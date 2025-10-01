@@ -1,0 +1,1043 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["sum"],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1\nORDER BY cost, usage_date",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Period Cost",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["mean"],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1\nORDER BY cost, usage_date",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Average Daily Cost",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["max"],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1\nORDER BY cost, usage_date",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Max Daily Cost",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 10,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["count"],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "10.4.1",
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1\nORDER BY cost, usage_date",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Days in Period",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
+      "id": 2,
+      "options": {
+        "displayLabels": ["name"],
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": ["sum"],
+          "fields": "",
+          "values": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      CASE\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN line_item_unblended_cost < 0.01 THEN 'Other'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      line_item_unblended_cost > 0.01\nGROUP BY 1\nORDER BY cost DESC",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Cost by Component",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "series",
+            "axisLabel": "",
+            "axisPlacement": "right",
+            "barAlignment": 1,
+            "drawStyle": "line",
+            "fillOpacity": 100,
+            "gradientMode": "hue",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepBefore",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 0,
+            "pointSize": 3,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 18,
+        "x": 6,
+        "y": 4
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "width": 130
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN line_item_unblended_cost < 0.01 THEN 'Other'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1,2\nORDER BY cost, usage_date",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Component Cost Timeseries",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": [],
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 6,
+        "x": 0,
+        "y": 17
+      },
+      "id": 3,
+      "options": {
+        "displayLabels": ["name"],
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      CASE\n            WHEN resource_tags_user_environment != '' THEN resource_tags_user_environment\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'shared'\n            WHEN product_servicename = 'AmazonCloudWatch' THEN 'shared'\n            ELSE 'other'\n      END as environment,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1\nORDER BY cost DESC",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Cost by Environment",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "series",
+            "axisLabel": "",
+            "axisPlacement": "right",
+            "barAlignment": -1,
+            "drawStyle": "line",
+            "fillOpacity": 100,
+            "gradientMode": "hue",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepBefore",
+            "lineWidth": 0,
+            "pointSize": 3,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 18,
+        "x": 6,
+        "y": 17
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "width": 130
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN resource_tags_user_environment != '' THEN resource_tags_user_environment\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'shared'\n            WHEN product_servicename = 'AmazonCloudWatch' THEN 'shared'\n            ELSE 'other'\n      END as environment,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1,2\nORDER BY cost, usage_date",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Environment Cost Timeseries",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": [],
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      },
+      "id": 5,
+      "options": {
+        "displayLabels": ["name"],
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": ["sum"],
+          "fields": "",
+          "values": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      CASE\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN product_servicename != '' THEN replace(product_servicename,'Amazon','')\n            ELSE 'Other'\n      END as service,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1\nORDER BY cost DESC",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "Cost by AWS Service",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-athena-datasource",
+        "uid": "${DS_ATHENA}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "series",
+            "axisLabel": "",
+            "axisPlacement": "right",
+            "barAlignment": -1,
+            "drawStyle": "line",
+            "fillOpacity": 100,
+            "gradientMode": "hue",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepBefore",
+            "lineWidth": 0,
+            "pointSize": 3,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 18,
+        "x": 6,
+        "y": 30
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "width": 130
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "datasource": {
+            "type": "grafana-athena-datasource",
+            "uid": "${DS_ATHENA}"
+          },
+          "format": 1,
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN product_servicename != '' THEN replace(product_servicename,'Amazon','')\n            ELSE 'Other'\n      END as service,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1,2\nORDER BY cost, usage_date",
+          "refId": "A",
+          "table": "robosystemscostandusage"
+        }
+      ],
+      "title": "AWS Service Cost Timeseries",
+      "transformations": [
+        {
+          "id": "prepareTimeSeries",
+          "options": {
+            "format": "multi"
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "^cost (.+)$",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["robosystems"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "Athena",
+          "value": "Athena"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data Source",
+        "multi": false,
+        "name": "DS_ATHENA",
+        "options": [],
+        "query": "grafana-athena-datasource",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": {
+          "type": "grafana-athena-datasource",
+          "uid": "${DS_ATHENA}"
+        },
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Environment",
+        "multi": true,
+        "name": "environment",
+        "options": [],
+        "query": {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "format": 1,
+          "rawSQL": "select distinct resource_tags_user_environment\nfrom robosystemscostandusage ",
+          "table": "robosystemscostandusage"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": ["All"],
+          "value": ["$__all"]
+        },
+        "datasource": {
+          "type": "grafana-athena-datasource",
+          "uid": "${DS_ATHENA}"
+        },
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Component",
+        "multi": true,
+        "name": "component",
+        "options": [],
+        "query": {
+          "connectionArgs": {
+            "catalog": "AwsDataCatalog",
+            "database": "athenacurcfn_robo_systems_cost_and_usage",
+            "region": "us-east-1",
+            "resultReuseEnabled": false,
+            "resultReuseMaxAgeInMinutes": 60
+          },
+          "format": 1,
+          "rawSQL": "select distinct resource_tags_user_component from robosystemscostandusage",
+          "table": "robosystemscostandusage"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now-1d"
+  },
+  "timepicker": {
+    "refresh_intervals": []
+  },
+  "timezone": "utc",
+  "title": "RoboSystems Cost and Usage Dashboard",
+  "uid": "depgbcbsbfe2oa",
+  "version": 18,
+  "weekStart": ""
+}

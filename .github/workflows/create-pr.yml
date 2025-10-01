@@ -1,0 +1,373 @@
+name: Create Claude PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "Source branch to create PR from (defaults to current branch)"
+        required: false
+        type: string
+      target_branch:
+        description: "Target branch to merge into"
+        required: true
+        type: choice
+        options:
+          - main
+        default: main
+      pr_type:
+        description: "Type of PR"
+        required: true
+        type: choice
+        options:
+          - feature
+          - bugfix
+          - hotfix
+          - chore
+          - refactor
+        default: feature
+      claude_review:
+        description: "Request Claude review automatically"
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  action:
+    runs-on: ubuntu-latest # Use GitHub-hosted runners for memory-intensive git/Claude operations
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+          fetch-depth: 0
+
+      - name: Determine source branch
+        id: source-branch
+        run: |
+          if [ -n "${{ inputs.source_branch }}" ]; then
+            SOURCE_BRANCH="${{ inputs.source_branch }}"
+            echo "Using specified source branch: $SOURCE_BRANCH"
+            git checkout "$SOURCE_BRANCH"
+          else
+            SOURCE_BRANCH=$(git branch --show-current)
+            echo "Using current branch: $SOURCE_BRANCH"
+          fi
+          echo "source_branch=$SOURCE_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Validate branches
+        id: validate
+        run: |
+          SOURCE_BRANCH="${{ steps.source-branch.outputs.source_branch }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+
+          echo "Source branch: $SOURCE_BRANCH"
+          echo "Target branch: $TARGET_BRANCH"
+
+          # Check if source branch exists
+          if ! git show-ref --verify --quiet refs/heads/$SOURCE_BRANCH && ! git show-ref --verify --quiet refs/remotes/origin/$SOURCE_BRANCH; then
+            echo "❌ Source branch $SOURCE_BRANCH does not exist"
+            exit 1
+          fi
+
+          # Check if target branch exists
+          if ! git show-ref --verify --quiet refs/heads/$TARGET_BRANCH && ! git show-ref --verify --quiet refs/remotes/origin/$TARGET_BRANCH; then
+            echo "❌ Target branch $TARGET_BRANCH does not exist"
+            exit 1
+          fi
+
+          # Check if branches are different
+          if [ "$SOURCE_BRANCH" = "$TARGET_BRANCH" ]; then
+            echo "❌ Source and target branches cannot be the same"
+            exit 1
+          fi
+
+          echo "✅ Branch validation passed"
+
+      - name: Analyze changes with Claude
+        id: analyze
+        run: |
+          SOURCE_BRANCH="${{ steps.source-branch.outputs.source_branch }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+          PR_TYPE="${{ inputs.pr_type }}"
+
+          # Get commit range for analysis
+          git fetch origin $TARGET_BRANCH
+          COMMIT_RANGE="origin/$TARGET_BRANCH...$SOURCE_BRANCH"
+
+          # Get diff stats (limit output to prevent memory issues)
+          DIFF_STATS=$(git diff --stat --no-color $COMMIT_RANGE | head -50 | sed 's/`//g')  # Limit to 50 lines
+          FILES_CHANGED=$(git diff --name-only $COMMIT_RANGE | wc -l)
+          COMMITS_COUNT=$(git rev-list --count $COMMIT_RANGE)
+
+          # Get commit messages (limit to recent commits)
+          COMMIT_MESSAGES=$(git log --oneline --no-color $COMMIT_RANGE | head -20 | sed 's/`//g')  # Limit to 20 commits
+
+          # Get detailed changes (limit to prevent memory issues)
+          DETAILED_CHANGES=$(git diff $COMMIT_RANGE --name-status --no-color | head -100 | sed 's/`//g')  # Limit to 100 files
+
+          # Create analysis prompt for Claude
+          cat << 'EOF' > /tmp/pr_analysis_prompt.txt
+          I need you to analyze the following git changes and create a comprehensive PR title and description.
+
+          **Context:**
+          - Source Branch: ${SOURCE_BRANCH}
+          - Target Branch: ${TARGET_BRANCH}
+          - PR Type: ${PR_TYPE}
+          - Files Changed: ${FILES_CHANGED}
+          - Commits: ${COMMITS_COUNT}
+
+          **Commit Messages:**
+          ${COMMIT_MESSAGES}
+
+          **Diff Statistics:**
+          ${DIFF_STATS}
+
+          **Detailed Changes:**
+          ${DETAILED_CHANGES}
+
+          Please provide:
+          1. A concise, descriptive PR title (50-72 characters)
+          2. A comprehensive PR description with:
+             - Summary of changes
+             - Key accomplishments
+             - Breaking changes (if any)
+             - Testing notes
+             - Infrastructure considerations (avoid mentioning specific script paths or commands)
+
+          Format the response as:
+          TITLE: [your title here]
+
+          DESCRIPTION:
+          [your description here]
+          EOF
+
+          # Create the final prompt by writing directly to a file (avoiding envsubst issues)
+          cat > /tmp/pr_analysis_prompt_final.txt << PROMPT_EOF
+          I need you to analyze the following git changes and create a comprehensive PR title and description.
+
+          **Context:**
+          - Source Branch: $SOURCE_BRANCH
+          - Target Branch: $TARGET_BRANCH
+          - PR Type: $PR_TYPE
+          - Files Changed: $FILES_CHANGED
+          - Commits: $COMMITS_COUNT
+
+          **Commit Messages:**
+          $COMMIT_MESSAGES
+
+          **Diff Statistics:**
+          $DIFF_STATS
+
+          **Detailed Changes:**
+          $DETAILED_CHANGES
+
+          Please provide:
+          1. A concise, descriptive PR title (50-72 characters)
+          2. A comprehensive PR description with:
+             - Summary of changes
+             - Key accomplishments
+             - Breaking changes (if any)
+             - Testing notes
+             - Infrastructure considerations (avoid mentioning specific script paths or commands)
+
+          Format the response as:
+          TITLE: [your title here]
+
+          DESCRIPTION:
+          [your description here]
+          PROMPT_EOF
+          mv /tmp/pr_analysis_prompt_final.txt /tmp/pr_analysis_prompt.txt
+
+          echo "analysis_prompt_file=/tmp/pr_analysis_prompt.txt" >> $GITHUB_OUTPUT
+          echo "commit_range=$COMMIT_RANGE" >> $GITHUB_OUTPUT
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "commits_count=$COMMITS_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Call Claude API
+        id: claude
+        run: |
+          # Call Claude API with the analysis prompt
+          PROMPT=$(cat /tmp/pr_analysis_prompt.txt)
+
+          # Create a proper JSON payload using jq to handle escaping
+          PAYLOAD=$(jq -n \
+            --arg model "claude-sonnet-4-20250514" \
+            --arg content "$PROMPT" \
+            '{
+              "model": $model,
+              "max_tokens": 4000,
+              "messages": [
+                {
+                  "role": "user",
+                  "content": $content
+                }
+              ]
+            }')
+
+          # Retry logic with exponential backoff
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          RETRY_DELAY=5
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            RESPONSE=$(curl -s -X POST "https://api.anthropic.com/v1/messages" \
+              -H "Content-Type: application/json" \
+              -H "x-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" \
+              -H "anthropic-version: 2023-06-01" \
+              -d "$PAYLOAD")
+
+            # Check for API errors
+            if echo "$RESPONSE" | jq -e '.error' > /dev/null; then
+              ERROR_TYPE=$(echo "$RESPONSE" | jq -r '.error.type // "unknown"')
+              ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown error"')
+
+              # Check if it's a rate limit or overload error
+              if [[ "$ERROR_TYPE" == "overloaded_error" ]] || [[ "$ERROR_TYPE" == "rate_limit_error" ]] || [[ "$ERROR_MSG" == *"Overloaded"* ]]; then
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                  echo "⚠️  Claude API overloaded (attempt $RETRY_COUNT/$MAX_RETRIES). Retrying in ${RETRY_DELAY}s..."
+                  sleep $RETRY_DELAY
+                  RETRY_DELAY=$((RETRY_DELAY * 2))  # Exponential backoff
+                  continue
+                else
+                  echo "❌ Claude API error after $MAX_RETRIES attempts: $ERROR_MSG"
+                  echo "Using fallback PR description..."
+                  # Set a fallback description
+                  PR_TITLE="PR: ${{ steps.source-branch.outputs.source_branch }} → ${{ inputs.target_branch }}"
+                  PR_DESCRIPTION="Automated PR from ${{ steps.source-branch.outputs.source_branch }} to ${{ inputs.target_branch }}"$'\n\n'"**Type:** ${{ inputs.pr_type }}"$'\n'"**Files Changed:** ${{ steps.analyze.outputs.files_changed }}"$'\n'"**Commits:** ${{ steps.analyze.outputs.commits_count }}"$'\n\n'"Please review the changes in the Files tab."
+                  break
+                fi
+              else
+                echo "❌ Claude API error: $ERROR_MSG"
+                exit 1
+              fi
+            else
+              # Success - break out of retry loop
+              break
+            fi
+          done
+
+          # Only process Claude response if we didn't use fallback
+          if [ -z "$PR_TITLE" ]; then
+            # Check for successful response
+            if echo "$RESPONSE" | jq -e '.content[0].text' > /dev/null; then
+              # Extract title and description from Claude's response
+              CLAUDE_OUTPUT=$(echo "$RESPONSE" | jq -r '.content[0].text')
+
+              # Parse the title and description
+              PR_TITLE=$(echo "$CLAUDE_OUTPUT" | grep "^TITLE:" | sed 's/^TITLE: //')
+              PR_DESCRIPTION=$(echo "$CLAUDE_OUTPUT" | sed -n '/^DESCRIPTION:/,$ p' | sed '1d')
+
+              # Validate that Claude returned meaningful content
+              if [ -z "$PR_TITLE" ] || [ -z "$PR_DESCRIPTION" ]; then
+                echo "⚠️  Claude returned empty title or description, using fallback"
+                PR_TITLE="PR: ${{ steps.source-branch.outputs.source_branch }} → ${{ inputs.target_branch }}"
+                PR_DESCRIPTION="Automated PR from ${{ steps.source-branch.outputs.source_branch }} to ${{ inputs.target_branch }}"
+                PR_DESCRIPTION="${PR_DESCRIPTION}"$'\n\n'"**Type:** ${{ inputs.pr_type }}"
+                PR_DESCRIPTION="${PR_DESCRIPTION}"$'\n'"**Files Changed:** ${{ steps.analyze.outputs.files_changed }}"
+                PR_DESCRIPTION="${PR_DESCRIPTION}"$'\n'"**Commits:** ${{ steps.analyze.outputs.commits_count }}"
+                PR_DESCRIPTION="${PR_DESCRIPTION}"$'\n\n'"Please review the changes in the Files tab."
+              fi
+            else
+              echo "⚠️  Invalid Claude response format, using fallback"
+              PR_TITLE="PR: ${{ steps.source-branch.outputs.source_branch }} → ${{ inputs.target_branch }}"
+              PR_DESCRIPTION="Automated PR from ${{ steps.source-branch.outputs.source_branch }} to ${{ inputs.target_branch }}"
+              PR_DESCRIPTION="${PR_DESCRIPTION}"$'\n\n'"**Type:** ${{ inputs.pr_type }}"
+              PR_DESCRIPTION="${PR_DESCRIPTION}"$'\n\n'"Please review the changes in the Files tab."
+            fi
+          fi
+
+          # Save to outputs (escape for JSON)
+          {
+            echo "pr_title<<EOF"
+            echo "$PR_TITLE"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          {
+            echo "pr_description<<EOF"
+            echo "$PR_DESCRIPTION"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          echo "✅ Claude analysis completed"
+
+      - name: Create Pull Request
+        id: create-pr
+        env:
+          CLAUDE_PR_TITLE: ${{ steps.claude.outputs.pr_title }}
+          CLAUDE_PR_DESCRIPTION: ${{ steps.claude.outputs.pr_description }}
+        run: |
+          SOURCE_BRANCH="${{ steps.source-branch.outputs.source_branch }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+
+          # Use environment variables to safely handle Claude's output
+          PR_TITLE="$CLAUDE_PR_TITLE"
+          PR_DESCRIPTION="$CLAUDE_PR_DESCRIPTION"
+
+          # Check if PR already exists
+          EXISTING_PR=$(gh pr list --head "$SOURCE_BRANCH" --base "$TARGET_BRANCH" --json url --jq '.[0].url' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_PR" ] && [ "$EXISTING_PR" != "null" ]; then
+            echo "✅ PR already exists: $EXISTING_PR"
+            echo "pr_url=$EXISTING_PR" >> $GITHUB_OUTPUT
+            PR_URL="$EXISTING_PR"
+          else
+            # Create PR description with Claude analysis + footer
+            cat > /tmp/pr_description.txt << EOF
+          $PR_DESCRIPTION
+
+          ---
+          🤖 Generated with [Claude Code](https://claude.ai/code)
+
+          **Branch Info:**
+          - Source: \`$SOURCE_BRANCH\`
+          - Target: \`$TARGET_BRANCH\`
+          - Type: ${{ inputs.pr_type }}
+
+          Co-Authored-By: Claude <noreply@anthropic.com>
+          EOF
+
+            FINAL_PR_DESCRIPTION=$(cat /tmp/pr_description.txt)
+
+            # Create the PR
+            PR_URL=$(gh pr create \
+              --title "$PR_TITLE" \
+              --body "$FINAL_PR_DESCRIPTION" \
+              --base "$TARGET_BRANCH" \
+              --head "$SOURCE_BRANCH")
+
+            echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+            echo "✅ Pull Request created: $PR_URL"
+          fi
+
+      - name: Request Claude review
+        if: ${{ inputs.claude_review }}
+        run: |
+          PR_NUMBER=$(echo "${{ steps.create-pr.outputs.pr_url }}" | sed 's/.*pull\///')
+
+          gh pr comment "$PR_NUMBER" --body "@claude please review this PR"
+          echo "✅ Claude review requested"
+
+      - name: Create summary
+        run: |
+          SOURCE_BRANCH="${{ steps.source-branch.outputs.source_branch }}"
+          TARGET_BRANCH="${{ inputs.target_branch }}"
+          PR_URL="${{ steps.create-pr.outputs.pr_url }}"
+
+          echo "## 🚀 Claude-Powered PR Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**PR URL:** [$PR_URL]($PR_URL)" >> $GITHUB_STEP_SUMMARY
+          echo "**Source:** \`$SOURCE_BRANCH\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** \`$TARGET_BRANCH\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Type:** ${{ inputs.pr_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### PR Details" >> $GITHUB_STEP_SUMMARY
+          echo "**Title:** ${{ steps.claude.outputs.pr_title }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commits:** ${{ steps.analyze.outputs.commit_range }}" >> $GITHUB_STEP_SUMMARY

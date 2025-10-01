@@ -1,0 +1,498 @@
+Description: RoboSystems GitHub Actions Self-Hosted Runner - EC2 Auto Scaling Group
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name for CI infrastructure
+    Default: ci
+
+  # Infrastructure & Networking Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where GHA Runner will be deployed
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for GHA Runner (multi-AZ deployment for better spot availability)
+
+  # Instance Configuration
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Amazon Linux 2023 x86_64 AMI ID
+    Default: ami-08a6efd148b1f7504
+  RunnerCount:
+    Type: Number
+    Description: Number of concurrent GHA Runners to configure on the instance (now 1 per instance with ASG)
+    Default: 1
+    MinValue: 1
+    MaxValue: 1
+  StorageSize:
+    Type: Number
+    Description: EBS volume size in GB for GHA Runner storage
+    Default: 30
+    MinValue: 20
+    MaxValue: 1000
+
+  # Auto-scaling Configuration
+  MinInstances:
+    Type: Number
+    Description: Minimum number of GHA Runner instances
+    Default: 1
+    MinValue: 1
+    MaxValue: 1
+  MaxInstances:
+    Type: Number
+    Description: Maximum number of GHA Runner instances
+    Default: 6
+    MinValue: 1
+    MaxValue: 6
+  DesiredInstances:
+    Type: Number
+    Description: Desired number of GHA Runner instances
+    Default: 1
+    MinValue: 1
+    MaxValue: 6
+
+  # Security & Access Configuration
+  GitHubOrg:
+    Type: String
+    Description: GitHub organization name
+  GitHubToken:
+    Type: String
+    Description: GitHub Personal Access Token
+    NoEcho: true
+
+  # Script Configuration
+  DeploymentBucket:
+    Type: String
+    Description: S3 bucket containing deployment scripts
+    Default: ""
+  UserDataScriptKey:
+    Type: String
+    Description: S3 key for GHA Runner UserData script
+    Default: "userdata/gha-runner.sh"
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: GHARunner
+
+Resources:
+  # Security group for GitHub Actions runner
+  GHARunnerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for GitHub Actions runner - HTTPS outbound only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/8
+          Description: SSH access from bastion host in VPC
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound for GitHub API and package downloads
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP outbound for package downloads
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/8
+          Description: SSH to other instances in VPC
+      Tags:
+        - Key: Name
+          Value: sg-gha-runner-ci
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM role for GitHub Actions runner EC2 instances
+  GHARunnerEC2InstanceRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: GHARunnerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ec2:CreateTags
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - "arn:aws:s3:::robosystems-*-deployment"
+                  - "arn:aws:s3:::robosystems-*-deployment/*"
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetInstanceHealth
+                  - autoscaling:DescribeAutoScalingInstances
+                  - autoscaling:SetInstanceProtection
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: robosystems-gha-runner-role-ci
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  GHARunnerEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Roles:
+        - !Ref GHARunnerEC2InstanceRole
+
+  # CloudWatch log group for GitHub Actions runner logs
+
+  GHARunnerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /robosystems/ci/gha-runner
+      RetentionInDays: 14
+      Tags:
+        - Key: Name
+          Value: robosystems-gha-runner-logs-ci
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Launch template for GitHub Actions runner instances
+
+  GHARunnerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LaunchTemplateName: !Sub "${AWS::StackName}-gha-runner-lt"
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        SecurityGroupIds:
+          - !Ref GHARunnerSecurityGroup
+        IamInstanceProfile:
+          Arn: !GetAtt GHARunnerEC2InstanceProfile.Arn
+        BlockDeviceMappings:
+          - Ebs:
+              VolumeType: gp3
+              Iops: 3000
+              VolumeSize: !Ref StorageSize
+              Encrypted: true
+              DeleteOnTermination: true
+            DeviceName: /dev/xvda
+        UserData: !Base64
+          Fn::Sub: |
+            #!/bin/bash
+            set -ex
+
+            # Log output
+            exec > >(tee /var/log/user-data.log)
+            exec 2>&1
+
+            echo "Starting GHA Runner initialization at $(date)"
+
+            # Download the UserData script from S3
+            SCRIPT_BUCKET="${DeploymentBucket}"
+            SCRIPT_KEY="${UserDataScriptKey}"
+
+            # Use deployment bucket or environment-based default
+            if [ -z "$SCRIPT_BUCKET" ]; then
+              # CI environment uses the prod deployment bucket
+              if [ "${Environment}" = "ci" ]; then
+                SCRIPT_BUCKET="robosystems-prod-deployment"
+              else
+                SCRIPT_BUCKET="robosystems-${Environment}-deployment"
+              fi
+            fi
+
+            echo "Downloading UserData script from s3://$SCRIPT_BUCKET/$SCRIPT_KEY"
+            aws s3 cp "s3://$SCRIPT_BUCKET/$SCRIPT_KEY" /tmp/gha-runner-userdata.sh --region ${AWS::Region}
+
+            # Make it executable
+            chmod +x /tmp/gha-runner-userdata.sh
+
+            # Export all CloudFormation parameters as environment variables
+            export Environment="${Environment}"
+            export GitHubOrg="${GitHubOrg}"
+            export GitHubToken="${GitHubToken}"
+            export RunnerCount="${RunnerCount}"
+            export AWS_REGION="${AWS::Region}"
+            export AWS_STACK_NAME="${AWS::StackName}"
+            export AWS_ACCOUNT_ID="${AWS::AccountId}"
+
+            # Execute the downloaded script
+            echo "Executing UserData script..."
+            /tmp/gha-runner-userdata.sh
+
+            # Signal CloudFormation
+            /opt/aws/bin/cfn-signal --exit-code $? --stack $AWS_STACK_NAME --resource GHARunnerAutoScalingGroup --region $AWS_REGION
+
+            echo "UserData script execution completed at $(date)"
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: robosystems-gha-runner-asg
+              - Key: Environment
+                Value: !Ref Environment
+              - Key: Service
+                Value: !Ref ServiceTag
+              - Key: Component
+                Value: !Ref ComponentTag
+              - Key: CreatedBy
+                Value: CloudFormation
+              - Key: GHARunner
+                Value: self-hosted
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub "robosystems-gha-runner-${Environment}-volume"
+              - Key: Environment
+                Value: !Ref Environment
+              - Key: Service
+                Value: !Ref ServiceTag
+              - Key: Component
+                Value: !Ref ComponentTag
+              - Key: VolumeType
+                Value: RootVolume
+              - Key: CreatedBy
+                Value: CloudFormation
+
+  # Auto Scaling Group for GitHub Actions runners
+  GHARunnerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref DesiredInstances
+        Timeout: PT15M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: !Ref MinInstances
+        MaxBatchSize: 1
+        PauseTime: PT10M
+        WaitOnResourceSignals: true
+    Properties:
+      AutoScalingGroupName: !Sub "${AWS::StackName}-gha-runner-asg"
+      MixedInstancesPolicy:
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref GHARunnerLaunchTemplate
+            Version: !GetAtt GHARunnerLaunchTemplate.LatestVersionNumber
+          Overrides:
+            - InstanceType: t3a.medium
+            - InstanceType: t3.medium
+            - InstanceType: c6a.large
+            - InstanceType: c6i.large
+            - InstanceType: c7a.large
+            - InstanceType: c7i.large
+        InstancesDistribution:
+          OnDemandBaseCapacity: 1
+          OnDemandPercentageAboveBaseCapacity: 0
+          SpotAllocationStrategy: price-capacity-optimized
+      VPCZoneIdentifier: !Ref PrivateSubnetIds
+      MinSize: !Ref MinInstances
+      MaxSize: !Ref MaxInstances
+      DesiredCapacity: !Ref DesiredInstances
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 600
+      Cooldown: 300
+      Tags:
+        - Key: Name
+          Value: robosystems-gha-runner-asg
+          PropagateAtLaunch: false
+        - Key: Environment
+          Value: !Ref Environment
+          PropagateAtLaunch: true
+        - Key: Service
+          Value: !Ref ServiceTag
+          PropagateAtLaunch: true
+        - Key: Component
+          Value: !Ref ComponentTag
+          PropagateAtLaunch: true
+        - Key: CreatedBy
+          Value: CloudFormation
+          PropagateAtLaunch: true
+        - Key: GHARunner
+          Value: self-hosted
+          PropagateAtLaunch: true
+
+  # Auto scaling policies based on CPU utilization
+  # Scale up aggressively when any activity is detected (>6% CPU)
+  # Scale down slowly when completely idle (<6% CPU)
+  CPUScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref GHARunnerAutoScalingGroup
+      PolicyType: StepScaling
+      AdjustmentType: ChangeInCapacity
+      StepAdjustments:
+        - MetricIntervalLowerBound: 0
+          ScalingAdjustment: 3 # Scale to max capacity immediately
+      Cooldown: 120
+
+  CPUScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref GHARunnerAutoScalingGroup
+      PolicyType: StepScaling
+      AdjustmentType: ChangeInCapacity
+      StepAdjustments:
+        - MetricIntervalUpperBound: 0
+          ScalingAdjustment: -1
+      Cooldown: 1200
+
+  # CloudWatch alarms for CPU-based auto scaling
+
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-gha-runner-${Environment}-high-cpu"
+      AlarmDescription: "Alert when GHA Runner has activity (>6% CPU) - triggers scale to full capacity"
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 120
+      EvaluationPeriods: 1
+      Threshold: 6
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref GHARunnerAutoScalingGroup
+      AlarmActions:
+        - !Ref CPUScaleUpPolicy
+      TreatMissingData: notBreaching
+
+  LowCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-gha-runner-${Environment}-low-cpu"
+      AlarmDescription: "Alert when GHA Runner is idle (<6% CPU) - triggers gradual scale down"
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 900
+      EvaluationPeriods: 4 # 1 hour of idle time before scaling down
+      Threshold: 6
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref GHARunnerAutoScalingGroup
+      AlarmActions:
+        - !Ref CPUScaleDownPolicy
+      TreatMissingData: notBreaching
+
+Outputs:
+  GHARunnerAutoScalingGroupName:
+    Description: Name of the GitHub Actions runner Auto Scaling Group
+    Value: !Ref GHARunnerAutoScalingGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-GHARunnerASGName
+
+  AutoScalingGroupName:
+    Description: Auto Scaling Group name (standard output key for refresh action)
+    Value: !Ref GHARunnerAutoScalingGroup
+
+  GHARunnerLaunchTemplateId:
+    Description: Launch Template ID for the GHA Runner instances
+    Value: !Ref GHARunnerLaunchTemplate
+    Export:
+      Name: !Sub ${AWS::StackName}-GHARunnerLaunchTemplateId
+
+  GHARunnerSecurityGroupId:
+    Description: Security Group ID of the GHA Runner
+    Value: !Ref GHARunnerSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-GHARunnerSecurityGroupId
+
+  RunnerLabels:
+    Description: GitHub Actions runner labels
+    Value: "self-hosted,Linux,X64,AL2023,ci"
+
+  RunnerCount:
+    Description: Number of concurrent runners configured per instance
+    Value: !Ref RunnerCount
+
+  TotalRunnerCapacity:
+    Description: Total runner capacity across all instances
+    Value: !Sub "${DesiredInstances} instances × ${RunnerCount} runners = ${DesiredInstances} × ${RunnerCount} total runners"
+
+  RunnerNames:
+    Description: Naming pattern for the configured runners
+    Value: !Sub "robosystems-gha-runner-{timestamp}-1 through robosystems-gha-runner-{timestamp}-${RunnerCount}"
+
+  InstanceConfiguration:
+    Description: Instance configuration for the ASG
+    Value: !Sub "${DesiredInstances} instances with ${StorageSize}GB storage each"
+
+  SSMAccessCommand:
+    Description: AWS Systems Manager access to runner instances
+    Value: "./bin/tools/tunnels.sh ci runner-direct"
+
+  LogGroup:
+    Description: CloudWatch log group for runner logs
+    Value: !Ref GHARunnerLogGroup

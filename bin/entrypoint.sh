@@ -1,0 +1,152 @@
+#!/bin/bash
+set -euo pipefail
+
+# Signal handling for graceful shutdown
+trap 'echo "Received shutdown signal"; kill -TERM $PID 2>/dev/null || true; wait $PID; exit 0' SIGTERM SIGINT
+
+# Default to API mode if not specified
+DOCKER_PROFILE=${DOCKER_PROFILE:-api}
+RUN_MIGRATIONS=${RUN_MIGRATIONS:-false}
+
+# Validate common required environment variables
+validate_env_vars() {
+    local required_vars=("ENVIRONMENT")
+    local missing_vars=()
+
+    # Only ENVIRONMENT is required to know which secrets to fetch
+
+    for var in "${required_vars[@]}"; do
+        if [ -z "${!var:-}" ]; then
+            missing_vars+=("$var")
+        fi
+    done
+
+    if [ ${#missing_vars[@]} -ne 0 ]; then
+        echo "Error: Missing required environment variables: ${missing_vars[*]}"
+        echo "Please set all required environment variables and try again."
+        exit 1
+    fi
+}
+
+# Validate environment variables
+validate_env_vars
+
+# Database initialization function
+run_db_init() {
+    echo "Running database initialization..."
+
+    sleep 3
+    echo "Running database migrations..."
+    # Run migrations
+    if uv run alembic upgrade head; then
+      echo "✓ Migrations completed successfully"
+    else
+        echo "✗ Migration failed"
+        return 1
+    fi
+
+    echo "Database initialization complete"
+}
+
+# For local development - wait for LocalStack to be ready
+if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
+    echo "Development environment detected - waiting for LocalStack to initialize..."
+    sleep 5
+fi
+
+# For local development - always run migrations and seeds automatically
+if [[ "${ENVIRONMENT:-}" == "dev" && "${DOCKER_PROFILE:-}" == "beat"  && "${RUN_MIGRATIONS:-}" == "true" ]]; then
+    run_db_init || echo "Database initialization failed, but continuing..."
+fi
+
+case $DOCKER_PROFILE in
+  "api")
+    echo "Starting API service..."
+    exec uv run uvicorn main:app \
+      --host 0.0.0.0 \
+      --port 8000 \
+      --access-log \
+      --proxy-headers
+    ;;
+  "worker")
+    echo "Starting Celery worker..."
+
+    # Run EDGAR init for development environment
+    if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
+        uv run python /app/robosystems/scripts/arelle_cache_manager.py dev-init || echo "Warning: EDGAR init failed"
+    fi
+
+    QUEUES="${WORKER_QUEUE:-default}"
+
+    # Special handling for specific queues
+    if [[ "${QUEUES}" == "shared-extraction" ]]; then
+      # Shared extraction workers for SEC XBRL downloads
+      echo "Worker listening to queue: shared-extraction"
+      # Force solo mode and no prefetch for extraction workers
+      WORKER_AUTOSCALE=1
+      WORKER_PREFETCH_MULTIPLIER=0
+    elif [[ "${QUEUES}" == "shared-processing" ]]; then
+      # Shared processing workers only handle shared-processing queue
+      # shared-ingestion moved to dedicated workers for concurrency control
+      echo "Worker listening to queue: shared-processing"
+      # Force solo mode and no prefetch for shared-processing workers
+      WORKER_AUTOSCALE=1
+      WORKER_PREFETCH_MULTIPLIER=0
+    elif [[ "${QUEUES}" == "shared-ingestion" ]]; then
+      # Dedicated shared-ingestion workers with strict concurrency control
+      echo "Worker listening to queue: shared-ingestion"
+      # Force solo mode and no prefetch for ingestion workers
+      WORKER_AUTOSCALE=1
+      WORKER_PREFETCH_MULTIPLIER=0
+    else
+      echo "Worker listening to queues: ${QUEUES}"
+    fi
+
+    exec uv run celery -A robosystems.celery worker \
+      --loglevel=info \
+      --concurrency=${WORKER_AUTOSCALE:-1} \
+      --prefetch-multiplier=${WORKER_PREFETCH_MULTIPLIER:-0} \
+      -Q ${QUEUES} \
+      --without-gossip \
+      --without-heartbeat
+    ;;
+  "beat")
+    echo "Starting Celery Beat scheduler..."
+    exec uv run celery -A robosystems.celery beat \
+      --loglevel=info \
+      -s /tmp/celerybeat-schedule \
+      --pidfile=/tmp/celerybeat.pid
+    ;;
+  "kuzu-writer")
+    echo "Starting Kuzu Writer API..."
+    # max-databases will be loaded from tier configuration based on CLUSTER_TIER
+    exec uv run python -m robosystems.kuzu_api \
+      --node-type writer \
+      --repository-type entity \
+      --port ${KUZU_PORT:-8001} \
+      --base-path ${KUZU_DATABASE_PATH:-/app/data/kuzu-dbs}
+    ;;
+  "kuzu-shared-writer")
+    # Determine if this is a master or replica based on KUZU_ROLE
+    if [[ "${KUZU_ROLE:-master}" == "replica" ]]; then
+      echo "Starting Kuzu Shared Replica API..."
+      KUZU_NODE_TYPE="shared_replica"
+      READONLY_FLAG="--read-only"
+    else
+      echo "Starting Kuzu Shared Master API..."
+      KUZU_NODE_TYPE="shared_master"
+      READONLY_FLAG=""
+    fi
+    # max-databases will be loaded from tier configuration based on CLUSTER_TIER
+    exec uv run python -m robosystems.kuzu_api \
+      --node-type ${KUZU_NODE_TYPE} \
+      --repository-type shared \
+      --port ${KUZU_PORT:-8002} \
+      --base-path ${KUZU_DATABASE_PATH:-/app/data/kuzu-dbs} \
+      ${READONLY_FLAG}
+    ;;
+  *)
+    echo "Unknown profile: $DOCKER_PROFILE"
+    exit 1
+    ;;
+esac

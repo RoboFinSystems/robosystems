@@ -1,0 +1,309 @@
+name: Kuzu Container Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to update (staging, prod)"
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+      node_types:
+        description: "Node types to update: 'all' (everything), 'writer' (all writers including shared), or 'shared' (only shared writer)"
+        required: false
+        type: choice
+        options:
+          - all
+          - writer
+          - shared
+        default: "all"
+      rolling_update:
+        description: "Perform rolling updates"
+        required: false
+        type: boolean
+        default: true
+      health_check_timeout:
+        description: "Health check timeout in seconds"
+        required: false
+        type: string
+        default: "30"
+  workflow_call:
+    inputs:
+      environment:
+        description: "Environment to update (staging, prod)"
+        required: true
+        type: string
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+      aws_account_id:
+        description: "AWS Account ID"
+        required: true
+        type: string
+      aws_region:
+        description: "AWS region"
+        required: false
+        type: string
+        default: "us-east-1"
+      node_types:
+        description: "Node types to update ('writer' includes both standard and shared writers, 'all' updates everything)"
+        required: false
+        type: string
+        default: "all"
+      rolling_update:
+        description: "Whether to perform rolling updates"
+        required: false
+        type: string
+        default: "true"
+      health_check_timeout:
+        description: "Seconds to wait for health check"
+        required: false
+        type: string
+        default: "30"
+    outputs:
+      instances_updated:
+        description: "Number of instances updated"
+        value: ${{ jobs.summary.outputs.instances_updated }}
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  check-runner-availability:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      runner_config: ${{ steps.check.outputs.runner_config }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Check runner availability
+        id: check
+        uses: ./.github/actions/runner-availability
+        with:
+          runner_labels: "self-hosted,Linux,X64,AL2023,ci"
+          timeout_minutes: "2"
+          github_token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+
+  collect-instances:
+    needs: [check-runner-availability]
+    if: always() && (needs.check-runner-availability.result == 'success' || needs.check-runner-availability.result == 'skipped')
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJSON(needs.check-runner-availability.outputs.runner_config) || fromJSON(inputs.runner_config) }}
+    outputs:
+      matrix: ${{ steps.collect.outputs.matrix }}
+      has_instances: ${{ steps.collect.outputs.has_instances }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+
+      - name: Collect instances to update
+        id: collect
+        run: |
+          echo "🔍 Collecting Kuzu instances for environment: ${{ inputs.environment }}"
+
+          NODE_TYPES="${{ inputs.node_types }}"
+          INSTANCES_JSON="[]"
+
+          # Function to add instances to JSON array
+          add_instances() {
+            local role="$1"
+            local tier="$2"
+            local filter_type="$3"
+
+            if [ "$filter_type" == "tier" ]; then
+              FILTER="Name=tag:WriterTier,Values=$tier"
+            else
+              FILTER="Name=tag:KuzuRole,Values=$role"
+            fi
+
+            INSTANCE_IDS=$(aws ec2 describe-instances \
+              --filters \
+                "Name=tag:Environment,Values=${{ inputs.environment }}" \
+                "$FILTER" \
+                "Name=instance-state-name,Values=running" \
+              --query "Reservations[].Instances[].InstanceId" \
+              --output text \
+              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}")
+
+            if [ -n "$INSTANCE_IDS" ]; then
+              for ID in $INSTANCE_IDS; do
+                INSTANCE_OBJ="{\"instance_id\":\"$ID\",\"node_type\":\"$role\"}"
+                if [ "$INSTANCES_JSON" == "[]" ]; then
+                  INSTANCES_JSON="[$INSTANCE_OBJ]"
+                else
+                  INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
+                fi
+              done
+            fi
+          }
+
+          # Check what to update based on node_types input
+          if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "shared" ]; then
+            echo "📦 Collecting writer instances..."
+            # Get all writers
+            ALL_WRITERS=$(aws ec2 describe-instances \
+              --filters \
+                "Name=tag:Environment,Values=${{ inputs.environment }}" \
+                "Name=tag:KuzuRole,Values=writer" \
+                "Name=instance-state-name,Values=running" \
+              --query "Reservations[].Instances[].InstanceId" \
+              --output text \
+              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}")
+
+            # Process writers based on what was requested
+            for INSTANCE in $ALL_WRITERS; do
+              TIER=$(aws ec2 describe-tags \
+                --filters \
+                  "Name=resource-id,Values=$INSTANCE" \
+                  "Name=key,Values=WriterTier" \
+                --query "Tags[0].Value" \
+                --output text \
+                --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
+
+              # Filter instances based on node_types parameter
+              if [ "$NODE_TYPES" == "shared" ]; then
+                # Only include shared writers
+                if [ "$TIER" != "shared" ]; then
+                  continue  # Skip non-shared writers
+                fi
+              elif [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "all" ]; then
+                # Include all writers (both standard and shared)
+                true  # Process this instance
+              fi
+
+              # Determine node type based on tier
+              if [ "$TIER" == "shared" ]; then
+                NODE_TYPE="shared-writer"
+                echo "  Found shared writer: $INSTANCE"
+              else
+                NODE_TYPE="writer"
+                echo "  Found writer: $INSTANCE (tier: ${TIER:-standard})"
+              fi
+              
+              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\"}"
+              if [ "$INSTANCES_JSON" == "[]" ]; then
+                INSTANCES_JSON="[$INSTANCE_OBJ]"
+              else
+                INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
+              fi
+            done
+          fi
+
+          # Skip master and replica as requested (removing shared replicas)
+
+          echo "instances_json=$INSTANCES_JSON"
+
+          if [ "$INSTANCES_JSON" == "[]" ]; then
+            echo "ℹ️ No instances found to update"
+            echo "matrix={}" >> $GITHUB_OUTPUT
+            echo "has_instances=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Found instances to update"
+            echo "matrix={\"include\":$INSTANCES_JSON}" >> $GITHUB_OUTPUT
+            echo "has_instances=true" >> $GITHUB_OUTPUT
+
+            # Display what will be updated
+            echo "📋 Instances to update:"
+            echo "$INSTANCES_JSON" | jq -r '.[] | "  - \(.instance_id) (\(.node_type))"'
+          fi
+
+  update-containers:
+    needs: [check-runner-availability, collect-instances]
+    if: |
+      always() && 
+      needs.collect-instances.outputs.has_instances == 'true' &&
+      (needs.check-runner-availability.result == 'success' || needs.check-runner-availability.result == 'skipped')
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJSON(needs.check-runner-availability.outputs.runner_config) || fromJSON(inputs.runner_config) }}
+    timeout-minutes: 15
+    strategy:
+      matrix: ${{ fromJSON(needs.collect-instances.outputs.matrix) }}
+      max-parallel: 10
+      fail-fast: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+
+      - name: Get AWS Account ID
+        id: aws-account
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
+
+      - name: Update Container
+        uses: ./.github/actions/refresh-kuzu-containers
+        with:
+          environment: ${{ inputs.environment }}
+          instance-id: ${{ matrix.instance_id }}
+          node-type: ${{ matrix.node_type }}
+          aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
+          aws-account-id: ${{ github.event_name == 'workflow_dispatch' && steps.aws-account.outputs.account_id || inputs.aws_account_id }}
+          health-check-timeout: ${{ inputs.health_check_timeout }}
+
+  summary:
+    needs: [collect-instances, update-containers]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      instances_updated: ${{ steps.count.outputs.total }}
+    steps:
+      - name: Count updated instances
+        id: count
+        run: |
+          if [ "${{ needs.collect-instances.outputs.has_instances }}" == "true" ]; then
+            # Count instances from the matrix
+            TOTAL=$(echo '${{ needs.collect-instances.outputs.matrix }}' | jq '.include | length')
+            echo "total=${TOTAL}" >> $GITHUB_OUTPUT
+          else
+            echo "total=0" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate Summary
+        run: |
+          echo "### 🎯 Kuzu Container Refresh Summary"
+          echo ""
+
+          if [ "${{ needs.collect-instances.outputs.has_instances }}" != "true" ]; then
+            echo "ℹ️ No instances found to update"
+          else
+            echo "| Instance | Status |"
+            echo "|----------|--------|"
+
+            # Parse the matrix to show results
+            echo '${{ needs.collect-instances.outputs.matrix }}' | jq -r '.include[] | "| \(.instance_id) (\(.node_type)) | ⏳ |"'
+          fi
+
+          echo ""
+          echo "**Environment:** ${{ inputs.environment }}"
+          echo "**Node Types:** ${{ inputs.node_types }}"
+          echo "**Parallel Updates:** Yes (max 10)"
+          echo "**Trigger:** ${{ github.event_name }}"
+          echo "**Timestamp:** $(date -u +%Y-%m-%dT%H:%M:%SZ)"

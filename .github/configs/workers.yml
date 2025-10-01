@@ -1,0 +1,397 @@
+# Worker Deployment Configuration
+# This file defines all worker configurations for both environments
+# It's easier to read and maintain than JSON
+
+production:
+  defaults:
+    fargate_weight: 20
+    fargate_spot_weight: 80
+    worker_prefetch_multiplier: 0
+    worker_profile: worker
+    queue_scaling_scale_out_cooldown: 60
+    # AWS ECS target tracking scales in one task at a time by default
+    # 60 seconds is sufficient since only one worker is terminated per scale-in
+    cpu_scale_in_cooldown: 60 # 1 minute between scale-in operations
+    cpu_scale_in: 10 # CPU % below which workers scale in (default 10%)
+    # Default scaling steps if not specified per worker
+    queue_scaling_steps:
+      - queue_multiplier: 1
+        add_tasks: 1
+      - queue_multiplier: 2
+        add_tasks: 2
+      - queue_multiplier: 4
+        add_tasks: 3
+      - queue_multiplier: 8
+        add_tasks: 4
+      - queue_multiplier: 16
+        add_tasks: 5
+      - queue_multiplier: 32
+        add_tasks: 6
+
+  workers:
+    - name: default
+      description: General async tasks, monitoring, billing - ALWAYS ENABLED
+      queue: default
+      stack_suffix: Default
+      resources:
+        cpu: 512
+        memory: 1024
+      scaling:
+        min: 1
+        max: 20
+        desired: 2
+        cpu_scale_in: 10 # Scale in when CPU < 10%
+      worker:
+        autoscale: 1
+        concurrency: 2
+      queue_scaling:
+        backlog: 50 # Queue threshold that triggers scaling
+        # Step scaling configuration for incremental capacity additions
+        # Each step defines how many tasks to ADD when queue reaches certain levels
+        steps:
+          - queue_multiplier: 1 # When queue is 1x backlog (50 items)
+            add_tasks: 2 # Add 2 tasks
+          - queue_multiplier: 2 # When queue is 2x backlog (100 items)
+            add_tasks: 3 # Add 3 more tasks
+          - queue_multiplier: 4 # When queue is 4x backlog (200 items)
+            add_tasks: 4 # Add 4 more tasks
+          - queue_multiplier: 8 # When queue is 8x backlog (400 items)
+            add_tasks: 5 # Add 5 more tasks
+          - queue_multiplier: 16 # When queue is 16x backlog (800 items)
+            add_tasks: 6 # Add 6 more tasks
+          - queue_multiplier: 32 # When queue is 32x backlog (1600+ items)
+            add_tasks: 8 # Add 8 more tasks (total ~28 tasks possible)
+      deployment:
+        enable_var: WORKER_DEFAULT_ENABLED_PROD # This variable is ignored - always deployed
+        enabled_default: true
+        always_enabled: true # Special flag - cannot be disabled
+
+    - name: critical
+      description: Urgent processing queue (currently unused)
+      queue: critical
+      stack_suffix: Critical
+      resources:
+        cpu: 512
+        memory: 1024
+      scaling:
+        min: 1
+        max: 5
+        desired: 1
+        cpu_scale_in: 10 # Scale in when CPU < 10%
+      worker:
+        autoscale: 2
+        concurrency: 4
+      queue_scaling:
+        backlog: 10 # Lower threshold for urgent tasks
+        # Aggressive scaling for critical tasks
+        steps:
+          - queue_multiplier: 1 # When queue is 1x backlog (10 items)
+            add_tasks: 1 # Add 1 task
+          - queue_multiplier: 2 # When queue is 2x backlog (20 items)
+            add_tasks: 1 # Add 1 more task
+          - queue_multiplier: 4 # When queue is 4x backlog (40 items)
+            add_tasks: 1 # Add 1 more task
+          - queue_multiplier: 8 # When queue is 8x backlog (80 items)
+            add_tasks: 1 # Add 1 more task
+          - queue_multiplier: 16 # When queue is 16x backlog (160 items)
+            add_tasks: 1 # Add 1 more task
+          - queue_multiplier: 32 # When queue is 32x backlog (320+ items)
+            add_tasks: 2 # Add 2 more tasks (max 7 possible)
+      deployment:
+        enable_var: WORKER_CRITICAL_ENABLED_PROD
+        enabled_default: false # Disabled to save costs
+        fargate_weight: 50 # Override default
+        fargate_spot_weight: 50
+
+    - name: shared-extraction
+      description: SEC XBRL ZIP file downloads - limited concurrency to avoid overwhelming SEC API
+      queue: shared-extraction
+      stack_suffix: Extraction
+      resources:
+        cpu: 512
+        memory: 1024
+      scaling:
+        min: 1
+        max: 2 # LIMITED: Max 2 workers to respect SEC rate limits
+        desired: 1
+        cpu_scale_in: 20 # Higher threshold due to rate-limited nature
+      worker:
+        autoscale: 1
+        concurrency: 1 # Single process per worker
+      queue_scaling:
+        backlog: 50
+        cooldown: 120 # Longer cooldown for extraction tasks
+        # Very conservative scaling due to SEC rate limits
+        # Note: ALL steps must have add_tasks >= 1 for CloudFormation validation
+        # Max capacity of 2 will prevent over-scaling regardless
+        steps:
+          - queue_multiplier: 1 # When queue is 1x backlog (50 items)
+            add_tasks: 1 # Add 1 task (max 2 total)
+          - queue_multiplier: 2 # When queue is 2x backlog (100 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 4 # When queue is 4x backlog (200 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 8 # When queue is 8x backlog (400 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 16 # When queue is 16x backlog (800 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 32 # When queue is 32x backlog (1600+ items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+      deployment:
+        enable_var: WORKER_EXTRACTION_ENABLED_PROD
+        enabled_default: true
+        fargate_weight: 80 # Prefer on-demand for stable SEC downloads
+        fargate_spot_weight: 20
+      requirements:
+        rate_limited: true # Indicates this worker is rate-limited by external API
+
+    - name: shared-processing
+      description: Heavy XBRL/SEC processing tasks
+      queue: shared-processing
+      stack_suffix: Shared
+      resources:
+        cpu: 1024
+        memory: 2048
+      scaling:
+        min: 1
+        max: 30
+        desired: 2
+        cpu_scale_in: 15 # Higher threshold for heavy processing workers
+      worker:
+        autoscale: 1
+        concurrency: 1 # Single process for memory efficiency
+      queue_scaling:
+        backlog: 100 # Higher threshold for heavy processing
+        # More aggressive scaling for compute-intensive tasks
+        steps:
+          - queue_multiplier: 1 # When queue is 1x backlog (100 items)
+            add_tasks: 3 # Add 3 tasks
+          - queue_multiplier: 2 # When queue is 2x backlog (200 items)
+            add_tasks: 5 # Add 5 more tasks
+          - queue_multiplier: 4 # When queue is 4x backlog (400 items)
+            add_tasks: 7 # Add 7 more tasks
+          - queue_multiplier: 8 # When queue is 8x backlog (800 items)
+            add_tasks: 10 # Add 10 more tasks
+          - queue_multiplier: 16 # When queue is 16x backlog (1600 items)
+            add_tasks: 12 # Add 12 more tasks
+          - queue_multiplier: 32 # When queue is 32x backlog (3200+ items)
+            add_tasks: 15 # Add 15 more tasks (total ~52 tasks possible)
+      deployment:
+        enable_var: WORKER_SHARED_ENABLED_PROD
+        enabled_default: true
+        fargate_weight: 40 # More on-demand for stability
+        fargate_spot_weight: 60
+
+    - name: shared-ingestion
+      description: Kuzu database ingestion (lightweight API orchestrator)
+      queue: shared-ingestion
+      stack_suffix: Ingestion
+      resources:
+        cpu: 256
+        memory: 512
+      scaling:
+        min: 1
+        max: 1 # Limited to prevent overwhelming Kuzu
+        desired: 1
+        cpu_scale_in: 10 # Standard threshold
+      worker:
+        autoscale: 1
+        concurrency: 1 # REQUIRED: Single-threaded for Kuzu
+      queue_scaling:
+        backlog: 5
+        # No scaling - fixed at 1 worker
+        # Note: ALL steps must have add_tasks >= 1 for CloudFormation validation
+        # Max capacity of 1 will prevent any actual scaling
+        steps:
+          - queue_multiplier: 1 # When queue is 1x backlog (5 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 2 # When queue is 2x backlog (10 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 4 # When queue is 4x backlog (20 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 8 # When queue is 8x backlog (40 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 16 # When queue is 16x backlog (80 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 32 # When queue is 32x backlog (160+ items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+      deployment:
+        enable_var: WORKER_INGESTION_ENABLED_PROD
+        enabled_default: true
+        fargate_weight: 60 # More on-demand for stability
+        fargate_spot_weight: 40
+      requirements:
+        single_threaded: true
+        on_demand_only: true
+
+staging:
+  defaults:
+    fargate_weight: 0
+    fargate_spot_weight: 100 # All Spot in staging
+    worker_prefetch_multiplier: 0
+    worker_profile: worker
+    queue_scaling_scale_out_cooldown: 60
+    # AWS ECS target tracking scales in one task at a time by default
+    # 60 seconds is sufficient since only one worker is terminated per scale-in
+    cpu_scale_in_cooldown: 60 # 1 minute between scale-in operations
+    cpu_scale_in: 10 # CPU % below which workers scale in (default 10%)
+    # Default scaling steps for staging (conservative)
+    queue_scaling_steps:
+      - queue_multiplier: 1
+        add_tasks: 1
+      - queue_multiplier: 2
+        add_tasks: 1
+      - queue_multiplier: 4
+        add_tasks: 1
+      - queue_multiplier: 8
+        add_tasks: 1
+      - queue_multiplier: 16
+        add_tasks: 1
+      - queue_multiplier: 32
+        add_tasks: 1
+
+  workers:
+    - name: default
+      description: General async tasks (staging) - ALWAYS ENABLED
+      queue: default
+      stack_suffix: Default
+      resources:
+        cpu: 256
+        memory: 512
+      scaling:
+        min: 1
+        max: 3
+        desired: 1
+        cpu_scale_in: 10 # Standard threshold
+      worker:
+        autoscale: 1
+        concurrency: 2
+      queue_scaling:
+        backlog: 10
+      deployment:
+        enable_var: WORKER_DEFAULT_ENABLED_STAGING # This variable is ignored - always deployed
+        enabled_default: true
+        always_enabled: true # Special flag - cannot be disabled
+
+    - name: critical
+      description: Urgent processing (disabled in staging)
+      queue: critical
+      stack_suffix: Critical
+      resources:
+        cpu: 256
+        memory: 512
+      scaling:
+        min: 0
+        max: 2
+        desired: 0
+        cpu_scale_in: 10 # Standard threshold
+      worker:
+        autoscale: 1
+        concurrency: 2
+      queue_scaling:
+        backlog: 5
+      deployment:
+        enable_var: WORKER_CRITICAL_ENABLED_STAGING
+        enabled_default: false
+
+    - name: shared-extraction
+      description: SEC XBRL downloads (limited for rate limits)
+      queue: shared-extraction
+      stack_suffix: Extraction
+      resources:
+        cpu: 256
+        memory: 512
+      scaling:
+        min: 0
+        max: 2 # LIMITED: Max 2 workers to respect SEC rate limits
+        desired: 0
+        cpu_scale_in: 20 # Higher threshold due to rate-limited nature
+      worker:
+        autoscale: 1
+        concurrency: 1
+      queue_scaling:
+        backlog: 20
+        # Very conservative scaling due to SEC rate limits
+        # Note: ALL steps must have add_tasks >= 1 for CloudFormation validation
+        # Max capacity of 2 will prevent over-scaling regardless
+        steps:
+          - queue_multiplier: 1 # When queue is 1x backlog (20 items)
+            add_tasks: 1 # Add 1 task (max 2 total)
+          - queue_multiplier: 2 # When queue is 2x backlog (40 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 4 # When queue is 4x backlog (80 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 8 # When queue is 8x backlog (160 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 16 # When queue is 16x backlog (320 items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+          - queue_multiplier: 32 # When queue is 32x backlog (640+ items)
+            add_tasks: 1 # CloudFormation min (but max=2 prevents scaling)
+      deployment:
+        enable_var: WORKER_EXTRACTION_ENABLED_STAGING
+        enabled_default: false # Disabled by default in staging
+      requirements:
+        rate_limited: true
+
+    - name: shared-processing
+      description: Heavy processing (disabled in staging)
+      queue: shared-processing
+      stack_suffix: Shared
+      resources:
+        cpu: 512
+        memory: 1024
+      scaling:
+        min: 0
+        max: 5
+        desired: 0
+        cpu_scale_in: 15 # Higher threshold for heavy processing
+      worker:
+        autoscale: 1
+        concurrency: 1
+      queue_scaling:
+        backlog: 20
+      deployment:
+        enable_var: WORKER_SHARED_ENABLED_STAGING
+        enabled_default: false
+
+    - name: shared-ingestion
+      description: Kuzu ingestion (lightweight API orchestrator)
+      queue: shared-ingestion
+      stack_suffix: Ingestion
+      resources:
+        cpu: 256
+        memory: 512
+      scaling:
+        min: 1
+        max: 1
+        desired: 1
+        cpu_scale_in: 10 # Standard threshold
+      worker:
+        autoscale: 1
+        concurrency: 1
+      queue_scaling:
+        backlog: 5
+        # No scaling - fixed at 1 worker
+        # Note: ALL steps must have add_tasks >= 1 for CloudFormation validation
+        # Max capacity of 1 will prevent any actual scaling
+        steps:
+          - queue_multiplier: 1 # When queue is 1x backlog (5 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 2 # When queue is 2x backlog (10 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 4 # When queue is 4x backlog (20 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 8 # When queue is 8x backlog (40 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 16 # When queue is 16x backlog (80 items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+          - queue_multiplier: 32 # When queue is 32x backlog (160+ items)
+            add_tasks: 1 # CloudFormation min (but max=1 prevents scaling)
+      deployment:
+        enable_var: WORKER_INGESTION_ENABLED_STAGING
+        enabled_default: false
+        fargate_weight: 60 # More on-demand for stability
+        fargate_spot_weight: 40
+      requirements:
+        single_threaded: true
+        on_demand_only: true

@@ -1,0 +1,219 @@
+Description: RoboSystems Grafana Service - Amazon Managed Grafana Workspace
+
+Parameters:
+  # Environment
+  ProjectName:
+    Type: String
+    Description: Project name for resource identification
+    Default: robosystems
+    AllowedPattern: ^[a-z][a-z0-9-]*[a-z0-9]$
+    ConstraintDescription: Must start with lowercase letter, contain only lowercase letters, numbers, and hyphens
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Observability
+
+Resources:
+  # SSO setup configuration
+  # Note: SSO resources are not yet supported in CloudFormation.
+  # Complete manual setup required for Grafana SSO access.
+  #
+  # Prerequisites: AWS SSO (Identity Center) must be enabled
+  # Current SSO Instance: arn:aws:sso:::instance/ssoins-7223bc67757c4e04
+  # Current Identity Store: d-906636dda1
+  #
+  # Required manual steps after stack deployment:
+  #
+  # Create SSO user (replace email with actual email):
+  #    aws identitystore create-user --identity-store-id d-906636dda1 \
+  #      --user-name "robosystems-grafana-admin" \
+  #      --display-name "RoboSystems Grafana Admin" \
+  #      --name '{"GivenName":"Grafana","FamilyName":"Admin"}' \
+  #      --emails '[{"Value":"your-email@example.com","Type":"work","Primary":true}]'
+  #
+  # Assign user to Grafana workspace:
+  #    aws grafana associate-license --license-type ENTERPRISE_FREE_TRIAL \
+  #      --workspace-id [WORKSPACE_ID_FROM_OUTPUT]
+  #
+  # Configure SSO authentication in Grafana workspace:
+  #    aws grafana put-workspace-authentication \
+  #      --workspace-id [WORKSPACE_ID_FROM_OUTPUT] \
+  #      --authentication-providers AWS_SSO \
+  #      --saml-configuration roleValueType=ALL \
+  #      idpMetadata='{"url":"https://portal.sso.us-east-1.amazonaws.com/saml/metadata/[SSO_INSTANCE_ID]"}'
+
+  # IAM service role for Grafana
+  # Grafana Service Role
+  GrafanaServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-grafana-service-role-shared"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: grafana.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+      Policies:
+        - PolicyName: !Sub "${ProjectName}-grafana-prometheus-policy-shared"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Allow access to all Prometheus workspaces in the account
+              - Effect: Allow
+                Action:
+                  - aps:ListWorkspaces
+                  - aps:DescribeWorkspace
+                  - aps:QueryMetrics
+                  - aps:GetLabels
+                  - aps:GetSeries
+                  - aps:GetMetricMetadata
+                Resource: !Sub "arn:${AWS::Partition}:aps:${AWS::Region}:${AWS::AccountId}:workspace/*"
+              # Allow CloudWatch access for all environments
+              - Effect: Allow
+                Action:
+                  - cloudwatch:DescribeAlarmsForMetric
+                  - cloudwatch:DescribeAlarmHistory
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:GetInsightRuleReport
+                Resource: "*"
+              # Allow logs access for all environments
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:GetLogEvents
+                  - logs:StartQuery
+                  - logs:StopQuery
+                  - logs:GetQueryResults
+                  - logs:GetLogRecord
+                Resource: "*"
+              # Allow EC2 describe for instance/volume lookups
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeRegions
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeTags
+                Resource: "*"
+              # Allow Athena access for cost and usage queries
+              - Effect: Allow
+                Action:
+                  - athena:BatchGetQueryExecution
+                  - athena:CancelQueryExecution
+                  - athena:GetDataCatalog
+                  - athena:GetDatabase
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:GetTableMetadata
+                  - athena:GetWorkGroup
+                  - athena:ListDataCatalogs
+                  - athena:ListDatabases
+                  - athena:ListTableMetadata
+                  - athena:ListTagsForResource
+                  - athena:ListWorkGroups
+                  - athena:StartQueryExecution
+                  - athena:StopQueryExecution
+                Resource: "*"
+              # Allow S3 access for Athena query results
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:ListMultipartUploadParts
+                  - s3:AbortMultipartUpload
+                  - s3:CreateBucket
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::AccountId}-${AWS::Region}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-cur"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-cur/*"
+              # Allow Glue access for Athena data catalog
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                  - glue:BatchCreatePartition
+                  - glue:BatchDeletePartition
+                  - glue:BatchGetPartition
+                Resource: "*"
+      Tags:
+        - Key: Environment
+          Value: shared
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Shared Grafana workspace for all environments
+  GrafanaWorkspace:
+    Type: AWS::Grafana::Workspace
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub "${ProjectName}-grafana-shared"
+      Description: "RoboSystems shared Grafana workspace for all environments"
+      AccountAccessType: CURRENT_ACCOUNT
+      AuthenticationProviders:
+        - AWS_SSO
+      PermissionType: SERVICE_MANAGED
+      RoleArn: !GetAtt GrafanaServiceRole.Arn
+      PluginAdminEnabled: true
+      DataSources:
+        - PROMETHEUS
+        - CLOUDWATCH
+        - ATHENA
+
+Outputs:
+  GrafanaWorkspaceId:
+    Description: ID of the shared Grafana workspace
+    Value: !Ref GrafanaWorkspace
+    Export:
+      Name: !Sub "${AWS::StackName}-shared-GrafanaWorkspaceId"
+
+  GrafanaWorkspaceEndpoint:
+    Description: Endpoint of the shared Grafana workspace
+    Value: !GetAtt GrafanaWorkspace.Endpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-shared-GrafanaWorkspaceEndpoint"
+
+  GrafanaServiceRoleArn:
+    Description: ARN of the Grafana service role
+    Value: !GetAtt GrafanaServiceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-shared-GrafanaServiceRoleArn"
+
+  # Configuration Information
+  ManualSetupRequired:
+    Description: Manual SSO setup steps required after deployment
+    Value: "See deployment documentation for SSO user creation and data source configuration"
+    Export:
+      Name: !Sub "${AWS::StackName}-shared-ManualSetupRequired"
+
+  DataSourceConfiguration:
+    Description: Data source configuration instructions
+    Value: "Configure Prometheus and CloudWatch data sources after workspace deployment"
+    Export:
+      Name: !Sub "${AWS::StackName}-shared-DataSourceConfiguration"

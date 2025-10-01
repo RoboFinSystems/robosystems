@@ -1,0 +1,298 @@
+name: Claude Tag Release
+
+on:
+  workflow_call:
+    inputs:
+      branch_ref:
+        description: 'Branch or commit ref to create tag from'
+        required: true
+        type: string
+    secrets:
+      ACTIONS_TOKEN:
+        description: 'GitHub token for repository operations'
+        required: true
+      ANTHROPIC_API_KEY:
+        description: 'API key for Claude changelog generation'
+        required: true
+    outputs:
+      tag_name:
+        description: 'The created tag name (e.g., v1.2.3)'
+        value: ${{ jobs.action.outputs.tag_name }}
+      version:
+        description: 'The version number (e.g., 1.2.3)'
+        value: ${{ jobs.action.outputs.version }}
+      release_url:
+        description: 'The GitHub release URL'
+        value: ${{ jobs.action.outputs.release_url }}
+
+jobs:
+  action:
+    runs-on: ubuntu-latest # Use GitHub-hosted runners for memory-intensive git/Claude operations
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      tag_name: ${{ steps.set-outputs.outputs.tag_name }}
+      version: ${{ steps.set-outputs.outputs.version }}
+      release_url: ${{ steps.set-outputs.outputs.release_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ inputs.branch_ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+          fetch-depth: 0
+
+      - name: Get Version from pyproject.toml
+        id: get-version
+        run: |
+          VERSION=$(grep "^version = " pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION"
+
+      - name: Check If Tag Exists
+        id: check-tag
+        run: |
+          if [ $(git tag -l "v${{ steps.get-version.outputs.version }}") ]; then
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.get-version.outputs.version }} already exists"
+          else
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.get-version.outputs.version }} does not exist yet"
+          fi
+
+      - name: Analyze changes since last release
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        id: analyze-changes
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+
+          # Get the last release tag
+          LAST_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous release found, analyzing all commits"
+            COMMIT_RANGE="$(git rev-list --max-parents=0 HEAD)..HEAD"
+            LAST_TAG="initial"
+          else
+            COMMIT_RANGE="$LAST_TAG..HEAD"
+            echo "Analyzing changes since last release: $LAST_TAG"
+          fi
+
+          # Get change statistics
+          FILES_CHANGED=$(git diff --name-only $COMMIT_RANGE | wc -l)
+          COMMITS_COUNT=$(git rev-list --count $COMMIT_RANGE)
+          ADDITIONS=$(git diff --shortstat $COMMIT_RANGE | grep -oE '[0-9]+ insertions?' | grep -oE '[0-9]+' || echo "0")
+          DELETIONS=$(git diff --shortstat $COMMIT_RANGE | grep -oE '[0-9]+ deletions?' | grep -oE '[0-9]+' || echo "0")
+
+          # Get commit messages (limit to prevent memory issues)
+          COMMIT_MESSAGES=$(git log --oneline --no-color $COMMIT_RANGE | head -30)
+
+          # Get file changes (limit to prevent memory issues)
+          DETAILED_CHANGES=$(git diff --name-status --no-color $COMMIT_RANGE | head -50)
+
+          # Get PR references from commit messages
+          PR_REFS=$(git log --oneline --no-color $COMMIT_RANGE | grep -oE '#[0-9]+' | sort -u | head -10 || echo "")
+
+          # Save outputs
+          echo "last_tag=$LAST_TAG" >> $GITHUB_OUTPUT
+          echo "commit_range=$COMMIT_RANGE" >> $GITHUB_OUTPUT
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "commits_count=$COMMITS_COUNT" >> $GITHUB_OUTPUT
+          echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
+          echo "deletions=$DELETIONS" >> $GITHUB_OUTPUT
+
+          # Save multiline outputs
+          {
+            echo "commit_messages<<EOF"
+            echo "$COMMIT_MESSAGES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          {
+            echo "detailed_changes<<EOF"
+            echo "$DETAILED_CHANGES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+          {
+            echo "pr_refs<<EOF"
+            echo "$PR_REFS"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Generate changelog with Claude
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        id: generate-changelog
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          LAST_TAG="${{ steps.analyze-changes.outputs.last_tag }}"
+
+          # Create analysis prompt for Claude
+          cat > /tmp/changelog_prompt.txt << PROMPT_EOF
+          I need you to generate a concise but informative changelog for a software release.
+
+          **Release Info:**
+          - Version: $VERSION
+          - Previous Version: $LAST_TAG
+          - Files Changed: ${{ steps.analyze-changes.outputs.files_changed }}
+          - Commits: ${{ steps.analyze-changes.outputs.commits_count }}
+          - Lines Added: ${{ steps.analyze-changes.outputs.additions }}
+          - Lines Deleted: ${{ steps.analyze-changes.outputs.deletions }}
+
+          **Recent Commits:**
+          ${{ steps.analyze-changes.outputs.commit_messages }}
+
+          **File Changes:**
+          ${{ steps.analyze-changes.outputs.detailed_changes }}
+
+          **PR References:**
+          ${{ steps.analyze-changes.outputs.pr_refs }}
+
+          Please generate a changelog that includes:
+          1. A brief 1-2 sentence summary of this release
+          2. Key features/improvements (bullet points)
+          3. Breaking changes (if any) - clearly marked with ⚠️
+          4. Notable technical changes worth mentioning
+          5. Bug fixes (if any)
+
+          Keep it concise but informative. Focus on what users and developers need to know.
+          Use markdown formatting. Don't include a version header as that will be added separately.
+          If there are security improvements, highlight them.
+          If this appears to be a maintenance/infrastructure release, emphasize that.
+
+          Format your response as clean markdown without any prefix text.
+          PROMPT_EOF
+
+          echo "✅ Changelog prompt created"
+
+      - name: Call Claude API for changelog
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        id: claude-changelog
+        run: |
+          # Call Claude API with the analysis prompt
+          PROMPT=$(cat /tmp/changelog_prompt.txt)
+
+          # Create a proper JSON payload using jq to handle escaping
+          PAYLOAD=$(jq -n \
+            --arg model "claude-sonnet-4-20250514" \
+            --arg content "$PROMPT" \
+            '{
+              "model": $model,
+              "max_tokens": 3000,
+              "messages": [
+                {
+                  "role": "user",
+                  "content": $content
+                }
+              ]
+            }')
+
+          RESPONSE=$(curl -s --max-time 60 --retry 3 --retry-delay 10 -X POST "https://api.anthropic.com/v1/messages" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.ANTHROPIC_API_KEY }}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "$PAYLOAD")
+
+          # Check for API errors
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null; then
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown error"')
+            ERROR_TYPE=$(echo "$RESPONSE" | jq -r '.error.type // "unknown"')
+            echo "❌ Claude API error [$ERROR_TYPE]: $ERROR_MSG"
+            echo "Full response: $RESPONSE" >&2  # Log to stderr for debugging
+            echo "Using fallback changelog"
+            CHANGELOG="## What's Changed\n\n- ${{ steps.analyze-changes.outputs.commits_count }} commits with ${{ steps.analyze-changes.outputs.files_changed }} files changed\n- ${{ steps.analyze-changes.outputs.additions }} additions and ${{ steps.analyze-changes.outputs.deletions }} deletions\n\nSee commit history for detailed changes."
+          else
+            # Extract changelog from Claude's response
+            CHANGELOG=$(echo "$RESPONSE" | jq -r '.content[0].text')
+
+            # Validate that Claude returned meaningful content
+            if [ -z "$CHANGELOG" ] || [ "$CHANGELOG" = "null" ]; then
+              echo "❌ Claude returned empty changelog, using fallback"
+              CHANGELOG="## What's Changed\n\n- ${{ steps.analyze-changes.outputs.commits_count }} commits with ${{ steps.analyze-changes.outputs.files_changed }} files changed\n- ${{ steps.analyze-changes.outputs.additions }} additions and ${{ steps.analyze-changes.outputs.deletions }} deletions\n\nSee commit history for detailed changes."
+            else
+              echo "✅ Claude changelog generated successfully"
+            fi
+          fi
+
+          # Save changelog to output
+          {
+            echo "changelog<<EOF"
+            echo -e "$CHANGELOG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create Release Tag
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.get-version.outputs.version }}" -m "Release v${{ steps.get-version.outputs.version }}"
+          git push origin "v${{ steps.get-version.outputs.version }}"
+
+      - name: Create GitHub Release
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.get-version.outputs.version }}
+          name: Release v${{ steps.get-version.outputs.version }}
+          body: |
+            # RoboSystems Service v${{ steps.get-version.outputs.version }}
+
+            ${{ steps.claude-changelog.outputs.changelog }}
+
+            ---
+
+            ## 📊 Release Statistics
+
+            - **Commits:** ${{ steps.analyze-changes.outputs.commits_count }}
+            - **Files Changed:** ${{ steps.analyze-changes.outputs.files_changed }}
+            - **Lines Added:** ${{ steps.analyze-changes.outputs.additions }}
+            - **Lines Deleted:** ${{ steps.analyze-changes.outputs.deletions }}
+            - **Previous Release:** ${{ steps.analyze-changes.outputs.last_tag }}
+
+            ## 🔗 Links
+
+            - **Full Changelog:** [${{ steps.analyze-changes.outputs.last_tag }}...v${{ steps.get-version.outputs.version }}](https://github.com/${{ github.repository }}/compare/${{ steps.analyze-changes.outputs.last_tag }}...v${{ steps.get-version.outputs.version }})
+            - **All Releases:** [View all releases](https://github.com/${{ github.repository }}/releases)
+
+            ---
+            🤖 Generated with [Claude Code](https://claude.ai/code)
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Create release summary
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+
+          echo "## 🚀 Release v$VERSION Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release URL:** [v$VERSION](https://github.com/${{ github.repository }}/releases/tag/v$VERSION)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Statistics" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commits:** ${{ steps.analyze-changes.outputs.commits_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files Changed:** ${{ steps.analyze-changes.outputs.files_changed }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lines Added:** ${{ steps.analyze-changes.outputs.additions }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lines Deleted:** ${{ steps.analyze-changes.outputs.deletions }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous Release:** ${{ steps.analyze-changes.outputs.last_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🤖 Claude-Generated Changelog" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.claude-changelog.outputs.changelog }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Set outputs
+        id: set-outputs
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          VERSION="${{ steps.get-version.outputs.version }}"
+          TAG_NAME="v$VERSION"
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$TAG_NAME"
+
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
+
+          echo "✅ Outputs set: tag=$TAG_NAME, version=$VERSION"

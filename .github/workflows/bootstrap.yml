@@ -1,0 +1,299 @@
+name: Bootstrap Infrastructure
+
+concurrency:
+  group: robosystems-bootstrap
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_ami_id:
+        description: "AMI ID for GitHub Actions runner"
+        required: true
+        type: string
+        default: "ami-08a6efd148b1f7504"
+
+jobs:
+  deploy-vpc:
+    uses: ./.github/workflows/deploy-vpc.yml
+    with:
+      # Environment & Repository Configuration
+      stack_name: RoboSystemsVPC
+      cloudtrail_stack_name: RoboSystemsCloudTrail
+      environment: shared
+      # Runner Configuration
+      runner_config: '["ubuntu-latest"]'
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      endpoint_mode: minimal
+      max_availability_zones: ${{ vars.MAX_AVAILABILITY_ZONES || '5' }}
+      # VPC Flow Logs Configuration (VPC-level, not environment-specific)
+      vpc_flow_logs_enabled: ${{ vars.VPC_FLOW_LOGS_ENABLED || 'true' }}
+      vpc_flow_logs_retention_days: ${{ vars.VPC_FLOW_LOGS_RETENTION_DAYS || '30' }}
+      vpc_flow_logs_traffic_type: ${{ vars.VPC_FLOW_LOGS_TRAFFIC_TYPE || 'REJECT' }}
+      # CloudTrail Configuration (account-level, not environment-specific)
+      cloudtrail_enabled: ${{ vars.CLOUDTRAIL_ENABLED || 'true' }}
+      cloudtrail_log_retention_days: ${{ vars.CLOUDTRAIL_LOG_RETENTION_DAYS || '90' }}
+      cloudtrail_data_events_enabled: ${{ vars.CLOUDTRAIL_DATA_EVENTS_ENABLED || 'false' }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-runner:
+    needs: [deploy-vpc]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Deploy GitHub Actions Runner Stack
+        id: deploy-stack
+        run: |
+          echo "🚀 Bootstrapping RoboSystems Infrastructure"
+          echo "This will deploy multi-AZ VPC and GitHub Actions runner Auto Scaling Group to enable CI/CD operations"
+          echo ""
+          echo "📋 Bootstrap Process:"
+          echo "1. Deploy VPC and networking infrastructure"
+          echo "2. Create or update GHA Runner stack"
+          echo "3. Deploy new Auto Scaling Group"
+          echo "4. Monitor deployment progress"
+          echo "5. Wait for runners to register and become available"
+          echo "6. Verify runners are online and ready"
+          echo ""
+          echo "Configuration:"
+          echo "- Stack Name: RoboSystemsGHARunner"
+          echo "- Environment: ${{ vars.RUNNER_ENVIRONMENT || 'ci' }}"
+          echo "- VPC configured"
+          echo "- Subnets configured"
+          echo "- AMI ID: ${{ inputs.runner_ami_id }}"
+          echo ""
+
+          # Check if stack exists to determine create vs update
+          if aws cloudformation describe-stacks --stack-name RoboSystemsGHARunner 2>&1 | grep -q 'Stack with id RoboSystemsGHARunner does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new stack RoboSystemsGHARunner"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing stack RoboSystemsGHARunner"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Set up parameters
+          PRIVATE_SUBNET_IDS='${{ needs.deploy-vpc.outputs.private_subnet_ids }}'
+          echo "Using private subnets (configured)"
+
+          RUNNER_PARAMS="ParameterKey=Environment,ParameterValue=${{ vars.RUNNER_ENVIRONMENT || 'ci' }} \
+                ParameterKey=VpcId,ParameterValue=${{ needs.deploy-vpc.outputs.vpc_id }} \
+                ParameterKey=PrivateSubnetIds,ParameterValue=\"$PRIVATE_SUBNET_IDS\" \
+                ParameterKey=AmiId,ParameterValue=${{ inputs.runner_ami_id }} \
+                ParameterKey=GitHubOrg,ParameterValue=${{ secrets.RUNNER_GITHUB_ORG }} \
+                ParameterKey=GitHubToken,ParameterValue=${{ secrets.RUNNER_GITHUB_TOKEN }} \
+                ParameterKey=StorageSize,ParameterValue=${{ vars.RUNNER_STORAGE_SIZE || '30' }} \
+                ParameterKey=MinInstances,ParameterValue=${{ vars.RUNNER_MIN_INSTANCES || '2' }} \
+                ParameterKey=MaxInstances,ParameterValue=${{ vars.RUNNER_MAX_INSTANCES || '8' }} \
+                ParameterKey=DesiredInstances,ParameterValue=${{ vars.RUNNER_DESIRED_INSTANCES || '2' }}"
+
+          # Add deployment bucket and userdata script (use consistent defaults)
+          # CI environment uses prod deployment bucket
+          if [ "${{ vars.RUNNER_ENVIRONMENT || 'ci' }}" = "ci" ]; then
+            DEPLOYMENT_BUCKET="robosystems-prod-deployment"
+          else
+            DEPLOYMENT_BUCKET="robosystems-${{ vars.RUNNER_ENVIRONMENT || 'ci' }}-deployment"
+          fi
+          USERDATA_SCRIPT_KEY="userdata/gha-runner.sh"
+
+          RUNNER_PARAMS="$RUNNER_PARAMS ParameterKey=DeploymentBucket,ParameterValue=$DEPLOYMENT_BUCKET"
+          RUNNER_PARAMS="$RUNNER_PARAMS ParameterKey=UserDataScriptKey,ParameterValue=$USERDATA_SCRIPT_KEY"
+
+          echo "Adding deployment bucket: $DEPLOYMENT_BUCKET"
+          echo "Adding UserData script key: $USERDATA_SCRIPT_KEY"
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name RoboSystemsGHARunner \
+              --template-body file://cloudformation/gha-runner.yaml \
+              --capabilities CAPABILITY_IAM \
+              --parameters $RUNNER_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ vars.RUNNER_ENVIRONMENT || 'ci' }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=GHARunner \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions \
+                Key=Purpose,Value=CI-Infrastructure
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name RoboSystemsGHARunner \
+              --template-body file://cloudformation/gha-runner.yaml \
+              --capabilities CAPABILITY_IAM \
+              --parameters $RUNNER_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ vars.RUNNER_ENVIRONMENT || 'ci' }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=GHARunner \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions \
+                Key=Purpose,Value=CI-Infrastructure 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: RoboSystemsGHARunner
+          timeout: "1800"
+          interval: "10"
+
+      - name: Refresh Auto Scaling Group Instances
+        uses: ./.github/actions/refresh-asg
+        with:
+          stack-name: RoboSystemsGHARunner
+          logical-resource-id: AutoScalingGroupName
+          min-healthy-percentage: 75
+          instance-warmup: 300
+          max-wait-time: 1800
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "📊 Retrieving stack outputs..."
+
+          # Get Auto Scaling Group Name
+          ASG_NAME=$(aws cloudformation describe-stacks \
+            --stack-name RoboSystemsGHARunner \
+            --query "Stacks[0].Outputs[?OutputKey=='GHARunnerAutoScalingGroupName'].OutputValue" \
+            --output text)
+
+          if [ -n "$ASG_NAME" ]; then
+            echo "asg_name=$ASG_NAME" >> $GITHUB_OUTPUT
+            echo "Found Auto Scaling Group: $ASG_NAME"
+          else
+            echo "Error: Could not retrieve Auto Scaling Group Name"
+            exit 1
+          fi
+
+          # Get Launch Template ID
+          LAUNCH_TEMPLATE_ID=$(aws cloudformation describe-stacks \
+            --stack-name RoboSystemsGHARunner \
+            --query "Stacks[0].Outputs[?OutputKey=='GHARunnerLaunchTemplateId'].OutputValue" \
+            --output text)
+
+          if [ -n "$LAUNCH_TEMPLATE_ID" ]; then
+            echo "launch_template_id=$LAUNCH_TEMPLATE_ID" >> $GITHUB_OUTPUT
+            echo "Launch Template configured successfully"
+          else
+            echo "Error: Could not retrieve Launch Template ID"
+            exit 1
+          fi
+
+          # Get Security Group ID
+          SECURITY_GROUP_ID=$(aws cloudformation describe-stacks \
+            --stack-name RoboSystemsGHARunner \
+            --query "Stacks[0].Outputs[?OutputKey=='GHARunnerSecurityGroupId'].OutputValue" \
+            --output text)
+
+          if [ -n "$SECURITY_GROUP_ID" ]; then
+            echo "security_group_id=$SECURITY_GROUP_ID" >> $GITHUB_OUTPUT
+            echo "Security Group configured successfully"
+          else
+            echo "Error: Could not retrieve Security Group ID"
+            exit 1
+          fi
+
+          # Get Runner Labels
+          RUNNER_LABELS=$(aws cloudformation describe-stacks \
+            --stack-name RoboSystemsGHARunner \
+            --query "Stacks[0].Outputs[?OutputKey=='RunnerLabels'].OutputValue" \
+            --output text)
+
+          if [ -n "$RUNNER_LABELS" ]; then
+            echo "runner_labels=$RUNNER_LABELS" >> $GITHUB_OUTPUT
+            echo "Found Runner Labels: $RUNNER_LABELS"
+          else
+            echo "Warning: Could not retrieve Runner Labels"
+          fi
+
+          echo ""
+          echo "### ✅ GitHub Actions Runner Auto Scaling Group Deployed Successfully"
+          echo ""
+          echo "**🖥️ Infrastructure Details:**"
+          echo "- Auto Scaling Group: \`$ASG_NAME\`"
+          echo "- Launch Template configured"
+          echo "- Security Group configured"
+          echo "- Runner Labels: \`$RUNNER_LABELS\`"
+          echo ""
+          echo "**⏳ Next Steps:**"
+          echo "1. ASG instances are launching with the latest configuration"
+          echo "2. Multiple runners will appear in GitHub Settings > Actions > Runners"
+          echo "3. Runners will be labeled: \`$RUNNER_LABELS\`"
+          echo "4. All subsequent deployments will use these self-hosted runners"
+          echo "5. ASG will automatically replace unhealthy runners"
+
+      - name: Wait for Runners to Become Available
+        run: |
+          echo "🔄 Waiting for GitHub Actions runners to become available..."
+          echo "This will check every 30 seconds for up to 2 minutes"
+
+          MAX_ATTEMPTS=4
+          ATTEMPT=1
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: Checking runner availability..."
+
+            # Use the check-runner-available workflow logic inline
+            RUNNERS_RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.RUNNER_GITHUB_TOKEN }}" \
+              "https://api.github.com/orgs/${{ secrets.RUNNER_GITHUB_ORG }}/actions/runners")
+
+            if echo "$RUNNERS_RESPONSE" | jq . >/dev/null 2>&1; then
+              ONLINE_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | select(.status == "online") | .name' | wc -l)
+              echo "Found $ONLINE_RUNNERS online runners"
+
+              if [ "$ONLINE_RUNNERS" -ge 1 ]; then
+                echo "✅ Success! Found $ONLINE_RUNNERS online runners"
+                echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | select(.status == "online") | "  - \(.name): \(.status)"'
+                break
+              fi
+            else
+              echo "Failed to get runner status from GitHub API"
+            fi
+
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "❌ Timeout: Runners not available after 2 minutes"
+              echo "Check the troubleshooting steps above"
+              exit 1
+            fi
+
+            echo "Waiting 30 seconds before next check..."
+            sleep 30
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+
+          echo "🎉 GitHub Actions runners are ready for use!"

@@ -1,0 +1,243 @@
+Description: Worker Monitor Lambda - Queue metrics and ECS task protection for autoscaling
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Must be prod or staging
+
+  ValkeyCacheClusterId:
+    Type: String
+    Description: ElastiCache Valkey cluster ID
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for Lambda
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for Lambda
+
+  ValkeySgId:
+    Type: String
+    Description: Security group ID for Valkey access
+
+  # Lambda Configuration
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+    ConstraintDescription: Must be a valid S3 bucket name
+
+  WorkerMonitorCodeKey:
+    Type: String
+    Description: S3 key for Worker Monitor Lambda deployment package
+    ConstraintDescription: Must be a valid S3 object key
+
+Resources:
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-worker-monitor-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: WorkerMonitorPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # CloudWatch Metrics
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+
+              # ECS Permissions
+              - Effect: Allow
+                Action:
+                  - ecs:ListTasks
+                  - ecs:ListServices
+                  - ecs:DescribeTasks
+                  - ecs:DescribeServices
+                  - ecs:GetTaskProtection
+                  - ecs:UpdateTaskProtection
+                Resource: "*"
+
+              # ElastiCache Permissions
+              - Effect: Allow
+                Action:
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeReplicationGroups
+                Resource: "*"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: RoboSystems
+        - Key: Component
+          Value: WorkerMonitor
+
+  # Lambda Security Group
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub robosystems-worker-monitor-${Environment}-sg
+      GroupDescription: Security group for Worker Monitor Lambda
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        # HTTPS for AWS APIs
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        # Note: Redis/Valkey access is granted by attaching the ValkeySgId to the Lambda
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-worker-monitor-${Environment}-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Function
+  WorkerMonitorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub robosystems-worker-monitor-${Environment}
+      Description: Monitor worker queues and manage ECS task protection
+      Runtime: python3.12
+      Handler: index.handler # Note: package-scripts.sh packages as index.py
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref WorkerMonitorCodeKey
+      MemorySize: 512
+      Timeout: 120 # 2 minute timeout for large-scale operations
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          VALKEY_CLUSTER_ID: !Ref ValkeyCacheClusterId
+          DLQ_CRITICAL_THRESHOLD: "20" # Configurable DLQ threshold
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+          - !Ref ValkeySgId # Add the Valkey client security group
+        SubnetIds: !Ref SubnetIds
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: RoboSystems
+        - Key: Component
+          Value: WorkerMonitor
+
+  # CloudWatch Log Group
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/robosystems-worker-monitor-${Environment}
+      RetentionInDays: 7 # Keep logs for 7 days
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: RoboSystems
+
+  # EventBridge Rule for scheduled execution (every minute)
+  ScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub robosystems-worker-monitor-${Environment}-schedule
+      Description: Trigger worker monitor every minute
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt WorkerMonitorLambda.Arn
+          Id: WorkerMonitorTarget
+          Input: |
+            {
+              "action": "all"
+            }
+
+  # Permission for EventBridge to invoke Lambda
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WorkerMonitorLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduleRule.Arn
+
+  # CloudWatch Alarm for Lambda errors
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-monitor-${Environment}-errors
+      AlarmDescription: Alert when worker monitoring Lambda has errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WorkerMonitorLambda
+      Statistic: Sum
+      Period: 300 # 5 minutes
+      EvaluationPeriods: 1
+      Threshold: 3 # Alert if more than 3 errors in 5 minutes
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: RoboSystems
+
+  # CloudWatch Alarm for Lambda duration
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-monitor-${Environment}-duration
+      AlarmDescription: Alert when worker monitoring Lambda takes too long
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WorkerMonitorLambda
+      Statistic: Average
+      Period: 300 # 5 minutes
+      EvaluationPeriods: 2
+      Threshold: 30000 # 30 seconds
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: RoboSystems
+
+Outputs:
+  LambdaFunctionArn:
+    Description: ARN of the Worker Monitor Lambda function
+    Value: !GetAtt WorkerMonitorLambda.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-LambdaArn
+
+  LambdaFunctionName:
+    Description: Name of the Worker Monitor Lambda function
+    Value: !Ref WorkerMonitorLambda
+    Export:
+      Name: !Sub ${AWS::StackName}-LambdaName
+
+  ScheduleRuleArn:
+    Description: ARN of the EventBridge schedule rule
+    Value: !GetAtt ScheduleRule.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ScheduleRuleArn

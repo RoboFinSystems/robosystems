@@ -1,0 +1,128 @@
+# Stage 1: Builder
+FROM python:3.12.10-slim AS builder
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_CACHE_DIR=/tmp/uv-cache \
+    UV_LINK_MODE=copy
+
+# Install system dependencies and uv using official installer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.local/bin/uv /usr/local/bin/uv
+
+# Pre-download the httpfs extension binary for Kuzu 0.11.2 on ARM64 Linux
+# This ensures the extension is available even after container restarts
+RUN mkdir -p /kuzu-extension/0.11.2/linux_arm64/httpfs && \
+    curl -L -o /kuzu-extension/0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension \
+    https://extension.kuzudb.com/v0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension
+
+WORKDIR /build
+
+# Copy dependency files first for better layer caching
+COPY pyproject.toml uv.lock ./
+
+# Install git for fetching EDGAR subtree
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies into project .venv (uv handles this automatically)
+RUN --mount=type=cache,target=/tmp/uv-cache \
+    uv sync --frozen --no-dev --no-install-project
+
+# Copy source code and install project
+COPY robosystems/ ./robosystems/
+COPY main.py ./
+
+# Copy pre-built cache bundles and cache manager script (required for build)
+COPY robosystems/arelle/bundles/ ./robosystems/arelle/bundles/
+COPY robosystems/scripts/arelle_cache_manager.py ./robosystems/scripts/
+
+# Validate that required bundles exist before attempting extraction
+RUN if [ ! -f "./robosystems/arelle/bundles/arelle-schemas-latest.tar.gz" ]; then \
+        echo "ERROR: Schema bundle (arelle-schemas-latest.tar.gz) is missing!" && \
+        echo "Run 'just cache-arelle-update' to generate bundles before building" && \
+        exit 1; \
+    fi
+
+# Extract schemas from bundle and fetch EDGAR plugin from GitHub
+RUN python robosystems/scripts/arelle_cache_manager.py extract && \
+    python robosystems/scripts/arelle_cache_manager.py fetch-edgar
+RUN --mount=type=cache,target=/tmp/uv-cache \
+    uv sync --frozen --no-dev
+
+# Stage 2: Runtime
+FROM python:3.12.10-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/build/.venv/bin:$PATH" \
+    ARELLE_CACHE_DIR="/app/robosystems/arelle/cache" \
+    KUZU_HOME="/app/data/.kuzu"
+
+# Install runtime dependencies and uv
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    postgresql-client \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.local/bin/uv /usr/local/bin/uv
+
+# Copy virtual environment from builder stage
+COPY --from=builder /build/.venv /build/.venv
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code first (includes arelle/bundles but not EDGAR/cache)
+COPY robosystems/ /app/robosystems/
+# Remove the incomplete arelle directory and replace with builder's complete version
+RUN rm -rf /app/robosystems/arelle
+# Copy builder's complete arelle directory (includes EDGAR + cache + bundles)
+COPY --from=builder /build/robosystems/arelle/ /app/robosystems/arelle/
+COPY main.py ./
+COPY bin/ /app/bin/
+# Copy static files for serving directly from container
+COPY static/ /app/static/
+# Copy alembic configuration and migrations
+COPY alembic.ini /app/
+COPY alembic/ /app/alembic/
+# Copy configuration files
+COPY .github/configs/kuzu.yml /app/configs/kuzu.yml
+COPY .github/configs/stacks.yml /app/configs/stacks.yml
+
+# Make entrypoint script executable
+RUN chmod +x bin/entrypoint.sh
+
+# Use non-root user for better security
+RUN useradd -m appuser
+# Ensure uv is accessible by appuser
+RUN chown appuser:appuser /usr/local/bin/uv
+# Create data directory and Kuzu home directory, set ownership for XBRL processing
+RUN mkdir -p /app/data /app/data/.kuzu/extension && chown -R appuser:appuser /app/data
+# Also create extension directory in appuser's home (where Kuzu looks for extensions)
+RUN mkdir -p /home/appuser/.kuzu/extension && chown -R appuser:appuser /home/appuser/.kuzu
+# Give appuser write access to /app for log files
+RUN chown -R appuser:appuser /app
+
+# Copy pre-downloaded Kuzu httpfs extension to user home directory
+# Kuzu always looks for extensions in ~/.kuzu/extension regardless of database location
+COPY --from=builder --chown=appuser:appuser /kuzu-extension /home/appuser/.kuzu/extension
+
+# Also copy to data location for consistency (optional, but keeps structure clean)
+COPY --from=builder --chown=appuser:appuser /kuzu-extension /app/data/.kuzu/extension
+
+# Switch to non-root user
+USER appuser
+
+# Set the entrypoint
+ENTRYPOINT ["/app/bin/entrypoint.sh"]

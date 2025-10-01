@@ -1,0 +1,28 @@
+# Ignore EDGAR and cache in Docker context (will be fetched/extracted in builder)
+robosystems/arelle/EDGAR/
+robosystems/arelle/cache/
+
+# Ignore other common files
+.git/
+.github/
+# But allow the kuzu config file (explicitly copied in Dockerfile)
+!.github/configs/
+!.github/configs/kuzu.yml
+.pytest_cache/
+__pycache__/
+*.pyc
+.env*
+.DS_Store
+.claude/
+CLAUDE.local.md
+.gemini/
+GEMINI.md
+data/
+local/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/

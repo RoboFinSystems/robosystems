@@ -1,0 +1,32 @@
+{
+  "name": "Release Branches",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": ["refs/heads/release/*"]
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "creation"
+    },
+    {
+      "type": "update"
+    }
+  ],
+  "bypass_actors": [
+    {
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    },
+    {
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "always"
+    }
+  ]
+}

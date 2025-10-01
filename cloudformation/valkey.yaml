@@ -1,0 +1,662 @@
+Description: "RoboSystems Valkey Service - ElastiCache"
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name (staging, prod)
+    Default: prod
+    AllowedValues: [staging, prod]
+
+  # Infrastructure & Networking Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for ElastiCache deployment
+  SubnetId1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First private subnet ID for ElastiCache subnet group
+  SubnetId2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second private subnet ID for ElastiCache subnet group
+
+  # Instance & Cache Configuration
+  NodeType:
+    Type: String
+    Description: ElastiCache node type
+    Default: cache.t4g.micro
+    AllowedValues:
+      # T4g - Burstable (CPU credits, cost-effective for variable loads)
+      - cache.t4g.micro # 1.37 GB memory
+      - cache.t4g.small # 3.09 GB memory
+      - cache.t4g.medium # 6.38 GB memory
+      # M6g - General Purpose Graviton2 (great value with RIs)
+      - cache.m6g.large # 8 GB memory
+      - cache.m6g.xlarge # 16 GB memory
+      - cache.m6g.2xlarge # 32 GB memory
+      # M7g - General Purpose Graviton3 (10-15% faster than m6g)
+      - cache.m7g.large # 8 GB memory
+      - cache.m7g.xlarge # 16 GB memory
+      - cache.m7g.2xlarge # 32 GB memory
+      # R7g - Memory Optimized (high throughput, >1M RPS on 4xlarge+)
+      - cache.r7g.large # 13.07 GB memory
+      - cache.r7g.xlarge # 26.32 GB memory
+      - cache.r7g.2xlarge # 52.82 GB memory
+  NumCacheNodes:
+    Type: Number
+    Description: Number of cache nodes (1 for single node, 2-6 for cluster)
+    Default: 1
+    MinValue: 1
+    MaxValue: 6
+
+  # Security Configuration
+  EnableEncryption:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable encryption at rest and in transit for Valkey
+    ConstraintDescription: Must be true or false
+  EnableSecretRotation:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable automatic rotation of Valkey auth tokens
+    ConstraintDescription: Must be true or false
+  RotationScheduleDays:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 365
+    Description: Number of days between automatic auth token rotations (when rotation is enabled)
+    ConstraintDescription: Must be between 1 and 365 days
+
+  # Backup Configuration
+  SnapshotRetentionDays:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 35
+    Description: Number of days to retain automatic backups (0 = disabled)
+    ConstraintDescription: Must be between 0 and 35 days
+  SnapshotWindow:
+    Type: String
+    Default: "02:00-03:00"
+    Description: Daily time window for automated snapshots (UTC, format hh:mm-hh:mm)
+    AllowedPattern: "^[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]$"
+    ConstraintDescription: Must be in format hh:mm-hh:mm (e.g., 02:00-03:00)
+
+  # Lambda Configuration
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+    ConstraintDescription: Must be a valid S3 bucket name
+  ValkeyRotationCodeKey:
+    Type: String
+    Description: S3 key for Valkey Auth Token Rotation Lambda deployment package
+    Default: "lambdas/valkey_rotation.zip"
+    ConstraintDescription: Must be a valid S3 object key
+  LambdaRotationTimeout:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 900
+    Description: Timeout in seconds for rotation Lambda function
+    ConstraintDescription: Must be between 60 and 900 seconds
+
+  # Monitoring
+  SNSAlertEmail:
+    Type: String
+    Description: Email address for Valkey alerts
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+    ConstraintDescription: Must be a valid email address
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Valkey
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, prod]
+  IsMultiNode: !Not [!Equals [!Ref NumCacheNodes, 1]]
+  EnableRotation: !Equals [!Ref EnableSecretRotation, "true"]
+  EnableEncryptionCondition: !Equals [!Ref EnableEncryption, "true"]
+  EnableSnapshots: !Not [!Equals [!Ref SnapshotRetentionDays, 0]]
+  RequireAuth:
+    !Or [!Condition EnableEncryptionCondition, !Condition EnableRotation]
+
+Resources:
+  # ElastiCache Subnet Group
+  ValkeySubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Subnet group for RoboSystems Valkey ElastiCache
+      SubnetIds:
+        - !Ref SubnetId1
+        - !Ref SubnetId2
+      CacheSubnetGroupName: !Sub "robosystems-valkey-subnet-group-${Environment}"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceTag}-valkey-subnet-group-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Security Group for ElastiCache
+  ValkeySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for RoboSystems Valkey ElastiCache
+      GroupName: !Sub "robosystems-valkey-sg-${Environment}"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref ValkeyClientSecurityGroup
+          Description: Allow Valkey access from application clients
+        - !If
+          - EnableRotation
+          - IpProtocol: tcp
+            FromPort: 6379
+            ToPort: 6379
+            SourceSecurityGroupId: !Ref ValkeyLambdaSecurityGroup
+            Description: Allow Valkey access from rotation Lambda
+          - !Ref AWS::NoValue
+      SecurityGroupEgress: []
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceTag}-valkey-sg-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Client Security Group (for applications to reference)
+  ValkeyClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for applications connecting to Valkey
+      GroupName: !Sub "robosystems-${Environment}-valkey-client-security-group"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-${Environment}-valkey-client-security-group"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Lambda Security Group (for rotation function)
+  ValkeyLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for Valkey rotation Lambda function
+      GroupName: !Sub "robosystems-${Environment}-valkey-lambda-sg"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        # Allow HTTPS to Secrets Manager
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS for Secrets Manager API
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-${Environment}-valkey-lambda-sg"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Lambda to Valkey Security Group Rule (separate to avoid circular dependency)
+  ValkeyLambdaToValkeyEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: EnableRotation
+    Properties:
+      GroupId: !Ref ValkeyLambdaSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      DestinationSecurityGroupId: !Ref ValkeySecurityGroup
+      Description: Allow Lambda to connect to Valkey for rotation
+
+  # ===== Security & Authentication =====
+  # Secret for Valkey auth token generation with automatic rotation
+  ValkeyAuthSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/valkey
+      Description: Valkey auth token for RoboSystems with automatic rotation
+      GenerateSecretString:
+        SecretStringTemplate: "{}"
+        GenerateStringKey: VALKEY_AUTH_TOKEN
+        PasswordLength: 64
+        # ElastiCache only allows these special chars: ! & # $ ^ < > -
+        # We must exclude all other punctuation characters
+        # Setting ExcludePunctuation: true excludes ALL punctuation, so we keep it false
+        # and explicitly list all disallowed characters including single quote
+        ExcludeCharacters: '"@/\`~()[]{}|:;,.?+=_*%'''
+        ExcludePunctuation: false
+        IncludeSpace: false
+      Tags:
+        - Key: Name
+          Value: robosystems-valkey-auth-secret
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Secret Rotation Lambda Function
+  # NOTE: Requires Lambda code to be deployed to S3 bucket/key specified in parameters
+  # The deployment pipeline automatically uploads the Lambda code during package-lambda-functions step
+  ValkeySecretRotationLambda:
+    Type: AWS::Lambda::Function
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-valkey-rotation
+      Description: "Rotates Valkey auth tokens - auto-updates via S3 key hash"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt ValkeySecretRotationRole.Arn
+      Timeout: !Ref LambdaRotationTimeout
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ValkeyLambdaSecurityGroup
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
+      Environment:
+        Variables:
+          SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.${AWS::URLSuffix}
+          VALKEY_REPLICATION_GROUP_ID: !Sub "robosystems-${Environment}-valkey"
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-valkey-rotation-lambda
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref ValkeyRotationCodeKey
+
+  # Lambda Execution Role for Secret Rotation
+  ValkeySecretRotationRole:
+    Type: AWS::IAM::Role
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerRotationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:UpdateSecretVersionStage
+                Resource: !Ref ValkeyAuthSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetRandomPassword
+                Resource: "*"
+              # KMS permissions for secret rotation
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+              - Effect: Allow
+                Action:
+                  - elasticache:DescribeReplicationGroups
+                  - elasticache:ModifyReplicationGroup
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-valkey-rotation-role
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Lambda Permission for Secrets Manager
+  ValkeySecretRotationPermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !GetAtt ValkeySecretRotationLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: secretsmanager.amazonaws.com
+
+  # Secret Rotation Schedule
+  ValkeyAuthSecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Condition: EnableRotation
+    DependsOn: ValkeySecretRotationPermission
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      SecretId: !Ref ValkeyAuthSecret
+      RotationLambdaARN: !GetAtt ValkeySecretRotationLambda.Arn
+      RotationRules:
+        # Rotate based on RotationScheduleDays parameter
+        ScheduleExpression: !Sub rate(${RotationScheduleDays} days)
+      RotateImmediatelyOnUpdate: false
+
+  # CloudWatch Alarms for Rotation Monitoring
+  ValkeyRotationFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-valkey-${Environment}-rotation-failure
+      AlarmDescription: Alert when Valkey auth token rotation fails
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ValkeySecretRotationLambda
+      AlarmActions:
+        - !Ref ValkeyNotificationTopic
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-valkey-rotation-failure-alarm
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Parameter Group for Valkey Configuration
+  ValkeyParameterGroup:
+    Type: AWS::ElastiCache::ParameterGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      CacheParameterGroupFamily: valkey8
+      Description: Parameter group for RoboSystems Valkey ElastiCache
+      Properties:
+        # Memory management for Celery workloads
+        maxmemory-policy: allkeys-lru
+        # Connection settings
+        timeout: 300
+        tcp-keepalive: 300
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceTag}-valkey-params-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ElastiCache Replication Group (for single node or cluster)
+  # IMPORTANT: Encryption settings CANNOT be changed after creation.
+  # To enable encryption on an existing unencrypted cluster:
+  # 1. Take a snapshot of the existing cluster
+  # 2. Delete the stack (data will be preserved in snapshot)
+  # 3. Redeploy with encryption enabled
+  # 4. Restore from snapshot
+  ValkeyReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    DeletionPolicy: !If [IsProduction, Snapshot, Delete]
+    UpdateReplacePolicy: !If [IsProduction, Snapshot, Delete]
+    Properties:
+      ReplicationGroupId: !Sub "robosystems-${Environment}-valkey"
+      ReplicationGroupDescription: !Sub "RoboSystems Valkey ElastiCache - ${Environment}"
+      # Node Configuration
+      CacheNodeType: !Ref NodeType
+      Engine: valkey
+      EngineVersion: 8.0
+      Port: 6379
+      # Cluster Configuration
+      NumCacheClusters: !Ref NumCacheNodes
+      MultiAZEnabled: !If [IsMultiNode, true, false]
+      AutomaticFailoverEnabled: !If [IsMultiNode, true, false]
+      # Network Configuration
+      CacheSubnetGroupName: !Ref ValkeySubnetGroup
+      SecurityGroupIds:
+        - !Ref ValkeySecurityGroup
+      # Parameter and Maintenance
+      CacheParameterGroupName: !Ref ValkeyParameterGroup
+      PreferredMaintenanceWindow: sun:03:00-sun:04:00
+      # Backup Configuration
+      SnapshotRetentionLimit: !Ref SnapshotRetentionDays
+      SnapshotWindow:
+        !If [EnableSnapshots, !Ref SnapshotWindow, !Ref "AWS::NoValue"]
+      # Security
+      AtRestEncryptionEnabled: !If [EnableEncryptionCondition, true, false]
+      TransitEncryptionEnabled: !If [EnableEncryptionCondition, true, false]
+      AuthToken: !If
+        - RequireAuth
+        - !Sub "{{resolve:secretsmanager:${ValkeyAuthSecret}:SecretString:VALKEY_AUTH_TOKEN}}"
+        - !Ref AWS::NoValue
+      # Notifications
+      NotificationTopicArn: !Ref ValkeyNotificationTopic
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceTag}-valkey-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # SNS Topic for ElastiCache Notifications
+  ValkeyNotificationTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TopicName: !Sub "robosystems-valkey-${Environment}-alerts"
+      DisplayName: !Sub "RoboSystems Valkey ${Environment} Alerts"
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-valkey-notifications-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+Outputs:
+  ValkeyEndpoint:
+    Description: Primary endpoint for Valkey ElastiCache
+    Value: !GetAtt ValkeyReplicationGroup.PrimaryEndPoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyEndpoint"
+
+  ValkeyPort:
+    Description: Port for Valkey ElastiCache
+    Value: !GetAtt ValkeyReplicationGroup.PrimaryEndPoint.Port
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyPort"
+
+  ValkeyUrl:
+    Description: Full Redis URL for Valkey ElastiCache (basic URL - applications should build authenticated URLs using Secrets Manager)
+    Value: !If
+      - EnableEncryptionCondition
+      - !Sub "rediss://${ValkeyReplicationGroup.PrimaryEndPoint.Address}:${ValkeyReplicationGroup.PrimaryEndPoint.Port}"
+      - !Sub "redis://${ValkeyReplicationGroup.PrimaryEndPoint.Address}:${ValkeyReplicationGroup.PrimaryEndPoint.Port}"
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyUrl"
+
+  ValkeyUrlWithAuth:
+    Condition: RequireAuth
+    Description: Full Redis URL for Valkey ElastiCache with authentication
+    Value: !Sub
+      - "rediss://default:${AuthToken}@${Address}:${Port}"
+      - AuthToken: !Sub "{{resolve:secretsmanager:${ValkeyAuthSecret}:SecretString:VALKEY_AUTH_TOKEN}}"
+        Address: !GetAtt ValkeyReplicationGroup.PrimaryEndPoint.Address
+        Port: !GetAtt ValkeyReplicationGroup.PrimaryEndPoint.Port
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyUrlWithAuth"
+
+  ValkeyConfigurationEndpoint:
+    Condition: IsMultiNode
+    Description: Configuration endpoint for Valkey cluster (multi-node only)
+    Value: !GetAtt ValkeyReplicationGroup.ConfigurationEndPoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyConfigEndpoint"
+
+  ValkeyClientSecurityGroupId:
+    Description: Security group ID for applications connecting to Valkey
+    Value: !Ref ValkeyClientSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyClientSecurityGroupId"
+
+  ValkeyNotificationTopicArn:
+    Description: SNS topic ARN for Valkey notifications
+    Value: !Ref ValkeyNotificationTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyNotificationTopicArn"
+
+  ValkeyReplicationGroupId:
+    Description: Replication group ID for the Valkey cluster
+    Value: !Ref ValkeyReplicationGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyReplicationGroupId"
+
+  ValkeyEngineVersion:
+    Description: Valkey engine version
+    Value: "8.0"
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyEngineVersion"
+
+  ValkeyParameterGroupFamily:
+    Description: Valkey parameter group family
+    Value: "valkey8"
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyParameterGroupFamily"
+
+  # Security outputs
+  ValkeyAuthSecretArn:
+    Description: ARN of the Valkey auth token secret
+    Value: !Ref ValkeyAuthSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyAuthSecretArn"
+
+  ValkeyAuthSecretName:
+    Description: Name of the Valkey auth token secret for application configuration
+    Value: !Sub "robosystems/${Environment}/valkey"
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyAuthSecretName"
+
+  ValkeyTransitEncryptionEnabled:
+    Description: Whether transit encryption is enabled
+    Value: !If [EnableEncryptionCondition, "true", "false"]
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyTransitEncryptionEnabled"
+
+  ValkeyRotationLambdaArn:
+    Condition: EnableRotation
+    Description: ARN of the Valkey auth token rotation Lambda function
+    Value: !GetAtt ValkeySecretRotationLambda.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyRotationLambdaArn"
+
+  ValkeyRotationScheduleArn:
+    Condition: EnableRotation
+    Description: ARN of the Valkey auth token rotation schedule
+    Value: !Ref ValkeyAuthSecretRotationSchedule
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyRotationScheduleArn"
+
+  ValkeyRotationDaysConfigured:
+    Condition: EnableRotation
+    Description: Number of days between automatic auth token rotations
+    Value: !Ref RotationScheduleDays
+    Export:
+      Name: !Sub "${AWS::StackName}-${Environment}-ValkeyRotationDays"

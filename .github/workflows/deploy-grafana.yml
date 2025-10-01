@@ -1,0 +1,194 @@
+name: Deploy Grafana
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging, or dev)"
+        required: true
+        type: string
+        default: "shared"
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+
+    outputs:
+      grafana_workspace_id:
+        description: "Amazon Managed Grafana workspace ID"
+        value: ${{ jobs.action.outputs.grafana_workspace_id }}
+      grafana_workspace_endpoint:
+        description: "Amazon Managed Grafana workspace endpoint"
+        value: ${{ jobs.action.outputs.grafana_workspace_endpoint }}
+      grafana_service_role_arn:
+        description: "Grafana service role ARN"
+        value: ${{ jobs.action.outputs.grafana_service_role_arn }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 30
+    outputs:
+      grafana_workspace_id: ${{ steps.stack-outputs.outputs.grafana_workspace_id }}
+      grafana_workspace_endpoint: ${{ steps.stack-outputs.outputs.grafana_workspace_endpoint }}
+      grafana_service_role_arn: ${{ steps.stack-outputs.outputs.grafana_service_role_arn }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy Shared Grafana CloudFormation Stack
+        id: deploy-stack
+        run: |
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new shared Grafana stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing shared Grafana stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Set up parameters for shared Grafana stack
+          GRAFANA_PARAMS=""
+
+          echo "Deploying shared Grafana stack for deployment environment: ${{ inputs.environment }}"
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/grafana.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --tags \
+                Key=Environment,Value=shared \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Observability \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions \
+                Key=DeployedFrom,Value=${{ inputs.environment }}
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/grafana.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --tags \
+                Key=Environment,Value=shared \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Observability \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions \
+                Key=DeployedFrom,Value=${{ inputs.environment }} 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Shared Grafana stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating shared Grafana stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Shared Grafana stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "2400"
+          interval: "15"
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "Retrieving shared Grafana stack outputs..."
+
+          # Get Grafana Workspace ID
+          GRAFANA_WORKSPACE_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='GrafanaWorkspaceId'].OutputValue" \
+            --output text)
+
+          if [ -n "$GRAFANA_WORKSPACE_ID" ] && [ "$GRAFANA_WORKSPACE_ID" != "None" ]; then
+            echo "grafana_workspace_id=$GRAFANA_WORKSPACE_ID" >> $GITHUB_OUTPUT
+            echo "Grafana Workspace configured successfully"
+          else
+            echo "Error: Could not retrieve Grafana Workspace ID"
+            exit 1
+          fi
+
+          # Get Grafana Workspace Endpoint
+          GRAFANA_WORKSPACE_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='GrafanaWorkspaceEndpoint'].OutputValue" \
+            --output text)
+
+          if [ -n "$GRAFANA_WORKSPACE_ENDPOINT" ] && [ "$GRAFANA_WORKSPACE_ENDPOINT" != "None" ]; then
+            echo "grafana_workspace_endpoint=$GRAFANA_WORKSPACE_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "Found Grafana Workspace Endpoint: $GRAFANA_WORKSPACE_ENDPOINT"
+          else
+            echo "Error: Could not retrieve Grafana Workspace Endpoint"
+            exit 1
+          fi
+
+          # Get Grafana Service Role ARN
+          GRAFANA_SERVICE_ROLE_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='GrafanaServiceRoleArn'].OutputValue" \
+            --output text)
+
+          if [ -n "$GRAFANA_SERVICE_ROLE_ARN" ] && [ "$GRAFANA_SERVICE_ROLE_ARN" != "None" ]; then
+            echo "grafana_service_role_arn=$GRAFANA_SERVICE_ROLE_ARN" >> $GITHUB_OUTPUT
+            echo "ARN configured successfully"
+          else
+            echo "Error: Could not retrieve Grafana Service Role ARN"
+            exit 1
+          fi
+
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          # Output deployment status for the main workflow
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "Shared Grafana stack creation completed"
+          else
+            echo "Shared Grafana stack update completed"
+          fi

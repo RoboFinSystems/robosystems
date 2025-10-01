@@ -1,0 +1,686 @@
+name: Deploy Production
+
+concurrency:
+  group: robosystems-deploy-prod
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runners_available: ${{ steps.check.outputs.runners_available }}
+      runner_type: ${{ steps.check.outputs.runner_type }}
+      runner_config: ${{ steps.check.outputs.runner_config }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Check runner availability
+        id: check
+        uses: ./.github/actions/runner-availability
+        with:
+          runner_labels: "self-hosted,Linux,X64,AL2023,ci"
+          timeout_minutes: "2"
+          github_token: ${{ secrets.ACTIONS_TOKEN }}
+
+  stack-config:
+    needs: [runner]
+    runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
+    outputs:
+      vpc_stack: ${{ steps.load.outputs.vpc_stack }}
+      s3_stack: ${{ steps.load.outputs.s3_stack }}
+      postgres_iam_stack: ${{ steps.load.outputs.postgres_iam_stack }}
+      valkey_stack: ${{ steps.load.outputs.valkey_stack }}
+      api_stack: ${{ steps.load.outputs.api_stack }}
+      beat_stack: ${{ steps.load.outputs.beat_stack }}
+      kuzu_infra_stack: ${{ steps.load.outputs.kuzu_infra_stack }}
+      kuzu_volumes_stack: ${{ steps.load.outputs.kuzu_volumes_stack }}
+      prometheus_stack: ${{ steps.load.outputs.prometheus_stack }}
+      grafana_stack: ${{ steps.load.outputs.grafana_stack }}
+      bastion_stack: ${{ steps.load.outputs.bastion_stack }}
+      worker_monitor_stack: ${{ steps.load.outputs.worker_monitor_stack }}
+      waf_stack: ${{ steps.load.outputs.waf_stack }}
+      cloudtrail_stack: ${{ steps.load.outputs.cloudtrail_stack }}
+      domain_name_root: ${{ steps.config.outputs.domain_name_root }}
+      jwt_issuer: ${{ steps.config.outputs.jwt_issuer }}
+      jwt_audience: ${{ steps.config.outputs.jwt_audience }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Load Stack Configuration
+        id: load
+        shell: bash
+        run: |
+          chmod +x bin/tools/stack-config.sh
+
+          ENV="production"
+
+          # Load all stack names from config
+          echo "vpc_stack=$(./bin/tools/stack-config.sh $ENV vpc)" >> $GITHUB_OUTPUT
+          echo "s3_stack=$(./bin/tools/stack-config.sh $ENV s3)" >> $GITHUB_OUTPUT
+          echo "postgres_iam_stack=$(./bin/tools/stack-config.sh $ENV postgres_iam)" >> $GITHUB_OUTPUT
+          echo "valkey_stack=$(./bin/tools/stack-config.sh $ENV valkey)" >> $GITHUB_OUTPUT
+          echo "api_stack=$(./bin/tools/stack-config.sh $ENV api)" >> $GITHUB_OUTPUT
+          echo "beat_stack=$(./bin/tools/stack-config.sh $ENV beat)" >> $GITHUB_OUTPUT
+          echo "kuzu_infra_stack=$(./bin/tools/stack-config.sh $ENV kuzu.infra)" >> $GITHUB_OUTPUT
+          echo "kuzu_volumes_stack=$(./bin/tools/stack-config.sh $ENV kuzu.volumes)" >> $GITHUB_OUTPUT
+          echo "prometheus_stack=$(./bin/tools/stack-config.sh $ENV monitoring.prometheus)" >> $GITHUB_OUTPUT
+          echo "grafana_stack=$(./bin/tools/stack-config.sh $ENV monitoring.grafana)" >> $GITHUB_OUTPUT
+          echo "bastion_stack=$(./bin/tools/stack-config.sh $ENV bastion)" >> $GITHUB_OUTPUT
+          echo "worker_monitor_stack=$(./bin/tools/stack-config.sh $ENV monitoring.worker_monitor)" >> $GITHUB_OUTPUT
+          echo "waf_stack=$(./bin/tools/stack-config.sh $ENV waf)" >> $GITHUB_OUTPUT
+          echo "cloudtrail_stack=$(./bin/tools/stack-config.sh $ENV cloudtrail)" >> $GITHUB_OUTPUT
+
+      - name: Set Environment Configuration
+        id: config
+        shell: bash
+        run: |
+          # Domain and JWT configuration for prod
+          echo "domain_name_root=${{ vars.API_DOMAIN_NAME_ROOT || 'robosystems.ai' }}" >> $GITHUB_OUTPUT
+
+          # Strip https:// prefix from JWT issuer and audience URLs
+          JWT_ISSUER="${{ vars.ROBOSYSTEMS_API_URL_PROD || '' }}"
+          JWT_ISSUER="${JWT_ISSUER#https://}"
+          JWT_ISSUER="${JWT_ISSUER#http://}"
+          echo "jwt_issuer=$JWT_ISSUER" >> $GITHUB_OUTPUT
+
+          JWT_AUD1="${{ vars.ROBOSYSTEMS_APP_URL_PROD || '' }}"
+          JWT_AUD1="${JWT_AUD1#https://}"
+          JWT_AUD1="${JWT_AUD1#http://}"
+
+          JWT_AUD2="${{ vars.ROBOLEDGER_APP_URL_PROD || '' }}"
+          JWT_AUD2="${JWT_AUD2#https://}"
+          JWT_AUD2="${JWT_AUD2#http://}"
+
+          JWT_AUD3="${{ vars.ROBOINVESTOR_APP_URL_PROD || '' }}"
+          JWT_AUD3="${JWT_AUD3#https://}"
+          JWT_AUD3="${JWT_AUD3#http://}"
+
+          echo "jwt_audience=$JWT_AUD1,$JWT_AUD2,$JWT_AUD3" >> $GITHUB_OUTPUT
+
+  test:
+    needs: [runner]
+    uses: ./.github/workflows/test.yml
+    with:
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+
+  build:
+    needs: [runner]
+    uses: ./.github/workflows/build.yml
+    with:
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      ecr_repository: ${{ vars.ECR_REPOSITORY || 'robosystems' }}
+      # Docker Hub publishing: only when explicitly enabled AND deploying from a version tag
+      # Set DOCKERHUB_PUBLISHING_ENABLED to 'true' in GitHub variables when ready to publish
+      publish_to_dockerhub: ${{ vars.DOCKERHUB_PUBLISHING_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/v') }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  create-deployment:
+    needs: [runner, test, build, stack-config]
+    runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
+    outputs:
+      deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+    steps:
+      - name: Create GitHub Deployment
+        id: deployment
+        uses: chrnorm/deployment-action@v2
+        with:
+          token: ${{ secrets.ACTIONS_TOKEN }}
+          environment: production
+          description: "Production Deployment Created"
+      - name: Update Deployment Status
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ secrets.ACTIONS_TOKEN }}
+          state: in_progress
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          description: "Production Deployment In Progress"
+
+  deploy-vpc:
+    needs: [runner, create-deployment, stack-config]
+    uses: ./.github/workflows/deploy-vpc.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.vpc_stack }}
+      cloudtrail_stack_name: ${{ needs.stack-config.outputs.cloudtrail_stack }}
+      environment: shared
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      # VPC Configuration
+      max_availability_zones: ${{ vars.MAX_AVAILABILITY_ZONES || '5' }}
+      # VPC Flow Logs Configuration (VPC-level, not environment-specific)
+      vpc_flow_logs_enabled: ${{ vars.VPC_FLOW_LOGS_ENABLED || 'true' }}
+      vpc_flow_logs_retention_days: ${{ vars.VPC_FLOW_LOGS_RETENTION_DAYS || '30' }}
+      vpc_flow_logs_traffic_type: ${{ vars.VPC_FLOW_LOGS_TRAFFIC_TYPE || 'REJECT' }}
+      # CloudTrail Configuration (account-level, not environment-specific)
+      cloudtrail_enabled: ${{ vars.CLOUDTRAIL_ENABLED || 'true' }}
+      cloudtrail_log_retention_days: ${{ vars.CLOUDTRAIL_LOG_RETENTION_DAYS || '90' }}
+      cloudtrail_data_events_enabled: ${{ vars.CLOUDTRAIL_DATA_EVENTS_ENABLED || 'false' }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-s3:
+    needs: [runner, create-deployment, stack-config]
+    uses: ./.github/workflows/deploy-s3.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.s3_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      # Domain Configuration
+      public_domain_name: ${{ vars.PUBLIC_DOMAIN_NAME_PROD || 'public.robosystems.ai' }}
+      domain_name_root: ${{ vars.API_DOMAIN_NAME_ROOT || 'robosystems.ai' }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  package-lambda-functions:
+    needs: [runner, deploy-s3]
+    runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Package and upload Lambda functions
+        run: |
+          echo "📦 Packaging Lambda functions for production..."
+          ./bin/tools/package-scripts.sh ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+          echo "✅ Lambda functions packaged and uploaded successfully"
+
+  deploy-postgres-iam:
+    needs:
+      [
+        runner,
+        create-deployment,
+        stack-config,
+        package-lambda-functions,
+        deploy-vpc,
+      ]
+    uses: ./.github/workflows/deploy-postgres-iam.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.postgres_iam_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      # Database Engine Configuration
+      engine: ${{ vars.DATABASE_ENGINE_PROD || 'postgres' }}
+      # Instance Configuration
+      instance_size: ${{ vars.DATABASE_INSTANCE_SIZE_PROD || 'db.t4g.small' }}
+      allocated_storage: ${{ vars.DATABASE_ALLOCATED_STORAGE_PROD || '20' }}
+      allocated_max_storage: ${{ vars.DATABASE_MAX_ALLOCATED_STORAGE_PROD || '100' }}
+      # High Availability Configuration
+      multi_az_enabled: ${{ vars.DATABASE_MULTI_AZ_ENABLED_PROD || 'false' }}
+      # Secret Rotation Configuration
+      secrets_rotation_days: ${{ vars.DATABASE_SECRETS_ROTATION_DAYS || '90' }}
+      # Lambda Configuration
+      lambda_code_bucket: robosystems-prod-deployment
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  deploy-valkey:
+    needs:
+      [
+        runner,
+        create-deployment,
+        stack-config,
+        package-lambda-functions,
+        deploy-vpc,
+      ]
+    uses: ./.github/workflows/deploy-valkey.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.valkey_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      # Instance Configuration
+      node_type: ${{ vars.VALKEY_NODE_TYPE_PROD || 'cache.m6g.large' }}
+      num_cache_nodes: ${{ vars.VALKEY_NUM_NODES_PROD || '1' }}
+      # Security Configuration
+      encryption_enabled: ${{ vars.VALKEY_ENCRYPTION_ENABLED_PROD || 'true' }}
+      secret_rotation_enabled: ${{ vars.VALKEY_SECRET_ROTATION_ENABLED_PROD || 'true' }}
+      rotation_schedule_days: ${{ vars.VALKEY_ROTATION_SCHEDULE_DAYS_PROD || '90' }}
+      # Backup Configuration
+      snapshot_retention_days: ${{ vars.VALKEY_SNAPSHOT_RETENTION_DAYS_PROD || '7' }}
+      # Lambda Configuration
+      lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_PROD || 'prod' }}-deployment
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  deploy-prometheus:
+    if: vars.OBSERVABILITY_ENABLED_PROD != 'false'
+    needs: [runner, create-deployment, stack-config, deploy-vpc]
+    uses: ./.github/workflows/deploy-prometheus.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.prometheus_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-grafana:
+    if: vars.OBSERVABILITY_ENABLED_PROD != 'false'
+    needs: [runner, create-deployment, stack-config, deploy-vpc]
+    uses: ./.github/workflows/deploy-grafana.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.grafana_stack }}
+      environment: shared
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-bastion:
+    needs:
+      [
+        runner,
+        create-deployment,
+        stack-config,
+        deploy-vpc,
+        deploy-postgres-iam,
+        deploy-valkey,
+      ]
+    uses: ./.github/workflows/deploy-bastion.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.bastion_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
+      # Security Groups
+      valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_EC2_KEY_NAME: ${{ secrets.AWS_EC2_KEY_NAME }}
+      BASTION_ALLOWED_CIDR_BLOCK: ${{ secrets.BASTION_ALLOWED_CIDR_BLOCK }}
+      BASTION_ADDITIONAL_SSH_KEYS: ${{ secrets.BASTION_ADDITIONAL_SSH_KEYS }}
+
+  # Kuzu Infrastructure - Step 1: Deploy DynamoDB, Secrets, Lambda monitoring
+  deploy-kuzu-infra:
+    needs:
+      [
+        runner,
+        create-deployment,
+        stack-config,
+        package-lambda-functions,
+        deploy-vpc,
+        deploy-s3,
+      ]
+    uses: ./.github/workflows/deploy-kuzu-infra.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.kuzu_infra_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      # Alert Configuration
+      rotation_schedule_days: ${{ vars.KUZU_API_KEY_ROTATION_DAYS || '90' }}
+      # Lambda Configuration
+      lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_PROD || 'prod' }}-deployment
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  # Kuzu Infrastructure - Step 2: Deploy EBS volume management
+  deploy-kuzu-volumes:
+    needs: [runner, stack-config, deploy-vpc, deploy-kuzu-infra]
+    uses: ./.github/workflows/deploy-kuzu-volumes.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.kuzu_volumes_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      # Registry Configuration
+      volume_registry_table: ${{ needs.deploy-kuzu-infra.outputs.volume_registry_table }}
+      # Lambda Configuration
+      lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_PROD || 'prod' }}-deployment
+      # Secrets Configuration
+      kuzu_api_secret_arn: ${{ needs.deploy-kuzu-infra.outputs.secret_arn }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  deploy-kuzu:
+    needs:
+      [
+        runner,
+        create-deployment,
+        build,
+        deploy-vpc,
+        deploy-postgres-iam,
+        deploy-valkey,
+        deploy-s3,
+        deploy-kuzu-infra,
+        deploy-kuzu-volumes,
+      ]
+    uses: ./.github/workflows/deploy-kuzu.yml
+    with:
+      # Environment Configuration
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
+      valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      # Container Configuration
+      ecr_image_tag: latest
+      # Infrastructure inputs from kuzu infrastructure jobs
+      secret_arn: ${{ needs.deploy-kuzu-infra.outputs.secret_arn }}
+      volume_registry_table: ${{ needs.deploy-kuzu-infra.outputs.volume_registry_table }}
+      volume_manager_function_arn: ${{ needs.deploy-kuzu-volumes.outputs.volume_manager_function_arn }}
+      volume_detachment_topic_arn: ${{ needs.deploy-kuzu-volumes.outputs.volume_detachment_topic_arn }}
+      # Kuzu Enable/Disable Configuration
+      enterprise_enabled: ${{ vars.ENTERPRISE_ENABLED_PROD }}
+      premium_enabled: ${{ vars.PREMIUM_ENABLED_PROD }}
+      shared_replica_enabled: ${{ vars.SHARED_REPLICA_ENABLED_PROD }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  kuzu-container-refresh:
+    needs: [runner, create-deployment, build, deploy-kuzu]
+    if: ${{ vars.KUZU_UPDATE_CONTAINERS_PROD == 'true' }}
+    uses: ./.github/workflows/kuzu-container-refresh.yml
+    with:
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+      node_types: writer
+      rolling_update: "true"
+      health_check_timeout: "30"
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-api:
+    needs:
+      [
+        runner,
+        create-deployment,
+        stack-config,
+        build,
+        deploy-vpc,
+        deploy-kuzu,
+        deploy-valkey,
+        deploy-postgres-iam,
+        deploy-s3,
+        deploy-grafana,
+        deploy-prometheus,
+      ]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
+    uses: ./.github/workflows/deploy-api.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: ${{ needs.stack-config.outputs.api_stack }}
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      # GHA Runner Configuration
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
+      # Container & Application Configuration
+      ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
+      ecr_image_tag: latest
+      # ECS & Compute Configuration
+      desired_count: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
+      cpu: "512"
+      memory: "1024"
+      fargate_weight: "1"
+      fargate_spot_weight: "99"
+      # Auto-scaling Configuration
+      min_capacity: ${{ vars.API_MIN_CAPACITY_PROD || '1' }}
+      max_capacity: ${{ vars.API_MAX_CAPACITY_PROD || '2' }}
+      cpu_target_value: "70"
+      memory_target_value: "80"
+      # Domain & DNS Configuration
+      domain_name: ${{ vars.API_DOMAIN_NAME_PROD }}
+      domain_name_root: ${{ needs.stack-config.outputs.domain_name_root }}
+      # JWT Configuration
+      jwt_issuer: ${{ needs.stack-config.outputs.jwt_issuer }}
+      jwt_audience: ${{ needs.stack-config.outputs.jwt_audience }}
+      # Cache Configuration
+      valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
+      valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      # Kuzu Configuration
+      kuzu_replica_alb_url: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint || '' }}
+      shared_replica_alb_enabled: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint && 'true' || 'false' }}
+      # Other Configuration
+      prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
+      refresh_ecs_service: ${{ vars.API_ASG_REFRESH_PROD || 'false' }}
+      # WAF Configuration (environment-specific)
+      waf_enabled: ${{ vars.WAF_ENABLED_PROD || 'true' }}
+      waf_stack_name: ${{ needs.stack-config.outputs.waf_stack }}
+      waf_rate_limit_per_ip: ${{ vars.WAF_RATE_LIMIT_PER_IP || '10000' }}
+      waf_enable_geo_blocking: ${{ vars.WAF_GEO_BLOCKING_ENABLED || 'false' }}
+      waf_enable_aws_managed_rules: ${{ vars.WAF_AWS_MANAGED_RULES_ENABLED || 'true' }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      WAF_ALLOWED_IPS: ${{ secrets.WAF_ALLOWED_IPS }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  deploy-workers-matrix:
+    needs:
+      [
+        runner,
+        create-deployment,
+        build,
+        deploy-vpc,
+        deploy-kuzu,
+        deploy-valkey,
+        deploy-postgres-iam,
+        deploy-s3,
+        deploy-grafana,
+        deploy-prometheus,
+      ]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'cancelled') && !contains(needs.*.result, 'failure') }}
+    uses: ./.github/workflows/deploy-workers-matrix.yml
+    with:
+      # Environment Configuration
+      environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
+      subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
+      # Container Configuration
+      ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
+      ecr_image_tag: latest
+      # Cache Configuration
+      valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
+      valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      # Kuzu Configuration
+      kuzu_replica_alb_url: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint || '' }}
+      shared_replica_alb_enabled: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint && 'true' || 'false' }}
+      # Other Configuration
+      refresh_ecs_service: ${{ vars.WORKER_ASG_REFRESH_PROD || 'false' }}
+      # Worker Enable/Disable Configuration
+      worker_critical_enabled: ${{ vars.WORKER_CRITICAL_ENABLED_PROD }}
+      worker_extraction_enabled: ${{ vars.WORKER_EXTRACTION_ENABLED_PROD }}
+      worker_shared_enabled: ${{ vars.WORKER_SHARED_ENABLED_PROD }}
+      worker_ingestion_enabled: ${{ vars.WORKER_INGESTION_ENABLED_PROD }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  deployment-successful:
+    needs:
+      [
+        runner,
+        create-deployment,
+        deploy-vpc,
+        deploy-kuzu,
+        deploy-valkey,
+        deploy-postgres-iam,
+        deploy-s3,
+        deploy-grafana,
+        deploy-prometheus,
+        deploy-bastion,
+        deploy-api,
+        deploy-workers-matrix,
+        kuzu-container-refresh,
+      ]
+    if: |
+      always() &&
+      needs.runner.result == 'success' &&
+      needs.create-deployment.result == 'success' &&
+      needs.deploy-vpc.result == 'success' &&
+      needs.deploy-kuzu.result == 'success' &&
+      needs.deploy-valkey.result == 'success' &&
+      needs.deploy-postgres-iam.result == 'success' &&
+      needs.deploy-s3.result == 'success' &&
+      (needs.deploy-grafana.result == 'success' || needs.deploy-grafana.result == 'skipped') &&
+      (needs.deploy-prometheus.result == 'success' || needs.deploy-prometheus.result == 'skipped') &&
+      needs.deploy-bastion.result == 'success' &&
+      needs.deploy-api.result == 'success' &&
+      needs.deploy-workers-matrix.result == 'success' &&
+      (needs.kuzu-container-refresh.result == 'success' || needs.kuzu-container-refresh.result == 'skipped')
+    runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
+    outputs:
+      deployment_id: ${{ needs.create-deployment.outputs.deployment_id }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Update Deployment Status
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ secrets.ACTIONS_TOKEN }}
+          state: success
+          deployment-id: ${{ needs.create-deployment.outputs.deployment_id }}
+          description: "Production Deployment Succeeded"
+
+  handle-deployment-failure:
+    needs:
+      [
+        runner,
+        create-deployment,
+        deploy-vpc,
+        deploy-kuzu,
+        deploy-valkey,
+        deploy-postgres-iam,
+        deploy-s3,
+        deploy-grafana,
+        deploy-prometheus,
+        deploy-bastion,
+        deploy-api,
+        deploy-workers-matrix,
+      ]
+    if: always() && contains(needs.*.result, 'failure')
+    runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Handle Deployment Failure
+        uses: ./.github/actions/handle-deployment-failure
+        with:
+          deployment-id: ${{ needs.create-deployment.outputs.deployment_id }}
+          environment: production
+          github-token: ${{ secrets.ACTIONS_TOKEN }}

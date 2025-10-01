@@ -1,0 +1,62 @@
+name: GHA Runner Maintenance
+
+on:
+  schedule:
+    - cron: "0 12 * * *" # Daily at 6:00 AM CST (12:00 UTC)
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  cleanup-offline-runners:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: main
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Cleanup offline runners
+        run: |
+          echo "🧹 Starting GitHub Actions runner maintenance..."
+          echo "Repository: ${{ github.repository }}"
+          echo ""
+
+          # Run cleanup for runners offline > 1 hour
+          GITHUB_TOKEN="${{ secrets.ACTIONS_TOKEN }}" \
+          GITHUB_ORG="${{ secrets.RUNNER_GITHUB_ORG }}" \
+          OFFLINE_HOURS_THRESHOLD=1 \
+          ./bin/tools/gha/cleanup-offline-runners.sh
+
+          echo ""
+          echo "✅ Runner maintenance completed"
+
+      - name: Monitor runner availability
+        run: |
+          echo "📊 Checking current runner availability..."
+
+          # Get current runner status
+          RUNNERS_RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.ACTIONS_TOKEN }}" \
+            "https://api.github.com/orgs/${{ secrets.RUNNER_GITHUB_ORG }}/actions/runners")
+
+          if echo "$RUNNERS_RESPONSE" | jq . >/dev/null 2>&1; then
+            ONLINE_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | select(.status == "online") | .name' | wc -l)
+            TOTAL_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r '.runners | length')
+
+            echo "Online runners: $ONLINE_RUNNERS"
+            echo "Total runners: $TOTAL_RUNNERS"
+
+            if [ "$ONLINE_RUNNERS" -lt 1 ]; then
+              echo "⚠️  WARNING: No online runners available!"
+              echo "This may affect CI/CD operations."
+            else
+              echo "✅ Sufficient runners available"
+            fi
+
+            echo ""
+            echo "Runner details:"
+            echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | "\(.name): \(.status)"' | sort
+          else
+            echo "❌ Failed to get runner status from GitHub API"
+            exit 1
+          fi

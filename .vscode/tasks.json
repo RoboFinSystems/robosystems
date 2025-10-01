@@ -1,0 +1,372 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "RoboSystems Bootstrap",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "if ! command -v uv >/dev/null 2>&1; then if command -v brew >/dev/null 2>&1; then brew install uv; else curl -LsSf https://astral.sh/uv/install.sh | sh; fi; fi && uv tool install rust-just"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Init",
+      "type": "shell",
+      "command": "just",
+      "args": ["init"],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Start",
+      "type": "shell",
+      "command": "just",
+      "args": [
+        "start",
+        "${input:profileDocker}",
+        "${input:envFile}",
+        "${input:buildDocker}",
+        "${input:detachedDocker}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Stop",
+      "type": "shell",
+      "command": "just",
+      "args": ["stop", "${input:profileDocker}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Restart",
+      "type": "shell",
+      "command": "just",
+      "args": ["restart", "${input:profileDocker}", "${input:envFile}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Rebuild",
+      "type": "shell",
+      "command": "just",
+      "args": ["rebuild", "${input:profileDocker}", "${input:envFile}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Install Apps",
+      "type": "shell",
+      "command": "just",
+      "args": ["install-apps"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker Logs",
+      "type": "shell",
+      "command": "just",
+      "args": ["logs", "${input:containerName}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Setup Environment",
+      "type": "shell",
+      "command": "just",
+      "args": ["venv"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Install Dependencies",
+      "type": "shell",
+      "command": "just",
+      "args": ["install"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Update Dependencies",
+      "type": "shell",
+      "command": "just",
+      "args": ["update"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Test",
+      "type": "shell",
+      "command": "just",
+      "args": ["test"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Test All",
+      "type": "shell",
+      "command": "just",
+      "args": ["test-all"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Test Full",
+      "type": "shell",
+      "command": "just",
+      "args": ["test-full"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Test Integration",
+      "type": "shell",
+      "command": "just",
+      "args": ["test-integration"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Test Coverage",
+      "type": "shell",
+      "command": "just",
+      "args": ["test-cov"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint",
+      "type": "shell",
+      "command": "just",
+      "args": ["lint"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Format",
+      "type": "shell",
+      "command": "just",
+      "args": ["format"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint Fix",
+      "type": "shell",
+      "command": "just",
+      "args": ["lint-fix"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Type Check",
+      "type": "shell",
+      "command": "just",
+      "args": ["typecheck"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Create Feature",
+      "type": "shell",
+      "command": "just",
+      "args": [
+        "create-feature",
+        "${input:branchType}",
+        "${input:branchName}",
+        "${input:baseBranch}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Create PR",
+      "type": "shell",
+      "command": "just",
+      "args": ["create-pr", "${input:targetBranch}", "${input:claudeReview}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Create Release",
+      "type": "shell",
+      "command": "just",
+      "args": [
+        "create-release",
+        "${input:versionType}",
+        "${input:deployTarget}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Deploy",
+      "type": "shell",
+      "command": "just",
+      "args": ["deploy", "${input:environment}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Bastion Tunnel",
+      "type": "shell",
+      "command": "just",
+      "args": [
+        "bastion-tunnel",
+        "${input:environment}",
+        "${input:tunnelService}",
+        "${input:sshKey}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Migrate Up",
+      "type": "shell",
+      "command": "just",
+      "args": ["migrate-up", "${input:envFile}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Migrate Down",
+      "type": "shell",
+      "command": "just",
+      "args": ["migrate-down", "${input:envFile}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Migrate Remote",
+      "type": "shell",
+      "command": "just",
+      "args": ["migrate-remote", "${input:environment}", "${input:sshKey}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Generate Secure Key",
+      "type": "shell",
+      "command": "just",
+      "args": ["generate-key"],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "buildDocker",
+      "type": "pickString",
+      "description": "Choose Docker build type:",
+      "default": "",
+      "options": ["", "--build"]
+    },
+    {
+      "id": "detachedDocker",
+      "type": "pickString",
+      "description": "Choose Docker run type:",
+      "default": "--detach",
+      "options": ["", "--detach"]
+    },
+    {
+      "id": "envFile",
+      "type": "promptString",
+      "description": "Choose .env file:",
+      "default": ".env"
+    },
+    {
+      "id": "environment",
+      "type": "pickString",
+      "description": "Choose environment:",
+      "default": "prod",
+      "options": ["prod", "staging", "dev", "shared", "local"]
+    },
+    {
+      "id": "profileDocker",
+      "type": "pickString",
+      "description": "Choose Docker profile (use 'robosystems' for full stack):",
+      "default": "robosystems",
+      "options": [
+        "robosystems",
+        "all",
+        "dev",
+        "apps",
+        "pg",
+        "valkey",
+        "kuzu",
+        "localstack",
+        "api",
+        "worker",
+        "beat",
+        "observability",
+        "roboledger-app",
+        "roboinvestor-app",
+        "robosystems-app"
+      ]
+    },
+    {
+      "id": "containerName",
+      "type": "pickString",
+      "description": "Choose container:",
+      "default": "worker",
+      "options": [
+        "api",
+        "worker",
+        "beat",
+        "kuzu",
+        "pg-iam",
+        "valkey",
+        "grafana",
+        "prometheus",
+        "otel-collector",
+        "localstack",
+        "roboledger-app",
+        "roboinvestor-app",
+        "robosystems-app"
+      ]
+    },
+    {
+      "id": "sshKey",
+      "type": "promptString",
+      "description": "Choose SSH Key:",
+      "default": ""
+    },
+    {
+      "id": "tunnelService",
+      "type": "pickString",
+      "description": "Choose service to tunnel:",
+      "default": "all",
+      "options": [
+        "all",
+        "postgres",
+        "kuzu",
+        "kuzu-direct",
+        "valkey",
+        "migrate",
+        "runner",
+        "runner-direct"
+      ]
+    },
+    {
+      "id": "versionType",
+      "type": "pickString",
+      "description": "Choose version type:",
+      "default": "patch",
+      "options": ["major", "minor", "patch"]
+    },
+    {
+      "id": "branchType",
+      "type": "pickString",
+      "description": "Choose branch type:",
+      "default": "feature",
+      "options": ["feature", "bugfix", "hotfix", "chore", "refactor"]
+    },
+    {
+      "id": "branchName",
+      "type": "promptString",
+      "description": "Enter branch name (will be prefixed with type/):",
+      "default": ""
+    },
+    {
+      "id": "baseBranch",
+      "type": "promptString",
+      "description": "Enter base branch (default: main):",
+      "default": "main"
+    },
+    {
+      "id": "deployTarget",
+      "type": "pickString",
+      "description": "Choose initial deployment target:",
+      "default": "staging",
+      "options": ["staging", "prod", "all", "none"]
+    },
+    {
+      "id": "targetBranch",
+      "type": "promptString",
+      "description": "Choose target branch:",
+      "default": "main"
+    },
+    {
+      "id": "claudeReview",
+      "type": "pickString",
+      "description": "Request Claude review automatically:",
+      "default": "true",
+      "options": ["true", "false"]
+    }
+  ]
+}

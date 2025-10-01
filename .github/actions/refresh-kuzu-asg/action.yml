@@ -1,0 +1,419 @@
+name: Refresh Kuzu ASG Refresh
+description: |
+  Performs a controlled instance refresh for Kuzu writer EC2 instances using Auto Scaling Groups.
+  Handles volume attachment and database allocation carefully to ensure data persistence.
+
+inputs:
+  environment:
+    description: "Environment (staging, prod)"
+    required: true
+  node-type:
+    description: "Node type to refresh ('writer' or 'shared')"
+    required: true
+    default: "writer"
+  aws-region:
+    description: "AWS region"
+    required: false
+    default: "us-east-1"
+  aws-account-id:
+    description: "AWS account ID"
+    required: true
+  max-instances-per-batch:
+    description: "Maximum instances to refresh in each batch"
+    required: false
+    default: "1"
+  pause-between-batches:
+    description: "Seconds to pause between batches"
+    required: false
+    default: "300"
+  health-check-timeout:
+    description: "Seconds to wait for health check after instance comes up"
+    required: false
+    default: "300"
+  instance-wait-timeout:
+    description: "Maximum seconds to wait for replacement instance to launch"
+    required: false
+    default: "600"
+  dry-run:
+    description: "If true, only show what would be refreshed without making changes"
+    required: false
+    default: "false"
+  force-refresh:
+    description: "If true, refresh even if instances have allocated databases (writer only)"
+    required: false
+    default: "false"
+
+outputs:
+  instances-refreshed:
+    description: "Number of instances refreshed"
+    value: ${{ steps.refresh.outputs.count }}
+  refresh-status:
+    description: "Status of the refresh operation"
+    value: ${{ steps.refresh.outputs.status }}
+  instance-count:
+    description: "Total number of instances found"
+    value: ${{ steps.refresh.outputs.instance_count }}
+  protected-count:
+    description: "Number of protected instances"
+    value: ${{ steps.refresh.outputs.protected_count }}
+  allocated-count:
+    description: "Number of instances with allocated databases"
+    value: ${{ steps.refresh.outputs.allocated_count }}
+  can-proceed:
+    description: "Whether the refresh can proceed"
+    value: ${{ steps.refresh.outputs.can_proceed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate Inputs
+      shell: bash
+      run: |
+        if [[ "${{ inputs.node-type }}" != "writer" && "${{ inputs.node-type }}" != "shared" ]]; then
+          echo "❌ Invalid node-type: ${{ inputs.node-type }}"
+          echo "This action supports writer and shared instances"
+          exit 1
+        fi
+
+        if [[ ! "${{ inputs.environment }}" =~ ^(staging|prod)$ ]]; then
+          echo "❌ Invalid environment: ${{ inputs.environment }}"
+          echo "Must be one of: staging, prod"
+          exit 1
+        fi
+
+    - name: Validate and Refresh Instances
+      id: refresh
+      shell: bash
+      run: |
+        echo "🔄 Starting Kuzu instance refresh..."
+        echo "Environment: ${{ inputs.environment }}"
+        echo "Node Type: ${{ inputs.node-type }}"
+        echo "Force Refresh: ${{ inputs.force-refresh }}"
+        echo "Dry Run: ${{ inputs.dry-run }}"
+        echo ""
+
+        # Get the appropriate stack name based on node type
+        if [ "${{ inputs.node-type }}" == "shared" ]; then
+          if [ "${{ inputs.environment }}" == "staging" ]; then
+            STACK_PREFIX="RoboSystemsKuzuWritersSharedMasterStaging"
+          else
+            STACK_PREFIX="RoboSystemsKuzuWritersSharedMasterProd"
+          fi
+          TAG_NAME="WriterTier"
+          TAG_VALUE="shared"
+        else
+          if [ "${{ inputs.environment }}" == "staging" ]; then
+            STACK_PREFIX="RoboSystemsKuzuWritersStandardStaging"
+          else
+            STACK_PREFIX="RoboSystemsKuzuWritersStandardProd"
+          fi
+          TAG_NAME="KuzuRole"
+          TAG_VALUE="writer"
+        fi
+
+        # Get ASG name from CloudFormation stack
+        ASG_NAME=$(aws cloudformation describe-stacks \
+          --stack-name "${STACK_PREFIX}" \
+          --query "Stacks[0].Outputs[?OutputKey=='WriterAutoScalingGroupName'].OutputValue" \
+          --output text \
+          --region "${{ inputs.aws-region }}" 2>/dev/null || echo "")
+
+        if [ -z "$ASG_NAME" ]; then
+          echo "❌ Could not find ASG for stack: ${STACK_PREFIX}"
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "count=0" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+        echo "Found ASG: ${ASG_NAME}"
+
+        # Validation phase - check instances and their status
+        echo "📊 Validating instance refresh request..."
+
+        # Get instances by tag for validation
+        INSTANCES=$(aws ec2 describe-instances \
+          --filters \
+            "Name=tag:Environment,Values=${{ inputs.environment }}" \
+            "Name=tag:${TAG_NAME},Values=${TAG_VALUE}" \
+            "Name=instance-state-name,Values=running" \
+          --query "Reservations[].Instances[].InstanceId" \
+          --output text \
+          --region "${{ inputs.aws-region }}")
+
+        if [ -z "$INSTANCES" ]; then
+          echo "⚠️  No running instances found"
+          echo "can_proceed=false" >> $GITHUB_OUTPUT
+          echo "status=no_instances" >> $GITHUB_OUTPUT
+          echo "count=0" >> $GITHUB_OUTPUT
+          echo "instance_count=0" >> $GITHUB_OUTPUT
+          echo "protected_count=0" >> $GITHUB_OUTPUT
+          echo "allocated_count=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        INSTANCE_COUNT=$(echo "$INSTANCES" | wc -w)
+        echo "Found $INSTANCE_COUNT instances"
+
+        # For writer instances, check protection and allocation
+        PROTECTED_COUNT=0
+        ALLOCATED_COUNT=0
+
+        if [ "${{ inputs.node-type }}" == "writer" ]; then
+          for INSTANCE_ID in $INSTANCES; do
+            # Check protection status
+            PROTECTION=$(aws autoscaling describe-auto-scaling-instances \
+              --instance-ids "$INSTANCE_ID" \
+              --query "AutoScalingInstances[0].ProtectedFromScaleIn" \
+              --output text \
+              --region "${{ inputs.aws-region }}" 2>/dev/null || echo "false")
+
+            if [ "$PROTECTION" == "true" ]; then
+              PROTECTED_COUNT=$((PROTECTED_COUNT + 1))
+            fi
+
+            # Check database allocation
+            DB_ITEM=$(aws dynamodb get-item \
+              --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+              --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
+              --output json \
+              --region "${{ inputs.aws-region }}" 2>/dev/null || echo '{}')
+
+            # Safely extract database count with null check
+            DB_COUNT="0"
+            if [ -n "$DB_ITEM" ] && [ "$DB_ITEM" != "{}" ]; then
+              DB_COUNT=$(echo "$DB_ITEM" | jq -r '.Item.database_count.N // "0"')
+            fi
+
+            if [ "$DB_COUNT" != "0" ]; then
+              ALLOCATED_COUNT=$((ALLOCATED_COUNT + 1))
+              echo "  - $INSTANCE_ID: $DB_COUNT databases allocated"
+            fi
+          done
+
+          echo ""
+          echo "📊 Instance Summary:"
+          echo "  Total instances: $INSTANCE_COUNT"
+          echo "  Protected instances: $PROTECTED_COUNT"
+          echo "  Instances with databases: $ALLOCATED_COUNT"
+
+          if [ $ALLOCATED_COUNT -gt 0 ] && [ "${{ inputs.force-refresh }}" != "true" ]; then
+            echo ""
+            echo "⚠️  WARNING: $ALLOCATED_COUNT instances have allocated databases"
+            echo "To proceed, enable 'force_refresh' option"
+            echo "can_proceed=false" >> $GITHUB_OUTPUT
+            echo "status=validation_failed" >> $GITHUB_OUTPUT
+            echo "count=0" >> $GITHUB_OUTPUT
+            echo "instance_count=$INSTANCE_COUNT" >> $GITHUB_OUTPUT
+            echo "protected_count=$PROTECTED_COUNT" >> $GITHUB_OUTPUT
+            echo "allocated_count=$ALLOCATED_COUNT" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+        fi
+
+        # Output validation results
+        echo "instance_count=$INSTANCE_COUNT" >> $GITHUB_OUTPUT
+        echo "protected_count=$PROTECTED_COUNT" >> $GITHUB_OUTPUT
+        echo "allocated_count=$ALLOCATED_COUNT" >> $GITHUB_OUTPUT
+        echo "can_proceed=true" >> $GITHUB_OUTPUT
+
+        # Get current instances
+        INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+          --auto-scaling-group-names "${ASG_NAME}" \
+          --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+          --output text \
+          --region "${{ inputs.aws-region }}")
+
+        if [ -z "$INSTANCES" ]; then
+          echo "ℹ️ No instances found in service"
+          echo "status=no_instances" >> $GITHUB_OUTPUT
+          echo "count=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        INSTANCE_COUNT=$(echo "$INSTANCES" | wc -w)
+        echo "Found ${INSTANCE_COUNT} instances to refresh"
+
+        if [ "${{ inputs.dry-run }}" == "true" ]; then
+          echo "🔍 DRY RUN - Would refresh the following instances:"
+          for INSTANCE_ID in $INSTANCES; do
+            echo "  - ${INSTANCE_ID}"
+          done
+          echo "status=dry_run" >> $GITHUB_OUTPUT
+          echo "count=${INSTANCE_COUNT}" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Handle writer instances one at a time with protection
+        echo "⚠️  Writer instance refresh requires careful handling due to volume attachment"
+        REFRESHED=0
+
+        for INSTANCE_ID in $INSTANCES; do
+            echo ""
+            echo "📦 Refreshing instance $((REFRESHED + 1))/${INSTANCE_COUNT}: ${INSTANCE_ID}"
+
+            # Check instance status in DynamoDB
+            INSTANCE_STATUS=$(aws dynamodb get-item \
+              --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+              --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
+              --query "Item.database_count.N" \
+              --output text \
+              --region "${{ inputs.aws-region }}" 2>/dev/null || echo "0")
+
+            if [ "$INSTANCE_STATUS" != "0" ] && [ "$INSTANCE_STATUS" != "None" ]; then
+              echo "⚠️  Instance has ${INSTANCE_STATUS} allocated databases"
+
+              if [ "${{ inputs.force-refresh }}" != "true" ]; then
+                echo "❌ Skipping instance with allocated databases. Use force-refresh=true to override."
+                continue
+              else
+                echo "⚠️  Force refresh enabled - proceeding with refresh"
+              fi
+            fi
+
+            # Get instance protection status
+            PROTECTION_STATUS=$(aws autoscaling describe-auto-scaling-instances \
+              --instance-ids "${INSTANCE_ID}" \
+              --query "AutoScalingInstances[0].ProtectedFromScaleIn" \
+              --output text \
+              --region "${{ inputs.aws-region }}" 2>/dev/null || echo "false")
+
+            if [ "$PROTECTION_STATUS" == "true" ]; then
+              echo "🔒 Instance is protected from scale-in"
+
+              if [ "${{ inputs.force-refresh }}" != "true" ]; then
+                echo "❌ Skipping protected instance. Use force-refresh=true to override."
+                continue
+              else
+                echo "🔓 Removing instance protection for refresh"
+                aws autoscaling set-instance-protection \
+                  --instance-ids "${INSTANCE_ID}" \
+                  --auto-scaling-group-name "${ASG_NAME}" \
+                  --no-protected-from-scale-in \
+                  --region "${{ inputs.aws-region }}"
+              fi
+            fi
+
+            # Terminate the instance
+            echo "🔪 Terminating instance ${INSTANCE_ID}..."
+            aws ec2 terminate-instances \
+              --instance-ids "${INSTANCE_ID}" \
+              --region "${{ inputs.aws-region }}"
+
+            # Wait for ASG to launch replacement
+            echo "⏳ Waiting for replacement instance to launch..."
+            WAIT_TIME=0
+            MAX_WAIT=${{ inputs.instance-wait-timeout }}
+
+            while [ $WAIT_TIME -lt $MAX_WAIT ]; do
+              NEW_INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+                --auto-scaling-group-names "${ASG_NAME}" \
+                --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+                --output text \
+                --region "${{ inputs.aws-region }}")
+
+              NEW_COUNT=$(echo "$NEW_INSTANCES" | wc -w)
+
+              if [ "$NEW_COUNT" -ge "$INSTANCE_COUNT" ]; then
+                echo "✅ Replacement instance launched"
+                break
+              fi
+
+              echo "⏳ Waiting for replacement... ($WAIT_TIME/$MAX_WAIT seconds)"
+              sleep 30
+              WAIT_TIME=$((WAIT_TIME + 30))
+            done
+
+            if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+              echo "❌ Timeout waiting for replacement instance"
+              echo "status=failed" >> $GITHUB_OUTPUT
+              echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+
+            # Health check the new instance
+            echo "🏥 Performing health check on new instance..."
+            sleep "${{ inputs.health-check-timeout }}"
+
+            # Find the new instance
+            NEW_INSTANCE=""
+            for NEW_ID in $NEW_INSTANCES; do
+              if [[ ! " $INSTANCES " =~ " $NEW_ID " ]]; then
+                NEW_INSTANCE=$NEW_ID
+                break
+              fi
+            done
+
+            if [ -n "$NEW_INSTANCE" ]; then
+              echo "🆕 New instance: ${NEW_INSTANCE}"
+
+              # Wait for instance to register in DynamoDB
+              echo "⏳ Waiting for instance to register in DynamoDB..."
+              REGISTER_WAIT=0
+              while [ $REGISTER_WAIT -lt 120 ]; do
+                REGISTRY_STATUS=$(aws dynamodb get-item \
+                  --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+                  --key "{\"instance_id\":{\"S\":\"${NEW_INSTANCE}\"}}" \
+                  --query "Item.status.S" \
+                  --output text \
+                  --region "${{ inputs.aws-region }}" 2>/dev/null || echo "not_found")
+
+                if [ "$REGISTRY_STATUS" != "not_found" ] && [ "$REGISTRY_STATUS" != "None" ]; then
+                  echo "✅ Instance registered with status: ${REGISTRY_STATUS}"
+                  break
+                fi
+
+                sleep 10
+                REGISTER_WAIT=$((REGISTER_WAIT + 10))
+              done
+
+              # Verify health
+              echo "🏥 Performing health check..."
+              HEALTH_CHECK=$(aws ssm send-command \
+                --instance-ids "${NEW_INSTANCE}" \
+                --document-name "AWS-RunShellScript" \
+                --parameters 'commands=["curl -f -s http://localhost:8001/status || echo UNHEALTHY"]' \
+                --query "Command.CommandId" \
+                --output text \
+                --region "${{ inputs.aws-region }}")
+
+              sleep 10
+
+              HEALTH_STATUS=$(aws ssm get-command-invocation \
+                --command-id "${HEALTH_CHECK}" \
+                --instance-id "${NEW_INSTANCE}" \
+                --query "StandardOutputContent" \
+                --output text \
+                --region "${{ inputs.aws-region }}" 2>/dev/null || echo "UNHEALTHY")
+
+              if [[ "$HEALTH_STATUS" == *"UNHEALTHY"* ]]; then
+                echo "❌ New instance failed health check"
+                echo "status=failed" >> $GITHUB_OUTPUT
+                echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
+                exit 1
+              fi
+
+              echo "✅ New instance is healthy"
+
+              # Update instance status to healthy
+              aws dynamodb update-item \
+                --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+                --key "{\"instance_id\":{\"S\":\"${NEW_INSTANCE}\"}}" \
+                --update-expression "SET #status = :status" \
+                --expression-attribute-names '{"#status": "status"}' \
+                --expression-attribute-values '{":status": {"S": "healthy"}}' \
+                --region "${{ inputs.aws-region }}" || true
+            fi
+
+            REFRESHED=$((REFRESHED + 1))
+
+            # Pause between instances
+            if [ $REFRESHED -lt $INSTANCE_COUNT ]; then
+              echo "⏸️  Pausing ${{ inputs.pause-between-batches }} seconds before next instance..."
+              sleep "${{ inputs.pause-between-batches }}"
+            fi
+          done
+
+          echo ""
+          echo "✅ Successfully refreshed ${REFRESHED} instances"
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "count=${REFRESHED}" >> $GITHUB_OUTPUT

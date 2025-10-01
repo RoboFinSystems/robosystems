@@ -1,0 +1,67 @@
+apiVersion: 1
+
+# CloudWatch datasource configuration for AWS Managed Grafana
+# This configuration uses IAM roles for authentication and includes
+# common AWS service namespaces for RoboSystems infrastructure
+
+datasources:
+  - name: CloudWatch-Production
+    type: cloudwatch
+    access: proxy
+    uid: cloudwatch-prod
+    isDefault: false
+    editable: true
+    jsonData:
+      authType: default
+      defaultRegion: us-east-1
+      # Custom metrics namespaces for RoboSystems services
+      customMetricsNamespaces: >-
+        AWS/ECS,AWS/ApplicationELB,AWS/RDS,AWS/ElastiCache,AWS/EC2,
+        AWS/S3,AWS/Lambda,AWS/ApiGateway,AWS/CloudFront,AWS/SecretsManager,
+        CWAgent,AWS/Prometheus,AWS/Grafana
+      # Log groups for application logs
+      logGroups: >-
+        /aws/ecs/robosystems-api,/aws/ecs/robosystems-worker,
+        /aws/ecs/robosystems-beat,/aws/rds/instance,
+        /aws/lambda
+      # Enable X-Ray tracing integration
+      tracingConfig:
+        datasourceUid: "xray"
+    secureJsonData: {}
+    version: 1
+
+  - name: CloudWatch-Staging  
+    type: cloudwatch
+    access: proxy
+    uid: cloudwatch-staging
+    isDefault: false
+    editable: true
+    jsonData:
+      authType: default
+      defaultRegion: us-east-1
+      customMetricsNamespaces: >-
+        AWS/ECS,AWS/ApplicationELB,AWS/RDS,AWS/ElastiCache,AWS/EC2,
+        CWAgent
+      logGroups: >-
+        /aws/ecs/robosystems-api-staging,/aws/ecs/robosystems-worker-staging,
+        /aws/ecs/robosystems-beat-staging
+    secureJsonData: {}
+    version: 1
+
+  - name: CloudWatch-Logs
+    type: cloudwatch  
+    access: proxy
+    uid: cloudwatch-logs
+    isDefault: false
+    editable: true
+    jsonData:
+      authType: default
+      defaultRegion: us-east-1
+      # Optimized for log analysis
+      customMetricsNamespaces: ""
+      logGroups: >-
+        /aws/ecs/robosystems-api,/aws/ecs/robosystems-worker,
+        /aws/ecs/robosystems-beat,/aws/rds/instance,
+        /aws/lambda,/aws/apigateway,/aws/cloudfront
+    secureJsonData: {}
+    version: 1

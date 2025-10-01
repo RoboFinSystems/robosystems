@@ -1,0 +1,295 @@
+services:
+  # Robosystems API
+  api:
+    container_name: api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /app/bin/entrypoint.sh
+    environment:
+      - DOCKER_PROFILE=api
+      - ENVIRONMENT=dev
+      - OTEL_FORCE_ENABLE=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/kuzu-dbs:/app/data/kuzu-dbs
+      - ./data/arelle-cache:/app/robosystems/arelle/cache # Writable Arelle cache directory
+      - ./robosystems:/app/robosystems # Mount code for hot reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://api:8000/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: always
+    profiles: ["api", "robosystems", "all"]
+
+  # Robosystems Worker
+  worker:
+    container_name: worker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /app/bin/entrypoint.sh
+    environment:
+      - DOCKER_PROFILE=worker
+      - ENVIRONMENT=dev
+      - WORKER_QUEUE=default,critical,shared-extraction,shared-processing,shared-ingestion
+    env_file:
+      - .env
+    volumes:
+      - ./data/input:/data/input
+      - ./data/output:/data/output
+      - ./data/kuzu-dbs:/app/data/kuzu-dbs
+      - ./data/arelle-cache:/app/robosystems/arelle/cache # Writable Arelle cache directory
+      - ./robosystems:/app/robosystems # Mount code for hot reload (rw for EDGAR init)
+    restart: always
+    profiles: ["worker", "robosystems", "all"]
+
+  # Robosystems Beat Worker
+  beat:
+    container_name: beat
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /app/bin/entrypoint.sh
+    environment:
+      - DOCKER_PROFILE=beat
+      - ENVIRONMENT=dev
+      - RUN_MIGRATIONS=true
+    env_file:
+      - .env
+    restart: always
+    profiles: ["beat", "robosystems", "all"]
+
+  # Kuzu
+  kuzu:
+    container_name: kuzu
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: /app/bin/entrypoint.sh
+    environment:
+      - DOCKER_PROFILE=kuzu-writer
+      - ENVIRONMENT=dev
+      - KUZU_PORT=8001
+      - KUZU_DATABASE_PATH=/app/data/kuzu-dbs
+      - KUZU_NODE_TYPE=writer
+      - CLUSTER_TIER=standard
+      - KUZU_DATABASES_PER_INSTANCE=${KUZU_DATABASES_PER_INSTANCE:-50}
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data/kuzu-dbs:/app/data/kuzu-dbs
+      - ./robosystems:/app/robosystems # Mount code for hot reload (rw for EDGAR init)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: always
+    profiles: ["kuzu", "dev", "robosystems", "all"]
+
+  # Robosystems App Frontend
+  robosystems-app:
+    container_name: robosystems-app
+    build:
+      context: ../robosystems-app
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - ENVIRONMENT=dev
+      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
+      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
+      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
+      - NEXT_PUBLIC_MAINTENANCE_MODE=true
+    ports:
+      - 3000:3000
+    volumes:
+      - ../robosystems-app/src:/app/src:ro # Mount source code for hot reload
+      - ../robosystems-app/public:/app/public:ro # Mount public assets
+      - ../robosystems-app/package.json:/app/package.json:ro # Mount package.json
+    restart: always
+    profiles: ["robosystems-app", "apps", "all"]
+
+  # RoboLedger App Frontend
+  roboledger-app:
+    container_name: roboledger-app
+    build:
+      context: ../roboledger-app
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - ENVIRONMENT=dev
+      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
+      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
+      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
+      - NEXT_PUBLIC_MAINTENANCE_MODE=true
+    ports:
+      - 3001:3000
+    volumes:
+      - ../roboledger-app/src:/app/src:ro # Mount source code for hot reload
+      - ../roboledger-app/public:/app/public:ro # Mount public assets
+      - ../roboledger-app/package.json:/app/package.json:ro # Mount package.json
+    restart: always
+    profiles: ["roboledger-app", "apps", "all"]
+
+  # RoboInvestor App Frontend
+  roboinvestor-app:
+    container_name: roboinvestor-app
+    build:
+      context: ../roboinvestor-app
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - ENVIRONMENT=dev
+      - NEXT_PUBLIC_ROBOSYSTEMS_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
+      - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
+      - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
+      - NEXT_PUBLIC_MAINTENANCE_MODE=true
+    ports:
+      - 3002:3000
+    volumes:
+      - ../roboinvestor-app/src:/app/src:ro # Mount source code for hot reload
+      - ../roboinvestor-app/public:/app/public:ro # Mount public assets
+      - ../roboinvestor-app/package.json:/app/package.json:ro # Mount package.json
+    restart: always
+    profiles: ["roboinvestor-app", "apps", "all"]
+
+  # Postgres - Database for RoboSystems (IAM)
+  pg-iam:
+    container_name: pg-iam
+    image: postgres:14
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=robosystems
+    ports:
+      - 5432:5432
+    volumes:
+      - ./data/postgres/data:/var/lib/postgresql/data
+      - ./bin/setup/postgres-init.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+    restart: always
+    profiles: ["pg", "dev", "robosystems", "all"]
+
+  # Valkey - Cache for RoboSystems
+  valkey:
+    container_name: valkey
+    image: valkey/valkey:8.0-alpine
+    ports:
+      - 6379:6379
+    volumes:
+      - ./data/valkey:/data
+    command: valkey-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${VALKEY_AUTH_TOKEN:-valkey}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "valkey-cli",
+          "-a",
+          "${VALKEY_AUTH_TOKEN:-valkey}",
+          "ping",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: always
+    profiles: ["valkey", "dev", "robosystems", "all"]
+
+  # LocalStack - AWS services for RoboSystems
+  localstack:
+    container_name: localstack
+    image: localstack/localstack:3.0
+    ports:
+      - "4566:4566" # LocalStack edge port
+    environment:
+      # LocalStack configuration
+      - SERVICES=s3,secretsmanager,iam,dynamodb
+      - DEBUG=1
+      - DATA_DIR=/var/lib/localstack
+      - PERSISTENCE=1
+
+      # S3 configuration
+      - S3_SKIP_SIGNATURE_VALIDATION=1
+      - S3_SKIP_KMS_KEY_VALIDATION=1
+
+      # AWS credentials (dummy values for LocalStack)
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+
+    volumes:
+      - "./data/localstack:/var/lib/localstack"
+      - "./bin/setup/localstack-init.sh:/etc/localstack/init/ready.d/init.sh"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    profiles: ["localstack", "dev", "robosystems", "all"]
+
+  # OpenTelemetry Collector - Metrics and Tracing for RoboSystems
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.106.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./robosystems/middleware/otel/config/otel-collector-config.yaml:/etc/otel/config.yaml
+    ports:
+      - "4318:4318" # OTLP HTTP receiver
+      - "8889:8889" # Prometheus exporter
+    restart: always
+    profiles: ["observability"]
+
+  # Prometheus - Metrics for RoboSystems
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: prometheus
+    volumes:
+      - ./robosystems/middleware/otel/config/prometheus.yaml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: always
+    profiles: ["observability"]
+
+  # Grafana - Dashboard for RoboSystems
+  grafana:
+    image: grafana/grafana:11.2.1
+    container_name: grafana
+    ports:
+      - "4000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./robosystems/middleware/otel/config/datasources:/etc/grafana/provisioning/datasources
+      - ./robosystems/middleware/otel/config/dashboards:/etc/grafana/provisioning/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=password
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_INSTALL_PLUGINS=
+    restart: always
+    profiles: ["observability"]
+
+volumes:
+  prometheus_data:
+  grafana_data:
