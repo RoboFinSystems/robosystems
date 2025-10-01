@@ -1,0 +1,910 @@
+Description: RoboSystems VPC Service - Shared VPC with NAT Gateways and Route Tables
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name for shared VPC
+    Default: shared
+    AllowedValues:
+      - shared
+      - prod
+      - staging
+    ConstraintDescription: VPC is typically shared across environments
+
+  # Multi-AZ Configuration
+  MaxAvailabilityZones:
+    Type: Number
+    Description: Maximum number of AZs to use (2-6). Ensure your target region has at least this many AZs available.
+    Default: 5
+    MinValue: 2
+    MaxValue: 6
+    ConstraintDescription: Must be between 2 and 6. Verify your AWS region has sufficient AZs before deployment.
+
+  # Infrastructure & Networking Configuration
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for VPC
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|[1-2][0-9]|3[0-2]))$
+    ConstraintDescription: Must be a valid CIDR block
+
+  # Security & Access Configuration
+  DeployVpcEndpoints:
+    Type: String
+    Default: minimal
+    AllowedValues:
+      - minimal
+      - full
+      - none
+    Description:
+      "Endpoint deployment strategy: 'minimal' deploys only in one AZ,
+      'full' deploys in all AZs, 'none' disables VPC endpoints"
+
+  # VPC Flow Logs Configuration
+  EnableVPCFlowLogs:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable VPC Flow Logs for network monitoring
+
+  FlowLogsRetentionDays:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 365
+    Description: Number of days to retain VPC Flow Logs
+
+  FlowLogsTrafficType:
+    Type: String
+    Default: REJECT
+    AllowedValues:
+      - ALL
+      - ACCEPT
+      - REJECT
+    Description: Type of traffic to capture (REJECT only = lower cost, ALL = comprehensive)
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: VPC
+
+Resources:
+  # VPC Configuration
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: robosystems-vpc
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Internet Gateway (for public subnets only)
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: robosystems-igw
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public Subnets (for ALBs only)
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: robosystems-public-subnet-1
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: robosystems-public-subnet-2
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: Create3rdAZ
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: robosystems-public-subnet-3
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PublicSubnet4:
+    Type: AWS::EC2::Subnet
+    Condition: Create4thAZ
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.13.0/24
+      AvailabilityZone: !Select
+        - 3
+        - !GetAZs ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: robosystems-public-subnet-4
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PublicSubnet5:
+    Type: AWS::EC2::Subnet
+    Condition: Create5thAZ
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.14.0/24
+      AvailabilityZone: !Select
+        - 5
+        - !GetAZs ""
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: robosystems-public-subnet-5
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Private Subnets (for all backend services)
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: robosystems-private-subnet-1
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: robosystems-private-subnet-2
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Condition: Create3rdAZ
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select
+        - 2
+        - !GetAZs ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: robosystems-private-subnet-3
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateSubnet4:
+    Type: AWS::EC2::Subnet
+    Condition: Create4thAZ
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select
+        - 3
+        - !GetAZs ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: robosystems-private-subnet-4
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateSubnet5:
+    Type: AWS::EC2::Subnet
+    Condition: Create5thAZ
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.5.0/24
+      AvailabilityZone: !Select
+        - 5
+        - !GetAZs ""
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: robosystems-private-subnet-5
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Single NAT Gateway for all environments
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: robosystems-nat-eip-1
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: robosystems-nat-1
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: robosystems-public-rt
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Create3rdAZ
+    Properties:
+      SubnetId: !Ref PublicSubnet3
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet4RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Create4thAZ
+    Properties:
+      SubnetId: !Ref PublicSubnet4
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet5RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Create5thAZ
+    Properties:
+      SubnetId: !Ref PublicSubnet5
+      RouteTableId: !Ref PublicRouteTable
+
+  # Private Route Tables - Both use the same NAT Gateway
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: robosystems-private-rt-1
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable1
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: robosystems-private-rt-2
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1 # Changed to use NatGateway1 for all environments
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable2
+
+  PrivateRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Condition: Create3rdAZ
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: robosystems-private-rt-3
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateRoute3:
+    Type: AWS::EC2::Route
+    Condition: Create3rdAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Create3rdAZ
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref PrivateRouteTable3
+
+  PrivateRouteTable4:
+    Type: AWS::EC2::RouteTable
+    Condition: Create4thAZ
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: robosystems-private-rt-4
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateRoute4:
+    Type: AWS::EC2::Route
+    Condition: Create4thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable4
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet4RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Create4thAZ
+    Properties:
+      SubnetId: !Ref PrivateSubnet4
+      RouteTableId: !Ref PrivateRouteTable4
+
+  PrivateRouteTable5:
+    Type: AWS::EC2::RouteTable
+    Condition: Create5thAZ
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: robosystems-private-rt-5
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  PrivateRoute5:
+    Type: AWS::EC2::Route
+    Condition: Create5thAZ
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable5
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet5RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: Create5thAZ
+    Properties:
+      SubnetId: !Ref PrivateSubnet5
+      RouteTableId: !Ref PrivateRouteTable5
+
+  # Security Group for VPC Endpoints
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateVpcEndpoints
+    Properties:
+      GroupDescription: Security group for VPC endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: sg-robosystems-vpc-endpoints
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # VPC Endpoints - Cost-optimized by default
+  # S3 Endpoint (Gateway type - no hourly cost)
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateVpcEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds: !Split
+        - ","
+        - !Sub
+          - "${BaseRouteTables}${ConditionalRouteTables}"
+          - BaseRouteTables: !Join
+              - ","
+              - - !Ref PrivateRouteTable1
+                - !Ref PrivateRouteTable2
+                - !Ref PublicRouteTable
+            ConditionalRouteTables: !Join
+              - ""
+              - - !If [Create3rdAZ, !Sub ",${PrivateRouteTable3}", ""]
+                - !If [Create4thAZ, !Sub ",${PrivateRouteTable4}", ""]
+                - !If [Create5thAZ, !Sub ",${PrivateRouteTable5}", ""]
+
+  # Interface endpoints - deployed only to one AZ by default to save costs
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateMinimalVpcEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  ECREndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateMinimalVpcEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  ECRDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateMinimalVpcEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  # Full deployment mode - endpoints in both AZs for higher availability
+  SecretsManagerEndpointFull:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateFullVpcEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  ECREndpointFull:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateFullVpcEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  ECRDkrEndpointFull:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateFullVpcEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  # ============================================================================
+  # VPC FLOW LOGS RESOURCES
+  # ============================================================================
+
+  # S3 Bucket for VPC Flow Logs (cheaper than CloudWatch Logs)
+  VPCFlowLogsBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateVPCFlowLogs
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "robosystems-vpc-flow-logs-${Environment}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: IntelligentTieringAndExpiry
+            Status: Enabled
+            Transitions:
+              # Use Intelligent-Tiering for automatic cost optimization
+              - TransitionInDays: 0
+                StorageClass: INTELLIGENT_TIERING
+            # Delete old logs after retention period
+            ExpirationInDays: !Ref FlowLogsRetentionDays
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceTag}-vpc-flow-logs-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Bucket Policy for VPC Flow Logs
+  VPCFlowLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateVPCFlowLogs
+    Properties:
+      Bucket: !Ref VPCFlowLogsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AWSLogDeliveryWrite
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "${VPCFlowLogsBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                "s3:x-amz-acl": bucket-owner-full-control
+                "aws:SourceAccount": !Ref AWS::AccountId
+          - Sid: AWSLogDeliveryAclCheck
+            Effect: Allow
+            Principal:
+              Service: delivery.logs.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt VPCFlowLogsBucket.Arn
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+
+  # VPC Flow Log
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Condition: CreateVPCFlowLogs
+    DependsOn: VPCFlowLogsBucketPolicy
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref VPC
+      TrafficType: !Ref FlowLogsTrafficType
+      LogDestinationType: s3
+      LogDestination: !Sub "${VPCFlowLogsBucket.Arn}/"
+      # Enhanced format with timestamps for temporal analysis
+      LogFormat: "${srcaddr} ${dstaddr} ${srcport} ${dstport} ${protocol} ${start} ${end} ${action} ${bytes}"
+      # Aggregate over 10 minutes to reduce log volume
+      MaxAggregationInterval: 600
+      Tags:
+        - Key: Name
+          Value: !Sub "${ServiceTag}-vpc-flow-log-${Environment}"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Purpose
+          Value: SOC2-Compliance
+
+Conditions:
+  # VPC Flow Logs Condition
+  CreateVPCFlowLogs: !Equals [!Ref EnableVPCFlowLogs, "true"]
+
+  # VPC Endpoint Conditions
+  CreateVpcEndpoints: !Or
+    - !Equals
+      - !Ref DeployVpcEndpoints
+      - minimal
+    - !Equals
+      - !Ref DeployVpcEndpoints
+      - full
+  CreateMinimalVpcEndpoints: !Equals
+    - !Ref DeployVpcEndpoints
+    - minimal
+  CreateFullVpcEndpoints: !Equals
+    - !Ref DeployVpcEndpoints
+    - full
+
+  # Multi-AZ Conditions - based on MaxAvailabilityZones parameter
+  Create3rdAZ: !Not [!Equals [!Ref MaxAvailabilityZones, 2]]
+  Create4thAZ: !And
+    - !Not [!Equals [!Ref MaxAvailabilityZones, 2]]
+    - !Not [!Equals [!Ref MaxAvailabilityZones, 3]]
+  Create5thAZ: !And
+    - !Not [!Equals [!Ref MaxAvailabilityZones, 2]]
+    - !Not [!Equals [!Ref MaxAvailabilityZones, 3]]
+    - !Not [!Equals [!Ref MaxAvailabilityZones, 4]]
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-VpcId
+
+  PublicSubnetIds:
+    Description: Public subnet IDs (for ALBs)
+    Value: !Join
+      - ","
+      - !Split
+        - ","
+        - !Sub
+          - "${BaseSubnets}${ConditionalSubnets}"
+          - BaseSubnets: !Join
+              - ","
+              - - !Ref PublicSubnet1
+                - !Ref PublicSubnet2
+            ConditionalSubnets: !Join
+              - ""
+              - - !If [Create3rdAZ, !Sub ",${PublicSubnet3}", ""]
+                - !If [Create4thAZ, !Sub ",${PublicSubnet4}", ""]
+                - !If [Create5thAZ, !Sub ",${PublicSubnet5}", ""]
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PublicSubnetIds
+
+  PrivateSubnetIds:
+    Description: Private subnet IDs (for backend services)
+    Value: !Join
+      - ","
+      - !Split
+        - ","
+        - !Sub
+          - "${BaseSubnets}${ConditionalSubnets}"
+          - BaseSubnets: !Join
+              - ","
+              - - !Ref PrivateSubnet1
+                - !Ref PrivateSubnet2
+            ConditionalSubnets: !Join
+              - ""
+              - - !If [Create3rdAZ, !Sub ",${PrivateSubnet3}", ""]
+                - !If [Create4thAZ, !Sub ",${PrivateSubnet4}", ""]
+                - !If [Create5thAZ, !Sub ",${PrivateSubnet5}", ""]
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PrivateSubnetIds
+
+  NatGatewayIPs:
+    Description: NAT Gateway Elastic IP
+    Value: !Ref NatGateway1EIP
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-NatGatewayIP
+
+  # VPC Flow Logs Outputs
+  VPCFlowLogsEnabled:
+    Description: Whether VPC Flow Logs are enabled
+    Value: !Ref EnableVPCFlowLogs
+    Export:
+      Name: !Sub ${AWS::StackName}-VPCFlowLogsEnabled
+
+  VPCFlowLogsBucket:
+    Description: S3 bucket for VPC Flow Logs
+    Value: !If
+      - CreateVPCFlowLogs
+      - !Ref VPCFlowLogsBucket
+      - "VPC Flow Logs not enabled"
+    Export:
+      Name: !Sub ${AWS::StackName}-VPCFlowLogsBucket

@@ -1,0 +1,924 @@
+Description: RoboSystems API Service - ECS Fargate
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Environment name (prod or staging)
+    ConstraintDescription: Must be prod or staging
+
+  # Infrastructure & Networking
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for ECS tasks
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for ECS tasks (comma-separated)
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public subnet IDs for ALB (comma-separated)
+
+  # Container & Application Configuration
+  ECRRepositoryUrl:
+    Type: String
+    Description: Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)
+  ECRImageTag:
+    Type: String
+    Description: Docker image tag
+    Default: latest
+  ContainerPort:
+    Type: Number
+    Default: 8000
+    MinValue: 1
+    MaxValue: 65535
+    Description: Port the container listens on
+
+  # ECS & Compute Configuration
+  DesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 100
+    Description: Desired number of ECS tasks
+  Cpu:
+    Type: String
+    Default: "512"
+    Description: CPU units for ECS task (512 = 0.5 vCPU)
+    AllowedValues:
+      - "256"
+      - "512"
+      - "1024"
+      - "2048"
+  Memory:
+    Type: String
+    Default: "1024"
+    Description: Memory in MiB for ECS task
+    AllowedValues:
+      - "512"
+      - "1024"
+      - "2048"
+      - "4096"
+
+  # Auto-scaling Configuration
+  MinCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 100
+    Description: Minimum number of tasks for auto scaling
+  MaxCapacity:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 100
+    Description: Maximum number of tasks for auto scaling
+  CPUTargetValue:
+    Type: Number
+    Default: 70
+    MinValue: 1
+    MaxValue: 100
+    Description: Target CPU utilization percentage for auto scaling
+  MemoryTargetValue:
+    Type: Number
+    Default: 60
+    MinValue: 1
+    MaxValue: 100
+    Description: Target Memory utilization percentage for auto scaling
+  FargateWeight:
+    Type: Number
+    Default: 20
+    MinValue: 0
+    MaxValue: 100
+    Description: Weight for FARGATE capacity provider (On-Demand instances)
+  FargateSpotWeight:
+    Type: Number
+    Default: 80
+    MinValue: 0
+    MaxValue: 100
+    Description: Weight for FARGATE_SPOT capacity provider (Spot instances)
+
+  # Domain & DNS Configuration
+  DomainName:
+    Type: String
+    Description: Full domain name for the API (e.g., api.robosystems.ai)
+    AllowedPattern: ^[a-z0-9][a-z0-9-\.]*\.[a-z]{2,}$
+    ConstraintDescription: Must be a valid domain name
+  RootDomainName:
+    Type: String
+    Description: Root domain name (e.g., robosystems.ai)
+    AllowedPattern: ^[a-z0-9][a-z0-9-]*\.[a-z]{2,}$
+    ConstraintDescription: Must be a valid root domain name
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID for the domain
+
+  # JWT Configuration (Authentication)
+  JwtIssuer:
+    Type: String
+    Description: JWT token issuer domain (without https:// prefix)
+    Default: ""
+  JwtAudience:
+    Type: CommaDelimitedList
+    Description: JWT token audience domains (comma-separated, without https:// prefix)
+    Default: ""
+
+  # Observability & Monitoring
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 365
+    Description: CloudWatch log retention in days
+  LogRetentionStrategy:
+    Type: String
+    Default: "standard"
+    AllowedValues: ["minimal", "standard", "extended"]
+    Description: "Log retention strategy for cost optimization"
+  ContainerInsightsEnabled:
+    Type: String
+    Default: disabled
+    AllowedValues:
+      - enabled
+      - disabled
+    Description: Enable/disable ECS Container Insights (adds ~$30-40/month in CloudWatch costs per cluster)
+  PrometheusStackName:
+    Type: String
+    Description: Name of the Prometheus CloudFormation stack for this environment
+    Default: ""
+
+  # Email Configuration
+  EmailFromAddress:
+    Type: String
+    Description: Verified email address for sending transactional emails via SES
+    Default: "noreply@robosystems.ai"
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+    ConstraintDescription: Must be a valid email address
+
+  # Cache Configuration
+  ValkeyUrl:
+    Type: String
+    Description: Valkey ElastiCache endpoint URL from Valkey stack
+    AllowedPattern: ^rediss?://.*:[0-9]+$
+    ConstraintDescription: Must be a valid Redis URL (redis://host:port or rediss://host:port)
+  ValkeyClientSecurityGroupId:
+    Type: String
+    Description: Security group ID for applications connecting to Valkey
+    AllowedPattern: ^sg-[0-9a-f]+$
+    ConstraintDescription: Must be a valid security group ID
+
+  # Kuzu Configuration
+  KuzuReplicaAlbUrl:
+    Type: String
+    Default: ""
+    Description: ALB endpoint URL for shared repository read replicas
+  SharedReplicaAlbEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable routing to shared replica ALB for read operations
+  AllowSharedMasterReads:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Allow fallback read operations from shared master when replicas unavailable
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Default: RoboSystems
+    Description: Service tag for resource identification and billing
+  ComponentTag:
+    Type: String
+    Default: API
+    Description: Component tag for resource identification and billing
+
+Conditions:
+  HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
+  IsProduction: !Equals [!Ref Environment, "prod"]
+
+Mappings:
+  LogRetentionPolicies:
+    minimal: # Development
+      Operational: 3
+    standard: # Production
+      Operational: 7
+    extended: # Compliance
+      Operational: 30
+
+Resources:
+  # ACM Certificate
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      DomainName: !Ref DomainName
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+      ValidationMethod: DNS
+      SubjectAlternativeNames:
+        - !Sub "*.${DomainName}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ECS Cluster
+  ApiCluster:
+    Type: AWS::ECS::Cluster
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ClusterName: !Sub robosystems-api-${Environment}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: !Ref ContainerInsightsEnabled
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  ApiTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "robosystems-api-task-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: !Sub "robosystems-api-task-policy-${Environment}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeRouteTables
+                Resource: "*"
+              # CloudFormation permissions for dynamic configuration
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/robosystems/${Environment}/*"
+              # KMS permissions for AWS managed keys with service conditions
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ebs"
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ssm"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                      - !Sub "ec2.${AWS::Region}.amazonaws.com"
+                      - !Sub "ssm.${AWS::Region}.amazonaws.com"
+              # Secrets Manager permissions for runtime secret retrieval
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  # Wildcard access to all environment-specific secrets
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # DynamoDB permissions for Kuzu instance, volume, and graph registries
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry/index/*"
+              # Amazon Managed Prometheus permissions (only if observability stack is configured)
+              - !If
+                - HasObservabilityStack
+                - Effect: Allow
+                  Action:
+                    - aps:RemoteWrite
+                    - aps:QueryMetrics
+                    - aps:GetLabels
+                    - aps:GetSeries
+                    - aps:GetMetricMetadata
+                  Resource: !ImportValue
+                    Fn::Sub: "${PrometheusStackName}-PrometheusWorkspaceArn"
+                - !Ref AWS::NoValue
+              # S3 permissions - API role with least privilege access
+              # Read-only access to processed data and deployments
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-kuzu-databases-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-kuzu-databases-${Environment}/*"
+              # Read/Write access to public data bucket for API serving
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-public-data-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-public-data-${Environment}/*"
+              # Read/Write access to main application bucket for user uploads/temp files
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
+              # SES permissions for sending emails
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    ses:FromAddress: !Ref EmailFromAddress
+              # SES permissions for checking sender verification status
+              - Effect: Allow
+                Action:
+                  - ses:GetSendQuota
+                  - ses:DescribeConfigurationSet
+                Resource: "*"
+
+  # ECS Task Execution Role
+  ApiTaskExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ExecutionRoleSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  # Wildcard access to all environment-specific secrets
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # KMS permissions for decrypting secrets during container startup
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Log Group
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/api
+      RetentionInDays: !If
+        - IsProduction
+        - !FindInMap [
+            LogRetentionPolicies,
+            !Ref LogRetentionStrategy,
+            Operational,
+          ]
+        - !Ref LogRetentionDays
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Security Group for ECS Tasks
+  ApiSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for RoboSystems API ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub sg-robosystems-api-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Security Group for ALB
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for RoboSystems API Application Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub sg-robosystems-api-${Environment}-alb
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Security Group Rule - Direct HTTPS to ALB (bypassing CloudFront)
+  PublicHTTPSToALBSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: Allow direct HTTPS traffic to ALB
+
+  # Security Group Rule - Public HTTP to ALB (for redirect)
+  PublicHTTPToALBSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+      Description: Allow HTTP traffic for redirect to HTTPS
+
+  # Security Group Rule - ALB to ECS Tasks
+  ALBToApiSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ApiSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Description: Allow traffic from ALB to API tasks
+
+  # Task Definition
+  ApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Family: !Sub robosystems-api-${Environment}-task
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ApiTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ApiTaskRole.Arn
+      ContainerDefinitions:
+        - Name: api-container
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Essential: true
+          DependsOn: []
+          StopTimeout: 90 # API services can shutdown quickly (90 seconds)
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+          Environment:
+            # Basic Environment Configuration
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: LOG_LEVEL
+              Value: INFO
+            - Name: DOCKER_PROFILE
+              Value: api
+            # AWS & Container Configuration
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            # Kuzu Routing Configuration (for enhanced client factory)
+            - Name: KUZU_REPLICA_ALB_URL
+              Value: !Ref KuzuReplicaAlbUrl
+            - Name: SHARED_REPLICA_ALB_ENABLED
+              Value: !Ref SharedReplicaAlbEnabled
+            - Name: ALLOW_SHARED_MASTER_READS
+              Value: !Ref AllowSharedMasterReads
+            # Cache & Message Queue Configuration
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            # Observability Configuration
+            - Name: OTEL_ENABLED
+              Value: !If [HasObservabilityStack, "true", "false"]
+            - Name: OTEL_FORCE_ENABLE
+              Value: "false"
+            - Name: OTEL_SERVICE_NAME
+              Value: !Sub "robosystems-api-${Environment}"
+            - Name: OTEL_EXPORTER_OTLP_ENDPOINT
+              Value: "http://localhost:4318"
+            - Name: OTEL_RESOURCE_ATTRIBUTES
+              Value: !Sub "service.name=robosystems-api-${Environment},service.version=latest,deployment.environment=${Environment}"
+            # Other Configuration
+            - Name: SECURITY_AUDIT_ENABLED
+              Value: !If [IsProduction, "true", "false"]
+            - Name: ROBOSYSTEMS_API_URL
+              Value: !Sub "https://${DomainName}"
+            # JWT Configuration (passed to application for token issuer/audience)
+            - Name: JWT_ISSUER
+              Value: !Ref JwtIssuer
+            - Name: JWT_AUDIENCE
+              Value: !Join [",", !Ref JwtAudience]
+            # Email Configuration
+            - Name: EMAIL_FROM_ADDRESS
+              Value: !Ref EmailFromAddress
+          # Secrets are fetched directly by the application using secrets_manager.py
+          # The container has IAM permissions to access robosystems/{env}/* secrets
+        # ADOT Collector Sidecar (only if observability stack is configured)
+        - !If
+          - HasObservabilityStack
+          - Name: adot-collector
+            Image: public.ecr.aws/aws-observability/aws-otel-collector:latest
+            Essential: true
+            Environment:
+              - Name: AWS_PROMETHEUS_ENDPOINT
+                Value: !Sub
+                  - "${PrometheusWorkspaceEndpoint}api/v1/remote_write"
+                  - PrometheusWorkspaceEndpoint:
+                      Fn::ImportValue: !Sub "${PrometheusStackName}-PrometheusWorkspaceEndpoint"
+              - Name: AWS_REGION
+                Value: !Ref AWS::Region
+              - Name: AOT_CONFIG_CONTENT
+                Value: !Sub
+                  - |
+                    extensions:
+                      sigv4auth:
+                        region: ${AWS::Region}
+                        service: aps
+
+                    receivers:
+                      otlp:
+                        protocols:
+                          grpc:
+                            endpoint: 0.0.0.0:4317
+                          http:
+                            endpoint: 0.0.0.0:4318
+
+                    processors:
+                      batch:
+
+                    exporters:
+                      prometheusremotewrite:
+                        endpoint: ${PrometheusEndpoint}
+                        auth:
+                          authenticator: sigv4auth
+                        timeout: 30s
+                        retry_on_failure:
+                          enabled: true
+                          initial_interval: 5s
+                          max_interval: 30s
+                          max_elapsed_time: 300s
+
+                      debug:
+                        verbosity: normal
+
+                    service:
+                      extensions: [sigv4auth]
+                      pipelines:
+                        metrics:
+                          receivers: [otlp]
+                          processors: [batch]
+                          exporters: [prometheusremotewrite, debug]
+                      telemetry:
+                        logs:
+                          level: info
+                  - PrometheusEndpoint:
+                      Fn::Sub:
+                        - "${PrometheusWorkspaceEndpoint}api/v1/remote_write"
+                        - PrometheusWorkspaceEndpoint:
+                            Fn::ImportValue: !Sub "${PrometheusStackName}-PrometheusWorkspaceEndpoint"
+            PortMappings:
+              - ContainerPort: 4318
+                Protocol: tcp
+              - ContainerPort: 8889
+                Protocol: tcp
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Ref ApiLogGroup
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: adot-collector
+          - !Ref AWS::NoValue
+
+  # ECS Service
+  ApiService:
+    Type: AWS::ECS::Service
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    DependsOn:
+      - ApiHttpsListener
+      - ApiHttpListener
+    Properties:
+      ServiceName: !Sub robosystems-api-${Environment}-service
+      Cluster: !Ref ApiCluster
+      DesiredCount: !Ref DesiredCount
+      CapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: !Ref FargateSpotWeight
+        - CapacityProvider: FARGATE
+          Weight: !Ref FargateWeight
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref ApiSecurityGroup
+            - !Ref ValkeyClientSecurityGroupId
+      TaskDefinition: !Ref ApiTaskDefinition
+      LoadBalancers:
+        - ContainerName: api-container
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref ApiTargetGroup
+      EnableExecuteCommand: true
+      PropagateTags: SERVICE
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Auto Scaling Target
+  ApiScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: ApiService
+    Properties:
+      ServiceNamespace: ecs
+      ResourceId: !Sub service/robosystems-api-${Environment}-cluster/robosystems-api-${Environment}-service
+      ScalableDimension: ecs:service:DesiredCount
+      MinCapacity: !Ref MinCapacity
+      MaxCapacity: !Ref MaxCapacity
+      RoleARN: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+
+  # CPU Target Tracking Scaling Policy
+  CPUTargetTrackingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-cpu-scaling-policy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ApiScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: !Ref CPUTargetValue
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 180
+
+  # Memory Target Tracking Scaling Policy
+  MemoryTargetTrackingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-memory-scaling-policy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ApiScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+        TargetValue: !Ref MemoryTargetValue
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 180
+
+  # Application Load Balancer
+  ApiALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems-api-${Environment}-alb
+      Scheme: internet-facing
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-api-${Environment}-alb
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Target Group
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      VpcId: !Ref VpcId
+      TargetType: ip
+      Protocol: HTTP
+      Port: !Ref ContainerPort
+      HealthCheckEnabled: true
+      HealthCheckPath: /v1/status
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: !Ref ContainerPort
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Matcher:
+        HttpCode: 200-399
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-api-${Environment}-tg
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # HTTPS Listener
+  ApiHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+      LoadBalancerArn: !Ref ApiALB
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref ApiCertificate
+
+  # HTTP Listener (redirect to HTTPS)
+  ApiHttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            Host: "#{host}"
+            Path: /#{path}
+            Query: "#{query}"
+            StatusCode: HTTP_301
+      LoadBalancerArn: !Ref ApiALB
+      Port: 80
+      Protocol: HTTP
+
+  # Route 53 Record (points directly to ALB)
+  ApiDNSRecord:
+    Type: AWS::Route53::RecordSet
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      HostedZoneName: !Sub ${RootDomainName}.
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiALB.DNSName
+        HostedZoneId: !GetAtt ApiALB.CanonicalHostedZoneID
+        EvaluateTargetHealth: true
+
+Outputs:
+  ApiUrl:
+    Description: URL of the API endpoint
+    Value: !Sub https://${DomainName}
+  LoadBalancerDNS:
+    Description: DNS of the Load Balancer
+    Value: !GetAtt ApiALB.DNSName
+  ClusterName:
+    Description: Name of the ECS Cluster
+    Value: !Ref ApiCluster
+  ECRRepositoryUsed:
+    Description: ECR Repository used for Docker images
+    Value: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-ECRRepositoryUsed
+  ApiScalingTarget:
+    Description: Auto Scaling Target Resource ID
+    Value: !Sub service/robosystems-api-${Environment}-cluster/robosystems-api-${Environment}-service
+  CertificateArn:
+    Description: ACM Certificate ARN
+    Value: !Ref ApiCertificate
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-CertificateArn
+  ApiALBArn:
+    Description: ARN of the API Application Load Balancer
+    Value: !Ref ApiALB
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiALBArn

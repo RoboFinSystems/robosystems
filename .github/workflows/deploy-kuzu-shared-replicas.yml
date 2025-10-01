@@ -1,0 +1,295 @@
+name: Deploy Kuzu Shared Replicas
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging, or dev)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+      vpc_id:
+        description: "VPC ID for deployment"
+        required: true
+        type: string
+      subnet_ids:
+        description: "Comma-separated list of private subnet IDs for instances (minimum 2 required)"
+        required: true
+        type: string
+
+      # Instance Configuration
+      instance_type:
+        description: "EC2 instance type for replicas (memory-optimized for Kuzu operations)"
+        required: false
+        type: string
+        default: "r7g.medium"
+      ami_id:
+        description: "Amazon Linux 2023 ARM64 AMI ID"
+        required: false
+        default: "ami-05ec8931dc5ae74ec"
+        type: string
+
+      # Auto Scaling Configuration
+      min_instances:
+        description: "Minimum number of replica instances"
+        required: true
+        type: string
+      max_instances:
+        description: "Maximum number of replica instances"
+        required: true
+        type: string
+      desired_instances:
+        description: "Desired number of replica instances"
+        required: true
+        type: string
+
+      # Kuzu Configuration
+      shared_repositories:
+        description: "Comma-delimited list of shared repositories (e.g., sec)"
+        required: false
+        type: string
+        default: "sec"
+
+      # Note: Secrets are fetched directly by the application using secrets_manager.py
+
+      # Other Configuration
+      ecr_image_tag:
+        description: "Docker image tag for Kuzu writers"
+        required: false
+        type: string
+        default: "latest"
+      lambda_code_bucket:
+        description: "S3 bucket containing Lambda deployment packages"
+        required: false
+        type: string
+        default: ""
+      volume_manager_function_arn:
+        description: "ARN of the Volume Manager Lambda function"
+        required: true
+        type: string
+
+    outputs:
+      # Kuzu Replica Outputs
+      security_group_id:
+        description: "Security Group ID for Kuzu shared infrastructure"
+        value: ${{ jobs.action.outputs.security_group_id }}
+      instance_role_arn:
+        description: "IAM Role ARN for Kuzu instances"
+        value: ${{ jobs.action.outputs.instance_role_arn }}
+      replica_alb_endpoint:
+        description: "Load balancer endpoint for replica read traffic"
+        value: ${{ jobs.action.outputs.replica_alb_endpoint }}
+      replica_asg_name:
+        description: "Auto Scaling Group Name for replicas"
+        value: ${{ jobs.action.outputs.replica_asg_name }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        description: "AWS Access Key ID for CloudFormation deployment"
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        description: "AWS Secret Access Key for CloudFormation deployment"
+        required: true
+      AWS_SNS_ALERT_EMAIL:
+        description: "SNS alert email address for CloudWatch alarms"
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 30
+
+    outputs:
+      security_group_id: ${{ steps.get-outputs.outputs.security_group_id }}
+      instance_role_arn: ${{ steps.get-outputs.outputs.instance_role_arn }}
+      replica_alb_endpoint: ${{ steps.get-outputs.outputs.replica_alb_endpoint }}
+      replica_asg_name: ${{ steps.get-outputs.outputs.replica_asg_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Configure ASG parameters
+        id: asg_config
+        run: |
+          echo "🎯 Configuring ASG for repositories: ${{ inputs.shared_repositories }} in environment: ${{ inputs.environment }}"
+
+          # Use direct inputs for ASG configuration
+          MIN_INSTANCES="${{ inputs.min_instances }}"
+          MAX_INSTANCES="${{ inputs.max_instances }}"
+          DESIRED_INSTANCES="${{ inputs.desired_instances }}"
+
+          echo "min_instances=$MIN_INSTANCES" >> $GITHUB_OUTPUT
+          echo "max_instances=$MAX_INSTANCES" >> $GITHUB_OUTPUT
+          echo "desired_instances=$DESIRED_INSTANCES" >> $GITHUB_OUTPUT
+
+          echo "📊 ASG Configuration for repositories (${{ inputs.shared_repositories }}):"
+          echo "  Min: $MIN_INSTANCES"
+          echo "  Max: $MAX_INSTANCES"
+          echo "  Desired: $DESIRED_INSTANCES"
+
+      - name: Deploy Kuzu Shared Writers CloudFormation stack
+        id: deploy-stack
+        run: |
+          # Check if stack exists
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Use inline template deployment
+          echo "Using inline template deployment"
+          TEMPLATE_PARAM="--template-body file://cloudformation/kuzu-shared-replicas.yaml"
+
+          # Build parameters for shared writers template
+          KUZU_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=SharedRepositories,ParameterValue=\"${{ inputs.shared_repositories }}\" \
+                ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=VpcCidr,ParameterValue=\"10.0.0.0/16\" \
+                ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
+                ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
+                ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+                ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
+                ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \
+                ParameterKey=DesiredInstances,ParameterValue=${{ inputs.desired_instances }} \
+                ParameterKey=EnableWarmPool,ParameterValue=\"false\" \
+                ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
+                ParameterKey=VolumeManagerFunctionArn,ParameterValue=\"${{ inputs.volume_manager_function_arn }}\" \
+                ParameterKey=ServiceTag,ParameterValue=\"RoboSystems\" \
+                ParameterKey=ComponentTag,ParameterValue=\"KuzuSharedReplicas\""
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              $TEMPLATE_PARAM \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $KUZU_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=KuzuSharedWriters \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              $TEMPLATE_PARAM \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $KUZU_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=KuzuSharedWriters \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "1800"
+          interval: "10"
+
+      - name: Get Stack Outputs
+        id: get-outputs
+        run: |
+          # Get stack outputs after deployment
+          STACK_OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "${{ inputs.stack_name }}" \
+            --query 'Stacks[0].Outputs' \
+            --output json)
+
+          # Extract shared replicas specific outputs
+          REPLICA_ENDPOINT=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="ReplicaLoadBalancerEndpoint") | .OutputValue // empty')
+          REPLICA_STATUS=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="ReplicaInfrastructureStatus") | .OutputValue // empty')
+          SECURITY_GROUP_ID=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="SecurityGroupId") | .OutputValue // empty')
+          INSTANCE_ROLE_ARN=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="InstanceRoleArn") | .OutputValue // empty')
+
+          # Map outputs
+          echo "replica_alb_endpoint=${REPLICA_ENDPOINT}" >> $GITHUB_OUTPUT
+          echo "security_group_id=${SECURITY_GROUP_ID}" >> $GITHUB_OUTPUT
+          echo "instance_role_arn=${INSTANCE_ROLE_ARN}" >> $GITHUB_OUTPUT
+
+          # Get ASG name if replicas are enabled
+          if [ "${REPLICA_STATUS}" = "ENABLED" ]; then
+            REPLICA_ASG=$(aws cloudformation describe-stack-resources \
+              --stack-name "${{ inputs.stack_name }}" \
+              --logical-resource-id ReplicaAutoScalingGroup \
+              --query 'StackResources[0].PhysicalResourceId' \
+              --output text)
+            echo "replica_asg_name=${REPLICA_ASG}" >> $GITHUB_OUTPUT
+          fi
+
+          echo "🔄 Replica Status: ${REPLICA_STATUS}"
+          if [ "${REPLICA_STATUS}" == "ENABLED" ] && [ -n "${REPLICA_ENDPOINT}" ]; then
+            echo "📖 Replica Endpoint: ${REPLICA_ENDPOINT}"
+          fi
+
+          if [ -n "${SECURITY_GROUP_ID}" ]; then
+            echo "🔒 Security Group configured"
+          fi
+          if [ -n "${INSTANCE_ROLE_ARN}" ]; then
+            echo "🔑 Instance Role configured"
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          # Output deployment status for the main workflow
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "Kuzu Shared Replicas stack creation completed"
+          else
+            echo "Kuzu Shared Replicas stack update completed"
+          fi

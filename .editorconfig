@@ -1,0 +1,23 @@
+# editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 2
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Python files
+[*.py]
+indent_size = 2
+max_line_length = 88
+
+# Exclude arelle/EDGAR from all formatting
+[robosystems/arelle/EDGAR/**]
+ignore = true
+
+# Exclude arelle directory
+[robosystems/arelle/**]
+ignore = true

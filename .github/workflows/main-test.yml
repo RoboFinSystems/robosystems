@@ -1,0 +1,37 @@
+name: Main Branch Test
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runners_available: ${{ steps.check.outputs.runners_available }}
+      runner_type: ${{ steps.check.outputs.runner_type }}
+      runner_config: ${{ steps.check.outputs.runner_config }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Check runner availability
+        id: check
+        uses: ./.github/actions/runner-availability
+        with:
+          runner_labels: "self-hosted,Linux,X64,AL2023,ci"
+          timeout_minutes: "2"
+          github_token: ${{ secrets.ACTIONS_TOKEN }}
+
+  test:
+    needs: [runner]
+    uses: ./.github/workflows/test.yml
+    with:
+      runner_config: ${{ needs.runner.outputs.runner_config }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}

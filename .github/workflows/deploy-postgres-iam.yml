@@ -1,0 +1,279 @@
+name: Deploy Postgres IAM
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging, or dev)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+      vpc_id:
+        description: "VPC ID for RDS instance"
+        required: true
+        type: string
+      subnet_ids:
+        description: "Comma-separated subnet IDs for RDS (minimum 2 for multi-AZ)"
+        required: true
+        type: string
+
+      # Database Engine Configuration
+      engine:
+        description: "Database engine type (aurora-postgresql for Aurora, postgres for RDS)"
+        required: false
+        type: string
+        default: "postgres"
+
+      # Instance Configuration
+      instance_size:
+        description: "Database instance type for PostgreSQL/Aurora"
+        required: true
+        type: string
+      allocated_storage:
+        description: "Initial storage size in GB (ignored by Aurora)"
+        required: false
+        type: string
+        default: "20"
+      allocated_max_storage:
+        description: "Maximum storage size in GB (ignored by Aurora)"
+        required: false
+        type: string
+        default: "100"
+
+      # High Availability Configuration
+      multi_az_enabled:
+        description: "Enable Multi-AZ deployment for high availability (increases cost ~2x)"
+        required: false
+        type: string
+        default: "false"
+
+      # Secret Rotation Configuration
+      secrets_rotation_days:
+        description: "Number of days between automatic password rotations"
+        required: false
+        type: string
+        default: "90"
+
+      # Lambda Configuration
+      lambda_code_bucket:
+        description: "S3 bucket containing Lambda deployment packages"
+        required: false
+        type: string
+        default: ""
+      secrets_code_key:
+        description: "S3 key for Postgres Secrets Lambda deployment package"
+        required: false
+        type: string
+        default: ""
+      rotation_code_key:
+        description: "S3 key for Postgres Rotation Lambda deployment package"
+        required: false
+        type: string
+        default: ""
+
+    outputs:
+      postgres_secret_arn:
+        description: "ARN of the PostgreSQL secret in Secrets Manager"
+        value: ${{ jobs.action.outputs.postgres_secret_arn }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SNS_ALERT_EMAIL:
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 15
+    outputs:
+      postgres_secret_arn: ${{ steps.stack-outputs.outputs.postgres_secret_arn }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy Postgres CloudFormation Stack
+        id: deploy-stack
+        run: |
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          POSTGRES_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=DatabaseEngine,ParameterValue=${{ inputs.engine }} \
+                ParameterKey=DBInstanceClass,ParameterValue=${{ inputs.instance_size }} \
+                ParameterKey=DBAllocatedStorage,ParameterValue=${{ inputs.allocated_storage }} \
+                ParameterKey=DBMaxAllocatedStorage,ParameterValue=${{ inputs.allocated_max_storage }} \
+                ParameterKey=EnableMultiAZ,ParameterValue=${{ inputs.multi_az_enabled }} \
+                ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
+                ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=PostgresRotationDays,ParameterValue=${{ inputs.secrets_rotation_days }}"
+
+          # Add Lambda bucket and fetch S3 keys from manifest if provided
+          if [ -n "${{ inputs.lambda_code_bucket }}" ] && [ "${{ inputs.lambda_code_bucket }}" != "" ]; then
+            POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=LambdaCodeBucket,ParameterValue=${{ inputs.lambda_code_bucket }}"
+            echo "Adding Lambda code bucket: ${{ inputs.lambda_code_bucket }}"
+            
+            # Fetch S3 keys from manifest (which includes hashes in filenames)
+            MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
+            
+            SECRETS_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."postgres-secrets".s3_key // empty')
+            ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."postgres-rotation".s3_key // empty')
+            
+            if [ -n "$SECRETS_KEY" ]; then
+              POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=PostgresSecretsCodeKey,ParameterValue=$SECRETS_KEY"
+              echo "Adding Postgres Secrets Lambda code key: $SECRETS_KEY"
+            fi
+            
+            if [ -n "$ROTATION_KEY" ]; then
+              POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=PostgresRotationCodeKey,ParameterValue=$ROTATION_KEY"
+              echo "Adding Postgres Rotation Lambda code key: $ROTATION_KEY"
+            fi
+          fi
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/postgres.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters $POSTGRES_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Postgres \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/postgres.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters $POSTGRES_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Postgres \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "1800"
+          interval: "10"
+
+      - name: Invoke Postgres Secrets Update Lambda
+        run: |
+          LAMBDA_NAME="${{ inputs.stack_name }}-secrets-update-lambda"
+          echo "Invoking secrets update lambda: $LAMBDA_NAME"
+
+          # Invoke the lambda function
+          RESPONSE=$(aws lambda invoke \
+            --function-name $LAMBDA_NAME \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            /tmp/lambda-response.json)
+
+          # Check the response
+          STATUS_CODE=$(echo $RESPONSE | jq -r '.StatusCode')
+          if [ "$STATUS_CODE" = "200" ]; then
+            echo "Lambda invoked successfully"
+            echo "Secrets update completed"
+          else
+            echo "Error invoking lambda: $RESPONSE"
+            exit 1
+          fi
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "Retrieving stack outputs..."
+
+          # Get the actual PostgreSQL Secret ARN using AWS CLI
+          SECRET_NAME="robosystems/${{ inputs.environment }}/postgres"
+          POSTGRES_SECRET_ARN=$(aws secretsmanager describe-secret \
+            --secret-id "$SECRET_NAME" \
+            --query "ARN" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$POSTGRES_SECRET_ARN" ]; then
+            echo "postgres_secret_arn=$POSTGRES_SECRET_ARN" >> $GITHUB_OUTPUT
+            echo "ARN configured successfully"
+          else
+            echo "Warning: Could not retrieve PostgreSQL Secret ARN for $SECRET_NAME"
+            # Fallback to CloudFormation output (pattern)
+            POSTGRES_SECRET_ARN=$(aws cloudformation describe-stacks \
+              --stack-name ${{ inputs.stack_name }} \
+              --query "Stacks[0].Outputs[?OutputKey=='PostgresSecretArn'].OutputValue" \
+              --output text)
+            echo "CloudFormation output retrieved"
+            echo "postgres_secret_arn=$POSTGRES_SECRET_ARN" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          # Output deployment status for the main workflow
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "PostgreSQL stack creation completed"
+          else
+            echo "PostgreSQL stack update completed"
+          fi

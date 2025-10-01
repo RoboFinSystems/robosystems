@@ -1,0 +1,158 @@
+[project]
+name = "robosystems-service"
+version = "0.1.0"
+description = "RoboSystems"
+requires-python = ">=3.12.10"
+authors = [
+    {name = "RFS LLC"},
+]
+license = {text = "MIT"}
+keywords = ["robosystems", "financial", "graph", "knowledge graph", "kuzu"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Framework :: Celery",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Office/Business :: Financial :: Accounting",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
+    "Typing :: Typed",
+]
+dependencies = [
+    # Core async and HTTP libraries
+    "aiohttp>=3.12.0",
+    "httpx>=0.28.0",
+    "httpx-sse>=0.4.0",
+    "uvicorn>=0.35.0,<1.0",
+    "async_timeout>=5.0.0,<6.0",
+    # Web framework
+    "fastapi>=0.116.0,<1.0",
+    "fastapi-limiter>=0.1.6,<1.0",
+    "python-multipart>=0.0.16,<1.0",
+    "sse-starlette>=2.4.1,<3.0",
+    # Graph database
+    "kuzu>=0.11.0,<0.12",
+    # Database and ORM
+    "alembic>=1.16.0,<2.0",
+    "sqlalchemy>=2.0.0,<3.0",
+    "psycopg2-binary>=2.9.0,<3.0",
+    # Task queue and messaging
+    "celery>=5.5.0,<6.0",
+    "amqp>=5.3.0,<6.0",
+    "redis>=6.2.0,<7.0",
+    # AWS and cloud services
+    "boto3>=1.39.0,<2.0",
+    # Data processing
+    "pandas>=2.3.0,<3.0",
+    "pyarrow>=20.0.0",
+    # Security and crypto
+    "bcrypt>=4.3.0,<5.0",
+    "pyjwt>=2.10.0,<3.0",
+    # XBRL processing
+    "arelle-release==2.37.12",
+    # External integrations
+    "anthropic>=0.57.0,<1.0",
+    "intuit-oauth>=1.2.0,<2.0",
+    "python-quickbooks>=0.9.0,<1.0",
+    "plaid-python>=34.0,<35.0",
+    # Observability
+    "opentelemetry-api>=1.35.0,<2.0",
+    "opentelemetry-sdk>=1.35.0,<2.0",
+    "opentelemetry-exporter-otlp>=1.35.0,<2.0",
+    "opentelemetry-instrumentation-aiohttp-client>=0.55b0,<1.0",
+    "opentelemetry-instrumentation-celery>=0.55b0,<1.0",
+    "opentelemetry-instrumentation-fastapi>=0.55b0,<1.0",
+    "opentelemetry-instrumentation-psycopg2>=0.55b0,<1.0",
+    "opentelemetry-instrumentation-requests>=0.55b0,<1.0",
+    # Utilities
+    "beautifulsoup4>=4.13.0,<5.0",
+    "email-validator>=2.2.0,<3.0",
+    "holidays>=0.76.0,<1.0",
+    "logger>=1.4,<2.0",
+    "lxml>=5.4.0,<6.0",
+    "psutil>=6.1.0,<7.0",
+    "pydantic[email]>=2.11.0,<3.0",
+    "python-slugify>=8.0.0,<9.0",
+    "python-ulid>=3.0.0",
+    "pyyaml>=6.0.0,<7.0",
+    "requests>=2.32.0,<3.0",
+    "retrying>=1.4.0,<2.0",
+    "uuid6>=2025.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing framework
+    "pytest>=8.4.0,<9.0",
+    "pytest-asyncio>=1.0.0,<2.0",
+    "pytest-cov>=6.2.0",
+    "pytest-env>=1.1.0,<2.0",
+    "pytest-mock>=3.14.0,<4.0",
+
+    # Code quality tools
+    "ruff>=0.12.0,<1.0",
+    "basedpyright>=1.22.0,<2.0",
+
+    # AWS development tools
+    "awscli-local>=0.22.0,<1.0",
+    "cfn-lint>=1.37.0,<2.0",
+    "moto[s3]>=5.1.6,<6.0",
+
+    # Development utilities
+    "flower>=2.0.0,<3.0",
+    "jupyter>=1.1.0,<2.0"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["robosystems"]
+
+[tool.setuptools.package-data]
+robosystems = ["**/*.py"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["data/*", "notebooks/*", "cloudformation/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --ignore=robosystems/arelle/EDGAR --ignore=robosystems/arelle"
+markers = [
+    "slow: marks tests as slow (deselect with '-m not slow')",
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
+    "kuzu_integration: marks tests as kuzu integration tests",
+    "celery: marks tests as celery tests"
+]
+
+[tool.basedpyright]
+include = ["robosystems", "tests", "main.py"]
+exclude = ["**/__pycache__", ".venv", "robosystems/arelle"]
+extraPaths = ["."]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+reportAttributeAccessIssue = "none"
+reportArgumentType = "none"
+reportGeneralTypeIssues = "none"
+reportOptionalMemberAccess = "none"
+reportReturnType = "none"

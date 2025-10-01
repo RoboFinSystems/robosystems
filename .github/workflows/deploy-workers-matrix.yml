@@ -1,0 +1,394 @@
+name: Deploy Workers with Matrix
+
+on:
+  workflow_call:
+    inputs:
+      # Repository Configuration
+      environment:
+        required: true
+        type: string
+        description: Environment to deploy to (staging/prod)
+
+      # GHA Runner Configuration
+      runner_config:
+        required: true
+        type: string
+        description: Runner configuration JSON
+
+      # AWS Configuration
+      aws_region:
+        required: true
+        type: string
+        description: AWS region
+      vpc_id:
+        required: true
+        type: string
+        description: VPC ID from deploy-vpc
+      subnet_ids:
+        required: true
+        type: string
+        description: Private subnet IDs
+
+      # Container & Application Configuration
+      ecr_repository_url:
+        required: true
+        type: string
+        description: Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)
+      ecr_image_tag:
+        required: true
+        type: string
+        description: ECR image tag
+
+      # Cache Configuration
+      valkey_url:
+        required: true
+        type: string
+        description: Valkey ElastiCache endpoint URL
+      valkey_sg_id:
+        required: true
+        type: string
+        description: Security group ID for Valkey
+
+      # Kuzu Configuration
+      kuzu_replica_alb_url:
+        required: false
+        type: string
+        description: ALB endpoint URL for shared repository read replicas
+        default: ""
+      shared_replica_alb_enabled:
+        required: false
+        type: string
+        description: Enable routing to shared replica ALB
+        default: "false"
+
+      # Other Configuration
+      beat_enabled:
+        required: false
+        type: boolean
+        description: Deploy beat worker (Celery scheduler)
+        default: true
+      refresh_ecs_service:
+        required: false
+        type: string
+        description: Refresh ECS service
+        default: "false"
+
+      # Worker Enable/Disable Configuration
+      worker_critical_enabled:
+        required: false
+        type: string
+        description: Enable critical worker
+        default: ""
+      worker_extraction_enabled:
+        required: false
+        type: string
+        description: Enable extraction worker
+        default: ""
+      worker_shared_enabled:
+        required: false
+        type: string
+        description: Enable shared processing worker
+        default: ""
+      worker_ingestion_enabled:
+        required: false
+        type: string
+        description: Enable ingestion worker
+        default: ""
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SNS_ALERT_EMAIL:
+        required: true
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/configs/workers.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Prepare Worker Matrix
+        id: set-matrix
+        run: |
+          # Determine environment key and set environment variables
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            ENV_KEY="production"
+            ENV_SUFFIX="PROD"
+            # Set environment variables for production
+            export WORKER_DEFAULT_ENABLED_PROD="true"
+            export WORKER_CRITICAL_ENABLED_PROD="${{ inputs.worker_critical_enabled }}"
+            export WORKER_EXTRACTION_ENABLED_PROD="${{ inputs.worker_extraction_enabled }}"
+            export WORKER_SHARED_ENABLED_PROD="${{ inputs.worker_shared_enabled }}"
+            export WORKER_INGESTION_ENABLED_PROD="${{ inputs.worker_ingestion_enabled }}"
+          else
+            ENV_KEY="staging"
+            ENV_SUFFIX="STAGING"
+            # Set environment variables for staging
+            export WORKER_DEFAULT_ENABLED_STAGING="true"
+            export WORKER_CRITICAL_ENABLED_STAGING="${{ inputs.worker_critical_enabled }}"
+            export WORKER_EXTRACTION_ENABLED_STAGING="${{ inputs.worker_extraction_enabled }}"
+            export WORKER_SHARED_ENABLED_STAGING="${{ inputs.worker_shared_enabled }}"
+            export WORKER_INGESTION_ENABLED_STAGING="${{ inputs.worker_ingestion_enabled }}"
+          fi
+
+          echo "Loading worker configuration for: $ENV_KEY"
+
+          # Parse YAML and build matrix
+          MATRIX_JSON=$(yq eval -o=json ".${ENV_KEY}.workers" .github/configs/workers.yml)
+
+          # Get defaults for this environment
+          DEFAULTS=$(yq eval -o=json ".${ENV_KEY}.defaults" .github/configs/workers.yml)
+
+          # Process each worker and apply defaults
+          # Build the filtered array using jq directly to avoid subshell issues
+          FILTERED=$(echo "$MATRIX_JSON" | jq --argjson defaults "$DEFAULTS" --arg env "$ENV_KEY" '
+            [.[] |
+              # Get environment variable names
+              .deployment.enable_var as $var_name |
+              .deployment.enabled_default as $enabled_default |
+              (.deployment.always_enabled // false) as $always_enabled |
+              .name as $worker_name |
+
+              # Determine if should deploy (this logic will be evaluated by bash)
+              select(
+                $always_enabled == true or
+                $enabled_default == true or
+                # Note: We cannot check env vars inside jq, so we will filter after
+                true
+              ) |
+
+              # Merge with defaults
+              . + {
+                fargate_weight: (.deployment.fargate_weight // $defaults.fargate_weight),
+                fargate_spot_weight: (.deployment.fargate_spot_weight // $defaults.fargate_spot_weight),
+                worker_prefetch_multiplier: ($defaults.worker_prefetch_multiplier),
+                worker_profile: ($defaults.worker_profile),
+                queue_scaling_scale_out_cooldown: ($defaults.queue_scaling_scale_out_cooldown),
+                cpu_scale_in_cooldown: ($defaults.cpu_scale_in_cooldown),
+                cpu_scale_in: (.scaling.cpu_scale_in // $defaults.cpu_scale_in // 10),
+                queue_scaling_steps: (.queue_scaling.steps // $defaults.queue_scaling_steps // []),
+                enable_var: .deployment.enable_var,
+                enabled_default: .deployment.enabled_default,
+                always_enabled: (.deployment.always_enabled // false),
+                name: .name
+              }
+            ]
+          ')
+
+          # Now filter based on environment variables
+          # Use temp file to avoid subshell issues
+          TEMP_FILE=$(mktemp)
+          echo '[]' > "$TEMP_FILE"
+
+          # Get number of workers
+          WORKER_COUNT=$(echo "$FILTERED" | jq 'length')
+
+          # Process each worker by index
+          for i in $(seq 0 $((WORKER_COUNT - 1))); do
+            worker=$(echo "$FILTERED" | jq --argjson idx "$i" '.[$idx]')
+            ENABLE_VAR=$(echo "$worker" | jq -r '.enable_var')
+            ENABLED_DEFAULT=$(echo "$worker" | jq -r '.enabled_default')
+            ALWAYS_ENABLED=$(echo "$worker" | jq -r '.always_enabled')
+            WORKER_NAME=$(echo "$worker" | jq -r '.name')
+
+            # Check if should deploy
+            SHOULD_DEPLOY="false"
+
+            if [ "$ALWAYS_ENABLED" = "true" ]; then
+              echo "  ✅ $WORKER_NAME is ALWAYS ENABLED (core worker)"
+              SHOULD_DEPLOY="true"
+            else
+              VAR_NAME="${ENABLE_VAR}"
+              VAR_VALUE="${!VAR_NAME:-}"
+
+              if [ "$VAR_VALUE" = "false" ]; then
+                echo "  ❌ $VAR_NAME is explicitly disabled"
+                SHOULD_DEPLOY="false"
+              elif [ -n "$VAR_VALUE" ] && [ "$VAR_VALUE" != "false" ]; then
+                echo "  ✅ $VAR_NAME is explicitly enabled"
+                SHOULD_DEPLOY="true"
+              elif [ "$ENABLED_DEFAULT" = "true" ]; then
+                echo "  ✅ $VAR_NAME using default (enabled)"
+                SHOULD_DEPLOY="true"
+              else
+                echo "  ❌ $VAR_NAME using default (disabled)"
+                SHOULD_DEPLOY="false"
+              fi
+            fi
+
+            if [ "$SHOULD_DEPLOY" = "true" ]; then
+              # Extract just the fields we need for the matrix
+              MATRIX_ENTRY=$(echo "$worker" | jq '{
+                queue: .queue,
+                stack_suffix: .stack_suffix,
+                cpu: .resources.cpu,
+                memory: .resources.memory,
+                min_capacity: .scaling.min,
+                max_capacity: .scaling.max,
+                desired_count: .scaling.desired,
+                cpu_scale_in: .cpu_scale_in,
+                worker_autoscale: .worker.autoscale,
+                queue_scaling_backlog: .queue_scaling.backlog,
+                queue_scaling_steps: .queue_scaling_steps,
+                fargate_weight: .fargate_weight,
+                fargate_spot_weight: .fargate_spot_weight,
+                worker_prefetch_multiplier: .worker_prefetch_multiplier,
+                worker_profile: .worker_profile,
+                queue_scaling_scale_out_cooldown: .queue_scaling_scale_out_cooldown,
+                cpu_scale_in_cooldown: .cpu_scale_in_cooldown
+              }')
+
+              # Append to temp file
+              jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]' "$TEMP_FILE" > "${TEMP_FILE}.tmp" && mv "${TEMP_FILE}.tmp" "$TEMP_FILE"
+            fi
+          done
+
+          # Get final result from temp file
+          FILTERED=$(cat "$TEMP_FILE")
+          rm -f "$TEMP_FILE"
+
+          # Output the matrix
+          MATRIX_OUTPUT=$(jq -nc --argjson filtered "$FILTERED" '{"include": $filtered}')
+          echo "matrix=$MATRIX_OUTPUT" >> $GITHUB_OUTPUT
+
+          # Debug output
+          echo ""
+          echo "Final matrix configuration:"
+          echo "$FILTERED" | jq '.'
+
+          # Summary
+          WORKER_COUNT=$(echo "$FILTERED" | jq 'length')
+          echo ""
+          echo "📊 Deployment Summary: $WORKER_COUNT workers will be deployed"
+
+  deploy-workers:
+    needs: prepare-matrix
+    if: needs.prepare-matrix.outputs.matrix != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+      max-parallel: 5 # Deploy up to 5 workers in parallel
+    uses: ./.github/workflows/deploy-worker.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: "RoboSystemsWorker${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}"
+      environment: ${{ inputs.environment }}
+      # GHA Runner Configuration
+      runner_config: ${{ inputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ inputs.aws_region }}
+      vpc_id: ${{ inputs.vpc_id }}
+      subnet_ids: ${{ inputs.subnet_ids }}
+      # Container & Application Configuration
+      ecr_repository_url: ${{ inputs.ecr_repository_url }}
+      ecr_image_tag: ${{ inputs.ecr_image_tag }}
+      # ECS & Compute Configuration
+      desired_count: "${{ matrix.desired_count }}"
+      cpu: "${{ matrix.cpu }}"
+      memory: "${{ matrix.memory }}"
+      fargate_weight: "${{ matrix.fargate_weight }}"
+      fargate_spot_weight: "${{ matrix.fargate_spot_weight }}"
+      # Auto-scaling Configuration
+      min_capacity: "${{ matrix.min_capacity }}"
+      max_capacity: "${{ matrix.max_capacity }}"
+      cpu_scale_in: "${{ matrix.cpu_scale_in }}"
+      # Worker Configuration
+      worker_queue: ${{ matrix.queue }}
+      worker_autoscale: "${{ matrix.worker_autoscale }}"
+      worker_prefetch_multiplier: "${{ matrix.worker_prefetch_multiplier }}"
+      worker_profile: "${{ matrix.worker_profile }}"
+      # Queue-Based Scale-Out
+      queue_scale_out_threshold: "${{ matrix.queue_scaling_backlog }}"
+      queue_scale_out_cooldown: "${{ matrix.queue_scaling_scale_out_cooldown }}"
+      queue_scale_out_evaluation_periods: "2"
+      queue_scaling_steps: "${{ toJson(matrix.queue_scaling_steps) }}"
+      # CPU-Based Scale-In (prevents killing active workers)
+      cpu_scale_in_cooldown: "${{ matrix.cpu_scale_in_cooldown }}"
+      # Cache Configuration
+      valkey_url: ${{ inputs.valkey_url }}
+      valkey_sg_id: ${{ inputs.valkey_sg_id }}
+      # Kuzu Configuration
+      kuzu_replica_alb_url: ${{ inputs.kuzu_replica_alb_url }}
+      shared_replica_alb_enabled: ${{ inputs.shared_replica_alb_enabled }}
+      # Other Configuration
+      refresh_ecs_service: ${{ inputs.refresh_ecs_service }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+
+  deploy-worker-beat:
+    needs: prepare-matrix
+    if: inputs.beat_enabled
+    uses: ./.github/workflows/deploy-worker-beat.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: "RoboSystemsBeat${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}"
+      environment: ${{ inputs.environment }}
+      # GHA Runner Configuration
+      runner_config: ${{ inputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ inputs.aws_region }}
+      # Infrastructure & Networking Configuration
+      vpc_id: ${{ inputs.vpc_id }}
+      subnet_ids: ${{ inputs.subnet_ids }}
+      # Container & Application Configuration
+      ecr_repository_url: ${{ inputs.ecr_repository_url }}
+      ecr_image_tag: ${{ inputs.ecr_image_tag }}
+      # ECS & Compute Configuration (beat-specific, lightweight)
+      cpu: "256"
+      memory: "512"
+      fargate_spot_weight: "80" # 80% Spot for cost savings on beat scheduler
+      fargate_weight: "20"
+      # Cache Configuration
+      valkey_url: ${{ inputs.valkey_url }}
+      valkey_sg_id: ${{ inputs.valkey_sg_id }}
+      # Kuzu Configuration
+      kuzu_replica_alb_url: ${{ inputs.kuzu_replica_alb_url }}
+      shared_replica_alb_enabled: ${{ inputs.shared_replica_alb_enabled }}
+      # Other Configuration
+      refresh_ecs_service: ${{ inputs.refresh_ecs_service }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-worker-monitor:
+    needs: prepare-matrix
+    uses: ./.github/workflows/deploy-worker-monitor.yml
+    with:
+      # Stack & Repository Configuration
+      stack_name: "RoboSystemsWorkerMonitor${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}"
+      environment: ${{ inputs.environment }}
+      # GHA Runner Configuration
+      runner_config: ${{ inputs.runner_config }}
+      # AWS Configuration
+      aws_region: ${{ inputs.aws_region }}
+      vpc_id: ${{ inputs.vpc_id }}
+      subnet_ids: ${{ inputs.subnet_ids }}
+      # Valkey Configuration
+      valkey_cluster_id: robosystems-${{ inputs.environment }}-valkey
+      valkey_sg_id: ${{ inputs.valkey_sg_id }}
+      # Lambda Configuration
+      lambda_code_bucket: robosystems-${{ inputs.environment }}-deployment
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

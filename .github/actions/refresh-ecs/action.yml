@@ -1,0 +1,268 @@
+name: "Refresh ECS Service Tasks"
+description: "Refreshes tasks in an ECS service by forcing a new deployment"
+
+inputs:
+  stack-name:
+    description: "Name of the CloudFormation stack containing the ECS service"
+    required: true
+  skip-autoscale-refresh:
+    description: "Whether to skip the service refresh"
+    required: true
+    default: "false"
+  max-wait-time:
+    description: "Maximum time to wait for service stabilization (in seconds)"
+    required: false
+    default: "600"
+  service-stability-delay:
+    description: "Initial delay before checking service stability (in seconds)"
+    required: false
+    default: "30"
+  service-type:
+    description: "Type of service being refreshed (api, worker, beat) for optimized timeouts"
+    required: false
+    default: "auto"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Refresh ECS Service Tasks
+      if: inputs.skip-autoscale-refresh != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "Getting ECS cluster name from CloudFormation outputs..."
+
+        # First try to get the cluster name from outputs
+        CLUSTER_NAME=$(aws cloudformation describe-stacks \
+          --stack-name ${{ inputs.stack-name }} \
+          --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue" \
+          --output text 2>/dev/null || true)
+
+        # If not found in outputs, try a more flexible approach
+        if [ -z "$CLUSTER_NAME" ] || [ "$CLUSTER_NAME" == "None" ]; then
+          echo "Could not find ClusterName in stack outputs, checking for other common output names..."
+
+          # Try alternative output keys
+          for OUTPUT_KEY in "WorkerClusterName" "ECSCluster" "ClusterArn" "Cluster"; do
+            CLUSTER_NAME=$(aws cloudformation describe-stacks \
+              --stack-name ${{ inputs.stack-name }} \
+              --query "Stacks[0].Outputs[?OutputKey=='${OUTPUT_KEY}'].OutputValue" \
+              --output text 2>/dev/null || true)
+
+            if [ -n "$CLUSTER_NAME" ] && [ "$CLUSTER_NAME" != "None" ]; then
+              echo "Found cluster name using output key: $OUTPUT_KEY"
+              break
+            fi
+          done
+        fi
+
+        # If still not found, try to construct it from the environment
+        if [ -z "$CLUSTER_NAME" ] || [ "$CLUSTER_NAME" == "None" ]; then
+          echo "Error: Could not determine ECS cluster name from outputs"
+          echo "Attempting to construct cluster name from stack name pattern..."
+
+          # Extract component and environment from stack name
+          # Expected patterns: RoboSystemsAPIProd, RoboSystemsWorkerDefaultStaging, etc.
+          if [[ ${{ inputs.stack-name }} =~ ^RoboSystems(Worker[A-Za-z]*|API|[A-Za-z]+)(Prod|Staging|Dev)$ ]]; then
+            COMPONENT=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+            ENVIRONMENT=$(echo "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
+
+            # Handle special cases and variations
+            if [[ "$COMPONENT" =~ ^worker ]]; then
+              # Handle various worker types: worker, workerdefault, workercritical, etc.
+              if [ "$COMPONENT" == "worker" ]; then
+                CLUSTER_NAME="robosystems-worker-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "workerdefault" ]; then
+                CLUSTER_NAME="robosystems-worker-default-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "workercritical" ]; then
+                CLUSTER_NAME="robosystems-worker-critical-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "workershared" ]; then
+                CLUSTER_NAME="robosystems-worker-shared-processing-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "workerextraction" ]; then
+                CLUSTER_NAME="robosystems-worker-extraction-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "workeringestion" ]; then
+                CLUSTER_NAME="robosystems-worker-ingestion-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "beat" ]; then
+                CLUSTER_NAME="robosystems-beat-${ENVIRONMENT}-cluster"
+              else
+                # Fallback for any other worker types
+                WORKER_TYPE=$(echo "$COMPONENT" | sed 's/^worker//')
+                CLUSTER_NAME="robosystems-worker-${WORKER_TYPE}-${ENVIRONMENT}-cluster"
+              fi
+            elif [ "$COMPONENT" == "api" ]; then
+              CLUSTER_NAME="robosystems-api-${ENVIRONMENT}-cluster"
+            else
+              CLUSTER_NAME="robosystems-${COMPONENT}-${ENVIRONMENT}-cluster"
+            fi
+
+            echo "Using constructed cluster name: $CLUSTER_NAME"
+          else
+            echo "Error: Could not parse stack name pattern"
+            exit 1
+          fi
+        fi
+
+        echo "Found ECS cluster: $CLUSTER_NAME"
+
+        # Determine service type for optimized timeouts
+        SERVICE_TYPE="${{ inputs.service-type }}"
+        if [ "$SERVICE_TYPE" == "auto" ]; then
+          # Auto-detect service type from stack name
+          if [[ "${{ inputs.stack-name }}" =~ API ]]; then
+            SERVICE_TYPE="api"
+          elif [[ "${{ inputs.stack-name }}" =~ Worker ]]; then
+            SERVICE_TYPE="worker"  
+          elif [[ "${{ inputs.stack-name }}" =~ Beat ]]; then
+            SERVICE_TYPE="beat"
+          else
+            SERVICE_TYPE="worker"  # Default to worker timeouts
+          fi
+        fi
+        
+        # Set optimized timeouts based on service type
+        case "$SERVICE_TYPE" in
+          "api")
+            # API services can shutdown quickly (no long-running tasks)
+            OPTIMIZED_MAX_WAIT=180        # 3 minutes
+            OPTIMIZED_STABILITY_DELAY=15   # 15 seconds
+            echo "Using API-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
+            ;;
+          "worker")
+            # Worker services need more time for task completion
+            OPTIMIZED_MAX_WAIT=600        # 10 minutes (current default)
+            OPTIMIZED_STABILITY_DELAY=30   # 30 seconds (current default)  
+            echo "Using worker-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
+            ;;
+          "beat")
+            # Beat services are lightweight schedulers
+            OPTIMIZED_MAX_WAIT=120        # 2 minutes
+            OPTIMIZED_STABILITY_DELAY=10   # 10 seconds
+            echo "Using beat-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
+            ;;
+          *)
+            # Use provided values or defaults
+            OPTIMIZED_MAX_WAIT=${{ inputs.max-wait-time }}
+            OPTIMIZED_STABILITY_DELAY=${{ inputs.service-stability-delay }}
+            echo "Using provided timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
+            ;;
+        esac
+
+        # Get the service name from stack outputs first
+        SERVICE_NAME=$(aws cloudformation describe-stacks \
+          --stack-name ${{ inputs.stack-name }} \
+          --query "Stacks[0].Outputs[?OutputKey=='ServiceName'].OutputValue" \
+          --output text 2>/dev/null || true)
+
+        # Try alternative output key if not found
+        if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" == "None" ]; then
+          SERVICE_NAME=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='WorkerServiceName'].OutputValue" \
+            --output text 2>/dev/null || true)
+        fi
+
+        if [ -n "$SERVICE_NAME" ] && [ "$SERVICE_NAME" != "None" ]; then
+          echo "Found service name from stack outputs: $SERVICE_NAME"
+        else
+          # If not found in outputs, list services in the cluster
+          echo "Getting services in the cluster..."
+          SERVICE_ARNS=$(aws ecs list-services --cluster "$CLUSTER_NAME" --query "serviceArns[]" --output text 2>/dev/null || true)
+
+          if [ -z "$SERVICE_ARNS" ] || [ "$SERVICE_ARNS" == "None" ]; then
+            echo "Error: No services found in cluster $CLUSTER_NAME"
+            exit 1
+          fi
+
+          # If multiple services, try to find the right one
+          SERVICE_COUNT=$(echo "$SERVICE_ARNS" | wc -w)
+          if [ "$SERVICE_COUNT" -eq 1 ]; then
+            SERVICE_NAME=$(basename "$SERVICE_ARNS")
+            echo "Found single service: $SERVICE_NAME"
+          else
+            echo "Multiple services found in cluster. Attempting to match service name..."
+
+            # Try to match service based on stack name pattern
+            for SERVICE_ARN in $SERVICE_ARNS; do
+              CURRENT_SERVICE_NAME=$(basename "$SERVICE_ARN")
+
+              # Check if service name contains "robosystems"
+              if [[ "$CURRENT_SERVICE_NAME" =~ robosystems ]]; then
+                SERVICE_NAME="$CURRENT_SERVICE_NAME"
+                echo "Matched service: $SERVICE_NAME"
+                break
+              fi
+            done
+
+            if [ -z "$SERVICE_NAME" ]; then
+              echo "Warning: Could not match specific service. Using first service."
+              SERVICE_NAME=$(basename $(echo "$SERVICE_ARNS" | cut -d' ' -f1))
+            fi
+          fi
+        fi
+
+        echo "Using service: $SERVICE_NAME"
+
+        # Force a new deployment
+        echo "Forcing new deployment of ECS service to refresh tasks..."
+        UPDATE_RESULT=$(aws ecs update-service \
+          --cluster "$CLUSTER_NAME" \
+          --service "$SERVICE_NAME" \
+          --force-new-deployment \
+          --output json)
+
+        if [ $? -ne 0 ]; then
+          echo "Error: Failed to update service"
+          exit 1
+        fi
+
+        echo "Service update initiated. New tasks will be deployed."
+
+        # Add a small delay before checking stability (using optimized timeout)
+        echo "Waiting ${OPTIMIZED_STABILITY_DELAY} seconds before checking stability..."
+        sleep ${OPTIMIZED_STABILITY_DELAY}
+
+        # Wait for service to stabilize with optimized timeout
+        echo "Waiting for service to stabilize (max ${OPTIMIZED_MAX_WAIT} seconds)..."
+
+        WAIT_START=$(date +%s)
+        MAX_WAIT=${OPTIMIZED_MAX_WAIT}
+
+        # Use AWS CLI wait with custom timeout
+        if timeout ${MAX_WAIT} aws ecs wait services-stable \
+          --cluster "$CLUSTER_NAME" \
+          --services "$SERVICE_NAME"; then
+          echo "Service stabilized with new tasks."
+        else
+          WAIT_END=$(date +%s)
+          WAIT_DURATION=$((WAIT_END - WAIT_START))
+
+          if [ $WAIT_DURATION -ge $MAX_WAIT ]; then
+            echo "Warning: Service stabilization timed out after ${MAX_WAIT} seconds"
+            echo "Service may still be updating. Checking current status..."
+
+            # Get current service status
+            SERVICE_STATUS=$(aws ecs describe-services \
+              --cluster "$CLUSTER_NAME" \
+              --services "$SERVICE_NAME" \
+              --query "services[0].deployments[?status=='PRIMARY'].{desired:desiredCount,running:runningCount}" \
+              --output json)
+
+            echo "Current service status: $SERVICE_STATUS"
+            echo "Proceeding despite timeout - service update was initiated successfully"
+          else
+            echo "Error: Service failed to stabilize"
+            exit 1
+          fi
+        fi
+
+        # Verify deployment
+        echo "Verifying deployment status..."
+        DEPLOYMENT_STATUS=$(aws ecs describe-services \
+          --cluster "$CLUSTER_NAME" \
+          --services "$SERVICE_NAME" \
+          --query "services[0].deployments[?status=='PRIMARY'].{taskDefinition:taskDefinition,desiredCount:desiredCount,runningCount:runningCount,status:status}" \
+          --output json)
+
+        echo "Deployment status: $DEPLOYMENT_STATUS"
+        echo "ECS service refresh completed successfully"

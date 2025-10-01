@@ -1,0 +1,77 @@
+Description: RoboSystems Prometheus Service - Amazon Managed Prometheus
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name (e.g., prod, staging)
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    ConstraintDescription: Must be prod or staging
+  ProjectName:
+    Type: String
+    Description: Project name for resource identification
+    Default: robosystems
+    AllowedPattern: ^[a-z][a-z0-9-]*[a-z0-9]$
+    ConstraintDescription: Must start with lowercase letter, contain only lowercase letters, numbers, and hyphens
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Observability
+
+Resources:
+  # Amazon Managed Prometheus workspace
+  PrometheusWorkspace:
+    Type: AWS::APS::Workspace
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Alias: !Sub "${ProjectName}-prometheus-${Environment}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+Outputs:
+  PrometheusWorkspaceArn:
+    Description: ARN of the Amazon Managed Prometheus workspace
+    Value: !GetAtt PrometheusWorkspace.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-PrometheusWorkspaceArn"
+
+  PrometheusWorkspaceId:
+    Description: ID of the Amazon Managed Prometheus workspace
+    Value: !GetAtt PrometheusWorkspace.WorkspaceId
+    Export:
+      Name: !Sub "${AWS::StackName}-PrometheusWorkspaceId"
+
+  PrometheusWorkspaceEndpoint:
+    Description: Endpoint of the Amazon Managed Prometheus workspace
+    Value: !GetAtt PrometheusWorkspace.PrometheusEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-PrometheusWorkspaceEndpoint"
+
+  PrometheusRemoteWriteEndpoint:
+    Description: Remote write endpoint for ADOT collectors
+    Value: !Sub "${PrometheusWorkspace.Arn}/api/v1/remote_write"
+    Export:
+      Name: !Sub "${AWS::StackName}-PrometheusRemoteWriteEndpoint"
+
+  PrometheusEnvironment:
+    Description: Environment for this Prometheus workspace
+    Value: !Ref Environment
+    Export:
+      Name: !Sub "${AWS::StackName}-PrometheusEnvironment"

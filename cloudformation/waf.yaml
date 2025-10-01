@@ -1,0 +1,419 @@
+Description: RoboSystems WAF Service - Web Application Firewall for ALB Protection
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name (e.g., prod, staging)
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    ConstraintDescription: Must be prod or staging
+
+  # ALB ARNs to protect
+  ApiAlbArn:
+    Type: String
+    Description: ARN of the API Application Load Balancer (internet-facing)
+    Default: ""
+
+  # Rate Limiting Configuration
+  RateLimitPerIP:
+    Type: Number
+    Description: Maximum requests per 5-minute window per IP
+    Default: 10000
+    MinValue: 100
+    MaxValue: 20000
+
+  # WAF Configuration
+  EnableGeoBlocking:
+    Type: String
+    Description: Enable geographic blocking (blocks non-US traffic to reduce costs)
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  EnableAwsManagedRules:
+    Type: String
+    Description: Enable AWS Managed Core Rule Set (adds $1/month but provides better protection)
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  # IP Allowlist Configuration
+  AllowedIPs:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of IP addresses/CIDRs to allowlist (bypass all WAF rules)
+    Default: "0.0.0.0/32"
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: WAF
+
+Conditions:
+  HasApiAlb: !Not [!Equals [!Ref ApiAlbArn, ""]]
+  EnableGeoBlockingCondition: !Equals [!Ref EnableGeoBlocking, "true"]
+  EnableAwsManagedRulesCondition: !Equals [!Ref EnableAwsManagedRules, "true"]
+
+Resources:
+  # IP Set for allow-listing (optional - for future use)
+  AllowedIPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: !Sub ${ServiceTag}-${Environment}-allowed-ips
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses: !Ref AllowedIPs
+      Description: Allowed IP addresses that bypass WAF rules
+      Tags:
+        - Key: Name
+          Value: !Sub ${ServiceTag}-${Environment}-allowed-ips
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Web ACL - Main WAF configuration
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub ${ServiceTag}-${Environment}-web-acl
+      Scope: REGIONAL
+      Description: !Sub WAF protection for ${ServiceTag} ${Environment} environment
+      DefaultAction:
+        Allow: {}
+      Rules:
+        # Rule 1: Allow whitelisted IPs (highest priority)
+        - Name: AllowWhitelistedIPs
+          Priority: 1
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt AllowedIPSet.Arn
+          Action:
+            Allow: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowWhitelistedIPs
+
+        # Rule 2: Rate limiting per IP
+        - Name: RateLimitPerIP
+          Priority: 2
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref RateLimitPerIP
+              AggregateKeyType: IP
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+                CustomResponseBodyKey: RateLimitExceeded
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitPerIP
+
+        # Rule 3: Block common attack patterns (SQL injection, XSS)
+        - Name: BlockCommonAttacks
+          Priority: 3
+          Statement:
+            OrStatement:
+              Statements:
+                # SQL Injection - Query Arguments
+                - SqliMatchStatement:
+                    FieldToMatch:
+                      AllQueryArguments: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: URL_DECODE
+                      - Priority: 1
+                        Type: HTML_ENTITY_DECODE
+                # SQL Injection - Request Body
+                - SqliMatchStatement:
+                    FieldToMatch:
+                      Body:
+                        OversizeHandling: CONTINUE
+                    TextTransformations:
+                      - Priority: 0
+                        Type: URL_DECODE
+                      - Priority: 1
+                        Type: HTML_ENTITY_DECODE
+                # SQL Injection - URI Path
+                - SqliMatchStatement:
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: URL_DECODE
+                      - Priority: 1
+                        Type: HTML_ENTITY_DECODE
+                # Cross-site scripting - Query Arguments
+                - XssMatchStatement:
+                    FieldToMatch:
+                      AllQueryArguments: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: URL_DECODE
+                      - Priority: 1
+                        Type: HTML_ENTITY_DECODE
+                # Cross-site scripting - Request Body
+                - XssMatchStatement:
+                    FieldToMatch:
+                      Body:
+                        OversizeHandling: CONTINUE
+                    TextTransformations:
+                      - Priority: 0
+                        Type: URL_DECODE
+                      - Priority: 1
+                        Type: HTML_ENTITY_DECODE
+                # Cross-site scripting - URI Path
+                - XssMatchStatement:
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: URL_DECODE
+                      - Priority: 1
+                        Type: HTML_ENTITY_DECODE
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: CommonAttackBlocked
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BlockCommonAttacks
+
+        # Rule 4: Size restrictions (prevent large payload attacks)
+        - Name: SizeRestrictions
+          Priority: 4
+          Statement:
+            OrStatement:
+              Statements:
+                # Block requests with body larger than 8MB
+                - SizeConstraintStatement:
+                    FieldToMatch:
+                      Body:
+                        OversizeHandling: MATCH
+                    ComparisonOperator: GT
+                    Size: 8388608
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+                # Block requests with headers larger than 8KB
+                - SizeConstraintStatement:
+                    FieldToMatch:
+                      Headers:
+                        MatchPattern:
+                          All: {}
+                        MatchScope: ALL
+                        OversizeHandling: MATCH
+                    ComparisonOperator: GT
+                    Size: 8192
+                    TextTransformations:
+                      - Priority: 0
+                        Type: NONE
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 413
+                CustomResponseBodyKey: PayloadTooLarge
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: SizeRestrictions
+
+        # Rule 5: Geographic blocking (optional - blocks non-US to reduce attack surface)
+        - !If
+          - EnableGeoBlockingCondition
+          - Name: GeoBlocking
+            Priority: 5
+            Statement:
+              NotStatement:
+                Statement:
+                  GeoMatchStatement:
+                    CountryCodes:
+                      - US
+                      - CA  # Allow Canada as well
+            Action:
+              Block:
+                CustomResponse:
+                  ResponseCode: 403
+                  CustomResponseBodyKey: GeoBlocked
+            VisibilityConfig:
+              SampledRequestsEnabled: true
+              CloudWatchMetricsEnabled: true
+              MetricName: GeoBlocking
+          - !Ref AWS::NoValue
+
+        # Rule 6: AWS Managed Core Rule Set (optional - adds protection but costs $1/month)
+        - !If
+          - EnableAwsManagedRulesCondition
+          - Name: AWSManagedRulesCommonRuleSet
+            Priority: 6
+            OverrideAction:
+              None: {}
+            Statement:
+              ManagedRuleGroupStatement:
+                VendorName: AWS
+                Name: AWSManagedRulesCommonRuleSet
+                ExcludedRules:  # Exclude rules that cause false positives with browser traffic
+                  - Name: NoUserAgent_HEADER  # Browsers always send User-Agent, but some tools don't
+                  - Name: UserAgent_BadBots_HEADER  # Can block legitimate browser user agents
+                  - Name: SizeRestrictions_BODY  # Already handled by our custom rule
+                  - Name: SizeRestrictions_QUERYSTRING  # Can block legitimate queries
+                  - Name: GenericRFI_BODY  # Can cause false positives with JSON payloads
+                  - Name: GenericRFI_QUERYARGUMENTS  # Can block legitimate query parameters
+                  - Name: GenericRFI_URIPATH  # Can block legitimate API paths
+                  - Name: RestrictedExtensions_URIPATH  # Can block legitimate API endpoints
+                  - Name: RestrictedExtensions_QUERYARGUMENTS  # Can block legitimate query params
+                  - Name: EC2MetaDataSSRF_BODY  # Can block legitimate requests with URLs
+                  - Name: EC2MetaDataSSRF_QUERYARGUMENTS  # Can block legitimate URL parameters
+            VisibilityConfig:
+              SampledRequestsEnabled: true
+              CloudWatchMetricsEnabled: true
+              MetricName: AWSManagedRulesCommonRuleSet
+          - !Ref AWS::NoValue
+
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub ${ServiceTag}-${Environment}-web-acl
+
+      # Custom response bodies
+      CustomResponseBodies:
+        RateLimitExceeded:
+          ContentType: APPLICATION_JSON
+          Content: '{"error": "Rate limit exceeded. Please try again later."}'
+        CommonAttackBlocked:
+          ContentType: APPLICATION_JSON
+          Content: '{"error": "Request blocked due to security rules."}'
+        PayloadTooLarge:
+          ContentType: APPLICATION_JSON
+          Content: '{"error": "Request payload too large."}'
+        GeoBlocked:
+          ContentType: APPLICATION_JSON
+          Content: '{"error": "Access denied from your location."}'
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${ServiceTag}-${Environment}-web-acl
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Associate WAF with API ALB (internet-facing)
+  ApiAlbAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: HasApiAlb
+    Properties:
+      ResourceArn: !Ref ApiAlbArn
+      WebACLArn: !GetAtt WebACL.Arn
+
+  # CloudWatch Dashboard for WAF metrics
+  WAFDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${ServiceTag}-${Environment}-waf
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/WAFV2", "AllowedRequests", { "stat": "Sum", "label": "Allowed" } ],
+                  [ ".", "BlockedRequests", { "stat": "Sum", "label": "Blocked" } ],
+                  [ ".", "CountedRequests", { "stat": "Sum", "label": "Counted" } ]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "WAF Request Summary",
+                "yAxis": {
+                  "left": {
+                    "min": 0
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/WAFV2", "BlockedRequests", { "stat": "Sum" } ]
+                ],
+                "period": 60,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Blocked Requests (1 minute)",
+                "yAxis": {
+                  "left": {
+                    "min": 0
+                  }
+                }
+              }
+            }
+          ]
+        }
+
+  # CloudWatch Alarm for high block rate
+  HighBlockRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${ServiceTag}-${Environment}-waf-high-block-rate
+      AlarmDescription: Alert when WAF blocks more than 100 requests per minute
+      MetricName: BlockedRequests
+      Namespace: AWS/WAFV2
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  WebACLId:
+    Description: ID of the Web ACL
+    Value: !Ref WebACL
+    Export:
+      Name: !Sub ${AWS::StackName}-WebACLId
+
+  WebACLArn:
+    Description: ARN of the Web ACL
+    Value: !GetAtt WebACL.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-WebACLArn
+
+  DashboardURL:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ServiceTag}-${Environment}-waf
+
+  AllowedIPSetArn:
+    Description: ARN of the allowed IP set (for adding trusted IPs)
+    Value: !GetAtt AllowedIPSet.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-AllowedIPSetArn
+
+  EstimatedMonthlyCost:
+    Description: Estimated monthly cost for WAF
+    Value: !If
+      - EnableAwsManagedRulesCondition
+      - "$6-7 (WebACL $5 + AWS Managed Rules $1 + requests ~$0.60-1.20)"
+      - "$5.60-6.20 (WebACL $5 + requests ~$0.60-1.20)"

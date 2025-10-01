@@ -1,0 +1,955 @@
+Description: RoboSystems Postgres Service - RDS Postgres and Aurora Postgres
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name (e.g., prod, staging)
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    ConstraintDescription: Must be prod or staging
+
+  # Infrastructure & Networking Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+  SubnetId1:
+    Type: AWS::EC2::Subnet::Id
+    Description: First subnet ID for RDS multi-AZ deployment
+  SubnetId2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Second subnet ID for RDS multi-AZ deployment
+
+  # Database Engine Configuration
+  DatabaseEngine:
+    Type: String
+    Description: Database engine type (aurora-postgresql for Aurora, postgres for RDS)
+    Default: postgres
+    AllowedValues:
+      - postgres
+      - aurora-postgresql
+    ConstraintDescription: Must be either postgres (RDS) or aurora-postgresql (Aurora)
+
+  # Instance & Database Configuration
+  DBInstanceClass:
+    Type: String
+    Description: Database instance type
+    Default: db.t4g.micro
+    AllowedValues:
+      - db.t4g.micro
+      - db.t4g.small
+      - db.t4g.medium
+      - db.r7g.large
+      - db.r7g.xlarge
+      - db.r7g.2xlarge
+    ConstraintDescription: Must be a valid database instance class
+  DBAllocatedStorage:
+    Type: Number
+    Description: Initial storage size in GB (ignored by Aurora - uses serverless storage)
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+    ConstraintDescription: Must be between 20 and 1000 GB
+  DBMaxAllocatedStorage:
+    Type: Number
+    Description: Maximum storage size in GB (ignored by Aurora - uses serverless storage)
+    Default: 100
+    MinValue: 20
+    MaxValue: 16384
+    ConstraintDescription: Must be between 20 and 16384 GB
+  DBInstanceName:
+    Type: String
+    Description: RDS instance identifier
+    Default: robosystems-iam
+    AllowedPattern: ^[a-z][a-z0-9-]*$
+    ConstraintDescription: Must begin with a letter and contain only lowercase
+      letters, numbers, and hyphens
+  DBName:
+    Type: String
+    Description: Initial database name
+    Default: robosystems
+    AllowedPattern: ^[a-z][a-z0-9_]*$
+    ConstraintDescription: Must begin with a letter and contain only lowercase
+      letters, numbers, and underscores
+
+  # Security & Access Configuration
+  DBUsername:
+    Type: String
+    Description: Master database username
+    MinLength: 1
+    MaxLength: 63
+    Default: postgres
+    AllowedPattern: ^[a-z][a-z0-9_]*$
+    ConstraintDescription: Must begin with a letter and contain only lowercase
+      letters, numbers, and underscores
+
+  # Lambda Configuration
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+  PostgresSecretsCodeKey:
+    Type: String
+    Description: S3 key for Postgres Secrets Lambda deployment package
+  PostgresRotationCodeKey:
+    Type: String
+    Description: S3 key for Postgres Rotation Lambda deployment package
+
+  # High Availability Configuration
+  EnableMultiAZ:
+    Type: String
+    Description: Enable Multi-AZ deployment for high availability (increases cost ~2x)
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    ConstraintDescription: Must be true or false
+
+  # Secret Rotation Parameters
+  PostgresRotationDays:
+    Type: Number
+    Description: Number of days between automatic password rotations
+    Default: 90
+    MinValue: 1
+    MaxValue: 365
+    ConstraintDescription: Must be between 1 and 365 days
+
+  # Monitoring & Observability Configuration
+  SNSAlertEmail:
+    Type: String
+    Description: Email for SNS alerts
+    ConstraintDescription: Must be a valid email address
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Postgres
+
+Conditions:
+  IsAurora: !Equals [!Ref DatabaseEngine, "aurora-postgresql"]
+  IsRDS: !Equals [!Ref DatabaseEngine, "postgres"]
+  EnableMultiAZCondition: !Equals [!Ref EnableMultiAZ, "true"]
+
+Resources:
+  # Common IAM policy for EC2 instances
+  CommonEC2Policy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Common policy for EC2 instances
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeTags
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+              - logs:DescribeLogGroups
+              - logs:CreateLogStream
+              - logs:CreateLogGroup
+              - logs:PutRetentionPolicy
+            Resource: "*"
+
+  # Secret for database password generation with automatic rotation
+  DBPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/postgres/password
+      Description: Database password for RoboSystems with automatic rotation
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "postgres"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+      Tags:
+        - Key: Name
+          Value: robosystems-postgres-secret
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Secret Rotation Lambda Function
+  PostgresSecretRotationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-postgres-rotation
+      Description: "Rotates PostgreSQL database passwords - auto-updates via S3 key hash"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt PostgresSecretRotationRole.Arn
+      Timeout: 300
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref RDSSecurityGroup
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
+      Environment:
+        Variables:
+          SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-rotation-lambda
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref PostgresRotationCodeKey
+
+  # Lambda Execution Role for Secret Rotation
+  PostgresSecretRotationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: SecretsManagerRotationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:UpdateSecretVersionStage
+                Resource: !Ref DBPasswordSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetRandomPassword
+                Resource: "*"
+              # KMS permissions for secret rotation
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-rotation-role
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Lambda Permission for Secrets Manager
+  PostgresSecretRotationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PostgresSecretRotationLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: secretsmanager.amazonaws.com
+
+  # Secret Rotation Schedule
+  DBPasswordSecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    DependsOn: PostgresSecretRotationPermission
+    Properties:
+      SecretId: !Ref DBPasswordSecret
+      RotationLambdaARN: !GetAtt PostgresSecretRotationLambda.Arn
+      RotationRules:
+        # Rotate based on PostgresRotationDays parameter
+        ScheduleExpression: !Sub rate(${PostgresRotationDays} days)
+      RotateImmediatelyOnUpdate: false
+
+  # CloudWatch Alarms for Rotation Monitoring
+  PostgresRotationFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-postgres-${Environment}-rotation-failure
+      AlarmDescription: Alert when PostgreSQL password rotation fails
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref PostgresSecretRotationLambda
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-rotation-failure-alarm
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Composite alarm for overall PostgreSQL health including rotation (RDS)
+  PostgresHealthCompositeAlarmRDS:
+    Type: AWS::CloudWatch::CompositeAlarm
+    Condition: IsRDS
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-postgres-${Environment}-health-composite
+      AlarmDescription: Overall PostgreSQL health including rotation status
+      AlarmRule: !Sub 'ALARM("${PostgresRotationFailureAlarm}") OR ALARM("${CloudWatchAlarmRoboSystemsPostgresAlarm}")'
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-health-composite
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Composite alarm for overall PostgreSQL health including rotation (Aurora)
+  PostgresHealthCompositeAlarmAurora:
+    Type: AWS::CloudWatch::CompositeAlarm
+    Condition: IsAurora
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-postgres-${Environment}-health-composite
+      AlarmDescription: Overall PostgreSQL health including rotation status
+      AlarmRule: !Sub 'ALARM("${PostgresRotationFailureAlarm}") OR ALARM("${CloudWatchAlarmAuroraCPU}")'
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-health-composite
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Database parameter group with SSL enforcement (RDS only)
+  RDSDBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Condition: IsRDS
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub Parameter group for ${DBInstanceName}-${Environment} database
+      Family: postgres14
+      Parameters:
+        rds.force_ssl: "1"
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}-paramgroup
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Aurora DB parameter group with SSL enforcement (Aurora only)
+  AuroraDBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Condition: IsAurora
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub Parameter group for ${DBInstanceName}-${Environment} Aurora database
+      Family: aurora-postgresql14
+      Parameters:
+        rds.force_ssl: "1"
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}-aurora-paramgroup
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Aurora cluster parameter group (Aurora only)
+  AuroraClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Condition: IsAurora
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub Cluster parameter group for ${DBInstanceName}-${Environment} Aurora cluster
+      Family: aurora-postgresql14
+      Parameters:
+        rds.force_ssl: "1"
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}-aurora-cluster-paramgroup
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Database subnet group for multi-AZ deployment
+  RDSDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      DBSubnetGroupDescription: !Sub Subnet group for ${DBInstanceName}-${Environment} database
+      SubnetIds:
+        - !Ref SubnetId1
+        - !Ref SubnetId2
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}-subnetgroup
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Security group for PostgreSQL database access
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: !Sub Security group for ${DBInstanceName}-${Environment} database
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/16 # Restrict to VPC CIDR only
+      Tags:
+        - Key: Name
+          Value: !Sub sg-postgres-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Aurora PostgreSQL Cluster (Aurora only)
+  AuroraDBCluster:
+    Type: AWS::RDS::DBCluster
+    Condition: IsAurora
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBClusterIdentifier: !Sub ${DBInstanceName}-${Environment}
+      DatabaseName: !Ref DBName
+      Engine: aurora-postgresql
+      EngineVersion: "14.17"
+      EngineMode: provisioned
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref RDSDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !GetAtt RDSSecurityGroup.GroupId
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: 03:00-04:00
+      PreferredMaintenanceWindow: sun:04:30-sun:05:30
+      DBClusterParameterGroupName: !Ref AuroraClusterParameterGroup
+      StorageEncrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}-cluster
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Aurora DB Instance (Aurora only)
+  AuroraDBInstance:
+    Type: AWS::RDS::DBInstance
+    Condition: IsAurora
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceClass: !Ref DBInstanceClass
+      DBClusterIdentifier: !Ref AuroraDBCluster
+      Engine: aurora-postgresql
+      DBParameterGroupName: !Ref AuroraDBParameterGroup
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}-instance
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # PostgreSQL RDS instance (RDS only)
+  RDSDBInstance:
+    Type: AWS::RDS::DBInstance
+    Condition: IsRDS
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBName: !Ref DBName
+      Engine: postgres
+      EngineVersion: "14.17"
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      MaxAllocatedStorage: !Ref DBMaxAllocatedStorage
+      StorageType: gp3
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref RDSDBSubnetGroup
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      PubliclyAccessible: false
+      MultiAZ: !If [EnableMultiAZCondition, true, false]
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: 03:00-04:00
+      PreferredMaintenanceWindow: sun:04:30-sun:05:30
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      DBInstanceIdentifier: !Sub ${DBInstanceName}-${Environment}
+      DBParameterGroupName: !Ref RDSDBParameterGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${DBInstanceName}-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # SNS topic for PostgreSQL monitoring alerts
+  PostgresAlertTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TopicName: !Sub "robosystems-postgres-${Environment}-alerts"
+      DisplayName: !Sub "RoboSystems PostgreSQL ${Environment} Alerts"
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-alerts
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # CloudWatch alarm for low storage space (RDS only - Aurora storage is serverless)
+  CloudWatchAlarmRoboSystemsPostgresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsRDS
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ActionsEnabled: true
+      AlarmName: !Sub robosystems-postgres-${Environment}-storage-low
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions:
+        - Value: !Sub ${DBInstanceName}-${Environment}
+          Name: DBInstanceIdentifier
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 1000000000
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-free-storage-space-alarm
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # CloudWatch alarm for Aurora CPU utilization
+  CloudWatchAlarmAuroraCPU:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsAurora
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ActionsEnabled: true
+      AlarmName: !Sub robosystems-postgres-${Environment}-aurora-cpu-high
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Value: !Sub ${DBInstanceName}-${Environment}
+          Name: DBClusterIdentifier
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref PostgresAlertTopic
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-aurora-cpu-high-alarm
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # CloudWatch event rule for RDS state changes
+  RDSStateChangeRule:
+    Type: AWS::Events::Rule
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub ${AWS::StackName}-rds-state-change
+      Description: Trigger Lambda when RDS instance becomes available
+      EventPattern:
+        source:
+          - aws.rds
+        detail-type:
+          - RDS DB Instance Event
+        detail:
+          EventCategories:
+            - availability
+          Message:
+            - prefix: DB instance restarted
+            - prefix: DB instance started
+            - prefix: DB instance available
+          SourceIdentifier: !If
+            - IsAurora
+            - - !Sub ${DBInstanceName}-${Environment}
+            - - !Sub ${DBInstanceName}-${Environment}
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt PostgresSecretsUpdateLambda.Arn
+          Id: PostgresSecretsUpdateLambdaTarget
+
+  # Lambda permission for CloudWatch Events
+  LambdaPermissionForCloudWatchEvents:
+    Type: AWS::Lambda::Permission
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !GetAtt PostgresSecretsUpdateLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RDSStateChangeRule.Arn
+
+  # Lambda function for updating Secrets Manager
+  PostgresSecretsUpdateLambda:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-secrets-update-lambda
+      Description: "Updates PostgreSQL secrets - auto-updates via S3 key hash"
+      Handler: index.lambda_handler
+      Role: !GetAtt PostgresSecretsUpdateLambdaRole.Arn
+      Runtime: python3.12
+      Timeout: 300
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          DATABASE_ENGINE: !Ref DatabaseEngine
+          POSTGRES_USERNAME: !Ref DBUsername
+          POSTGRES_PASSWORD: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}"
+          POSTGRES_DB_INSTANCE: !Sub ${DBInstanceName}-${Environment}
+          POSTGRES_DB_NAME: !Ref DBName
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-secrets-update-lambda
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref PostgresSecretsCodeKey
+  PostgresSecretsUpdateLambdaRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: RDSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                Resource: "*"
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DBPasswordSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:TagResource
+                Resource:
+                  - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}
+                  - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*
+              # KMS permissions for Lambda secret operations
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-postgres-secrets-update-lambda-role
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+Outputs:
+  DatabaseEndpoint:
+    Description: Endpoint of the PostgreSQL database (Aurora cluster or RDS instance)
+    Value: !If
+      - IsAurora
+      - !GetAtt AuroraDBCluster.Endpoint.Address
+      - !GetAtt RDSDBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DatabaseEndpoint
+
+  # Legacy output for backwards compatibility
+  RDSInstanceEndpoint:
+    Description: Endpoint of the PostgreSQL database (legacy name for compatibility)
+    Value: !If
+      - IsAurora
+      - !GetAtt AuroraDBCluster.Endpoint.Address
+      - !GetAtt RDSDBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSEndpoint
+
+  PostgresSecretArn:
+    Description: ARN pattern for the PostgreSQL Secret in Secrets Manager
+    Value: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/postgres
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PostgresSecretArnPattern
+
+  DatabasePort:
+    Description: Port of the PostgreSQL database
+    Value: !If
+      - IsAurora
+      - !GetAtt AuroraDBCluster.Endpoint.Port
+      - !GetAtt RDSDBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DatabasePort
+
+  # Legacy output for backwards compatibility
+  RDSPort:
+    Description: Port of the PostgreSQL database (legacy name for compatibility)
+    Value: !If
+      - IsAurora
+      - !GetAtt AuroraDBCluster.Endpoint.Port
+      - !GetAtt RDSDBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSPort
+
+  DatabaseIdentifier:
+    Description: Identifier of the PostgreSQL database
+    Value: !If
+      - IsAurora
+      - !Ref AuroraDBCluster
+      - !Ref RDSDBInstance
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DatabaseIdentifier
+
+  # Legacy output for backwards compatibility
+  RDSIdentifier:
+    Description: Identifier of the PostgreSQL database (legacy name for compatibility)
+    Value: !If
+      - IsAurora
+      - !Ref AuroraDBCluster
+      - !Ref RDSDBInstance
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSIdentifier
+
+  DatabaseEngine:
+    Description: Database engine type (aurora-postgresql or postgres)
+    Value: !Ref DatabaseEngine
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DatabaseEngine
+
+  RDSSecurityGroupId:
+    Description: ID of the RDS security group
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSSecurityGroupId
+
+  RDSDatabaseName:
+    Description: Name of the PostgreSQL database
+    Value: !Ref DBName
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSDatabaseName
+
+  RDSUsername:
+    Description: Master username for the PostgreSQL database
+    Value: !Ref DBUsername
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSUsername
+
+  RDSAllocatedStorage:
+    Description: Allocated storage for the PostgreSQL database in GB
+    Value: !Ref DBAllocatedStorage
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSAllocatedStorage
+
+  RDSPasswordSecretArn:
+    Description: ARN of the PostgreSQL password secret
+    Value: !Ref DBPasswordSecret
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-RDSPasswordSecretArn
+
+  PostgresRotationLambdaArn:
+    Description: ARN of the PostgreSQL password rotation Lambda function
+    Value: !GetAtt PostgresSecretRotationLambda.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PostgresRotationLambdaArn
+
+  PostgresRotationScheduleArn:
+    Description: ARN of the PostgreSQL password rotation schedule
+    Value: !Ref DBPasswordSecretRotationSchedule
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PostgresRotationScheduleArn
+
+  PostgresRotationDaysConfigured:
+    Description: Number of days between automatic password rotations
+    Value: !Ref PostgresRotationDays
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PostgresRotationDays
+
+  MultiAZEnabled:
+    Description: Whether Multi-AZ deployment is enabled for high availability
+    Value: !If [EnableMultiAZCondition, "true", "false"]
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-MultiAZEnabled

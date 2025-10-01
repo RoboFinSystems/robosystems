@@ -1,0 +1,150 @@
+name: "Handle Deployment Failure"
+description: "Updates deployment status with detailed failure information"
+
+inputs:
+  deployment-id:
+    description: "The deployment ID to update"
+    required: true
+  environment:
+    description: "The deployment environment"
+    required: true
+  github-token:
+    description: "GitHub token for API access"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Gather Failure Information
+      id: failure-info
+      shell: bash
+      run: |
+        echo "Gathering failure information for deployment..."
+        
+        # Get current workflow run details
+        WORKFLOW_RUN=$(gh api \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          /repos/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        
+        # Get all jobs for this workflow run
+        JOBS=$(gh api \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          /repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs)
+        
+        # Extract failed jobs
+        FAILED_JOBS=$(echo "$JOBS" | jq -r '.jobs[] | select(.status == "completed" and .conclusion == "failure") | .name')
+        
+        # Create failure description
+        if [ -n "$FAILED_JOBS" ]; then
+          FAILURE_DESC="${{ inputs.environment }} Deployment Failed - Failed jobs: $(echo $FAILED_JOBS | tr '\n' ', ')"
+        else
+          FAILURE_DESC="${{ inputs.environment }} Deployment Failed"
+        fi
+        
+        echo "failure_description=$FAILURE_DESC" >> $GITHUB_OUTPUT
+        
+        # Get detailed error messages from failed jobs
+        FAILED_STEPS=""
+        for job in $(echo "$JOBS" | jq -r '.jobs[] | select(.status == "completed" and .conclusion == "failure") | .id'); do
+          JOB_NAME=$(echo "$JOBS" | jq -r ".jobs[] | select(.id == $job) | .name")
+          
+          # Get failed steps for this job
+          STEPS=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            /repos/${{ github.repository }}/actions/jobs/$job/steps)
+          
+          FAILED_STEP_NAMES=$(echo "$STEPS" | jq -r '.steps[] | select(.conclusion == "failure") | .name')
+          
+          if [ -n "$FAILED_STEP_NAMES" ]; then
+            FAILED_STEPS="${FAILED_STEPS}Job '$JOB_NAME' failed at: $(echo $FAILED_STEP_NAMES | tr '\n' ', ')\n"
+          fi
+        done
+        
+        echo "failed_steps<<EOF" >> $GITHUB_OUTPUT
+        echo "$FAILED_STEPS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+    
+    - name: Update Deployment Status
+      uses: chrnorm/deployment-status@v2
+      with:
+        token: ${{ inputs.github-token }}
+        state: failure
+        deployment-id: ${{ inputs.deployment-id }}
+        description: ${{ steps.failure-info.outputs.failure_description }}
+    
+    - name: Add Deployment Comment
+      if: steps.failure-info.outputs.failed_steps != ''
+      shell: bash
+      run: |
+        # Get the deployment URL
+        DEPLOYMENT=$(gh api \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          /repos/${{ github.repository }}/deployments/${{ inputs.deployment-id }})
+        
+        # Create a comment with failure details
+        COMMENT_BODY="## Deployment Failure Details\n\n"
+        COMMENT_BODY="${COMMENT_BODY}**Environment:** ${{ inputs.environment }}\n"
+        COMMENT_BODY="${COMMENT_BODY}**Workflow Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})\n\n"
+        COMMENT_BODY="${COMMENT_BODY}### Failed Steps:\n"
+        COMMENT_BODY="${COMMENT_BODY}${{ steps.failure-info.outputs.failed_steps }}\n"
+        COMMENT_BODY="${COMMENT_BODY}\n[View Full Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        
+        # Create issue comment if there's a related PR
+        if [ -n "${{ github.event.pull_request.number }}" ]; then
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "$COMMENT_BODY"
+        fi
+        
+        # Also create a deployment status with the detailed info
+        gh api \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          -X POST \
+          /repos/${{ github.repository }}/deployments/${{ inputs.deployment-id }}/statuses \
+          -f state='error' \
+          -f description="${{ steps.failure-info.outputs.failure_description }}" \
+          -f environment="${{ inputs.environment }}" \
+          -f log_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+    
+    - name: Ensure Deployment is Marked as Failed
+      if: always()
+      shell: bash
+      run: |
+        # Double-check that the deployment is marked as failed
+        # Sometimes GitHub can have race conditions with deployment status updates
+        
+        sleep 5  # Brief delay to ensure previous updates are processed
+        
+        # Get current deployment status
+        CURRENT_STATUS=$(gh api \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          /repos/${{ github.repository }}/deployments/${{ inputs.deployment-id }}/statuses \
+          | jq -r '.[0].state // "unknown"')
+        
+        echo "Current deployment status: $CURRENT_STATUS"
+        
+        # If it's still not failed, try one more time
+        if [ "$CURRENT_STATUS" != "failure" ] && [ "$CURRENT_STATUS" != "error" ]; then
+          echo "Deployment still not marked as failed, updating again..."
+          
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -X POST \
+            /repos/${{ github.repository }}/deployments/${{ inputs.deployment-id }}/statuses \
+            -f state='failure' \
+            -f description="${{ inputs.environment }} Deployment Failed - Check logs for details" \
+            -f environment="${{ inputs.environment }}" \
+            -f log_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}

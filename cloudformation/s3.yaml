@@ -1,0 +1,656 @@
+Description: RoboSystems File Storage Service - S3 Buckets and IAM Policies
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name (e.g., prod, staging)
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    ConstraintDescription: Must be prod or staging
+
+  # AWS Configuration
+  AwsRegion:
+    Type: String
+    Description: AWS region
+    Default: us-east-1
+    AllowedPattern: ^[a-z]{2}-[a-z]+-[0-9]$
+    ConstraintDescription: Must be a valid AWS region
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: S3
+
+  # Domain Configuration for Public CDN
+  PublicDomainName:
+    Type: String
+    Description: Domain name for public data CDN (e.g., public.robosystems.ai)
+    Default: ""
+
+  HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID for the domain
+    Default: ""
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref PublicDomainName, ""]]
+
+Resources:
+  S3BucketRoboSystems:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub robosystems-${Environment}
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+          - Id: TransitionToIntelligentTiering
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: INTELLIGENT_TIERING
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-bucket
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # SEC Processed Data Bucket (Kuzu ingestion source)
+  S3BucketSECProcessed:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub robosystems-sec-processed-${Environment}
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIntelligentTiering
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 0
+                StorageClass: INTELLIGENT_TIERING
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-sec-processed-bucket
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: ProcessedData
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # SEC Raw Data Bucket (original filings)
+  S3BucketSECRaw:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub robosystems-sec-raw-${Environment}
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIntelligentTiering
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 0
+                StorageClass: INTELLIGENT_TIERING
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-sec-raw-bucket
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: RawData
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Public Data Repository Bucket (for all publicly accessible data including SEC textblocks)
+  S3BucketPublicData:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub robosystems-public-data-${Environment}
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIntelligentTiering
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 0
+                StorageClass: INTELLIGENT_TIERING
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - "*"
+            AllowedMethods:
+              - GET
+              - HEAD
+            AllowedHeaders:
+              - "*"
+            MaxAge: 3600
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-public-data-bucket
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: PublicData
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Bucket Policy for CloudFront OAC Access Only
+  S3BucketPublicDataPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3BucketPublicData
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Allow CloudFront OAC to read objects
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource: !Sub ${S3BucketPublicData.Arn}/*
+            Condition:
+              StringEquals:
+                "AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+          # Deny all non-HTTPS requests
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub ${S3BucketPublicData.Arn}/*
+              - !GetAtt S3BucketPublicData.Arn
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  # ACM Certificate for Public Data CDN (conditional)
+  PublicDataCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: HasCustomDomain
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DomainName: !Ref PublicDomainName
+      DomainValidationOptions:
+        - DomainName: !Ref PublicDomainName
+          HostedZoneId: !Ref HostedZoneId
+      ValidationMethod: DNS
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-public-data-cert
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudFront Origin Access Identity
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub OAI for Public Data Repository ${Environment}
+
+  # CloudFront Distribution for Public Data Repository
+  # Origin Access Control for secure CloudFront -> S3 access
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${Environment}-public-data-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+        Description: "Origin Access Control for Public Data Repository"
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub Public Data CDN - ${Environment}
+        Enabled: true
+        HttpVersion: http2
+        PriceClass: PriceClass_100 # US, Canada, Europe (cheapest)
+        Aliases: !If
+          - HasCustomDomain
+          - - !Ref PublicDomainName
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref PublicDataCertificate
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - !Ref AWS::NoValue
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt S3BucketPublicData.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          ResponseHeadersPolicyId: 5cc3b908-e619-4b99-88e5-2cf7f45965bd # Managed-CORS-with-preflight
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 300
+          - ErrorCode: 403
+            ResponseCode: 403
+            ResponsePagePath: /403.html
+            ErrorCachingMinTTL: 300
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-public-data-cdn
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: PublicDataCDN
+
+  # Route53 Record for Public Data CDN (conditional)
+  PublicDataDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref PublicDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt CloudFrontDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2 # CloudFront's hosted zone ID
+        EvaluateTargetHealth: false
+
+  # Kuzu Database Sync Bucket (reader synchronization)
+  S3BucketKuzuDatabases:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub robosystems-kuzu-databases-${Environment}
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            ExpirationInDays: 30
+          - Id: TransitionToIntelligentTiering
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 0
+                StorageClass: INTELLIGENT_TIERING
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-kuzu-databases-bucket
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: KuzuBackups
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Deployment Bucket (Lambda packages, scripts, etc.)
+  S3BucketDeployment:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      BucketName: !Sub robosystems-${Environment}-deployment
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: false
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLambdaVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+          - Id: CleanupIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-${Environment}-deployment-bucket
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: Deployment
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM Managed Policy for Kuzu Writers (read SEC processed, write sync buckets)
+  KuzuWriterS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ManagedPolicyName: !Sub ${AWS::StackName}-kuzu-writer-s3-policy-${Environment}
+      Description: S3 access policy for Kuzu writer instances
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt S3BucketSECRaw.Arn
+              - !Sub ${S3BucketSECRaw.Arn}/*
+              - !GetAtt S3BucketSECProcessed.Arn
+              - !Sub ${S3BucketSECProcessed.Arn}/*
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt S3BucketKuzuDatabases.Arn
+              - !Sub ${S3BucketKuzuDatabases.Arn}/*
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt S3BucketPublicData.Arn
+              - !Sub ${S3BucketPublicData.Arn}/*
+
+  # IAM Managed Policy for Kuzu Readers (read-only access to sync bucket)
+  KuzuReaderS3Policy:
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ManagedPolicyName: !Sub ${AWS::StackName}-kuzu-reader-s3-policy-${Environment}
+      Description: S3 read-only access policy for Kuzu reader instances
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt S3BucketKuzuDatabases.Arn
+              - !Sub ${S3BucketKuzuDatabases.Arn}/*
+
+  # AWS Secrets Manager Secret for S3
+  S3Secret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/s3
+      Description: !Sub S3 configuration for ${Environment} environment
+      SecretString: !Sub |
+        {
+          "AWS_S3_BUCKET":"${S3BucketRoboSystems}",
+          "SEC_RAW_BUCKET":"${S3BucketSECRaw}",
+          "SEC_PROCESSED_BUCKET":"${S3BucketSECProcessed}",
+          "PUBLIC_DATA_BUCKET":"${S3BucketPublicData}",
+          "PUBLIC_DATA_CDN_URL":"https://${CloudFrontDistribution.DomainName}",
+          "KUZU_S3_BUCKET":"${S3BucketKuzuDatabases}",
+          "DEPLOYMENT_BUCKET":"${S3BucketDeployment}",
+          "AWS_REGION":"${AwsRegion}"
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems/${Environment}/s3
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+Outputs:
+  S3BucketName:
+    Description: Name of the S3 bucket
+    Value: !Ref S3BucketRoboSystems
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketName
+  S3BucketArn:
+    Description: ARN of the S3 bucket
+    Value: !GetAtt S3BucketRoboSystems.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketArn
+  S3SecretArn:
+    Description: ARN of the S3 Secret in Secrets Manager
+    Value: !Ref S3Secret
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-S3SecretArn
+
+  S3BucketUrl:
+    Description: URL of the S3 bucket
+    Value: !Sub https://${S3BucketRoboSystems}.s3.${AWS::URLSuffix}
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketUrl
+
+  S3BucketRegion:
+    Description: Region of the S3 bucket
+    Value: !Ref AwsRegion
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketRegion
+
+  # SEC Raw Bucket Outputs
+  SECRawBucketName:
+    Description: Name of the SEC raw data bucket
+    Value: !Ref S3BucketSECRaw
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-SECRawBucketName
+
+  SECRawBucketArn:
+    Description: ARN of the SEC raw data bucket
+    Value: !GetAtt S3BucketSECRaw.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-SECRawBucketArn
+
+  # SEC Processed Bucket Outputs
+  SECProcessedBucketName:
+    Description: Name of the SEC processed data bucket
+    Value: !Ref S3BucketSECProcessed
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-SECProcessedBucketName
+
+  SECProcessedBucketArn:
+    Description: ARN of the SEC processed data bucket
+    Value: !GetAtt S3BucketSECProcessed.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-SECProcessedBucketArn
+
+  # Kuzu Database Sync Bucket Outputs
+  KuzuDatabasesBucketName:
+    Description: Name of the Kuzu databases sync bucket
+    Value: !Ref S3BucketKuzuDatabases
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-KuzuDatabasesBucketName
+
+  KuzuDatabasesBucketArn:
+    Description: ARN of the Kuzu databases sync bucket
+    Value: !GetAtt S3BucketKuzuDatabases.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-KuzuDatabasesBucketArn
+
+  # Policy ARNs for use by other stacks
+  KuzuWriterS3PolicyArn:
+    Description: ARN of the Kuzu writer S3 policy
+    Value: !Ref KuzuWriterS3Policy
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-KuzuWriterS3PolicyArn
+
+  KuzuReaderS3PolicyArn:
+    Description: ARN of the Kuzu reader S3 policy
+    Value: !Ref KuzuReaderS3Policy
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-KuzuReaderS3PolicyArn
+
+  # Deployment Bucket Outputs
+  DeploymentBucketName:
+    Description: Name of the deployment bucket
+    Value: !Ref S3BucketDeployment
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DeploymentBucketName
+
+  DeploymentBucketArn:
+    Description: ARN of the deployment bucket
+    Value: !GetAtt S3BucketDeployment.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-DeploymentBucketArn
+
+  # Public Data Repository Outputs
+  PublicDataBucketName:
+    Description: Name of the public data repository bucket
+    Value: !Ref S3BucketPublicData
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PublicDataBucketName
+
+  PublicDataBucketArn:
+    Description: ARN of the public data repository bucket
+    Value: !GetAtt S3BucketPublicData.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PublicDataBucketArn
+
+  PublicDataCDNURL:
+    Description: CloudFront distribution URL for public data
+    Value: !If
+      - HasCustomDomain
+      - !Sub https://${PublicDomainName}
+      - !Sub https://${CloudFrontDistribution.DomainName}
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-PublicDataCDNURL
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID for public data
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-CloudFrontDistributionId

@@ -1,0 +1,276 @@
+name: Test
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: "3.12"
+      runner_config:
+        required: true
+        type: string
+        description: "Runner configuration JSON (from runner availability check)"
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 10
+    env:
+      # Environment setup
+      ENVIRONMENT: test
+      LOG_LEVEL: INFO
+      # Use fixed ports for robosystems-service
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
+      POSTGRES_PASSWORD: postgres
+      # Kuzu Configuration
+      KUZU_DATABASE_PATH: ./data/kuzu-dbs
+      KUZU_MAX_DATABASES_PER_NODE: "50"
+      KUZU_API_URL: http://localhost:8001
+      KUZU_REPLICA_ALB_URL: http://localhost:8003
+      AWS_ENDPOINT_URL: http://localhost:4566
+      # JWT and security secrets for authentication (test environment)
+      JWT_SECRET_KEY: test-jwt-secret-key-12345678901234567890abcdef
+      CONNECTION_CREDENTIALS_KEY: test-connection-credentials-key-12345678901234567890abcdef
+      # Celery/Redis Configuration (with authentication)
+      VALKEY_URL: redis://localhost:6379
+      VALKEY_AUTH_TOKEN: valkey # Must match pytest.ini
+      # AI Configuration
+      ANTHROPIC_API_KEY: test-anthropic-key
+      ANTHROPIC_MODEL: claude-sonnet-4-20250514
+      # External Service Configuration (test values)
+      INTUIT_CLIENT_ID: test-intuit-client-id
+      INTUIT_CLIENT_SECRET: test-intuit-secret
+      INTUIT_ENVIRONMENT: sandbox
+      INTUIT_REDIRECT_URI: http://localhost:8000/auth/callback
+      SEC_GOV_USER_AGENT: test-user-agent test@example.com
+      OPENFIGI_API_KEY: test-openfigi-key
+      # LocalStack S3 Configuration for testing
+      AWS_S3_BUCKET: robosystems-local
+      AWS_S3_ACCESS_KEY_ID: test
+      AWS_S3_SECRET_ACCESS_KEY: test
+      AWS_REGION: us-east-1
+      # Kuzu Backup Configuration
+      KUZU_BACKUP_ENCRYPTION_KEY: test-encryption-key-dev
+      # Queue Management Configuration (from pytest.ini)
+      ADMISSION_MEMORY_THRESHOLD: "99.0"
+      ADMISSION_CPU_THRESHOLD: "99.0"
+      ADMISSION_QUEUE_THRESHOLD: "0.95"
+      QUERY_QUEUE_MAX_SIZE: "10000"
+      QUERY_QUEUE_MAX_CONCURRENT: "100"
+      QUERY_QUEUE_MAX_PER_USER: "100"
+      QUERY_QUEUE_TIMEOUT: "600"
+      KUZU_HTTP_TIMEOUT: "60"
+      KUZU_QUERY_TIMEOUT: "60"
+      KUZU_MAX_QUERY_LENGTH: "100000"
+      # Feature Flags (test configuration)
+      USER_REGISTRATION_ENABLED: "true"
+      RATE_LIMIT_ENABLED: "false"
+      SSE_ENABLED: "true"
+      OTEL_ENABLED: "false"
+      LOAD_SHEDDING_ENABLED: "true"
+      CSP_TRUSTED_TYPES_ENABLED: "false"
+      MCP_AUTO_LIMIT_ENABLED: "true"
+      CONNECTION_SEC_ENABLED: "true"
+      CONNECTION_QUICKBOOKS_ENABLED: "true"
+      CONNECTION_PLAID_ENABLED: "true"
+      BILLING_ENABLED: "true"
+      BILLING_PREMIUM_PLANS_ENABLED: "true"
+      SECURITY_AUDIT_ENABLED: "true"
+      KUZU_CIRCUIT_BREAKERS_ENABLED: "true"
+      KUZU_REDIS_CACHE_ENABLED: "true"
+      KUZU_RETRY_LOGIC_ENABLED: "true"
+      KUZU_HEALTH_CHECKS_ENABLED: "true"
+      SHARED_REPLICA_ALB_ENABLED: "false"
+      SUBGRAPH_CREATION_ENABLED: "true"
+      BACKUP_CREATION_ENABLED: "true"
+      AGENT_POST_ENABLED: "true"
+      EMAIL_VERIFICATION_ENABLED: "true"
+      CAPTCHA_ENABLED: "false"
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: robosystems_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      # Kuzu runs as file-based database, no service container needed
+      # Graph databases are created in ./data/kuzu-dbs/ directory during tests
+      valkey:
+        # Note: GitHub Actions doesn't support custom commands for service containers
+        # We'll configure authentication in a setup step instead
+        image: valkey/valkey:8.0-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+      localstack:
+        image: localstack/localstack:3.0
+        env:
+          SERVICES: s3,secretsmanager,iam
+          DEBUG: 1
+          DATA_DIR: /var/lib/localstack
+          PERSISTENCE: 1
+          S3_SKIP_SIGNATURE_VALIDATION: 1
+          S3_SKIP_KMS_KEY_VALIDATION: 1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 4566:4566
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Setup Python (GitHub-hosted runners only)
+        if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version || '3.12' }}
+
+      - name: Install uv (GitHub-hosted runners only)
+        if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
+        uses: astral-sh/setup-uv@v6
+
+      - name: Verify Python and uv installation
+        run: |
+          # Check runner type and verify installations
+          if [[ "${{ runner.name }}" == *"robosystems"* ]]; then
+            echo "🏃 Running on self-hosted runner: ${{ runner.name }}"
+            echo "Using pre-installed Python and uv from GHA runner"
+          else
+            echo "🏃 Running on GitHub-hosted runner: ${{ runner.name }}"
+            echo "Using Python and uv installed via actions"
+          fi
+          echo ""
+          echo "Python version: $(python --version)"
+          echo "uv version: $(uv --version)"
+
+      - name: Install dependencies
+        run: |
+          uv venv .venv
+          uv sync --frozen --all-extras
+
+      - name: Validate lockfile
+        run: |
+          uv lock --locked
+
+      - name: Configure Valkey authentication
+        run: |
+          echo "🔐 Configuring Valkey authentication..."
+          # GitHub Actions service containers run in Docker, so we use docker exec directly
+          CONTAINER_ID=$(docker ps --filter "ancestor=valkey/valkey:8.0-alpine" --format "{{.ID}}" | head -1)
+          if [ -n "$CONTAINER_ID" ]; then
+            # Set the requirepass configuration (must match VALKEY_AUTH_TOKEN env var)
+            docker exec $CONTAINER_ID redis-cli CONFIG SET requirepass valkey
+            # Verify authentication is working
+            docker exec $CONTAINER_ID redis-cli -a valkey ping
+            echo "✅ Valkey authentication configured"
+          else
+            echo "⚠️ Warning: Could not find Valkey container - tests may fail"
+            exit 1
+          fi
+
+      - name: Setup Kuzu databases and LocalStack
+        run: |
+          # Create Kuzu database directory structure
+          echo "Setting up Kuzu database directories..."
+          mkdir -p ./data/kuzu-dbs
+          chmod 755 ./data/kuzu-dbs
+          echo "✅ Kuzu database directory created: ./data/kuzu-dbs"
+
+          # Wait for LocalStack to be ready
+          echo "Waiting for LocalStack to be ready..."
+          timeout 60 bash -c 'until curl -f http://localhost:4566/_localstack/health; do sleep 2; done'
+
+          # Wait specifically for S3 service
+          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "\"s3\": \"available\""; do sleep 2; done'
+
+          # Create S3 bucket for testing using awslocal
+          echo "Creating S3 bucket for testing..."
+          uv run awslocal s3api create-bucket --bucket robosystems-local --region us-east-1 || echo "Bucket already exists"
+
+          # Verify bucket was created
+          uv run awslocal s3 ls
+          echo "✅ Test environment setup completed"
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+
+      - name: Run tests
+        timeout-minutes: 5
+        run: |
+          # Run tests (exclude integration and slow tests)
+          timeout 300 uv run pytest -v --tb=short --ignore=tests/integration -m "not slow" || {
+            echo "::error::Tests timed out after 5 minutes"
+            exit 1
+          }
+
+      - name: Run linting
+        timeout-minutes: 1
+        run: |
+          timeout 60 uv run ruff check . --output-format=github || {
+            echo "::error::Linting timed out after 1 minute"
+            exit 1
+          }
+
+      - name: Run type checking
+        timeout-minutes: 3
+        run: |
+          echo "🔍 Starting type checking with basedpyright..."
+          export NODE_OPTIONS="--max-old-space-size=2048"
+          timeout 180 uv run basedpyright --stats || {
+            echo "::error::Type checking timed out after 3 minutes"
+            exit 1
+          }
+
+      - name: Post-test cleanup
+        if: always()
+        run: |
+          # Clean up test containers and free ports for next runs
+          echo "🧹 Post-test cleanup: stopping test services..."
+          docker ps -q --filter "label=com.docker.compose.project=robosystems-service" | xargs -r docker rm -f || true
+          docker ps -q --filter "name=postgres" | xargs -r docker rm -f || true
+          docker ps -q --filter "name=redis" | xargs -r docker rm -f || true
+          docker ps -q --filter "name=localstack" | xargs -r docker rm -f || true
+
+          # Clean up Kuzu test databases
+          echo "🧹 Cleaning up Kuzu test databases..."
+          if [ -d "./data/kuzu-dbs" ]; then
+            rm -rf ./data/kuzu-dbs/*
+            echo "✅ Kuzu test databases cleaned up"
+          fi
+
+          # Wait for services to fully stop and ports to be released
+          sleep 3
+
+          echo "✅ Cleanup completed - ports 5432, 6379, 4566 should now be available"
+
+      - name: Clean cache (CI optimization)
+        if: always() && !contains(runner.name, 'robosystems')
+        run: |
+          uv cache prune --ci

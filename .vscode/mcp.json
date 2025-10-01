@@ -1,0 +1,49 @@
+{
+  "mcpServers": {
+    "Context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+    },
+    "postgres": {
+      "command": "uvx",
+      "args": ["postgres-mcp", "--access-mode=unrestricted"],
+      "env": {
+        "DATABASE_URI": "postgresql://postgres:postgres@localhost:5432/robosystems"
+      }
+    },
+    "aws-documentation": {
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "AWS_DOCUMENTATION_PARTITION": "aws"
+      }
+    },
+    "robosystems": {
+      "command": "npx",
+      "args": ["-y", "@robosystems/mcp"],
+      "env": {
+        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
+        "ROBOSYSTEMS_API_KEY": "rfs*",
+        "ROBOSYSTEMS_GRAPH_ID": "kg*"
+      }
+    },
+    "robosystems-local": {
+      "command": "node",
+      "args": ["../../robosystems-mcp-client/index.js"],
+      "env": {
+        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
+        "ROBOSYSTEMS_API_KEY": "rfs*",
+        "ROBOSYSTEMS_GRAPH_ID": "kg*"
+      }
+    }
+  }
+}

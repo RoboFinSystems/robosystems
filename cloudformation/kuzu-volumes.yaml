@@ -1,0 +1,1097 @@
+Description: RoboSystems Kuzu Volume Management - EBS, DynamoDB, and Lambda
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Environment name
+    ConstraintDescription: Must be prod or staging
+
+  # Registry Configuration
+  VolumeRegistryTable:
+    Type: String
+    Default: ""
+    Description: DynamoDB table name for volume registry (optional - will construct if not provided)
+
+  # Infrastructure & Networking
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for Kuzu volumes
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for Lambda functions (multi-AZ for redundancy)
+
+  # Secrets Configuration
+  KuzuSecretArn:
+    Type: String
+    Description: ARN of the Kuzu API secret in Secrets Manager
+    Default: ""
+
+  # Lambda Configuration
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
+    ConstraintDescription: Must be a valid S3 bucket name
+  VolumeManagerCodeKey:
+    Type: String
+    Description: S3 key for Volume Manager Lambda deployment package (includes hash)
+  VolumeMonitorCodeKey:
+    Type: String
+    Description: S3 key for Volume Monitor Lambda deployment package (includes hash)
+  VolumeDetachmentCodeKey:
+    Type: String
+    Description: S3 key for Volume Detachment Lambda deployment package (includes hash)
+
+  # Monitoring & Alerting
+  SNSAlertEmail:
+    Type: String
+    Description: Email address for volume alerts
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+    ConstraintDescription: Must be a valid email address
+
+  # Tagging
+  ServiceTag:
+    Type: String
+    Default: RoboSystems
+    Description: Service tag for resource identification
+  ComponentTag:
+    Type: String
+    Default: KuzuVolumeManager
+    Description: Component tag for resource identification
+
+Mappings:
+  # Map environment names to their capitalized versions for CloudWatch namespace
+  EnvironmentNamespace:
+    prod:
+      Name: Prod
+    staging:
+      Name: Staging
+
+  # Environment-specific volume defaults
+  VolumeDefaults:
+    prod:
+      Size: "100" # Production: 100GB for larger datasets
+      Type: "gp3"
+      IOPS: "3000"
+      Throughput: "125"
+    staging:
+      Size: "50" # Staging: 50GB smaller datasets for testing
+      Type: "gp3"
+      IOPS: "3000"
+      Throughput: "125"
+
+Conditions:
+  UseProvidedVolumeRegistry: !Not [!Equals [!Ref VolumeRegistryTable, ""]]
+  HasKuzuSecret: !Not [!Equals [!Ref KuzuSecretArn, ""]]
+
+Resources:
+  # ========================================
+  # NOTE: VolumeRegistry table has been moved to kuzu-infra.yaml
+  # to keep all registry tables together
+  # ========================================
+
+  # ========================================
+  # SNS TOPICS
+  # ========================================
+
+  # Volume Alert Topic
+  VolumeAlertTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TopicName: !Sub "robosystems-kuzu-volumes-${Environment}-alerts"
+      DisplayName: !Sub "RoboSystems Kuzu Volumes ${Environment} Alerts"
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ========================================
+  # IAM ROLES & POLICIES
+  # ========================================
+
+  # Lambda Execution Role
+  VolumeManagerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-volume-manager-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+      Policies:
+        - PolicyName: VolumeManagementPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateVolume
+                  - ec2:DeleteVolume
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVolumeStatus
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
+                  - ec2:ModifyVolume
+                  - ec2:CreateSnapshot
+                  - ec2:DescribeSnapshots
+                  - ec2:CreateTags
+                  - ec2:DescribeTags
+                  - ec2:DescribeInstances
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !If
+                    - UseProvidedVolumeRegistry
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
+                  - !If
+                    - UseProvidedVolumeRegistry
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}/index/*"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref VolumeAlertTopic
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                  - ssm:DescribeInstanceInformation
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ========================================
+  # LAMBDA FUNCTIONS
+  # ========================================
+
+  # Volume Manager Function
+  VolumeManagerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-volume-manager"
+      Description: "Volume manager Lambda - auto-updates via S3 key hash"
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 300
+      MemorySize: 256
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt VolumeManagerRole.Arn
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          VOLUME_REGISTRY_TABLE: !If
+            - UseProvidedVolumeRegistry
+            - !Ref VolumeRegistryTable
+            - !Sub "robosystems-kuzu-${Environment}-volume-registry"
+          ALERT_TOPIC_ARN: !Ref VolumeAlertTopic
+          DEFAULT_VOLUME_SIZE:
+            !FindInMap [VolumeDefaults, !Ref Environment, Size]
+          DEFAULT_VOLUME_TYPE:
+            !FindInMap [VolumeDefaults, !Ref Environment, Type]
+          DEFAULT_VOLUME_IOPS:
+            !FindInMap [VolumeDefaults, !Ref Environment, IOPS]
+          DEFAULT_VOLUME_THROUGHPUT:
+            !FindInMap [VolumeDefaults, !Ref Environment, Throughput]
+          SNAPSHOT_RETENTION_DAYS: "7"
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref VolumeManagerCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref VolumeManagerSecurityGroup
+        SubnetIds: !Ref SubnetIds
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Security Group for Lambda
+  VolumeManagerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}-lambda-sg"
+      GroupDescription: Security group for Volume Manager Lambda
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS for AWS API calls
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-lambda-sg"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ========================================
+  # SNAPSHOT MANAGEMENT LAMBDAS
+  # ========================================
+
+  # Lambda role for snapshot operations
+  SnapshotLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-snapshot-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: SnapshotManagement
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:DeleteSnapshot
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeInstances
+                  - ec2:CreateTags
+                  - ec2:DescribeTags
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: "*"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Volume Monitor Lambda Role
+  VolumeMonitorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-volume-monitor-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+      Policies:
+        - PolicyName: VolumeMonitorPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVolumes
+                  - ec2:ModifyVolume
+                  - ec2:DescribeVolumesModifications
+                  - ec2:CreateTags
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !If
+                    - UseProvidedVolumeRegistry
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
+                  - !If
+                    - UseProvidedVolumeRegistry
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}/index/*"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                  - ssm:DescribeInstanceInformation
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref VolumeAlertTopic
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - !If
+                - HasKuzuSecret
+                - Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource: !Ref KuzuSecretArn
+                - !Ref AWS::NoValue
+              # KMS permissions for decrypting secrets
+              - !If
+                - HasKuzuSecret
+                - Effect: Allow
+                  Action:
+                    - kms:Decrypt
+                    - kms:DescribeKey
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService":
+                        - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                - !Ref AWS::NoValue
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: VolumeMonitor
+
+  # Volume Monitor Lambda Function
+  VolumeMonitorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-volume-monitor"
+      Description: "Volume monitor Lambda - auto-updates via S3 key hash"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt VolumeMonitorLambdaRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          VOLUME_REGISTRY_TABLE: !If
+            - UseProvidedVolumeRegistry
+            - !Ref VolumeRegistryTable
+            - !Sub "robosystems-kuzu-${Environment}-volume-registry"
+          INSTANCE_REGISTRY_TABLE: !Sub "robosystems-kuzu-${Environment}-instance-registry"
+          ALERT_TOPIC_ARN: !Ref VolumeAlertTopic
+          EXPANSION_THRESHOLD: "0.8"
+          EXPANSION_FACTOR: "1.5"
+          MIN_EXPANSION_GB: "50"
+          MAX_VOLUME_SIZE_GB: "16384"
+          KUZU_API_PORT: "8001"
+          KUZU_API_KEY: !If
+            - HasKuzuSecret
+            - !Sub "{{resolve:secretsmanager:${KuzuSecretArn}:SecretString:KUZU_API_KEY}}"
+            - ""
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref VolumeMonitorCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref VolumeMonitorSecurityGroup
+        SubnetIds: !Ref SubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-volume-monitor"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: VolumeMonitor
+
+  # Security Group for Volume Monitor Lambda (needs VPC access to reach Kuzu APIs)
+  VolumeMonitorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Volume Monitor Lambda
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8001
+          ToPort: 8001
+          CidrIp: 10.0.0.0/8 # VPC CIDR
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0 # For AWS API calls
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-volume-monitor-sg"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+
+  # Lambda function to create snapshots (migrated from shared writers)
+  SnapshotCreatorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-snapshot-creator"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt SnapshotLambdaRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          RETENTION_DAYS: "7"
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub "lambda/kuzu-snapshot-creator-${Environment}.zip"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-snapshot-creator"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Lambda role for snapshot selector
+  SnapshotSelectorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-snapshot-selector-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: SnapshotSelectorPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:ModifyLaunchTemplate
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:StartInstanceRefresh
+                Resource: "*"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Lambda function to update launch templates with latest snapshot
+  SnapshotSelectorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-snapshot-selector"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt SnapshotSelectorLambdaRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          # AUTO_SCALING_GROUP_NAME will be set by EventBridge rule input
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub "lambda/kuzu-snapshot-selector-${Environment}.zip"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-snapshot-selector"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # ========================================
+  # CLOUDWATCH ALARMS
+  # ========================================
+
+  # Orphaned Volumes Alarm
+  OrphanedVolumesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-orphaned"
+      AlarmDescription: Alert when orphaned volumes are detected
+      MetricName: OrphanedVolumes
+      Namespace: !Sub
+        - "RoboSystemsKuzu/${EnvName}"
+        - EnvName: !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
+  # Failed Attachments Alarm
+  FailedAttachmentsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-failed-attachments"
+      AlarmDescription: Alert on volume attachment failures
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref VolumeManagerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
+  # ========================================
+  # DISK USAGE ALARMS
+  # ========================================
+
+  # Warning: 70% disk usage (monitors all instances)
+  DiskUsageWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-disk-usage-warning"
+      AlarmDescription: Disk usage exceeded 70% on any Kuzu instance at /mnt/kuzu-data
+      Metrics:
+        - Id: m1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              MetricName: DISK_USED_PERCENT
+              Namespace: !Sub
+                - "RoboSystemsKuzu/${EnvName}"
+                - EnvName:
+                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Dimensions:
+                - Name: path
+                  Value: /mnt/kuzu-data
+            Stat: Maximum
+            Period: 300
+        - Id: max_across_all
+          Expression: "MAX(METRICS())"
+      EvaluationPeriods: 2 # 10 minutes of sustained high usage
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  # Critical: 85% disk usage (monitors all instances)
+  DiskUsageCriticalAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-disk-usage-critical"
+      AlarmDescription: CRITICAL - Disk usage exceeded 85% on any Kuzu instance at /mnt/kuzu-data
+      Metrics:
+        - Id: m1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              MetricName: DISK_USED_PERCENT
+              Namespace: !Sub
+                - "RoboSystemsKuzu/${EnvName}"
+                - EnvName:
+                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Dimensions:
+                - Name: path
+                  Value: /mnt/kuzu-data
+            Stat: Maximum
+            Period: 300
+        - Id: max_across_all
+          Expression: "MAX(METRICS())"
+      EvaluationPeriods: 1 # Trigger immediately at critical level
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+        - !GetAtt VolumeMonitorFunction.Arn # Trigger Lambda for immediate expansion
+
+  # Emergency: 95% disk usage (monitors all instances)
+  DiskUsageEmergencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-disk-usage-emergency"
+      AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any Kuzu instance at /mnt/kuzu-data - Database operations at risk!
+      Metrics:
+        - Id: m1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              MetricName: DISK_USED_PERCENT
+              Namespace: !Sub
+                - "RoboSystemsKuzu/${EnvName}"
+                - EnvName:
+                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Dimensions:
+                - Name: path
+                  Value: /mnt/kuzu-data
+            Stat: Maximum
+            Period: 60
+        - Id: max_across_all
+          Expression: "MAX(METRICS())"
+      EvaluationPeriods: 1 # Trigger immediately
+      Threshold: 95
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+        - !GetAtt VolumeMonitorFunction.Arn # Trigger Lambda for immediate expansion
+
+  # Rapid disk growth detection (for XBRL scenarios)
+  RapidDiskGrowthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-rapid-disk-growth"
+      AlarmDescription: Disk usage growing rapidly (>10% in 30 minutes)
+      Metrics:
+        - Id: growth_rate
+          Expression: "RATE(disk_usage)"
+        - Id: disk_usage
+          ReturnData: false
+          MetricStat:
+            Metric:
+              MetricName: DISK_USED_PERCENT
+              Namespace: !Sub
+                - "RoboSystemsKuzu/${EnvName}"
+                - EnvName:
+                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Dimensions:
+                - Name: path
+                  Value: /mnt/kuzu-data
+            Period: 1800 # 30 minutes
+            Stat: Average
+      EvaluationPeriods: 1
+      Threshold: 0.33 # 10% growth in 30 minutes = 0.33% per minute
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref VolumeAlertTopic
+
+  # ========================================
+  # LAMBDA PERMISSIONS & EVENTBRIDGE RULES
+  # ========================================
+
+  # Permission for CloudWatch Alarms to invoke Volume Monitor Lambda
+  VolumeMonitorAlarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: lambda.alarms.cloudwatch.amazonaws.com
+      SourceArn: !GetAtt DiskUsageCriticalAlarm.Arn
+
+  # Permission for Emergency Alarm
+  VolumeMonitorEmergencyPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: lambda.alarms.cloudwatch.amazonaws.com
+      SourceArn: !GetAtt DiskUsageEmergencyAlarm.Arn
+
+  # Scheduled Volume Monitoring Rule (every hour)
+  ScheduledVolumeMonitoringRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-scheduled-volume-monitoring"
+      Description: Volume monitoring and expansion check every 15 minutes
+      ScheduleExpression: "rate(15 minutes)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VolumeMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "monitor_all"}'
+
+  # Permission for EventBridge to invoke Volume Monitor Lambda
+  ScheduledVolumeMonitoringPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledVolumeMonitoringRule.Arn
+
+  # Daily Orphaned Volume Cleanup
+  OrphanedVolumeCleanupRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-daily-cleanup"
+      Description: Daily cleanup of orphaned volumes
+      ScheduleExpression: "cron(0 2 * * ? *)" # 2 AM UTC daily
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VolumeManagerFunction.Arn
+          Id: "1"
+          Input: '{"action": "cleanup_orphaned"}'
+
+  # Lambda Permission for EventBridge
+  CleanupRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt OrphanedVolumeCleanupRule.Arn
+
+  # ========================================
+  # EC2 STATE CHANGE EVENT RULES
+  # ========================================
+  # These provide immediate response to instance/volume state changes
+
+  # Rule for EC2 Instance Termination Events
+  InstanceTerminationEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-instance-termination"
+      Description: Trigger registry sync when EC2 instances terminate (covers manual terminations)
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Instance State-change Notification
+        detail:
+          state:
+            - terminated
+            - terminating
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VolumeMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "monitor_all"}'
+          RetryPolicy:
+            MaximumRetryAttempts: 2
+            MaximumEventAgeInSeconds: 600
+
+  # Permission for Instance Termination Events
+  InstanceTerminationEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt InstanceTerminationEventRule.Arn
+
+  # Rule for EBS Volume Detachment Events
+  VolumeDetachmentEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-volume-detachment-event"
+      Description: Trigger registry sync when EBS volumes are detached
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EBS Volume Notification
+        detail:
+          event:
+            - detachVolume
+            - deleteVolume
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VolumeMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "monitor_all"}'
+          RetryPolicy:
+            MaximumRetryAttempts: 2
+            MaximumEventAgeInSeconds: 600
+
+  # Permission for Volume Detachment Events
+  VolumeDetachmentEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt VolumeDetachmentEventRule.Arn
+
+  # Daily Snapshot Creation for Shared Volumes
+  SharedVolumeSnapshotRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-shared-snapshots"
+      Description: Daily snapshots of shared repository volumes
+      ScheduleExpression: "cron(0 1 * * ? *)" # 1 AM UTC daily
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VolumeManagerFunction.Arn
+          Id: "1"
+          Input: '{"action": "scheduled_snapshots", "filter": "shared"}'
+
+  SharedSnapshotRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SharedVolumeSnapshotRule.Arn
+
+  # Daily Snapshot Cleanup
+  SnapshotCleanupRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-snapshot-cleanup"
+      Description: Daily cleanup of old snapshots
+      ScheduleExpression: "cron(0 3 * * ? *)" # 3 AM UTC daily
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VolumeManagerFunction.Arn
+          Id: "1"
+          Input: '{"action": "cleanup_snapshots"}'
+
+  SnapshotCleanupRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeManagerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SnapshotCleanupRule.Arn
+
+  # Update Replica Launch Templates after Snapshot Creation
+  UpdateReplicaSnapshotsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-update-replica-snapshots"
+      Description: Update replica launch templates with latest snapshots
+      ScheduleExpression: "cron(30 1 * * ? *)" # 1:30 AM UTC daily (after snapshots)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SnapshotSelectorFunction.Arn
+          Id: "1"
+          # Pass the ASG name as an environment variable in the event
+          InputTransformer:
+            InputPathsMap:
+              time: "$.time"
+            InputTemplate: !Sub |
+              {
+                "AUTO_SCALING_GROUP_NAME": "robosystems-kuzu-shared-replicas-${Environment}-replicas-asg",
+                "time": <time>
+              }
+
+  UpdateReplicaSnapshotsRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SnapshotSelectorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt UpdateReplicaSnapshotsRule.Arn
+
+  # ========================================
+  # Volume Detachment Resources
+  # ========================================
+  # These handle graceful volume detachment when instances terminate
+
+  # SNS Topic for Volume Detachment Notifications
+  VolumeDetachmentTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TopicName: !Sub "robosystems-kuzu-volumes-${Environment}-detachment"
+      DisplayName: !Sub "RoboSystems Kuzu Volumes ${Environment} Detachment Notifications"
+      Subscription:
+        - Endpoint: !GetAtt VolumeDetachmentFunction.Arn
+          Protocol: lambda
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Lambda Function for Volume Detachment
+  VolumeDetachmentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-volume-detachment"
+      Description: "Volume detachment Lambda - auto-updates via S3 key hash"
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 300
+      Role: !GetAtt VolumeDetachmentRole.Arn
+      Environment:
+        Variables:
+          VOLUME_MANAGER_FUNCTION_ARN: !GetAtt VolumeManagerFunction.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref VolumeDetachmentCodeKey
+
+  # Lambda Permission for SNS
+  VolumeDetachmentPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref VolumeDetachmentFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref VolumeDetachmentTopic
+
+  # IAM Role for Volume Detachment Lambda
+  VolumeDetachmentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: VolumeDetachmentPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt VolumeManagerFunction.Arn
+              - Effect: Allow
+                Action:
+                  - autoscaling:CompleteLifecycleAction
+                  - autoscaling:RecordLifecycleActionHeartbeat
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVolumes
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-volume-detachment-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+
+Outputs:
+  VolumeRegistryTableName:
+    Description: DynamoDB table name for volume registry
+    Value: !If
+      - UseProvidedVolumeRegistry
+      - !Ref VolumeRegistryTable
+      - !Sub "robosystems-kuzu-${Environment}-volume-registry"
+    Export:
+      Name: !Sub "${AWS::StackName}-volume-registry"
+
+  VolumeManagerFunctionArn:
+    Description: ARN of the Volume Manager Lambda function
+    Value: !GetAtt VolumeManagerFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-volume-manager-arn"
+
+  VolumeAlertTopicArn:
+    Description: SNS topic for volume alerts
+    Value: !Ref VolumeAlertTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-alert-topic"
+
+  VolumeDetachmentTopicArn:
+    Description: SNS topic for volume detachment notifications
+    Value: !Ref VolumeDetachmentTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-detachment-topic"
+
+  VolumeManagerRoleArn:
+    Description: IAM role for Volume Manager
+    Value: !GetAtt VolumeManagerRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-role-arn"
+
+  SnapshotCreatorFunctionArn:
+    Description: ARN of the snapshot creator Lambda function
+    Value: !GetAtt SnapshotCreatorFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-snapshot-creator-arn"
+
+  SnapshotSelectorFunctionArn:
+    Description: ARN of the snapshot selector Lambda function
+    Value: !GetAtt SnapshotSelectorFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-snapshot-selector-arn"

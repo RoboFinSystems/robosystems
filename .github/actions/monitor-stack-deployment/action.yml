@@ -1,0 +1,117 @@
+name: "Monitor Stack Deployment"
+description: "Monitors CloudFormation stack deployment with focus on debugging"
+
+inputs:
+  stack-name:
+    description: "Name of the CloudFormation stack to monitor"
+    required: true
+  timeout:
+    description: "Timeout in seconds (default: 30 minutes)"
+    required: false
+    default: "1800"
+  interval:
+    description: "Check interval in seconds"
+    required: false
+    default: "10"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Monitor Stack Deployment
+      shell: bash
+      run: |
+        set -euo pipefail
+        
+        STACK_NAME="${{ inputs.stack-name }}"
+        TIMEOUT=${{ inputs.timeout }}
+        INTERVAL=${{ inputs.interval }}
+        START_TIME=$(date +%s)
+        
+        echo "Monitoring stack: $STACK_NAME"
+        echo "Timeout: ${TIMEOUT}s, Check interval: ${INTERVAL}s"
+        echo "Starting at: $(date)"
+        echo "---"
+        
+        while true; do
+          # Get current status
+          STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].StackStatus' \
+            --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+          
+          # Check if stack exists
+          if [ "$STATUS" == "STACK_NOT_FOUND" ]; then
+            echo "ERROR: Stack '$STACK_NAME' not found"
+            exit 1
+          fi
+          
+          # Print status update
+          CURRENT_TIME=$(date +%s)
+          ELAPSED=$((CURRENT_TIME - START_TIME))
+          echo "[$(date +'%H:%M:%S')] Status: $STATUS (${ELAPSED}s elapsed)"
+          
+          # Check for terminal states
+          case "$STATUS" in
+            *_COMPLETE)
+              echo "---"
+              echo "Stack operation completed: $STATUS"
+              
+              # Get outputs for successful deployments
+              if [[ "$STATUS" == "CREATE_COMPLETE" || "$STATUS" == "UPDATE_COMPLETE" ]]; then
+                echo "Stack outputs:"
+                aws cloudformation describe-stacks \
+                  --stack-name "$STACK_NAME" \
+                  --query 'Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}' \
+                  --output table
+              fi
+              
+              # Exit with appropriate code
+              if [[ "$STATUS" == *"ROLLBACK_COMPLETE" || "$STATUS" == *"FAILED" ]]; then
+                echo "Stack operation failed. Getting error details..."
+                aws cloudformation describe-stack-events \
+                  --stack-name "$STACK_NAME" \
+                  --query 'StackEvents[?(ResourceStatus==`CREATE_FAILED` || ResourceStatus==`UPDATE_FAILED`)].{LogicalResourceId:LogicalResourceId,ResourceStatus:ResourceStatus,ResourceStatusReason:ResourceStatusReason}' \
+                  --output table
+                exit 1
+              fi
+              exit 0
+              ;;
+              
+            *_FAILED)
+              echo "---"
+              echo "Stack operation failed: $STATUS"
+              echo "Getting failure details..."
+              
+              # Get failed resources
+              aws cloudformation describe-stack-events \
+                --stack-name "$STACK_NAME" \
+                --query 'StackEvents[?(ResourceStatus==`CREATE_FAILED` || ResourceStatus==`UPDATE_FAILED` || ResourceStatus==`DELETE_FAILED`)].{Resource:LogicalResourceId,Status:ResourceStatus,Reason:ResourceStatusReason}' \
+                --output table
+              
+              exit 1
+              ;;
+              
+            *ROLLBACK_IN_PROGRESS)
+              echo "WARNING: Stack is rolling back"
+              ;;
+          esac
+          
+          # Check timeout
+          if [ $ELAPSED -gt $TIMEOUT ]; then
+            echo "---"
+            echo "ERROR: Operation timed out after ${TIMEOUT}s"
+            echo "Final status: $STATUS"
+            
+            # Get current stack events for debugging
+            echo "Recent events:"
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --query 'StackEvents[0:10].{Time:Timestamp,Resource:LogicalResourceId,Status:ResourceStatus}' \
+              --output table
+            
+            exit 1
+          fi
+          
+          # Wait before next check
+          sleep $INTERVAL
+        done

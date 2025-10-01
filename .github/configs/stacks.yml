@@ -1,0 +1,312 @@
+# CloudFormation Stack Names Configuration
+# This file defines all CloudFormation stack names for both environments
+# Used by both GitHub Actions workflows and application code for consistency
+#
+# IMPORTANT: These names must match exactly what's defined in the GitHub Actions workflows
+# The workflows are the source of truth - this config mirrors them for application use
+
+# Stack naming convention: RoboSystems{Component}{Variant}{Environment}
+# Examples:
+#   - RoboSystemsAPIProd
+#   - RoboSystemsWorkerDefaultStaging
+#   - RoboSystemsKuzuWritersStandardProd
+
+production:
+  # Core Infrastructure (Shared VPC)
+  vpc:
+    stack_name: RoboSystemsVPC  # Shared between prod and staging
+    outputs:
+      vpc_id: VpcId
+      private_subnets: PrivateSubnetIds
+      public_subnets: PublicSubnetIds
+  
+  valkey:
+    stack_name: RoboSystemsValkeyProd
+    outputs:
+      url: ValkeyUrl
+      endpoint: ValkeyEndpoint
+      security_group: ValkeySecurityGroupId
+  
+  postgres_iam:
+    stack_name: RoboSystemsPostgresIAMProd
+    outputs:
+      database_url: DatabaseUrl
+      database_endpoint: DatabaseEndpoint
+      security_group: DatabaseSecurityGroupId
+  
+  s3:
+    stack_name: RoboSystemsS3Prod
+    outputs:
+      bucket_name: BucketName
+      bucket_arn: BucketArn
+  
+  # API & Worker Services
+  api:
+    stack_name: RoboSystemsAPIProd
+    outputs:
+      alb_url: ApiAlbUrl
+      alb_dns: ApiAlbDnsName
+      service_arn: ApiServiceArn
+  
+  beat:
+    stack_name: RoboSystemsBeatProd
+    outputs:
+      service_arn: BeatServiceArn
+  
+  workers:
+    default:
+      stack_name: RoboSystemsWorkerDefaultProd
+      outputs:
+        service_arn: WorkerServiceArn
+    shared:
+      stack_name: RoboSystemsWorkerSharedProd  # For shared-processing queue
+      outputs:
+        service_arn: WorkerServiceArn
+    extraction:
+      stack_name: RoboSystemsWorkerExtractionProd  # For shared-extraction queue
+      outputs:
+        service_arn: WorkerServiceArn
+    ingestion:
+      stack_name: RoboSystemsWorkerIngestionProd  # For shared-ingestion queue
+      outputs:
+        service_arn: WorkerServiceArn
+  
+  # Kuzu Infrastructure
+  kuzu:
+    infra:
+      stack_name: RoboSystemsKuzuInfraProd
+      outputs:
+        instance_registry_table: InstanceRegistryTableName
+        volume_registry_table: VolumeRegistryTableName
+        graph_registry_table: GraphRegistryTableName
+    
+    volumes:
+      stack_name: RoboSystemsKuzuVolumesProd
+      outputs:
+        volume_manager_lambda: VolumeManagerFunctionArn
+        detachment_topic: VolumeDetachmentTopicArn
+    
+    writers:
+      standard:
+        stack_name: RoboSystemsKuzuWritersStandardProd
+        outputs:
+          asg_name: AutoScalingGroupName
+          instance_ids: InstanceIds
+      
+      enterprise:
+        stack_name: RoboSystemsKuzuWritersEnterpriseProd
+        outputs:
+          asg_name: AutoScalingGroupName
+          instance_ids: InstanceIds
+      
+      premium:
+        stack_name: RoboSystemsKuzuWritersPremiumProd
+        outputs:
+          asg_name: AutoScalingGroupName
+          instance_ids: InstanceIds
+      
+      shared_master:
+        stack_name: RoboSystemsKuzuWritersSharedMasterProd
+        outputs:
+          asg_name: AutoScalingGroupName
+          instance_ids: InstanceIds
+    
+    shared_replicas:
+      stack_name: RoboSystemsKuzuSharedReplicasProd
+      outputs:
+        alb_url: SharedReplicaAlbUrl
+        alb_dns: SharedReplicaAlbDnsName
+        service_arn: SharedReplicaServiceArn
+  
+  # Monitoring & Observability
+  monitoring:
+    worker_monitor:
+      stack_name: RoboSystemsWorkerMonitorProd
+      outputs:
+        lambda_arn: WorkerMonitorFunctionArn
+    
+    prometheus:
+      stack_name: RoboSystemsPrometheusProduction  # Note: "Production" not "Prod"
+      outputs:
+        workspace_endpoint: PrometheusWorkspaceEndpoint
+        workspace_id: PrometheusWorkspaceId
+    
+    grafana:
+      stack_name: RoboSystemsGrafana  # Shared between environments
+      outputs:
+        workspace_url: GrafanaWorkspaceUrl
+        workspace_id: GrafanaWorkspaceId
+  
+  # Bastion Host
+  bastion:
+    stack_name: RoboSystemsBastionProd
+    outputs:
+      instance_id: BastionInstanceId
+      security_group: BastionSecurityGroupId
+
+  # WAF (Web Application Firewall)
+  waf:
+    stack_name: RoboSystemsWAFProd
+    outputs:
+      web_acl_id: WebACLId
+      web_acl_arn: WebACLArn
+
+  # GitHub Actions Runner
+  gha_runner:
+    stack_name: RoboSystemsGHARunner  # Shared between environments
+    outputs:
+      instance_id: RunnerInstanceId
+  
+  # Cost and Usage Reports
+  cur:
+    stack_name: RoboSystemsCUR  # Shared between environments
+    outputs:
+      bucket_name: CURBucketName
+
+  # CloudTrail (Audit Logging)
+  cloudtrail:
+    stack_name: RoboSystemsCloudTrail  # Shared between environments
+    outputs:
+      trail_arn: CloudTrailArn
+      bucket_name: CloudTrailBucketName
+      enabled: CloudTrailEnabled
+
+staging:
+  # Core Infrastructure (Uses shared VPC)
+  vpc:
+    stack_name: RoboSystemsVPC  # Shared between prod and staging
+    outputs:
+      vpc_id: VpcId
+      private_subnets: PrivateSubnetIds
+      public_subnets: PublicSubnetIds
+  
+  valkey:
+    stack_name: RoboSystemsValkeyStaging
+    outputs:
+      url: ValkeyUrl
+      endpoint: ValkeyEndpoint
+      security_group: ValkeySecurityGroupId
+  
+  postgres_iam:
+    stack_name: RoboSystemsPostgresIAMStaging
+    outputs:
+      database_url: DatabaseUrl
+      database_endpoint: DatabaseEndpoint
+      security_group: DatabaseSecurityGroupId
+  
+  s3:
+    stack_name: RoboSystemsS3Staging
+    outputs:
+      bucket_name: BucketName
+      bucket_arn: BucketArn
+  
+  # API & Worker Services
+  api:
+    stack_name: RoboSystemsAPIStaging
+    outputs:
+      alb_url: ApiAlbUrl
+      alb_dns: ApiAlbDnsName
+      service_arn: ApiServiceArn
+  
+  beat:
+    stack_name: RoboSystemsBeatStaging
+    outputs:
+      service_arn: BeatServiceArn
+  
+  workers:
+    default:
+      stack_name: RoboSystemsWorkerDefaultStaging
+      outputs:
+        service_arn: WorkerServiceArn
+    # Note: No shared, extraction, or ingestion workers in staging (cost savings)
+  
+  # Kuzu Infrastructure
+  kuzu:
+    infra:
+      stack_name: RoboSystemsKuzuInfraStaging
+      outputs:
+        instance_registry_table: InstanceRegistryTableName
+        volume_registry_table: VolumeRegistryTableName
+        graph_registry_table: GraphRegistryTableName
+    
+    volumes:
+      stack_name: RoboSystemsKuzuVolumesStaging
+      outputs:
+        volume_manager_lambda: VolumeManagerFunctionArn
+        detachment_topic: VolumeDetachmentTopicArn
+    
+    writers:
+      standard:
+        stack_name: RoboSystemsKuzuWritersStandardStaging
+        outputs:
+          asg_name: AutoScalingGroupName
+          instance_ids: InstanceIds
+      
+      shared_master:
+        stack_name: RoboSystemsKuzuWritersSharedMasterStaging
+        outputs:
+          asg_name: AutoScalingGroupName
+          instance_ids: InstanceIds
+  
+  # Monitoring & Observability  
+  monitoring:
+    worker_monitor:
+      stack_name: RoboSystemsWorkerMonitorStaging
+      outputs:
+        lambda_arn: WorkerMonitorFunctionArn
+    
+    prometheus:
+      stack_name: RoboSystemsPrometheusStaging
+      outputs:
+        workspace_endpoint: PrometheusWorkspaceEndpoint
+        workspace_id: PrometheusWorkspaceId
+    
+    grafana:
+      stack_name: RoboSystemsGrafana  # Shared between environments
+      outputs:
+        workspace_url: GrafanaWorkspaceUrl
+        workspace_id: GrafanaWorkspaceId
+  
+  # Bastion Host
+  bastion:
+    stack_name: RoboSystemsBastionStaging
+    outputs:
+      instance_id: BastionInstanceId
+      security_group: BastionSecurityGroupId
+
+  # WAF (Web Application Firewall)
+  waf:
+    stack_name: RoboSystemsWAFStaging
+    outputs:
+      web_acl_id: WebACLId
+      web_acl_arn: WebACLArn
+
+  # Shared Resources (reference same as prod)
+  gha_runner:
+    stack_name: RoboSystemsGHARunner  # Shared between environments
+    outputs:
+      instance_id: RunnerInstanceId
+
+  cur:
+    stack_name: RoboSystemsCUR  # Shared between environments
+    outputs:
+      bucket_name: CURBucketName
+
+  # CloudTrail (Audit Logging)
+  cloudtrail:
+    stack_name: RoboSystemsCloudTrail  # Shared between environments
+    outputs:
+      trail_arn: CloudTrailArn
+      bucket_name: CloudTrailBucketName
+      enabled: CloudTrailEnabled
+
+# Common patterns for dynamic stack name generation
+patterns:
+  # Pattern for worker stacks: RoboSystemsWorker{Name}{Environment}
+  worker: "RoboSystemsWorker{name}{environment}"
+  
+  # Pattern for Kuzu writer stacks: RoboSystemsKuzuWriters{Tier}{Environment}
+  kuzu_writer: "RoboSystemsKuzuWriters{tier}{environment}"
+  
+  # Pattern for general stacks: RoboSystems{Component}{Environment}
+  general: "RoboSystems{component}{environment}"

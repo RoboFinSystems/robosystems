@@ -1,0 +1,225 @@
+name: Deploy S3
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging, or dev)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+      
+      # Domain Configuration
+      public_domain_name:
+        description: "Custom domain for public data CDN (e.g., public.robosystems.ai)"
+        required: false
+        type: string
+        default: ""
+      domain_name_root:
+        description: "Root domain name for Route 53 hosted zone (e.g., robosystems.ai)"
+        required: false
+        type: string
+        default: ""
+
+    outputs:
+      s3_secret_arn:
+        description: "ARN of the S3 secret in Secrets Manager"
+        value: ${{ jobs.action.outputs.s3_secret_arn }}
+      kuzu_writer_s3_policy_arn:
+        description: "ARN of the Kuzu writer S3 policy"
+        value: ${{ jobs.action.outputs.kuzu_writer_s3_policy_arn }}
+      kuzu_reader_s3_policy_arn:
+        description: "ARN of the Kuzu reader S3 policy"
+        value: ${{ jobs.action.outputs.kuzu_reader_s3_policy_arn }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 15
+    outputs:
+      s3_secret_arn: ${{ steps.stack-outputs.outputs.s3_secret_arn }}
+      kuzu_writer_s3_policy_arn: ${{ steps.stack-outputs.outputs.kuzu_writer_s3_policy_arn }}
+      kuzu_reader_s3_policy_arn: ${{ steps.stack-outputs.outputs.kuzu_reader_s3_policy_arn }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy S3 CloudFormation Stack
+        id: deploy-stack
+        run: |
+          # Look up the hosted zone ID if domain is provided
+          if [ -n "${{ inputs.public_domain_name }}" ] && [ -n "${{ inputs.domain_name_root }}" ]; then
+            HOSTED_ZONE_ID=$(aws route53 list-hosted-zones | jq -r ".HostedZones[] | select(.Name==\"${{ inputs.domain_name_root }}.\") | .Id" | cut -d'/' -f3)
+            
+            if [ -z "$HOSTED_ZONE_ID" ]; then
+              echo "WARNING: No hosted zone found for domain ${{ inputs.domain_name_root }}, proceeding without custom domain"
+              HOSTED_ZONE_ID=""
+            else
+              echo "Hosted zone configured for domain ${{ inputs.domain_name_root }}"
+            fi
+          else
+            HOSTED_ZONE_ID=""
+          fi
+
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          S3_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=AwsRegion,ParameterValue=${{ inputs.aws_region }}"
+          
+          # Add domain parameters if provided
+          if [ -n "${{ inputs.public_domain_name }}" ]; then
+            S3_STACK_PARAMS="$S3_STACK_PARAMS \
+                  ParameterKey=PublicDomainName,ParameterValue=${{ inputs.public_domain_name }}"
+          fi
+          
+          if [ -n "$HOSTED_ZONE_ID" ]; then
+            S3_STACK_PARAMS="$S3_STACK_PARAMS \
+                  ParameterKey=HostedZoneId,ParameterValue=$HOSTED_ZONE_ID"
+          fi
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/s3.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters $S3_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=S3 \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/s3.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --parameters $S3_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=S3 \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "1800"
+          interval: "10"
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "Retrieving stack outputs..."
+
+          # Get S3 Secret ARN
+          S3_SECRET_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='S3SecretArn'].OutputValue" \
+            --output text)
+
+          if [ -n "$S3_SECRET_ARN" ]; then
+            echo "s3_secret_arn=$S3_SECRET_ARN" >> $GITHUB_OUTPUT
+            echo "Found S3 Secret ARN: $S3_SECRET_ARN"
+          else
+            echo "Warning: Could not retrieve S3 Secret ARN"
+          fi
+          
+          # Get Kuzu Writer S3 Policy ARN
+          KUZU_WRITER_S3_POLICY_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='KuzuWriterS3PolicyArn'].OutputValue" \
+            --output text)
+          
+          if [ -n "$KUZU_WRITER_S3_POLICY_ARN" ]; then
+            echo "kuzu_writer_s3_policy_arn=$KUZU_WRITER_S3_POLICY_ARN" >> $GITHUB_OUTPUT
+            echo "Found Kuzu Writer S3 Policy ARN: $KUZU_WRITER_S3_POLICY_ARN"
+          else
+            echo "Warning: Could not retrieve Kuzu Writer S3 Policy ARN"
+          fi
+          
+          # Get Kuzu Reader S3 Policy ARN
+          KUZU_READER_S3_POLICY_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='KuzuReaderS3PolicyArn'].OutputValue" \
+            --output text)
+          
+          if [ -n "$KUZU_READER_S3_POLICY_ARN" ]; then
+            echo "kuzu_reader_s3_policy_arn=$KUZU_READER_S3_POLICY_ARN" >> $GITHUB_OUTPUT
+            echo "Found Kuzu Reader S3 Policy ARN: $KUZU_READER_S3_POLICY_ARN"
+          else
+            echo "Warning: Could not retrieve Kuzu Reader S3 Policy ARN"
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          # Output deployment status for the main workflow
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "S3 stack creation completed"
+          else
+            echo "S3 stack update completed"
+          fi

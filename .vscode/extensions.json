@@ -1,0 +1,26 @@
+{
+  "recommendations": [
+    "amazonwebservices.aws-toolkit-vscode",
+    "bradlc.vscode-tailwindcss",
+    "charliermarsh.ruff",
+    "christian-kohler.npm-intellisense",
+    "christian-kohler.path-intellisense",
+    "dbaeumer.vscode-eslint",
+    "editorconfig.editorconfig",
+    "esbenp.prettier-vscode",
+    "fill-labs.dependi",
+    "github.vscode-github-actions",
+    "github.vscode-pull-request-github",
+    "kddejong.vscode-cfn-lint",
+    "ms-azuretools.vscode-containers",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "nefrob.vscode-just-syntax",
+    "rvest.vs-code-prettier-eslint",
+    "vscode.git",
+    "vscode.json-language-features",
+    "vscode.npm",
+    "vscode.typescript-language-features",
+    "yoavbls.pretty-ts-errors"
+  ]
+}

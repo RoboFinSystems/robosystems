@@ -1,0 +1,264 @@
+name: Deploy Valkey
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging, or dev)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+      vpc_id:
+        description: "VPC ID for Valkey ElastiCache"
+        required: true
+        type: string
+      subnet_ids:
+        description: "Comma-separated subnet IDs for Valkey ElastiCache (minimum 2 for multi-AZ)"
+        required: true
+        type: string
+
+      # Instance Configuration
+      node_type:
+        description: "ElastiCache node type for Valkey"
+        required: false
+        type: string
+        default: "cache.t4g.micro"
+      num_cache_nodes:
+        description: "Number of cache nodes (1 for single node, 2-6 for cluster)"
+        required: false
+        type: string
+        default: "1"
+
+      # Security Configuration
+      encryption_enabled:
+        description: "Enable encryption at rest and in transit for Valkey"
+        required: false
+        type: string
+        default: "true"
+      secret_rotation_enabled:
+        description: "Enable automatic rotation of Valkey auth tokens"
+        required: false
+        type: string
+        default: "true"
+      rotation_schedule_days:
+        description: "Number of days between automatic auth token rotations"
+        required: false
+        type: string
+        default: "90"
+
+      # Backup Configuration
+      snapshot_retention_days:
+        description: "Number of days to retain automatic backups (0 = disabled)"
+        required: false
+        type: string
+        default: "0"
+
+      # Lambda Configuration
+      lambda_code_bucket:
+        description: "S3 bucket containing Lambda deployment packages"
+        required: true
+        type: string
+
+    outputs:
+      valkey_url:
+        description: "Full Redis URL for Valkey ElastiCache"
+        value: ${{ jobs.action.outputs.valkey_url }}
+      valkey_endpoint:
+        description: "Primary endpoint for Valkey ElastiCache"
+        value: ${{ jobs.action.outputs.valkey_endpoint }}
+      valkey_sg_id:
+        description: "Security group ID for applications connecting to Valkey"
+        value: ${{ jobs.action.outputs.valkey_sg_id }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SNS_ALERT_EMAIL:
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 15
+    outputs:
+      valkey_url: ${{ steps.stack-outputs.outputs.valkey_url }}
+      valkey_endpoint: ${{ steps.stack-outputs.outputs.valkey_endpoint }}
+      valkey_sg_id: ${{ steps.stack-outputs.outputs.valkey_sg_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy Valkey CloudFormation Stack
+        id: deploy-stack
+        run: |
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          VALKEY_STACK_PARAMS="ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
+                ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
+                ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=NodeType,ParameterValue=${{ inputs.node_type }} \
+                ParameterKey=NumCacheNodes,ParameterValue=${{ inputs.num_cache_nodes }} \
+                ParameterKey=EnableEncryption,ParameterValue=${{ inputs.encryption_enabled }} \
+                ParameterKey=EnableSecretRotation,ParameterValue=${{ inputs.secret_rotation_enabled }} \
+                ParameterKey=RotationScheduleDays,ParameterValue=${{ inputs.rotation_schedule_days }} \
+                ParameterKey=SnapshotRetentionDays,ParameterValue=${{ inputs.snapshot_retention_days }} \
+                ParameterKey=LambdaCodeBucket,ParameterValue=${{ inputs.lambda_code_bucket }}"
+
+          # Get Lambda deployment keys from manifest (similar to postgres-iam)
+          echo "Retrieving Lambda deployment manifest..."
+          MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
+
+          VALKEY_ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."valkey-rotation".s3_key // empty')
+
+          if [ -n "$VALKEY_ROTATION_KEY" ]; then
+            VALKEY_STACK_PARAMS="$VALKEY_STACK_PARAMS ParameterKey=ValkeyRotationCodeKey,ParameterValue=$VALKEY_ROTATION_KEY"
+            echo "Adding Valkey Rotation Lambda code key: $VALKEY_ROTATION_KEY"
+          else
+            echo "Warning: Valkey rotation Lambda code key not found in manifest, using default"
+          fi
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/valkey.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $VALKEY_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=valkey \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/valkey.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $VALKEY_STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=valkey \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "1800"
+          interval: "10"
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "Retrieving stack outputs..."
+
+          # Get Valkey URL from CloudFormation outputs
+          VALKEY_URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ValkeyUrl'].OutputValue" \
+            --output text)
+
+          # Get Valkey endpoint from CloudFormation outputs
+          VALKEY_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ValkeyEndpoint'].OutputValue" \
+            --output text)
+
+          # Get Valkey client security group ID
+          VALKEY_CLIENT_SG=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ValkeyClientSecurityGroupId'].OutputValue" \
+            --output text)
+
+          if [ -n "$VALKEY_URL" ]; then
+            echo "valkey_url=$VALKEY_URL" >> $GITHUB_OUTPUT
+            echo "Found Valkey URL: $VALKEY_URL"
+          else
+            echo "Warning: Could not retrieve Valkey URL"
+            exit 1
+          fi
+
+          if [ -n "$VALKEY_ENDPOINT" ]; then
+            echo "valkey_endpoint=$VALKEY_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "Found Valkey endpoint: $VALKEY_ENDPOINT"
+          else
+            echo "Warning: Could not retrieve Valkey endpoint"
+          fi
+
+          if [ -n "$VALKEY_CLIENT_SG" ]; then
+            echo "valkey_sg_id=$VALKEY_CLIENT_SG" >> $GITHUB_OUTPUT
+            echo "Found Valkey client security group: $VALKEY_CLIENT_SG"
+          else
+            echo "Warning: Could not retrieve Valkey client security group"
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          # Output deployment status for the main workflow
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "Valkey stack creation completed"
+          else
+            echo "Valkey stack update completed"
+          fi

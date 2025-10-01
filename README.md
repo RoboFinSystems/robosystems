@@ -15,11 +15,11 @@ RoboSystems bridges the gap between raw financial data and actionable business i
 - **Multi-Tenant Graph Databases**: Create isolated Kuzu database instances with cluster-based scaling
 - **AI Agent Interface**: Natural language financial analysis through Claude AI via Model Context Protocol (MCP)
 - **Entity Graph Creation**: Curated enterprise financial data schemas for defined use cases with RoboLedger, RoboInvestor and more
-- **Generic Graph Creation**: Custom schemas definitions with custom node/relationship types
+- **Generic Graph Creation**: Custom schema definitions with custom node/relationship types
 - **Subgraph Creation**: Create subgraphs with custom schemas for AI memory layers, version and access control
 - **Shared Repositories**: XBRL SEC filings (10-K, 10-Q) knowledge graph for context mining with MCP
 - **QuickBooks Integration**: Complete accounting synchronization with trial balance and report creation
-- **Credit-Based Billing**: AI operations (Anthropic/OpenAI) and storage overage tracking
+- **Credit-Based Billing**: AI operations via in-house agents consume credits in proportion to token use (Anthropic/OpenAI)
 - **Query Queue System**: Production-ready query management with admission control and load shedding
 
 ## Quick Start
@@ -87,7 +87,7 @@ just logs-follow worker              # CloudWatch log search
 #### System Requirements
 
 - Docker & Docker Compose
-- 8GB RAM minimum (16GB recommended for full stack)
+- 8GB RAM minimum
 - 20GB free disk space
 
 #### Required Tools
@@ -106,7 +106,7 @@ just logs-follow worker              # CloudWatch log search
 ### Application Layer
 
 - **FastAPI Backend** (`main.py`) with async REST API and versioned endpoints (`/v1/`)
-- **Multi-Database Routing**: Database-scoped endpoints (`/v1/{graph_id}/`) for multi-tenant operations
+- **Multi-Database Routing**: Database-scoped endpoints (`/v1/graphs/{graph_id}/`) for multi-tenant operations
 - **MCP Integration**: Model Context Protocol for AI-powered financial analytics
 - **Celery Workers** with priority queues for asynchronous processing
 
@@ -118,7 +118,7 @@ just logs-follow worker              # CloudWatch log search
 - **Multi-Tenant Isolation**: Each entity gets a dedicated database (`kg12345abc`) with complete data isolation
 - **Shared Repositories**: Common databases for SEC filings, industry benchmarks, and economic indicators
 - **API-First Design**: All database access through REST APIs with no direct database connections
-- **Schema-Driven Operations**: All database operations derive from curated graph schemas (RoboLedger, RoboInvestor, and more)
+- **Schema-Driven Operations**: All graph operations derive from curated schemas (RoboLedger, RoboInvestor, and more)
 
 #### Kuzu API System (`/robosystems/kuzu_api/`)
 
@@ -143,12 +143,12 @@ The client-factory layer provides intelligent routing between application code a
 
 #### Infrastructure Tiers
 
-| Tier           | Instance Type | Databases/Instance | Memory/DB | Use Case                |
-| -------------- | ------------- | ------------------ | --------- | ----------------------- |
-| **Standard**   | r7g.xlarge    | 10                 | 2GB       | Shared resources        |
-| **Enterprise** | r7g.large     | 1                  | 14GB      | Isolated resources      |
-| **Premium**    | r7g.xlarge    | 1                  | 28GB      | Maximum performance     |
-| **Shared**     | r7g.xlarge    | N/A                | Pooled    | SEC/public repositories |
+| Tier           | Instance Type | Databases/Instance | Memory/Graph | Use Case                |
+| -------------- | ------------- | ------------------ | ------------ | ----------------------- |
+| **Standard**   | r7g.xlarge    | 10                 | 2GB          | Shared resources        |
+| **Enterprise** | r7g.large     | 1                  | 14GB         | Isolated resources      |
+| **Premium**    | r7g.xlarge    | 1                  | 28GB         | Maximum performance     |
+| **Shared**     | r7g.xlarge    | N/A                | Pooled       | SEC/public repositories |
 
 ### Key Components
 
@@ -163,16 +163,16 @@ The client-factory layer provides intelligent routing between application code a
 
 - **EntityGraphService**: Entity-specific graph creation workflows
 - **GenericGraphService**: Generic graph creation with custom schemas
-- **CreditService**: AI token-based billing and storage overage management
 - **Data Ingestion**: High-performance bulk data loading using COPY operations
+- **CreditService**: AI agent usage with token-based consumption
 
 #### Data Processors (`/robosystems/processors/`)
 
 - **XBRLGraphProcessor**: XBRL filing processing and graph transformation
 - **QBTransactionsProcessor**: QuickBooks data processing and normalization
-- **SchemaProcessor**: DataFrame schema compatibility validation
 - **TrialBalanceProcessor**: Financial calculations and accounting operations
 - **ScheduleProcessor**: Financial schedule generation
+- **SchemaProcessor**: DataFrame schema compatibility validation
 
 #### Database Models (`/robosystems/models/`)
 
@@ -191,7 +191,7 @@ The client-factory layer provides intelligent routing between application code a
 
 ### Data Layer
 
-- **Kuzu Graph Database**: Financial relationships with cluster-based scaling
+- **Kuzu Graph Database**: Financial knowledge graph with cluster-based scaling
 - **DynamoDB**: Kuzu database allocation registry, instance and volume management
 - **PostgreSQL**: Primary relational database for identity and access management
 - **Valkey**: Message broker and caching (separate DBs for queues, cache, progress tracking)
@@ -199,10 +199,12 @@ The client-factory layer provides intelligent routing between application code a
 
 ### Infrastructure
 
-- **API Service**: ECS Fargate ARM64/Graviton with auto-scaling
+- **VPC**: AWS VPC with NAT Gateway, CloudTrail, and VPC Flow Logs
+- **API**: ECS Fargate ARM64/Graviton with auto-scaling and WAF
 - **Workers**: ECS Fargate ARM64/Graviton with auto-scaling
-- **Kuzu Writers**: EC2 ARM64/Graviton instances with DynamoDB registry
-- **Kuzu Readers**: EC2 ARM64/Graviton instances with load balancing for shared repositories
+- **Kuzu Writers**: EC2 Graviton instances with DynamoDB registry and management lambdas
+- **Kuzu Readers**: EC2 Graviton instances with load balancing for shared repositories
+- **Database & Cache**: AWS RDS PostgreSQL + AWS ElastiCache Valkey instances
 - **Observability**: Amazon Managed Prometheus + Grafana with AWS SSO
 - **Self-Hosted CI/CD**: GitHub Actions runner on dedicated infrastructure
 
@@ -211,7 +213,6 @@ The client-factory layer provides intelligent routing between application code a
 - **SEC EDGAR**: XBRL filing processing with staging parallel processing
 - **QuickBooks API**: OAuth-based accounting synchronization
 - **Anthropic Claude**: AI analysis via Model Context Protocol
-- **OpenFIGI**: Financial instrument identification
 
 ## AI
 
@@ -244,14 +245,12 @@ The client-factory layer provides intelligent routing between application code a
 - **`prod.yml`**: Production deployment orchestrator
 
   - Triggered on release tags (e.g., `v1.0.0`)
-  - Deploys to api.robosystems.ai
   - Full stack deployment with health checks and rollback capability
   - Runs database migrations automatically
 
 - **`staging.yml`**: Staging environment deployment
 
   - Triggered on manual dispatch on branches or release tags
-  - Deploys to staging.api.robosystems.ai
   - Used for integration testing before production releases
   - Identical infrastructure to production at reduced scale
 
@@ -280,7 +279,8 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 #### Core Infrastructure
 
-- **`vpc.yaml`**: VPC, subnets, NAT gateways, VPC endpoints, and network configuration
+- **`vpc.yaml`**: VPC, subnets, NAT gateways, VPC endpoints, network configuration, and VPC Flow Logs
+- **`cloudtrail.yaml`**: CloudTrail AWS Audit Logging for compliance purposes
 - **`s3.yaml`**: S3 buckets for data storage, backups, and CloudFormation templates
 - **`postgres.yaml`**: RDS PostgreSQL database with auto-scaling storage and automated backups
 - **`valkey.yaml`**: ElastiCache Valkey (Redis fork) for caching and message broker
@@ -288,6 +288,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 #### API & Workers
 
 - **`api.yaml`**: ECS Fargate API service with auto-scaling, load balancing, and health checks
+- **`waf.yaml`**: AWS Web Application Firewall for protecting the API from web exploits
 - **`worker.yaml`**: ECS Fargate Celery workers with priority queues and spot capacity
 - **`beat.yaml`**: Celery beat scheduler for periodic tasks and cron jobs
 - **`worker-monitor.yaml`**: Lambda function for monitoring worker health and queue depths
@@ -295,19 +296,19 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 #### Kuzu Graph Database
 
 - **`kuzu-infra.yaml`**: Base infrastructure for Kuzu clusters (security groups, roles, registries)
+- **`kuzu-volumes.yaml`**: EBS volume management and snapshot automation
 - **`kuzu-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types
 - **`kuzu-shared-replicas.yaml`**: ECS Fargate read replicas for shared repositories (SEC)
-- **`kuzu-volumes.yaml`**: EBS volume management and snapshot automation
 
 #### Observability
 
 - **`prometheus.yaml`**: Amazon Managed Prometheus for metrics collection
 - **`grafana.yaml`**: Amazon Managed Grafana for visualization and dashboards
 
-#### Development & Operations
+#### CI/CD & Support
 
 - **`gha-runner.yaml`**: Self-hosted GitHub Actions runner on EC2 spot instances
-- **`bastion.yaml`**: Bastion host for secure database access and troubleshooting
+- **`bastion.yaml`**: Bastion host for secure access and troubleshooting
 
 ### Environment Configuration
 

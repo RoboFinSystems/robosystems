@@ -1,0 +1,388 @@
+Description: RoboSystems Bastion Host Service - EC2 Bastion Host
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Description: Environment name (e.g., prod, staging)
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    ConstraintDescription: Must be prod or staging
+
+  # Infrastructure & Networking Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where bastion host will be deployed
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet ID for bastion host (must have internet gateway access)
+  ValkeySecurityGroupId:
+    Type: String
+    Description: Security group ID for accessing Valkey ElastiCache (from Valkey stack)
+    Default: ""
+
+  # Instance Configuration
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Amazon Linux 2023 ARM64 AMI ID
+  InstanceType:
+    Type: String
+    Description: EC2 instance type for bastion host (ARM64/Graviton)
+    Default: t4g.small
+    AllowedValues:
+      - t4g.nano
+      - t4g.micro
+      - t4g.small
+      - t4g.medium
+    ConstraintDescription: Must be a valid ARM64 instance type
+
+  # Security & Access Configuration
+  AllowedCidrBlock:
+    Type: String
+    Description: "REQUIRED: Specific office IP or VPN endpoint CIDR for SSH access (e.g., 203.0.113.0/24)"
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\/([0-9]|[1-2][0-9]|3[0-2])$
+    ConstraintDescription: Must be a valid CIDR block (e.g., 203.0.113.0/24)
+  KeyPairName:
+    Type: String
+    Description: EC2 Key Pair name for SSH access
+    ConstraintDescription: Must be an existing EC2 Key Pair
+  AdditionalSSHKeys:
+    Type: String
+    Description: Additional SSH public keys (one per line, separated by newlines)
+    Default: ""
+
+  # Script Configuration
+  DeploymentBucket:
+    Type: String
+    Description: S3 bucket containing deployment scripts
+    Default: ""
+  UserDataScriptKey:
+    Type: String
+    Description: S3 key for Bastion UserData script
+    Default: "userdata/bastion.sh"
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Bastion
+
+Conditions:
+  HasValkeySecurityGroup: !Not [!Equals [!Ref ValkeySecurityGroupId, ""]]
+  HasDeploymentBucket: !Not [!Equals [!Ref DeploymentBucket, ""]]
+
+Resources:
+  # Security group for bastion host SSH access
+  BastionHostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for bastion host - SSH access from allowed IPs
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedCidrBlock
+          Description: SSH access from specified CIDR block
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub sg-bastion-host-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM role for bastion host EC2 instance
+  BastionHostEC2InstanceRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: BastionHostPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                  - ec2:CreateTags
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
+              # KMS permissions for AWS managed keys with service conditions
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                      - !Sub "ssm.${AWS::Region}.amazonaws.com"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: !If
+                  - HasDeploymentBucket
+                  - - !Sub "arn:${AWS::Partition}:s3:::${DeploymentBucket}/*"
+                    - !Sub "arn:${AWS::Partition}:s3:::${DeploymentBucket}"
+                    - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
+                    - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
+                  - - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
+                    - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/RoboSystemsPostgresIAM*/*"
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-bastion-role-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  BastionHostEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Roles:
+        - !Ref BastionHostEC2InstanceRole
+
+  # CloudWatch log group for bastion host logs
+
+  BastionHostLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/bastion-host
+      RetentionInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-bastion-logs-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Bastion host EC2 instance
+
+  BastionHostEC2Instance:
+    Type: AWS::EC2::Instance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnetId
+      InstanceInitiatedShutdownBehavior: stop
+      SecurityGroupIds: !If
+        - HasValkeySecurityGroup
+        - [!Ref BastionHostSecurityGroup, !Ref ValkeySecurityGroupId]
+        - [!Ref BastionHostSecurityGroup]
+      IamInstanceProfile: !Ref BastionHostEC2InstanceProfile
+      BlockDeviceMappings:
+        - Ebs:
+            VolumeType: gp3
+            Iops: 3000
+            VolumeSize: 8
+            Encrypted: true
+            DeleteOnTermination: true
+          DeviceName: /dev/xvda
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-bastion-host-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          set -ex
+
+          # Log output
+          exec > >(tee /var/log/user-data.log)
+          exec 2>&1
+
+          echo "Starting Bastion Host initialization at $(date)"
+
+          # Download the UserData script from S3
+          SCRIPT_BUCKET="${DeploymentBucket}"
+          SCRIPT_KEY="${UserDataScriptKey}"
+
+          # Use deployment bucket or environment-based default
+          if [ -z "$SCRIPT_BUCKET" ]; then
+            SCRIPT_BUCKET="robosystems-${Environment}-deployment"
+          fi
+
+          echo "Downloading UserData script from s3://$SCRIPT_BUCKET/$SCRIPT_KEY"
+          aws s3 cp "s3://$SCRIPT_BUCKET/$SCRIPT_KEY" /tmp/bastion-userdata.sh --region ${AWS::Region}
+
+          # Make it executable
+          chmod +x /tmp/bastion-userdata.sh
+
+          # Export all CloudFormation parameters as environment variables
+          export Environment="${Environment}"
+          export AdditionalSSHKeys="${AdditionalSSHKeys}"
+          export AWS_REGION="${AWS::Region}"
+          export AWS_STACK_NAME="${AWS::StackName}"
+          export AWS_ACCOUNT_ID="${AWS::AccountId}"
+
+          # Execute the downloaded script
+          echo "Executing UserData script..."
+          /tmp/bastion-userdata.sh
+
+          # Tag the root volume
+          echo "Tagging EBS volumes..."
+          INSTANCE_ID=$(ec2-metadata --instance-id | cut -d' ' -f2)
+          ROOT_VOLUME=$(aws ec2 describe-instances \
+            --instance-ids $INSTANCE_ID \
+            --query "Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName=='/dev/xvda'].Ebs.VolumeId" \
+            --output text --region $AWS_REGION)
+
+          if [ -n "$ROOT_VOLUME" ]; then
+            aws ec2 create-tags \
+              --resources $ROOT_VOLUME \
+              --tags \
+                Key=Name,Value="robosystems-bastion-${Environment}-root" \
+                Key=Environment,Value="${Environment}" \
+                Key=Service,Value="${ServiceTag}" \
+                Key=Component,Value="${ComponentTag}" \
+                Key=VolumeType,Value=RootVolume \
+                Key=CreatedBy,Value=CloudFormation \
+              --region $AWS_REGION
+            echo "Tagged root volume: $ROOT_VOLUME"
+          fi
+
+          # Signal CloudFormation
+          /opt/aws/bin/cfn-signal --exit-code $? --stack $AWS_STACK_NAME --resource BastionHostEC2Instance --region $AWS_REGION
+
+          echo "UserData script execution completed at $(date)"
+
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+        Count: 1
+
+  # Elastic IP for bastion host
+
+  BastionHostEIP:
+    Type: AWS::EC2::EIP
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref BastionHostEC2Instance
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-bastion-eip-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+Outputs:
+  BastionHostId:
+    Description: Instance ID of the bastion host
+    Value: !Ref BastionHostEC2Instance
+    Export:
+      Name: !Sub ${AWS::StackName}-BastionHostId
+
+  BastionPublicIP:
+    Description: Public IP address of the bastion host
+    Value: !Ref BastionHostEIP
+    Export:
+      Name: !Sub ${AWS::StackName}-BastionPublicIP
+
+  BastionSecurityGroupId:
+    Description: Security Group ID of the bastion host
+    Value: !Ref BastionHostSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-BastionSecurityGroupId
+
+  SSHCommand:
+    Description: SSH command to connect to bastion host
+    Value: !Sub ssh -i /path/to/${KeyPairName}.pem ec2-user@${BastionHostEIP}
+
+  DynamicTunnelCommand:
+    Description: Tunnels script command for automatic endpoint discovery
+    Value: "./bin/tools/tunnels.sh prod all  # Replace 'prod' with your environment"
+
+  TunnelScriptUsage:
+    Description: Instructions for using the tunnels script
+    Value: Run './bin/tools/tunnels.sh' from your local machine

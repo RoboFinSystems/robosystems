@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python Debugger: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "RoboSystems API (Debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["main:app", "--reload"],
+      "jinja": false,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "RoboSystems Worker (Debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "celery",
+      "args": [
+        "-A",
+        "robosystems",
+        "worker",
+        "-n",
+        "rsworker",
+        "--autoscale=1,0",
+        "-Q",
+        "robosystems",
+        "-l",
+        "info",
+        "-Ofair",
+        "--prefetch-multiplier=0"
+      ],
+      "console": "integratedTerminal"
+    }
+  ]
+}

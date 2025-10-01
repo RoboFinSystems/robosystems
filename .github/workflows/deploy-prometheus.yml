@@ -1,0 +1,213 @@
+name: Deploy Prometheus
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging, or dev)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+
+    outputs:
+      prometheus_stack_name:
+        description: "Prometheus stack name"
+        value: ${{ inputs.stack_name }}
+      prometheus_workspace_arn:
+        description: "Amazon Managed Prometheus workspace ARN"
+        value: ${{ jobs.action.outputs.prometheus_workspace_arn }}
+      prometheus_workspace_id:
+        description: "Amazon Managed Prometheus workspace ID"
+        value: ${{ jobs.action.outputs.prometheus_workspace_id }}
+      prometheus_workspace_endpoint:
+        description: "Amazon Managed Prometheus workspace endpoint"
+        value: ${{ jobs.action.outputs.prometheus_workspace_endpoint }}
+      prometheus_remote_write_endpoint:
+        description: "Prometheus remote write endpoint for ADOT collectors"
+        value: ${{ jobs.action.outputs.prometheus_remote_write_endpoint }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 20
+    outputs:
+      prometheus_workspace_arn: ${{ steps.stack-outputs.outputs.prometheus_workspace_arn }}
+      prometheus_workspace_id: ${{ steps.stack-outputs.outputs.prometheus_workspace_id }}
+      prometheus_workspace_endpoint: ${{ steps.stack-outputs.outputs.prometheus_workspace_endpoint }}
+      prometheus_remote_write_endpoint: ${{ steps.stack-outputs.outputs.prometheus_remote_write_endpoint }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy Environment Prometheus CloudFormation Stack
+        id: deploy-stack
+        run: |
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new Prometheus stack ${{ inputs.stack_name }} for environment ${{ inputs.environment }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing Prometheus stack ${{ inputs.stack_name }} for environment ${{ inputs.environment }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Set up parameters for environment Prometheus stack
+          PROMETHEUS_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }}"
+
+          echo "Deploying Prometheus stack for environment: ${{ inputs.environment }}"
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/prometheus.yaml \
+              --parameters $PROMETHEUS_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Observability \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/prometheus.yaml \
+              --parameters $PROMETHEUS_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=Observability \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Prometheus stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating Prometheus stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Prometheus stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "1200"
+          interval: "15"
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "Retrieving Prometheus stack outputs for environment ${{ inputs.environment }}..."
+
+          # Get Prometheus Workspace ARN
+          PROMETHEUS_WORKSPACE_ARN=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='PrometheusWorkspaceArn'].OutputValue" \
+            --output text)
+
+          if [ -n "$PROMETHEUS_WORKSPACE_ARN" ] && [ "$PROMETHEUS_WORKSPACE_ARN" != "None" ]; then
+            echo "prometheus_workspace_arn=$PROMETHEUS_WORKSPACE_ARN" >> $GITHUB_OUTPUT
+            echo "ARN configured successfully"
+          else
+            echo "Error: Could not retrieve Prometheus Workspace ARN"
+            exit 1
+          fi
+
+          # Get Prometheus Workspace ID
+          PROMETHEUS_WORKSPACE_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='PrometheusWorkspaceId'].OutputValue" \
+            --output text)
+
+          if [ -n "$PROMETHEUS_WORKSPACE_ID" ] && [ "$PROMETHEUS_WORKSPACE_ID" != "None" ]; then
+            echo "prometheus_workspace_id=$PROMETHEUS_WORKSPACE_ID" >> $GITHUB_OUTPUT
+            echo "Prometheus Workspace configured successfully"
+          else
+            echo "Error: Could not retrieve Prometheus Workspace ID"
+            exit 1
+          fi
+
+          # Get Prometheus Workspace Endpoint
+          PROMETHEUS_WORKSPACE_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='PrometheusWorkspaceEndpoint'].OutputValue" \
+            --output text)
+
+          if [ -n "$PROMETHEUS_WORKSPACE_ENDPOINT" ] && [ "$PROMETHEUS_WORKSPACE_ENDPOINT" != "None" ]; then
+            echo "prometheus_workspace_endpoint=$PROMETHEUS_WORKSPACE_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "Found Prometheus Workspace Endpoint: $PROMETHEUS_WORKSPACE_ENDPOINT"
+          else
+            echo "Error: Could not retrieve Prometheus Workspace Endpoint"
+            exit 1
+          fi
+
+          # Get Prometheus Remote Write Endpoint
+          PROMETHEUS_REMOTE_WRITE_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='PrometheusRemoteWriteEndpoint'].OutputValue" \
+            --output text)
+
+          if [ -n "$PROMETHEUS_REMOTE_WRITE_ENDPOINT" ] && [ "$PROMETHEUS_REMOTE_WRITE_ENDPOINT" != "None" ]; then
+            echo "prometheus_remote_write_endpoint=$PROMETHEUS_REMOTE_WRITE_ENDPOINT" >> $GITHUB_OUTPUT
+            echo "Found Prometheus Remote Write Endpoint: $PROMETHEUS_REMOTE_WRITE_ENDPOINT"
+          else
+            echo "Error: Could not retrieve Prometheus Remote Write Endpoint"
+            exit 1
+          fi
+
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          # Output deployment status for the main workflow
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "Prometheus stack creation completed for ${{ inputs.environment }}"
+          else
+            echo "Prometheus stack update completed for ${{ inputs.environment }}"
+          fi

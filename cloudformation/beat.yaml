@@ -1,0 +1,435 @@
+Description: RoboSystems Beat Worker Service - ECS Fargate
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Environment name (e.g., prod, staging)
+    ConstraintDescription: Must be prod or staging
+
+  # Infrastructure & Networking Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs (comma-separated)
+
+  # Container & Application Configuration
+  ECRRepositoryUrl:
+    Type: String
+    Description: Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)
+  ECRImageTag:
+    Type: String
+    Description: ECR image tag
+    Default: latest
+    ConstraintDescription: Must be a valid Docker image tag
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: CloudWatch log retention in days
+
+  # ECS & Compute Configuration
+  Cpu:
+    Type: String
+    Default: "256"
+    Description: CPU units for ECS task
+    AllowedValues:
+      - "256"
+      - "512"
+  Memory:
+    Type: String
+    Default: "512"
+    Description: Memory units for ECS task
+    AllowedValues:
+      - "512"
+      - "1024"
+  FargateSpotWeight:
+    Type: Number
+    Default: 80
+    Description: Fargate Spot capacity provider weight
+    MinValue: 0
+    MaxValue: 100
+  FargateWeight:
+    Type: Number
+    Default: 20
+    Description: Fargate capacity provider weight
+    MinValue: 0
+    MaxValue: 100
+
+  # Cache Configuration
+  ValkeyUrl:
+    Type: String
+    Description: Valkey ElastiCache endpoint URL from Valkey stack
+    AllowedPattern: ^rediss?://.*:[0-9]+$
+    ConstraintDescription: Must be a valid Redis URL (redis://host:port or rediss://host:port)
+  ValkeyClientSecurityGroupId:
+    Type: String
+    Description: Security group ID for applications connecting to Valkey
+    AllowedPattern: ^sg-[0-9a-f]+$
+    ConstraintDescription: Must be a valid security group ID
+
+  # Observability Configuration
+  PrometheusStackName:
+    Type: String
+    Description: Name of the Prometheus CloudFormation stack for this environment
+    Default: ""
+    ConstraintDescription: Must be a valid CloudFormation stack name or empty
+
+  # Kuzu Configuration
+  KuzuReplicaAlbUrl:
+    Type: String
+    Default: ""
+    Description: ALB endpoint URL for shared repository read replicas
+  SharedReplicaAlbEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable routing to shared replica ALB for read operations
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Beat
+
+Conditions:
+  HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
+  IsProduction: !Equals [!Ref Environment, "prod"]
+
+Resources:
+  # ECS Cluster
+  BeatCluster:
+    Type: AWS::ECS::Cluster
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ClusterName: !Sub robosystems-beat-${Environment}-cluster
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM Role for ECS Task Execution
+  BeatEcsExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ExecutionRoleSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  # Base secret: robosystems/prod or robosystems/staging
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
+                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/kuzu, etc.
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # KMS permissions for decrypting secrets during container startup
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM Role for ECS Task
+  BeatTaskRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BeatTaskRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment
+                  - !Sub arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                  - cloudwatch:DescribeAlarms
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry/index/*"
+              # Secrets Manager permissions for runtime secret access
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  # Base secret: robosystems/prod or robosystems/staging
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
+                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/kuzu, etc.
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # KMS permissions for AWS managed keys with service conditions
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ebs"
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ssm"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                      - !Sub "ec2.${AWS::Region}.amazonaws.com"
+                      - !Sub "ssm.${AWS::Region}.amazonaws.com"
+              # Amazon Managed Prometheus permissions (only if observability stack is configured)
+              - !If
+                - HasObservabilityStack
+                - Effect: Allow
+                  Action:
+                    - aps:RemoteWrite
+                    - aps:QueryMetrics
+                    - aps:GetLabels
+                    - aps:GetSeries
+                    - aps:GetMetricMetadata
+                  Resource: !Sub
+                    - "${PrometheusWorkspaceArn}"
+                    - PrometheusWorkspaceArn:
+                        Fn::ImportValue: !Sub "${PrometheusStackName}-PrometheusWorkspaceArn"
+                - !Ref AWS::NoValue
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Log Group
+  BeatLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/beat
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Security Group
+  BeatSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: Security group for RoboSystems Worker Maintenance ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub sg-robosystems-beat-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Task Definition
+  BeatTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Family: !Sub robosystems-beat-${Environment}-task
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt BeatEcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt BeatTaskRole.Arn
+      ContainerDefinitions:
+        - Name: beat-container
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          Essential: true
+          StopTimeout: 60 # Beat scheduler can shutdown quickly (1 minute)
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BeatLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: beat
+          Environment:
+            # Basic Environment Configuration
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: LOG_LEVEL
+              Value: INFO
+            - Name: DOCKER_PROFILE
+              Value: beat
+            # AWS & Container Configuration
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            # Kuzu Routing Configuration (for enhanced client factory)
+            - Name: KUZU_REPLICA_ALB_URL
+              Value: !Ref KuzuReplicaAlbUrl
+            - Name: SHARED_REPLICA_ALB_ENABLED
+              Value: !Ref SharedReplicaAlbEnabled
+            # Cache & Message Queue Configuration
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            # Feature flags and runtime configs configured via AWS Secrets Manager
+            - Name: SECURITY_AUDIT_ENABLED
+              Value: !If [IsProduction, "true", "false"]
+          # Secrets are fetched directly by the application using secrets_manager.py
+          # The container has IAM permissions to access robosystems/{env}/* secrets
+
+  # ECS Service
+  BeatService:
+    Type: AWS::ECS::Service
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ServiceName: !Sub robosystems-beat-${Environment}-service
+      Cluster: !Ref BeatCluster
+      DesiredCount: 1
+      CapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: !Ref FargateSpotWeight
+        - CapacityProvider: FARGATE
+          Weight: !Ref FargateWeight
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref BeatSecurityGroup
+            - !Ref ValkeyClientSecurityGroupId
+      TaskDefinition: !Ref BeatTaskDefinition
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 0 # Beat can have brief downtime during deployment
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      EnableExecuteCommand: true
+      PropagateTags: SERVICE
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+Outputs:
+  ClusterName:
+    Description: Name of the ECS Cluster
+    Value: !Ref BeatCluster
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-ClusterName
+  ServiceName:
+    Description: Name of the ECS Service
+    Value: !Ref BeatService
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-ServiceName
+  ECRRepositoryUsed:
+    Description: ECR Repository used for Docker images
+    Value: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-ECRRepositoryUsed
+  TaskDefinitionArn:
+    Description: ARN of the task definition
+    Value: !Ref BeatTaskDefinition
+    Export:
+      Name: !Sub ${AWS::StackName}-${Environment}-TaskDefinitionArn
