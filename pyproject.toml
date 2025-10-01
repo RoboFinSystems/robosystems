@@ -1,6 +1,6 @@
 [project]
 name = "robosystems-service"
-version = "0.1.0"
+version = "1.0.0"
 description = "RoboSystems"
 requires-python = ">=3.12.10"
 authors = [
