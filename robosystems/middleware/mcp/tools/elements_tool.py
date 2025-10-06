@@ -162,8 +162,9 @@ Use the discovered qnames in your Fact queries to get actual values.""",
         if include_samples:
           sample_query = f"""
                     MATCH (e:Element)<-[:FACT_HAS_ELEMENT]-(f:Fact)
+                    OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
                     WHERE e.qname = '{elem["qname"]}' AND f.numeric_value IS NOT NULL
-                    RETURN f.numeric_value as value, f.currency_code as currency
+                    RETURN f.numeric_value as value, u.value as currency
                     LIMIT 3
                     """
           samples = await self.client.execute_query(sample_query)

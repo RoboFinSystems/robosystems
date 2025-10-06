@@ -135,10 +135,10 @@ class FactsTool(BaseTool):
       # Analyze fact types
       fact_types_query = """
             MATCH (f:Fact)
-            RETURN 
+            RETURN
                 count(CASE WHEN f.numeric_value IS NOT NULL THEN 1 END) as numeric_facts,
-                count(CASE WHEN f.nonnumeric_value IS NOT NULL THEN 1 END) as text_facts,
-                count(CASE WHEN f.textblock_uri IS NOT NULL THEN 1 END) as textblock_facts
+                count(CASE WHEN f.fact_type = 'Nonnumeric' THEN 1 END) as text_facts,
+                count(CASE WHEN f.fact_type = 'Textblock' THEN 1 END) as textblock_facts
             """
       fact_types_result = await self.client.execute_query(fact_types_query)
       if fact_types_result:
@@ -155,8 +155,8 @@ class FactsTool(BaseTool):
                 MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
                 OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
                 WHERE f.numeric_value IS NOT NULL {element_clause}
-                RETURN e.qname as element, d.dimension_type as dim_type, 
-                       d.dimension_value as dim_value, count(f) as fact_count
+                RETURN e.qname as element, d.axis_uri as dim_type,
+                       d.member_uri as dim_value, count(f) as fact_count
                 ORDER BY fact_count DESC
                 LIMIT {limit}
                 """
@@ -175,10 +175,11 @@ class FactsTool(BaseTool):
               sample_query = f"""
                             MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
                             MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
-                            WHERE e.qname = '{row["element"]}' 
-                              AND d.dimension_type = '{row["dim_type"]}'
+                            OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
+                            WHERE e.qname = '{row["element"]}'
+                              AND d.axis_uri = '{row["dim_type"]}'
                               AND f.numeric_value IS NOT NULL
-                            RETURN f.numeric_value as value, f.currency_code as currency
+                            RETURN f.numeric_value as value, u.value as currency
                             LIMIT 3
                             """
               samples = await self.client.execute_query(sample_query)
@@ -193,7 +194,7 @@ class FactsTool(BaseTool):
                 MATCH (f)-[:FACT_HAS_ELEMENT]->(e:Element)
                 WHERE f.numeric_value IS NOT NULL {element_clause}
                 RETURN p.end_date as period, e.qname as element, count(f) as fact_count
-                ORDER BY p.end_date DESC
+                ORDER BY period DESC
                 LIMIT {limit}
                 """
         temporal_result = await self.client.execute_query(temporal_query)
@@ -225,7 +226,7 @@ class FactsTool(BaseTool):
             "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
 MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
 WHERE e.qname CONTAINS 'Revenue' AND f.numeric_value IS NOT NULL
-RETURN d.dimension_type, d.dimension_value, sum(f.numeric_value) as total
+RETURN d.axis_uri, d.member_uri, sum(f.numeric_value) as total
 ORDER BY total DESC LIMIT 10""",
             "explanation": "Revenue by segment with safe aggregation",
           },
@@ -268,7 +269,7 @@ OPTIONAL MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
 OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
 OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
 WHERE e.qname = '{element_filter}' AND f.numeric_value IS NOT NULL
-RETURN f.numeric_value, p.end_date, d.dimension_type, d.dimension_value, u.unit_type
+RETURN f.numeric_value, p.end_date, d.axis_uri, d.member_uri, u.value
 LIMIT 10""",
               "explanation": "Complete fact context with all aspects",
             },
