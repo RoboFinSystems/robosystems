@@ -173,12 +173,12 @@ install-apps:
 
 ## Development Server ##
 # Environment Detection and Hostname Overrides
-_dev_override := if env_var_or_default("DEV_OVERRIDE", "false") == "true" { "" } else {
-  "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/robosystems " +
-  "TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/robosystems_test " +
-  "CELERY_BROKER_URL=redis://:valkey@localhost:6379/0 " +
-  "CELERY_RESULT_BACKEND=redis://:valkey@localhost:6379/1 " +
-  "VALKEY_URL=redis://:valkey@localhost:6379 " +
+_dev := if env_var_or_default("DEV_OVERRIDE", "false") == "true" { "" } else {
+  "DATABASE_URL=postgresql://postgres:"+env_var_or_default("PG_PWD", "postgres")+"@localhost:5432/robosystems " +
+  "TEST_DATABASE_URL=postgresql://postgres:"+env_var_or_default("PG_PWD", "postgres")+"@localhost:5432/robosystems_test " +
+  "CELERY_BROKER_URL=redis://:"+env_var_or_default("VALKEY_PWD", "valkey")+"@localhost:6379/0 " +
+  "CELERY_RESULT_BACKEND=redis://:"+env_var_or_default("VALKEY_PWD", "valkey")+"@localhost:6379/1 " +
+  "VALKEY_URL=redis://:"+env_var_or_default("VALKEY_PWD", "valkey")+"@localhost:6379 " +
   "KUZU_API_URL=http://localhost:8001 " +
   "AWS_ENDPOINT_URL=http://localhost:4566 " +
   "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318"
@@ -186,44 +186,44 @@ _dev_override := if env_var_or_default("DEV_OVERRIDE", "false") == "true" { "" }
 
 # Start development server
 api env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run uvicorn main:app --reload
+    {{_dev}} UV_ENV_FILE={{env}} uv run uvicorn main:app --reload
 
 # Start Kuzu API server (configurable node type)
 kuzu-api type="writer" port="8001" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --node-type {{type}} --port {{port}} --base-path ./data/kuzu-dbs
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --node-type {{type}} --port {{port}} --base-path ./data/kuzu-dbs
 
 # Start worker
 worker env=".env" num_workers="1" queue="robosystems":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run celery -A robosystems worker -B -n rsworkerbeat --concurrency={{num_workers}} -Q {{queue}} -l info -Ofair --prefetch-multiplier=0
+    {{_dev}} UV_ENV_FILE={{env}} uv run celery -A robosystems worker -B -n rsworkerbeat --concurrency={{num_workers}} -Q {{queue}} -l info -Ofair --prefetch-multiplier=0
 
 # Start beat worker (Celery scheduler)
 beat env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
+    {{_dev}} UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
 
 # Start Flower (Celery monitoring web UI)
 flower env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run celery -A robosystems flower --port=5555
+    {{_dev}} UV_ENV_FILE={{env}} uv run celery -A robosystems flower --port=5555
 
 ## Database Operations ##
 # Create new migration
 migrate-create message env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run alembic revision --autogenerate -m "{{message}}"
+    {{_dev}} UV_ENV_FILE={{env}} uv run alembic revision --autogenerate -m "{{message}}"
 
 # Run migrations
 migrate-up env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run alembic upgrade head
+    {{_dev}} UV_ENV_FILE={{env}} uv run alembic upgrade head
 
 # Rollback migration
 migrate-down env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run alembic downgrade -1
+    {{_dev}} UV_ENV_FILE={{env}} uv run alembic downgrade -1
 
 # Show migration history
 migrate-history env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run alembic history
+    {{_dev}} UV_ENV_FILE={{env}} uv run alembic history
 
 # Show current migration
 migrate-current env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run alembic current
+    {{_dev}} UV_ENV_FILE={{env}} uv run alembic current
 
 # Run migrations on remote environment via bastion
 migrate-remote environment key:
@@ -232,80 +232,80 @@ migrate-remote environment key:
 # Initialize database with sample data
 # Reset database (drop and recreate all auth tables)
 db-reset env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run alembic downgrade base
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run alembic upgrade head
+    {{_dev}} UV_ENV_FILE={{env}} uv run alembic downgrade base
+    {{_dev}} UV_ENV_FILE={{env}} uv run alembic upgrade head
 
 # Database management commands
 db-info env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager info
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager info
 
 db-list-users env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager list-users
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager list-users
 
 db-create-user email name password env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-user {{email}} "{{name}}" {{password}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-user {{email}} "{{name}}" {{password}}
 
 db-create-key email key_name env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-key {{email}} "{{key_name}}"
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-key {{email}} "{{key_name}}"
 
 # Create test user (add 'file' to save creds, 'json' for JSON output, 'sec' for SEC access)
 db-create-test-user mode="" base_url="http://localhost:8000" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode == "file" { "--save-file" } else if mode == "json" { "--json" } else if mode == "sec" { "--with-sec-access" } else { "" } }}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode == "file" { "--save-file" } else if mode == "json" { "--json" } else if mode == "sec" { "--with-sec-access" } else { "" } }}
 
 ## Kuzu Database ##
 # Kuzu API client - health check
 kuzu-health url="http://localhost:8001" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --url {{url}} health
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --url {{url}} health
 
 # Kuzu API client - get database info
 kuzu-info url="http://localhost:8001" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --url {{url}} info
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --url {{url}} info
 
 # Kuzu API client - execute query
 kuzu-query graph_id query format="table" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api cli query "{{query}}" --database {{graph_id}} --format {{format}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api cli query "{{query}}" --database {{graph_id}} --format {{format}}
 
 # Kuzu embedded database direct query tool
 kuzu-db-query graph_id query format="table" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
 
 ## SEC Local Pipeline - Testing and Development ##
-# SEC Local - Load single company by ticker (e.g., just sec-load NVDA 2024)
-sec-load ticker year="2024" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} --year {{year}}
+# SEC Local - Load single company by ticker and (all) years (e.g., just sec-load NVDA)
+sec-load ticker year="" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --force-reconsolidate
 
 # SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
 sec-health verbose="" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local_health {{ if verbose == "v" { "--verbose" } else { "" } }}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local_health {{ if verbose == "v" { "--verbose" } else { "" } }}
 
 # SEC Local - Reset database with proper schema
 sec-reset-local env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset
 
 ## SEC Orchestrator - For large-scale production processing ##
 # SEC - Plan processing with optional company limit for testing
 sec-plan start_year="2020" end_year="2025" max_companies="" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {{start_year}} --end-year {{end_year}} --max-companies {{max_companies}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {{start_year}} --end-year {{end_year}} --max-companies {{max_companies}}
 
 # SEC - Start a specific phase: download, process, consolidate, ingest
 sec-phase phase env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}}
 
 # SEC - Resume a phase from last checkpoint
 sec-phase-resume phase env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --resume
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --resume
 
 # SEC - Retry failed companies in a phase
 sec-phase-retry phase env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --retry-failed
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --retry-failed
 
 # SEC - Get status of all phases
 sec-status env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator status
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator status
 
 # SEC - Reset database (requires confirmation)
 sec-reset confirm="" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 ## Arelle Schema Cache Management ##
 # Arelle Cache commands: update, check, extract, clean, download, fetch-edgar, bundle
@@ -315,90 +315,90 @@ arelle-cache command="update":
 ## Dead Letter Queue (DLQ) Management ##
 # DLQ Stats - Check failed task statistics
 dlq-stats env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq stats
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq stats
 
 # DLQ Health - Check DLQ health status
 dlq-health env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq health
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq health
 
 # DLQ List - List failed tasks in the queue
 dlq-list limit="10" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq list --limit {{limit}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq list --limit {{limit}}
 
 # DLQ Reprocess - Retry a failed task
 dlq-reprocess task_id env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq reprocess {{task_id}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq reprocess {{task_id}}
 
 # DLQ Purge - Remove all failed tasks
 dlq-purge env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq purge --confirm
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.manage_dlq purge --confirm
 
 ## Repository Access Management ##
 # Repository Access Management
 repo-grant-access user_id repository access_level="read" env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}}
 
 # Grant repository access with expiration
 repo-grant-access-expire user_id repository access_level expires_days env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}} --expires-days {{expires_days}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}} --expires-days {{expires_days}}
 
 # Revoke repository access
 repo-revoke-access user_id repository env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager revoke {{user_id}} {{repository}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager revoke {{user_id}} {{repository}}
 
 # List all repository access
 repo-list-access env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list
 
 # List repository access
 repo-list-access-repo repository env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list --repository {{repository}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list --repository {{repository}}
 
 # Check user access
 repo-check-access user_id env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}}
 
 # Check repository access
 repo-check-access-repo user_id repository env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
 
 # List all repositories
 repo-list-repositories env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager repositories
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager repositories
 
 ## Credit Admin Tools ##
 # Credit admin - allocate credits for a specific user
 credit-admin-user user_id env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin allocate-user {{user_id}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin allocate-user {{user_id}}
 
 # Credit admin - allocate credits for a specific graph
 credit-admin-graph graph_id env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin allocate-graph {{graph_id}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin allocate-graph {{graph_id}}
 
 # Credit admin - run global credit allocation (all users/graphs)
 credit-admin-allocate-all env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin allocate-all
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin allocate-all
 
 # Credit admin - add bonus credits to a graph
 credit-admin-bonus graph_id amount description env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin bonus {{graph_id}} --amount {{amount}} --description "{{description}}"
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin bonus {{graph_id}} --amount {{amount}} --description "{{description}}"
 
 # Credit admin - check credit system health
 credit-admin-health env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin health
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin health
 
 ## Valkey/Redis ##
 # Clear Valkey/Redis queues
 valkey-clear-queue queue env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues {{queue}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues {{queue}}
 
 # Clear Valkey/Redis queues including unacknowledged messages
 valkey-clear-queue-all queue env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --clear-unacked {{queue}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --clear-unacked {{queue}}
 
 # List Valkey/Redis queue contents without clearing
 valkey-list-queue queue env=".env":
-    {{_dev_override}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
 
 ## Misc ##
 # Clean up development artifacts
