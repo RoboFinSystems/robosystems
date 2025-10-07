@@ -28,40 +28,6 @@ def sample_qb_entity_data():
   }
 
 
-@pytest.fixture
-def sample_qb_accounts_data():
-  """Sample QuickBooks accounts data for testing."""
-  return [
-    {
-      "Id": "1",
-      "Name": "Checking",
-      "AcctNum": "1000",
-      "AccountType": "Bank",
-      "AccountSubType": "Checking",
-      "CurrentBalance": 25000.00,
-      "Active": True,
-    },
-    {
-      "Id": "2",
-      "Name": "Accounts Receivable",
-      "AcctNum": "1200",
-      "AccountType": "Accounts Receivable",
-      "AccountSubType": "AccountsReceivable",
-      "CurrentBalance": 15000.00,
-      "Active": True,
-    },
-    {
-      "Id": "3",
-      "Name": "Revenue",
-      "AcctNum": "4000",
-      "AccountType": "Income",
-      "AccountSubType": "SalesOfProductIncome",
-      "CurrentBalance": -100000.00,
-      "Active": True,
-    },
-  ]
-
-
 class TestQBClientIntegration:
   """Test QuickBooks client integration with Kuzu database."""
 
@@ -179,79 +145,6 @@ class TestQBDataIntegration:
     assert entity["name"] == sample_qb_entity_data["EntityName"]
     assert entity["legal_name"] == sample_qb_entity_data["LegalName"]
     assert entity["city"] == "San Francisco"
-
-  def test_accounts_data_mapping(
-    self, kuzu_repository_with_schema, sample_qb_accounts_data
-  ):
-    """Test mapping QuickBooks accounts data to Kuzu database."""
-    # Create QB entity schema for relationship
-    kuzu_repository_with_schema.execute_query("""
-      CREATE NODE TABLE QBEntity(
-        identifier STRING,
-        name STRING,
-        PRIMARY KEY (identifier)
-      )
-    """)
-
-    # Create account schema for testing
-    kuzu_repository_with_schema.execute_query("""
-      CREATE NODE TABLE Account(
-        identifier STRING,
-        qb_id STRING,
-        name STRING,
-        account_number STRING,
-        account_type STRING,
-        account_subtype STRING,
-        current_balance DOUBLE,
-        active BOOLEAN,
-        created_at TIMESTAMP,
-        updated_at TIMESTAMP,
-        PRIMARY KEY (identifier)
-      )
-    """)
-
-    # Add relationship for entity accounts
-    kuzu_repository_with_schema.execute_query("""
-      CREATE REL TABLE ENTITY_HAS_QB_ACCOUNT(FROM QBEntity TO Account)
-    """)
-
-    # Process each account
-    for qb_account in sample_qb_accounts_data:
-      account_data = {
-        "identifier": f"qb-account-{qb_account['Id']}",
-        "qb_id": qb_account["Id"],
-        "name": qb_account["Name"],
-        "account_number": qb_account["AcctNum"],
-        "account_type": qb_account["AccountType"],
-        "account_subtype": qb_account["AccountSubType"],
-        "current_balance": qb_account["CurrentBalance"],
-        "active": qb_account["Active"],
-        "created_at": "2023-01-01 00:00:00",
-        "updated_at": "2023-01-01 00:00:00",
-      }
-
-      cypher = """
-      CREATE (a:Account {
-        identifier: $identifier,
-        qb_id: $qb_id,
-        name: $name,
-        account_number: $account_number,
-        account_type: $account_type,
-        account_subtype: $account_subtype,
-        current_balance: $current_balance,
-        active: $active,
-        created_at: timestamp($created_at),
-        updated_at: timestamp($updated_at)
-      }) RETURN a
-      """
-
-      result = kuzu_repository_with_schema.execute_single(cypher, account_data)
-      assert result is not None
-
-      account = result["a"]
-      assert account["name"] == qb_account["Name"]
-      assert account["account_type"] == qb_account["AccountType"]
-      assert account["current_balance"] == qb_account["CurrentBalance"]
 
   def test_qb_connection_mapping(self, kuzu_repository_with_schema):
     """Test mapping QuickBooks connection data to Kuzu database."""

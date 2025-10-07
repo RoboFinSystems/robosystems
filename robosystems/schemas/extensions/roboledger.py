@@ -268,22 +268,6 @@ REPORTING_RELATIONSHIPS = [
 
 TRANSACTION_NODES = [
   Node(
-    name="Account",
-    description="Chart of accounts for general ledger",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="account_number", type="STRING"),
-      Property(name="name", type="STRING"),
-      Property(
-        name="account_type", type="STRING"
-      ),  # asset, liability, equity, revenue, expense
-      Property(name="balance", type="STRING"),
-      Property(name="parent_account_id", type="STRING"),
-      Property(name="is_active", type="BOOLEAN"),
-      Property(name="updated_at", type="STRING"),
-    ],
-  ),
-  Node(
     name="Transaction",
     description="Financial transactions and journal entries",
     properties=[
@@ -331,31 +315,9 @@ TRANSACTION_NODES = [
       Property(name="updated_at", type="STRING"),
     ],
   ),
-  Node(
-    name="Disclosure",
-    description="SEC disclosure requirements and compliance",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="uri", type="STRING"),
-      Property(name="name", type="STRING"),
-      Property(name="sec_type", type="STRING"),
-      Property(name="description", type="STRING"),
-      Property(name="required", type="BOOLEAN"),
-      Property(name="updated_at", type="STRING"),
-    ],
-  ),
 ]
 
 TRANSACTION_RELATIONSHIPS = [
-  Relationship(
-    name="ENTITY_HAS_ACCOUNT",
-    from_node="Entity",
-    to_node="Account",
-    description="Entity has chart of accounts",
-    properties=[
-      Property(name="account_context", type="STRING"),
-    ],
-  ),
   Relationship(
     name="ENTITY_HAS_TRANSACTION",
     from_node="Entity",
@@ -363,16 +325,6 @@ TRANSACTION_RELATIONSHIPS = [
     description="Entity has financial transactions",
     properties=[
       Property(name="transaction_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="ACCOUNT_HAS_TRANSACTION",
-    from_node="Account",
-    to_node="Transaction",
-    description="Account has transactions",
-    properties=[
-      Property(name="debit_amount", type="DOUBLE"),
-      Property(name="credit_amount", type="DOUBLE"),
     ],
   ),
   Relationship(
@@ -391,24 +343,6 @@ TRANSACTION_RELATIONSHIPS = [
     description="Line item maps to XBRL element for reporting",
     properties=[
       Property(name="mapping_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="PROCESS_HAS_DISCLOSURE",
-    from_node="Process",
-    to_node="Disclosure",
-    description="Process generates disclosure requirements",
-    properties=[
-      Property(name="disclosure_context", type="STRING"),
-    ],
-  ),
-  Relationship(
-    name="ACCOUNT_PARENT_CHILD",
-    from_node="Account",
-    to_node="Account",
-    description="Account hierarchy relationship",
-    properties=[
-      Property(name="hierarchy_level", type="INT64"),
     ],
   ),
 ]

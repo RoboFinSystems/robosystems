@@ -335,9 +335,9 @@ result = await queue.wait_for_result(query_id)
 ```python
 repo = router.get_repository("kg1a2b3c", operation_type="write")
 success = await repo.execute_transaction([
-    "CREATE (c:Entity {name: 'New Corp'})",
-    "CREATE (a:Account {name: 'Cash'})",
-    "CREATE (c)-[:HAS_ACCOUNT]->(a)"
+    "CREATE (e:Entity {identifier: 'entity-123', name: 'New Corp'})",
+    "CREATE (el:Element {uri: 'http://example.com/element/Cash', qname: 'Cash'})",
+    "CREATE (e)-[:ENTITY_HAS_ELEMENT]->(el)"
 ])
 ```
 

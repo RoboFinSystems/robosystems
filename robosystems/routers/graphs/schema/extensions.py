@@ -82,7 +82,7 @@ async def list_schema_extensions(
           "Complete accounting system with XBRL reporting and GL transactions. "
           "Context-aware: SEC repositories automatically get reporting-only tables "
           "(9 additional nodes), while entity graphs get full accounting capabilities "
-          "(14 additional nodes including Account, Transaction, LineItem, etc.)."
+          "(12 additional nodes including Transaction, LineItem, Process, etc.)."
         )
         # Add context information
         ext["context_aware"] = True
@@ -101,18 +101,16 @@ async def list_schema_extensions(
               "Label",
               "Taxonomy",
             ],
-            "excludes": ["Account", "Transaction", "LineItem", "Process", "Disclosure"],
+            "excludes": ["Transaction", "LineItem", "Process"],
           },
           "full_accounting": {
             "description": "Complete accounting system for entity graphs",
-            "node_count": 14,
+            "node_count": 12,
             "includes": [
               "All reporting nodes",
-              "Account",
               "Transaction",
               "LineItem",
               "Process",
-              "Disclosure",
             ],
           },
         }
