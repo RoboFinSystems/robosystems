@@ -87,22 +87,38 @@ PROTECTION_EXPIRY_MINUTES = 60
 # Connection pool for Redis - reused across functions
 _redis_connections = {}
 _valkey_auth_token = None
+_token_cache_time = None
+
+# Token cache TTL (1 hour) - allows rotation without Lambda restart
+TOKEN_CACHE_TTL = 3600
 
 
 def get_valkey_auth_token() -> Optional[str]:
-  """Get Valkey auth token from Secrets Manager with caching."""
-  global _valkey_auth_token
+  """Get Valkey auth token from Secrets Manager with TTL-based caching."""
+  global _valkey_auth_token, _token_cache_time
 
-  if _valkey_auth_token:
-    return _valkey_auth_token
+  import time
+
+  # Check if cached token is still valid
+  if _valkey_auth_token and _token_cache_time:
+    if time.time() - _token_cache_time < TOKEN_CACHE_TTL:
+      return _valkey_auth_token
 
   secret_name = f"robosystems/{ENVIRONMENT}/valkey"
 
   try:
     response = secretsmanager.get_secret_value(SecretId=secret_name)
     secret_data = json.loads(response["SecretString"])
-    _valkey_auth_token = secret_data.get("AUTH_TOKEN")
-    logger.info(f"Retrieved Valkey auth token from {secret_name}")
+    _valkey_auth_token = secret_data.get("VALKEY_AUTH_TOKEN")
+
+    if not _valkey_auth_token:
+      logger.error(f"VALKEY_AUTH_TOKEN key not found in secret {secret_name}")
+      return None
+
+    _token_cache_time = time.time()
+    logger.info(
+      f"Retrieved Valkey auth token from {secret_name} (cached for {TOKEN_CACHE_TTL}s)"
+    )
     return _valkey_auth_token
   except Exception as e:
     logger.error(f"Failed to get Valkey auth token from {secret_name}: {e}")
@@ -142,7 +158,11 @@ def get_redis_connection(database: int = 0) -> redis.Redis:
   # Get auth token
   auth_token = get_valkey_auth_token()
   if not auth_token:
-    raise RuntimeError("Failed to get Valkey auth token")
+    secret_name = f"robosystems/{ENVIRONMENT}/valkey"
+    raise RuntimeError(
+      f"Failed to retrieve Valkey auth token from Secrets Manager. "
+      f"Check that secret '{secret_name}' exists and contains 'VALKEY_AUTH_TOKEN' key."
+    )
 
   # Build URL with auth token and database number
   # Format: rediss://default:{password}@{host}:{port}/{db}
