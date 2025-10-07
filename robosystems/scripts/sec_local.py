@@ -49,7 +49,7 @@ class SECLocalPipeline:
 
     logger.info("⏳ Waiting for database reset to complete...")
     try:
-      result = task.get(timeout=60)  # 1 minute timeout
+      result = task.get(timeout=300)  # 5 minute timeout for database reset
 
       if result.get("status") == "success":
         logger.info("✅ Database reset successfully")
@@ -100,7 +100,43 @@ class SECLocalPipeline:
       except Exception as e:
         logger.warning(f"  Error clearing {bucket}: {e}")
 
-  def load_company(self, ticker: str, year: int) -> bool:
+  def _clear_consolidated_files(self):
+    """Clear consolidated files from S3 to force reconsolidation."""
+    from robosystems.config import env
+
+    bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
+    prefix = "consolidated/"
+
+    try:
+      # Use LocalStack endpoint for development
+      endpoint_url = (
+        "--endpoint-url http://localhost:4566" if env.is_development() else ""
+      )
+
+      cmd = [
+        "aws",
+        "s3",
+        "rm",
+        f"s3://{bucket}/{prefix}",
+        "--recursive",
+      ]
+
+      if endpoint_url:
+        cmd.extend(endpoint_url.split())
+
+      result = subprocess.run(cmd, capture_output=True, text=True)
+      if result.returncode == 0:
+        logger.info(f"✅ Cleared consolidated files from s3://{bucket}/{prefix}")
+      elif "NoSuchBucket" in result.stderr or "(KeyError)" in result.stderr:
+        logger.debug(f"No consolidated files to clear in {bucket}")
+      else:
+        logger.warning(f"Failed to clear consolidated files: {result.stderr}")
+    except Exception as e:
+      logger.warning(f"Error clearing consolidated files: {e}")
+
+  def load_company(
+    self, ticker: str, year: int = None, force_reconsolidate: bool = False
+  ) -> bool:
     """
     Load a single company's data by ticker symbol using orchestrated Celery tasks.
 
@@ -115,12 +151,25 @@ class SECLocalPipeline:
 
     Args:
         ticker: Company ticker symbol (e.g., "NVDA", "AAPL")
-        year: Year to load data for
+        year: Year to load data for (None for all available years)
+        force_reconsolidate: If True, clear existing consolidated files to force reconsolidation
 
     Returns:
         True if successful, False otherwise
     """
-    logger.info(f"📊 Loading {ticker} data for {year} using orchestrated pipeline...")
+    if year is None:
+      logger.info(
+        f"📊 Loading {ticker} data for ALL YEARS using orchestrated pipeline..."
+      )
+      # Default to a reasonable range of years
+      start_year = (
+        2019  # SEC started requiring XBRL in 2009, but quality improves from 2019
+      )
+      end_year = datetime.now().year
+    else:
+      logger.info(f"📊 Loading {ticker} data for {year} using orchestrated pipeline...")
+      start_year = year
+      end_year = year
 
     try:
       # Use the orchestration tasks just like production
@@ -142,12 +191,12 @@ class SECLocalPipeline:
       company_name = company.iloc[0]["title"]
       logger.info(f"Found: {company_name} (CIK: {cik})")
 
-      # Step 1: Create a plan for just this company and one year
-      logger.info("Creating processing plan...")
+      # Step 1: Create a plan for just this company and specified year(s)
+      logger.info(f"Creating processing plan for years {start_year}-{end_year}...")
       plan_task = plan_phased_processing.apply_async(
         kwargs={
-          "start_year": year,
-          "end_year": year,  # Single year constraint
+          "start_year": start_year,
+          "end_year": end_year,
           "cik_filter": cik,  # Filter to specific CIK
         }
       )
@@ -157,13 +206,24 @@ class SECLocalPipeline:
         logger.error(f"Failed to create plan: {plan_result.get('error')}")
         return False
 
-      logger.info(f"✅ Plan created for {company_name} ({year})")
+      year_display = (
+        f"{start_year}-{end_year}" if start_year != end_year else str(start_year)
+      )
+      logger.info(f"✅ Plan created for {company_name} ({year_display})")
+
+      # Calculate timeouts based on number of years being processed
+      num_years = end_year - start_year + 1
+      base_timeout = 120
+      per_year_timeout = 60
+      phase_timeout = base_timeout + (num_years * per_year_timeout)
+
+      logger.info(f"Using timeout of {phase_timeout}s for {num_years} years of data")
 
       # Step 2: Run download phase
       logger.info("Starting download phase...")
       download_task = start_phase.apply_async(kwargs={"phase": "download"})
 
-      download_result = download_task.get(timeout=120)
+      download_result = download_task.get(timeout=phase_timeout)
       if download_result.get("status") != "started":
         logger.error(f"Failed to start download: {download_result.get('error')}")
         return False
@@ -173,14 +233,15 @@ class SECLocalPipeline:
       from robosystems.config import env
 
       # In dev environment, use minimal delays for faster iteration
-      wait_time = 0.5 if env.is_development() else 5
+      # But scale up wait time for multiple years
+      wait_time = (0.5 if env.is_development() else 5) * min(num_years, 3)
       time.sleep(wait_time)  # Give it a moment to process
 
       # Step 3: Run process phase
       logger.info("Starting processing phase...")
       process_task = start_phase.apply_async(kwargs={"phase": "process"})
 
-      process_result = process_task.get(timeout=120)
+      process_result = process_task.get(timeout=phase_timeout)
       if process_result.get("status") != "started":
         logger.error(f"Failed to start processing: {process_result.get('error')}")
         return False
@@ -188,11 +249,23 @@ class SECLocalPipeline:
       # Wait for processing
       time.sleep(wait_time)
 
+      # Step 3: Clear consolidated files if force_reconsolidate is True
+      if force_reconsolidate:
+        logger.info(
+          "🧹 Clearing existing consolidated files to force reconsolidation..."
+        )
+        self._clear_consolidated_files()
+
+        # Also reset the Kuzu database to avoid duplicates
+        logger.info("🔄 Resetting SEC database to avoid duplicates...")
+        if not self.reset_database(clear_s3=False):
+          logger.error("Failed to reset database, continuing anyway...")
+
       # Step 3: Run consolidation phase (consolidates all files across years)
       logger.info("Starting consolidation phase...")
       consolidate_task = start_phase.apply_async(kwargs={"phase": "consolidate"})
 
-      consolidate_result = consolidate_task.get(timeout=120)
+      consolidate_result = consolidate_task.get(timeout=phase_timeout)
       if consolidate_result.get("status") != "started":
         logger.error(
           f"Failed to start consolidation: {consolidate_result.get('error')}"
@@ -203,14 +276,15 @@ class SECLocalPipeline:
       # The consolidation phase returns a job_id for the group of tasks
       consolidation_job_id = consolidate_result.get("job_id")
 
-      # Define wait time for after ingestion starts
-      ingestion_wait = 5 if env.is_development() else 30
+      # Define wait time for after ingestion starts (scale with years)
+      ingestion_wait = (5 if env.is_development() else 30) * min(num_years, 3)
 
       if consolidation_job_id:
         from celery.result import GroupResult
 
         logger.info("Waiting for all consolidation tasks to complete...")
-        max_wait = 60 if env.is_development() else 300  # 1 min dev, 5 min prod
+        # Scale wait time with number of years
+        max_wait = (60 if env.is_development() else 300) * max(1, num_years // 2)
         check_interval = 2 if env.is_development() else 5
         waited = 0
 
@@ -240,8 +314,8 @@ class SECLocalPipeline:
             f"Consolidation may not be complete after {max_wait}s, proceeding anyway"
           )
       else:
-        # Fallback to fixed wait if no job ID
-        consolidation_wait = 10 if env.is_development() else 30
+        # Fallback to fixed wait if no job ID (scale with years)
+        consolidation_wait = (10 if env.is_development() else 30) * min(num_years, 3)
         logger.info(
           f"No job ID found, waiting {consolidation_wait}s for consolidation to complete..."
         )
@@ -251,7 +325,9 @@ class SECLocalPipeline:
       logger.info("Starting ingestion phase...")
       ingest_task = start_phase.apply_async(kwargs={"phase": "ingest"})
 
-      ingest_result = ingest_task.get(timeout=300)
+      # Use longer timeout for ingestion with multiple years
+      ingest_timeout = min(phase_timeout * 2, 1800)  # Max 30 minutes
+      ingest_result = ingest_task.get(timeout=ingest_timeout)
       if ingest_result.get("status") != "started":
         logger.error(f"Failed to start ingestion: {ingest_result.get('error')}")
         return False
@@ -259,7 +335,12 @@ class SECLocalPipeline:
       # Wait for ingestion to complete
       time.sleep(ingestion_wait)
 
-      logger.info(f"✅ Successfully loaded {ticker} data for {year}")
+      year_display = (
+        f"years {start_year}-{end_year}"
+        if start_year != end_year
+        else f"year {start_year}"
+      )
+      logger.info(f"✅ Successfully loaded {ticker} data for {year_display}")
       return True
 
     except Exception as e:
@@ -308,8 +389,13 @@ Examples:
   load_parser.add_argument(
     "--year",
     type=int,
-    default=datetime.now().year - 1,
-    help=f"Year to load (default: {datetime.now().year - 1})",
+    default=None,
+    help=f"Year to load (default: all years from 2019 to {datetime.now().year})",
+  )
+  load_parser.add_argument(
+    "--force-reconsolidate",
+    action="store_true",
+    help="Force reconsolidation by clearing existing consolidated files",
   )
 
   args = parser.parse_args()
@@ -327,7 +413,11 @@ Examples:
     sys.exit(0 if success else 1)
 
   elif args.command == "load":
-    success = pipeline.load_company(ticker=args.ticker, year=args.year)
+    success = pipeline.load_company(
+      ticker=args.ticker,
+      year=args.year,
+      force_reconsolidate=args.force_reconsolidate,
+    )
     sys.exit(0 if success else 1)
 
 
