@@ -236,7 +236,6 @@ class GraphMetricsService:
     """Get node counts grouped by label."""
     try:
       # Get all unique node labels using Kuzu-compatible query
-      # Avoid selecting balance property to prevent type conflicts between Element and Account nodes
       labels_query = "MATCH (n) RETURN DISTINCT LABEL(n) AS label"
       # Use async method for repository
       labels_result = await repository.execute_query(labels_query)

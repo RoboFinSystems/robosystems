@@ -53,7 +53,7 @@ graph TD
     I --> L[RoboSCM]
 
     J --> M[Report/Fact]
-    J --> N[Account/Transaction]
+    J --> N[Transaction/LineItem]
     K --> O[Portfolio/Security]
     L --> P[Supplier/Product]
 ```
@@ -99,9 +99,10 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 #### Transaction Section (General Ledger)
 
-- **Nodes**: Account, Transaction, LineItem, Process, Disclosure
+- **Nodes**: Transaction, LineItem, Process
 - **Use Cases**: Entity accounting, journal entries, trial balances
-- **Key Features**: Double-entry bookkeeping, account hierarchies, audit trails
+- **Key Features**: Transaction tracking, line item details, process workflows
+- **Note**: Chart of accounts is represented via Structure/Association/Element pattern (from Reporting Section)
 
 #### Context-Aware Loading
 
