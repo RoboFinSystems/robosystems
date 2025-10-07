@@ -2,9 +2,10 @@
 
 RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial data into actionable intelligence through graph-based analytics and AI-powered insights.
 
-- **Graph-Based Financial Intelligence**: Leverages Kuzu graph database technology to model complex financial relationships, enabling deep analysis of relationships between accounting, financial reporting, investment management, and public XBRL data
+- **Graph-Based Financial Intelligence**: Leverages Kuzu graph database technology to model complex financial relationships, enabling deep analysis of relationships between accounting, financial reporting, portfolio management, and public XBRL data
+- **GraphRAG Architecture**: Knowledge graph-based retrieval-augmented generation for LLM-powered financial analysis over enterprise financial and operating data
+- **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with natural language querying
 - **Multi-Source Data Integration**: Seamlessly integrates QuickBooks accounting data, SEC XBRL filings (10-K, 10-Q), and custom financial datasets into a unified knowledge graph
-- **AI-Powered Analysis**: Natural language financial analysis through Claude AI integration via Model Context Protocol (MCP), enabling sophisticated queries and insights
 - **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling (Standard/Enterprise/Premium), production-grade query management, and credit-based billing for sustainable operations
 - **Developer-First API**: RESTful API with comprehensive endpoints for graph operations, data ingestion, and analysis - designed for integration with financial applications like RoboLedger and RoboInvestor
 
@@ -13,7 +14,7 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 RoboSystems bridges the gap between raw financial data and actionable business intelligence by creating interconnected knowledge graphs that reveal hidden relationships, patterns, and insights that traditional databases miss. It's the backbone for next-generation financial applications that need to understand not just numbers, but the relationships and context behind them.
 
 - **Multi-Tenant Graph Databases**: Create isolated Kuzu database instances with cluster-based scaling
-- **AI Agent Interface**: Natural language financial analysis through Claude AI via Model Context Protocol (MCP)
+- **AI Agent Interface**: Natural language financial analysis through Claude powered agents via Model Context Protocol (MCP)
 - **Entity Graph Creation**: Curated enterprise financial data schemas for defined use cases with RoboLedger, RoboInvestor and more
 - **Generic Graph Creation**: Custom schema definitions with custom node/relationship types
 - **Subgraph Creation**: Create subgraphs with custom schemas for AI memory layers, version and access control
@@ -204,7 +205,7 @@ The client-factory layer provides intelligent routing between application code a
 - **Workers**: ECS Fargate ARM64/Graviton with auto-scaling
 - **Kuzu Writers**: EC2 Graviton instances with DynamoDB registry and management lambdas
 - **Kuzu Readers**: EC2 Graviton instances with load balancing for shared repositories
-- **Database & Cache**: AWS RDS PostgreSQL + AWS ElastiCache Valkey instances
+- **Database & Cache**: RDS PostgreSQL + ElastiCache Valkey instances
 - **Observability**: Amazon Managed Prometheus + Grafana with AWS SSO
 - **Self-Hosted CI/CD**: GitHub Actions runner on dedicated infrastructure
 
@@ -212,7 +213,7 @@ The client-factory layer provides intelligent routing between application code a
 
 - **SEC EDGAR**: XBRL filing processing with staging parallel processing
 - **QuickBooks API**: OAuth-based accounting synchronization
-- **Anthropic Claude**: AI analysis via Model Context Protocol
+- **Anthropic Claude**: AI analysis agents system powered by Claude
 
 ## AI
 
@@ -246,7 +247,7 @@ The client-factory layer provides intelligent routing between application code a
 
   - Triggered on release tags (e.g., `v1.0.0`)
   - Full stack deployment with health checks and rollback capability
-  - Runs database migrations automatically
+  - Run database migrations separately with dedicated workflow
 
 - **`staging.yml`**: Staging environment deployment
 
@@ -255,10 +256,14 @@ The client-factory layer provides intelligent routing between application code a
   - Identical infrastructure to production at reduced scale
 
 - **`bootstrap.yml`**: One-time infrastructure initialization
+
   - Creates base AWS resources (VPC, networking)
   - Sets up GitHub Actions runner infrastructure
-  - Configures secrets and IAM roles
   - Run once per AWS account setup
+
+- **`run-migrations.yml`**: Database migrations on RDS instances
+  - Connect to bastion host via AWS SSM
+  - Run migrations script with deployed environment container
 
 #### Infrastructure Features
 
@@ -283,7 +288,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`cloudtrail.yaml`**: CloudTrail AWS Audit Logging for compliance purposes
 - **`s3.yaml`**: S3 buckets for data storage, backups, and CloudFormation templates
 - **`postgres.yaml`**: RDS PostgreSQL database with auto-scaling storage and automated backups
-- **`valkey.yaml`**: ElastiCache Valkey (Redis fork) for caching and message broker
+- **`valkey.yaml`**: ElastiCache Valkey for caching and message broker
 
 #### API & Workers
 
@@ -307,6 +312,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 #### CI/CD & Support
 
+- **`run-migrations.yaml`**: Run the database migrations on the environment RDS database
 - **`gha-runner.yaml`**: Self-hosted GitHub Actions runner on EC2 spot instances
 - **`bastion.yaml`**: Bastion host for secure access and troubleshooting
 
@@ -400,8 +406,9 @@ Each major system component has detailed documentation:
 
 ### Testing & Development
 
-- **`/tests/README.md`**: Testing framework and test organization
+- **`/CLAUDE.md`**: Curated Claude memory to improve usefulness
 - **`/.github/CONTRIBUTING.md`**: Open source contribution guide
+- **`/tests/README.md`**: Testing framework and test organization
 
 ## API Reference
 

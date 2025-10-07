@@ -48,7 +48,7 @@ logs-grep container="worker" pattern="ERROR" lines="100":
 # Initialize complete development environment (run after bootstrap)
 init:
     uv python install $(cat .python-version)
-    just venv
+    @just venv
 
 # Create virtual environment (assumes uv is installed)
 venv:

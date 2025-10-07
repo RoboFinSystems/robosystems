@@ -5,6 +5,7 @@
 The RoboSystems schema system provides a comprehensive, extensible framework for defining graph database structures in Kuzu. It implements a **base + extensions** architecture that enables modular, domain-specific data modeling while maintaining consistency and compatibility across different application contexts.
 
 **Key Features:**
+
 - **Modular Architecture**: Base schema + pluggable extensions for different domains
 - **Context-Aware Loading**: Different views of the same schema based on use case
 - **Type-Safe Validation**: Strong typing with Kuzu-native data types
@@ -63,18 +64,18 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 
 ### Core Nodes
 
-| Node | Purpose | Key Properties |
-|------|---------|----------------|
-| **GraphMetadata** | Database metadata and configuration | identifier, graph_id, tier, schema_type |
-| **User** | System users with authentication | identifier, email, is_active |
-| **Entity** | Organizations, companies, subsidiaries | identifier, cik, ticker, name, entity_type |
-| **Period** | Time periods for data | start_date, end_date, fiscal_year, period_type |
-| **Unit** | Measurement units | measure, value, numerator_uri |
-| **Connection** | External system integrations | provider, connection_id, status |
-| **Element** | XBRL taxonomy elements | qname, period_type, is_numeric |
-| **Label** | Human-readable element labels | value, type, language |
-| **Reference** | Authoritative element references | value, type |
-| **Taxonomy** | Global XBRL taxonomies | name, version, namespace |
+| Node              | Purpose                                | Key Properties                                 |
+| ----------------- | -------------------------------------- | ---------------------------------------------- |
+| **GraphMetadata** | Database metadata and configuration    | identifier, graph_id, tier, schema_type        |
+| **User**          | System users with authentication       | identifier, email, is_active                   |
+| **Entity**        | Organizations, companies, subsidiaries | identifier, cik, ticker, name, entity_type     |
+| **Period**        | Time periods for data                  | start_date, end_date, fiscal_year, period_type |
+| **Unit**          | Measurement units                      | measure, value, numerator_uri                  |
+| **Connection**    | External system integrations           | provider, connection_id, status                |
+| **Element**       | XBRL taxonomy elements                 | qname, period_type, is_numeric                 |
+| **Label**         | Human-readable element labels          | value, type, language                          |
+| **Reference**     | Authoritative element references       | value, type                                    |
+| **Taxonomy**      | Global XBRL taxonomies                 | name, version, namespace                       |
 
 ### Core Relationships
 
@@ -91,16 +92,19 @@ The base schema (`base.py`) provides foundational nodes and relationships that a
 **Unified schema with context-aware loading:**
 
 #### Reporting Section (SEC/XBRL)
+
 - **Nodes**: Report, Fact, Structure, FactDimension, Association, FactSet
 - **Use Cases**: SEC repositories, financial statements, XBRL processing
 - **Key Features**: Dimensional analysis, fact aggregation, taxonomy navigation
 
 #### Transaction Section (General Ledger)
+
 - **Nodes**: Account, Transaction, LineItem, Process, Disclosure
 - **Use Cases**: Entity accounting, journal entries, trial balances
 - **Key Features**: Double-entry bookkeeping, account hierarchies, audit trails
 
 #### Context-Aware Loading
+
 ```python
 # SEC Repository - Reporting only
 loader = get_contextual_schema_loader("repository", "sec")
@@ -112,6 +116,7 @@ loader = get_contextual_schema_loader("application", "roboledger")
 ### RoboInvestor - Portfolio Management
 
 **Investment tracking and analysis:**
+
 - **Nodes**: Portfolio, Security, Position, Trade, Benchmark, MarketData, Dividend, Risk
 - **Relationships**: Portfolio positions, trade history, security pricing
 - **Key Features**:
@@ -123,6 +128,7 @@ loader = get_contextual_schema_loader("application", "roboledger")
 ### RoboSCM - Supply Chain Management
 
 **End-to-end supply chain operations:**
+
 - **Nodes**: Supplier, Product, Warehouse, Inventory, PurchaseOrder, Contract, Shipment, Demand
 - **Supporting Nodes**: Contact, Address
 - **Key Features**:
@@ -135,6 +141,7 @@ loader = get_contextual_schema_loader("application", "roboledger")
 ### RoboFO - Front Office & CRM
 
 **Sales and marketing operations:**
+
 - **Nodes**: Lead, Customer, Contact, Opportunity, Campaign, Activity, Quote
 - **Key Features**:
   - Lead scoring and conversion
@@ -145,6 +152,7 @@ loader = get_contextual_schema_loader("application", "roboledger")
 ### RoboEPM - Enterprise Performance Management
 
 **Strategic planning and performance:**
+
 - **Nodes**: KPI, Budget, Forecast, Scorecard, Initiative
 - **Key Features**:
   - KPI tracking and dashboards
@@ -155,6 +163,7 @@ loader = get_contextual_schema_loader("application", "roboledger")
 ### RoboHRM - Human Resources Management
 
 **Workforce and talent management:**
+
 - **Nodes**: Employee, Department, Position, Payroll, Benefit, TimeOff
 - **Key Features**:
   - Organizational hierarchy
@@ -165,6 +174,7 @@ loader = get_contextual_schema_loader("application", "roboledger")
 ### RoboReport - Regulatory Compliance
 
 **Compliance and filing management:**
+
 - **Nodes**: Regulation, Filing, Submission, Audit, Control
 - **Key Features**:
   - Regulatory requirement tracking
@@ -276,14 +286,14 @@ merged = manager.merge_with_base(schema)
 
 ### Supported Kuzu Types
 
-| Category | Types | Usage |
-|----------|-------|-------|
-| **Strings** | STRING | Names, identifiers, text |
-| **Numbers** | INT8, INT16, INT32, INT64, DOUBLE, FLOAT | Quantities, amounts |
-| **Temporal** | DATE, TIMESTAMP, INTERVAL | Time-based data |
-| **Boolean** | BOOLEAN | Flags, states |
-| **Special** | UUID, BLOB | Unique IDs, binary data |
-| **Complex** | LIST, MAP, STRUCT, UNION | Structured data |
+| Category     | Types                                    | Usage                    |
+| ------------ | ---------------------------------------- | ------------------------ |
+| **Strings**  | STRING                                   | Names, identifiers, text |
+| **Numbers**  | INT8, INT16, INT32, INT64, DOUBLE, FLOAT | Quantities, amounts      |
+| **Temporal** | DATE, TIMESTAMP, INTERVAL                | Time-based data          |
+| **Boolean**  | BOOLEAN                                  | Flags, states            |
+| **Special**  | UUID, BLOB                               | Unique IDs, binary data  |
+| **Complex**  | LIST, MAP, STRUCT, UNION                 | Structured data          |
 
 ### Type Mappings
 
@@ -313,20 +323,7 @@ if compatibility.compatible:
     print("Extensions are compatible")
 else:
     print(f"Conflicts: {compatibility.conflicts}")
-
-# Get optimal groupings
-groups = manager.get_optimal_schema_groups()
-# Returns predefined compatible extension combinations
 ```
-
-### Recommended Schema Groups
-
-| Group | Extensions | Use Case |
-|-------|------------|----------|
-| **financial_core** | roboledger, roboepm, roboreport | Core financial operations |
-| **operations_hub** | roboscm, robohrm, roboepm | Operational management |
-| **sales_engine** | robofo, robohrm, roboinvestor | Sales and customer management |
-| **compliance_center** | roboreport, roboledger, robohrm | Regulatory compliance |
 
 ## Production Usage
 
@@ -430,12 +427,12 @@ ALTER TABLE Entity ADD COLUMN new_field STRING
 
 ### Common Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| **Duplicate node names** | Extension conflicts | Check compatibility before loading |
-| **Missing primary key** | Schema definition error | Ensure all nodes have identifier |
-| **Relationship reference error** | Node doesn't exist | Load required extensions |
-| **Context loading fails** | Unsupported context | Use predefined contexts only |
+| Issue                            | Cause                   | Solution                           |
+| -------------------------------- | ----------------------- | ---------------------------------- |
+| **Duplicate node names**         | Extension conflicts     | Check compatibility before loading |
+| **Missing primary key**          | Schema definition error | Ensure all nodes have identifier   |
+| **Relationship reference error** | Node doesn't exist      | Load required extensions           |
+| **Context loading fails**        | Unsupported context     | Use predefined contexts only       |
 
 ### Debugging
 
@@ -460,49 +457,13 @@ manager._validate_schema_consistency(schema)
 The schema system integrates with the RoboSystems API:
 
 ### Graph Operations
+
 - Schema installation during database creation
 - Validation before data ingestion
 - Query generation based on schema
 
 ### MCP Integration
+
 - Context-aware schema exposure to AI agents
 - Natural language to Cypher query generation
 - Schema-guided response formatting
-
-### Credit System
-- AI operations consume credits based on complexity
-- Schema operations are free (no credit consumption)
-- Storage tracked separately from operations
-
-## Future Enhancements
-
-### Planned Features
-- **Schema Versioning**: Track and manage schema versions
-- **Auto-Migration**: Automated migration script generation
-- **Schema Discovery**: Infer schema from existing data
-- **GraphQL Integration**: Auto-generate GraphQL schemas
-- **Schema Documentation**: Auto-generate API documentation
-
-### Extension Roadmap
-- **RoboTax**: Tax planning and compliance
-- **RoboRisk**: Risk management and analytics
-- **RoboESG**: Environmental, social, governance tracking
-- **RoboAudit**: Audit automation and documentation
-
-## Contributing
-
-When adding new extensions:
-
-1. Create new file in `extensions/` directory
-2. Define EXTENSION_NODES and EXTENSION_RELATIONSHIPS
-3. Follow naming conventions (PascalCase for nodes, UPPER_SNAKE for relationships)
-4. Add to SchemaType enum in manager.py
-5. Document in this README
-6. Add tests in tests/schemas/
-
-## References
-
-- [Kuzu Documentation](https://kuzudb.com/docs/)
-- [XBRL Specification](https://www.xbrl.org/specification/)
-- [Graph Database Patterns](https://neo4j.com/docs/cypher-manual/current/patterns/)
-- [RoboSystems API Documentation](/openapi.json)
