@@ -78,6 +78,12 @@ Resources:
                   - elasticache:DescribeCacheClusters
                   - elasticache:DescribeReplicationGroups
                 Resource: "*"
+
+              # Secrets Manager - Valkey Auth Token
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/valkey-*"
       Tags:
         - Key: Environment
           Value: !Ref Environment

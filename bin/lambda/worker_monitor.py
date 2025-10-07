@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from time import sleep
 import redis
+import ssl
+from urllib.parse import quote
 
 # Configure logging
 logger = logging.getLogger()
@@ -29,6 +31,7 @@ ecs = boto3.client("ecs")
 cloudwatch = boto3.client("cloudwatch")
 elasticache = boto3.client("elasticache")
 sns = boto3.client("sns")  # Added for DLQ alerting
+secretsmanager = boto3.client("secretsmanager")
 
 # Environment variables
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "staging")
@@ -83,6 +86,43 @@ PROTECTION_EXPIRY_MINUTES = 60
 
 # Connection pool for Redis - reused across functions
 _redis_connections = {}
+_valkey_auth_token = None
+_token_cache_time = None
+
+# Token cache TTL (1 hour) - allows rotation without Lambda restart
+TOKEN_CACHE_TTL = 3600
+
+
+def get_valkey_auth_token() -> Optional[str]:
+  """Get Valkey auth token from Secrets Manager with TTL-based caching."""
+  global _valkey_auth_token, _token_cache_time
+
+  import time
+
+  # Check if cached token is still valid
+  if _valkey_auth_token and _token_cache_time:
+    if time.time() - _token_cache_time < TOKEN_CACHE_TTL:
+      return _valkey_auth_token
+
+  secret_name = f"robosystems/{ENVIRONMENT}/valkey"
+
+  try:
+    response = secretsmanager.get_secret_value(SecretId=secret_name)
+    secret_data = json.loads(response["SecretString"])
+    _valkey_auth_token = secret_data.get("VALKEY_AUTH_TOKEN")
+
+    if not _valkey_auth_token:
+      logger.error(f"VALKEY_AUTH_TOKEN key not found in secret {secret_name}")
+      return None
+
+    _token_cache_time = time.time()
+    logger.info(
+      f"Retrieved Valkey auth token from {secret_name} (cached for {TOKEN_CACHE_TTL}s)"
+    )
+    return _valkey_auth_token
+  except Exception as e:
+    logger.error(f"Failed to get Valkey auth token from {secret_name}: {e}")
+    return None
 
 
 def get_redis_connection(database: int = 0) -> redis.Redis:
@@ -115,15 +155,35 @@ def get_redis_connection(database: int = 0) -> redis.Redis:
   if not redis_endpoint:
     raise RuntimeError("Failed to get Valkey endpoint")
 
-  # Build URL with database number
-  redis_url = f"redis://{redis_endpoint}/{database}"
+  # Get auth token
+  auth_token = get_valkey_auth_token()
+  if not auth_token:
+    secret_name = f"robosystems/{ENVIRONMENT}/valkey"
+    raise RuntimeError(
+      f"Failed to retrieve Valkey auth token from Secrets Manager. "
+      f"Check that secret '{secret_name}' exists and contains 'VALKEY_AUTH_TOKEN' key."
+    )
 
+  # Build URL with auth token and database number
+  # Format: rediss://default:{password}@{host}:{port}/{db}
+  # Use rediss:// for TLS connections (matches application pattern)
+  # URL-encode the auth token to handle special characters (use quote, not quote_plus)
+  encoded_token = quote(auth_token, safe="")
+  redis_url = f"rediss://default:{encoded_token}@{redis_endpoint}/{database}"
+
+  # Connection parameters matching application configuration
+  # SECURITY NOTE: ElastiCache uses self-signed certificates that cannot be validated
+  # against a CA. This is AWS's design for ElastiCache. The connection is still
+  # encrypted with TLS, but we cannot verify the certificate authenticity.
   conn = redis.from_url(
     redis_url,
-    socket_connect_timeout=5,
-    socket_timeout=5,
-    retry_on_timeout=True,
+    socket_connect_timeout=2,
+    socket_timeout=2,
+    retry_on_timeout=False,
     decode_responses=False,  # Keep as bytes for proper queue detection
+    ssl_cert_reqs=ssl.CERT_NONE,  # Don't verify certificate (ElastiCache uses self-signed)
+    ssl_check_hostname=False,  # Don't check hostname
+    ssl_ca_certs=None,  # No CA certificate validation
   )
 
   # Store connection for reuse
@@ -294,6 +354,8 @@ def publish_queue_metrics(redis_client) -> Dict[str, Any]:
   queue_metrics = {}
   worker_pool_metrics = {}
   metrics_published = 0
+  error_count = 0
+  max_consecutive_errors = 3
 
   try:
     # Collect queue sizes
@@ -304,14 +366,26 @@ def publish_queue_metrics(redis_client) -> Dict[str, Any]:
         if queue_size >= 0:
           queue_metrics[queue_name] = queue_size
           pool_total += queue_size
+          error_count = 0
+        else:
+          error_count += 1
+          if error_count >= max_consecutive_errors:
+            logger.error(
+              f"Hit {max_consecutive_errors} consecutive errors, stopping metric collection early"
+            )
+            break
+
+      if error_count >= max_consecutive_errors:
+        break
 
       worker_pool_metrics[pool_name] = pool_total
 
-    # Check dead letter queue
-    dlq_size = get_queue_size(redis_client, "dead_letter")
-    if dlq_size > 0:
-      queue_metrics["dead_letter"] = dlq_size
-      logger.warning(f"Dead letter queue has {dlq_size} messages")
+    # Check dead letter queue only if we haven't hit too many errors
+    if error_count < max_consecutive_errors:
+      dlq_size = get_queue_size(redis_client, "dead_letter")
+      if dlq_size > 0:
+        queue_metrics["dead_letter"] = dlq_size
+        logger.warning(f"Dead letter queue has {dlq_size} messages")
 
     # Publish to CloudWatch
     metric_data = []
@@ -411,6 +485,12 @@ def get_queue_size(redis_client, queue_name: str) -> int:
 
     return queue_size
 
+  except redis.TimeoutError:
+    logger.error(f"Timeout getting queue size for '{queue_name}'")
+    return -1
+  except redis.ConnectionError:
+    logger.error(f"Connection error getting queue size for '{queue_name}'")
+    return -1
   except Exception as e:
     logger.error(f"Failed to get queue size for '{queue_name}': {e}")
     return -1
@@ -502,15 +582,26 @@ def process_worker_tasks(worker_type: str, config: Dict[str, Any]) -> Dict[str, 
     )
 
     # Get Redis connection for distributed locks
-    redis_locks = get_redis_connection(4)
+    try:
+      redis_locks = get_redis_connection(4)
+    except Exception as redis_error:
+      logger.error(f"Failed to connect to Redis for task protection: {redis_error}")
+      result["error"] = f"Redis connection failed: {str(redis_error)}"
+      return result
 
     for task_info in protection_response.get("protectedTasks", []):
       task_arn = task_info["taskArn"]
       task_id = task_arn.split("/")[-1] if "/" in task_arn else task_arn.split(":")[-1]
       protection_enabled = task_info.get("protectionEnabled", False)
 
-      # Check if task is actively processing
-      is_processing = check_task_processing_status(task_id, redis_locks)
+      # Check if task is actively processing (with timeout handling)
+      try:
+        is_processing = check_task_processing_status(task_id, redis_locks)
+      except (redis.TimeoutError, redis.ConnectionError) as e:
+        logger.warning(
+          f"Redis timeout checking task {task_id}, assuming not processing: {e}"
+        )
+        is_processing = False
 
       task_data = {
         "task_id": task_id,
@@ -526,15 +617,17 @@ def process_worker_tasks(worker_type: str, config: Dict[str, Any]) -> Dict[str, 
 
       # Disable protection if idle
       elif not is_processing and protection_enabled:
-        idle_minutes = check_task_idle_time(task_id, redis_locks)
+        try:
+          idle_minutes = check_task_idle_time(task_id, redis_locks)
 
-        if idle_minutes >= IDLE_THRESHOLD_MINUTES:
-          if update_task_protection(cluster_name, task_arn, False):
-            result["protection_disabled"] += 1
-            clear_task_idle_time(task_id, redis_locks)
-        else:
-          # Increment idle counter
-          increment_task_idle_time(task_id, redis_locks)
+          if idle_minutes >= IDLE_THRESHOLD_MINUTES:
+            if update_task_protection(cluster_name, task_arn, False):
+              result["protection_disabled"] += 1
+              clear_task_idle_time(task_id, redis_locks)
+          else:
+            increment_task_idle_time(task_id, redis_locks)
+        except (redis.TimeoutError, redis.ConnectionError) as e:
+          logger.warning(f"Redis timeout managing idle time for task {task_id}: {e}")
 
   except Exception as e:
     logger.error(f"Failed to process tasks for {worker_type}: {e}")
@@ -633,8 +726,12 @@ def monitor_dlq(redis_client) -> Dict[str, Any]:
   metrics_published = 0
 
   try:
-    # Get DLQ size
-    dlq_size = redis_client.llen(DLQ_NAME)
+    # Get DLQ size with timeout handling
+    try:
+      dlq_size = redis_client.llen(DLQ_NAME)
+    except (redis.TimeoutError, redis.ConnectionError) as e:
+      logger.error(f"Redis timeout getting DLQ size: {e}")
+      return {"error": f"Redis timeout: {str(e)}"}
 
     # Determine health status using configurable threshold
     if dlq_size == 0:
