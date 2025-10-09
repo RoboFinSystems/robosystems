@@ -1,4 +1,4 @@
-# Getting Started with the SEC XBRL Pipeline Locally
+# Getting Started with the SEC XBRL Pipeline
 
 This guide shows you how to load SEC financial data locally and query it using the RoboSystems platform.
 
