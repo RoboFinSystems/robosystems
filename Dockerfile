@@ -17,11 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv
 
-# Pre-download the httpfs extension binary for Kuzu 0.11.2 on ARM64 Linux
-# This ensures the extension is available even after container restarts
-RUN mkdir -p /kuzu-extension/0.11.2/linux_arm64/httpfs && \
-    curl -L -o /kuzu-extension/0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension \
-    https://extension.kuzudb.com/v0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension
+# Copy the Kuzu httpfs extension from local archive
+# We maintain a local copy extracted from previous Docker builds
+RUN mkdir -p /kuzu-extension/0.11.2/linux_arm64/httpfs
+COPY bin/kuzu-extensions/v0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension \
+    /kuzu-extension/0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension
 
 WORKDIR /build
 
