@@ -162,13 +162,13 @@ tracker = HealthTracker()
 
 # Register service
 tracker.register_service(
-    name="kuzu_api",
+    name="graph_api",
     health_check=lambda: check_kuzu_health(),
     interval=30  # Check every 30 seconds
 )
 
 # Get service status
-status = tracker.get_status("kuzu_api")
+status = tracker.get_status("graph_api")
 print(f"Service health: {status.health_score}%")
 print(f"Average latency: {status.avg_latency}ms")
 ```

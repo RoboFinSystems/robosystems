@@ -121,7 +121,7 @@ just logs-follow worker              # CloudWatch log search
 - **API-First Design**: All database access through REST APIs with no direct database connections
 - **Schema-Driven Operations**: All graph operations derive from curated schemas (RoboLedger, RoboInvestor, and more)
 
-#### Kuzu API System (`/robosystems/kuzu_api/`)
+#### Kuzu API System (`/robosystems/graph_api/`)
 
 The **Kuzu API** is a FastAPI microservice that runs alongside Kuzu databases on instances, providing:
 
@@ -132,7 +132,7 @@ The **Kuzu API** is a FastAPI microservice that runs alongside Kuzu databases on
 - **Streaming Support**: NDJSON streaming for large query results
 - **Admission Control**: CPU/memory-based backpressure to prevent overload
 
-#### Client-Factory System (`/robosystems/kuzu_api/client/`)
+#### Client-Factory System (`/robosystems/graph_api/client/`)
 
 The client-factory layer provides intelligent routing between application code and Kuzu infrastructure:
 
@@ -387,8 +387,8 @@ Each major system component has detailed documentation:
 
 ### Kuzu Graph Database System
 
-- **`/robosystems/kuzu_api/README.md`**: Complete Kuzu API documentation
-- **`/robosystems/kuzu_api/client/README.md`**: Client-factory system for intelligent routing
+- **`/robosystems/graph_api/README.md`**: Complete Kuzu API documentation
+- **`/robosystems/graph_api/client/README.md`**: Client-factory system for intelligent routing
 
 ### Middleware Components
 

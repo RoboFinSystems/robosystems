@@ -54,7 +54,7 @@ def reset_sec_database(confirm: bool = False) -> Dict:
 
   async def reset_database():
     """Async function to reset the database."""
-    from robosystems.kuzu_api.client.factory import KuzuClientFactory
+    from robosystems.graph_api.client.factory import KuzuClientFactory
 
     try:
       # Get a client for the SEC database

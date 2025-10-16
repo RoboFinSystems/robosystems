@@ -7,7 +7,7 @@ This directory contains tests for the RoboSystems Service application. The tests
 - `adapters/` - Tests for external service adapters (MCP, S3)
 - `processors/` - Tests for data transformation processors (XBRL, QuickBooks, schedules)
 - `integration/` - End-to-end integration tests
-- `kuzu_api/` - Tests for Kuzu database cluster services
+- `graph_api/` - Tests for Kuzu database cluster services
 - `middleware/` - Tests for middleware components (OpenTelemetry metrics)
 - `models/` - Tests for database models (IAM, graph, financial entities)
 - `operations/` - Tests for business logic services

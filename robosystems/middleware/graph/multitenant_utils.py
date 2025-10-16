@@ -599,8 +599,8 @@ class MultiTenantUtils:
     Raises:
         RuntimeError: If creation fails
     """
-    from robosystems.kuzu_api.client import KuzuClient
-    from robosystems.kuzu_api.client.exceptions import KuzuClientError
+    from robosystems.graph_api.client import KuzuClient
+    from robosystems.graph_api.client.exceptions import KuzuClientError
 
     # Create Kuzu client
     headers = {}

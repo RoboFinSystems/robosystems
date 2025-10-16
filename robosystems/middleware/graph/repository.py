@@ -19,7 +19,7 @@ from typing import List, Dict, Any, Optional, Union
 
 from .base import GraphOperation
 from .engine import Repository
-from robosystems.kuzu_api.client import KuzuClient
+from robosystems.graph_api.client import KuzuClient
 from robosystems.logger import logger
 
 

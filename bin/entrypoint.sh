@@ -120,7 +120,7 @@ case $DOCKER_PROFILE in
   "kuzu-writer")
     echo "Starting Kuzu Writer API..."
     # max-databases will be loaded from tier configuration based on CLUSTER_TIER
-    exec uv run python -m robosystems.kuzu_api \
+    exec uv run python -m robosystems.graph_api \
       --node-type writer \
       --repository-type entity \
       --port ${KUZU_PORT:-8001} \
@@ -138,12 +138,23 @@ case $DOCKER_PROFILE in
       READONLY_FLAG=""
     fi
     # max-databases will be loaded from tier configuration based on CLUSTER_TIER
-    exec uv run python -m robosystems.kuzu_api \
+    exec uv run python -m robosystems.graph_api \
       --node-type ${KUZU_NODE_TYPE} \
       --repository-type shared \
       --port ${KUZU_PORT:-8002} \
       --base-path ${KUZU_DATABASE_PATH:-/app/data/kuzu-dbs} \
       ${READONLY_FLAG}
+    ;;
+  "neo4j-writer")
+    echo "Starting Neo4j Graph API..."
+    # Graph API with Neo4j backend
+    # Backend type determined by BACKEND_TYPE env var (neo4j_community or neo4j_enterprise)
+    # Note: base-path is for metadata only (actual data stored in Neo4j database via Bolt)
+    exec uv run python -m robosystems.graph_api \
+      --node-type writer \
+      --repository-type entity \
+      --port ${GRAPH_API_PORT:-8002} \
+      --base-path /app/data/neo4j-metadata
     ;;
   *)
     echo "Unknown profile: $DOCKER_PROFILE"

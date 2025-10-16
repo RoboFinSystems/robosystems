@@ -16,7 +16,7 @@ from httpx import HTTPError, TimeoutException
 
 from robosystems.logger import logger
 from robosystems.config import env
-from robosystems.kuzu_api.client import KuzuClient
+from robosystems.graph_api.client import KuzuClient
 
 from .exceptions import KuzuAPIError, KuzuQueryTimeoutError, KuzuQueryComplexityError
 

@@ -190,7 +190,7 @@ def ingest_sec_data(
   # IMPORTANT: We do NOT create or recreate databases here - only verify
   logger.info("Verifying SEC database exists with proper schema...")
   try:
-    from robosystems.kuzu_api.client.factory import KuzuClientFactory
+    from robosystems.graph_api.client.factory import KuzuClientFactory
     import asyncio
 
     async def verify_database():
@@ -696,7 +696,7 @@ async def _bulk_load_node_type(
   ignore_errors: bool,
 ) -> Dict[str, Any]:
   """Bulk load node type using S3 glob pattern via SYNC mode with direct S3 COPY."""
-  from robosystems.kuzu_api.client.factory import KuzuClientFactory
+  from robosystems.graph_api.client.factory import KuzuClientFactory
   import boto3
   from urllib.parse import urlparse
 
@@ -901,7 +901,7 @@ async def _bulk_load_relationship_type(
   ignore_errors: bool,
 ) -> Dict[str, Any]:
   """Bulk load relationship type using S3 glob pattern via SYNC mode with direct S3 COPY."""
-  from robosystems.kuzu_api.client.factory import KuzuClientFactory
+  from robosystems.graph_api.client.factory import KuzuClientFactory
   import boto3
   from urllib.parse import urlparse
 

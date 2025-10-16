@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any
 import uuid
 
-from robosystems.kuzu_api.client import KuzuClient
+from robosystems.graph_api.client import KuzuClient
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.logger import logger
 from robosystems.middleware.sse.event_storage import (

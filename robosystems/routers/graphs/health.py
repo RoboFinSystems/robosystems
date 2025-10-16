@@ -17,7 +17,7 @@ from robosystems.middleware.rate_limits import (
 from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
 from robosystems.models.api.graph import DatabaseHealthResponse
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.kuzu_api.client import KuzuClient
+from robosystems.graph_api.client import KuzuClient
 from robosystems.logger import logger
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
@@ -34,7 +34,7 @@ timeout_coordinator = TimeoutCoordinator()
 
 async def _get_kuzu_client(graph_id: str) -> KuzuClient:
   """Get Kuzu client for the specified graph using factory for endpoint discovery."""
-  from robosystems.kuzu_api.client.factory import KuzuClientFactory
+  from robosystems.graph_api.client.factory import KuzuClientFactory
   from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 
   # Determine operation type based on graph

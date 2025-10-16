@@ -68,7 +68,7 @@ psycopg2-binary==2.9.9"
 package_lambda "valkey-rotation" "valkey_rotation.py" "boto3==1.34.14
 redis==5.0.1"
 
-package_lambda "kuzu-api-rotation" "kuzu_api_rotation.py" "boto3==1.34.14"
+package_lambda "kuzu-api-rotation" "graph_api_rotation.py" "boto3==1.34.14"
 
 # Package snapshot Lambda functions (temporary - will be migrated to volume manager)
 package_lambda "kuzu-snapshot-creator" "kuzu_snapshot_creator.py" "boto3==1.34.14"

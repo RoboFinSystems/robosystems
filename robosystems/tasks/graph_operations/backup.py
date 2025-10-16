@@ -118,7 +118,7 @@ def create_graph_backup(
 
     # Call Kuzu API to create the backup
     logger.info(f"Calling Kuzu API to create backup for graph '{graph_id}'")
-    from robosystems.kuzu_api.client.factory import get_kuzu_client
+    from robosystems.graph_api.client.factory import get_kuzu_client
 
     # Get properly routed Kuzu client
     client = asyncio.run(get_kuzu_client(graph_id, operation_type="read"))
@@ -548,7 +548,7 @@ def restore_graph_backup(
 
     # Call Kuzu API to restore the backup
     logger.info(f"Calling Kuzu API to restore database for graph '{graph_id}'")
-    from ...kuzu_api.client.factory import get_kuzu_client_sync
+    from ...graph_api.client.factory import get_kuzu_client_sync
 
     # Get properly routed Kuzu client
     client = get_kuzu_client_sync(graph_id, operation_type="write")
@@ -589,7 +589,7 @@ def restore_graph_backup(
     if verify_after_restore:
       try:
         # Create a simple verification by checking if we can connect and query
-        from ...kuzu_api.client.factory import get_kuzu_client
+        from ...graph_api.client.factory import get_kuzu_client
 
         client = asyncio.run(get_kuzu_client(graph_id, operation_type="read"))
 
@@ -1104,7 +1104,7 @@ def restore_graph_backup_sse(
     progress_tracker.emit_progress("Downloading backup from storage...", 40)
 
     # Use Kuzu API client for restoration
-    from ...kuzu_api.client.factory import get_kuzu_client
+    from ...graph_api.client.factory import get_kuzu_client
 
     client = asyncio.run(get_kuzu_client(graph_id, operation_type="write"))
 

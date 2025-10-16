@@ -44,7 +44,7 @@ class TestSharedRepositoryService:
   async def test_create_shared_repository_sec(self, service, mock_kuzu_client):
     """Test successful creation of SEC shared repository."""
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       mock_get_url.return_value = "http://10.0.1.100:8080"
 
@@ -78,7 +78,7 @@ class TestSharedRepositoryService:
 
     for repo_name in valid_repos:
       with patch(
-        "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+        "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
       ) as mock_get_url:
         mock_get_url.return_value = "http://10.0.1.100:8080"
 
@@ -110,7 +110,7 @@ class TestSharedRepositoryService:
   async def test_create_shared_repository_invalid_url_format(self, service):
     """Test handling of invalid shared master URL format."""
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       # Return invalid URL format
       mock_get_url.return_value = "invalid://url:format"
@@ -132,7 +132,7 @@ class TestSharedRepositoryService:
     }
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       mock_get_url.return_value = "http://10.0.1.100:8080"
 
@@ -153,7 +153,7 @@ class TestSharedRepositoryService:
   async def test_create_shared_repository_client_error(self, service):
     """Test handling of Kuzu client errors."""
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       mock_get_url.return_value = "http://10.0.1.100:8080"
 
@@ -177,7 +177,7 @@ class TestSharedRepositoryService:
     )
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       mock_get_url.return_value = "http://10.0.1.100:8080"
 
@@ -198,7 +198,7 @@ class TestSharedRepositoryService:
   async def test_create_shared_repository_no_user(self, service, mock_kuzu_client):
     """Test creation without specifying created_by user."""
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       mock_get_url.return_value = "http://10.0.1.100:8080"
 
@@ -223,7 +223,7 @@ class TestSharedRepositoryService:
 
     for url, expected_ip in test_cases:
       with patch(
-        "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+        "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
       ) as mock_get_url:
         mock_get_url.return_value = url
 
@@ -267,7 +267,7 @@ class TestEnsureSharedRepositoryExists:
     }
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+      "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
     ) as mock_factory:
       mock_factory.return_value = mock_client
 
@@ -288,7 +288,7 @@ class TestEnsureSharedRepositoryExists:
     mock_client.get_database_info.side_effect = Exception("Database not found")
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+      "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
     ) as mock_factory:
       mock_factory.return_value = mock_client
 
@@ -319,7 +319,7 @@ class TestEnsureSharedRepositoryExists:
     }
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+      "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
     ) as mock_factory:
       mock_factory.return_value = mock_client
 
@@ -346,7 +346,7 @@ class TestEnsureSharedRepositoryExists:
     }
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+      "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
     ) as mock_factory:
       mock_factory.return_value = mock_client
 
@@ -362,7 +362,7 @@ class TestEnsureSharedRepositoryExists:
     mock_client.get_database_info.side_effect = Exception("Not found")
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+      "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
     ) as mock_factory:
       mock_factory.return_value = mock_client
 
@@ -388,7 +388,7 @@ class TestIntegration:
     service = SharedRepositoryService()
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       mock_get_url.return_value = "http://10.0.1.100:8080"
 
@@ -419,7 +419,7 @@ class TestIntegration:
 
         # Verify it exists
         with patch(
-          "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+          "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
         ) as mock_factory:
           mock_factory.return_value = mock_client
 
@@ -435,7 +435,7 @@ class TestIntegration:
     service = SharedRepositoryService()
 
     with patch(
-      "robosystems.kuzu_api.client.factory.KuzuClientFactory._get_shared_master_url"
+      "robosystems.graph_api.client.factory.KuzuClientFactory._get_shared_master_url"
     ) as mock_get_url:
       mock_get_url.return_value = "http://10.0.1.100:8080"
 

@@ -25,7 +25,7 @@ from ...middleware.graph.subgraph_utils import (
   validate_subgraph_name,
   validate_parent_graph_id,
 )
-from ...kuzu_api.client.factory import get_kuzu_client_for_instance
+from ...graph_api.client.factory import get_kuzu_client_for_instance
 from ...exceptions import GraphAllocationError
 from ...logger import logger
 

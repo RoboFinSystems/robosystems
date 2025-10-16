@@ -29,7 +29,7 @@ async def create_kuzu_mcp_client(
   """
   # If URL not provided, use KuzuClientFactory to discover the proper endpoint
   if not api_base_url:
-    from robosystems.kuzu_api.client.factory import KuzuClientFactory
+    from robosystems.graph_api.client.factory import KuzuClientFactory
     from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 
     # Determine operation type based on graph

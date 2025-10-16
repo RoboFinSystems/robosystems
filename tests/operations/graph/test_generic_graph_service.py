@@ -119,7 +119,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -200,7 +200,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -420,7 +420,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -472,7 +472,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -520,7 +520,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -581,7 +581,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -642,7 +642,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -712,7 +712,7 @@ class TestGenericGraphService:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_get_client.return_value = mock_kuzu_client
 
@@ -776,7 +776,7 @@ class TestGenericGraphService:
             mock_alloc_class.return_value = mock_manager
 
             with patch(
-              "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+              "robosystems.graph_api.client.get_kuzu_client_for_instance"
             ) as mock_get_client:
               mock_get_client.return_value = mock_kuzu_client
 
@@ -901,7 +901,7 @@ class TestGenericGraphServiceIntegration:
           mock_alloc_class.return_value = mock_manager
 
           with patch(
-            "robosystems.kuzu_api.client.get_kuzu_client_for_instance"
+            "robosystems.graph_api.client.get_kuzu_client_for_instance"
           ) as mock_get_client:
             mock_client = AsyncMock()
             mock_client.create_database.return_value = {"status": "created"}

@@ -233,7 +233,7 @@ class TestEntityGraphService:
   @pytest.mark.asyncio
   async def test_create_graph_metadata_node_error_suppression(self, mocker):
     """Test that GraphMetadata creation errors are suppressed."""
-    from robosystems.kuzu_api.client.exceptions import KuzuClientError
+    from robosystems.graph_api.client.exceptions import KuzuClientError
 
     mock_kuzu_client = mocker.AsyncMock()
     mock_kuzu_client.query.side_effect = KuzuClientError("Duplicate node")
