@@ -54,11 +54,7 @@ class BaseKuzuClient:
       if "headers" not in kwargs:
         kwargs["headers"] = {}
       kwargs["headers"]["X-Kuzu-API-Key"] = api_key
-      logger.debug(
-        f"KuzuClient configured with API key: {api_key[:8]}..."
-        if api_key
-        else "No API key"
-      )
+      logger.debug("KuzuClient configured with API key")
     else:
       # Only warn about missing API key in production environments
       if env.ENVIRONMENT in ("prod", "production", "staging"):
