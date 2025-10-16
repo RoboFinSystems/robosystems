@@ -444,9 +444,9 @@ Resources:
           MIN_EXPANSION_GB: "50"
           MAX_VOLUME_SIZE_GB: "16384"
           KUZU_API_PORT: "8001"
-          KUZU_API_KEY: !If
+          GRAPH_API_KEY: !If
             - HasKuzuSecret
-            - !Sub "{{resolve:secretsmanager:${KuzuSecretArn}:SecretString:KUZU_API_KEY}}"
+            - !Sub "{{resolve:secretsmanager:${KuzuSecretArn}:SecretString:GRAPH_API_KEY}}"
             - ""
       Code:
         S3Bucket: !Ref LambdaCodeBucket

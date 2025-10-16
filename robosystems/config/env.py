@@ -298,11 +298,11 @@ class EnvConfig:
   )
   CORS_ALLOW_CREDENTIALS = get_bool_env("CORS_ALLOW_CREDENTIALS", True)
 
-  # Kuzu Infrastructure Feature Flags
-  KUZU_CIRCUIT_BREAKERS_ENABLED = get_bool_env("KUZU_CIRCUIT_BREAKERS_ENABLED", True)
-  KUZU_REDIS_CACHE_ENABLED = get_bool_env("KUZU_REDIS_CACHE_ENABLED", True)
-  KUZU_RETRY_LOGIC_ENABLED = get_bool_env("KUZU_RETRY_LOGIC_ENABLED", True)
-  KUZU_HEALTH_CHECKS_ENABLED = get_bool_env("KUZU_HEALTH_CHECKS_ENABLED", True)
+  # Graph Infrastructure Feature Flags (applies to all backends)
+  GRAPH_CIRCUIT_BREAKERS_ENABLED = get_bool_env("GRAPH_CIRCUIT_BREAKERS_ENABLED", True)
+  GRAPH_REDIS_CACHE_ENABLED = get_bool_env("GRAPH_REDIS_CACHE_ENABLED", True)
+  GRAPH_RETRY_LOGIC_ENABLED = get_bool_env("GRAPH_RETRY_LOGIC_ENABLED", True)
+  GRAPH_HEALTH_CHECKS_ENABLED = get_bool_env("GRAPH_HEALTH_CHECKS_ENABLED", True)
   SHARED_REPLICA_ALB_ENABLED = get_bool_env("SHARED_REPLICA_ALB_ENABLED", False)
   ALLOW_SHARED_MASTER_READS = get_bool_env("ALLOW_SHARED_MASTER_READS", True)
 
@@ -366,62 +366,67 @@ class EnvConfig:
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
   # ==========================================================================
-  # DATABASE CONFIGURATION - GRAPH DATABASES (KUZU AND NEO4J)
+  # DATABASE CONFIGURATION - GRAPH DATABASES (MULTI-BACKEND: KUZU AND NEO4J)
   # ==========================================================================
 
   # Graph Backend Selection
-  BACKEND_TYPE = get_str_env("BACKEND_TYPE", "kuzu")  # Options: kuzu, neo4j
+  BACKEND_TYPE = get_str_env(
+    "BACKEND_TYPE", "kuzu"
+  )  # Options: kuzu, neo4j_community, neo4j_enterprise
 
-  # Basic Kuzu configuration
-  KUZU_API_URL = get_str_env("KUZU_API_URL", "http://localhost:8001")
-  KUZU_API_KEY = get_secret_value("KUZU_API_KEY", "")
+  # Graph API Configuration (applies to all backends - unified access layer)
+  GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
+  GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
+
+  # Graph API Timeouts and Limits (applies to all backends)
+  GRAPH_HTTP_TIMEOUT = get_int_env("GRAPH_HTTP_TIMEOUT", DEFAULT_HTTP_TIMEOUT)
+  GRAPH_QUERY_TIMEOUT = get_int_env("GRAPH_QUERY_TIMEOUT", DEFAULT_QUERY_TIMEOUT)
+  GRAPH_MAX_QUERY_LENGTH = get_int_env("GRAPH_MAX_QUERY_LENGTH", MAX_QUERY_LENGTH)
+  GRAPH_MAX_REQUEST_SIZE = get_int_env("GRAPH_MAX_REQUEST_SIZE", KUZU_MAX_REQUEST_SIZE)
+  GRAPH_CONNECT_TIMEOUT = get_float_env("GRAPH_CONNECT_TIMEOUT", KUZU_CONNECT_TIMEOUT)
+  GRAPH_READ_TIMEOUT = get_float_env("GRAPH_READ_TIMEOUT", KUZU_READ_TIMEOUT)
+
+  # Graph Routing and Load Balancing (applies to all backends)
+  GRAPH_REPLICA_ALB_URL = get_str_env("GRAPH_REPLICA_ALB_URL", "")
+
+  # Graph Resiliency and Circuit Breaker Configuration (applies to all backends)
+  GRAPH_ALB_HEALTH_CACHE_TTL = get_int_env(
+    "GRAPH_ALB_HEALTH_CACHE_TTL", KUZU_ALB_HEALTH_CACHE_TTL
+  )
+  GRAPH_INSTANCE_CACHE_TTL = get_int_env(
+    "GRAPH_INSTANCE_CACHE_TTL", KUZU_INSTANCE_CACHE_TTL
+  )
+  GRAPH_CIRCUIT_BREAKER_THRESHOLD = get_int_env(
+    "GRAPH_CIRCUIT_BREAKER_THRESHOLD", KUZU_CIRCUIT_BREAKER_THRESHOLD
+  )
+  GRAPH_CIRCUIT_BREAKER_TIMEOUT = get_int_env(
+    "GRAPH_CIRCUIT_BREAKER_TIMEOUT", KUZU_CIRCUIT_BREAKER_TIMEOUT
+  )
+  GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
+    "GRAPH_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
+  )
+
+  # Graph Backup Configuration (applies to all backends)
+  GRAPH_BACKUP_ENCRYPTION_KEY = get_secret_value("GRAPH_BACKUP_ENCRYPTION_KEY", "")
+  GRAPH_BACKUP_ENCRYPTION_PASSWORD = get_secret_value(
+    "GRAPH_BACKUP_ENCRYPTION_PASSWORD", ""
+  )
+
+  # Kuzu-Specific Configuration (when BACKEND_TYPE=kuzu)
   KUZU_DATABASE_PATH = get_str_env("KUZU_DATABASE_PATH", "./data/kuzu-dbs")
   KUZU_ACCESS_PATTERN = get_str_env("KUZU_ACCESS_PATTERN", "api_auto")
   KUZU_NODE_TYPE = get_str_env("KUZU_NODE_TYPE", "writer")
   KUZU_S3_BUCKET = get_str_env("KUZU_S3_BUCKET", "")
+  KUZU_HOME = get_str_env("KUZU_HOME", "/app/data/.kuzu")
 
-  # Neo4j configuration
-  NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
-  NEO4J_USERNAME = get_str_env("NEO4J_USERNAME", "neo4j")
-  NEO4J_PASSWORD = get_secret_value("NEO4J_PASSWORD", "")
-  NEO4J_ENTERPRISE = get_bool_env("NEO4J_ENTERPRISE", False)
-  NEO4J_MAX_CONNECTION_POOL_SIZE = get_int_env("NEO4J_MAX_CONNECTION_POOL_SIZE", 50)
-  NEO4J_CONNECTION_ACQUISITION_TIMEOUT = get_int_env(
-    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT", 60
-  )
-  NEO4J_MAX_CONNECTION_LIFETIME = get_int_env("NEO4J_MAX_CONNECTION_LIFETIME", 3600)
-
-  # User graph creation limits (safety valve)
-  # User graph limits (from secrets for runtime control)
-  USER_GRAPHS_DEFAULT_LIMIT = get_int_env(
-    "USER_GRAPHS_DEFAULT_LIMIT",
-    int(get_secret_value("USER_GRAPHS_DEFAULT_LIMIT", "100")),
-  )
-
-  # Kuzu capacity and performance
+  # Kuzu Capacity and Performance
   KUZU_MAX_DATABASES_PER_NODE = get_int_env(
     "KUZU_MAX_DATABASES_PER_NODE", MAX_DATABASES_PER_NODE
   )
-  KUZU_MAX_QUERY_LENGTH = get_int_env("KUZU_MAX_QUERY_LENGTH", MAX_QUERY_LENGTH)
 
-  # Kuzu timeouts and technical limits
-  KUZU_HTTP_TIMEOUT = get_int_env("KUZU_HTTP_TIMEOUT", DEFAULT_HTTP_TIMEOUT)
-  KUZU_QUERY_TIMEOUT = get_int_env("KUZU_QUERY_TIMEOUT", DEFAULT_QUERY_TIMEOUT)
-  KUZU_MAX_REQUEST_SIZE = get_int_env("KUZU_MAX_REQUEST_SIZE", KUZU_MAX_REQUEST_SIZE)
-  KUZU_CONNECT_TIMEOUT = get_float_env("KUZU_CONNECT_TIMEOUT", KUZU_CONNECT_TIMEOUT)
-  KUZU_READ_TIMEOUT = get_float_env("KUZU_READ_TIMEOUT", KUZU_READ_TIMEOUT)
-
-  # Kuzu routing and load balancing
-  KUZU_REPLICA_ALB_URL = get_str_env("KUZU_REPLICA_ALB_URL", "")
-
-  # General Kuzu memory configuration (can be overridden per-tier)
-  # First try environment variable, then fall back to default
-  KUZU_MAX_MEMORY_MB = get_int_env(
-    "KUZU_MAX_MEMORY_MB", 2048
-  )  # Default buffer pool size
-  KUZU_MAX_MEMORY_PER_DB_MB = get_int_env(
-    "KUZU_MAX_MEMORY_PER_DB_MB", 0
-  )  # 0 = shared pool
+  # Kuzu Memory Configuration (can be overridden per-tier)
+  KUZU_MAX_MEMORY_MB = get_int_env("KUZU_MAX_MEMORY_MB", 2048)
+  KUZU_MAX_MEMORY_PER_DB_MB = get_int_env("KUZU_MAX_MEMORY_PER_DB_MB", 0)
 
   # Tier-specific memory allocations (with environment variable overrides)
   KUZU_STANDARD_MAX_MEMORY_MB = get_int_env(
@@ -454,39 +459,37 @@ class EnvConfig:
     "KUZU_PREMIUM_CHUNK_SIZE", KUZU_PREMIUM_CHUNK_SIZE
   )
 
-  # Kuzu backup
-  KUZU_BACKUP_ENCRYPTION_KEY = get_secret_value("KUZU_BACKUP_ENCRYPTION_KEY", "")
-  KUZU_BACKUP_ENCRYPTION_PASSWORD = get_secret_value(
-    "KUZU_BACKUP_ENCRYPTION_PASSWORD", ""
+  # Kuzu-specific admission control
+  KUZU_ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "KUZU_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  )
+  KUZU_ADMISSION_CPU_THRESHOLD = get_float_env(
+    "KUZU_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
+  )
+  KUZU_MAX_CONNECTIONS_PER_DB = get_int_env("KUZU_MAX_CONNECTIONS_PER_DB", 10)
+  KUZU_CONNECTION_TTL_MINUTES = get_float_env("KUZU_CONNECTION_TTL_MINUTES", 30.0)
+
+  # Neo4j-Specific Configuration (when BACKEND_TYPE=neo4j_*)
+  NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
+  NEO4J_USERNAME = get_str_env("NEO4J_USERNAME", "neo4j")
+  NEO4J_PASSWORD = get_secret_value("NEO4J_PASSWORD", "")
+  NEO4J_ENTERPRISE = get_bool_env("NEO4J_ENTERPRISE", False)
+  NEO4J_MAX_CONNECTION_POOL_SIZE = get_int_env("NEO4J_MAX_CONNECTION_POOL_SIZE", 50)
+  NEO4J_CONNECTION_ACQUISITION_TIMEOUT = get_int_env(
+    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT", 60
+  )
+  NEO4J_MAX_CONNECTION_LIFETIME = get_int_env("NEO4J_MAX_CONNECTION_LIFETIME", 3600)
+
+  # User Graph Creation Limits (safety valve)
+  USER_GRAPHS_DEFAULT_LIMIT = get_int_env(
+    "USER_GRAPHS_DEFAULT_LIMIT",
+    int(get_secret_value("USER_GRAPHS_DEFAULT_LIMIT", "100")),
   )
 
-  # Kuzu home directory for extensions and cache
-  # NOTE: This is defined but not currently used in the code
-  # The home_directory is set dynamically per-connection in connection_pool.py
-  # Keeping for potential future use with extensions
-  KUZU_HOME = get_str_env("KUZU_HOME", "/app/data/.kuzu")
-
-  # Instance metadata
+  # Instance Metadata (applies to all backends)
   EC2_INSTANCE_ID = get_str_env("INSTANCE_ID", "")
   INSTANCE_ID = get_str_env("INSTANCE_ID", "")
-  CLUSTER_TIER = get_str_env(
-    "CLUSTER_TIER", ""
-  )  # e.g., "standard", "enterprise", "premium", "shared_repository"
-
-  # Kuzu resiliency and circuit breaker configuration
-  KUZU_ALB_HEALTH_CACHE_TTL = get_int_env(
-    "KUZU_ALB_HEALTH_CACHE_TTL", KUZU_ALB_HEALTH_CACHE_TTL
-  )
-  KUZU_INSTANCE_CACHE_TTL = get_int_env(
-    "KUZU_INSTANCE_CACHE_TTL", KUZU_INSTANCE_CACHE_TTL
-  )
-  KUZU_CIRCUIT_BREAKER_THRESHOLD = get_int_env(
-    "KUZU_CIRCUIT_BREAKER_THRESHOLD", KUZU_CIRCUIT_BREAKER_THRESHOLD
-  )
-  KUZU_CIRCUIT_BREAKER_TIMEOUT = get_int_env(
-    "KUZU_CIRCUIT_BREAKER_TIMEOUT", KUZU_CIRCUIT_BREAKER_TIMEOUT
-  )
-
+  CLUSTER_TIER = get_str_env("CLUSTER_TIER", "")
   # ==========================================================================
   # CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
   # ==========================================================================
@@ -939,10 +942,10 @@ class EnvConfig:
             # Performance settings
             "chunk_size": instance_config.get("chunk_size", 1000),
             "query_timeout": instance_config.get(
-              "query_timeout", cls.KUZU_QUERY_TIMEOUT
+              "query_timeout", cls.GRAPH_QUERY_TIMEOUT
             ),
             "max_query_length": instance_config.get(
-              "max_query_length", cls.KUZU_MAX_QUERY_LENGTH
+              "max_query_length", cls.GRAPH_MAX_QUERY_LENGTH
             ),
             "connection_pool_size": instance_config.get("connection_pool_size", 10),
             # Database settings - prioritize environment variable in dev
@@ -979,8 +982,8 @@ class EnvConfig:
       "memory_per_db_mb": cls.KUZU_MAX_MEMORY_PER_DB_MB,
       # Performance settings
       "chunk_size": get_int_env("KUZU_CHUNK_SIZE", 1000),
-      "query_timeout": cls.KUZU_QUERY_TIMEOUT,
-      "max_query_length": cls.KUZU_MAX_QUERY_LENGTH,
+      "query_timeout": cls.GRAPH_QUERY_TIMEOUT,
+      "max_query_length": cls.GRAPH_MAX_QUERY_LENGTH,
       "connection_pool_size": get_int_env("KUZU_CONNECTION_POOL_SIZE", 10),
       # Database settings
       "databases_per_instance": get_int_env("KUZU_DATABASES_PER_INSTANCE", 10),

@@ -17,9 +17,9 @@ class TestCreateKuzuMCPClient:
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
   async def test_create_client_with_explicit_url(self, mock_client_class, mock_env):
     """Test creating client with explicit API URL."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client
@@ -44,9 +44,9 @@ class TestCreateKuzuMCPClient:
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
     """Test creating client with URL discovery for shared repository."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     # Mock shared repository detection
     mock_utils.is_shared_repository.return_value = True
@@ -87,9 +87,9 @@ class TestCreateKuzuMCPClient:
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
     """Test creating client with URL discovery for user graph."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     # Mock user graph detection
     mock_utils.is_shared_repository.return_value = False
@@ -131,9 +131,9 @@ class TestCreateKuzuMCPClient:
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
     """Test URL discovery with fallback to base_url attribute."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     mock_utils.is_shared_repository.return_value = False
 
@@ -165,10 +165,10 @@ class TestCreateKuzuMCPClient:
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
     """Test URL discovery with fallback to environment variable."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
-    mock_env.KUZU_API_URL = "http://env-fallback.com"
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_API_URL = "http://env-fallback.com"
 
     mock_utils.is_shared_repository.return_value = False
 
@@ -200,10 +200,10 @@ class TestCreateKuzuMCPClient:
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
     """Test URL discovery with final localhost fallback."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
-    mock_env.KUZU_API_URL = None
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_API_URL = None
 
     mock_utils.is_shared_repository.return_value = False
 
@@ -231,10 +231,10 @@ class TestCreateKuzuMCPClient:
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
   async def test_create_client_env_defaults(self, mock_client_class, mock_env):
     """Test client creation with environment defaults."""
-    mock_env.KUZU_HTTP_TIMEOUT = 45
-    mock_env.KUZU_QUERY_TIMEOUT = 90
+    mock_env.GRAPH_HTTP_TIMEOUT = 45
+    mock_env.GRAPH_QUERY_TIMEOUT = 90
     # No KUZU_MAX_QUERY_LENGTH attribute (testing hasattr fallback)
-    delattr(mock_env, "KUZU_MAX_QUERY_LENGTH")
+    delattr(mock_env, "GRAPH_MAX_QUERY_LENGTH")
 
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client
@@ -253,9 +253,9 @@ class TestCreateKuzuMCPClient:
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
   async def test_create_client_default_graph_id(self, mock_client_class, mock_env):
     """Test client creation with default graph ID."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client
@@ -280,9 +280,9 @@ class TestCreateKuzuMCPClient:
     self, mock_utils, mock_factory, mock_client_class, mock_env, mock_logger
   ):
     """Test that URL discovery is logged."""
-    mock_env.KUZU_HTTP_TIMEOUT = 30
-    mock_env.KUZU_QUERY_TIMEOUT = 60
-    mock_env.KUZU_MAX_QUERY_LENGTH = "50000"
+    mock_env.GRAPH_HTTP_TIMEOUT = 30
+    mock_env.GRAPH_QUERY_TIMEOUT = 60
+    mock_env.GRAPH_MAX_QUERY_LENGTH = "50000"
 
     mock_utils.is_shared_repository.return_value = True
 

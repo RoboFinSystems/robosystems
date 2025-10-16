@@ -191,7 +191,7 @@ class TestSecretMappingsConfiguration:
       "AWS_S3_SECRET_ACCESS_KEY",
       "SEC_RAW_BUCKET",
       "SEC_PROCESSED_BUCKET",
-      "KUZU_API_KEY",
+      "GRAPH_API_KEY",
       "ANTHROPIC_API_KEY",
     ]
 

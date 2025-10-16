@@ -112,7 +112,8 @@ class TestHealthRouter:
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     data = response.json()
     assert data["status"] == "unhealthy"
-    assert "Service unavailable" in data["error"]
+    # Security: Generic error message to avoid information disclosure
+    assert data["error"] == "Service temporarily unavailable"
 
   def test_health_check_database_error(self, client):
     """Test health check when database manager has an error."""
@@ -128,7 +129,8 @@ class TestHealthRouter:
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     data = response.json()
     assert data["status"] == "unhealthy"
-    assert "Database error" in data["error"]
+    # Security: Generic error message to avoid information disclosure
+    assert data["error"] == "Service temporarily unavailable"
 
   def test_health_check_zero_databases(self, client, mock_cluster_service):
     """Test health check with zero databases."""

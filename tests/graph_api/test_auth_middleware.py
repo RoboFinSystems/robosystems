@@ -51,7 +51,7 @@ class TestKuzuAuthMiddleware:
     """Test that authentication is bypassed in development."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "dev"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app)
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
@@ -65,7 +65,7 @@ class TestKuzuAuthMiddleware:
     """Test successful authentication with valid API key in header."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="valid-key-123")
       mock_request.headers = Headers({"X-Kuzu-API-Key": "valid-key-123"})
@@ -80,7 +80,7 @@ class TestKuzuAuthMiddleware:
     """Test successful authentication with Bearer token."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "staging"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="bearer-key-456")
       mock_request.headers = Headers({"Authorization": "Bearer bearer-key-456"})
@@ -95,7 +95,7 @@ class TestKuzuAuthMiddleware:
     """Test authentication failure with missing API key."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="secret-key")
       call_next = AsyncMock()
@@ -111,7 +111,7 @@ class TestKuzuAuthMiddleware:
     """Test authentication failure with invalid API key."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "staging"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
       mock_request.headers = Headers({"X-Kuzu-API-Key": "wrong-key"})
@@ -128,7 +128,7 @@ class TestKuzuAuthMiddleware:
     """Test rate limiting after multiple failed attempts."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
       middleware.max_failed_attempts = 3  # Lower for testing
@@ -151,7 +151,7 @@ class TestKuzuAuthMiddleware:
     """Test that rate limiting expires after lockout duration."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
       middleware.max_failed_attempts = 2
@@ -181,7 +181,7 @@ class TestKuzuAuthMiddleware:
     """Test that successful auth resets failed attempt counter."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
@@ -201,7 +201,7 @@ class TestKuzuAuthMiddleware:
     """Test middleware initialization with key from environment."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
-      mock_env.KUZU_API_KEY = "env-api-key"
+      mock_env.GRAPH_API_KEY = "env-api-key"
 
       middleware = KuzuAuthMiddleware(mock_app)
       assert middleware.api_key == "env-api-key"
@@ -211,7 +211,7 @@ class TestKuzuAuthMiddleware:
     """Test that middleware requires API key in production."""
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
 
       with patch(
         "robosystems.graph_api.middleware.auth.get_api_key_from_secrets_manager"
@@ -266,7 +266,7 @@ class TestSecretsManagerIntegration:
     mock_client = MagicMock()
     mock_boto_client.return_value = mock_client
     mock_client.get_secret_value.return_value = {
-      "SecretString": json.dumps({"KUZU_API_KEY": "secret-key-123"})
+      "SecretString": json.dumps({"GRAPH_API_KEY": "secret-key-123"})
     }
 
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
@@ -325,7 +325,7 @@ class TestSecretsManagerIntegration:
     mock_client = MagicMock()
     mock_boto_client.return_value = mock_client
     mock_client.get_secret_value.return_value = {
-      "SecretString": json.dumps({"KUZU_API_KEY": "cached-key"})
+      "SecretString": json.dumps({"GRAPH_API_KEY": "cached-key"})
     }
 
     with patch("robosystems.graph_api.middleware.auth.env") as mock_env:

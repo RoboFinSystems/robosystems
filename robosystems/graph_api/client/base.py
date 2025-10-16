@@ -49,16 +49,12 @@ class BaseKuzuClient:
     # Use centralized config to get from Secrets Manager
     from robosystems.config import env
 
-    api_key = kwargs.pop("api_key", None) or env.KUZU_API_KEY
+    api_key = kwargs.pop("api_key", None) or env.GRAPH_API_KEY
     if api_key:
       if "headers" not in kwargs:
         kwargs["headers"] = {}
       kwargs["headers"]["X-Kuzu-API-Key"] = api_key
-      logger.debug(
-        f"KuzuClient configured with API key: {api_key[:8]}..."
-        if api_key
-        else "No API key"
-      )
+      logger.debug("KuzuClient configured with API key")
     else:
       # Only warn about missing API key in production environments
       if env.ENVIRONMENT in ("prod", "production", "staging"):

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.logger import logger
 
 router = APIRouter(tags=["Cluster Health"])
 
@@ -59,6 +60,10 @@ async def health_check(
       },
     )
   except Exception as e:
+    # Log the detailed error securely
+    logger.error(f"Health check failed: {str(e)}")
+    # Return generic error message to avoid information disclosure
     return JSONResponse(
-      status_code=503, content={"status": "unhealthy", "error": str(e)}
+      status_code=503,
+      content={"status": "unhealthy", "error": "Service temporarily unavailable"},
     )

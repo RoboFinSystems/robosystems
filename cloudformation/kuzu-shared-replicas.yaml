@@ -460,8 +460,8 @@ Resources:
               export MAX_DATABASES_PER_NODE="10"
               export REPOSITORY_TYPE="shared"
 
-              # Set KUZU_API_URL to the ALB endpoint for shared replicas
-              export KUZU_API_URL="http://${ReplicaLoadBalancerDNS}"
+              # Set GRAPH_API_URL to the ALB endpoint for shared replicas
+              export GRAPH_API_URL="http://${ReplicaLoadBalancerDNS}"
 
               # Execute setup script with error handling
               SETUP_EXIT_CODE=0

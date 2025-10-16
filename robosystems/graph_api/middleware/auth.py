@@ -64,9 +64,9 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
     self.api_key = None
     if api_key:
       self.api_key = api_key
-    elif env.KUZU_API_KEY:
+    elif env.GRAPH_API_KEY:
       # Get from centralized config (handles Secrets Manager)
-      self.api_key = env.KUZU_API_KEY
+      self.api_key = env.GRAPH_API_KEY
     elif self.auth_enabled:
       # Fallback to direct Secrets Manager lookup
       self.api_key = get_api_key_from_secrets_manager(key_type=self.key_type)
@@ -213,15 +213,13 @@ def get_api_key_from_secrets_manager(
     secret_data = json.loads(response["SecretString"])
 
     # All node types use the same unified API key
-    api_key = secret_data.get("KUZU_API_KEY")
+    api_key = secret_data.get("GRAPH_API_KEY")
 
     if api_key:
-      logger.info(
-        f"Successfully retrieved unified API key from Secrets Manager: {secret_name}"
-      )
+      logger.info("Successfully retrieved Graph API key from Secrets Manager")
       return api_key
     else:
-      logger.error(f"No KUZU_API_KEY found in secret: {secret_name}")
+      logger.error(f"No GRAPH_API_KEY found in secret: {secret_name}")
       return None
 
   except ClientError as e:

@@ -55,7 +55,7 @@ class TestSecurityValidation:
     from robosystems.config import env
 
     # Create a query that exceeds the configured limit
-    max_length = env.KUZU_MAX_QUERY_LENGTH
+    max_length = env.GRAPH_MAX_QUERY_LENGTH
     long_query = "MATCH (n) RETURN n" + "x" * (max_length + 1)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -319,10 +319,10 @@ class TestKuzuClusterService:
     from concurrent.futures import TimeoutError as FuturesTimeoutError
     from fastapi import HTTPException
 
-    # Mock the env instance's KUZU_QUERY_TIMEOUT
+    # Mock the env instance's GRAPH_QUERY_TIMEOUT
     from robosystems.config import env
 
-    with patch.object(env, "KUZU_QUERY_TIMEOUT", 1.0):
+    with patch.object(env, "GRAPH_QUERY_TIMEOUT", 1.0):
       # Mock database manager
       mock_db_instance = MagicMock()
       mock_db_instance.list_databases.return_value = ["test_db"]

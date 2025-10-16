@@ -81,6 +81,7 @@ class DatabaseLocation:
   availability_zone: str
   created_at: datetime
   status: DatabaseStatus
+  backend_type: str = "kuzu"
 
 
 @dataclass
@@ -125,19 +126,22 @@ class KuzuAllocationManager:
       else MultiTenantUtils.get_max_databases_per_node()
     )
 
-    # Tier-based configuration for memory and chunk sizes
+    # Tier-based configuration for memory, chunk sizes, and backend selection
     self.tier_configs = {
       InstanceTier.STANDARD: {
+        "backend_type": "kuzu",
         "max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
         "chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
         "databases_per_instance": self.max_databases_per_instance,
       },
       InstanceTier.ENTERPRISE: {
+        "backend_type": "neo4j_community",
         "max_memory_mb": env.KUZU_ENTERPRISE_MAX_MEMORY_MB,
         "chunk_size": env.KUZU_ENTERPRISE_CHUNK_SIZE,
         "databases_per_instance": 1,  # Dedicated instance
       },
       InstanceTier.PREMIUM: {
+        "backend_type": "neo4j_community",
         "max_memory_mb": env.KUZU_PREMIUM_MAX_MEMORY_MB,
         "chunk_size": env.KUZU_PREMIUM_CHUNK_SIZE,
         "databases_per_instance": 1,  # Dedicated instance
@@ -282,6 +286,7 @@ class KuzuAllocationManager:
         availability_zone=parent_location.availability_zone,
         created_at=datetime.now(timezone.utc),
         status=DatabaseStatus.ACTIVE,
+        backend_type=parent_location.backend_type,
       )
 
     logger.info(f"Allocating database {graph_id} for entity {entity_id}")
@@ -289,6 +294,10 @@ class KuzuAllocationManager:
     try:
       # Get graph identity for routing
       identity = GraphTypeRegistry.identify_graph(graph_id, instance_tier)
+
+      # Get backend type for this tier
+      tier_config = self.get_tier_config(instance_tier or InstanceTier.STANDARD)
+      backend_type = tier_config.get("backend_type", "kuzu")
 
       # Find instance with capacity for the specified tier (do this first to fail fast)
       instance = await self._find_best_instance(instance_tier)
@@ -330,6 +339,7 @@ class KuzuAllocationManager:
               "graph_id": graph_id,
               "entity_id": entity_id,
               "graph_type": identity.graph_type if identity else graph_type,
+              "backend_type": backend_type,
               "instance_id": instance.instance_id,
               "private_ip": instance.private_ip,
               "availability_zone": instance.availability_zone,
@@ -419,6 +429,7 @@ class KuzuAllocationManager:
                   availability_zone=item.get("availability_zone", "unknown"),
                   created_at=datetime.fromisoformat(item["created_at"]),
                   status=DatabaseStatus(item.get("status", "active")),
+                  backend_type=item.get("backend_type", "kuzu"),
                 )
               else:
                 # Shouldn't happen - conditional check failed but item doesn't exist
@@ -490,6 +501,7 @@ class KuzuAllocationManager:
         availability_zone=instance.availability_zone,
         created_at=now,
         status=DatabaseStatus.ACTIVE,
+        backend_type=backend_type,
       )
 
     except ClientError as e:
@@ -541,6 +553,7 @@ class KuzuAllocationManager:
         availability_zone=item.get("availability_zone", "unknown"),
         created_at=datetime.fromisoformat(item["created_at"]),
         status=DatabaseStatus(item.get("status", "active")),
+        backend_type=item.get("backend_type", "kuzu"),
       )
 
     except ClientError as e:

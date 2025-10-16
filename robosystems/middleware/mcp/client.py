@@ -54,7 +54,7 @@ class KuzuMCPClient:
         graph_id: Graph/database identifier
     """
     self.api_base_url = api_base_url.rstrip("/")
-    self.timeout = timeout if timeout is not None else env.KUZU_HTTP_TIMEOUT
+    self.timeout = timeout if timeout is not None else env.GRAPH_HTTP_TIMEOUT
     self.query_timeout = query_timeout
     self.max_query_length = max_query_length
     self.graph_id = graph_id
@@ -64,7 +64,7 @@ class KuzuMCPClient:
 
     # Create KuzuClient with unified API key from centralized config
     # This ensures we get the key from Secrets Manager in production
-    api_key = env.KUZU_API_KEY
+    api_key = env.GRAPH_API_KEY
 
     self.kuzu_client = KuzuClient(base_url=api_base_url, api_key=api_key)
     self.kuzu_client.graph_id = graph_id  # Set the graph_id for queries

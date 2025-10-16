@@ -1,13 +1,18 @@
 """
-Simplified Kuzu-only Graph Router
+Multi-Backend Graph Router
 
-This router provides graph database access exclusively through Kuzu,
+This router provides graph database access with pluggable backend support,
 using the enhanced client factory for all routing decisions.
 
+Supported backends:
+- Kuzu: Embedded graph database (Standard tier)
+- Neo4j Community: Client-server architecture (Professional/Enterprise tiers)
+- Neo4j Enterprise: Full enterprise features (Premium tier, future)
+
 Key features:
-- Delegates all routing to the enhanced KuzuClientFactory
-- Supports direct file access for development (KUZU_ACCESS_PATTERN=direct_file)
-- Adds streaming support to all Kuzu clients
+- Backend-agnostic routing based on tier and allocation
+- Delegates routing to the enhanced client factory
+- Supports direct file access for development (Kuzu only)
 - Maintains backward compatibility with existing code
 """
 
@@ -23,19 +28,20 @@ from robosystems.logger import logger
 
 class GraphRouter:
   """
-  Simplified router for graph database access.
+  Multi-backend router for graph database access.
 
   This router now delegates all routing decisions to the enhanced
-  KuzuClientFactory which handles:
+  client factory which handles:
   - Entity graphs: Private databases for individual companies
   - Shared repositories: SEC, industry, economic data
-  - Dev environment: Single local Kuzu instance
+  - Dev environment: Single local backend instance
   - Production: Distributed instances with tier-based routing
+  - Backend selection: Automatic based on tier (Kuzu/Neo4j)
   """
 
   def __init__(self):
     """Initialize the graph router."""
-    logger.info("Initialized graph router (using enhanced client factory)")
+    logger.info(f"Initialized multi-backend graph router (backend: {env.BACKEND_TYPE})")
 
   async def get_repository(
     self,
@@ -142,7 +148,7 @@ class GraphRouter:
       # Use unified API key for test repository from centralized config
       from robosystems.config import env
 
-      api_key = env.KUZU_API_KEY
+      api_key = env.GRAPH_API_KEY
 
       from robosystems.graph_api.client import KuzuClient
 

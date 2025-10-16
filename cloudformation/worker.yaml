@@ -692,7 +692,7 @@ Resources:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             # Kuzu Routing Configuration (for enhanced client factory)
-            - Name: KUZU_REPLICA_ALB_URL
+            - Name: GRAPH_REPLICA_ALB_URL
               Value: !Ref KuzuReplicaAlbUrl
             - Name: SHARED_REPLICA_ALB_ENABLED
               Value: !Ref SharedReplicaAlbEnabled
