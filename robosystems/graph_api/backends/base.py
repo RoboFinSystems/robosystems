@@ -65,5 +65,5 @@ class GraphBackend(ABC):
     pass
 
   @abstractmethod
-  def close(self) -> None:
+  async def close(self) -> None:
     pass

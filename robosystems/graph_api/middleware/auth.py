@@ -1,8 +1,9 @@
 """
-Authentication middleware for Kuzu API with environment-based security.
+Authentication middleware for Graph API with environment-based security.
 
 Provides API key authentication for production/staging environments while
 allowing unrestricted access in development and from bastion hosts.
+Supports both Kuzu and Neo4j backends.
 """
 
 import json
@@ -22,9 +23,9 @@ from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 
-class KuzuAuthMiddleware(BaseHTTPMiddleware):
+class GraphAuthMiddleware(BaseHTTPMiddleware):
   """
-  Authentication middleware for Kuzu API.
+  Authentication middleware for Graph API.
 
   Features:
   - API key authentication in production/staging
@@ -32,6 +33,7 @@ class KuzuAuthMiddleware(BaseHTTPMiddleware):
   - Bypassed for requests from bastion hosts
   - Bypassed for health check endpoints
   - Rate limiting for failed auth attempts
+  - Works with both Kuzu and Neo4j backends
   """
 
   # Endpoints that don't require authentication
@@ -71,14 +73,14 @@ class KuzuAuthMiddleware(BaseHTTPMiddleware):
 
     if self.auth_enabled and not self.api_key:
       logger.error(
-        f"Kuzu API key not configured for {self.key_type} in {self.environment} environment!"
+        f"Graph API key not configured for {self.key_type} in {self.environment} environment!"
       )
       raise ValueError(
         f"KUZU_API_KEY must be set for {self.key_type} in production/staging"
       )
 
     logger.info(
-      f"Kuzu Auth Middleware initialized - Environment: {self.environment}, "
+      f"Graph Auth Middleware initialized - Environment: {self.environment}, "
       f"Auth Enabled: {self.auth_enabled}, Key Type: {self.key_type}"
     )
 
@@ -117,8 +119,8 @@ class KuzuAuthMiddleware(BaseHTTPMiddleware):
 
   def _validate_api_key(self, request: Request) -> None:
     """Validate API key from request headers."""
-    # Check for API key in header
-    api_key = request.headers.get("X-Kuzu-API-Key")
+    # Check for API key in header (support both old and new header names)
+    api_key = request.headers.get("X-Graph-API-Key") or request.headers.get("X-Kuzu-API-Key")
     if not api_key:
       # Also check Authorization header
       auth_header = request.headers.get("Authorization", "")
@@ -265,3 +267,6 @@ def create_api_key(prefix: str = "kuzu") -> tuple[str, str]:
   )
 
   return api_key, key_hash
+
+
+KuzuAuthMiddleware = GraphAuthMiddleware

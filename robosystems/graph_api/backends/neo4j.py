@@ -21,7 +21,7 @@ class Neo4jBackend(GraphBackend):
       await self._connect()
 
   async def _connect(self):
-    if env.NEO4J_PASSWORD:
+    if env.NEO4J_PASSWORD is not None and env.NEO4J_PASSWORD != "":
       self._password = env.NEO4J_PASSWORD
     else:
       secrets = boto3.client("secretsmanager", region_name=env.AWS_REGION)
@@ -59,15 +59,10 @@ class Neo4jBackend(GraphBackend):
 
     db_name = self._get_database_name(graph_id, database)
 
-    cypher_upper = cypher.strip().upper()
-    is_read = cypher_upper.startswith(("MATCH", "RETURN", "WITH", "CALL"))
-
+    # Use Neo4j driver's automatic routing for cluster mode
+    # For non-cluster mode, this has no effect
     async with self.driver.session(database=db_name) as session:
-      if self.enterprise and is_read:
-        result = await session.run(cypher, parameters or {})
-      else:
-        result = await session.run(cypher, parameters or {})
-
+      result = await session.run(cypher, parameters or {})
       records = await result.data()
       return records
 
@@ -218,8 +213,7 @@ class Neo4jBackend(GraphBackend):
       logger.error(f"Neo4j health check failed: {e}")
       return False
 
-  def close(self) -> None:
+  async def close(self) -> None:
     if self.driver:
-      import asyncio
-
-      asyncio.create_task(self.driver.close())
+      await self.driver.close()
+      self.driver = None

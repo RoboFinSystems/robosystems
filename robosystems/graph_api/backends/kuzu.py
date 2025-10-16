@@ -99,7 +99,7 @@ class KuzuBackend(GraphBackend):
   async def health_check(self) -> bool:
     return True
 
-  def close(self) -> None:
+  async def close(self) -> None:
     for engine in self._engines.values():
       engine.close()
     self._engines.clear()
