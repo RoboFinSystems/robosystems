@@ -17,11 +17,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv
 
-# Copy the Kuzu httpfs extension from local archive
-# We maintain a local copy extracted from previous Docker builds
-RUN mkdir -p /kuzu-extension/0.11.2/linux_arm64/httpfs
-COPY bin/kuzu-extensions/v0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension \
-    /kuzu-extension/0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension
+# Copy the Kuzu httpfs extension from local archive with architecture support
+# Extensions are bundled locally to eliminate network dependencies during build
+# See bin/kuzu-extensions/README.md for provenance and update procedures
+ARG TARGETARCH=arm64
+RUN mkdir -p /kuzu-extension/0.11.2/linux_${TARGETARCH}/httpfs
+COPY bin/kuzu-extensions/v0.11.2/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension \
+    /kuzu-extension/0.11.2/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension
+
+# Verify extension integrity with checksum
+RUN if [ "${TARGETARCH}" = "arm64" ]; then \
+        echo "ea1b8f35234e57e961e1e0ca540769fc0192ff2e360b825a7e7b0e532f0f696e  /kuzu-extension/0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
+        (echo "ERROR: ARM64 httpfs extension checksum verification failed!" && exit 1); \
+    fi
+# Note: Add AMD64 checksum verification when AMD64 binary is available
 
 WORKDIR /build
 
@@ -59,6 +68,9 @@ RUN --mount=type=cache,target=/tmp/uv-cache \
 
 # Stage 2: Runtime
 FROM python:3.12.10-slim
+
+# Accept architecture argument in runtime stage
+ARG TARGETARCH=arm64
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \

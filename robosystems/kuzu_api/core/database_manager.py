@@ -47,7 +47,7 @@ def validate_database_path(base_path: Path, db_name: str) -> Path:
       status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
     )
 
-  # Construct safe path (Kuzu 0.11.0 uses .kuzu files)
+  # Construct safe path (Kuzu 0.11.x uses .kuzu files)
   db_path = base_path / f"{db_name}.kuzu"
 
   # Ensure the resolved path is still within base_path
@@ -329,7 +329,7 @@ class KuzuDatabaseManager:
       # Close any connections in the pool for this database
       self.connection_pool.close_database_connections(graph_id)
 
-      # Remove database file (single file in Kuzu 0.11.0)
+      # Remove database file (single file in Kuzu 0.11.x)
       if db_path.is_file():
         db_path.unlink()
       elif db_path.is_dir():
@@ -417,7 +417,7 @@ class KuzuDatabaseManager:
       )
 
     try:
-      # Calculate database size (single file in Kuzu 0.11.0)
+      # Calculate database size (single file in Kuzu 0.11.x)
       size_bytes = db_path.stat().st_size if db_path.is_file() else 0
 
       # Get creation time
@@ -909,7 +909,7 @@ class KuzuDatabaseManager:
         region_name="us-east-1",
       )
 
-      # Count databases (Kuzu 0.11.0 uses .kuzu files)
+      # Count databases (Kuzu 0.11.x uses .kuzu files)
       db_count = len([f for f in self.base_path.glob("*.kuzu") if f.is_file()])
       capacity_pct = int((db_count / self.max_databases) * 100)
 

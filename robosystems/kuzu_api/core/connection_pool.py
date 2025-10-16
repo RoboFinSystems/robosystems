@@ -234,7 +234,7 @@ class KuzuConnectionPool:
         self._remove_oldest_connection(database_name)
 
     try:
-      # Construct database path safely (Kuzu 0.11.0 uses .kuzu files)
+      # Construct database path safely (Kuzu 0.11.x uses .kuzu files)
       db_path = self.base_path / f"{database_name}.kuzu"
 
       # Get or create shared Database object

@@ -520,7 +520,7 @@ class MultiTenantUtils:
   @staticmethod
   def get_database_path_for_graph(graph_id: str) -> str:
     """
-    Get the database file path for a graph (Kuzu 0.11.0 single-file format).
+    Get the database file path for a graph (Kuzu 0.11.x single-file format).
 
     Args:
         graph_id: Graph identifier
