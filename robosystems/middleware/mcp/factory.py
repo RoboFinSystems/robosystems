@@ -55,7 +55,7 @@ async def create_kuzu_mcp_client(
       api_base_url = kuzu_client.base_url
     else:
       # Fallback to environment variable
-      api_base_url = env.KUZU_API_URL or "http://localhost:8001"
+      api_base_url = env.GRAPH_API_URL or "http://localhost:8001"
 
     # Ensure we have a valid URL
     if not api_base_url:
@@ -66,10 +66,10 @@ async def create_kuzu_mcp_client(
     )
 
   # Configure timeouts based on environment and query type
-  timeout = env.KUZU_HTTP_TIMEOUT
-  query_timeout = env.KUZU_QUERY_TIMEOUT  # 30 seconds to prevent resource exhaustion
+  timeout = env.GRAPH_HTTP_TIMEOUT
+  query_timeout = env.GRAPH_QUERY_TIMEOUT  # 30 seconds to prevent resource exhaustion
   max_query_length = int(
-    env.KUZU_MAX_QUERY_LENGTH if hasattr(env, "KUZU_MAX_QUERY_LENGTH") else 50000
+    env.GRAPH_MAX_QUERY_LENGTH if hasattr(env, "GRAPH_MAX_QUERY_LENGTH") else 50000
   )  # 50KB queries max
 
   return KuzuMCPClient(

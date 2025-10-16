@@ -8,7 +8,7 @@ rather than relying on environment variables passed through userdata scripts.
 
 Secrets are organized in AWS Secrets Manager with the following structure:
 - Base secret: `robosystems/{environment}` (e.g., robosystems/prod, robosystems/staging)
-  Contains: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY, KUZU_BACKUP_ENCRYPTION_KEY,
+  Contains: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY, GRAPH_BACKUP_ENCRYPTION_KEY,
             ANTHROPIC_API_KEY, INTUIT_*, PLAID_*, SEC_GOV_USER_AGENT, TURNSTILE_*,
             Feature flags: RATE_LIMIT_ENABLED, USER_REGISTRATION_ENABLED,
             CONNECTION_SEC_ENABLED, CONNECTION_QUICKBOOKS_ENABLED, CONNECTION_PLAID_ENABLED,
@@ -18,7 +18,7 @@ Secrets are organized in AWS Secrets Manager with the following structure:
 - Extension secrets: `robosystems/{environment}/{type}`
   - `/postgres`: DATABASE_URL and other PostgreSQL configuration
   - `/s3`: AWS_S3_ACCESS_KEY_ID, AWS_S3_SECRET_ACCESS_KEY, bucket names
-  - `/kuzu`: KUZU_API_KEY and other Kuzu-specific secrets
+  - `/kuzu`: GRAPH_API_KEY and other Kuzu-specific secrets
 
 ## Usage
 
@@ -317,14 +317,14 @@ SECRET_MAPPINGS = {
   "PUBLIC_DATA_BUCKET": ("s3", "PUBLIC_DATA_BUCKET"),
   "PUBLIC_DATA_CDN_URL": ("s3", "PUBLIC_DATA_CDN_URL"),
   # Kuzu secrets
-  "KUZU_API_KEY": ("kuzu", "KUZU_API_KEY"),
+  "GRAPH_API_KEY": ("kuzu", "GRAPH_API_KEY"),
   # Valkey secrets
   "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
   # Base secrets (robosystems/{env})
   "CONNECTION_CREDENTIALS_KEY": (None, "CONNECTION_CREDENTIALS_KEY"),
   "JWT_SECRET_KEY": (None, "JWT_SECRET_KEY"),
-  "KUZU_BACKUP_ENCRYPTION_KEY": (None, "KUZU_BACKUP_ENCRYPTION_KEY"),
-  "KUZU_BACKUP_ENCRYPTION_PASSWORD": (None, "KUZU_BACKUP_ENCRYPTION_PASSWORD"),
+  "GRAPH_BACKUP_ENCRYPTION_KEY": (None, "GRAPH_BACKUP_ENCRYPTION_KEY"),
+  "GRAPH_BACKUP_ENCRYPTION_PASSWORD": (None, "GRAPH_BACKUP_ENCRYPTION_PASSWORD"),
   "ANTHROPIC_API_KEY": (None, "ANTHROPIC_API_KEY"),
   "INTUIT_REDIRECT_URI": (None, "INTUIT_REDIRECT_URI"),
   "INTUIT_CLIENT_ID": (None, "INTUIT_CLIENT_ID"),

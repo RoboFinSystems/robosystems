@@ -134,7 +134,7 @@ def with_retry(
   def decorator(func):
     async def wrapper(*args, **kwargs):
       # Check if retry logic is enabled via feature flag
-      if not env.KUZU_RETRY_LOGIC_ENABLED:
+      if not env.GRAPH_RETRY_LOGIC_ENABLED:
         return await func(*args, **kwargs)
 
       last_exception = None
@@ -189,12 +189,12 @@ class KuzuClientFactory:
   SHARED_REPOSITORIES = list(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
 
   # Cache TTLs from constants
-  _alb_health_cache_ttl = env.KUZU_ALB_HEALTH_CACHE_TTL
-  _instance_cache_ttl = env.KUZU_INSTANCE_CACHE_TTL
+  _alb_health_cache_ttl = env.GRAPH_ALB_HEALTH_CACHE_TTL
+  _instance_cache_ttl = env.GRAPH_INSTANCE_CACHE_TTL
 
   # Timeout configurations from constants
-  _connect_timeout = env.KUZU_CONNECT_TIMEOUT
-  _read_timeout = env.KUZU_READ_TIMEOUT
+  _connect_timeout = env.GRAPH_CONNECT_TIMEOUT
+  _read_timeout = env.GRAPH_READ_TIMEOUT
 
   # Connection pools for reuse (HTTP/2 enabled for efficiency)
   _connection_pools: Dict[str, httpx.AsyncClient] = {}
@@ -206,12 +206,12 @@ class KuzuClientFactory:
 
   # Circuit breakers for different services
   _alb_circuit_breaker = CircuitBreaker(
-    failure_threshold=env.KUZU_CIRCUIT_BREAKER_THRESHOLD,
-    timeout=env.KUZU_CIRCUIT_BREAKER_TIMEOUT,
+    failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
+    timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
   )
   _master_circuit_breaker = CircuitBreaker(
-    failure_threshold=env.KUZU_CIRCUIT_BREAKER_THRESHOLD,
-    timeout=env.KUZU_CIRCUIT_BREAKER_TIMEOUT,
+    failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
+    timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
   )
 
   @classmethod
@@ -235,7 +235,7 @@ class KuzuClientFactory:
   async def _get_redis(cls) -> redis.Redis | None:
     """Get or create Redis connection for caching with event loop safety."""
     # Check if Redis caching is enabled via feature flag
-    if not env.KUZU_REDIS_CACHE_ENABLED:
+    if not env.GRAPH_REDIS_CACHE_ENABLED:
       return None
 
     try:
@@ -349,8 +349,8 @@ class KuzuClientFactory:
 
     # In dev environment, route everything to the single Kuzu instance
     if env.is_development():
-      api_url = env.KUZU_API_URL or "http://localhost:8001"
-      api_key = env.KUZU_API_KEY
+      api_url = env.GRAPH_API_URL or "http://localhost:8001"
+      api_key = env.GRAPH_API_KEY
       target = RouteTarget.SHARED_MASTER  # Treat as master in dev
 
       logger.info(
@@ -362,7 +362,7 @@ class KuzuClientFactory:
       # All writes MUST go to shared master
       target = RouteTarget.SHARED_MASTER
       api_url = await cls._get_shared_master_url()
-      api_key = env.KUZU_API_KEY
+      api_key = env.GRAPH_API_KEY
 
       logger.info(f"Routing {graph_id} WRITE to shared master at {api_url}")
 
@@ -378,7 +378,7 @@ class KuzuClientFactory:
       # Only warn in production/staging environments
       if not env.is_development() and not env.is_test():
         logger.warning(f"No API key configured for {target.value}, using default")
-      api_key = env.KUZU_API_KEY
+      api_key = env.GRAPH_API_KEY
 
     # Create client with appropriate configuration
     client = KuzuClient(base_url=api_url, api_key=api_key)
@@ -399,18 +399,18 @@ class KuzuClientFactory:
     """
 
     # Check if replica ALB is enabled
-    if env.SHARED_REPLICA_ALB_ENABLED and env.KUZU_REPLICA_ALB_URL:
+    if env.SHARED_REPLICA_ALB_ENABLED and env.GRAPH_REPLICA_ALB_URL:
       # Check ALB health if health checks are enabled
       alb_is_healthy = True
-      if env.KUZU_HEALTH_CHECKS_ENABLED:
+      if env.GRAPH_HEALTH_CHECKS_ENABLED:
         alb_is_healthy = await cls._check_alb_health()
 
       if alb_is_healthy:
         logger.info(f"Routing {graph_id} READ to replica ALB")
         return (
           RouteTarget.SHARED_REPLICA_ALB,
-          env.KUZU_REPLICA_ALB_URL,
-          env.KUZU_API_KEY,
+          env.GRAPH_REPLICA_ALB_URL,
+          env.GRAPH_API_KEY,
         )
       else:
         logger.warning(f"Replica ALB unhealthy for {graph_id}")
@@ -421,7 +421,7 @@ class KuzuClientFactory:
           return (
             RouteTarget.SHARED_MASTER,
             await cls._get_shared_master_url(),
-            env.KUZU_API_KEY,
+            env.GRAPH_API_KEY,
           )
         else:
           raise ServiceUnavailableError(
@@ -434,7 +434,7 @@ class KuzuClientFactory:
       return (
         RouteTarget.SHARED_MASTER,
         await cls._get_shared_master_url(),
-        env.KUZU_API_KEY,
+        env.GRAPH_API_KEY,
       )
 
     else:
@@ -457,11 +457,11 @@ class KuzuClientFactory:
     3. Fallback to standard API URL if discovery fails
     """
     # Check circuit breaker if enabled
-    if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+    if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
       if not await cls._master_circuit_breaker.should_attempt():
         logger.warning("Shared master circuit breaker is open, using fallback")
-        if env.KUZU_API_URL:
-          return env.KUZU_API_URL
+        if env.GRAPH_API_URL:
+          return env.GRAPH_API_URL
         raise ServiceUnavailableError(
           "Shared master unavailable (circuit breaker open)"
         )
@@ -476,7 +476,7 @@ class KuzuClientFactory:
           cached_url = await redis_client.get(cache_key)
           if cached_url:
             logger.debug(f"Using cached shared master URL: {cached_url}")
-            if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+            if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
               await cls._master_circuit_breaker.record_success()
             return cached_url
         except Exception as e:
@@ -526,7 +526,7 @@ class KuzuClientFactory:
               except Exception as e:
                 logger.warning(f"Redis cache write failed: {e}")
 
-            if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+            if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
               await cls._master_circuit_breaker.record_success()
             return url
 
@@ -570,7 +570,7 @@ class KuzuClientFactory:
                 # Cache this discovery with shorter TTL
                 await redis_client.setex(cache_key, 60, url)  # Only 1 minute cache
 
-                if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+                if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
                   await cls._master_circuit_breaker.record_success()
                 return url
 
@@ -581,11 +581,11 @@ class KuzuClientFactory:
         f"No healthy shared master found in DynamoDB after scanning "
         f"{env.ENVIRONMENT} environment"
       )
-      if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+      if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
         await cls._master_circuit_breaker.record_failure()
 
     except Exception as e:
-      if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+      if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
         await cls._master_circuit_breaker.record_failure()
       logger.error(
         f"Failed to discover shared master: {e}",
@@ -599,11 +599,11 @@ class KuzuClientFactory:
 
     # Don't use localhost as fallback in production/staging
     # This should only be used in development
-    if env.is_development() and env.KUZU_API_URL:
+    if env.is_development() and env.GRAPH_API_URL:
       logger.warning(
-        f"Dev environment: Using API URL fallback for shared master: {env.KUZU_API_URL}"
+        f"Dev environment: Using API URL fallback for shared master: {env.GRAPH_API_URL}"
       )
-      return env.KUZU_API_URL
+      return env.GRAPH_API_URL
 
     raise ServiceUnavailableError(
       f"Cannot find shared master in {env.ENVIRONMENT} environment. "
@@ -619,7 +619,7 @@ class KuzuClientFactory:
     Implements circuit breaker pattern for fault tolerance.
     """
     # Check circuit breaker first if enabled
-    if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+    if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
       if not await cls._alb_circuit_breaker.should_attempt():
         logger.debug("ALB circuit breaker is open, returning unhealthy")
         return False
@@ -636,14 +636,14 @@ class KuzuClientFactory:
           age = time.time() - health_data["timestamp"]
           if age < cls._alb_health_cache_ttl:
             is_healthy = health_data["healthy"]
-            if is_healthy and env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+            if is_healthy and env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
               await cls._alb_circuit_breaker.record_success()
             return is_healthy
       except Exception as e:
         logger.warning(f"Redis cache read failed: {e}")
 
     # Perform health check with timeout
-    alb_url = env.KUZU_REPLICA_ALB_URL
+    alb_url = env.GRAPH_REPLICA_ALB_URL
     try:
       if not alb_url:
         return False
@@ -670,11 +670,11 @@ class KuzuClientFactory:
       healthy = response.status_code == 200
 
       if healthy:
-        if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+        if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
           await cls._alb_circuit_breaker.record_success()
         logger.debug(f"ALB health check successful for {alb_url}")
       else:
-        if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+        if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
           await cls._alb_circuit_breaker.record_failure()
         cls._pool_stats[alb_url]["failures"] += 1
         logger.warning(
@@ -696,7 +696,7 @@ class KuzuClientFactory:
       return healthy
 
     except Exception as e:
-      if env.KUZU_CIRCUIT_BREAKERS_ENABLED:
+      if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
         await cls._alb_circuit_breaker.record_failure()
       cls._pool_stats.get(alb_url, {}).setdefault("failures", 0)
       cls._pool_stats.get(alb_url, {})["failures"] += 1
@@ -742,8 +742,8 @@ class KuzuClientFactory:
 
     # In dev environment, route everything to the single Kuzu instance
     if env.is_development():
-      api_url = env.KUZU_API_URL or "http://localhost:8001"
-      api_key = env.KUZU_API_KEY
+      api_url = env.GRAPH_API_URL or "http://localhost:8001"
+      api_key = env.GRAPH_API_KEY
 
       logger.info(
         f"Dev environment: Routing user graph {graph_id} to local Kuzu at {api_url}"
@@ -815,7 +815,7 @@ class KuzuClientFactory:
 
     # Create client with the allocated instance's endpoint
     api_url = f"http://{db_location.private_ip}:8001"
-    api_key = env.KUZU_API_KEY
+    api_key = env.GRAPH_API_KEY
 
     logger.info(
       f"Routing user graph {graph_id} to instance "
@@ -957,12 +957,12 @@ class KuzuClientFactory:
 
     # Reset circuit breakers
     cls._alb_circuit_breaker = CircuitBreaker(
-      failure_threshold=env.KUZU_CIRCUIT_BREAKER_THRESHOLD,
-      timeout=env.KUZU_CIRCUIT_BREAKER_TIMEOUT,
+      failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
+      timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
     )
     cls._master_circuit_breaker = CircuitBreaker(
-      failure_threshold=env.KUZU_CIRCUIT_BREAKER_THRESHOLD,
-      timeout=env.KUZU_CIRCUIT_BREAKER_TIMEOUT,
+      failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
+      timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
     )
 
     logger.info("KuzuClientFactory cleanup completed")
@@ -1040,7 +1040,7 @@ async def get_kuzu_client_for_instance(
 
   Args:
       instance_ip: Private IP address of the Kuzu instance
-      api_key: API key (defaults to env.KUZU_API_KEY)
+      api_key: API key (defaults to env.GRAPH_API_KEY)
 
   Returns:
       Configured KuzuClient instance for direct access
@@ -1050,7 +1050,7 @@ async def get_kuzu_client_for_instance(
       await client.create_database("entity_456")
   """
   if api_key is None:
-    api_key = env.KUZU_API_KEY
+    api_key = env.GRAPH_API_KEY
 
   api_url = f"http://{instance_ip}:8001"
   logger.info(f"Creating direct KuzuClient for instance at {api_url}")
@@ -1074,7 +1074,7 @@ async def get_kuzu_client_for_sec_ingestion() -> KuzuClient:
 
   # In dev, use the single local Kuzu instance
   if env.is_development():
-    api_url = env.KUZU_API_URL or "http://localhost:8001"
+    api_url = env.GRAPH_API_URL or "http://localhost:8001"
     logger.info(f"Dev environment: SEC ingestion to local Kuzu at {api_url}")
   else:
     # In prod/staging, discover shared master from DynamoDB
@@ -1084,15 +1084,15 @@ async def get_kuzu_client_for_sec_ingestion() -> KuzuClient:
     except Exception as e:
       # Fallback during migration or if discovery fails
       logger.warning(f"Failed to discover shared master: {e}")
-      if env.KUZU_API_URL:
-        api_url = env.KUZU_API_URL
+      if env.GRAPH_API_URL:
+        api_url = env.GRAPH_API_URL
         logger.warning("Using API Gateway fallback for SEC ingestion")
       else:
         raise ServiceUnavailableError(
           "Cannot find shared master for SEC ingestion and no fallback configured"
         )
 
-  api_key = env.KUZU_API_KEY
+  api_key = env.GRAPH_API_KEY
 
   client = KuzuClient(base_url=api_url, api_key=api_key)
   client._route_target = RouteTarget.SHARED_MASTER.value

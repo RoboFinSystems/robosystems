@@ -131,7 +131,7 @@ async def ensure_shared_repository_exists(
       Dictionary with repository status
   """
   if not kuzu_url:
-    kuzu_url = env.KUZU_API_URL
+    kuzu_url = env.GRAPH_API_URL
 
   # Try to get database info first
   try:

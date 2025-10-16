@@ -24,7 +24,7 @@ class TestKuzuClientExtended:
   def mock_env(self):
     """Mock environment variables."""
     with patch("robosystems.config.env") as mock:
-      mock.KUZU_API_KEY = "test-api-key"
+      mock.GRAPH_API_KEY = "test-api-key"
       mock.ENVIRONMENT = "test"
       yield mock
 

@@ -30,7 +30,7 @@ def main():
   parser = argparse.ArgumentParser(description="Kuzu API Client")
   parser.add_argument(
     "--url",
-    default=env.KUZU_API_URL or "http://localhost:8001",
+    default=env.GRAPH_API_URL or "http://localhost:8001",
     help="Kuzu API base URL",
   )
   parser.add_argument(

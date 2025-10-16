@@ -24,7 +24,7 @@ class SECHealthChecker:
   def __init__(self):
     """Initialize the health checker."""
     self.database_path = "./data/kuzu-dbs/sec.kuzu"
-    self.api_url = env.KUZU_API_URL or "http://localhost:8001"
+    self.api_url = env.GRAPH_API_URL or "http://localhost:8001"
     self.results = {
       "timestamp": datetime.now().isoformat(),
       "direct_access": {},

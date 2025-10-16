@@ -28,10 +28,10 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
   ):
     super().__init__(app)
     # Default limits (in bytes)
-    self.max_body_size = max_body_size or env.KUZU_MAX_REQUEST_SIZE
+    self.max_body_size = max_body_size or env.GRAPH_MAX_REQUEST_SIZE
     self.max_query_size = (
       max_query_size
-      or env.KUZU_MAX_QUERY_LENGTH * 10  # Convert characters to approximate bytes
+      or env.GRAPH_MAX_QUERY_LENGTH * 10  # Convert characters to approximate bytes
     )  # Allow for multi-byte characters
     self.max_schema_size = max_schema_size or 1 * 1024 * 1024  # 1MB for schema DDL
 

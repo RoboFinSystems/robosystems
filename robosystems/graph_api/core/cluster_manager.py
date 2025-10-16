@@ -181,7 +181,7 @@ def validate_cypher_query(cypher: str) -> None:
   # Check query length
   from robosystems.config import env
 
-  max_query_length = env.KUZU_MAX_QUERY_LENGTH
+  max_query_length = env.GRAPH_MAX_QUERY_LENGTH
   if len(cypher) > max_query_length:
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
@@ -528,7 +528,7 @@ class KuzuClusterService:
           # Execute query with proper thread-based timeout
           from robosystems.config import env
 
-          query_timeout = env.KUZU_QUERY_TIMEOUT
+          query_timeout = env.GRAPH_QUERY_TIMEOUT
 
           # Use ThreadPoolExecutor for proper timeout handling
           # This works across all platforms and doesn't interfere with signals
@@ -783,10 +783,10 @@ class KuzuClusterService:
     )
 
     query_config = QueryConfiguration(
-      timeout_seconds=env.KUZU_QUERY_TIMEOUT,
+      timeout_seconds=env.GRAPH_QUERY_TIMEOUT,
       max_connections_per_db=env.KUZU_MAX_CONNECTIONS_PER_DB,
       connection_ttl_minutes=env.KUZU_CONNECTION_TTL_MINUTES,
-      health_check_interval_minutes=env.KUZU_HEALTH_CHECK_INTERVAL_MINUTES,
+      health_check_interval_minutes=env.GRAPH_HEALTH_CHECK_INTERVAL_MINUTES,
     )
 
     admission_config = AdmissionControlConfig(

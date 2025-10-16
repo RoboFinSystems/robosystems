@@ -99,6 +99,8 @@ services:
     profiles: ["kuzu", "dev", "robosystems", "all"]
 
   # Neo4j Database - Graph Database Backend
+  # Currently: Community Edition (for Enterprise tier testing)
+  # Future Premium tier: Will use neo4j:5.25-enterprise with clustering and multi-database support
   neo4j-db:
     container_name: neo4j-db
     image: neo4j:5.25-community
@@ -132,7 +134,7 @@ services:
     restart: always
     profiles: ["neo4j", "dev", "robosystems", "all"]
 
-  # Neo4j Graph API - Graph API with Neo4j Backend
+  # Neo4j Graph API - Graph API with Neo4j Backend (Enterprise Tier)
   neo4j-api:
     container_name: neo4j-api
     build:
@@ -147,7 +149,7 @@ services:
       - NEO4J_USERNAME=neo4j
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - GRAPH_API_PORT=8002
-      - CLUSTER_TIER=professional
+      - CLUSTER_TIER=enterprise
     env_file:
       - .env
     ports:

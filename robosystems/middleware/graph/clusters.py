@@ -136,7 +136,7 @@ def load_cluster_configs_from_environment() -> Dict[str, ClusterConfig]:
 
   # Writer configuration
   # This is the direct connection to the Kuzu instance
-  writer_url = env.KUZU_API_URL
+  writer_url = env.GRAPH_API_URL
 
   # Log the API URL for debugging
   logger.info(f"Configuring Kuzu cluster with API URL: {writer_url}")

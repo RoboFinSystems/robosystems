@@ -21,7 +21,7 @@ class TestBaseKuzuClient:
   def test_initialization_with_base_url(self):
     """Test client initialization with base URL."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -37,7 +37,7 @@ class TestBaseKuzuClient:
     )
 
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(config=config)
@@ -49,7 +49,7 @@ class TestBaseKuzuClient:
   def test_initialization_with_api_key(self):
     """Test client initialization with API key."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(
@@ -62,7 +62,7 @@ class TestBaseKuzuClient:
   def test_initialization_with_env_api_key(self):
     """Test client initialization with API key from environment."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = "env-api-key-456"
+      mock_env.GRAPH_API_KEY = "env-api-key-456"
       mock_env.ENVIRONMENT = "prod"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -75,7 +75,7 @@ class TestBaseKuzuClient:
     config = KuzuClientConfig()  # No base_url
 
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       with pytest.raises(ValueError, match="base_url must be provided"):
@@ -84,7 +84,7 @@ class TestBaseKuzuClient:
   def test_initialization_strips_trailing_slash(self):
     """Test that base URL trailing slash is stripped."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001/")
@@ -94,7 +94,7 @@ class TestBaseKuzuClient:
   def test_build_url(self):
     """Test URL building."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -114,7 +114,7 @@ class TestBaseKuzuClient:
   def test_should_retry_transient_errors(self):
     """Test retry logic for transient errors."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -130,7 +130,7 @@ class TestBaseKuzuClient:
   def test_should_not_retry_syntax_errors(self):
     """Test that syntax errors are never retried."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -143,7 +143,7 @@ class TestBaseKuzuClient:
   def test_should_not_retry_client_errors(self):
     """Test that client errors are not retried."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -154,7 +154,7 @@ class TestBaseKuzuClient:
   def test_should_retry_server_errors(self):
     """Test that server errors are retried."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -170,7 +170,7 @@ class TestBaseKuzuClient:
     )
 
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(config=config)
@@ -192,7 +192,7 @@ class TestBaseKuzuClient:
     )
 
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(config=config)
@@ -214,7 +214,7 @@ class TestBaseKuzuClient:
     )
 
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(config=config)
@@ -235,7 +235,7 @@ class TestBaseKuzuClient:
     )
 
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(config=config)
@@ -253,7 +253,7 @@ class TestBaseKuzuClient:
   def test_record_success_resets_circuit_breaker(self):
     """Test that success resets circuit breaker."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -270,7 +270,7 @@ class TestBaseKuzuClient:
   def test_handle_response_error_client_errors(self):
     """Test handling of client error responses."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -289,7 +289,7 @@ class TestBaseKuzuClient:
   def test_handle_response_error_server_errors(self):
     """Test handling of server error responses."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       client = BaseKuzuClient(base_url="http://localhost:8001")
@@ -309,7 +309,7 @@ class TestBaseKuzuClient:
   def test_initialization_warns_missing_api_key_in_prod(self):
     """Test that missing API key warns in production."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "prod"
 
       with patch("robosystems.graph_api.client.base.logger") as mock_logger:
@@ -319,7 +319,7 @@ class TestBaseKuzuClient:
   def test_initialization_debug_missing_api_key_in_dev(self):
     """Test that missing API key only debugs in development."""
     with patch("robosystems.config.env") as mock_env:
-      mock_env.KUZU_API_KEY = None
+      mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       with patch("robosystems.graph_api.client.base.logger") as mock_logger:

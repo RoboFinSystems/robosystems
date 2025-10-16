@@ -69,7 +69,7 @@ class TestGetOrCreateEncryptionKey:
     encoded_key = base64.urlsafe_b64encode(test_key).decode()
 
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = encoded_key
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = encoded_key
 
       result = _get_or_create_encryption_key()
 
@@ -78,28 +78,30 @@ class TestGetOrCreateEncryptionKey:
   def test_get_key_invalid_format(self):
     """Test handling of invalid encryption key format."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = "invalid_key_format"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = "invalid_key_format"
 
-      with pytest.raises(ValueError, match="Invalid KUZU_BACKUP_ENCRYPTION_KEY format"):
+      with pytest.raises(
+        ValueError, match="Invalid GRAPH_BACKUP_ENCRYPTION_KEY format"
+      ):
         _get_or_create_encryption_key()
 
   def test_production_requires_encryption_key(self):
     """Test that production environment requires explicit encryption key."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = None
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
       mock_env.ENVIRONMENT = "prod"
 
       with pytest.raises(
-        ValueError, match="KUZU_BACKUP_ENCRYPTION_KEY must be set in production"
+        ValueError, match="GRAPH_BACKUP_ENCRYPTION_KEY must be set in production"
       ):
         _get_or_create_encryption_key()
 
   def test_development_derives_key_from_password(self):
     """Test key derivation for development environment."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = None
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
       mock_env.ENVIRONMENT = "dev"
-      mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "test_password"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "test_password"
 
       with patch("robosystems.security.encryption.logger") as mock_logger:
         result = _get_or_create_encryption_key()
@@ -114,9 +116,9 @@ class TestGetOrCreateEncryptionKey:
   def test_development_key_deterministic(self):
     """Test that development key derivation is deterministic."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = None
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
       mock_env.ENVIRONMENT = "dev"
-      mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "same_password"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "same_password"
 
       with patch("robosystems.security.encryption.logger"):
         key1 = _get_or_create_encryption_key()
@@ -127,14 +129,14 @@ class TestGetOrCreateEncryptionKey:
   def test_development_different_passwords_different_keys(self):
     """Test that different passwords produce different keys."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = None
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       with patch("robosystems.security.encryption.logger"):
-        mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "password1"
+        mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "password1"
         key1 = _get_or_create_encryption_key()
 
-        mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "password2"
+        mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "password2"
         key2 = _get_or_create_encryption_key()
 
         assert key1 != key2
@@ -142,9 +144,9 @@ class TestGetOrCreateEncryptionKey:
   def test_pbkdf2_parameters(self):
     """Test PBKDF2 parameters for security."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = None
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
       mock_env.ENVIRONMENT = "dev"
-      mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "test_password"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "test_password"
 
       with patch("robosystems.security.encryption.logger"):
         with patch("robosystems.security.encryption.PBKDF2HMAC") as mock_kdf:
@@ -525,7 +527,9 @@ class TestEncryptionSecurity:
     with patch("robosystems.security.encryption.env") as mock_env:
       # Valid Fernet key
       valid_key = Fernet.generate_key()
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = base64.urlsafe_b64encode(valid_key).decode()
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = base64.urlsafe_b64encode(
+        valid_key
+      ).decode()
 
       retrieved_key = _get_or_create_encryption_key()
       assert retrieved_key == valid_key
@@ -535,9 +539,9 @@ class TestEncryptionSecurity:
     password = "test_password"
 
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = None
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
       mock_env.ENVIRONMENT = "dev"
-      mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = password
+      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = password
 
       with patch("robosystems.security.encryption.logger"):
         key1 = _get_or_create_encryption_key()
@@ -550,17 +554,17 @@ class TestEncryptionSecurity:
     """Test that different environments can use different keys."""
     # This is more of a documentation test to ensure environment isolation
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = None
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
 
       # Test dev environment
       mock_env.ENVIRONMENT = "dev"
-      mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "dev_password"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "dev_password"
       with patch("robosystems.security.encryption.logger"):
         dev_key = _get_or_create_encryption_key()
 
       # Test staging environment
       mock_env.ENVIRONMENT = "staging"
-      mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "staging_password"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "staging_password"
       with patch("robosystems.security.encryption.logger"):
         staging_key = _get_or_create_encryption_key()
 
@@ -693,9 +697,9 @@ class TestEncryptionEdgeCases:
     """Test edge cases in environment variable handling."""
     with patch("robosystems.security.encryption.env") as mock_env:
       # Test empty string
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = ""
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = ""
       mock_env.ENVIRONMENT = "dev"
-      mock_env.KUZU_BACKUP_ENCRYPTION_PASSWORD = "fallback_password"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "fallback_password"
 
       with patch("robosystems.security.encryption.logger"):
         # Should fall back to key derivation
@@ -705,7 +709,7 @@ class TestEncryptionEdgeCases:
   def test_invalid_base64_key(self):
     """Test handling of invalid base64 encryption key."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = "invalid base64 key!"
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = "invalid base64 key!"
 
       # Invalid base64 will decode but produce wrong length, causing Fernet to fail
       with pytest.raises(ValueError, match="Failed to encrypt data"):
@@ -716,7 +720,7 @@ class TestEncryptionEdgeCases:
     with patch("robosystems.security.encryption.env") as mock_env:
       # Valid base64 but wrong length for Fernet
       short_key = base64.urlsafe_b64encode(b"short").decode()
-      mock_env.KUZU_BACKUP_ENCRYPTION_KEY = short_key
+      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = short_key
 
       with pytest.raises(ValueError):
         # This should fail when trying to create Fernet instance

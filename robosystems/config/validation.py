@@ -98,12 +98,12 @@ class EnvValidator:
 
     # Special validation for Kuzu API key
     if (
-      not getattr(env_config, "KUZU_API_KEY", None)
+      not getattr(env_config, "GRAPH_API_KEY", None)
       and env_config.ENVIRONMENT != "dev"
       and env_config.ENVIRONMENT != "local"
     ):
       warnings.append(
-        "KUZU_API_KEY: Not configured - "
+        "GRAPH_API_KEY: Not configured - "
         "Graph database operations will fail without proper authentication."
       )
 
@@ -257,7 +257,7 @@ class EnvValidator:
       "kuzu": {
         "access_pattern": env_config.KUZU_ACCESS_PATTERN,
         "max_databases": env_config.KUZU_MAX_DATABASES_PER_NODE,
-        "api_key_configured": bool(env_config.KUZU_API_KEY),
+        "api_key_configured": bool(env_config.GRAPH_API_KEY),
       },
       "security": {
         "rate_limiting": env_config.RATE_LIMIT_ENABLED,

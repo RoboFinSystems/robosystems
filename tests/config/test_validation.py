@@ -30,7 +30,7 @@ class MockEnvConfig:
     self.ANTHROPIC_API_KEY = None
     self.KUZU_DATABASE_PATH = "/tmp/kuzu"
     self.KUZU_API_URL = "http://localhost:8001"
-    self.KUZU_API_KEY = None
+    self.GRAPH_API_KEY = None
     self.WORKER_AUTOSCALE = 10
     self.CELERY_TASK_TIME_LIMIT = 3600
     self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
@@ -79,7 +79,7 @@ class TestEnvValidator:
     """Test successful validation in production environment."""
     env_config = MockEnvConfig()
     env_config.ENVIRONMENT = "prod"
-    env_config.KUZU_API_KEY = "test-api-key"
+    env_config.GRAPH_API_KEY = "test-api-key"
 
     with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
       with patch("robosystems.config.validation.logger") as mock_logger:
@@ -146,16 +146,16 @@ class TestEnvValidator:
       EnvValidator.validate_required_vars(env_config)
 
   def test_validate_required_vars_kuzu_api_key_warning(self):
-    """Test warning for missing KUZU_API_KEY in non-dev environment."""
+    """Test warning for missing GRAPH_API_KEY in non-dev environment."""
     env_config = MockEnvConfig()
     env_config.ENVIRONMENT = "staging"
-    env_config.KUZU_API_KEY = None
+    env_config.GRAPH_API_KEY = None
 
     with patch("robosystems.config.validation.logger") as mock_logger:
       EnvValidator.validate_required_vars(env_config)
 
       warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
-      assert any("KUZU_API_KEY" in msg for msg in warning_calls)
+      assert any("GRAPH_API_KEY" in msg for msg in warning_calls)
 
   def test_validate_numeric_ranges_valid(self):
     """Test validation passes for valid numeric ranges."""
@@ -305,7 +305,7 @@ class TestEnvValidator:
     env_config.INTUIT_CLIENT_ID = "intuit-id"
     env_config.PLAID_CLIENT_ID = "plaid-id"
     env_config.ANTHROPIC_API_KEY = "claude-key"
-    env_config.KUZU_API_KEY = "kuzu-key"
+    env_config.GRAPH_API_KEY = "kuzu-key"
 
     summary = EnvValidator.get_config_summary(env_config)
 
@@ -332,7 +332,7 @@ class TestIntegrationScenarios:
     """Test complete validation success in production."""
     env_config = MockEnvConfig()
     env_config.ENVIRONMENT = "prod"
-    env_config.KUZU_API_KEY = "prod-key"
+    env_config.GRAPH_API_KEY = "prod-key"
     env_config.INTUIT_CLIENT_ID = "intuit-prod"
     env_config.INTUIT_CLIENT_SECRET = "intuit-secret"
 

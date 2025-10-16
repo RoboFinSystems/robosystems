@@ -224,7 +224,7 @@ Resources:
       SecretString: !Sub
         - |
           {
-            "KUZU_API_KEY": "${ApiKey}",
+            "GRAPH_API_KEY": "${ApiKey}",
             "ENVIRONMENT": "${Environment}",
             "GENERATED_AT": "${GeneratedAt}"
           }

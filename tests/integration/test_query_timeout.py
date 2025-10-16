@@ -52,7 +52,7 @@ class TestQueryTimeout:
     from robosystems.config import env
 
     # Mock the timeout to 0.5 seconds
-    with patch.object(env, "KUZU_QUERY_TIMEOUT", 0.5):
+    with patch.object(env, "GRAPH_QUERY_TIMEOUT", 0.5):
       # Mock database manager
       mock_db_instance = MagicMock()
       mock_db_instance.list_databases.return_value = ["test_db"]

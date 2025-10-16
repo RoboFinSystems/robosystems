@@ -37,7 +37,7 @@ class TestKuzuMCPClient:
       client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
       assert client.api_base_url == "http://test:8001"
       assert client.graph_id == "test"
-      assert client.timeout == 60  # Now uses env.KUZU_HTTP_TIMEOUT default
+      assert client.timeout == 60  # Now uses env.GRAPH_HTTP_TIMEOUT default
 
   @pytest.mark.unit
   def test_init_custom_timeout(self):

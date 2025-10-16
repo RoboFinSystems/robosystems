@@ -109,12 +109,12 @@ class TestKuzuClientFactory:
   def mock_env(self):
     """Mock environment variables."""
     with patch("robosystems.graph_api.client.factory.env") as mock:
-      mock.KUZU_CONNECT_TIMEOUT = 5.0
-      mock.KUZU_READ_TIMEOUT = 30.0
-      mock.KUZU_CIRCUIT_BREAKER_THRESHOLD = 5
-      mock.KUZU_CIRCUIT_BREAKER_TIMEOUT = 60
-      mock.KUZU_ALB_HEALTH_CACHE_TTL = 300
-      mock.KUZU_INSTANCE_CACHE_TTL = 3600
+      mock.GRAPH_CONNECT_TIMEOUT = 5.0
+      mock.GRAPH_READ_TIMEOUT = 30.0
+      mock.GRAPH_CIRCUIT_BREAKER_THRESHOLD = 5
+      mock.GRAPH_CIRCUIT_BREAKER_TIMEOUT = 60
+      mock.GRAPH_ALB_HEALTH_CACHE_TTL = 300
+      mock.GRAPH_INSTANCE_CACHE_TTL = 3600
       mock.KUZU_REPLICA_ENDPOINT = "http://replica.example.com"
       mock.KUZU_MASTER_ENDPOINT = "http://master.example.com"
       mock.ENVIRONMENT = "test"
@@ -247,8 +247,8 @@ class TestKuzuClientFactory:
   async def test_create_client_no_allocation(self, mock_env):
     """Test error when no allocation exists."""
     # Mock env properly
-    mock_env.KUZU_API_URL = "http://localhost:8001"
-    mock_env.KUZU_API_KEY = "test-api-key"
+    mock_env.GRAPH_API_URL = "http://localhost:8001"
+    mock_env.GRAPH_API_KEY = "test-api-key"
     mock_env.ENVIRONMENT = "dev"
 
     with patch(
@@ -351,10 +351,10 @@ class TestFactoryFunctions:
     # Mock the environment to be development to avoid DynamoDB calls
     with patch("robosystems.graph_api.client.factory.env") as mock_env:
       mock_env.is_development.return_value = True
-      mock_env.KUZU_API_URL = "http://localhost:8001"
-      mock_env.KUZU_API_KEY = "test-key"
-      mock_env.KUZU_CONNECT_TIMEOUT = 5.0
-      mock_env.KUZU_READ_TIMEOUT = 30.0
+      mock_env.GRAPH_API_URL = "http://localhost:8001"
+      mock_env.GRAPH_API_KEY = "test-key"
+      mock_env.GRAPH_CONNECT_TIMEOUT = 5.0
+      mock_env.GRAPH_READ_TIMEOUT = 30.0
 
       # Mock KuzuClient creation
       with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
