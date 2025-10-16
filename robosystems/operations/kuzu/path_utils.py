@@ -2,7 +2,7 @@
 Utility functions for consistent Kuzu database path handling.
 
 This module ensures consistent path construction for Kuzu databases
-using the Kuzu 0.11.0 single-file format with .kuzu extension.
+using the Kuzu 0.11.x single-file format with .kuzu extension.
 """
 
 from pathlib import Path
@@ -16,7 +16,7 @@ def get_kuzu_database_path(db_name: str, base_path: Optional[str] = None) -> Pat
   Get the correct path for a Kuzu database, handling shared repositories.
 
   This function ensures consistent path construction across the codebase,
-  using the new Kuzu 0.11.0 single-file format with .kuzu extension.
+  using the new Kuzu 0.11.x single-file format with .kuzu extension.
 
   Args:
       db_name: Name of the database (e.g., 'sec', 'kg1a2b3c')

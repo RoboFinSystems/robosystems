@@ -199,7 +199,7 @@ class KuzuMetricsCollector:
           db_size = self._get_directory_size(item)
           new_cache[db_name] = db_size
         elif item.is_file() and item.suffix == ".kuzu":
-          # It's a file-based database (Kuzu 0.11.0+ format)
+          # It's a file-based database (Kuzu 0.11.x+ format)
           db_name = item.stem
           db_size = item.stat().st_size
           new_cache[db_name] = db_size
