@@ -1,8 +1,12 @@
-# Kuzu API Client & Factory
+# Graph API Client & Factory
 
 ## Overview
 
-The Kuzu Client and Factory system provides the critical interface between the RoboSystems application (API and workers) and the Kuzu API running on EC2 instances. This layer handles intelligent routing, connection pooling, circuit breaking, and automatic failover to ensure reliable graph database operations at scale.
+The Graph Client and Factory system provides the critical interface between the RoboSystems application (API and workers) and the Graph API running on infrastructure. This layer handles intelligent routing, connection pooling, circuit breaking, and automatic failover to ensure reliable graph database operations at scale.
+
+**Backend Support:**
+- **Kuzu**: EC2-based instances with DynamoDB registry discovery
+- **Neo4j**: Direct Bolt connection or service discovery
 
 ## Architecture
 
@@ -11,26 +15,29 @@ The Kuzu Client and Factory system provides the critical interface between the R
 │                     Application Layer                           │
 │                  (FastAPI Routes / Celery Workers)              │
 ├─────────────────────────────────────────────────────────────────┤
-│                    KuzuClientFactory                            │
+│                    GraphClientFactory                           │
 │              (Intelligent Routing & Discovery)                  │
 ├─────────────────────────────────────────────────────────────────┤
-│                      KuzuClient                                 │
+│                      GraphClient                                │
 │         (Async/Sync HTTP Client with Retry Logic)               │
 ├─────────────────────────────────────────────────────────────────┤
-│                    EC2 Infrastructure                           │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
-│   │ Standard │  │Enterprise│  │ Premium  │  │  Shared  │        │
-│   │ Writers  │  │ Writers  │  │ Writers  │  │  Master  │        │
-│   └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
-│                        ┌──────────────┐                         │
-│                        │ Replica ALB  │                         │
-│                        └──────────────┘                         │
+│              Backend-Specific Infrastructure                    │
+│                                                                 │
+│  Kuzu Backend:          │  Neo4j Backend:                       │
+│  ┌──────────────────┐   │  ┌──────────────────┐                 │
+│  │ EC2 Instances    │   │  │ Neo4j Database   │                 │
+│  │ - Standard       │   │  │ - Community      │                 │
+│  │ - Enterprise     │   │  │ - Enterprise     │                 │
+│  │ - Premium        │   │  │ (Bolt Protocol)  │                 │
+│  │ - Shared Master  │   │  └──────────────────┘                 │
+│  │ - Replica ALB    │   │                                       │
+│  └──────────────────┘   │                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Components
 
-### 1. KuzuClientFactory (`factory.py`)
+### 1. GraphClientFactory (`factory.py`)
 
 The factory is responsible for intelligent routing decisions based on:
 
@@ -38,8 +45,11 @@ The factory is responsible for intelligent routing decisions based on:
 - **Operation Type**: Read vs Write operations
 - **Environment**: Development, Staging, Production
 - **Tier**: Standard, Enterprise, Premium for user graphs
+- **Backend Type**: Kuzu or Neo4j
 
 #### Routing Logic
+
+##### Kuzu Backend
 
 ```python
 # Shared Repositories (SEC, industry, economic)
@@ -55,18 +65,29 @@ The factory is responsible for intelligent routing decisions based on:
 └── Route to appropriate tier writer instance
 ```
 
+##### Neo4j Backend
+
+```python
+# All Operations (User and Shared)
+├── Development → Local Neo4j instance (bolt://neo4j-db:7687)
+└── Production/Staging → Neo4j cluster or single instance
+    ├── Community → Single database endpoint
+    └── Enterprise → Multi-database support
+```
+
 #### Key Features
 
-- **Dynamic Discovery**: Automatically discovers EC2 instances from DynamoDB
+- **Dynamic Discovery**: Automatically discovers instances (DynamoDB for Kuzu, service discovery for Neo4j)
+- **Backend Abstraction**: Consistent interface regardless of backend
 - **Circuit Breakers**: Prevents cascading failures with configurable thresholds
-- **Connection Pooling**: Reuses HTTP/2 connections for efficiency
-- **Redis Caching**: Caches instance locations to reduce DynamoDB lookups
+- **Connection Pooling**: Reuses connections for efficiency (HTTP/2 for Kuzu, Bolt for Neo4j)
+- **Redis Caching**: Caches instance locations to reduce lookups
 - **Automatic Failover**: Falls back to alternative endpoints when primary unavailable
 - **Retry Logic**: Exponential backoff with jitter for transient errors
 
-### 2. KuzuClient (`client.py`)
+### 2. GraphClient (`client.py`)
 
-Asynchronous HTTP client for interacting with Kuzu API endpoints.
+Asynchronous HTTP client for interacting with Graph API endpoints (backend-agnostic).
 
 #### Core Operations
 
@@ -210,18 +231,25 @@ except ServiceUnavailableError as e:
 ### Core Configuration
 
 ```bash
-# API Endpoints
+# Backend Selection
+BACKEND_TYPE=kuzu                             # kuzu|neo4j_community|neo4j_enterprise
+
+# API Endpoints (Kuzu Backend)
 KUZU_API_URL=http://localhost:8001           # Default API URL (dev/fallback)
 KUZU_REPLICA_ALB_URL=http://alb.internal     # Replica ALB endpoint
 KUZU_API_KEY=kuzu_prod_64chars...            # Authentication key
+
+# API Endpoints (Neo4j Backend)
+NEO4J_URI=bolt://neo4j-db:7687               # Neo4j Bolt connection
+GRAPH_API_PORT=8002                           # Graph API port for Neo4j
 
 # Feature Flags
 KUZU_RETRY_LOGIC_ENABLED=true                # Enable automatic retries
 KUZU_CIRCUIT_BREAKERS_ENABLED=true           # Enable circuit breakers
 KUZU_HEALTH_CHECKS_ENABLED=true              # Enable health checking
 KUZU_REDIS_CACHE_ENABLED=true                # Enable Redis caching
-SHARED_REPLICA_ALB_ENABLED=true              # Enable replica ALB routing
-ALLOW_SHARED_MASTER_READS=true               # Allow reads from master
+SHARED_REPLICA_ALB_ENABLED=true              # Enable replica ALB routing (Kuzu)
+ALLOW_SHARED_MASTER_READS=true               # Allow reads from master (Kuzu)
 
 # Performance Tuning
 KUZU_CLIENT_TIMEOUT=30                       # Request timeout (seconds)
@@ -229,17 +257,22 @@ KUZU_CLIENT_MAX_RETRIES=3                    # Maximum retry attempts
 KUZU_CIRCUIT_BREAKER_THRESHOLD=5             # Failures before opening
 KUZU_CIRCUIT_BREAKER_TIMEOUT=60              # Seconds before reset
 KUZU_CACHE_TTL=300                           # Cache TTL (seconds)
+NEO4J_MAX_CONNECTION_POOL_SIZE=50            # Neo4j connection pool size
 ```
 
-### DynamoDB Configuration
+### DynamoDB Configuration (Kuzu Backend)
 
 ```bash
-# For instance discovery
+# For instance discovery (Kuzu only)
 KUZU_INSTANCE_REGISTRY_TABLE=robosystems-kuzu-{env}-instance-registry
 KUZU_GRAPH_REGISTRY_TABLE=robosystems-kuzu-{env}-graph-registry
+
+# Note: Neo4j backend uses direct connection URIs instead of DynamoDB discovery
 ```
 
 ## Instance Discovery Flow
+
+### Kuzu Backend
 
 1. **Check Cache**: Redis cache with 5-minute TTL
 2. **Query DynamoDB**: Find instance hosting the graph
@@ -249,12 +282,28 @@ KUZU_GRAPH_REGISTRY_TABLE=robosystems-kuzu-{env}-graph-registry
 
 ```python
 # Internal discovery flow (handled automatically)
-1. KuzuClientFactory.create_client("kg1a2b3c4d5")
+1. GraphClientFactory.create_client("kg1a2b3c4d5")
 2. → Check Redis: kuzu:prod:location:kg1a2b3c4d5
 3. → Query DynamoDB: GraphRegistry[graph_id=kg1a2b3c4d5]
 4. → Get instance: i-1234567890 at 10.0.1.100
 5. → Create client: http://10.0.1.100:8001
 6. → Cache location for 300 seconds
+```
+
+### Neo4j Backend
+
+1. **Direct Connection**: Uses configured NEO4J_URI
+2. **Database Selection**: Routes to correct database (Community: single, Enterprise: multi)
+3. **Connection Pool**: Manages Bolt protocol connections
+4. **Health Check**: Verifies Neo4j database availability
+
+```python
+# Internal connection flow (handled automatically)
+1. GraphClientFactory.create_client("kg1a2b3c4d5")
+2. → Use NEO4J_URI from configuration
+3. → Select database: kg_kg1a2b3c4d5_main (Enterprise) or neo4j (Community)
+4. → Create Bolt connection via Graph API
+5. → Pool connections for efficiency
 ```
 
 ## Circuit Breaker Pattern

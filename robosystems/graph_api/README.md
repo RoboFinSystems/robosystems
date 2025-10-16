@@ -1,6 +1,11 @@
-# Kuzu API
+# Graph API
 
-High-performance HTTP API server for Kuzu graph database cluster management. FastAPI-based microservice that runs alongside Kuzu databases on EC2 instances, providing REST endpoints for multi-tenant graph operations with enterprise-grade reliability and security.
+High-performance HTTP API server for graph database cluster management with pluggable backend support. FastAPI-based microservice that provides REST endpoints for multi-tenant graph operations with enterprise-grade reliability and security.
+
+**Supported Backends:**
+- **Kuzu** (Default): High-performance embedded graph database, ideal for Standard tier deployments
+- **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers with advanced features
+- **Neo4j Enterprise**: Full enterprise features including multi-database support for Premium tier
 
 ## Table of Contents
 
@@ -27,14 +32,17 @@ High-performance HTTP API server for Kuzu graph database cluster management. Fas
 │                     GraphRouter Layer                       │
 │                 (Intelligent Routing Logic)                 │
 ├─────────────────────────────────────────────────────────────┤
-│                   KuzuClientFactory Layer                   │
+│                   GraphClientFactory Layer                  │
 │              (Circuit Breakers, Retry Logic)                │
 ├─────────────────────────────────────────────────────────────┤
-│                      Kuzu API Layer                         │
-│                  (FastAPI on Port 8001)                     │
+│                      Graph API Layer                        │
+│          (FastAPI on Port 8001/8002 depending on backend)   │
 ├─────────────────────────────────────────────────────────────┤
-│                   Kuzu Database Engine                      │
-│                  (Native Graph Database)                    │
+│                Backend Abstraction Layer                    │
+│         (Pluggable: Kuzu, Neo4j Community/Enterprise)       │
+├─────────────────────────────────────────────────────────────┤
+│                   Graph Database Engine                     │
+│              (Kuzu Embedded or Neo4j Bolt)                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -46,6 +54,12 @@ graph_api/
 ├── main.py                     # Server entry point
 ├── __main__.py                 # Module entry point
 │
+├── backends/                   # Backend implementations
+│   ├── base.py                # Abstract backend interface
+│   ├── kuzu.py                # Kuzu backend implementation
+│   ├── neo4j.py               # Neo4j backend implementation
+│   └── __init__.py            # Backend factory
+│
 ├── client/                     # Python clients
 │   ├── client.py              # Async client implementation
 │   ├── sync_client.py         # Synchronous client
@@ -56,7 +70,7 @@ graph_api/
 ├── core/                      # Core services
 │   ├── cluster_manager.py    # Cluster orchestration
 │   ├── database_manager.py   # Database lifecycle management
-│   ├── connection_pool.py    # Connection pooling (max 3/DB)
+│   ├── connection_pool.py    # Connection pooling
 │   ├── admission_control.py  # Backpressure management
 │   └── metrics_collector.py  # Performance metrics
 │
@@ -74,7 +88,7 @@ graph_api/
 │   └── tasks.py              # Background task tracking
 │
 ├── middleware/
-│   ├── auth.py               # API key authentication
+│   ├── auth.py               # API key authentication (backend-agnostic)
 │   └── request_limits.py     # Rate limiting
 │
 └── models/                    # Pydantic models
@@ -84,17 +98,30 @@ graph_api/
     └── cluster.py            # Cluster configuration
 ```
 
-### Node Types
+### Node Types (Kuzu Backend)
+
+When using the Kuzu backend, the system deploys different node types:
 
 - **Writer Nodes** (`writer`): Entity database read/write operations on EC2
 - **Shared Master** (`shared_master`): Repository ingestion and writes on EC2
 - **Shared Replica** (`shared_replica`): Read-only replicas on EC2 with ALB
 
+### Backend Selection (Neo4j)
+
+When using Neo4j backend:
+
+- **Community Edition**: Single database, suitable for development and Professional/Enterprise tiers
+- **Enterprise Edition**: Multi-database support for Premium tier with advanced features
+
 ## Deployment Infrastructure
 
 ### CloudFormation Stack Architecture
 
-The Kuzu API is deployed through a sophisticated multi-stack CloudFormation architecture:
+The Graph API deployment architecture varies by backend:
+
+#### Kuzu Backend Infrastructure
+
+For Kuzu deployments, the system uses a sophisticated multi-stack CloudFormation architecture:
 
 ```
 1. Infrastructure Stack (kuzu-infra.yaml)
@@ -119,6 +146,23 @@ The Kuzu API is deployed through a sophisticated multi-stack CloudFormation arch
    ├─ Auto Scaling Group (2-20 instances)
    ├─ Application Load Balancer
    └─ Read-only EC2 instances (r7g.medium)
+```
+
+#### Neo4j Backend Infrastructure
+
+For Neo4j deployments (future implementation):
+
+```
+1. Neo4j Database Stack (neo4j-db.yaml)
+   ├─ ECS Fargate Service or EC2 instances
+   ├─ EBS volumes for data persistence
+   ├─ Application Load Balancer
+   └─ Multi-AZ deployment for Enterprise
+
+2. Neo4j API Stack (neo4j-api.yaml)
+   ├─ ECS Fargate Service (Graph API)
+   ├─ Bolt connection to Neo4j database
+   └─ Health checks and auto-scaling
 ```
 
 ### Infrastructure Tiers
@@ -236,20 +280,22 @@ cfn-signal --success --stack ${STACK_NAME} ...
 
 ```http
 POST /databases
-Authorization: X-Kuzu-API-Key: {api_key}
+Authorization: X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
   "graph_id": "kg1a2b3c4d5",
   "schema_type": "entity"  // entity|shared|custom
 }
+
+Note: Both X-Graph-API-Key and X-Kuzu-API-Key headers are supported for backward compatibility
 ```
 
 #### Execute Query
 
 ```http
 POST /databases/{graph_id}/query
-Authorization: X-Kuzu-API-Key: {api_key}
+Authorization: X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
@@ -265,7 +311,7 @@ Content-Type: application/json
 
 ```http
 POST /databases/{graph_id}/copy
-Authorization: X-Kuzu-API-Key: {api_key}
+Authorization: X-Graph-API-Key: {api_key}
 Content-Type: application/json
 
 {
@@ -278,13 +324,15 @@ Content-Type: application/json
     "region": "us-east-1"
   }
 }
+
+Note: S3 bulk copy is Kuzu-specific. Neo4j uses alternative data loading methods.
 ```
 
 This returns a task ID that can be monitored via Server-Sent Events:
 
 ```http
 GET /tasks/{task_id}/monitor
-Authorization: X-Kuzu-API-Key: {api_key}
+Authorization: X-Graph-API-Key: {api_key}
 ```
 
 ### System Operations
@@ -401,23 +449,34 @@ client = await get_kuzu_client(
 ### Environment Variables
 
 ```bash
-# Node Configuration
+# Backend Configuration
+BACKEND_TYPE=kuzu                        # kuzu|neo4j_community|neo4j_enterprise
+
+# Node Configuration (Kuzu Backend)
 KUZU_NODE_TYPE=writer                    # writer|shared_master|shared_replica
 WRITER_TIER=standard                     # standard|enterprise|premium|shared
 KUZU_DATABASE_PATH=/data/kuzu-dbs       # Storage location
-KUZU_PORT=8001                           # API port
+KUZU_PORT=8001                           # API port (8001 for Kuzu, 8002 for Neo4j)
+
+# Neo4j Configuration (Neo4j Backend)
+NEO4J_URI=bolt://neo4j-db:7687          # Neo4j Bolt connection
+NEO4J_USERNAME=neo4j                     # Neo4j username
+NEO4J_PASSWORD=                          # Retrieved from Secrets Manager
+NEO4J_ENTERPRISE=false                   # Enable multi-database support
+GRAPH_API_PORT=8002                      # API port for Neo4j backend
 
 # Performance Settings
-KUZU_MAX_DATABASES_PER_NODE=10          # Tier-specific limit
-KUZU_MAX_MEMORY_MB=14336                # Total memory allocation
-KUZU_MEMORY_PER_DB_MB=2048              # Per-database memory
+KUZU_MAX_DATABASES_PER_NODE=10          # Tier-specific limit (Kuzu)
+KUZU_MAX_MEMORY_MB=14336                # Total memory allocation (Kuzu)
+KUZU_MEMORY_PER_DB_MB=2048              # Per-database memory (Kuzu)
 KUZU_CHUNK_SIZE=1000                    # Streaming chunk size
 KUZU_QUERY_TIMEOUT=30                   # Query timeout seconds
 KUZU_MAX_QUERY_LENGTH=10000             # Max query characters
 KUZU_CONNECTION_POOL_SIZE=10            # Connections per database
+NEO4J_MAX_CONNECTION_POOL_SIZE=50       # Neo4j connection pool size
 
 # Authentication
-KUZU_API_KEY=kuzu_prod_...              # Unified API key
+KUZU_API_KEY=                            # Unified API key (both backends)
 
 # AWS Configuration
 AWS_DEFAULT_REGION=us-east-1
@@ -429,8 +488,8 @@ KUZU_CIRCUIT_BREAKERS_ENABLED=true     # Enable circuit breakers
 KUZU_REDIS_CACHE_ENABLED=true          # Enable Redis caching
 KUZU_RETRY_LOGIC_ENABLED=true          # Enable automatic retries
 KUZU_HEALTH_CHECKS_ENABLED=true        # Enable health checking
-SHARED_REPLICA_ALB_ENABLED=false       # Enable replica ALB routing
-ALLOW_SHARED_MASTER_READS=true         # Allow reads from master
+SHARED_REPLICA_ALB_ENABLED=false       # Enable replica ALB routing (Kuzu)
+ALLOW_SHARED_MASTER_READS=true         # Allow reads from master (Kuzu)
 ```
 
 ### Schema Types
@@ -444,6 +503,12 @@ ALLOW_SHARED_MASTER_READS=true         # Allow reads from master
 ### Authentication
 
 All API requests require authentication via API key header:
+
+```http
+X-Graph-API-Key: graph_api_64_character_random_string
+```
+
+Or the legacy header (still supported):
 
 ```http
 X-Kuzu-API-Key: kuzu_prod_64_character_random_string
@@ -713,11 +778,20 @@ aws autoscaling start-instance-refresh \
 
 ## Known Limitations
 
+### Kuzu Backend
+
 1. **Sequential Ingestion**: Files processed one at a time per database (Kuzu constraint)
 2. **Connection Limit**: Maximum 3 concurrent connections per database
 3. **Single Writer**: Only one write operation per database at a time
 4. **No Cross-Database Queries**: Each query scoped to single database
 5. **Volume Attachment**: One EBS volume per database (no striping)
+
+### Neo4j Backend
+
+1. **Multi-Database**: Only available in Enterprise edition
+2. **Connection Pooling**: Limited by Neo4j configuration
+3. **Bolt Protocol**: Requires network connectivity to Neo4j instance
+4. **Licensing**: Enterprise features require Neo4j Enterprise license
 
 ## Contributing
 
