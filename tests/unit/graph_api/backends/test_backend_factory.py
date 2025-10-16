@@ -18,6 +18,13 @@ def test_backend_factory_kuzu(monkeypatch, tmp_path):
 
 def test_backend_factory_neo4j_community(monkeypatch):
   monkeypatch.setenv("BACKEND_TYPE", "neo4j_community")
+  monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
+  monkeypatch.setenv("NEO4J_USERNAME", "neo4j")
+  monkeypatch.setenv("NEO4J_PASSWORD", "password")
+  monkeypatch.setattr("robosystems.config.env.BACKEND_TYPE", "neo4j_community")
+  monkeypatch.setattr("robosystems.config.env.NEO4J_URI", "bolt://localhost:7687")
+  monkeypatch.setattr("robosystems.config.env.NEO4J_USERNAME", "neo4j")
+  monkeypatch.setattr("robosystems.config.env.NEO4J_PASSWORD", "password")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
 
   backend = get_backend()
@@ -28,6 +35,13 @@ def test_backend_factory_neo4j_community(monkeypatch):
 
 def test_backend_factory_neo4j_enterprise(monkeypatch):
   monkeypatch.setenv("BACKEND_TYPE", "neo4j_enterprise")
+  monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
+  monkeypatch.setenv("NEO4J_USERNAME", "neo4j")
+  monkeypatch.setenv("NEO4J_PASSWORD", "password")
+  monkeypatch.setattr("robosystems.config.env.BACKEND_TYPE", "neo4j_enterprise")
+  monkeypatch.setattr("robosystems.config.env.NEO4J_URI", "bolt://localhost:7687")
+  monkeypatch.setattr("robosystems.config.env.NEO4J_USERNAME", "neo4j")
+  monkeypatch.setattr("robosystems.config.env.NEO4J_PASSWORD", "password")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
 
   backend = get_backend()
@@ -38,6 +52,7 @@ def test_backend_factory_neo4j_enterprise(monkeypatch):
 
 def test_backend_factory_invalid_type(monkeypatch):
   monkeypatch.setenv("BACKEND_TYPE", "invalid_backend")
+  monkeypatch.setattr("robosystems.config.env.BACKEND_TYPE", "invalid_backend")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
 
   with pytest.raises(ValueError, match="Unknown BACKEND_TYPE"):
