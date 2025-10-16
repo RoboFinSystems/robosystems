@@ -7,7 +7,7 @@ allocations in DynamoDB. The hardcoded configurations here do not work
 correctly in production environments with multiple EC2 instances.
 
 For entity graphs, use:
-  from robosystems.kuzu_api.client import get_kuzu_client
+  from robosystems.graph_api.client import get_kuzu_client
   client = await get_kuzu_client(graph_id)
 
 This module defines cluster configurations for single-writer, multiple-reader architecture.

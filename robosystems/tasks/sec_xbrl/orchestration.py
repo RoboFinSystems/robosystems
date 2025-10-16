@@ -585,7 +585,7 @@ def cleanup_phase_connections(phase: str) -> Dict:
 
     # Clear Kuzu client factory connection pools
     try:
-      from robosystems.kuzu_api.client.factory import KuzuClientFactory
+      from robosystems.graph_api.client.factory import KuzuClientFactory
 
       if hasattr(KuzuClientFactory, "_connection_pools"):
         pool_count = len(KuzuClientFactory._connection_pools)

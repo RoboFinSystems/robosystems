@@ -119,7 +119,7 @@ def graph_usage_collector(self):
 
 async def collect_graph_metrics(graph_id: str) -> Dict:
   """Collect usage metrics for a specific graph using KuzuClientFactory."""
-  from robosystems.kuzu_api.client.factory import KuzuClientFactory
+  from robosystems.graph_api.client.factory import KuzuClientFactory
 
   try:
     # Use factory to create client with proper authentication and routing

@@ -2,7 +2,7 @@
 
 RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial data into actionable intelligence through graph-based analytics and AI-powered insights.
 
-- **Graph-Based Financial Intelligence**: Leverages Kuzu graph database technology to model complex financial relationships, enabling deep analysis of relationships between accounting, financial reporting, portfolio management, and public XBRL data
+- **Graph-Based Financial Intelligence**: Leverages graph database technology (Kuzu or Neo4j) to model complex financial relationships, enabling deep analysis of relationships between accounting, financial reporting, portfolio management, and public XBRL data
 - **GraphRAG Architecture**: Knowledge graph-based retrieval-augmented generation for LLM-powered financial analysis over enterprise financial and operating data
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with natural language querying
 - **Multi-Source Data Integration**: Seamlessly integrates QuickBooks accounting data, SEC XBRL filings (10-K, 10-Q), and custom financial datasets into a unified knowledge graph
@@ -13,7 +13,7 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 
 RoboSystems bridges the gap between raw financial data and actionable business intelligence by creating interconnected knowledge graphs that reveal hidden relationships, patterns, and insights that traditional databases miss. It's the backbone for next-generation financial applications that need to understand not just numbers, but the relationships and context behind them.
 
-- **Multi-Tenant Graph Databases**: Create isolated Kuzu database instances with cluster-based scaling
+- **Multi-Tenant Graph Databases**: Create isolated graph database instances (Kuzu or Neo4j) with cluster-based scaling
 - **AI Agent Interface**: Natural language financial analysis through Claude powered agents via Model Context Protocol (MCP)
 - **Entity Graph Creation**: Curated enterprise financial data schemas for defined use cases with RoboLedger, RoboInvestor and more
 - **Generic Graph Creation**: Custom schema definitions with custom node/relationship types
@@ -41,7 +41,7 @@ just start
 
 This initializes the `.env` file and starts the complete RoboSystems stack with:
 
-- Kuzu graph database
+- Graph database (Kuzu by default, Neo4j optional)
 - PostgreSQL with automatic migrations
 - Valkey message broker
 - All development services
@@ -111,9 +111,29 @@ just logs-follow worker              # CloudWatch log search
 - **MCP Integration**: Model Context Protocol for AI-powered financial analytics
 - **Celery Workers** with priority queues for asynchronous processing
 
-### Kuzu Graph Database System
+### Graph Database System
 
-**Kuzu** is a high-performance embedded graph database that powers RoboSystems' financial knowledge graph platform. This system provides multi-tenant graph databases with enterprise-grade scaling and reliability.
+RoboSystems supports **pluggable graph database backends** to provide flexibility and choice for different deployment scenarios:
+
+#### Supported Backends
+
+- **Kuzu** (Default): High-performance embedded graph database, ideal for Standard tier deployments
+- **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers with advanced features
+- **Neo4j Enterprise**: Full enterprise features including multi-database support for Premium tier
+
+#### Graph API System (`/robosystems/graph_api/`)
+
+The **Graph API** is a FastAPI microservice that provides a unified interface regardless of backend:
+
+- **Backend Abstraction**: Consistent API whether using Kuzu or Neo4j
+- **HTTP REST Interface**: High-performance API for all graph operations (port 8001 for Kuzu, 8002 for Neo4j)
+- **Multi-Database Management**: Handles multiple databases per instance (backend-dependent)
+- **Connection Pooling**: Efficient resource management with backend-optimized pooling
+- **Async Ingestion**: Queue-based data loading with S3 integration
+- **Streaming Support**: NDJSON streaming for large query results
+- **Admission Control**: CPU/memory-based backpressure to prevent overload
+
+#### Infrastructure Design
 
 - **Cluster-Based Infrastructure**: Tiered instances (Standard/Enterprise/Premium) for different workload requirements
 - **Multi-Tenant Isolation**: Each entity gets a dedicated database (`kg12345abc`) with complete data isolation
@@ -121,22 +141,12 @@ just logs-follow worker              # CloudWatch log search
 - **API-First Design**: All database access through REST APIs with no direct database connections
 - **Schema-Driven Operations**: All graph operations derive from curated schemas (RoboLedger, RoboInvestor, and more)
 
-#### Kuzu API System (`/robosystems/kuzu_api/`)
+#### Client-Factory System (`/robosystems/graph_api/client/`)
 
-The **Kuzu API** is a FastAPI microservice that runs alongside Kuzu databases on instances, providing:
+The client-factory layer provides intelligent routing between application code and graph database infrastructure:
 
-- **HTTP REST Interface**: High-performance API for all graph operations (port 8001)
-- **Multi-Database Management**: Handles up to 10 databases per instance (Standard tier)
-- **Connection Pooling**: Efficient resource management with max 3 connections per database
-- **Async Ingestion**: Queue-based data loading with S3 integration
-- **Streaming Support**: NDJSON streaming for large query results
-- **Admission Control**: CPU/memory-based backpressure to prevent overload
-
-#### Client-Factory System (`/robosystems/kuzu_api/client/`)
-
-The client-factory layer provides intelligent routing between application code and Kuzu infrastructure:
-
-- **Automatic Discovery**: Finds database instances via DynamoDB registry
+- **Backend-Agnostic**: Works seamlessly with both Kuzu and Neo4j backends
+- **Automatic Discovery**: Finds database instances via DynamoDB registry (Kuzu) or direct connection (Neo4j)
 - **Redis Caching**: Caches instance locations to reduce lookups
 - **Circuit Breakers**: Prevents cascading failures with automatic recovery
 - **Connection Reuse**: HTTP/2 connection pooling for efficiency
@@ -192,8 +202,8 @@ The client-factory layer provides intelligent routing between application code a
 
 ### Data Layer
 
-- **Kuzu Graph Database**: Financial knowledge graph with cluster-based scaling
-- **DynamoDB**: Kuzu database allocation registry, instance and volume management
+- **Graph Database**: Pluggable backend (Kuzu or Neo4j) for financial knowledge graphs with cluster-based scaling
+- **DynamoDB**: Database allocation registry, instance and volume management
 - **PostgreSQL**: Primary relational database for identity and access management
 - **Valkey**: Message broker and caching (separate DBs for queues, cache, progress tracking)
 - **AWS S3**: Document storage and database synchronization
@@ -203,8 +213,8 @@ The client-factory layer provides intelligent routing between application code a
 - **VPC**: AWS VPC with NAT Gateway, CloudTrail, and VPC Flow Logs
 - **API**: ECS Fargate ARM64/Graviton with auto-scaling and WAF
 - **Workers**: ECS Fargate ARM64/Graviton with auto-scaling
-- **Kuzu Writers**: EC2 Graviton instances with DynamoDB registry and management lambdas
-- **Kuzu Readers**: EC2 Graviton instances with load balancing for shared repositories
+- **Graph Database Writers**: EC2 Graviton instances (Kuzu) or ECS containers (Neo4j) with DynamoDB registry and management lambdas
+- **Graph Database Readers**: EC2 Graviton instances or ECS containers with load balancing for shared repositories
 - **Database & Cache**: RDS PostgreSQL + ElastiCache Valkey instances
 - **Observability**: Amazon Managed Prometheus + Grafana with AWS SSO
 - **Self-Hosted CI/CD**: GitHub Actions runner on dedicated infrastructure
@@ -229,7 +239,7 @@ The client-factory layer provides intelligent routing between application code a
 - **Multi-Agent Architecture**: Intelligent routing to specialized agents based on query context
 - **Dynamic Agent Selection**: Automatic selection of the most appropriate agent for each task
 - **Parallel Query Processing**: Batch processing of multiple queries simultaneously
-- **Context-Aware Responses**: GraphRAG-enabled agents with native kuzu graph database integration
+- **Context-Aware Responses**: GraphRAG-enabled agents with native graph database integration
 - **Extensible Framework**: Support for custom agents with specific domain expertise
 
 ### Credit System
@@ -298,12 +308,13 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`beat.yaml`**: Celery beat scheduler for periodic tasks and cron jobs
 - **`worker-monitor.yaml`**: Lambda function for monitoring worker health and queue depths
 
-#### Kuzu Graph Database
+#### Graph Database Infrastructure
 
-- **`kuzu-infra.yaml`**: Base infrastructure for Kuzu clusters (security groups, roles, registries)
+- **`kuzu-infra.yaml`**: Base infrastructure for graph database clusters (security groups, roles, registries)
 - **`kuzu-volumes.yaml`**: EBS volume management and snapshot automation
-- **`kuzu-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types
+- **`kuzu-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Kuzu backend)
 - **`kuzu-shared-replicas.yaml`**: ECS Fargate read replicas for shared repositories (SEC)
+- **`neo4j-*.yaml`**: Neo4j-specific infrastructure templates (when using Neo4j backend)
 
 #### Observability
 
@@ -385,10 +396,11 @@ Each major system component has detailed documentation:
 - **`/robosystems/models/api/README.md`**: Centralized Pydantic models for API validation
 - **`/robosystems/config/README.md`**: Configuration management and environment handling
 
-### Kuzu Graph Database System
+### Graph Database System
 
-- **`/robosystems/kuzu_api/README.md`**: Complete Kuzu API documentation
-- **`/robosystems/kuzu_api/client/README.md`**: Client-factory system for intelligent routing
+- **`/robosystems/graph_api/README.md`**: Complete Graph API documentation (supports Kuzu and Neo4j backends)
+- **`/robosystems/graph_api/backends/README.md`**: Backend abstraction layer and implementation details
+- **`/robosystems/graph_api/client/README.md`**: Client-factory system for intelligent routing
 
 ### Middleware Components
 

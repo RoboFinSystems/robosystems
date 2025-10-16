@@ -89,7 +89,7 @@ robosystems/
 ├── adapters/         # External service integrations
 ├── config/           # Centralized configuration
 ├── security/         # Security implementations
-├── kuzu_api/         # Graph database API service
+├── graph_api/         # Graph database API service
 └── scripts/          # Utility and admin scripts
 ```
 

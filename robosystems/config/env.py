@@ -366,8 +366,11 @@ class EnvConfig:
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
   # ==========================================================================
-  # DATABASE CONFIGURATION - KUZU GRAPH DATABASE
+  # DATABASE CONFIGURATION - GRAPH DATABASES (KUZU AND NEO4J)
   # ==========================================================================
+
+  # Graph Backend Selection
+  BACKEND_TYPE = get_str_env("BACKEND_TYPE", "kuzu")  # Options: kuzu, neo4j
 
   # Basic Kuzu configuration
   KUZU_API_URL = get_str_env("KUZU_API_URL", "http://localhost:8001")
@@ -376,6 +379,17 @@ class EnvConfig:
   KUZU_ACCESS_PATTERN = get_str_env("KUZU_ACCESS_PATTERN", "api_auto")
   KUZU_NODE_TYPE = get_str_env("KUZU_NODE_TYPE", "writer")
   KUZU_S3_BUCKET = get_str_env("KUZU_S3_BUCKET", "")
+
+  # Neo4j configuration
+  NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
+  NEO4J_USERNAME = get_str_env("NEO4J_USERNAME", "neo4j")
+  NEO4J_PASSWORD = get_secret_value("NEO4J_PASSWORD", "")
+  NEO4J_ENTERPRISE = get_bool_env("NEO4J_ENTERPRISE", False)
+  NEO4J_MAX_CONNECTION_POOL_SIZE = get_int_env("NEO4J_MAX_CONNECTION_POOL_SIZE", 50)
+  NEO4J_CONNECTION_ACQUISITION_TIMEOUT = get_int_env(
+    "NEO4J_CONNECTION_ACQUISITION_TIMEOUT", 60
+  )
+  NEO4J_MAX_CONNECTION_LIFETIME = get_int_env("NEO4J_MAX_CONNECTION_LIFETIME", 3600)
 
   # User graph creation limits (safety valve)
   # User graph limits (from secrets for runtime control)

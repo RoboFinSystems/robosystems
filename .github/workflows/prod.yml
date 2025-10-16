@@ -418,7 +418,7 @@ jobs:
       # Lambda Configuration
       lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_PROD || 'prod' }}-deployment
       # Secrets Configuration
-      kuzu_api_secret_arn: ${{ needs.deploy-kuzu-infra.outputs.secret_arn }}
+      graph_api_secret_arn: ${{ needs.deploy-kuzu-infra.outputs.secret_arn }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

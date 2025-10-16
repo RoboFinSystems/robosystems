@@ -458,7 +458,7 @@ class TestKuzuMCPFactory:
       patch("robosystems.middleware.mcp.client.KuzuClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
       patch(
-        "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+        "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
       ) as mock_factory,
       patch(
         "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository",
@@ -491,7 +491,7 @@ class TestKuzuMCPFactory:
       patch("robosystems.middleware.mcp.client.KuzuClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
       patch(
-        "robosystems.kuzu_api.client.factory.KuzuClientFactory.create_client"
+        "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
       ) as mock_factory,
       patch(
         "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository",

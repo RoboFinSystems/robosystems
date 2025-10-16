@@ -49,7 +49,7 @@ on:
         default: ""
       
       # Secrets Configuration
-      kuzu_api_secret_arn:
+      graph_api_secret_arn:
         description: "ARN of the Kuzu API secret for Lambda authentication"
         required: false
         type: string
@@ -164,9 +164,9 @@ jobs:
           fi
 
           # Add Kuzu API secret if provided
-          if [ -n "${{ inputs.kuzu_api_secret_arn }}" ]; then
+          if [ -n "${{ inputs.graph_api_secret_arn }}" ]; then
             STACK_PARAMS="$STACK_PARAMS \
-                  ParameterKey=KuzuSecretArn,ParameterValue=${{ inputs.kuzu_api_secret_arn }}"
+                  ParameterKey=KuzuSecretArn,ParameterValue=${{ inputs.graph_api_secret_arn }}"
           fi
 
           # Deploy or update the stack

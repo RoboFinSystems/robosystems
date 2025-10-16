@@ -163,7 +163,7 @@ class GenericGraphService:
     logger.info(f"Creating database {graph_id} on Kuzu writer")
 
     # Use KuzuClient with proper API key
-    from ...kuzu_api.client import get_kuzu_client_for_instance
+    from ...graph_api.client import get_kuzu_client_for_instance
 
     kuzu_client = await get_kuzu_client_for_instance(cluster_info.private_ip)
 

@@ -1,16 +1,22 @@
 # Graph Middleware
 
-This middleware layer provides the core graph database abstraction and routing logic for the RoboSystems platform.
+This middleware layer provides the core graph database abstraction and routing logic for the RoboSystems platform with support for multiple backend types.
 
 ## Overview
 
 The graph middleware:
 
-- Routes graph operations to appropriate Kuzu clusters
+- Routes graph operations to appropriate clusters (Kuzu or Neo4j)
+- Provides backend-agnostic database abstraction
 - Manages database connections and pooling
 - Handles query execution with caching and queuing
 - Provides admission control and backpressure management
 - Integrates with the credit system for usage tracking
+
+**Supported Backends:**
+- **Kuzu**: Embedded graph database with EC2-based clusters
+- **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers
+- **Neo4j Enterprise**: Multi-database support for Premium tier
 
 ## Architecture
 
@@ -96,7 +102,7 @@ class ClusterConfig:
 
 ### 3. Graph Engine (`engine.py`)
 
-Direct Kuzu database access with connection management.
+Direct graph database access with connection management (Kuzu-specific).
 
 **Features:**
 
@@ -108,9 +114,12 @@ Direct Kuzu database access with connection management.
 **Usage:**
 
 ```python
+# Kuzu-specific direct access (development/legacy)
 engine = GraphEngine(database_path="/data/kuzu-dbs/kg1a2b3c")
 result = engine.execute_query("MATCH (c:Entity) RETURN c")
 engine.close()
+
+# Note: For production use the backend abstraction layer instead
 ```
 
 ### 4. Repository Pattern (`repository.py`)
@@ -222,7 +231,7 @@ Core type definitions and enums.
 
 ### 9. Database Allocation (`allocation_manager.py`)
 
-DynamoDB-based allocation manager for Kuzu databases across writer instances.
+DynamoDB-based allocation manager for graph databases across instances (Kuzu-specific).
 
 **Features:**
 
@@ -279,9 +288,16 @@ routing = MultiTenantUtils.get_graph_routing("kg1a2b3c")
 Key environment variables:
 
 ```bash
-# Routing Configuration
+# Backend Configuration
+BACKEND_TYPE=kuzu                   # kuzu|neo4j_community|neo4j_enterprise
+
+# Routing Configuration (Kuzu)
 KUZU_ACCESS_PATTERN=api_writer      # Access pattern (api_writer/api_reader/direct_file)
 KUZU_API_URL=                        # Localhost endpoint for routing (dynamic lookup in prod)
+
+# Routing Configuration (Neo4j)
+NEO4J_URI=bolt://neo4j-db:7687      # Neo4j Bolt connection
+NEO4J_ENTERPRISE=false               # Enable multi-database support
 
 # Queue Configuration
 QUERY_QUEUE_MAX_SIZE=1000           # Maximum queries in queue
@@ -296,8 +312,9 @@ LOAD_SHEDDING_ENABLED=true         # Enable load shedding
 # Performance
 CONNECTION_POOL_SIZE=10             # Database connection pool size
 QUERY_TIMEOUT=30                    # Query timeout (seconds)
+NEO4J_MAX_CONNECTION_POOL_SIZE=50   # Neo4j connection pool size
 
-# Database Allocation
+# Database Allocation (Kuzu)
 KUZU_MAX_DATABASES_PER_NODE=50     # Max databases per Kuzu instance
 
 # Multi-tenant Configuration

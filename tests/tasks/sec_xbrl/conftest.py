@@ -110,7 +110,7 @@ def mock_kuzu_client():
 @pytest.fixture
 def mock_kuzu_factory(mock_kuzu_client):
   """Mock KuzuClientFactory."""
-  with patch("robosystems.kuzu_api.client.factory.KuzuClientFactory") as mock_factory:
+  with patch("robosystems.graph_api.client.factory.KuzuClientFactory") as mock_factory:
     mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
     yield mock_factory
 

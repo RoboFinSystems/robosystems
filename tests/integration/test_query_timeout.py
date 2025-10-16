@@ -6,8 +6,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from unittest.mock import MagicMock, patch
 
-from robosystems.kuzu_api.core.cluster_manager import KuzuClusterService
-from robosystems.kuzu_api.models.database import QueryRequest
+from robosystems.graph_api.core.cluster_manager import KuzuClusterService
+from robosystems.graph_api.models.database import QueryRequest
 from robosystems.middleware.graph.clusters import NodeType, RepositoryType
 from fastapi import HTTPException
 
@@ -46,7 +46,7 @@ class TestQueryTimeout:
       # Verify the future is cancelled or still running
       assert future.cancelled() or future.running()
 
-  @patch("robosystems.kuzu_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
   def test_query_timeout_with_slow_query(self, mock_db_manager):
     """Test actual query timeout with simulated slow query."""
     from robosystems.config import env

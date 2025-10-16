@@ -22,8 +22,8 @@ from sqlalchemy.orm import Session, scoped_session
 from ...models.iam import UserGraph, UserLimits
 from ...config import env
 from ...models.api import EntityCreate, EntityResponse
-from ...kuzu_api.client import KuzuClient, get_kuzu_client_for_instance
-from ...kuzu_api.client.exceptions import KuzuClientError
+from ...graph_api.client import KuzuClient, get_kuzu_client_for_instance
+from ...graph_api.client.exceptions import KuzuClientError
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
 from ...middleware.graph.types import InstanceTier
 from ...exceptions import (

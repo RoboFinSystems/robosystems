@@ -2144,6 +2144,18 @@ wheels = [
 ]
 
 [[package]]
+name = "neo4j"
+version = "5.28.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/50/69/4862fabc082f2447131aada5c91736155349d77ebf443af7f59553b7b789/neo4j-5.28.2.tar.gz", hash = "sha256:7d38e27e4f987a45cc9052500c6ee27325cb23dae6509037fe31dd7ddaed70c7", size = 231874, upload-time = "2025-07-30T06:04:34.669Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/00/1f74089c06aec1fac9390e2300a6a6b2381e0dac281783d64ccca9d681fd/neo4j-5.28.2-py3-none-any.whl", hash = "sha256:5c53b5c3eee6dee7e920c9724391aa38d7135a651e71b766da00533b92a91a94", size = 313156, upload-time = "2025-07-30T06:04:31.438Z" },
+]
+
+[[package]]
 name = "nest-asyncio"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3545,6 +3557,7 @@ dependencies = [
     { name = "kuzu" },
     { name = "logger" },
     { name = "lxml" },
+    { name = "neo4j" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-instrumentation-aiohttp-client" },
@@ -3618,6 +3631,7 @@ requires-dist = [
     { name = "logger", specifier = ">=1.4,<2.0" },
     { name = "lxml", specifier = ">=5.4.0,<6.0" },
     { name = "moto", extras = ["s3"], marker = "extra == 'dev'", specifier = ">=5.1.6,<6.0" },
+    { name = "neo4j", specifier = ">=5.15.0,<6.0" },
     { name = "opentelemetry-api", specifier = ">=1.35.0,<2.0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.35.0,<2.0" },
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.55b0,<1.0" },

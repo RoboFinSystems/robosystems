@@ -42,7 +42,7 @@ on:
         required: false
         type: string
         default: ""
-      kuzu_api_rotation_code_key:
+      graph_api_rotation_code_key:
         description: "S3 key for Kuzu API Rotation Lambda deployment package"
         required: false
         type: string

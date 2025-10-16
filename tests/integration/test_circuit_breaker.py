@@ -5,7 +5,7 @@ Integration tests for circuit breaker functionality in Kuzu client factory.
 import asyncio
 import pytest
 
-from robosystems.kuzu_api.client.factory import CircuitBreaker
+from robosystems.graph_api.client.factory import CircuitBreaker
 
 
 class TestCircuitBreaker:
