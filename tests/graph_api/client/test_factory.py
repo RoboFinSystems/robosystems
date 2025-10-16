@@ -115,8 +115,7 @@ class TestKuzuClientFactory:
       mock.GRAPH_CIRCUIT_BREAKER_TIMEOUT = 60
       mock.GRAPH_ALB_HEALTH_CACHE_TTL = 300
       mock.GRAPH_INSTANCE_CACHE_TTL = 3600
-      mock.KUZU_REPLICA_ENDPOINT = "http://replica.example.com"
-      mock.KUZU_MASTER_ENDPOINT = "http://master.example.com"
+      mock.GRAPH_REPLICA_ALB_URL = "http://replica.example.com"
       mock.ENVIRONMENT = "test"
       mock.VALKEY_URL = "redis://localhost:6379"
       yield mock
