@@ -120,7 +120,9 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
   def _validate_api_key(self, request: Request) -> None:
     """Validate API key from request headers."""
     # Check for API key in header (support both old and new header names)
-    api_key = request.headers.get("X-Graph-API-Key") or request.headers.get("X-Kuzu-API-Key")
+    api_key = request.headers.get("X-Graph-API-Key") or request.headers.get(
+      "X-Kuzu-API-Key"
+    )
     if not api_key:
       # Also check Authorization header
       auth_header = request.headers.get("Authorization", "")

@@ -1,5 +1,6 @@
 from typing import Optional, Union
 from robosystems.config import env
+from .base import GraphBackend
 from .kuzu import KuzuBackend
 from .neo4j import Neo4jBackend
 from robosystems.logger import logger
