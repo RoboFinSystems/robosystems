@@ -20,6 +20,7 @@ from fastapi import status as http_status
 from robosystems.graph_api.models.database import RestoreResponse
 from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.task_manager import restore_task_manager
+from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases", tags=["Database Backup"])
@@ -46,6 +47,9 @@ async def restore_database(
   The restore operation runs as a background task and can be monitored
   using the returned task_id.
   """
+  # Validate graph_id to prevent path injection
+  graph_id = validate_database_name(graph_id)
+
   if cluster_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
@@ -105,6 +109,9 @@ async def download_backup(
   as binary data for download. This is used by the main API
   to get the database backup for storage in S3.
   """
+  # Validate graph_id to prevent path injection
+  graph_id = validate_database_name(graph_id)
+
   if cluster_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,

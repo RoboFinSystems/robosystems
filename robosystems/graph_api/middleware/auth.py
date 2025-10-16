@@ -216,12 +216,10 @@ def get_api_key_from_secrets_manager(
     api_key = secret_data.get("GRAPH_API_KEY")
 
     if api_key:
-      logger.info(
-        f"Successfully retrieved unified API key from Secrets Manager: {secret_name}"
-      )
+      logger.info("Successfully retrieved Graph API key from Secrets Manager")
       return api_key
     else:
-      logger.error(f"No KUZU_API_KEY found in secret: {secret_name}")
+      logger.error(f"No GRAPH_API_KEY found in secret: {secret_name}")
       return None
 
   except ClientError as e:
