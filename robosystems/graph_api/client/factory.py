@@ -492,7 +492,7 @@ class KuzuClientFactory:
 
       # Configure pagination
       page_iterator = paginator.paginate(
-        TableName=f"robosystems-kuzu-{env.ENVIRONMENT}-instance-registry",
+        TableName=env.INSTANCE_REGISTRY_TABLE,
         FilterExpression="#status = :status AND node_type = :node_type",
         ExpressionAttributeNames={
           "#status": "status",  # 'status' is a reserved keyword in DynamoDB
@@ -551,7 +551,7 @@ class KuzuClientFactory:
 
             # Check if this is the shared master instance
             response = dynamodb.get_item(
-              TableName=f"robosystems-kuzu-{env.ENVIRONMENT}-instance-registry",
+              TableName=env.INSTANCE_REGISTRY_TABLE,
               Key={"instance_id": {"S": instance_id}},
             )
 
@@ -591,7 +591,7 @@ class KuzuClientFactory:
         f"Failed to discover shared master: {e}",
         extra={
           "environment": env.ENVIRONMENT,
-          "table_name": f"robosystems-kuzu-{env.ENVIRONMENT}-instance-registry",
+          "table_name": env.INSTANCE_REGISTRY_TABLE,
           "error_type": type(e).__name__,
           "error_details": str(e),
         },

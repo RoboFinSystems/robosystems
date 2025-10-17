@@ -126,25 +126,26 @@ class KuzuAllocationManager:
       else MultiTenantUtils.get_max_databases_per_node()
     )
 
-    # Tier-based configuration for memory, chunk sizes, and backend selection
+    # Tier-based configuration for backend selection and database allocation
+    # Note: Backend-specific settings (Kuzu buffer pools, Neo4j JVM heap) are
+    # configured in their respective userdata scripts, not here.
     self.tier_configs = {
       InstanceTier.STANDARD: {
         "backend_type": "kuzu",
-        "max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
-        "chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
         "databases_per_instance": self.max_databases_per_instance,
+        # Kuzu-specific settings (only used by Kuzu backend)
+        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
+        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
       },
       InstanceTier.ENTERPRISE: {
         "backend_type": "neo4j_community",
-        "max_memory_mb": env.KUZU_ENTERPRISE_MAX_MEMORY_MB,
-        "chunk_size": env.KUZU_ENTERPRISE_CHUNK_SIZE,
         "databases_per_instance": 1,  # Dedicated instance
+        # Neo4j settings configured in neo4j-writer.sh userdata script
       },
       InstanceTier.PREMIUM: {
-        "backend_type": "neo4j_community",
-        "max_memory_mb": env.KUZU_PREMIUM_MAX_MEMORY_MB,
-        "chunk_size": env.KUZU_PREMIUM_CHUNK_SIZE,
+        "backend_type": "neo4j_enterprise",  # Premium uses Enterprise for subgraph support
         "databases_per_instance": 1,  # Dedicated instance
+        # Neo4j Enterprise settings configured in neo4j-writer.sh userdata script
       },
     }
     # ASG name will be determined dynamically from instance data
@@ -168,11 +169,9 @@ class KuzuAllocationManager:
     # Rate limiting for scale-up triggers (one per 5 minutes per tier)
     self._scale_up_timestamps: Dict[str, datetime] = {}
 
-    # DynamoDB tables
-    self.graph_table = dynamodb.Table(f"robosystems-kuzu-{environment}-graph-registry")
-    self.instance_table = dynamodb.Table(
-      f"robosystems-kuzu-{environment}-instance-registry"
-    )
+    # DynamoDB tables - use centralized configuration
+    self.graph_table = dynamodb.Table(env.GRAPH_REGISTRY_TABLE)
+    self.instance_table = dynamodb.Table(env.INSTANCE_REGISTRY_TABLE)
 
     # AWS clients with region configuration
     region = env.AWS_REGION

@@ -1,0 +1,876 @@
+Description: RoboSystems Graph Database Infrastructure - DynamoDB, Lambda, and Secrets Manager (Shared by Kuzu and Neo4j)
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Environment name (prod or staging)
+    ConstraintDescription: Must be prod or staging
+
+  # Security Configuration
+  EnableSecretRotation:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Enable automatic rotation of API keys
+    ConstraintDescription: Must be true or false
+  RotationScheduleDays:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 365
+    Description: Number of days between automatic API key rotations (when rotation is enabled)
+    ConstraintDescription: Must be between 1 and 365 days
+
+  # Lambda Configuration - Rotation only
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+    ConstraintDescription: Must be a valid S3 bucket name
+  KuzuApiRotationCodeKey:
+    Type: String
+    Description: S3 key for Kuzu API Rotation Lambda deployment package
+    ConstraintDescription: Must be a valid S3 object key
+  InstanceMonitorCodeKey:
+    Type: String
+    Description: S3 key for Instance Monitor Lambda deployment package
+    Default: lambdas/kuzu_instance_monitor.zip
+    ConstraintDescription: Must be a valid S3 object key
+
+  # Monitoring & Alerting
+  SNSAlertEmail:
+    Type: String
+    Description: Email address for infrastructure alerts
+    ConstraintDescription: Must be a valid email address
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Default: RoboSystems
+    Description: Service tag for resource identification and billing
+    ConstraintDescription: Must be a valid tag value
+  ComponentTag:
+    Type: String
+    Default: GraphInfra
+    Description: Component tag for resource identification and billing
+    ConstraintDescription: Must be a valid tag value
+
+Conditions:
+  EnableRotation: !Equals [!Ref EnableSecretRotation, "true"]
+  IsProduction: !Equals [!Ref Environment, "prod"]
+
+Resources:
+  # ===== Security Groups =====
+
+  # ===== DynamoDB Tables =====
+  # Single instance registry for all graph database instances (Kuzu and Neo4j)
+  InstanceRegistry:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "robosystems-graph-${Environment}-instance-registry"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: instance_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: database_count
+          AttributeType: N
+        - AttributeName: cluster_tier
+          AttributeType: S
+      KeySchema:
+        - AttributeName: instance_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-database-count-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: database_count
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tier-status-index
+          KeySchema:
+            - AttributeName: cluster_tier
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: RoboSystems
+        - Key: Component
+          Value: GraphInfra
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Single graph registry for all database allocations
+  GraphRegistry:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "robosystems-graph-${Environment}-graph-registry"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: graph_id
+          AttributeType: S
+        - AttributeName: instance_id
+          AttributeType: S
+        - AttributeName: entity_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: graph_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: instance-index
+          KeySchema:
+            - AttributeName: instance_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: entity-index
+          KeySchema:
+            - AttributeName: entity_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: RoboSystems
+        - Key: Component
+          Value: GraphInfra
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Volume registry for tracking graph database volumes (Kuzu and Neo4j)
+  VolumeRegistry:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub "robosystems-graph-${Environment}-volume-registry"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: volume_id
+          AttributeType: S
+        - AttributeName: instance_id
+          AttributeType: S
+        - AttributeName: database_id
+          AttributeType: S
+        - AttributeName: tier
+          AttributeType: S
+      KeySchema:
+        - AttributeName: volume_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: instance-index
+          KeySchema:
+            - AttributeName: instance_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: database-index
+          KeySchema:
+            - AttributeName: database_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tier-index
+          KeySchema:
+            - AttributeName: tier
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-graph-${Environment}-volume-registry"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ===== Authentication Infrastructure =====
+  # Single secret containing all three API keys
+  KuzuApiSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/kuzu
+      Description: !Sub Kuzu API authentication key for ${Environment}
+      SecretString: !Sub
+        - |
+          {
+            "GRAPH_API_KEY": "${ApiKey}",
+            "ENVIRONMENT": "${Environment}",
+            "GENERATED_AT": "${GeneratedAt}"
+          }
+        - ApiKey: !GetAtt ApiKeyGenerator.ApiKey
+          GeneratedAt: !GetAtt ApiKeyGenerator.GeneratedAt
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Custom resource to generate initial API keys
+  ApiKeyGenerator:
+    Type: Custom::ApiKeyGenerator
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ServiceToken: !GetAtt ApiKeyGeneratorFunction.Arn
+      Environment: !Ref Environment
+
+  ApiKeyGeneratorFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-api-key-generator"
+      Description: "API Key Generator Lambda - inline code (no S3)"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt ApiKeyGeneratorRole.Arn
+      Timeout: 60
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-api-key-generator"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      Code:
+        ZipFile: |
+          """
+          Kuzu API Key Generator Lambda Function
+
+          CloudFormation custom resource that generates initial API keys for Kuzu services.
+          This function is called during stack creation to generate the initial set of API keys.
+          """
+
+          import secrets
+          import string
+          import cfnresponse
+          from datetime import datetime, timezone
+
+
+          def generate_api_key(prefix, length=64):
+            """
+            Generate a secure API key with a given prefix.
+
+            Args:
+                prefix: Prefix for the API key (e.g., 'kuzu_prod')
+                length: Length of the random portion (default: 64)
+
+            Returns:
+                A secure API key string with high entropy
+            """
+            # Use a larger character set for better entropy
+            alphabet = string.ascii_letters + string.digits + "-_"
+            # Generate a longer key for better security
+            random_part = "".join(secrets.choice(alphabet) for _ in range(length))
+            return f"{prefix}_{random_part}"
+
+
+          def lambda_handler(event, context):
+            """
+            CloudFormation custom resource handler for generating API keys.
+
+            This function handles Create, Update, and Delete requests from CloudFormation.
+            For Create/Update, it generates new API keys. For Delete, it simply returns success.
+
+            Args:
+                event: CloudFormation custom resource event
+                context: Lambda context
+            """
+            try:
+              request_type = event.get("RequestType", "")
+
+              # For delete requests, just return success
+              if request_type == "Delete":
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                return
+
+              # Get the environment from the resource properties
+              resource_properties = event.get("ResourceProperties", {})
+              environment = resource_properties.get("Environment", "unknown")
+
+              # Generate a single high-entropy API key
+              response_data = {
+                "ApiKey": generate_api_key(f"kuzu_{environment}"),
+                "GeneratedAt": datetime.now(timezone.utc).isoformat(),
+              }
+
+              # Log the generation (without exposing the actual key)
+              print(f"Generated API key for environment: {environment}")
+              print(f"Request Type: {request_type}")
+              print(f"Generated at: {response_data['GeneratedAt']}")
+
+              # Send success response to CloudFormation
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+
+            except Exception as e:
+              print(f"Error generating API keys: {str(e)}")
+              error_message = str(e)
+
+              # Send failure response to CloudFormation
+              cfnresponse.send(
+                event,
+                context,
+                cfnresponse.FAILED,
+                {},
+                reason=f"Failed to generate API key: {error_message}",
+              )
+
+  ApiKeyGeneratorRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-graph-${Environment}-api-key-generator-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Lambda function for secret rotation
+  SecretRotationLambda:
+    Type: AWS::Lambda::Function
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-api-secret-rotation"
+      Description: "Kuzu API Rotation Lambda - auto-updates via S3 key hash"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt SecretRotationRole.Arn
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref KuzuApiRotationCodeKey
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-api-secret-rotation"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM role for rotation Lambda
+  SecretRotationRole:
+    Type: AWS::IAM::Role
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: !Sub "robosystems-graph-${Environment}-secret-rotation-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretRotationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:UpdateSecretVersionStage
+                Resource: !Ref KuzuApiSecret
+              # KMS permissions for secret rotation
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-graph-${Environment}-secret-rotation-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Rotation schedule
+  SecretRotationSchedule:
+    Type: AWS::SecretsManager::RotationSchedule
+    Condition: EnableRotation
+    DependsOn: LambdaInvokePermission
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      SecretId: !Ref KuzuApiSecret
+      RotationLambdaARN: !GetAtt SecretRotationLambda.Arn
+      RotationRules:
+        ScheduleExpression: !Sub "rate(${RotationScheduleDays} days)"
+        Duration: 1h
+
+  # Permission for Secrets Manager to invoke Lambda
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: EnableRotation
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref SecretRotationLambda
+      Action: lambda:InvokeFunction
+      Principal: secretsmanager.amazonaws.com
+
+  # ===== Monitoring Infrastructure =====
+  # SNS Topic for Infrastructure Alerts
+  InfraAlertTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TopicName: !Sub robosystems-graph-${Environment}-infra-alerts
+      DisplayName: !Sub "RoboSystems Graph Database ${Environment} Infrastructure Alerts"
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-graph-${Environment}-infra-alerts"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+
+  # Database capacity alarms
+  DatabaseCapacityAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AlarmName: !Sub robosystems-graph-${Environment}-database-capacity
+      AlarmDescription: RoboSystems graph database capacity is running low
+      MetricName: DatabaseUtilizationPercent
+      Namespace: RoboSystemsKuzu
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref InfraAlertTopic
+
+  # ===== CloudWatch Log Groups =====
+  # Log group for standard tier kuzu writers
+  KuzuWriterStandardLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/robosystems/${Environment}/kuzu-writer-standard"
+      RetentionInDays: 30
+
+  # Log group for enterprise tier kuzu writers
+  KuzuWriterEnterpriseLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/robosystems/${Environment}/kuzu-writer-enterprise"
+      RetentionInDays: 30
+
+  # Log group for premium tier kuzu writers
+  KuzuWriterPremiumLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/robosystems/${Environment}/kuzu-writer-premium"
+      RetentionInDays: 30
+
+  # Note: Shared master and replica log groups have been removed
+  # All databases (entity and shared repositories) now use the writer log groups
+
+  # ===== Instance Monitor Lambda =====
+  InstanceMonitorFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-instance-monitor"
+      Description: "Instance Monitor Lambda - auto-updates via S3 key hash"
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 300
+      MemorySize: 512
+      Role: !GetAtt InstanceMonitorRole.Arn
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          INSTANCE_REGISTRY_TABLE: !Ref InstanceRegistry
+          GRAPH_REGISTRY_TABLE: !Ref GraphRegistry
+          VOLUME_REGISTRY_TABLE: !Ref VolumeRegistry
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref InstanceMonitorCodeKey
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-instance-monitor"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM Role for Instance Monitor Lambda
+  InstanceMonitorRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: !Sub "robosystems-graph-${Environment}-instance-monitor-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: InstanceMonitorPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeTags
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !GetAtt InstanceRegistry.Arn
+                  - !GetAtt GraphRegistry.Arn
+                  - !GetAtt VolumeRegistry.Arn
+                  - !Sub "${InstanceRegistry.Arn}/index/*"
+                  - !Sub "${GraphRegistry.Arn}/index/*"
+                  - !Sub "${VolumeRegistry.Arn}/index/*"
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace:
+                      - !Sub "RoboSystemsKuzu/${Environment}"
+                      - !Sub
+                        - "RoboSystemsKuzu/${CapitalizedEnv}"
+                        - CapitalizedEnv: !If
+                            - IsProduction
+                            - "Prod"
+                            - "Staging"
+      Tags:
+        - Key: Name
+          Value: !Sub "robosystems-graph-${Environment}-instance-monitor-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ===== EventBridge Rules for Instance Monitor =====
+
+  # Health Check Rule - Every hour
+  InstanceHealthCheckRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-instance-health-check"
+      Description: Hourly health check for graph database instances
+      ScheduleExpression: "rate(1 hour)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InstanceMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "health_check"}'
+
+  InstanceHealthCheckPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InstanceMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt InstanceHealthCheckRule.Arn
+
+  # Metrics Collection Rule - Every 5 minutes (critical for autoscaling)
+  MetricsCollectionRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-metrics-collection"
+      Description: Collect graph database cluster metrics for monitoring and autoscaling
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InstanceMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "collect_metrics"}'
+
+  MetricsCollectionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InstanceMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MetricsCollectionRule.Arn
+
+  # Graph Cleanup Rule - Daily at 3 AM UTC
+  GraphCleanupRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-graph-cleanup"
+      Description: Daily cleanup of stale graph registry entries
+      ScheduleExpression: "cron(0 3 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InstanceMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "cleanup_graphs"}'
+
+  GraphCleanupPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InstanceMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt GraphCleanupRule.Arn
+
+  # Volume Cleanup Rule - Daily at 4 AM UTC
+  VolumeCleanupRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-volume-cleanup"
+      Description: Daily cleanup of stale volume registry entries
+      ScheduleExpression: "cron(0 4 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InstanceMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "cleanup_volumes"}'
+
+  VolumeCleanupPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InstanceMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt VolumeCleanupRule.Arn
+
+  # ===== EC2 State Change Event Rules =====
+  # These provide immediate response to instance state changes
+
+  # Rule for EC2 Instance State Changes (terminating/terminated)
+  InstanceStateChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-instance-state-change"
+      Description: Trigger instance health check when EC2 instances change state
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Instance State-change Notification
+        detail:
+          state:
+            - terminated
+            - terminating
+            - stopping
+            - stopped
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InstanceMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "health_check"}'
+          RetryPolicy:
+            MaximumRetryAttempts: 2
+            MaximumEventAgeInSeconds: 600
+
+  # Permission for Instance State Change Events
+  InstanceStateChangePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InstanceMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt InstanceStateChangeRule.Arn
+
+  # Rule for EC2 Instance Launch Events
+  InstanceLaunchRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-instance-launch"
+      Description: Trigger metrics collection when new EC2 instances launch
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Instance State-change Notification
+        detail:
+          state:
+            - running
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InstanceMonitorFunction.Arn
+          Id: "1"
+          Input: '{"action": "collect_metrics"}'
+          RetryPolicy:
+            MaximumRetryAttempts: 2
+            MaximumEventAgeInSeconds: 600
+
+  # Permission for Instance Launch Events
+  InstanceLaunchPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InstanceMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt InstanceLaunchRule.Arn
+
+Outputs:
+  # DynamoDB Table Names
+  InstanceRegistryTableName:
+    Description: DynamoDB table name for instance registry
+    Value: !Ref InstanceRegistry
+    Export:
+      Name: !Sub "${AWS::StackName}-InstanceRegistryTable"
+
+  GraphRegistryTableName:
+    Description: DynamoDB table name for graph registry
+    Value: !Ref GraphRegistry
+    Export:
+      Name: !Sub "${AWS::StackName}-GraphRegistryTable"
+
+  # DynamoDB Table ARNs
+  InstanceRegistryTableArn:
+    Description: DynamoDB table ARN for instance registry
+    Value: !GetAtt InstanceRegistry.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-InstanceRegistryTableArn"
+
+  GraphRegistryTableArn:
+    Description: DynamoDB table ARN for graph registry
+    Value: !GetAtt GraphRegistry.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-GraphRegistryTableArn"
+
+  VolumeRegistryTableName:
+    Description: DynamoDB table name for volume registry
+    Value: !Ref VolumeRegistry
+    Export:
+      Name: !Sub "${AWS::StackName}-VolumeRegistryTable"
+
+  VolumeRegistryTableArn:
+    Description: DynamoDB table ARN for volume registry
+    Value: !GetAtt VolumeRegistry.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-VolumeRegistryTableArn"
+
+  # Authentication
+  SecretArn:
+    Description: ARN of the Kuzu API authentication secret
+    Value: !Ref KuzuApiSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-SecretArn"
+
+  # Monitoring
+  AlertTopicArn:
+    Description: SNS topic ARN for infrastructure alerts
+    Value: !Ref InfraAlertTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-AlertTopicArn"

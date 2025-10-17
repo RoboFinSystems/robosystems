@@ -27,7 +27,7 @@ class TestStorageLimitChecking:
     """Test storage check when within limits."""
     credit_service = CreditService(db_session)
 
-    # Test with 60GB usage against 100GB limit (60%, below 80% threshold)
+    # Test with 60GB usage against 500GB limit (12%, below 80% threshold)
     result = credit_service.check_storage_limit(
       sample_graph_credits.graph_id, current_storage_gb=Decimal("60")
     )
@@ -35,8 +35,8 @@ class TestStorageLimitChecking:
     assert result["within_limit"] is True
     assert result["approaching_limit"] is False
     assert result["current_storage_gb"] == 60.0
-    assert result["effective_limit_gb"] == 100.0
-    assert result["usage_percentage"] == 60.0
+    assert result["effective_limit_gb"] == 500.0
+    assert result["usage_percentage"] == 12.0
     assert result["has_override"] is False
 
   def test_check_storage_limit_approaching_threshold(
@@ -45,9 +45,9 @@ class TestStorageLimitChecking:
     """Test storage check when approaching the warning threshold."""
     credit_service = CreditService(db_session)
 
-    # Test with 90GB usage (90% of 100GB limit, above 80% threshold)
+    # Test with 450GB usage (90% of 500GB limit, above 80% threshold)
     result = credit_service.check_storage_limit(
-      sample_graph_credits.graph_id, current_storage_gb=Decimal("90")
+      sample_graph_credits.graph_id, current_storage_gb=Decimal("450")
     )
 
     assert result["within_limit"] is True
@@ -59,9 +59,9 @@ class TestStorageLimitChecking:
     """Test storage check when exceeding limits."""
     credit_service = CreditService(db_session)
 
-    # Test with 120GB usage against 100GB limit
+    # Test with 600GB usage against 500GB limit
     result = credit_service.check_storage_limit(
-      sample_graph_credits.graph_id, current_storage_gb=Decimal("120")
+      sample_graph_credits.graph_id, current_storage_gb=Decimal("600")
     )
 
     assert result["within_limit"] is False
@@ -145,7 +145,7 @@ class TestStorageOverride:
     )
 
     assert result["success"] is True
-    assert result["old_limit_gb"] == 100.0
+    assert result["old_limit_gb"] == 500.0
     assert result["new_limit_gb"] == 1000.0
     assert result["admin_user_id"] == "admin_123"
     assert result["reason"] == "Emergency capacity increase"
@@ -246,7 +246,7 @@ class TestStorageViolationDetection:
       session=db_session,
     )
 
-    # Create usage record that exceeds limit (120GB > 100GB limit)
+    # Create usage record that exceeds limit (600GB > 500GB limit)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="violation_usage_1",
@@ -256,7 +256,7 @@ class TestStorageViolationDetection:
       graph_tier=credits.graph_tier.value
       if hasattr(credits.graph_tier, "value")
       else credits.graph_tier,
-      storage_gb=Decimal("120"),
+      storage_gb=Decimal("600"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,
@@ -275,8 +275,8 @@ class TestStorageViolationDetection:
     violation = graph_violations[0]
     assert violation["graph_id"] == credits.graph_id
     assert violation["user_id"] == sample_user.id
-    assert violation["current_storage_gb"] == 120.0
-    assert violation["effective_limit_gb"] == 100.0
+    assert violation["current_storage_gb"] == 600.0
+    assert violation["effective_limit_gb"] == 500.0
     assert violation["exceeds_limit"] is True
     assert violation["usage_percentage"] == 120.0
 
@@ -305,7 +305,7 @@ class TestStorageViolationDetection:
       session=db_session,
     )
 
-    # Create usage record that approaches limit (90GB = 90% of 100GB)
+    # Create usage record that approaches limit (450GB = 90% of 500GB)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="approaching_usage_1",
@@ -315,7 +315,7 @@ class TestStorageViolationDetection:
       graph_tier=credits.graph_tier.value
       if hasattr(credits.graph_tier, "value")
       else credits.graph_tier,
-      storage_gb=Decimal("90"),
+      storage_gb=Decimal("450"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,

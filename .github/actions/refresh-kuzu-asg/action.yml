@@ -173,7 +173,7 @@ runs:
 
             # Check database allocation
             DB_ITEM=$(aws dynamodb get-item \
-              --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+              --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
               --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
               --output json \
               --region "${{ inputs.aws-region }}" 2>/dev/null || echo '{}')
@@ -253,7 +253,7 @@ runs:
 
             # Check instance status in DynamoDB
             INSTANCE_STATUS=$(aws dynamodb get-item \
-              --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+              --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
               --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
               --query "Item.database_count.N" \
               --output text \
@@ -351,7 +351,7 @@ runs:
               REGISTER_WAIT=0
               while [ $REGISTER_WAIT -lt 120 ]; do
                 REGISTRY_STATUS=$(aws dynamodb get-item \
-                  --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+                  --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
                   --key "{\"instance_id\":{\"S\":\"${NEW_INSTANCE}\"}}" \
                   --query "Item.status.S" \
                   --output text \
@@ -396,7 +396,7 @@ runs:
 
               # Update instance status to healthy
               aws dynamodb update-item \
-                --table-name "robosystems-kuzu-${{ inputs.environment }}-instance-registry" \
+                --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
                 --key "{\"instance_id\":{\"S\":\"${NEW_INSTANCE}\"}}" \
                 --update-expression "SET #status = :status" \
                 --expression-attribute-names '{"#status": "status"}' \

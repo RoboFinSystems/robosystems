@@ -1,4 +1,4 @@
-name: Deploy Kuzu Writers and Replicas
+name: Deploy Graph Database Writers and Replicas
 
 on:
   workflow_call:
@@ -68,11 +68,6 @@ on:
         type: string
         description: Enable premium tier writers
         default: ""
-      shared_replica_enabled:
-        required: false
-        type: string
-        description: Enable shared replica deployment
-        default: ""
     secrets:
       ACTIONS_TOKEN:
         required: true
@@ -82,23 +77,20 @@ on:
         required: true
       AWS_SNS_ALERT_EMAIL:
         required: true
-    outputs:
-      replica_alb_endpoint:
-        description: Shared replica ALB endpoint URL
-        value: ${{ jobs.deploy-shared-replicas.outputs.replica_alb_endpoint }}
 
 jobs:
   # Step 1: Prepare Writer Matrix
   prepare-writer-matrix:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      kuzu_matrix: ${{ steps.set-matrix.outputs.kuzu_matrix }}
+      neo4j_matrix: ${{ steps.set-matrix.outputs.neo4j_matrix }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
-            .github/configs/kuzu.yml
+            .github/configs/graph.yml
           sparse-checkout-cone-mode: false
 
       - name: Install yq
@@ -117,7 +109,6 @@ jobs:
             export STANDARD_ENABLED_PROD="true"  # Always enabled
             export ENTERPRISE_ENABLED_PROD="${{ inputs.enterprise_enabled }}"
             export PREMIUM_ENABLED_PROD="${{ inputs.premium_enabled }}"
-            export SHARED_MASTER_ENABLED_PROD="true"  # Always enabled
           else
             ENV_KEY="staging"
             ENV_SUFFIX="STAGING"
@@ -125,16 +116,16 @@ jobs:
             export STANDARD_ENABLED_STAGING="true"  # Always enabled
             export ENTERPRISE_ENABLED_STAGING="${{ inputs.enterprise_enabled }}"
             export PREMIUM_ENABLED_STAGING="${{ inputs.premium_enabled }}"
-            export SHARED_MASTER_ENABLED_STAGING="true"  # Always enabled
           fi
 
-          echo "Loading Kuzu writer configuration for: $ENV_KEY"
+          echo "Loading Graph database writer configuration for: $ENV_KEY"
 
           # Parse YAML and build matrix
-          MATRIX_JSON=$(yq eval -o=json ".${ENV_KEY}.writers" .github/configs/kuzu.yml)
+          MATRIX_JSON=$(yq eval -o=json ".${ENV_KEY}.writers" .github/configs/graph.yml)
 
-          # Filter based on enable variables
-          FILTERED="[]"
+          # Filter based on enable variables - separate by backend
+          KUZU_FILTERED="[]"
+          NEO4J_FILTERED="[]"
 
           # Get number of writers
           WRITER_COUNT=$(echo "$MATRIX_JSON" | jq 'length')
@@ -174,8 +165,10 @@ jobs:
 
             if [ "$SHOULD_DEPLOY" = "true" ]; then
               # Build the matrix entry from writer config with nested instance specs
+              # Include backend field for routing to correct workflow (kuzu vs neo4j)
               MATRIX_ENTRY=$(echo "$writer" | jq '{
                 name: .name,
+                backend: .backend,
                 stack_suffix: .stack_suffix,
                 tier: .tier,
                 min_instances: .scaling.min,
@@ -189,35 +182,53 @@ jobs:
                 query_timeout: .instance.query_timeout,
                 max_query_length: .instance.max_query_length,
                 ingestion_batch_size: .instance.ingestion_batch_size,
-                connection_pool_size: .instance.connection_pool_size
+                connection_pool_size: .instance.connection_pool_size,
+                neo4j_version: .instance.neo4j_version,
+                neo4j_edition: .instance.neo4j_edition
               }')
 
-              # Append to filtered array
-              FILTERED=$(echo "$FILTERED" | jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]')
+              # Append to backend-specific filtered array
+              BACKEND=$(echo "$writer" | jq -r '.backend')
+              if [ "$BACKEND" = "kuzu" ]; then
+                KUZU_FILTERED=$(echo "$KUZU_FILTERED" | jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]')
+              elif [ "$BACKEND" = "neo4j" ]; then
+                NEO4J_FILTERED=$(echo "$NEO4J_FILTERED" | jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]')
+              fi
             fi
           done
 
-          # Output the matrix
-          MATRIX_OUTPUT=$(jq -nc --argjson filtered "$FILTERED" '{"include": $filtered}')
-          echo "matrix=$MATRIX_OUTPUT" >> $GITHUB_OUTPUT
+          # Output the matrices
+          KUZU_MATRIX=$(jq -nc --argjson filtered "$KUZU_FILTERED" '{"include": $filtered}')
+          NEO4J_MATRIX=$(jq -nc --argjson filtered "$NEO4J_FILTERED" '{"include": $filtered}')
+
+          echo "kuzu_matrix=$KUZU_MATRIX" >> $GITHUB_OUTPUT
+          echo "neo4j_matrix=$NEO4J_MATRIX" >> $GITHUB_OUTPUT
 
           # Debug output
           echo ""
-          echo "Final writer matrix configuration:"
-          echo "$FILTERED" | jq '.'
+          echo "Kuzu writer matrix:"
+          echo "$KUZU_FILTERED" | jq '.'
+          echo ""
+          echo "Neo4j writer matrix:"
+          echo "$NEO4J_FILTERED" | jq '.'
 
           # Summary
-          WRITER_COUNT=$(echo "$FILTERED" | jq 'length')
+          KUZU_COUNT=$(echo "$KUZU_FILTERED" | jq 'length')
+          NEO4J_COUNT=$(echo "$NEO4J_FILTERED" | jq 'length')
+          TOTAL_COUNT=$((KUZU_COUNT + NEO4J_COUNT))
           echo ""
-          echo "📊 Deployment Summary: $WRITER_COUNT Kuzu writers will be deployed"
+          echo "📊 Deployment Summary:"
+          echo "  - $KUZU_COUNT Kuzu writers"
+          echo "  - $NEO4J_COUNT Neo4j writers"
+          echo "  - $TOTAL_COUNT Total graph database writers"
 
-  # Step 2: Deploy Writers with Matrix
-  deploy-writers:
+  # Step 2a: Deploy Kuzu Writers
+  deploy-kuzu-writers:
     needs: [prepare-writer-matrix]
-    if: needs.prepare-writer-matrix.outputs.matrix != '{"include":[]}'
+    if: needs.prepare-writer-matrix.outputs.kuzu_matrix != '{"include":[]}'
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.kuzu_matrix) }}
       max-parallel: 4 # Deploy up to 4 writers in parallel
     uses: ./.github/workflows/deploy-kuzu-writers.yml
     with:
@@ -250,69 +261,18 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
-  # Step 3: Deploy Shared Replicas (if enabled)
-  check-replica-config:
-    runs-on: ubuntu-latest
-    outputs:
-      should_deploy: ${{ steps.check.outputs.should_deploy }}
-      replica_config: ${{ steps.check.outputs.replica_config }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            .github/configs/kuzu.yml
-          sparse-checkout-cone-mode: false
-
-      - name: Install yq
-        run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-
-      - name: Check Replica Configuration
-        id: check
-        run: |
-          # Determine environment key and set environment variables
-          if [ "${{ inputs.environment }}" = "prod" ]; then
-            ENV_KEY="production"
-            ENABLE_VAR="SHARED_REPLICA_ENABLED_PROD"
-            export SHARED_REPLICA_ENABLED_PROD="${{ inputs.shared_replica_enabled }}"
-          else
-            ENV_KEY="staging"
-            ENABLE_VAR="SHARED_REPLICA_ENABLED_STAGING"
-            export SHARED_REPLICA_ENABLED_STAGING="${{ inputs.shared_replica_enabled }}"
-          fi
-
-          # Get replica configuration
-          REPLICA_CONFIG=$(yq eval -o=json ".${ENV_KEY}.replicas[0]" .github/configs/kuzu.yml)
-
-          # Check if should deploy
-          VAR_VALUE="${!ENABLE_VAR:-}"
-          ENABLED_DEFAULT=$(echo "$REPLICA_CONFIG" | jq -r '.deployment.enabled_default')
-
-          if [ "$VAR_VALUE" = "false" ]; then
-            echo "❌ Shared replicas explicitly disabled"
-            echo "should_deploy=false" >> $GITHUB_OUTPUT
-          elif [ -n "$VAR_VALUE" ] && [ "$VAR_VALUE" != "false" ]; then
-            echo "✅ Shared replicas explicitly enabled"
-            echo "should_deploy=true" >> $GITHUB_OUTPUT
-            echo "replica_config=$REPLICA_CONFIG" >> $GITHUB_OUTPUT
-          elif [ "$ENABLED_DEFAULT" = "true" ]; then
-            echo "✅ Shared replicas using default (enabled)"
-            echo "should_deploy=true" >> $GITHUB_OUTPUT
-            echo "replica_config=$REPLICA_CONFIG" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Shared replicas using default (disabled)"
-            echo "should_deploy=false" >> $GITHUB_OUTPUT
-          fi
-
-  deploy-shared-replicas:
-    needs: [check-replica-config]
-    if: needs.check-replica-config.outputs.should_deploy == 'true'
-    uses: ./.github/workflows/deploy-kuzu-shared-replicas.yml
+  # Step 2b: Deploy Neo4j Writers
+  deploy-neo4j-writers:
+    needs: [prepare-writer-matrix]
+    if: needs.prepare-writer-matrix.outputs.neo4j_matrix != '{"include":[]}'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.neo4j_matrix) }}
+      max-parallel: 4 # Deploy up to 4 writers in parallel
+    uses: ./.github/workflows/deploy-neo4j-writers.yml
     with:
       # Stack & Repository Configuration
-      stack_name: RoboSystemsKuzuSharedReplicas${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
+      stack_name: RoboSystemsNeo4jWriters${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
       environment: ${{ inputs.environment }}
       # GHA Runner Configuration
       runner_config: ${{ inputs.runner_config }}
@@ -320,20 +280,21 @@ jobs:
       aws_region: ${{ inputs.aws_region }}
       vpc_id: ${{ inputs.vpc_id }}
       subnet_ids: ${{ inputs.subnet_ids }}
-      # Instance Configuration (from config)
-      instance_type: ${{ fromJson(needs.check-replica-config.outputs.replica_config).instance_type }}
+      valkey_sg_id: ${{ inputs.valkey_sg_id }}
       # Auto Scaling Configuration
-      min_instances: "${{ fromJson(needs.check-replica-config.outputs.replica_config).scaling.min }}"
-      max_instances: "${{ fromJson(needs.check-replica-config.outputs.replica_config).scaling.max }}"
-      desired_instances: "${{ fromJson(needs.check-replica-config.outputs.replica_config).scaling.desired }}"
-      # Kuzu Configuration
-      shared_repositories: ${{ fromJson(needs.check-replica-config.outputs.replica_config).shared_repositories }}
-      # Other Configuration
-      ecr_image_tag: ${{ inputs.ecr_image_tag }}
-      lambda_code_bucket: robosystems-${{ inputs.environment }}-deployment
+      min_instances: "${{ matrix.min_instances }}"
+      max_instances: "${{ matrix.max_instances }}"
+      # Neo4j Configuration
+      writer_tier: ${{ matrix.tier }}
+      neo4j_version: ${{ matrix.neo4j_version || '5.15.0' }}
+      # Instance Configuration
+      instance_type: ${{ matrix.instance_type }}
+      # Volume Management
+      volume_detachment_topic_arn: ${{ inputs.volume_detachment_topic_arn }}
       volume_manager_function_arn: ${{ inputs.volume_manager_function_arn }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
+

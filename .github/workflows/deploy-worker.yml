@@ -137,17 +137,6 @@ on:
         required: true
         type: string
 
-      # Kuzu Configuration
-      kuzu_replica_alb_url:
-        description: "ALB endpoint URL for shared repository read replicas"
-        required: false
-        type: string
-        default: ""
-      shared_replica_alb_enabled:
-        description: "Enable routing to shared replica ALB for read operations"
-        required: false
-        type: string
-        default: "false"
 
       # Cache Configuration
       valkey_url:
@@ -333,8 +322,6 @@ jobs:
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\" \
 
-                ParameterKey=KuzuReplicaAlbUrl,ParameterValue=\"${{ inputs.kuzu_replica_alb_url }}\" \
-                ParameterKey=SharedReplicaAlbEnabled,ParameterValue=${{ inputs.shared_replica_alb_enabled }}"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

@@ -118,17 +118,6 @@ on:
         type: string
         default: ""
 
-      # Kuzu Configuration
-      kuzu_replica_alb_url:
-        description: "ALB endpoint URL for shared repository read replicas"
-        required: false
-        type: string
-        default: ""
-      shared_replica_alb_enabled:
-        description: "Enable routing to shared replica ALB for read operations"
-        required: false
-        type: string
-        default: "false"
 
       # Cache Configuration
       valkey_url:
@@ -255,8 +244,6 @@ jobs:
                 ParameterKey=FargateSpotWeight,ParameterValue=${{ inputs.fargate_spot_weight }} \
                 ParameterKey=FargateWeight,ParameterValue=${{ inputs.fargate_weight }} \
                 ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\" \
-                ParameterKey=KuzuReplicaAlbUrl,ParameterValue=\"${{ inputs.kuzu_replica_alb_url }}\" \
-                ParameterKey=SharedReplicaAlbEnabled,ParameterValue=${{ inputs.shared_replica_alb_enabled }} \
                 ParameterKey=EmailFromAddress,ParameterValue="${{ secrets.AWS_SNS_ALERT_EMAIL }}""
 
           # Deploy or update the stack

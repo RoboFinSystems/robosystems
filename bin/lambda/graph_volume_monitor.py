@@ -1,7 +1,7 @@
 """
 Kuzu Volume Monitor and Auto-Expansion Lambda Function
 
-This Lambda handles proactive volume monitoring and expansion for Kuzu instances:
+This Lambda handles proactive volume monitoring and expansion for Graph instances:
 - Monitors disk usage across all instances
 - Automatically expands volumes when thresholds are exceeded
 - Grows filesystems after EBS expansion
@@ -92,7 +92,7 @@ def handle_alarm_trigger(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
-  """Monitor all Kuzu instances and expand volumes as needed"""
+  """Monitor all Graph instances and expand volumes as needed"""
 
   results = {
     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -112,11 +112,11 @@ def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
       logger.warning(f"Failed to sync volume registry: {e}")
       results["errors"].append(f"Registry sync failed: {str(e)}")
 
-    # Discover all Kuzu instances
+    # Discover all Graph instances
     instances = discover_kuzu_instances()
     results["instances_checked"] = len(instances)
 
-    logger.info(f"Monitoring {len(instances)} Kuzu instances")
+    logger.info(f"Monitoring {len(instances)} Graph instances")
 
     for instance in instances:
       try:
@@ -150,12 +150,12 @@ def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
 
 
 def discover_kuzu_instances() -> List[Dict]:
-  """Discover all running Kuzu instances"""
+  """Discover all running Graph instances"""
 
   instances = []
 
   try:
-    # Query EC2 for Kuzu instances
+    # Query EC2 for Graph instances
     response = ec2.describe_instances(
       Filters=[
         {"Name": "tag:Service", "Values": ["RoboSystems"]},
@@ -379,7 +379,7 @@ def check_volume_modification_state(volume_id: str) -> Optional[str]:
 
 
 def get_data_volume_id(instance_id: str) -> Optional[str]:
-  """Get the data volume ID for a Kuzu instance"""
+  """Get the data volume ID for a Graph instance"""
 
   try:
     # Get volumes attached to the instance
@@ -420,7 +420,7 @@ def get_data_volume_id(instance_id: str) -> Optional[str]:
 
 
 def get_volume_metrics_from_instance(instance: Dict) -> Optional[Dict]:
-  """Query Kuzu API for volume metrics"""
+  """Query Graph API for volume metrics"""
 
   try:
     # Use the /metrics endpoint
@@ -500,7 +500,7 @@ def perform_volume_expansion(
 
     # Publish CloudWatch metric
     cloudwatch.put_metric_data(
-      Namespace=f"RoboSystemsKuzu/{ENVIRONMENT.title()}",
+      Namespace=f"RoboSystemsGraph/{ENVIRONMENT.title()}",
       MetricData=[
         {
           "MetricName": "VolumeExpansions",
@@ -843,7 +843,7 @@ def publish_monitoring_metrics(results: Dict):
   """Publish monitoring metrics to CloudWatch"""
 
   try:
-    namespace = f"RoboSystemsKuzu/{ENVIRONMENT.title()}"
+    namespace = f"RoboSystemsGraph/{ENVIRONMENT.title()}"
 
     metric_data = [
       {
@@ -1208,7 +1208,7 @@ def sync_volume_registry():
 
       # Publish metric
       cloudwatch.put_metric_data(
-        Namespace=f"RoboSystemsKuzu/{ENVIRONMENT.title()}",
+        Namespace=f"RoboSystemsGraph/{ENVIRONMENT.title()}",
         MetricData=[
           {
             "MetricName": "RegistryUpdates",

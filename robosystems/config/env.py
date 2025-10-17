@@ -412,6 +412,18 @@ class EnvConfig:
     "GRAPH_BACKUP_ENCRYPTION_PASSWORD", ""
   )
 
+  # Graph Registry Tables (DynamoDB - applies to all backends)
+  # These tables track graph allocations, instance health, and volume management
+  GRAPH_REGISTRY_TABLE = get_str_env(
+    "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
+  )
+  INSTANCE_REGISTRY_TABLE = get_str_env(
+    "INSTANCE_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-instance-registry"
+  )
+  VOLUME_REGISTRY_TABLE = get_str_env(
+    "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
+  )
+
   # Kuzu-Specific Configuration (when BACKEND_TYPE=kuzu)
   KUZU_DATABASE_PATH = get_str_env("KUZU_DATABASE_PATH", "./data/kuzu-dbs")
   KUZU_ACCESS_PATTERN = get_str_env("KUZU_ACCESS_PATTERN", "api_auto")

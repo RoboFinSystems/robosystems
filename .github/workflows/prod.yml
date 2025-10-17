@@ -369,8 +369,8 @@ jobs:
       BASTION_ALLOWED_CIDR_BLOCK: ${{ secrets.BASTION_ALLOWED_CIDR_BLOCK }}
       BASTION_ADDITIONAL_SSH_KEYS: ${{ secrets.BASTION_ADDITIONAL_SSH_KEYS }}
 
-  # Kuzu Infrastructure - Step 1: Deploy DynamoDB, Secrets, Lambda monitoring
-  deploy-kuzu-infra:
+  # Graph Infrastructure - Step 1: Deploy DynamoDB, Secrets, Lambda monitoring
+  deploy-graph-infra:
     needs:
       [
         runner,
@@ -380,7 +380,7 @@ jobs:
         deploy-vpc,
         deploy-s3,
       ]
-    uses: ./.github/workflows/deploy-kuzu-infra.yml
+    uses: ./.github/workflows/deploy-graph-infra.yml
     with:
       # Stack & Repository Configuration
       stack_name: ${{ needs.stack-config.outputs.kuzu_infra_stack }}
@@ -399,10 +399,10 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
-  # Kuzu Infrastructure - Step 2: Deploy EBS volume management
-  deploy-kuzu-volumes:
-    needs: [runner, stack-config, deploy-vpc, deploy-kuzu-infra]
-    uses: ./.github/workflows/deploy-kuzu-volumes.yml
+  # Graph Infrastructure - Step 2: Deploy EBS volume management
+  deploy-graph-volumes:
+    needs: [runner, stack-config, deploy-vpc, deploy-graph-infra]
+    uses: ./.github/workflows/deploy-graph-volumes.yml
     with:
       # Stack & Repository Configuration
       stack_name: ${{ needs.stack-config.outputs.kuzu_volumes_stack }}
@@ -414,18 +414,18 @@ jobs:
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Registry Configuration
-      volume_registry_table: ${{ needs.deploy-kuzu-infra.outputs.volume_registry_table }}
+      volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
       # Lambda Configuration
       lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_PROD || 'prod' }}-deployment
       # Secrets Configuration
-      graph_api_secret_arn: ${{ needs.deploy-kuzu-infra.outputs.secret_arn }}
+      graph_api_secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
-  deploy-kuzu:
+  deploy-graph:
     needs:
       [
         runner,
@@ -435,10 +435,10 @@ jobs:
         deploy-postgres-iam,
         deploy-valkey,
         deploy-s3,
-        deploy-kuzu-infra,
-        deploy-kuzu-volumes,
+        deploy-graph-infra,
+        deploy-graph-volumes,
       ]
-    uses: ./.github/workflows/deploy-kuzu.yml
+    uses: ./.github/workflows/deploy-graph.yml
     with:
       # Environment Configuration
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
@@ -454,10 +454,10 @@ jobs:
       # Container Configuration
       ecr_image_tag: latest
       # Infrastructure inputs from kuzu infrastructure jobs
-      secret_arn: ${{ needs.deploy-kuzu-infra.outputs.secret_arn }}
-      volume_registry_table: ${{ needs.deploy-kuzu-infra.outputs.volume_registry_table }}
-      volume_manager_function_arn: ${{ needs.deploy-kuzu-volumes.outputs.volume_manager_function_arn }}
-      volume_detachment_topic_arn: ${{ needs.deploy-kuzu-volumes.outputs.volume_detachment_topic_arn }}
+      secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
+      volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
+      volume_manager_function_arn: ${{ needs.deploy-graph-volumes.outputs.volume_manager_function_arn }}
+      volume_detachment_topic_arn: ${{ needs.deploy-graph-volumes.outputs.volume_detachment_topic_arn }}
       # Kuzu Enable/Disable Configuration
       enterprise_enabled: ${{ vars.ENTERPRISE_ENABLED_PROD }}
       premium_enabled: ${{ vars.PREMIUM_ENABLED_PROD }}
@@ -469,7 +469,7 @@ jobs:
       AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   kuzu-container-refresh:
-    needs: [runner, create-deployment, build, deploy-kuzu]
+    needs: [runner, create-deployment, build, deploy-graph]
     if: ${{ vars.KUZU_UPDATE_CONTAINERS_PROD == 'true' }}
     uses: ./.github/workflows/kuzu-container-refresh.yml
     with:
@@ -493,7 +493,7 @@ jobs:
         stack-config,
         build,
         deploy-vpc,
-        deploy-kuzu,
+        deploy-graph,
         deploy-valkey,
         deploy-postgres-iam,
         deploy-s3,
@@ -537,8 +537,8 @@ jobs:
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       # Kuzu Configuration
-      kuzu_replica_alb_url: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint || '' }}
-      shared_replica_alb_enabled: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint && 'true' || 'false' }}
+      kuzu_replica_alb_url: ${{ needs.deploy-graph.outputs.replica_alb_endpoint || '' }}
+      shared_replica_alb_enabled: ${{ needs.deploy-graph.outputs.replica_alb_endpoint && 'true' || 'false' }}
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       refresh_ecs_service: ${{ vars.API_ASG_REFRESH_PROD || 'false' }}
@@ -562,7 +562,7 @@ jobs:
         create-deployment,
         build,
         deploy-vpc,
-        deploy-kuzu,
+        deploy-graph,
         deploy-valkey,
         deploy-postgres-iam,
         deploy-s3,
@@ -586,8 +586,8 @@ jobs:
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       # Kuzu Configuration
-      kuzu_replica_alb_url: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint || '' }}
-      shared_replica_alb_enabled: ${{ needs.deploy-kuzu.outputs.replica_alb_endpoint && 'true' || 'false' }}
+      kuzu_replica_alb_url: ${{ needs.deploy-graph.outputs.replica_alb_endpoint || '' }}
+      shared_replica_alb_enabled: ${{ needs.deploy-graph.outputs.replica_alb_endpoint && 'true' || 'false' }}
       # Other Configuration
       refresh_ecs_service: ${{ vars.WORKER_ASG_REFRESH_PROD || 'false' }}
       # Worker Enable/Disable Configuration
@@ -607,7 +607,7 @@ jobs:
         runner,
         create-deployment,
         deploy-vpc,
-        deploy-kuzu,
+        deploy-graph,
         deploy-valkey,
         deploy-postgres-iam,
         deploy-s3,
@@ -623,7 +623,7 @@ jobs:
       needs.runner.result == 'success' &&
       needs.create-deployment.result == 'success' &&
       needs.deploy-vpc.result == 'success' &&
-      needs.deploy-kuzu.result == 'success' &&
+      needs.deploy-graph.result == 'success' &&
       needs.deploy-valkey.result == 'success' &&
       needs.deploy-postgres-iam.result == 'success' &&
       needs.deploy-s3.result == 'success' &&
@@ -658,7 +658,7 @@ jobs:
         runner,
         create-deployment,
         deploy-vpc,
-        deploy-kuzu,
+        deploy-graph,
         deploy-valkey,
         deploy-postgres-iam,
         deploy-s3,

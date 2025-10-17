@@ -105,18 +105,7 @@ production:
           asg_name: AutoScalingGroupName
           instance_ids: InstanceIds
       
-      shared_master:
-        stack_name: RoboSystemsKuzuWritersSharedMasterProd
-        outputs:
-          asg_name: AutoScalingGroupName
-          instance_ids: InstanceIds
     
-    shared_replicas:
-      stack_name: RoboSystemsKuzuSharedReplicasProd
-      outputs:
-        alb_url: SharedReplicaAlbUrl
-        alb_dns: SharedReplicaAlbDnsName
-        service_arn: SharedReplicaServiceArn
   
   # Monitoring & Observability
   monitoring:
@@ -242,11 +231,6 @@ staging:
           asg_name: AutoScalingGroupName
           instance_ids: InstanceIds
       
-      shared_master:
-        stack_name: RoboSystemsKuzuWritersSharedMasterStaging
-        outputs:
-          asg_name: AutoScalingGroupName
-          instance_ids: InstanceIds
   
   # Monitoring & Observability  
   monitoring:

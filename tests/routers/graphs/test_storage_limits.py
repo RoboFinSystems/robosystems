@@ -87,8 +87,8 @@ class TestStorageLimitsAPI:
 
     assert data["graph_id"] == sample_graph_credits.graph_id
     assert data["current_storage_gb"] == 60.0
-    assert data["effective_limit_gb"] == 100.0
-    assert data["usage_percentage"] == 60.0
+    assert data["effective_limit_gb"] == 500.0
+    assert data["usage_percentage"] == 12.0
     assert data["within_limit"] is True
     assert data["approaching_limit"] is False
     assert data["has_override"] is False
@@ -97,7 +97,7 @@ class TestStorageLimitsAPI:
     self, client_with_test_user: TestClient, sample_graph_credits, db_session
   ):
     """Test storage limits when approaching threshold."""
-    # Create usage record at 90% (90GB of 100GB)
+    # Create usage record at 90% (450GB of 500GB)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="api_usage_2",
@@ -107,7 +107,7 @@ class TestStorageLimitsAPI:
       graph_tier=sample_graph_credits.graph_tier.value
       if hasattr(sample_graph_credits.graph_tier, "value")
       else sample_graph_credits.graph_tier,
-      storage_gb=Decimal("90"),
+      storage_gb=Decimal("450"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,
@@ -135,7 +135,7 @@ class TestStorageLimitsAPI:
     self, client_with_test_user: TestClient, sample_graph_credits, db_session
   ):
     """Test storage limits when exceeding limit."""
-    # Create usage record that exceeds limit (120GB > 100GB)
+    # Create usage record that exceeds limit (600GB > 500GB)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="api_usage_3",
@@ -145,7 +145,7 @@ class TestStorageLimitsAPI:
       graph_tier=sample_graph_credits.graph_tier.value
       if hasattr(sample_graph_credits.graph_tier, "value")
       else sample_graph_credits.graph_tier,
-      storage_gb=Decimal("120"),
+      storage_gb=Decimal("600"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,

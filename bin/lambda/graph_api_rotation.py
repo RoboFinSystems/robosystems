@@ -1,7 +1,7 @@
 """
-Kuzu API Key Rotation Lambda Function
+Graph API Key Rotation Lambda Function
 
-Implements AWS Secrets Manager rotation for Kuzu API keys.
+Implements AWS Secrets Manager rotation for Graph API keys.
 Generates new API keys and stores them securely.
 
 This function handles the 4-step rotation process:

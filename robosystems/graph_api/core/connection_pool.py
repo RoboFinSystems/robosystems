@@ -256,7 +256,10 @@ class KuzuConnectionPool:
           logger.info(f"Using per-database memory limit: {buffer_pool_mb} MB")
         else:
           # Fall back to total memory for single-database instances (enterprise/premium/shared)
-          buffer_pool_mb = tier_config.get("max_memory_mb", 2048)
+          # Note: This only applies to Kuzu databases (Standard tier uses this pool)
+          buffer_pool_mb = tier_config.get(
+            "kuzu_max_memory_mb", tier_config.get("max_memory_mb", 2048)
+          )
           logger.info(
             f"Using total memory allocation: {buffer_pool_mb} MB (tier: {tier_config.get('tier', 'default')})"
           )
