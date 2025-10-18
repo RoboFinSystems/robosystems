@@ -93,23 +93,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> None:
   # Setup the client
   metadata = secrets_client.describe_secret(SecretId=arn)
   if not metadata["RotationEnabled"]:
-    logger.error(f"Secret {arn} is not enabled for rotation")
+    logger.error("Secret is not enabled for rotation")
     raise ValueError(f"Secret {arn} is not enabled for rotation")
 
   versions = metadata["VersionIdsToStages"]
   if token not in versions:
-    logger.error(f"Secret version {token} has no stage for rotation of secret {arn}")
+    logger.error("Secret version has no stage for rotation")
     raise ValueError(
       f"Secret version {token} has no stage for rotation of secret {arn}"
     )
 
   if "AWSCURRENT" in versions[token]:
-    logger.info(f"Secret version {token} already set as AWSCURRENT for secret {arn}")
+    logger.info("Secret version already set as AWSCURRENT")
     return
   elif "AWSPENDING" not in versions[token]:
-    logger.error(
-      f"Secret version {token} not set as AWSPENDING for rotation of secret {arn}"
-    )
+    logger.error("Secret version not set as AWSPENDING for rotation")
     raise ValueError(
       f"Secret version {token} not set as AWSPENDING for rotation of secret {arn}"
     )
@@ -124,7 +122,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> None:
   elif step == "finishSecret":
     finish_secret(arn, token)
   else:
-    raise ValueError(f"Invalid step parameter {step} for secret {arn}")
+    raise ValueError(f"Invalid step parameter: {step}")
 
 
 def create_secret(arn: str, token: str) -> None:
@@ -173,9 +171,7 @@ def create_secret(arn: str, token: str) -> None:
     SecretString=json.dumps(new_secret),
     VersionStages=["AWSPENDING"],
   )
-  logger.info(
-    f"createSecret: Successfully generated new credentials for ARN {arn} and version {token}"
-  )
+  logger.info("createSecret: Successfully generated new credentials")
 
 
 def set_secret(arn: str, token: str) -> None:
@@ -245,7 +241,9 @@ def test_secret(arn: str, token: str) -> None:
 
     parts = api_key.split("_", 2)  # Split into max 3 parts: graph, environment, random
     if len(parts) != 3:
-      raise ValueError("Invalid API key format: expected graph_environment_randomstring")
+      raise ValueError(
+        "Invalid API key format: expected graph_environment_randomstring"
+      )
 
     # Validate prefix
     if parts[0] != "graph":
@@ -301,9 +299,7 @@ def finish_secret(arn: str, token: str) -> None:
     MoveToVersionId=token,
     RemoveFromVersionId=current_version,
   )
-  logger.info(
-    f"finishSecret: Successfully set AWSCURRENT stage to version {token} for secret {arn}"
-  )
+  logger.info("finishSecret: Successfully set AWSCURRENT stage to new version")
 
   # Log rotation completion
   try:
