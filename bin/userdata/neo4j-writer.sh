@@ -123,9 +123,9 @@ PAYLOAD="{
 # Lambda CLI v2 requires base64-encoded payload
 ENCODED_PAYLOAD=$(echo -n "$PAYLOAD" | base64)
 
-# Invoke Volume Manager Lambda to attach volume (uses shared Kuzu infrastructure)
+# Invoke Volume Manager Lambda to attach volume
 aws lambda invoke \
-  --function-name "RoboSystemsKuzuVolumes${ENVIRONMENT^}-volume-manager" \
+  --function-name "RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager" \
   --payload "$ENCODED_PAYLOAD" \
   --region ${REGION} \
   /tmp/volume-response.json || echo "Failed to invoke Volume Manager"

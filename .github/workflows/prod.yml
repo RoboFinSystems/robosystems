@@ -45,8 +45,8 @@ jobs:
       valkey_stack: ${{ steps.load.outputs.valkey_stack }}
       api_stack: ${{ steps.load.outputs.api_stack }}
       beat_stack: ${{ steps.load.outputs.beat_stack }}
-      kuzu_infra_stack: ${{ steps.load.outputs.kuzu_infra_stack }}
-      kuzu_volumes_stack: ${{ steps.load.outputs.kuzu_volumes_stack }}
+      graph_infra_stack: ${{ steps.load.outputs.graph_infra_stack }}
+      graph_volumes_stack: ${{ steps.load.outputs.graph_volumes_stack }}
       prometheus_stack: ${{ steps.load.outputs.prometheus_stack }}
       grafana_stack: ${{ steps.load.outputs.grafana_stack }}
       bastion_stack: ${{ steps.load.outputs.bastion_stack }}
@@ -82,8 +82,8 @@ jobs:
           echo "valkey_stack=$(./bin/tools/stack-config.sh $ENV valkey)" >> $GITHUB_OUTPUT
           echo "api_stack=$(./bin/tools/stack-config.sh $ENV api)" >> $GITHUB_OUTPUT
           echo "beat_stack=$(./bin/tools/stack-config.sh $ENV beat)" >> $GITHUB_OUTPUT
-          echo "kuzu_infra_stack=$(./bin/tools/stack-config.sh $ENV kuzu.infra)" >> $GITHUB_OUTPUT
-          echo "kuzu_volumes_stack=$(./bin/tools/stack-config.sh $ENV kuzu.volumes)" >> $GITHUB_OUTPUT
+          echo "graph_infra_stack=$(./bin/tools/stack-config.sh $ENV graph.infra)" >> $GITHUB_OUTPUT
+          echo "graph_volumes_stack=$(./bin/tools/stack-config.sh $ENV graph.volumes)" >> $GITHUB_OUTPUT
           echo "prometheus_stack=$(./bin/tools/stack-config.sh $ENV monitoring.prometheus)" >> $GITHUB_OUTPUT
           echo "grafana_stack=$(./bin/tools/stack-config.sh $ENV monitoring.grafana)" >> $GITHUB_OUTPUT
           echo "bastion_stack=$(./bin/tools/stack-config.sh $ENV bastion)" >> $GITHUB_OUTPUT
@@ -388,7 +388,7 @@ jobs:
     uses: ./.github/workflows/deploy-graph-infra.yml
     with:
       # Stack & Repository Configuration
-      stack_name: ${{ needs.stack-config.outputs.kuzu_infra_stack }}
+      stack_name: ${{ needs.stack-config.outputs.graph_infra_stack }}
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
       # GHA Runner Configuration
       runner_config: ${{ needs.runner.outputs.runner_config }}
@@ -410,7 +410,7 @@ jobs:
     uses: ./.github/workflows/deploy-graph-volumes.yml
     with:
       # Stack & Repository Configuration
-      stack_name: ${{ needs.stack-config.outputs.kuzu_volumes_stack }}
+      stack_name: ${{ needs.stack-config.outputs.graph_volumes_stack }}
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
       # GHA Runner Configuration
       runner_config: ${{ needs.runner.outputs.runner_config }}

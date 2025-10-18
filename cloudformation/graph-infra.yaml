@@ -533,7 +533,7 @@ Resources:
       AlarmName: !Sub robosystems-graph-${Environment}-database-capacity
       AlarmDescription: RoboSystems graph database capacity is running low
       MetricName: DatabaseUtilizationPercent
-      Namespace: RoboSystemsKuzu
+      Namespace: !Sub "RoboSystemsGraph/${Environment}"
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2
@@ -657,9 +657,9 @@ Resources:
                 Condition:
                   StringEquals:
                     cloudwatch:namespace:
-                      - !Sub "RoboSystemsKuzu/${Environment}"
+                      - !Sub "RoboSystemsGraph/${Environment}"
                       - !Sub
-                        - "RoboSystemsKuzu/${CapitalizedEnv}"
+                        - "RoboSystemsGraph/${CapitalizedEnv}"
                         - CapitalizedEnv: !If
                             - IsProduction
                             - "Prod"

@@ -71,17 +71,17 @@ production:
       outputs:
         service_arn: WorkerServiceArn
   
-  # Kuzu Infrastructure
-  kuzu:
+  # Graph Infrastructure (Multi-Backend: Kuzu and Neo4j)
+  graph:
     infra:
-      stack_name: RoboSystemsKuzuInfraProd
+      stack_name: RoboSystemsGraphInfraProd
       outputs:
         instance_registry_table: InstanceRegistryTableName
         volume_registry_table: VolumeRegistryTableName
         graph_registry_table: GraphRegistryTableName
-    
+
     volumes:
-      stack_name: RoboSystemsKuzuVolumesProd
+      stack_name: RoboSystemsGraphVolumesProd
       outputs:
         volume_manager_lambda: VolumeManagerFunctionArn
         detachment_topic: VolumeDetachmentTopicArn
@@ -209,17 +209,17 @@ staging:
         service_arn: WorkerServiceArn
     # Note: No shared, extraction, or ingestion workers in staging (cost savings)
   
-  # Kuzu Infrastructure
-  kuzu:
+  # Graph Infrastructure (Multi-Backend: Kuzu and Neo4j)
+  graph:
     infra:
-      stack_name: RoboSystemsKuzuInfraStaging
+      stack_name: RoboSystemsGraphInfraStaging
       outputs:
         instance_registry_table: InstanceRegistryTableName
         volume_registry_table: VolumeRegistryTableName
         graph_registry_table: GraphRegistryTableName
-    
+
     volumes:
-      stack_name: RoboSystemsKuzuVolumesStaging
+      stack_name: RoboSystemsGraphVolumesStaging
       outputs:
         volume_manager_lambda: VolumeManagerFunctionArn
         detachment_topic: VolumeDetachmentTopicArn
@@ -288,9 +288,13 @@ staging:
 patterns:
   # Pattern for worker stacks: RoboSystemsWorker{Name}{Environment}
   worker: "RoboSystemsWorker{name}{environment}"
-  
+
   # Pattern for Kuzu writer stacks: RoboSystemsKuzuWriters{Tier}{Environment}
+  # Note: Writer stacks keep "Kuzu" prefix as they are backend-specific
   kuzu_writer: "RoboSystemsKuzuWriters{tier}{environment}"
-  
+
+  # Pattern for Neo4j writer stacks: RoboSystemsNeo4jWriters{Tier}{Environment}
+  neo4j_writer: "RoboSystemsNeo4jWriters{tier}{environment}"
+
   # Pattern for general stacks: RoboSystems{Component}{Environment}
   general: "RoboSystems{component}{environment}"
