@@ -109,7 +109,7 @@ COPY static/ /app/static/
 COPY alembic.ini /app/
 COPY alembic/ /app/alembic/
 # Copy configuration files
-COPY .github/configs/kuzu.yml /app/configs/kuzu.yml
+COPY .github/configs/graph.yml /app/configs/graph.yml
 COPY .github/configs/stacks.yml /app/configs/stacks.yml
 
 # Make entrypoint script executable

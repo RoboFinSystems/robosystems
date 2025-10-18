@@ -25,9 +25,19 @@ from robosystems.logger import logger
 class SECLocalPipeline:
   """Local SEC pipeline for testing and development."""
 
-  def __init__(self):
-    """Initialize the local pipeline."""
+  def __init__(self, backend: str = "kuzu"):
+    """
+    Initialize the local pipeline.
+
+    Args:
+        backend: Database backend to use ("kuzu" or "neo4j")
+    """
+    if backend not in ("kuzu", "neo4j"):
+      raise ValueError(f"Invalid backend: {backend}. Must be 'kuzu' or 'neo4j'")
+
+    self.backend = backend
     self.sec_database = "sec"
+    logger.info(f"Initialized SEC pipeline with backend: {backend}")
 
   def reset_database(self, clear_s3: bool = True) -> bool:
     """
@@ -39,13 +49,15 @@ class SECLocalPipeline:
     Returns:
         True if successful, False otherwise
     """
-    logger.info("🔄 Starting SEC database reset...")
+    logger.info(f"🔄 Starting SEC database reset ({self.backend})...")
 
-    # Use the maintenance task to reset the database through the Kuzu API
+    # Use the maintenance task to reset the database through the Graph API
     from robosystems.tasks.sec_xbrl.maintenance import reset_sec_database
 
     # Call as a Celery task (even locally, we use the same pattern as production)
-    task = reset_sec_database.apply_async(kwargs={"confirm": True})
+    task = reset_sec_database.apply_async(
+      kwargs={"confirm": True, "backend": self.backend}
+    )
 
     logger.info("⏳ Waiting for database reset to complete...")
     try:
@@ -144,10 +156,10 @@ class SECLocalPipeline:
     1. Download - Fetch XBRL files from SEC
     2. Process - Convert XBRL to parquet format
     3. Consolidate - Combine small parquet files into larger ones
-    4. Ingest - Load consolidated files into Kuzu database
+    4. Ingest - Load consolidated files into graph database (Kuzu or Neo4j)
 
     Note: Consolidation processes ALL available files across all years
-    for optimal Kuzu ingestion performance.
+    for optimal graph database ingestion performance.
 
     Args:
         ticker: Company ticker symbol (e.g., "NVDA", "AAPL")
@@ -192,12 +204,15 @@ class SECLocalPipeline:
       logger.info(f"Found: {company_name} (CIK: {cik})")
 
       # Step 1: Create a plan for just this company and specified year(s)
-      logger.info(f"Creating processing plan for years {start_year}-{end_year}...")
+      logger.info(
+        f"Creating processing plan for years {start_year}-{end_year} ({self.backend})..."
+      )
       plan_task = plan_phased_processing.apply_async(
         kwargs={
           "start_year": start_year,
           "end_year": end_year,
           "cik_filter": cik,  # Filter to specific CIK
+          "backend": self.backend,  # Pass backend selection
         }
       )
 
@@ -221,7 +236,9 @@ class SECLocalPipeline:
 
       # Step 2: Run download phase
       logger.info("Starting download phase...")
-      download_task = start_phase.apply_async(kwargs={"phase": "download"})
+      download_task = start_phase.apply_async(
+        kwargs={"phase": "download", "backend": self.backend}
+      )
 
       download_result = download_task.get(timeout=phase_timeout)
       if download_result.get("status") != "started":
@@ -239,7 +256,9 @@ class SECLocalPipeline:
 
       # Step 3: Run process phase
       logger.info("Starting processing phase...")
-      process_task = start_phase.apply_async(kwargs={"phase": "process"})
+      process_task = start_phase.apply_async(
+        kwargs={"phase": "process", "backend": self.backend}
+      )
 
       process_result = process_task.get(timeout=phase_timeout)
       if process_result.get("status") != "started":
@@ -263,7 +282,9 @@ class SECLocalPipeline:
 
       # Step 3: Run consolidation phase (consolidates all files across years)
       logger.info("Starting consolidation phase...")
-      consolidate_task = start_phase.apply_async(kwargs={"phase": "consolidate"})
+      consolidate_task = start_phase.apply_async(
+        kwargs={"phase": "consolidate", "backend": self.backend}
+      )
 
       consolidate_result = consolidate_task.get(timeout=phase_timeout)
       if consolidate_result.get("status") != "started":
@@ -322,8 +343,10 @@ class SECLocalPipeline:
         time.sleep(consolidation_wait)
 
       # Step 4: Run ingestion phase (reads from consolidated files)
-      logger.info("Starting ingestion phase...")
-      ingest_task = start_phase.apply_async(kwargs={"phase": "ingest"})
+      logger.info(f"Starting ingestion phase ({self.backend})...")
+      ingest_task = start_phase.apply_async(
+        kwargs={"phase": "ingest", "backend": self.backend}
+      )
 
       # Use longer timeout for ingestion with multiple years
       ingest_timeout = min(phase_timeout * 2, 1800)  # Max 30 minutes
@@ -359,17 +382,20 @@ def main():
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-  # Reset database and start fresh
+  # Reset Kuzu database and start fresh (default)
   %(prog)s reset
 
-  # Load NVIDIA data for 2024
+  # Reset Neo4j database
+  %(prog)s reset --backend neo4j
+
+  # Load NVIDIA data for 2024 into Kuzu
   %(prog)s load --ticker NVDA --year 2024
 
-  # Load Apple data for 2023
-  %(prog)s load --ticker AAPL --year 2023
+  # Load Apple data for 2023 into Neo4j
+  %(prog)s load --ticker AAPL --year 2023 --backend neo4j
 
-  # Full reset and load NVIDIA
-  %(prog)s reset && %(prog)s load --ticker NVDA --year 2024
+  # Full reset and load NVIDIA into Neo4j
+  %(prog)s reset --backend neo4j && %(prog)s load --ticker NVDA --year 2024 --backend neo4j
 """,
   )
 
@@ -379,6 +405,12 @@ Examples:
   reset_parser = subparsers.add_parser("reset", help="Reset SEC database")
   reset_parser.add_argument(
     "--keep-s3", action="store_true", help="Keep S3 data (only reset database)"
+  )
+  reset_parser.add_argument(
+    "--backend",
+    default="kuzu",
+    choices=["kuzu", "neo4j"],
+    help="Database backend to use (default: kuzu)",
   )
 
   # Load command
@@ -397,6 +429,12 @@ Examples:
     action="store_true",
     help="Force reconsolidation by clearing existing consolidated files",
   )
+  load_parser.add_argument(
+    "--backend",
+    default="kuzu",
+    choices=["kuzu", "neo4j"],
+    help="Database backend to use (default: kuzu)",
+  )
 
   args = parser.parse_args()
 
@@ -404,8 +442,8 @@ Examples:
     parser.print_help()
     return
 
-  # Initialize pipeline
-  pipeline = SECLocalPipeline()
+  # Initialize pipeline with selected backend
+  pipeline = SECLocalPipeline(backend=args.backend)
 
   # Execute command
   if args.command == "reset":

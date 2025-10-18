@@ -65,5 +65,17 @@ class GraphBackend(ABC):
     pass
 
   @abstractmethod
+  async def ingest_from_s3(
+    self,
+    graph_id: str,
+    table_name: str,
+    s3_pattern: str,
+    s3_credentials: Optional[Dict[str, Any]] = None,
+    ignore_errors: bool = True,
+    database: Optional[str] = None,
+  ) -> Dict[str, Any]:
+    pass
+
+  @abstractmethod
   async def close(self) -> None:
     pass

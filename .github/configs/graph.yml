@@ -84,6 +84,30 @@ production:
         enable_var: PREMIUM_ENABLED_PROD
         enabled_default: false
 
+    - name: shared
+      description: Shared repositories for public data (SEC, industry, economic)
+      backend: neo4j # Currently using Neo4j - can be switched to kuzu by changing this line
+      stack_suffix: Shared
+      tier: shared
+      shared_repositories: "sec" # Comma-separated list of shared repositories
+      storage_limit_gb: 5000 # 5 TB storage for shared public data
+      instance:
+        type: r7g.large
+        databases_per_instance: 3 # Multiple shared repositories per instance
+        # Neo4j-specific settings
+        neo4j_version: "5.15.0"
+        neo4j_edition: "community"
+        query_timeout: 300 # Longer timeout for complex analytical queries
+        max_query_length: 100000
+        ingestion_batch_size: 10000 # Large batch size for bulk data loading
+        connection_pool_size: 100 # High connection pool for many concurrent readers
+      scaling:
+        min: 1
+        max: 3
+      deployment:
+        enable_var: SHARED_ENABLED_PROD
+        enabled_default: false
+
 staging:
   writers:
     - name: standard
@@ -113,3 +137,27 @@ staging:
         enable_var: STANDARD_ENABLED_STAGING
         enabled_default: true
         always_enabled: true # Standard tier must always be available
+
+    - name: shared
+      description: Shared repositories for public data (SEC, industry, economic)
+      backend: neo4j # Currently using Neo4j - can be switched to kuzu by changing this line
+      stack_suffix: Shared
+      tier: shared
+      shared_repositories: "sec" # Comma-separated list of shared repositories
+      storage_limit_gb: 1000 # 1 TB storage for staging (reduced from production)
+      instance:
+        type: r7g.medium
+        databases_per_instance: 3 # Multiple shared repositories per instance
+        # Neo4j-specific settings
+        neo4j_version: "5.15.0"
+        neo4j_edition: "community"
+        query_timeout: 300 # Longer timeout for complex analytical queries
+        max_query_length: 100000
+        ingestion_batch_size: 5000 # Smaller batch size for staging
+        connection_pool_size: 50 # Smaller connection pool for staging
+      scaling:
+        min: 1
+        max: 2
+      deployment:
+        enable_var: SHARED_ENABLED_STAGING
+        enabled_default: true # Enable by default in staging for testing

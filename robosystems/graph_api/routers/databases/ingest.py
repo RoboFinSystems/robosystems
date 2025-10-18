@@ -191,11 +191,12 @@ async def perform_ingestion(
   s3_pattern: str,
   s3_credentials: Optional[dict],
   ignore_errors: bool,
-  connection_pool,
+  backend,
 ) -> None:
   """
   Perform the actual ingestion in the background.
   Updates task status in Redis for SSE monitoring.
+  Uses backend abstraction to support both Kuzu and Neo4j.
   """
   try:
     # Update task status to running
@@ -205,224 +206,22 @@ async def perform_ingestion(
       started_at=datetime.now(timezone.utc).isoformat(),
     )
 
-    # Get connection from pool using context manager
-    with connection_pool.get_connection(graph_id) as conn:
-      # Load httpfs extension for S3 support
-      try:
-        # Check if httpfs is already loaded
-        result = conn.execute("CALL show_loaded_extensions() RETURN *")
-        loaded_extensions = []
-        while result.has_next():
-          loaded_extensions.append(str(result.get_next()).lower())
+    # Use backend-specific ingestion method
+    logger.info(
+      f"[Task {task_id}] Starting ingestion using backend: {type(backend).__name__}"
+    )
 
-        if "httpfs" not in loaded_extensions:
-          # Install and load httpfs extension
-          try:
-            conn.execute("INSTALL httpfs")
-            logger.debug("Installed httpfs extension for S3 support")
-          except Exception as e:
-            logger.debug(f"Could not install httpfs (may already be installed): {e}")
+    result = await backend.ingest_from_s3(
+      graph_id=graph_id,
+      table_name=table_name,
+      s3_pattern=s3_pattern,
+      s3_credentials=s3_credentials,
+      ignore_errors=ignore_errors,
+    )
 
-          conn.execute("LOAD httpfs")
-          logger.debug("Loaded httpfs extension")
-        else:
-          logger.debug("httpfs extension already loaded")
-      except Exception as e:
-        if "already loaded" not in str(e).lower():
-          logger.warning(f"Could not load httpfs extension: {e}")
-          # Try one more time
-          try:
-            conn.execute("INSTALL httpfs")
-            conn.execute("LOAD httpfs")
-            logger.debug("Successfully loaded httpfs on retry")
-          except Exception as retry_error:
-            logger.error(f"Failed to load httpfs after retry: {retry_error}")
-            raise Exception(f"httpfs extension required for S3 access: {retry_error}")
-
-      # Set S3 credentials using CALL statements (Kuzu's way)
-      # SECURITY: Escape single quotes to prevent SQL injection
-      if s3_credentials:
-        # Only set credentials that are provided
-        if s3_credentials.get("aws_access_key_id"):
-          # Escape single quotes to prevent SQL injection
-          escaped_key = s3_credentials["aws_access_key_id"].replace("'", "''")
-          conn.execute(f"CALL s3_access_key_id = '{escaped_key}'")
-        if s3_credentials.get("aws_secret_access_key"):
-          # Escape single quotes to prevent SQL injection
-          escaped_secret = s3_credentials["aws_secret_access_key"].replace("'", "''")
-          conn.execute(f"CALL s3_secret_access_key = '{escaped_secret}'")
-        if s3_credentials.get("region"):
-          # Escape single quotes to prevent SQL injection
-          escaped_region = s3_credentials["region"].replace("'", "''")
-          conn.execute(f"CALL s3_region = '{escaped_region}'")
-        if s3_credentials.get("endpoint_url"):
-          endpoint = s3_credentials["endpoint_url"]
-          # Remove protocol prefix for Kuzu - it will add https:// by default
-          # For LocalStack with HTTP, we need to strip the protocol
-          if endpoint.startswith("http://"):
-            endpoint = endpoint[7:]
-          elif endpoint.startswith("https://"):
-            endpoint = endpoint[8:]
-          # Escape single quotes to prevent SQL injection
-          escaped_endpoint = endpoint.replace("'", "''")
-          conn.execute(f"CALL s3_endpoint = '{escaped_endpoint}'")
-          conn.execute("CALL s3_url_style = 'path'")  # For LocalStack/MinIO
-          logger.debug(f"Set S3 endpoint to: {endpoint} (path style URLs)")
-
-        # Set S3 performance configurations
-        conn.execute("CALL s3_uploader_threads_limit = 8")
-        conn.execute("CALL s3_uploader_max_num_parts_per_file = 10000")
-        conn.execute("CALL s3_uploader_max_filesize = 10737418240")  # 10GB
-
-        # CRITICAL: Memory management settings for large ingestions
-        # Ensure spill_to_disk is enabled to handle memory overflow
-        conn.execute("CALL spill_to_disk = true")
-
-        # Set timeout to 30 minutes for large COPY operations
-        # The default 10-minute timeout may be too short for bulk data ingestion
-        conn.execute("CALL timeout=1800000")  # 30 minutes in milliseconds
-
-        logger.debug(
-          "Configured S3 performance settings, memory management, and 30-minute timeout for bulk ingestion"
-        )
-      # Build COPY query with S3 pattern
-      # Note: S3 credentials are already set via CALL statements above
-      # Kuzu uses those for S3 access, not inline parameters
-      query = f'COPY {table_name} FROM "{s3_pattern}"'
-
-      # Add IGNORE_ERRORS for duplicate handling
-      if ignore_errors:
-        if "(" in query:
-          query = query[:-1] + ", IGNORE_ERRORS=TRUE)"
-        else:
-          query += " (IGNORE_ERRORS=TRUE)"
-
-      logger.info(f"[Task {task_id}] Executing: {query}")
-
-      # Execute the COPY command
-      # This is a blocking operation that could take hours
-      start_time = time.time()
-      result = conn.execute(query)
-
-      duration = time.time() - start_time
-
-      # Parse result to get records loaded
-      records_loaded = 0
-      if result and hasattr(result, "get_as_list"):
-        result_list = result.get_as_list()
-        if result_list and len(result_list) > 0:
-          # Try to extract record count from result
-          result_str = str(result_list[0])
-          if "Records loaded:" in result_str:
-            try:
-              records_loaded = int(
-                result_str.split("Records loaded:")[-1].strip().split()[0]
-              )
-            except (ValueError, IndexError):
-              pass
-
-      # CRITICAL: Force checkpoint after large COPY operations
-      # This flushes the Write-Ahead Log (WAL) to disk and can help with memory management
-      try:
-        # Execute checkpoint to flush WAL to disk
-        conn.execute("CHECKPOINT;")
-        logger.debug(f"[Task {task_id}] Executed checkpoint to flush WAL to disk")
-      except Exception as checkpoint_error:
-        logger.warning(
-          f"[Task {task_id}] Failed to execute checkpoint: {checkpoint_error}"
-        )
-
-      # For very large tables (>100MB), force connection pool cleanup to release memory
-      # This is especially important for SEC data ingestion with multiple large files
-      if table_name in LARGE_TABLES_REQUIRING_CLEANUP:
-        try:
-          # Force aggressive cleanup of connections and database object to release buffer pool memory
-          # This includes multiple GC passes and memory trimming back to OS
-          connection_pool.force_database_cleanup(graph_id, aggressive=True)
-          logger.info(
-            f"[Task {task_id}] Forced aggressive database cleanup for {graph_id} after loading large table {table_name}"
-          )
-
-          # Memory settlement delay after large table ingestion
-          #
-          # Why different settlement times?
-          # - Production (10s): Kuzu's buffer pool manager needs time to release memory back to the OS
-          #   after large ingestions. The admission controller monitors memory usage and will reject
-          #   new tasks if memory appears high. A 10-second delay ensures memory metrics stabilize.
-          # - Development (0.1s): Local development has smaller datasets and no admission controller.
-          #   A minimal symbolic delay improves developer experience without affecting stability.
-          import time as time_module
-
-          if env.is_development():
-            settlement_time = (
-              0.1  # Minimal delay for faster local development iteration
-            )
-          else:
-            settlement_time = (
-              10  # Production delay for memory stabilization and admission controller
-            )
-
-          if settlement_time > 0:
-            logger.info(
-              f"[Task {task_id}] Waiting {settlement_time}s for memory to fully settle after {table_name} ingestion"
-            )
-            time_module.sleep(settlement_time)
-
-          # Log memory status after settlement
-          try:
-            import psutil
-
-            process = psutil.Process()
-            mem_info = process.memory_info()
-            logger.info(
-              f"[Task {task_id}] Memory after settlement - RSS: {mem_info.rss / (1024 * 1024):.1f}MB, "
-              f"VMS: {mem_info.vms / (1024 * 1024):.1f}MB"
-            )
-          except ImportError:
-            pass
-
-        except Exception as cleanup_error:
-          logger.warning(
-            f"[Task {task_id}] Could not force database cleanup: {cleanup_error}"
-          )
-
-    # Final cleanup and memory settlement before marking task complete
-    # This ensures the admission controller sees low memory for the next task
-    try:
-      # One more aggressive cleanup at the end
-      connection_pool.force_database_cleanup(graph_id, aggressive=True)
-      logger.info(f"[Task {task_id}] Final cleanup completed for {graph_id}")
-
-      # Final settlement time before task completion
-      # This shorter delay (5s vs 10s) ensures the admission controller sees stable memory
-      # before the next task starts, while being less aggressive than post-large-table delays
-      import time as time_module
-
-      if env.is_development():
-        final_settlement = 0.1  # Minimal delay for faster local development
-      else:
-        final_settlement = 5  # Shorter production delay for final memory stabilization
-
-      if final_settlement > 0:
-        logger.info(
-          f"[Task {task_id}] Final {final_settlement}s settlement before task completion"
-        )
-        time_module.sleep(final_settlement)
-
-      # Log final memory state
-      try:
-        import psutil
-
-        process = psutil.Process()
-        mem_info = process.memory_info()
-        logger.info(
-          f"[Task {task_id}] Final memory state - RSS: {mem_info.rss / (1024 * 1024):.1f}MB, "
-          f"VMS: {mem_info.vms / (1024 * 1024):.1f}MB"
-        )
-      except ImportError:
-        pass
-    except Exception as final_cleanup_error:
-      logger.warning(f"[Task {task_id}] Final cleanup failed: {final_cleanup_error}")
+    records_loaded = result.get("records_loaded", 0)
+    duration = result.get("duration_seconds", 0)
+    query = result.get("query", "N/A")
 
     # Clear the ingestion flag now that we're done
     try:
@@ -513,6 +312,11 @@ async def start_background_copy(
       detail="Cannot ingest data: node is in read-only mode",
     )
 
+  # Get the backend instance for ingestion
+  from robosystems.graph_api.backends import get_backend
+
+  backend = get_backend()
+
   # Estimate data size (simplified - in production, query S3 for actual size)
   estimated_records = 1000000  # Default estimate
   estimated_size_mb = 100.0  # Default estimate
@@ -545,7 +349,7 @@ async def start_background_copy(
     f"Set ingestion flag for instance {instance_id} - table: {request.table_name}"
   )
 
-  # Add background task
+  # Add background task with backend instead of connection_pool
   background_tasks.add_task(
     perform_ingestion,
     task_id=task_id,
@@ -554,7 +358,7 @@ async def start_background_copy(
     s3_pattern=request.s3_pattern,
     s3_credentials=request.s3_credentials,
     ignore_errors=request.ignore_errors,
-    connection_pool=connection_pool,
+    backend=backend,
   )
 
   logger.info(f"Started background ingestion task {task_id} for {request.table_name}")
