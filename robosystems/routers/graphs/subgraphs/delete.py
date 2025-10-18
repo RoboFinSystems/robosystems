@@ -108,7 +108,7 @@ async def delete_subgraph(
 
     subgraph_id = subgraph.graph_id  # type: ignore[assignment]
 
-    # Delete the Kuzu database (handles backup if requested)
+    # Delete the graph database (handles backup if requested)
     subgraph_service = get_subgraph_service()
     deletion_result = await subgraph_service.delete_subgraph_database(
       subgraph_id=subgraph_id, force=request.force, create_backup=request.backup_first

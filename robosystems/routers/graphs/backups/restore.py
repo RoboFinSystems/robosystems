@@ -40,7 +40,7 @@ router = APIRouter()
   summary="Restore Encrypted Backup",
   description="""Restore a graph database from an encrypted backup.
 
-Restores a complete Kuzu database from an encrypted backup:
+Restores a complete graph database from an encrypted backup:
 - **Format**: Only full_dump backups can be restored
 - **Encryption**: Only encrypted backups can be restored (security requirement)
 - **System Backup**: Creates automatic backup of existing database before restore
@@ -105,7 +105,7 @@ async def restore_backup(
   """
   Restore a graph database from an encrypted backup.
 
-  This endpoint restores a complete Kuzu database from an encrypted backup:
+  This endpoint restores a complete graph database from an encrypted backup:
   - Only encrypted backups can be restored for security
   - Creates a system backup of existing database before restore
   - Verifies database integrity after restore
@@ -230,7 +230,7 @@ async def restore_backup(
       **sse_response,
       "task_id": task_id,
       "status": "pending",
-      "message": f"Kuzu database restore scheduled for graph '{graph_id}' from encrypted backup",
+      "message": f"graph database restore scheduled for graph '{graph_id}' from encrypted backup",
     }
 
   except HTTPException:

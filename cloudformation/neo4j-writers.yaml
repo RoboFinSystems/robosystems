@@ -62,9 +62,14 @@ Parameters:
   Neo4jVersion:
     Type: String
     Default: "5.15.0"
-    Description: Neo4j Community Edition version to deploy
+    Description: Neo4j version to deploy (Community for Enterprise tier, Enterprise for Premium tier)
     AllowedPattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     ConstraintDescription: Must be a valid semantic version (e.g., 5.15.0)
+  Neo4jLicenseKey:
+    Type: String
+    Default: ""
+    Description: Neo4j Enterprise license key (required for Premium tier, leave empty for Enterprise tier)
+    NoEcho: true
 
   # Tier Configuration Parameters
   InstanceType:
@@ -110,6 +115,10 @@ Mappings:
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
+  IsPremiumTier: !Equals [!Ref WriterTier, premium]
+  HasLicenseKey: !And
+    - !Condition IsPremiumTier
+    - !Not [!Equals [!Ref Neo4jLicenseKey, ""]]
 
 Resources:
   # ========================================
@@ -137,6 +146,173 @@ Resources:
           Value: CloudFormation
 
   # ========================================
+  # SECRETS MANAGEMENT
+  # ========================================
+
+  # Neo4j password secret (shared by all Neo4j instances in this tier)
+  Neo4jPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/neo4j/${WriterTier}
+      Description: !Sub Neo4j database password for ${WriterTier} tier in ${Environment}
+      SecretString: !Sub
+        - |
+          {
+            "NEO4J_PASSWORD": "${Password}",
+            "TIER": "${WriterTier}",
+            "ENVIRONMENT": "${Environment}",
+            "GENERATED_AT": "${GeneratedAt}"
+          }
+        - Password: !GetAtt Neo4jPasswordGenerator.Password
+          GeneratedAt: !GetAtt Neo4jPasswordGenerator.GeneratedAt
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Tier
+          Value: !Ref WriterTier
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Neo4j Enterprise license key secret (Premium tier only)
+  Neo4jLicenseSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasLicenseKey
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/neo4j/${WriterTier}/license
+      Description: !Sub Neo4j Enterprise license key for ${WriterTier} tier in ${Environment}
+      SecretString: !Sub
+        - |
+          {
+            "NEO4J_LICENSE_KEY": "${LicenseKey}",
+            "TIER": "${WriterTier}",
+            "ENVIRONMENT": "${Environment}",
+            "EDITION": "enterprise"
+          }
+        - LicenseKey: !Ref Neo4jLicenseKey
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Tier
+          Value: !Ref WriterTier
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Custom resource to generate Neo4j password
+  Neo4jPasswordGenerator:
+    Type: Custom::PasswordGenerator
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ServiceToken: !GetAtt PasswordGeneratorFunction.Arn
+      Environment: !Ref Environment
+      Tier: !Ref WriterTier
+
+  PasswordGeneratorFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-password-generator"
+      Description: "Neo4j Password Generator Lambda - inline code (no S3)"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt PasswordGeneratorRole.Arn
+      Timeout: 60
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-password-generator"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      Code:
+        ZipFile: |
+          import secrets
+          import string
+          import cfnresponse
+          from datetime import datetime, timezone
+
+          def generate_password(length=32):
+              alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{}|;:,.<>?"
+              password = "".join(secrets.choice(alphabet) for _ in range(length))
+              return password
+
+          def lambda_handler(event, context):
+              try:
+                  request_type = event.get("RequestType", "")
+
+                  if request_type == "Delete":
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+
+                  resource_properties = event.get("ResourceProperties", {})
+                  environment = resource_properties.get("Environment", "unknown")
+                  tier = resource_properties.get("Tier", "unknown")
+
+                  response_data = {
+                      "Password": generate_password(),
+                      "GeneratedAt": datetime.now(timezone.utc).isoformat(),
+                  }
+
+                  print(f"Generated Neo4j password for tier: {tier}, environment: {environment}")
+                  print(f"Request Type: {request_type}")
+                  print(f"Generated at: {response_data['GeneratedAt']}")
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+
+              except Exception as e:
+                  print(f"Error generating Neo4j password: {str(e)}")
+                  cfnresponse.send(
+                      event,
+                      context,
+                      cfnresponse.FAILED,
+                      {},
+                      reason=f"Failed to generate password: {str(e)}",
+                  )
+
+  PasswordGeneratorRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-password-generator-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ========================================
   # NETWORKING & SECURITY
   # ========================================
 
@@ -150,20 +326,15 @@ Resources:
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 7687
-          ToPort: 7687
-          CidrIp: !Ref VpcCidr
-          Description: Allow Neo4j Bolt protocol access from VPC
-        - IpProtocol: tcp
-          FromPort: 7474
-          ToPort: 7474
-          CidrIp: !Ref VpcCidr
-          Description: Allow Neo4j HTTP access from VPC
-        - IpProtocol: tcp
           FromPort: 8001
           ToPort: 8001
           CidrIp: !Ref VpcCidr
-          Description: Allow Graph API access from VPC (compatibility layer)
+          Description: Allow Graph API access from VPC (unified interface for all backends)
+        - IpProtocol: tcp
+          FromPort: 7687
+          ToPort: 7687
+          CidrIp: !Ref VpcCidr
+          Description: Allow Neo4j Bolt protocol access for database administration via bastion
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-writers-sg"
@@ -397,14 +568,21 @@ Resources:
               export GRAPH_BACKEND="neo4j"
               export GRAPH_NODE_TYPE="writer"
 
+              # Determine backend_type based on tier
+              if [ "${WriterTier}" = "premium" ]; then
+                BACKEND_TYPE="neo4j_enterprise"
+              else
+                BACKEND_TYPE="neo4j_community"
+              fi
+
               # Register instance in DynamoDB with backend_type
-              echo "Registering Neo4j instance in DynamoDB..."
+              echo "Registering Neo4j instance in DynamoDB with backend_type: $BACKEND_TYPE..."
               aws dynamodb put-item \
                 --table-name "$INSTANCE_REGISTRY_TABLE" \
                 --item "{
                   \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
                   \"cluster_tier\": {\"S\": \"${WriterTier}\"},
-                  \"backend_type\": {\"S\": \"neo4j_community\"},
+                  \"backend_type\": {\"S\": \"$BACKEND_TYPE\"},
                   \"private_ip\": {\"S\": \"$PRIVATE_IP\"},
                   \"stack_name\": {\"S\": \"${AWS::StackName}\"},
                   \"node_type\": {\"S\": \"writer\"},
@@ -428,12 +606,48 @@ Resources:
               }
               chmod +x /tmp/neo4j-setup.sh
 
+              # Retrieve Neo4j password from Secrets Manager
+              NEO4J_PASSWORD=$(aws secretsmanager get-secret-value \
+                --secret-id "robosystems/${Environment}/neo4j/${WriterTier}" \
+                --query SecretString \
+                --output text \
+                --region ${AWS::Region} | jq -r '.NEO4J_PASSWORD')
+
+              if [ -z "$NEO4J_PASSWORD" ] || [ "$NEO4J_PASSWORD" = "null" ]; then
+                echo "ERROR: Failed to retrieve Neo4j password from Secrets Manager"
+                exit 1
+              fi
+
+              # Retrieve Neo4j Enterprise license key for Premium tier
+              if [ "${WriterTier}" = "premium" ]; then
+                echo "Retrieving Neo4j Enterprise license key for Premium tier..."
+                NEO4J_LICENSE_KEY=$(aws secretsmanager get-secret-value \
+                  --secret-id "robosystems/${Environment}/neo4j/${WriterTier}/license" \
+                  --query SecretString \
+                  --output text \
+                  --region ${AWS::Region} 2>/dev/null | jq -r '.NEO4J_LICENSE_KEY' || echo "")
+
+                if [ -n "$NEO4J_LICENSE_KEY" ] && [ "$NEO4J_LICENSE_KEY" != "null" ]; then
+                  export NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+                  export NEO4J_LICENSE_KEY="$NEO4J_LICENSE_KEY"
+                  echo "Neo4j Enterprise license key retrieved successfully"
+                else
+                  echo "WARNING: No license key found for Premium tier - Neo4j will run in evaluation mode"
+                fi
+              fi
+
               # Export required environment variables for the setup script
               export ENVIRONMENT="${Environment}"
               export INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type)
               export NEO4J_VERSION="${Neo4jVersion}"
+              export NEO4J_AUTH="neo4j/$NEO4J_PASSWORD"
               export WRITER_TIER="${WriterTier}"
-              export CloudWatchNamespace="RoboSystemsNeo4j/${EnvironmentCapitalized}"
+              # Determine Neo4j edition for CloudWatch namespace
+              if [ "${WriterTier}" = "premium" ]; then
+                export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Neo4jEnterprise"
+              else
+                export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Neo4jCommunity"
+              fi
               export AWS_REGION="${AWS::Region}"
               export AWS_DEFAULT_REGION="${AWS::Region}"
               export GRAPH_NODE_TYPE="writer"
@@ -580,10 +794,16 @@ Resources:
       AlarmName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-high-memory"
       AlarmDescription: Triggers when memory usage exceeds 85% for 5 minutes
       MetricName: mem_used_percent
-      Namespace: !Sub
-        - "RoboSystemsNeo4j/${EnvCapitalized}"
-        - EnvCapitalized:
-            !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+      Namespace: !If
+        - IsPremiumTier
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jEnterprise"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jCommunity"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
       Statistic: Average
       Period: 300
       EvaluationPeriods: 1
@@ -606,10 +826,16 @@ Resources:
       AlarmName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-allocation-failures"
       AlarmDescription: "Alert when database allocations fail"
       MetricName: AllocationFailures
-      Namespace: !Sub
-        - "RoboSystemsNeo4j/${EnvCapitalized}"
-        - EnvCapitalized:
-            !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+      Namespace: !If
+        - IsPremiumTier
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jEnterprise"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jCommunity"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1

@@ -587,7 +587,7 @@ class MultiTenantUtils:
     Ensure database exists with proper schema.
 
     Args:
-        kuzu_url: Kuzu API endpoint URL
+        kuzu_url: Graph API endpoint URL
         db_name: Database name to create
         schema_name: Schema name to apply (e.g., "sec", "entity")
         api_key: Optional API key for authentication
@@ -599,10 +599,8 @@ class MultiTenantUtils:
     Raises:
         RuntimeError: If creation fails
     """
-    from robosystems.graph_api.client import KuzuClient
-    from robosystems.graph_api.client.exceptions import KuzuClientError
 
-    # Create Kuzu client
+    # Create Graph client
     headers = {}
     if api_key:
       headers["Authorization"] = f"Bearer {api_key}"
@@ -704,7 +702,7 @@ class MultiTenantUtils:
     Synchronous wrapper for ensure_database_with_schema.
 
     Args:
-        kuzu_url: Kuzu API endpoint URL
+        kuzu_url: Graph API endpoint URL
         db_name: Database name to create
         schema_name: Schema name to apply
         api_key: Optional API key for authentication

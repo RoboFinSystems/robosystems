@@ -1,5 +1,5 @@
 """
-SSE client for monitoring long-running Kuzu ingestion tasks.
+SSE client for monitoring long-running graph ingestion tasks.
 
 This module provides an SSE client that can monitor ingestion progress
 from Celery workers, handling multi-hour operations with heartbeat support.
@@ -16,12 +16,12 @@ from httpx_sse import aconnect_sse
 from robosystems.logger import logger
 
 
-class KuzuIngestionSSEClient:
+class GraphIngestionSSEClient:
   """
-  SSE client for monitoring Kuzu ingestion tasks.
+  SSE client for monitoring graph ingestion tasks.
 
   Features:
-  - Connects to Kuzu API SSE endpoint
+  - Connects to Graph API SSE endpoint
   - Handles heartbeat events to prevent timeout
   - Processes progress updates
   - Returns final result or error
@@ -36,7 +36,7 @@ class KuzuIngestionSSEClient:
     Initialize SSE client.
 
     Args:
-        base_url: Kuzu API base URL (e.g., "http://10.0.1.123:8001")
+        base_url: Graph API base URL (e.g., "http://10.0.1.123:8001")
         timeout: Maximum time to wait for completion (seconds)
     """
     self.base_url = base_url.rstrip("/")
@@ -241,7 +241,7 @@ def monitor_ingestion_sync(
   This function can be called from synchronous Celery tasks.
 
   Args:
-      base_url: Kuzu API base URL
+      base_url: Graph API base URL
       graph_id: Target database identifier
       table_name: Table to ingest into
       s3_pattern: S3 glob pattern for files
@@ -252,7 +252,7 @@ def monitor_ingestion_sync(
   Returns:
       Dict with ingestion results or error
   """
-  client = KuzuIngestionSSEClient(base_url, timeout)
+  client = GraphIngestionSSEClient(base_url, timeout)
 
   # Run the async function in a new event loop
   return asyncio.run(

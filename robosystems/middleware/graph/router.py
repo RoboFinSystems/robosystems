@@ -73,7 +73,6 @@ class GraphRouter:
       return Repository(database_path)
     else:
       # Use the new enhanced client factory for all routing
-      from robosystems.graph_api.client.factory import get_kuzu_client
       from .streaming_wrapper import add_streaming_support
 
       logger.debug(f"Using enhanced client factory for {graph_id}")
@@ -150,7 +149,6 @@ class GraphRouter:
 
       api_key = env.GRAPH_API_KEY
 
-      from robosystems.graph_api.client import KuzuClient
 
       client = KuzuClient(base_url=cluster_config.alb_endpoint, api_key=api_key)
       client.graph_id = "test"

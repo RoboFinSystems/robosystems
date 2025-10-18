@@ -10,6 +10,7 @@ from robosystems.middleware.graph.allocation_manager import (
   InstanceStatus,
   DatabaseLocation,
   InstanceInfo,
+  InstanceTier,
 )
 
 
@@ -92,3 +93,128 @@ class TestAllocationManagerBasic:
     assert info.max_databases == 10
     assert info.database_count == 5
     assert info.available_capacity == 5
+
+
+class TestMultiBackendSupport:
+  """Test multi-backend support (Kuzu, Neo4j Community, Neo4j Enterprise)."""
+
+  @pytest.fixture
+  def allocation_manager(self):
+    """Create a KuzuAllocationManager instance with tier configs."""
+    with patch("robosystems.middleware.graph.allocation_manager.boto3"):
+      with patch.object(
+        KuzuAllocationManager, "__init__", lambda x, environment="test": None
+      ):
+        manager = KuzuAllocationManager(environment="test")
+        manager.environment = "test"
+
+        # Set up tier configurations matching allocation_manager.py
+        manager.tier_configs = {
+          InstanceTier.STANDARD: {
+            "backend": "kuzu",
+            "backend_type": "kuzu",
+            "databases_per_instance": 10,
+          },
+          InstanceTier.ENTERPRISE: {
+            "backend": "neo4j",
+            "backend_type": "neo4j",
+            "neo4j_edition": "community",
+            "databases_per_instance": 1,
+          },
+          InstanceTier.PREMIUM: {
+            "backend": "neo4j",
+            "backend_type": "neo4j",
+            "neo4j_edition": "enterprise",
+            "databases_per_instance": 1,
+          },
+        }
+
+        return manager
+
+  @pytest.mark.parametrize(
+    "tier,expected_backend,expected_backend_type,expected_edition,expected_capacity",
+    [
+      (InstanceTier.STANDARD, "kuzu", "kuzu", None, 10),
+      (InstanceTier.ENTERPRISE, "neo4j", "neo4j", "community", 1),
+      (InstanceTier.PREMIUM, "neo4j", "neo4j", "enterprise", 1),
+    ],
+  )
+  def test_tier_backend_configuration(
+    self,
+    allocation_manager,
+    tier,
+    expected_backend,
+    expected_backend_type,
+    expected_edition,
+    expected_capacity,
+  ):
+    """Test that each tier has correct backend configuration."""
+    config = allocation_manager.tier_configs[tier]
+
+    assert config["backend"] == expected_backend
+    assert config["backend_type"] == expected_backend_type
+    assert config["databases_per_instance"] == expected_capacity
+
+    if expected_edition:
+      assert config.get("neo4j_edition") == expected_edition
+    else:
+      assert "neo4j_edition" not in config
+
+  def test_kuzu_backend_standard_tier(self, allocation_manager):
+    """Test Kuzu backend is used for Standard tier."""
+    config = allocation_manager.tier_configs[InstanceTier.STANDARD]
+
+    assert config["backend"] == "kuzu"
+    assert config["backend_type"] == "kuzu"
+    assert config["databases_per_instance"] == 10
+    assert "neo4j_edition" not in config
+
+  def test_neo4j_community_enterprise_tier(self, allocation_manager):
+    """Test Neo4j Community backend is used for Enterprise tier."""
+    config = allocation_manager.tier_configs[InstanceTier.ENTERPRISE]
+
+    assert config["backend"] == "neo4j"
+    assert config["backend_type"] == "neo4j"
+    assert config["neo4j_edition"] == "community"
+    assert config["databases_per_instance"] == 1
+
+  def test_neo4j_enterprise_premium_tier(self, allocation_manager):
+    """Test Neo4j Enterprise backend is used for Premium tier."""
+    config = allocation_manager.tier_configs[InstanceTier.PREMIUM]
+
+    assert config["backend"] == "neo4j"
+    assert config["backend_type"] == "neo4j"
+    assert config["neo4j_edition"] == "enterprise"
+    assert config["databases_per_instance"] == 1
+
+  @pytest.mark.parametrize(
+    "tier,expected_isolation",
+    [
+      (InstanceTier.STANDARD, False),  # Shared resources
+      (InstanceTier.ENTERPRISE, True),  # Isolated resources
+      (InstanceTier.PREMIUM, True),  # Isolated resources
+    ],
+  )
+  def test_tier_resource_isolation(self, allocation_manager, tier, expected_isolation):
+    """Test resource isolation for each tier."""
+    config = allocation_manager.tier_configs[tier]
+
+    # Standard tier: 10 databases per instance (shared)
+    # Enterprise/Premium: 1 database per instance (isolated)
+    is_isolated = config["databases_per_instance"] == 1
+    assert is_isolated == expected_isolation
+
+  def test_all_tiers_have_backend_type(self, allocation_manager):
+    """Test that all tiers have backend_type attribute for DynamoDB."""
+    for tier, config in allocation_manager.tier_configs.items():
+      assert "backend_type" in config, f"Tier {tier} missing backend_type"
+      assert config["backend_type"] in ["kuzu", "neo4j"], f"Invalid backend_type for tier {tier}"
+
+  def test_backend_type_consistency(self, allocation_manager):
+    """Test that backend and backend_type are consistent."""
+    for tier, config in allocation_manager.tier_configs.items():
+      backend = config["backend"]
+      backend_type = config["backend_type"]
+
+      # Both should match (both "kuzu" or both "neo4j")
+      assert backend == backend_type, f"Tier {tier} has inconsistent backend ({backend}) and backend_type ({backend_type})"

@@ -190,7 +190,6 @@ def ingest_sec_data(
   # IMPORTANT: We do NOT create or recreate databases here - only verify
   logger.info("Verifying SEC database exists with proper schema...")
   try:
-    from robosystems.graph_api.client.factory import KuzuClientFactory
     import asyncio
 
     async def verify_database():
@@ -205,7 +204,7 @@ def ingest_sec_data(
         # Get a client for the SEC database - this will route correctly
         # In dev: goes to local Kuzu instance
         # In prod: goes to shared master for writes
-        client = await KuzuClientFactory.create_client(
+        client = await GraphClientFactory.create_client(
           graph_id=graph_id, operation_type="write"
         )
 
@@ -696,14 +695,13 @@ async def _bulk_load_node_type(
   ignore_errors: bool,
 ) -> Dict[str, Any]:
   """Bulk load node type using S3 glob pattern via SYNC mode with direct S3 COPY."""
-  from robosystems.graph_api.client.factory import KuzuClientFactory
   import boto3
   from urllib.parse import urlparse
 
   start_time = datetime.now()
 
   # Get client for Kuzu operations
-  client = await KuzuClientFactory.create_client(
+  client = await GraphClientFactory.create_client(
     graph_id=db_name, operation_type="write"
   )
 
@@ -901,14 +899,13 @@ async def _bulk_load_relationship_type(
   ignore_errors: bool,
 ) -> Dict[str, Any]:
   """Bulk load relationship type using S3 glob pattern via SYNC mode with direct S3 COPY."""
-  from robosystems.graph_api.client.factory import KuzuClientFactory
   import boto3
   from urllib.parse import urlparse
 
   start_time = datetime.now()
 
   # Get client for Kuzu operations
-  client = await KuzuClientFactory.create_client(
+  client = await GraphClientFactory.create_client(
     graph_id=db_name, operation_type="write"
   )
 

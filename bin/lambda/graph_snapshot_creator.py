@@ -1,5 +1,5 @@
 """
-Lambda function to create daily snapshots of Kuzu shared master volumes.
+Lambda function to create daily snapshots of Graph shared master volumes.
 
 This function:
 1. Finds the shared master writer instance (WriterTier=shared)

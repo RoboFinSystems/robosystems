@@ -1,7 +1,7 @@
 """
-Utility functions for consistent Kuzu database path handling.
+Utility functions for consistent graph database path handling.
 
-This module ensures consistent path construction for Kuzu databases
+This module ensures consistent path construction for graph databases
 using the Kuzu 0.11.x single-file format with .kuzu extension.
 """
 
@@ -13,7 +13,7 @@ from ...config import env
 
 def get_kuzu_database_path(db_name: str, base_path: Optional[str] = None) -> Path:
   """
-  Get the correct path for a Kuzu database, handling shared repositories.
+  Get the correct path for a graph database, handling shared repositories.
 
   This function ensures consistent path construction across the codebase,
   using the new Kuzu 0.11.x single-file format with .kuzu extension.
@@ -40,7 +40,7 @@ def get_kuzu_database_path(db_name: str, base_path: Optional[str] = None) -> Pat
 
 def ensure_kuzu_directory(db_path: Union[str, Path]) -> None:
   """
-  Ensure the parent directory for a Kuzu database exists.
+  Ensure the parent directory for a graph database exists.
 
   Args:
       db_path: Path to the database file

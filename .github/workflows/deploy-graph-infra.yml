@@ -43,7 +43,7 @@ on:
         type: string
         default: ""
       graph_api_rotation_code_key:
-        description: "S3 key for Kuzu API Rotation Lambda deployment package"
+        description: "S3 key for Graph API Rotation Lambda deployment package"
         required: false
         type: string
         default: ""
@@ -63,7 +63,7 @@ on:
         required: true
     outputs:
       secret_arn:
-        description: "ARN of the Kuzu API authentication secret"
+        description: "ARN of the Graph API authentication secret"
         value: ${{ jobs.action.outputs.secret_arn }}
       instance_registry_table:
         description: "DynamoDB table name for instance registry"
@@ -137,7 +137,7 @@ jobs:
             
             if [ -n "$ROTATION_KEY" ]; then
               INFRA_STACK_PARAMS="$INFRA_STACK_PARAMS \
-                    ParameterKey=KuzuApiRotationCodeKey,ParameterValue=$ROTATION_KEY"
+                    ParameterKey=GraphApiRotationCodeKey,ParameterValue=$ROTATION_KEY"
             fi
             
             if [ -n "$MONITOR_KEY" ]; then

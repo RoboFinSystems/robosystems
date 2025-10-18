@@ -66,7 +66,7 @@ class TestEntityGraphService:
       return_value=mock_allocation_manager,
     )
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.get_kuzu_client_for_instance",
+      "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance",
       return_value=mock_kuzu_client,
     )
 
@@ -165,7 +165,7 @@ class TestEntityGraphService:
       return_value=mock_allocation_manager,
     )
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.get_kuzu_client_for_instance",
+      "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance",
       return_value=mock_kuzu_client,
     )
 
@@ -233,10 +233,10 @@ class TestEntityGraphService:
   @pytest.mark.asyncio
   async def test_create_graph_metadata_node_error_suppression(self, mocker):
     """Test that GraphMetadata creation errors are suppressed."""
-    from robosystems.graph_api.client.exceptions import KuzuClientError
+    from robosystems.graph_api.client.exceptions import GraphClientError
 
     mock_kuzu_client = mocker.AsyncMock()
-    mock_kuzu_client.query.side_effect = KuzuClientError("Duplicate node")
+    mock_kuzu_client.query.side_effect = GraphClientError("Duplicate node")
 
     service = EntityGraphService(session=mocker.MagicMock())
 
@@ -300,7 +300,7 @@ class TestEntityGraphService:
       return_value=mock_allocation_manager,
     )
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.get_kuzu_client_for_instance",
+      "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance",
       return_value=mock_kuzu_client,
     )
 

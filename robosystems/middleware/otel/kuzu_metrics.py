@@ -1,7 +1,7 @@
 """
-OpenTelemetry metrics for Kuzu clustering system.
+OpenTelemetry metrics for graph databases clustering system.
 
-This module provides comprehensive metrics collection for the Kuzu database
+This module provides comprehensive metrics collection for the graph database
 clustering infrastructure including allocation, routing, and health monitoring.
 """
 
@@ -25,7 +25,7 @@ class KuzuMetricType(Enum):
 
 
 class KuzuClusterMetrics:
-  """Comprehensive metrics for Kuzu clustering system."""
+  """Comprehensive metrics for graph databases clustering system."""
 
   def __init__(self):
     self.meter = metrics.get_meter("robosystems.kuzu.cluster")

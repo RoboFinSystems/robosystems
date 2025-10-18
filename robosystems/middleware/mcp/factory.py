@@ -27,9 +27,9 @@ async def create_kuzu_mcp_client(
   Returns:
       Configured KuzuMCPClient instance with appropriate timeouts
   """
-  # If URL not provided, use KuzuClientFactory to discover the proper endpoint
+  # If URL not provided, use GraphClientFactory to discover the proper endpoint
   if not api_base_url:
-    from robosystems.graph_api.client.factory import KuzuClientFactory
+    from robosystems.graph_api.client.factory import GraphClientFactory
     from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 
     # Determine operation type based on graph
@@ -42,7 +42,7 @@ async def create_kuzu_mcp_client(
     # The factory handles routing appropriately:
     # - Shared repos: Routes to shared_master/shared_replica infrastructure
     # - User graphs: Looks up the tier from the database
-    kuzu_client = await KuzuClientFactory.create_client(
+    kuzu_client = await GraphClientFactory.create_client(
       graph_id=graph_id, operation_type=operation_type
     )
 
@@ -62,7 +62,7 @@ async def create_kuzu_mcp_client(
       api_base_url = "http://localhost:8001"
 
     logger.info(
-      f"KuzuClientFactory discovered endpoint: {api_base_url} for graph {graph_id}"
+      f"GraphClientFactory discovered endpoint: {api_base_url} for graph {graph_id}"
     )
 
   # Configure timeouts based on environment and query type

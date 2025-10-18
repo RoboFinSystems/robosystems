@@ -4,19 +4,19 @@ import time
 from unittest.mock import patch
 import pytest
 
-from robosystems.graph_api.client.base import BaseKuzuClient
-from robosystems.graph_api.client.config import KuzuClientConfig
+from robosystems.graph_api.client.base import BaseGraphClient
+from robosystems.graph_api.client.config import GraphClientConfig
 from robosystems.graph_api.client.exceptions import (
-  KuzuAPIError,
-  KuzuTransientError,
-  KuzuClientError,
-  KuzuServerError,
-  KuzuSyntaxError,
+  GraphAPIError,
+  GraphTransientError,
+  GraphClientError,
+  GraphServerError,
+  GraphSyntaxError,
 )
 
 
-class TestBaseKuzuClient:
-  """Test cases for BaseKuzuClient."""
+class TestBaseGraphClient:
+  """Test cases for BaseGraphClient."""
 
   def test_initialization_with_base_url(self):
     """Test client initialization with base URL."""
@@ -24,7 +24,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
       assert client.config.base_url == "http://localhost:8001"
       assert client.graph_id is None
@@ -32,7 +32,7 @@ class TestBaseKuzuClient:
 
   def test_initialization_with_config(self):
     """Test client initialization with custom config."""
-    config = KuzuClientConfig(
+    config = GraphClientConfig(
       base_url="http://custom.example.com", timeout=60, max_retries=5
     )
 
@@ -40,7 +40,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(config=config)
+      client = BaseGraphClient(config=config)
 
       assert client.config.base_url == "http://custom.example.com"
       assert client.config.timeout == 60
@@ -52,7 +52,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(
+      client = BaseGraphClient(
         base_url="http://localhost:8001", api_key="test-api-key-123"
       )
 
@@ -65,21 +65,21 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = "env-api-key-456"
       mock_env.ENVIRONMENT = "prod"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
       assert "X-Kuzu-API-Key" in client.config.headers
       assert client.config.headers["X-Kuzu-API-Key"] == "env-api-key-456"
 
   def test_initialization_no_base_url_error(self):
     """Test that initialization fails without base URL."""
-    config = KuzuClientConfig()  # No base_url
+    config = GraphClientConfig()  # No base_url
 
     with patch("robosystems.config.env") as mock_env:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
       with pytest.raises(ValueError, match="base_url must be provided"):
-        BaseKuzuClient(config=config)
+        BaseGraphClient(config=config)
 
   def test_initialization_strips_trailing_slash(self):
     """Test that base URL trailing slash is stripped."""
@@ -87,7 +87,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001/")
+      client = BaseGraphClient(base_url="http://localhost:8001/")
 
       assert client.config.base_url == "http://localhost:8001"
 
@@ -97,7 +97,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
       # Test with leading slash
       assert client._build_url("/databases") == "http://localhost:8001/databases"
@@ -117,10 +117,10 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
       # Transient errors should be retried
-      transient_error = KuzuTransientError("Network issue")
+      transient_error = GraphTransientError("Network issue")
       assert client._should_retry(transient_error, 0) is True
       assert client._should_retry(transient_error, 1) is True
       assert client._should_retry(transient_error, 2) is True
@@ -133,9 +133,9 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
-      syntax_error = KuzuSyntaxError("Invalid query")
+      syntax_error = GraphSyntaxError("Invalid query")
       # Should never retry, even on first attempt
       assert client._should_retry(syntax_error, 0) is False
       assert client._should_retry(syntax_error, 1) is False
@@ -146,9 +146,9 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
-      client_error = KuzuClientError("Bad request")
+      client_error = GraphClientError("Bad request")
       assert client._should_retry(client_error, 0) is False
 
   def test_should_retry_server_errors(self):
@@ -157,15 +157,15 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
-      server_error = KuzuServerError("Internal error")
+      server_error = GraphServerError("Internal error")
       assert client._should_retry(server_error, 0) is True
       assert client._should_retry(server_error, 1) is True
 
   def test_calculate_retry_delay(self):
     """Test retry delay calculation with exponential backoff."""
-    config = KuzuClientConfig(
+    config = GraphClientConfig(
       base_url="http://localhost:8001", retry_delay=1.0, retry_backoff=2.0
     )
 
@@ -173,7 +173,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(config=config)
+      client = BaseGraphClient(config=config)
 
       # Test exponential backoff
       delay0 = client._calculate_retry_delay(0)
@@ -187,7 +187,7 @@ class TestBaseKuzuClient:
 
   def test_circuit_breaker_opens_after_threshold(self):
     """Test that circuit breaker opens after failure threshold."""
-    config = KuzuClientConfig(
+    config = GraphClientConfig(
       base_url="http://localhost:8001", circuit_breaker_threshold=3
     )
 
@@ -195,7 +195,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(config=config)
+      client = BaseGraphClient(config=config)
 
       # Record failures
       client._record_failure()
@@ -209,7 +209,7 @@ class TestBaseKuzuClient:
 
   def test_circuit_breaker_check_when_open(self):
     """Test circuit breaker check when open."""
-    config = KuzuClientConfig(
+    config = GraphClientConfig(
       base_url="http://localhost:8001", circuit_breaker_timeout=60
     )
 
@@ -217,19 +217,19 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(config=config)
+      client = BaseGraphClient(config=config)
 
       # Open circuit breaker
       client._circuit_breaker_open = True
       client._circuit_breaker_last_failure = time.time()
 
       # Should raise error when open
-      with pytest.raises(KuzuTransientError, match="Circuit breaker open"):
+      with pytest.raises(GraphTransientError, match="Circuit breaker open"):
         client._check_circuit_breaker()
 
   def test_circuit_breaker_resets_after_timeout(self):
     """Test that circuit breaker resets after timeout."""
-    config = KuzuClientConfig(
+    config = GraphClientConfig(
       base_url="http://localhost:8001",
       circuit_breaker_timeout=0.1,  # 100ms for testing
     )
@@ -238,7 +238,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(config=config)
+      client = BaseGraphClient(config=config)
 
       # Open circuit breaker
       client._circuit_breaker_open = True
@@ -256,7 +256,7 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
       # Set some failures
       client._circuit_breaker_failures = 2
@@ -273,17 +273,17 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
       # 400 Bad Request
       error = client._handle_response_error(400, {"detail": "Invalid request"})
-      assert isinstance(error, KuzuClientError)
+      assert isinstance(error, GraphClientError)
       assert error.status_code == 400
       assert str(error) == "Invalid request"
 
       # 404 Not Found
       error = client._handle_response_error(404, {"detail": "Not found"})
-      assert isinstance(error, KuzuClientError)
+      assert isinstance(error, GraphClientError)
       assert error.status_code == 404
 
   def test_handle_response_error_server_errors(self):
@@ -292,18 +292,18 @@ class TestBaseKuzuClient:
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "dev"
 
-      client = BaseKuzuClient(base_url="http://localhost:8001")
+      client = BaseGraphClient(base_url="http://localhost:8001")
 
       # 500 Internal Server Error
       error = client._handle_response_error(500, {"detail": "Server error"})
       # Note: The actual implementation may classify 500 errors differently
       # based on the error message
-      assert isinstance(error, KuzuAPIError)
+      assert isinstance(error, GraphAPIError)
       assert error.status_code == 500
 
       # 503 Service Unavailable
       error = client._handle_response_error(503, {"detail": "Service unavailable"})
-      assert isinstance(error, KuzuTransientError)
+      assert isinstance(error, GraphTransientError)
       assert error.status_code == 503
 
   def test_initialization_warns_missing_api_key_in_prod(self):
@@ -313,8 +313,8 @@ class TestBaseKuzuClient:
       mock_env.ENVIRONMENT = "prod"
 
       with patch("robosystems.graph_api.client.base.logger") as mock_logger:
-        BaseKuzuClient(base_url="http://localhost:8001")
-        mock_logger.warning.assert_called_with("KuzuClient initialized without API key")
+        BaseGraphClient(base_url="http://localhost:8001")
+        mock_logger.warning.assert_called_with("GraphClient initialized without API key")
 
   def test_initialization_debug_missing_api_key_in_dev(self):
     """Test that missing API key only debugs in development."""
@@ -323,8 +323,8 @@ class TestBaseKuzuClient:
       mock_env.ENVIRONMENT = "dev"
 
       with patch("robosystems.graph_api.client.base.logger") as mock_logger:
-        BaseKuzuClient(base_url="http://localhost:8001")
+        BaseGraphClient(base_url="http://localhost:8001")
         mock_logger.debug.assert_called_with(
-          "KuzuClient initialized without API key (development mode)"
+          "GraphClient initialized without API key (development mode)"
         )
         mock_logger.warning.assert_not_called()

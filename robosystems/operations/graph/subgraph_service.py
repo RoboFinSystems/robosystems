@@ -25,7 +25,7 @@ from ...middleware.graph.subgraph_utils import (
   validate_subgraph_name,
   validate_parent_graph_id,
 )
-from ...graph_api.client.factory import get_kuzu_client_for_instance
+from ...graph_api.client.factory import get_graph_client_for_instance
 from ...exceptions import GraphAllocationError
 from ...logger import logger
 
@@ -111,7 +111,7 @@ class SubgraphService:
         )
 
       # Get a direct client to the parent's instance
-      client = await get_kuzu_client_for_instance(parent_location.private_ip)
+      client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # Check if database already exists
       existing_databases = await client.list_databases()
@@ -212,7 +212,7 @@ class SubgraphService:
         )
 
       # Get a direct client to the parent's instance
-      client = await get_kuzu_client_for_instance(parent_location.private_ip)
+      client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # Check if database exists
       existing_databases = await client.list_databases()
@@ -289,7 +289,7 @@ class SubgraphService:
         return []
 
       # Get a direct client to the parent's instance
-      client = await get_kuzu_client_for_instance(parent_location.private_ip)
+      client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # List all databases on the instance
       all_databases = await client.list_databases()
@@ -353,7 +353,7 @@ class SubgraphService:
         return None
 
       # Get a direct client to the parent's instance
-      client = await get_kuzu_client_for_instance(parent_location.private_ip)
+      client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # Check if database exists
       existing_databases = await client.list_databases()

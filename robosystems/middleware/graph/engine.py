@@ -194,7 +194,7 @@ class Engine(GraphEngineInterface):
 
   def _validate_parameters(self, params: Dict[str, Any]) -> None:
     """
-    Validate query parameters for Kuzu's native parameter binding.
+    Validate query parameters for graph databases's native parameter binding.
 
     Args:
         params: Parameters dictionary to validate

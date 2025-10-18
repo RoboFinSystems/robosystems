@@ -1,11 +1,15 @@
 """
-Kuzu Client Factory - Intelligent routing for all Kuzu database types.
+Graph Client Factory - Intelligent routing for all graph database backends.
 
-This module provides a factory for creating KuzuClient instances that properly
-route to the correct Kuzu instance based on the graph ID, operation type, and tier.
+This module provides a factory for creating GraphClient instances that properly
+route to the correct graph database instance (Kuzu or Neo4j) based on the graph ID,
+operation type, and tier.
 
 Routing targets:
 1. User Graph Writers - Tier-based routing (Standard/Enterprise/Premium)
+   - Standard: Kuzu backend
+   - Enterprise: Neo4j Community backend
+   - Premium: Neo4j Enterprise backend
 2. Shared Repository Master - Primary source of truth for shared data (writes + fallback reads)
 3. Shared Repository Replica ALB - Read-only replicas for high-volume reads
 """
@@ -19,7 +23,7 @@ import threading
 from typing import Dict, Any
 from enum import Enum
 import redis.asyncio as redis
-from robosystems.graph_api.client import KuzuClient
+from robosystems.graph_api.client import GraphClient
 from robosystems.config import env
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.logger import logger
@@ -28,25 +32,25 @@ from robosystems.middleware.graph.types import InstanceTier, GraphTypeRegistry
 from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
 
 
-class KuzuClientError(Exception):
-  """Base exception for Kuzu client errors."""
+class GraphClientError(Exception):
+  """Base exception for graph client errors."""
 
   pass
 
 
-class ServiceUnavailableError(KuzuClientError):
+class ServiceUnavailableError(GraphClientError):
   """Raised when a required service is not available."""
 
   pass
 
 
-class ConfigurationError(KuzuClientError):
+class ConfigurationError(GraphClientError):
   """Raised when there's a configuration issue."""
 
   pass
 
 
-class RouteError(KuzuClientError):
+class RouteError(GraphClientError):
   """Raised when routing cannot be determined."""
 
   pass
@@ -175,12 +179,15 @@ def with_retry(
   return decorator
 
 
-class KuzuClientFactory:
+class GraphClientFactory:
   """
-  Factory for creating properly routed Kuzu clients.
+  Factory for creating properly routed graph database clients.
 
-  Handles intelligent routing to:
-  - User graph writers (tier-based)
+  Handles intelligent routing to different backends:
+  - User graph writers (tier-based routing to Kuzu or Neo4j)
+    - Standard tier: Kuzu
+    - Enterprise tier: Neo4j Community
+    - Premium tier: Neo4j Enterprise
   - Shared repository master (writes + fallback reads)
   - Shared repository replica ALB (primary reads)
   """
@@ -228,8 +235,8 @@ class KuzuClientFactory:
     """
     env_prefix = env.ENVIRONMENT or "dev"
     if identifier:
-      return f"kuzu:{env_prefix}:{key_type}:{identifier}"
-    return f"kuzu:{env_prefix}:{key_type}"
+      return f"graph:{env_prefix}:{key_type}:{identifier}"
+    return f"graph:{env_prefix}:{key_type}"
 
   @classmethod
   async def _get_redis(cls) -> redis.Redis | None:
@@ -280,9 +287,14 @@ class KuzuClientFactory:
     operation_type: str = "read",
     environment: str | None = None,
     tier: InstanceTier | None = None,
-  ) -> KuzuClient:
+  ) -> GraphClient:
     """
-    Create a KuzuClient with intelligent routing.
+    Create a graph database client with intelligent routing.
+
+    Routes to the appropriate backend based on tier:
+    - Standard tier: Kuzu
+    - Enterprise tier: Neo4j Community
+    - Premium tier: Neo4j Enterprise
 
     Args:
         graph_id: Graph database identifier
@@ -291,7 +303,7 @@ class KuzuClientFactory:
         tier: Instance tier for user graphs (Standard/Enterprise/Premium)
 
     Returns:
-        Configured KuzuClient instance
+        Configured GraphClient instance (works with all backends via Graph API)
 
     Raises:
         ValueError: If graph not found or invalid configuration
@@ -302,13 +314,13 @@ class KuzuClientFactory:
 
     # Log routing decision with context
     logger.info(
-      f"Creating KuzuClient for graph={graph_id}, "
+      f"Creating graph client for graph={graph_id}, "
       f"operation={operation_type}, tier={tier}, env={environment}"
     )
 
     try:
       # Determine routing based on graph_id
-      if graph_id.lower() in KuzuClientFactory.SHARED_REPOSITORIES:
+      if graph_id.lower() in GraphClientFactory.SHARED_REPOSITORIES:
         # Route to shared repository infrastructure
         return await cls._create_shared_repository_client(graph_id, operation_type)
       else:
@@ -336,25 +348,25 @@ class KuzuClientFactory:
   @classmethod
   async def _create_shared_repository_client(
     cls, graph_id: str, operation_type: str
-  ) -> KuzuClient:
+  ) -> GraphClient:
     """
     Create client for shared repository with intelligent routing.
 
     Routing logic:
-    - Dev: Everything goes to single local Kuzu instance
+    - Dev: Everything goes to single local graph instance
     - Prod/Staging:
       - Writes: Always go to shared master
       - Reads: Try replica ALB first, fallback to master if allowed
     """
 
-    # In dev environment, route everything to the single Kuzu instance
+    # In dev environment, route everything to the single graph instance
     if env.is_development():
       api_url = env.GRAPH_API_URL or "http://localhost:8001"
       api_key = env.GRAPH_API_KEY
       target = RouteTarget.SHARED_MASTER  # Treat as master in dev
 
       logger.info(
-        f"Dev environment: Routing {graph_id} {operation_type} to local Kuzu at {api_url}"
+        f"Dev environment: Routing {graph_id} {operation_type} to local graph at {api_url}"
       )
 
     # Production/staging routing
@@ -381,7 +393,7 @@ class KuzuClientFactory:
       api_key = env.GRAPH_API_KEY
 
     # Create client with appropriate configuration
-    client = KuzuClient(base_url=api_url, api_key=api_key)
+    client = GraphClient(base_url=api_url, api_key=api_key)
 
     # Add metadata for debugging
     client._route_target = target.value
@@ -719,13 +731,16 @@ class KuzuClientFactory:
   @classmethod
   async def _create_user_graph_client(
     cls, graph_id: str, environment: str | None, tier: InstanceTier | None
-  ) -> KuzuClient:
+  ) -> GraphClient:
     """
     Create client for user graph with tier-based routing.
 
-    - Dev: Routes to single local Kuzu instance
+    - Dev: Routes to single local graph instance
     - Prod/Staging: Uses allocation manager to find the appropriate instance
-      based on the graph's tier (Standard/Enterprise/Premium).
+      based on the graph's tier:
+      - Standard: Kuzu backend
+      - Enterprise: Neo4j Community backend
+      - Premium: Neo4j Enterprise backend
     - Subgraphs: Routes to parent's instance but uses subgraph database
     """
 
@@ -740,16 +755,16 @@ class KuzuClientFactory:
         f"database: {database_name}"
       )
 
-    # In dev environment, route everything to the single Kuzu instance
+    # In dev environment, route everything to the single graph instance
     if env.is_development():
       api_url = env.GRAPH_API_URL or "http://localhost:8001"
       api_key = env.GRAPH_API_KEY
 
       logger.info(
-        f"Dev environment: Routing user graph {graph_id} to local Kuzu at {api_url}"
+        f"Dev environment: Routing user graph {graph_id} to local graph at {api_url}"
       )
 
-      client = KuzuClient(base_url=api_url, api_key=api_key)
+      client = GraphClient(base_url=api_url, api_key=api_key)
       client._route_target = RouteTarget.USER_GRAPH.value
       client._graph_id = graph_id
       client._database_name = database_name  # Actual database to use
@@ -823,9 +838,9 @@ class KuzuClientFactory:
     )
 
     if not api_key:
-      logger.error("KUZU_API_KEY is not set in environment!")
+      logger.error("GRAPH_API_KEY is not set in environment!")
 
-    client = KuzuClient(base_url=api_url, api_key=api_key)
+    client = GraphClient(base_url=api_url, api_key=api_key)
 
     # Add metadata
     client._route_target = RouteTarget.USER_GRAPH.value
@@ -844,7 +859,7 @@ class KuzuClientFactory:
     operation_type: str = "read",
     environment: str | None = None,
     tier: InstanceTier | None = None,
-  ) -> KuzuClient:
+  ) -> GraphClient:
     """
     Synchronous wrapper for create_client.
 
@@ -855,7 +870,7 @@ class KuzuClientFactory:
         tier: Instance tier for user graphs
 
     Returns:
-        Configured KuzuClient instance
+        Configured GraphClient instance
     """
     # Check if we're already in an async context
     try:
@@ -864,8 +879,8 @@ class KuzuClientFactory:
       # This is a design flaw - sync methods shouldn't be called from async context
       raise RuntimeError(
         "create_client_sync() cannot be called from an async context. "
-        "Use 'await get_kuzu_client(graph_id)' or "
-        "'await KuzuClientFactory.create_client(graph_id)' instead. "
+        "Use 'await get_graph_client(graph_id)' or "
+        "'await GraphClientFactory.create_client(graph_id)' instead. "
         "If you're in a Celery task, wrap with asyncio.run()."
       )
     except RuntimeError as e:
@@ -927,7 +942,7 @@ class KuzuClientFactory:
     try:
       stats = cls.get_pool_statistics()
       logger.info(
-        f"Cleaning up KuzuClientFactory: {stats['total_pools']} pools active",
+        f"Cleaning up GraphClientFactory: {stats['total_pools']} pools active",
         extra={"pool_stats": stats},
       )
     except Exception as e:
@@ -965,121 +980,124 @@ class KuzuClientFactory:
       timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
     )
 
-    logger.info("KuzuClientFactory cleanup completed")
+    logger.info("GraphClientFactory cleanup completed")
 
 
 # Convenience functions
 
 
-async def get_kuzu_client(
+async def get_graph_client(
   graph_id: str,
   operation_type: str = "read",
   environment: str | None = None,
   tier: InstanceTier | None = None,
-) -> KuzuClient:
+) -> GraphClient:
   """
-  Convenience function to get a properly routed Kuzu client.
+  Convenience function to get a properly routed graph database client.
 
-  This is the preferred method for getting a KuzuClient in async contexts.
+  This is the preferred method for getting a graph client in async contexts.
+  Routes to appropriate backend (Kuzu or Neo4j) based on tier.
 
   Args:
       graph_id: Graph database identifier
       operation_type: "read" or "write"
       environment: Environment (defaults to env.ENVIRONMENT)
-      tier: Instance tier for user graphs
+      tier: Instance tier for user graphs (Standard/Enterprise/Premium)
 
   Returns:
-      Configured KuzuClient instance
+      Configured GraphClient instance (works with all backends via Graph API)
 
   Example:
-      async with await get_kuzu_client("sec", "read") as client:
+      async with await get_graph_client("sec", "read") as client:
           result = await client.query("MATCH (c:Company) RETURN c LIMIT 10")
   """
-  return await KuzuClientFactory.create_client(
+  return await GraphClientFactory.create_client(
     graph_id, operation_type, environment, tier
   )
 
 
-def get_kuzu_client_sync(
+def get_graph_client_sync(
   graph_id: str,
   operation_type: str = "read",
   environment: str | None = None,
   tier: InstanceTier | None = None,
-) -> KuzuClient:
+) -> GraphClient:
   """
-  Convenience function to get a properly routed Kuzu client (sync version).
+  Convenience function to get a properly routed graph database client (sync version).
 
-  This is the preferred method for getting a KuzuClient in sync contexts.
+  This is the preferred method for getting a graph client in sync contexts.
+  Routes to appropriate backend (Kuzu or Neo4j) based on tier.
 
   Args:
       graph_id: Graph database identifier
       operation_type: "read" or "write"
       environment: Environment (defaults to env.ENVIRONMENT)
-      tier: Instance tier for user graphs
+      tier: Instance tier for user graphs (Standard/Enterprise/Premium)
 
   Returns:
-      Configured KuzuClient instance
+      Configured GraphClient instance (works with all backends via Graph API)
 
   Example:
-      with get_kuzu_client_sync("kg1a2b3c") as client:
+      with get_graph_client_sync("kg1a2b3c") as client:
           result = client.query("MATCH (c:Entity) RETURN c")
   """
-  return KuzuClientFactory.create_client_sync(
+  return GraphClientFactory.create_client_sync(
     graph_id, operation_type, environment, tier
   )
 
 
-async def get_kuzu_client_for_instance(
+async def get_graph_client_for_instance(
   instance_ip: str, api_key: str | None = None
-) -> KuzuClient:
+) -> GraphClient:
   """
-  Get a Kuzu client for direct instance access.
+  Get a graph database client for direct instance access.
 
   This bypasses all routing and connects directly to a specific instance.
   Used for allocation operations where we need to target a specific instance.
+  Works with both Kuzu and Neo4j backends via Graph API.
 
   Args:
-      instance_ip: Private IP address of the Kuzu instance
+      instance_ip: Private IP address of the graph database instance
       api_key: API key (defaults to env.GRAPH_API_KEY)
 
   Returns:
-      Configured KuzuClient instance for direct access
+      Configured GraphClient instance for direct access (works with all backends)
 
   Example:
-      client = await get_kuzu_client_for_instance("10.0.1.123")
+      client = await get_graph_client_for_instance("10.0.1.123")
       await client.create_database("entity_456")
   """
   if api_key is None:
     api_key = env.GRAPH_API_KEY
 
   api_url = f"http://{instance_ip}:8001"
-  logger.info(f"Creating direct KuzuClient for instance at {api_url}")
+  logger.info(f"Creating direct graph client for instance at {api_url}")
 
-  return KuzuClient(base_url=api_url, api_key=api_key)
+  return GraphClient(base_url=api_url, api_key=api_key)
 
 
 # Special factory method for SEC ingestion
-async def get_kuzu_client_for_sec_ingestion() -> KuzuClient:
+async def get_graph_client_for_sec_ingestion() -> GraphClient:
   """
-  Get a Kuzu client specifically for SEC data ingestion.
+  Get a graph database client specifically for SEC data ingestion.
 
   CRITICAL: SEC ingestion MUST always go to the shared master instance.
   This bypasses normal routing logic to ensure data is loaded to the
   correct instance that will be snapshotted for replicas.
 
   Returns:
-      KuzuClient configured for shared master
+      GraphClient configured for shared master
   """
-  logger.info("Creating KuzuClient for SEC ingestion (direct to shared master)")
+  logger.info("Creating graph client for SEC ingestion (direct to shared master)")
 
-  # In dev, use the single local Kuzu instance
+  # In dev, use the single local graph instance
   if env.is_development():
     api_url = env.GRAPH_API_URL or "http://localhost:8001"
-    logger.info(f"Dev environment: SEC ingestion to local Kuzu at {api_url}")
+    logger.info(f"Dev environment: SEC ingestion to local graph at {api_url}")
   else:
     # In prod/staging, discover shared master from DynamoDB
     try:
-      api_url = await KuzuClientFactory._get_shared_master_url()
+      api_url = await GraphClientFactory._get_shared_master_url()
       logger.info(f"Discovered shared master for SEC ingestion: {api_url}")
     except Exception as e:
       # Fallback during migration or if discovery fails
@@ -1094,7 +1112,7 @@ async def get_kuzu_client_for_sec_ingestion() -> KuzuClient:
 
   api_key = env.GRAPH_API_KEY
 
-  client = KuzuClient(base_url=api_url, api_key=api_key)
+  client = GraphClient(base_url=api_url, api_key=api_key)
   client._route_target = RouteTarget.SHARED_MASTER.value
   client._purpose = "sec_ingestion"
 

@@ -17,7 +17,7 @@ from robosystems.middleware.rate_limits import (
 )
 from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.graph_api.client import KuzuClient
+from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
@@ -32,9 +32,9 @@ circuit_breaker = CircuitBreakerManager()
 timeout_coordinator = TimeoutCoordinator()
 
 
-async def _get_kuzu_client(graph_id: str) -> KuzuClient:
-  """Get Kuzu client for the specified graph using factory for endpoint discovery."""
-  from robosystems.graph_api.client.factory import KuzuClientFactory
+async def _get_graph_client(graph_id: str) -> GraphClient:
+  """Get Graph client for the specified graph using factory for endpoint discovery."""
+  from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 
   # Determine operation type based on graph
@@ -47,7 +47,7 @@ async def _get_kuzu_client(graph_id: str) -> KuzuClient:
   # Factory automatically handles routing:
   # - Shared repos: Routes to shared_master/shared_replica
   # - User graphs: Looks up tier from database and routes appropriately
-  client = await KuzuClientFactory.create_client(
+  client = await GraphClientFactory.create_client(
     graph_id=graph_id, operation_type=operation_type
   )
 
@@ -131,11 +131,11 @@ async def get_graph_limits(
     # Get storage information
     storage_limits = {}
     try:
-      kuzu_client = await _get_kuzu_client(graph_id)
+      graph_client = await _get_graph_client(graph_id)
       db_info = await asyncio.wait_for(
-        kuzu_client.get_database_info(graph_id), timeout=10
+        graph_client.get_database_info(graph_id), timeout=10
       )
-      await kuzu_client.close()
+      await graph_client.close()
 
       current_storage_gb = db_info.get("database_size_bytes", 0) / (1024**3)
       max_storage_gb = {

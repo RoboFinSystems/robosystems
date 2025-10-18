@@ -1,7 +1,7 @@
 """
 FastAPI dependency functions for multi-tenant Kuzu graph database resolution.
 
-Simplified for Kuzu-only architecture.
+Simplified for graph databases-only architecture.
 """
 
 from typing import Optional

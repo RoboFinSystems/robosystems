@@ -496,7 +496,7 @@ Resources:
               export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
               export ECR_IMAGE_TAG="${ECRImageTag}"
               # Set CloudWatch namespace with environment suffix
-              export CloudWatchNamespace="RoboSystemsKuzu/${EnvironmentCapitalized}"
+              export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Kuzu"
 
               # Critical missing variables
               export AWS_REGION="${AWS::Region}"

@@ -1,7 +1,7 @@
 """
 Kuzu Database Schema Setup
 
-This module handles one-time schema initialization for Kuzu databases.
+This module handles one-time schema initialization for graph databases.
 Schema is created only once when the database is first initialized,
 eliminating redundant schema compilation during data ingestion.
 """
@@ -18,14 +18,14 @@ from ...processors.schema_ingestion import (
 
 
 class KuzuSchemaManager:
-  """Manages schema initialization and verification for Kuzu databases."""
+  """Manages schema initialization and verification for graph databases."""
 
   def __init__(self, engine: Engine):
     """
     Initialize schema manager with a Kuzu engine.
 
     Args:
-        engine: Connected Kuzu database engine
+        engine: Connected graph database engine
     """
     self.engine = engine
 
@@ -97,7 +97,7 @@ class KuzuSchemaManager:
       logger.info("Schema already exists in database, skipping initialization")
       return False
 
-    logger.info("Initializing Kuzu database schema")
+    logger.info("Initializing graph database schema")
 
     # Create schema processor
     if schema_config:
@@ -399,7 +399,7 @@ def ensure_schema(
   force: bool = False,
 ) -> bool:
   """
-  Ensure schema exists for a Kuzu database.
+  Ensure schema exists for a graph database.
 
   This is a convenience function that handles the full flow:
   1. Connect to database
@@ -408,7 +408,7 @@ def ensure_schema(
   4. Return status
 
   Args:
-      db_path: Path to Kuzu database
+      db_path: Path to graph database
       schema_config: Optional schema configuration
       force: Force schema recreation
 

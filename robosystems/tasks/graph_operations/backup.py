@@ -118,7 +118,6 @@ def create_graph_backup(
 
     # Call Kuzu API to create the backup
     logger.info(f"Calling Kuzu API to create backup for graph '{graph_id}'")
-    from robosystems.graph_api.client.factory import get_kuzu_client
 
     # Get properly routed Kuzu client
     client = asyncio.run(get_kuzu_client(graph_id, operation_type="read"))

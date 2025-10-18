@@ -62,7 +62,7 @@ class KuzuGraphBackupService:
 
     Args:
         environment: Environment name (dev/staging/prod)
-        base_path: Base path where Kuzu databases are stored
+        base_path: Base path where graph databases are stored
         s3_bucket: S3 bucket for backups (defaults to env-specific bucket)
         retention_days: Number of days to keep backups
         compression_level: Gzip compression level (1-9)
