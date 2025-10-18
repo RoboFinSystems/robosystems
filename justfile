@@ -252,35 +252,48 @@ db-create-key email key_name env=".env":
 db-create-test-user mode="" base_url="http://localhost:8000" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode == "file" { "--save-file" } else if mode == "json" { "--json" } else if mode == "sec" { "--with-sec-access" } else { "" } }}
 
-## Kuzu Database ##
-# Kuzu API client - health check
+## Graph Database (Generic - Works with Kuzu, Neo4j, etc.) ##
+# Graph API - health check
+graph-health url="http://localhost:8001" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --command health
+
+# Graph API - get database info
+graph-info graph_id url="http://localhost:8001" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --command info
+
+# Graph API - execute Cypher query (works with any backend)
+graph-query graph_id query format="table" url="http://localhost:8001" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
+
+## Kuzu Database (Kuzu-Specific) ##
+# Kuzu API client - health check (direct Kuzu API)
 kuzu-health url="http://localhost:8001" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --url {{url}} health
 
-# Kuzu API client - get database info
+# Kuzu API client - get database info (direct Kuzu API)
 kuzu-info url="http://localhost:8001" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api --url {{url}} info
 
-# Kuzu API client - execute query
+# Kuzu API client - execute query (direct Kuzu API)
 kuzu-query graph_id query format="table" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.kuzu_api cli query "{{query}}" --database {{graph_id}} --format {{format}}
 
-# Kuzu embedded database direct query tool
+# Kuzu embedded database direct query tool (bypasses API)
 kuzu-db-query graph_id query format="table" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
 
 ## SEC Local Pipeline - Testing and Development ##
 # SEC Local - Load single company by ticker and (all) years (e.g., just sec-load NVDA)
-sec-load ticker year="" env=".env":
-    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --force-reconsolidate
+sec-load ticker year="" backend="kuzu" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} --force-reconsolidate
 
 # SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
 sec-health verbose="" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local_health {{ if verbose == "v" { "--verbose" } else { "" } }}
 
 # SEC Local - Reset database with proper schema
-sec-reset-local env=".env":
-    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset
+sec-reset-local backend="kuzu" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
 
 ## SEC Orchestrator - For large-scale production processing ##
 # SEC - Plan processing with optional company limit for testing

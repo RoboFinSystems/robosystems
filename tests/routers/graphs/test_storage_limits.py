@@ -58,7 +58,7 @@ class TestStorageLimitsAPI:
     self, client_with_test_user: TestClient, sample_graph_credits, db_session, test_user
   ):
     """Test successful storage limits retrieval."""
-    # Create usage record (60GB = 60%, below 80% threshold)
+    # Create usage record (30GB = 30% of 100GB, below 80% threshold)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="api_usage_1",
@@ -68,7 +68,7 @@ class TestStorageLimitsAPI:
       graph_tier=sample_graph_credits.graph_tier.value
       if hasattr(sample_graph_credits.graph_tier, "value")
       else sample_graph_credits.graph_tier,
-      storage_gb=Decimal("60"),
+      storage_gb=Decimal("30"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,
@@ -86,9 +86,9 @@ class TestStorageLimitsAPI:
     data = response.json()
 
     assert data["graph_id"] == sample_graph_credits.graph_id
-    assert data["current_storage_gb"] == 60.0
-    assert data["effective_limit_gb"] == 500.0
-    assert data["usage_percentage"] == 12.0
+    assert data["current_storage_gb"] == 30.0
+    assert data["effective_limit_gb"] == 100.0
+    assert data["usage_percentage"] == 30.0
     assert data["within_limit"] is True
     assert data["approaching_limit"] is False
     assert data["has_override"] is False
@@ -97,7 +97,7 @@ class TestStorageLimitsAPI:
     self, client_with_test_user: TestClient, sample_graph_credits, db_session
   ):
     """Test storage limits when approaching threshold."""
-    # Create usage record at 90% (450GB of 500GB)
+    # Create usage record at 90% (90GB of 100GB)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="api_usage_2",
@@ -107,7 +107,7 @@ class TestStorageLimitsAPI:
       graph_tier=sample_graph_credits.graph_tier.value
       if hasattr(sample_graph_credits.graph_tier, "value")
       else sample_graph_credits.graph_tier,
-      storage_gb=Decimal("450"),
+      storage_gb=Decimal("90"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,
@@ -135,7 +135,7 @@ class TestStorageLimitsAPI:
     self, client_with_test_user: TestClient, sample_graph_credits, db_session
   ):
     """Test storage limits when exceeding limit."""
-    # Create usage record that exceeds limit (600GB > 500GB)
+    # Create usage record that exceeds limit (120GB > 100GB)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="api_usage_3",
@@ -145,7 +145,7 @@ class TestStorageLimitsAPI:
       graph_tier=sample_graph_credits.graph_tier.value
       if hasattr(sample_graph_credits.graph_tier, "value")
       else sample_graph_credits.graph_tier,
-      storage_gb=Decimal("600"),
+      storage_gb=Decimal("120"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,
@@ -172,11 +172,11 @@ class TestStorageLimitsAPI:
     self, client_with_test_user: TestClient, sample_graph_credits, db_session
   ):
     """Test storage limits with admin override."""
-    # Set override limit
-    sample_graph_credits.storage_override_gb = Decimal("1000")
+    # Set override limit to 200GB
+    sample_graph_credits.storage_override_gb = Decimal("200")
     db_session.commit()
 
-    # Create usage record
+    # Create usage record (120GB = 60% of 200GB override)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="api_usage_4",
@@ -186,7 +186,7 @@ class TestStorageLimitsAPI:
       graph_tier=sample_graph_credits.graph_tier.value
       if hasattr(sample_graph_credits.graph_tier, "value")
       else sample_graph_credits.graph_tier,
-      storage_gb=Decimal("600"),
+      storage_gb=Decimal("120"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,
@@ -203,7 +203,7 @@ class TestStorageLimitsAPI:
     assert response.status_code == 200
     data = response.json()
 
-    assert data["effective_limit_gb"] == 1000.0
+    assert data["effective_limit_gb"] == 200.0
     assert data["usage_percentage"] == 60.0
     assert data["within_limit"] is True
     assert data["has_override"] is True

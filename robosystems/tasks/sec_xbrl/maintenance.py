@@ -2,7 +2,7 @@
 SEC XBRL Pipeline Maintenance Tasks
 
 Provides maintenance operations for the SEC pipeline including:
-- Resetting/recreating the Kuzu SEC database
+- Resetting/recreating the SEC graph database (supports Kuzu and Neo4j backends)
 - Clearing S3 processed data for a specific year
 - Future: data integrity checks, etc.
 """
@@ -22,7 +22,7 @@ from robosystems.graph_api.client.factory import GraphClientFactory
   name="sec_xbrl.reset_sec_database",
   max_retries=1,
 )
-def reset_sec_database(confirm: bool = False) -> Dict:
+def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
   """
   Completely reset the SEC database by deleting and recreating it with schema.
 
@@ -33,6 +33,7 @@ def reset_sec_database(confirm: bool = False) -> Dict:
 
   Args:
       confirm: Must be True to actually perform the reset
+      backend: Backend type for context/logging ("kuzu" or "neo4j")
 
   Returns:
       Status of the reset operation
@@ -45,7 +46,9 @@ def reset_sec_database(confirm: bool = False) -> Dict:
 
   start_time = datetime.now()
 
-  logger.warning("🚨 RESETTING SEC DATABASE - This will delete ALL data!")
+  logger.warning(
+    f"🚨 RESETTING SEC DATABASE ({backend} backend) - This will delete ALL data!"
+  )
 
   # The SEC database details (matching ingestion.py)
   db_name = "sec"
@@ -140,9 +143,10 @@ def reset_sec_database(confirm: bool = False) -> Dict:
 
     return {
       "status": "success",
-      "message": "SEC database has been completely reset",
+      "message": f"SEC database ({backend} backend) has been completely reset",
       "database": db_name,
       "graph_id": graph_id,
+      "backend": backend,
       "duration_seconds": duration,
       "node_types": reset_result.get("node_types", 0),
       "relationship_types": reset_result.get("relationship_types", 0),
@@ -165,7 +169,9 @@ def reset_sec_database(confirm: bool = False) -> Dict:
   name="sec_xbrl.full_reset_for_year",
   max_retries=1,
 )
-def full_reset_for_year(year: int, confirm: bool = False) -> Dict:
+def full_reset_for_year(
+  year: int, confirm: bool = False, backend: str = "kuzu"
+) -> Dict:
   """
   Clear all processed S3 data for a specific year and reset the SEC database.
 
@@ -176,6 +182,7 @@ def full_reset_for_year(year: int, confirm: bool = False) -> Dict:
   Args:
       year: Year of data to clear
       confirm: Must be True to actually perform the reset
+      backend: Backend type for context/logging ("kuzu" or "neo4j")
 
   Returns:
       Status of the reset operation
@@ -188,11 +195,13 @@ def full_reset_for_year(year: int, confirm: bool = False) -> Dict:
 
   start_time = datetime.now()
 
-  logger.warning(f"🚨 FULL RESET for year {year} - Clearing S3 and resetting database")
+  logger.warning(
+    f"🚨 FULL RESET for year {year} ({backend} backend) - Clearing S3 and resetting database"
+  )
 
   # Track results
   s3_result = {"status": "skipped", "files_deleted": 0}
-  kuzu_result = {"status": "skipped"}
+  db_result = {"status": "skipped"}
 
   # Step 1: Clear S3 processed data
   try:
@@ -238,29 +247,29 @@ def full_reset_for_year(year: int, confirm: bool = False) -> Dict:
 
   # Step 2: Reset the SEC database
   try:
-    logger.info("Resetting SEC database...")
+    logger.info(f"Resetting SEC database ({backend} backend)...")
 
-    # Call the existing reset function
-    db_result = reset_sec_database(confirm=True)
+    # Call the existing reset function with backend parameter
+    reset_result = reset_sec_database(confirm=True, backend=backend)
 
-    if db_result["status"] == "success":
-      kuzu_result = {"status": "success"}
+    if reset_result["status"] == "success":
+      db_result = {"status": "success"}
       logger.info("SEC database reset successfully")
     else:
-      kuzu_result = {
+      db_result = {
         "status": "failed",
-        "error": db_result.get("error", "Unknown error"),
+        "error": reset_result.get("error", "Unknown error"),
       }
-      logger.error(f"Failed to reset SEC database: {kuzu_result['error']}")
+      logger.error(f"Failed to reset SEC database: {db_result['error']}")
 
   except Exception as e:
     logger.error(f"Failed to reset SEC database: {e}")
-    kuzu_result = {"status": "failed", "error": str(e)}
+    db_result = {"status": "failed", "error": str(e)}
 
   duration = (datetime.now() - start_time).total_seconds()
 
   # Determine overall status
-  if s3_result["status"] == "success" and kuzu_result["status"] == "success":
+  if s3_result["status"] == "success" and db_result["status"] == "success":
     overall_status = "completed"
     logger.info(f"✅ Full reset for year {year} completed in {duration:.1f}s")
   else:
@@ -272,7 +281,8 @@ def full_reset_for_year(year: int, confirm: bool = False) -> Dict:
   return {
     "status": overall_status,
     "year": year,
+    "backend": backend,
     "duration_seconds": duration,
     "s3_clear": s3_result,
-    "kuzu_reset": kuzu_result,
+    "database_reset": db_result,
   }

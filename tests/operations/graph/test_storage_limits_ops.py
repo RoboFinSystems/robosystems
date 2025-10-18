@@ -27,16 +27,16 @@ class TestStorageLimitChecking:
     """Test storage check when within limits."""
     credit_service = CreditService(db_session)
 
-    # Test with 60GB usage against 500GB limit (12%, below 80% threshold)
+    # Test with 30GB usage against 100GB limit (30%, below 80% threshold)
     result = credit_service.check_storage_limit(
-      sample_graph_credits.graph_id, current_storage_gb=Decimal("60")
+      sample_graph_credits.graph_id, current_storage_gb=Decimal("30")
     )
 
     assert result["within_limit"] is True
     assert result["approaching_limit"] is False
-    assert result["current_storage_gb"] == 60.0
-    assert result["effective_limit_gb"] == 500.0
-    assert result["usage_percentage"] == 12.0
+    assert result["current_storage_gb"] == 30.0
+    assert result["effective_limit_gb"] == 100.0
+    assert result["usage_percentage"] == 30.0
     assert result["has_override"] is False
 
   def test_check_storage_limit_approaching_threshold(
@@ -45,9 +45,9 @@ class TestStorageLimitChecking:
     """Test storage check when approaching the warning threshold."""
     credit_service = CreditService(db_session)
 
-    # Test with 450GB usage (90% of 500GB limit, above 80% threshold)
+    # Test with 90GB usage (90% of 100GB limit, above 80% threshold)
     result = credit_service.check_storage_limit(
-      sample_graph_credits.graph_id, current_storage_gb=Decimal("450")
+      sample_graph_credits.graph_id, current_storage_gb=Decimal("90")
     )
 
     assert result["within_limit"] is True
@@ -59,9 +59,9 @@ class TestStorageLimitChecking:
     """Test storage check when exceeding limits."""
     credit_service = CreditService(db_session)
 
-    # Test with 600GB usage against 500GB limit
+    # Test with 120GB usage against 100GB limit
     result = credit_service.check_storage_limit(
-      sample_graph_credits.graph_id, current_storage_gb=Decimal("600")
+      sample_graph_credits.graph_id, current_storage_gb=Decimal("120")
     )
 
     assert result["within_limit"] is False
@@ -74,17 +74,17 @@ class TestStorageLimitChecking:
     """Test storage check with admin override applied."""
     credit_service = CreditService(db_session)
 
-    # Set an override to 1000GB
-    sample_graph_credits.storage_override_gb = Decimal("1000")
+    # Set an override to 200GB
+    sample_graph_credits.storage_override_gb = Decimal("200")
     db_session.commit()
 
-    # Test with 600GB usage against 1000GB override limit
+    # Test with 120GB usage against 200GB override limit
     result = credit_service.check_storage_limit(
-      sample_graph_credits.graph_id, current_storage_gb=Decimal("600")
+      sample_graph_credits.graph_id, current_storage_gb=Decimal("120")
     )
 
     assert result["within_limit"] is True
-    assert result["effective_limit_gb"] == 1000.0
+    assert result["effective_limit_gb"] == 200.0
     assert result["usage_percentage"] == 60.0
     assert result["has_override"] is True
 
@@ -139,20 +139,20 @@ class TestStorageOverride:
 
     result = credit_service.set_storage_override(
       graph_id=sample_graph_credits.graph_id,
-      new_limit_gb=Decimal("1000"),
+      new_limit_gb=Decimal("200"),
       admin_user_id="admin_123",
       reason="Emergency capacity increase",
     )
 
     assert result["success"] is True
-    assert result["old_limit_gb"] == 500.0
-    assert result["new_limit_gb"] == 1000.0
+    assert result["old_limit_gb"] == 100.0
+    assert result["new_limit_gb"] == 200.0
     assert result["admin_user_id"] == "admin_123"
     assert result["reason"] == "Emergency capacity increase"
 
     # Verify database was updated
     db_session.refresh(sample_graph_credits)
-    assert sample_graph_credits.storage_override_gb == Decimal("1000")
+    assert sample_graph_credits.storage_override_gb == Decimal("200")
 
   def test_set_storage_override_creates_audit_transaction(
     self, db_session, sample_graph_credits
@@ -162,7 +162,7 @@ class TestStorageOverride:
 
     credit_service.set_storage_override(
       graph_id=sample_graph_credits.graph_id,
-      new_limit_gb=Decimal("1500"),
+      new_limit_gb=Decimal("300"),
       admin_user_id="admin_456",
       reason="Special project requirements",
     )
@@ -246,7 +246,7 @@ class TestStorageViolationDetection:
       session=db_session,
     )
 
-    # Create usage record that exceeds limit (600GB > 500GB limit)
+    # Create usage record that exceeds limit (120GB > 100GB limit)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="violation_usage_1",
@@ -256,7 +256,7 @@ class TestStorageViolationDetection:
       graph_tier=credits.graph_tier.value
       if hasattr(credits.graph_tier, "value")
       else credits.graph_tier,
-      storage_gb=Decimal("600"),
+      storage_gb=Decimal("120"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,
@@ -275,8 +275,8 @@ class TestStorageViolationDetection:
     violation = graph_violations[0]
     assert violation["graph_id"] == credits.graph_id
     assert violation["user_id"] == sample_user.id
-    assert violation["current_storage_gb"] == 600.0
-    assert violation["effective_limit_gb"] == 500.0
+    assert violation["current_storage_gb"] == 120.0
+    assert violation["effective_limit_gb"] == 100.0
     assert violation["exceeds_limit"] is True
     assert violation["usage_percentage"] == 120.0
 
@@ -305,7 +305,7 @@ class TestStorageViolationDetection:
       session=db_session,
     )
 
-    # Create usage record that approaches limit (450GB = 90% of 500GB)
+    # Create usage record that approaches limit (90GB = 90% of 100GB)
     now = datetime.now(timezone.utc)
     usage_record = GraphUsageTracking(
       id="approaching_usage_1",
@@ -315,7 +315,7 @@ class TestStorageViolationDetection:
       graph_tier=credits.graph_tier.value
       if hasattr(credits.graph_tier, "value")
       else credits.graph_tier,
-      storage_gb=Decimal("450"),
+      storage_gb=Decimal("90"),
       recorded_at=now,
       billing_year=now.year,
       billing_month=now.month,

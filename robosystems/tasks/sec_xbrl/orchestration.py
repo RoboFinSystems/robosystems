@@ -4,7 +4,8 @@ SEC Orchestration - Phase-Based Processing
 Architecture:
 - Phase 1: Download (rate-limited, shared-extraction queue)
 - Phase 2: Process (unlimited parallelism, shared-processing queue)
-- Phase 3: Ingest (shared-ingestion queue, reads directly from processed files)
+- Phase 3: Consolidate (combine small parquet files into larger ones)
+- Phase 4: Ingest (shared-ingestion queue, supports both Kuzu and Neo4j backends)
 
 All state managed in Redis for distributed coordination.
 """
@@ -916,6 +917,7 @@ def plan_phased_processing(
   max_companies: Optional[int] = None,  # Limit companies for testing
   companies_per_batch: int = 50,  # For monitoring/checkpointing only
   cik_filter: Optional[str] = None,  # Filter to specific CIK for local testing
+  backend: str = "kuzu",  # Backend type for ingestion ("kuzu" or "neo4j")
 ) -> Dict:
   """
   Plan phased SEC processing with optional company limit for testing.
@@ -926,11 +928,12 @@ def plan_phased_processing(
       max_companies: Maximum companies to process (None = all)
       companies_per_batch: Batch size for monitoring (not parallelism)
       cik_filter: Optional CIK to filter to a single company
+      backend: Backend type for ingestion ("kuzu" or "neo4j")
   """
   from robosystems.adapters.sec import SECClient
 
   logger.info(
-    f"Planning phased processing: years {start_year}-{end_year}, "
+    f"Planning phased processing ({backend} backend): years {start_year}-{end_year}, "
     f"max_companies={max_companies}, batch_size={companies_per_batch}, "
     f"cik_filter={cik_filter}"
   )
@@ -964,6 +967,7 @@ def plan_phased_processing(
     "config": {
       "max_companies": max_companies,
       "companies_per_batch": companies_per_batch,
+      "backend": backend,
     },
     "phases": {
       "download": {"status": "pending"},
@@ -984,8 +988,9 @@ def plan_phased_processing(
     "companies": len(companies),
     "years": years,
     "max_companies": max_companies,
+    "backend": backend,
     "phases": ["download", "process", "consolidate", "ingest"],
-    "message": f"Ready to process {len(companies)} companies for {len(years)} years",
+    "message": f"Ready to process {len(companies)} companies for {len(years)} years ({backend} backend)",
   }
 
 
@@ -994,14 +999,17 @@ def plan_phased_processing(
   name="sec_xbrl.start_phase",
   max_retries=1,
 )
-def start_phase(phase: str, resume: bool = False, retry_failed: bool = False) -> Dict:
+def start_phase(
+  phase: str, resume: bool = False, retry_failed: bool = False, backend: str = "kuzu"
+) -> Dict:
   """
   Start a specific processing phase with optional resume support.
 
   Args:
-      phase: Phase to start (download, process, ingest)
+      phase: Phase to start (download, process, consolidate, ingest)
       resume: Resume from last checkpoint if available
       retry_failed: Include previously failed companies
+      backend: Backend type for ingestion ("kuzu" or "neo4j")
   """
   orchestrator = SECOrchestrator()
   state = orchestrator._load_state()
@@ -1015,6 +1023,11 @@ def start_phase(phase: str, resume: bool = False, retry_failed: bool = False) ->
   companies = state["companies"]
   years = state["years"]
   config = state["config"]
+
+  # Use backend from state if not specified (for backward compatibility)
+  if backend == "kuzu" and config.get("backend"):
+    backend = config["backend"]
+    logger.info(f"Using backend from state: {backend}")
 
   # Check for checkpoint if resuming
   if resume:
@@ -1089,6 +1102,8 @@ def start_phase(phase: str, resume: bool = False, retry_failed: bool = False) ->
     # Use existing ingestion - will now use consolidated files
     from robosystems.tasks.sec_xbrl.ingestion import ingest_sec_data
 
+    logger.info(f"Starting ingestion phase with {backend} backend for years {years}")
+
     tasks = []
     for year in years:
       task = ingest_sec_data.apply_async(  # type: ignore[attr-defined]
@@ -1099,6 +1114,7 @@ def start_phase(phase: str, resume: bool = False, retry_failed: bool = False) ->
           "graph_id": "sec",
           "bucket": env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed",
           "use_consolidated": True,  # Use consolidated files
+          "backend": backend,  # Pass backend parameter
         }
       )
       tasks.append(task)
@@ -1106,6 +1122,7 @@ def start_phase(phase: str, resume: bool = False, retry_failed: bool = False) ->
     return {
       "status": "started",
       "phase": "ingest",
+      "backend": backend,
       "years": years,
       "tasks": len(tasks),
     }

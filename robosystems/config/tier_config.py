@@ -1,7 +1,7 @@
 """Tier configuration utilities.
 
 This module provides utilities for loading and accessing tier-specific
-configuration values from the kuzu.yml configuration file.
+configuration values from the graph.yml configuration file.
 """
 
 import os
@@ -20,23 +20,23 @@ class TierConfig:
 
   @classmethod
   def _load_config(cls) -> Dict[str, Any]:
-    """Load the kuzu.yml configuration file."""
+    """Load the graph.yml configuration file."""
     if cls._config_cache is not None:
       return cls._config_cache
 
     # Determine config path - try container location first, then development location
-    container_path = "/app/configs/kuzu.yml"
+    container_path = "/app/configs/graph.yml"
     dev_path = os.path.join(
       os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
       ".github",
       "configs",
-      "kuzu.yml",
+      "graph.yml",
     )
 
     config_path = container_path if os.path.exists(container_path) else dev_path
 
     if not os.path.exists(config_path):
-      warnings.warn(f"Kuzu config file not found at {config_path}")
+      warnings.warn(f"Graph config file not found at {config_path}")
       cls._config_cache = {}
       return cls._config_cache
 
@@ -46,11 +46,11 @@ class TierConfig:
       cls._config_cache = config or {}
       # Use print for debug since logger isn't available due to circular import
       if os.getenv("DEBUG", "").lower() == "true":
-        print(f"DEBUG: Loaded kuzu config from {config_path}")
+        print(f"DEBUG: Loaded graph config from {config_path}")
       assert cls._config_cache is not None
       return cls._config_cache
     except Exception as e:
-      warnings.warn(f"Failed to load kuzu config: {e}")
+      warnings.warn(f"Failed to load graph config: {e}")
       cls._config_cache = {}
       return cls._config_cache
 

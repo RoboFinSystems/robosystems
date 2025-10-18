@@ -359,15 +359,30 @@ class GraphClientFactory:
       - Reads: Try replica ALB first, fallback to master if allowed
     """
 
-    # In dev environment, route everything to the single graph instance
+    # In dev environment, route to appropriate local instance based on tier config
     if env.is_development():
-      api_url = env.GRAPH_API_URL or "http://localhost:8001"
+      # Check tier configuration to determine backend for shared repositories
+      from robosystems.config.tier_config import TierConfig
+
+      tier_config = TierConfig.get_tier_config(
+        "shared", "staging"
+      )  # Use staging config for dev
+      backend = tier_config.get("backend", "kuzu")
+
+      # Route to appropriate local instance based on backend
+      if backend == "neo4j":
+        api_url = "http://neo4j-api:8002"  # Neo4j instance
+        logger.info(
+          f"Dev environment: Routing {graph_id} {operation_type} to Neo4j at {api_url} (shared tier)"
+        )
+      else:
+        api_url = env.GRAPH_API_URL or "http://localhost:8001"  # Kuzu instance
+        logger.info(
+          f"Dev environment: Routing {graph_id} {operation_type} to Kuzu at {api_url} (shared tier)"
+        )
+
       api_key = env.GRAPH_API_KEY
       target = RouteTarget.SHARED_MASTER  # Treat as master in dev
-
-      logger.info(
-        f"Dev environment: Routing {graph_id} {operation_type} to local graph at {api_url}"
-      )
 
     # Production/staging routing
     elif operation_type == "write":

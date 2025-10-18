@@ -3,6 +3,10 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 
+class S3IngestionError(Exception):
+  pass
+
+
 @dataclass
 class DatabaseInfo:
   name: str
@@ -62,6 +66,18 @@ class GraphBackend(ABC):
 
   @abstractmethod
   async def health_check(self) -> bool:
+    pass
+
+  @abstractmethod
+  async def ingest_from_s3(
+    self,
+    graph_id: str,
+    table_name: str,
+    s3_pattern: str,
+    s3_credentials: Optional[Dict[str, Any]] = None,
+    ignore_errors: bool = True,
+    database: Optional[str] = None,
+  ) -> Dict[str, Any]:
     pass
 
   @abstractmethod

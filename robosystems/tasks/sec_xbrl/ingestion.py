@@ -1,13 +1,14 @@
 """
-SEC XBRL Kuzu Ingestion Task
+SEC XBRL Graph Database Ingestion Task
 
 Handles the final stage of the SEC pipeline - ingesting processed
 parquet files directly from the processed folder using native S3 bulk loading.
 
 Key features:
-- Uses Kuzu's native S3 COPY FROM with glob patterns
+- Supports both Kuzu and Neo4j backends via Graph API
+- Uses native S3 COPY FROM with glob patterns
 - Processes nodes before relationships (dependency order)
-- Single-threaded to prevent overwhelming Kuzu
+- Single-threaded to prevent overwhelming the database
 - Supports incremental updates
 - Reads directly from processed folder (no consolidation needed)
 """
@@ -123,7 +124,7 @@ def _ensure_schema_loaded():
 @celery_app.task(
   bind=True,
   queue=QUEUE_SHARED_INGESTION,
-  name="sec_xbrl.ingest_to_kuzu",  # More descriptive name
+  name="sec_xbrl.ingest_sec_data",  # Backend-agnostic name
   max_retries=3,
   default_retry_delay=60,
 )
@@ -141,9 +142,12 @@ def ingest_sec_data(
   incremental: bool = False,  # Only load new batches
   timestamp_after: Optional[str] = None,  # Load batches after this timestamp
   use_consolidated: bool = False,  # Use consolidated files instead of raw processed
+  backend: str = "kuzu",  # Backend type ("kuzu" or "neo4j")
 ) -> Dict[str, Any]:
   """
-  Ingest SEC data from S3 to Kuzu using native bulk loading.
+  Ingest SEC data from S3 to graph database using native bulk loading.
+
+  Supports both Kuzu and Neo4j backends via the Graph API.
 
   Expects data organized as either:
   - processed/year={year}/nodes/{type}/*.parquet (raw processed files)
@@ -166,11 +170,16 @@ def ingest_sec_data(
       incremental: Only load new batches since last run
       timestamp_after: Only load batches with timestamp after this
       use_consolidated: Use consolidated files for better performance (default: False)
+      backend: Backend type for context/logging ("kuzu" or "neo4j")
 
   Returns:
       Dict with ingestion results
   """
   start_time = datetime.now()
+
+  logger.info(
+    f"Starting SEC data ingestion with {backend} backend for year {year} (pipeline: {pipeline_run_id})"
+  )
 
   # Set environment variable for large tables requiring cleanup in Kuzu ingestion
   # This is used by the generic Kuzu ingestion API to handle memory management
@@ -648,6 +657,7 @@ def ingest_sec_data(
       "status": "completed" if total_warnings == 0 else "completed_with_warnings",
       "pipeline_run_id": pipeline_run_id,
       "year": year,
+      "backend": backend,
       "batch_mode": batch_mode,
       "incremental": incremental,
       "duration_seconds": duration_seconds,

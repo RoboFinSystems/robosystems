@@ -4,7 +4,7 @@ import boto3
 from neo4j import AsyncGraphDatabase, AsyncDriver
 from robosystems.logger import logger
 from robosystems.config import env
-from .base import GraphBackend, DatabaseInfo, ClusterTopology
+from .base import GraphBackend, DatabaseInfo, ClusterTopology, S3IngestionError
 
 
 class Neo4jBackend(GraphBackend):
@@ -212,6 +212,171 @@ class Neo4jBackend(GraphBackend):
     except Exception as e:
       logger.error(f"Neo4j health check failed: {e}")
       return False
+
+  async def ingest_from_s3(
+    self,
+    graph_id: str,
+    table_name: str,
+    s3_pattern: str,
+    s3_credentials: Optional[Dict[str, Any]] = None,
+    ignore_errors: bool = True,
+    database: Optional[str] = None,
+  ) -> Dict[str, Any]:
+    import time
+    import boto3
+    import pyarrow.parquet as pq
+    import io
+    from botocore.exceptions import ClientError
+
+    await self._ensure_connected()
+
+    db_name = self._get_database_name(graph_id, database)
+
+    s3_client = boto3.client(
+      "s3",
+      aws_access_key_id=s3_credentials.get("aws_access_key_id")
+      if s3_credentials
+      else None,
+      aws_secret_access_key=s3_credentials.get("aws_secret_access_key")
+      if s3_credentials
+      else None,
+      region_name=s3_credentials.get("region", env.AWS_REGION)
+      if s3_credentials
+      else env.AWS_REGION,
+      endpoint_url=s3_credentials.get("endpoint_url") if s3_credentials else None,
+    )
+
+    if s3_pattern.startswith("s3://"):
+      s3_pattern = s3_pattern[5:]
+
+    parts = s3_pattern.split("/", 1)
+    bucket = parts[0]
+    prefix = parts[1] if len(parts) > 1 else ""
+
+    prefix_path = "/".join(prefix.rsplit("/", 1)[:-1]) if "/" in prefix else ""
+    file_pattern = prefix.rsplit("/", 1)[-1] if "/" in prefix else prefix
+
+    logger.info(
+      f"S3 file discovery - Bucket: {bucket}, Prefix: {prefix_path}, Pattern: {file_pattern}"
+    )
+
+    try:
+      import fnmatch
+
+      paginator = s3_client.get_paginator("list_objects_v2")
+      pages = paginator.paginate(Bucket=bucket, Prefix=prefix_path)
+
+      files = []
+      for page in pages:
+        if "Contents" in page:
+          for obj in page["Contents"]:
+            key = obj["Key"]
+            if key.endswith(".parquet"):
+              filename = key.rsplit("/", 1)[-1] if "/" in key else key
+              if fnmatch.fnmatch(filename, file_pattern):
+                files.append(key)
+
+      logger.info(f"Found {len(files)} Parquet files matching pattern {s3_pattern}")
+
+      if not files:
+        logger.warning(f"No Parquet files found for pattern: {s3_pattern}")
+        return {
+          "records_loaded": 0,
+          "duration_seconds": 0,
+          "files_processed": 0,
+          "query": "N/A - no files found",
+        }
+
+    except ClientError as e:
+      logger.error(f"Failed to list S3 files: {e}")
+      raise S3IngestionError(f"S3 list operation failed: {e}")
+
+    total_records = 0
+    start_time = time.time()
+
+    for file_key in files:
+      logger.info(f"Loading Parquet file from S3: {file_key}")
+
+      try:
+        response = s3_client.get_object(Bucket=bucket, Key=file_key)
+        parquet_data = response["Body"].read()
+
+        table = pq.read_table(io.BytesIO(parquet_data))
+        df = table.to_pandas()
+
+        df = df.where(df.notnull(), None)
+
+        df = df.fillna({col: "" for col in df.columns if df[col].dtype == "object"})
+        for col in df.columns:
+          if df[col].dtype in ["float64", "int64"]:
+            df[col] = df[col].fillna(0)
+
+        records_in_file = len(df)
+        logger.info(f"Read {records_in_file} records from {file_key}")
+
+        batch_size = 1000
+        file_records_loaded = 0
+
+        for batch_start in range(0, records_in_file, batch_size):
+          batch_end = min(batch_start + batch_size, records_in_file)
+          batch_df = df.iloc[batch_start:batch_end]
+
+          batch_records = [
+            {k: (v if v is not None else "") for k, v in record.items()}
+            for record in batch_df.to_dict("records")
+          ]
+
+          async with self.driver.session(database=db_name) as session:
+
+            async def _load_batch(tx):
+              id_field = "identifier" if "identifier" in batch_records[0] else "id"
+              cypher = f"""
+              UNWIND $batch as row
+              MERGE (n:{table_name} {{{id_field}: row.{id_field}}})
+              SET n += row
+              RETURN count(n) as count
+              """
+              result = await tx.run(cypher, {"batch": batch_records})
+              record = await result.single()
+              return record["count"] if record else 0
+
+            try:
+              count = await session.execute_write(_load_batch)
+              file_records_loaded += count
+            except Exception as batch_error:
+              if ignore_errors:
+                logger.warning(
+                  f"Skipped batch {batch_start}-{batch_end} in {file_key} due to error: {batch_error}"
+                )
+              else:
+                raise
+
+          logger.debug(
+            f"Loaded batch {batch_start}-{batch_end} ({len(batch_records)} records)"
+          )
+
+        total_records += file_records_loaded
+        logger.info(f"Completed loading {file_records_loaded} records from {file_key}")
+
+      except Exception as e:
+        logger.error(f"Failed to load Parquet file {file_key}: {e}")
+        if not ignore_errors:
+          raise
+        else:
+          logger.warning(f"Skipped file {file_key} due to error (ignore_errors=True)")
+
+    duration = time.time() - start_time
+
+    logger.info(
+      f"Neo4j ingestion completed: {total_records:,} records from {len(files)} files in {duration:.2f}s"
+    )
+
+    return {
+      "records_loaded": total_records,
+      "duration_seconds": duration,
+      "files_processed": len(files),
+      "query": f"Python driver + pyarrow for {len(files)} files",
+    }
 
   async def close(self) -> None:
     if self.driver:
