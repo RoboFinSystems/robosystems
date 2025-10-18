@@ -1,4 +1,4 @@
-name: Deploy Kuzu Volumes Infrastructure
+name: Deploy Graph Volumes Infrastructure
 
 on:
   workflow_call:
@@ -36,7 +36,7 @@ on:
 
       # Registry Configuration
       volume_registry_table:
-        description: "DynamoDB table name for volume registry (from kuzu-infra stack)"
+        description: "DynamoDB table name for volume registry (from graph-infra stack)"
         required: false
         type: string
         default: ""
@@ -107,7 +107,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.aws_region }}
 
-      - name: Deploy Kuzu Volumes CloudFormation stack
+      - name: Deploy Graph Volumes CloudFormation stack
         id: deploy-stack
         run: |
           # Check if stack exists
@@ -127,7 +127,7 @@ jobs:
                 ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
                 ParameterKey=ServiceTag,ParameterValue=\"RoboSystems\" \
-                ParameterKey=ComponentTag,ParameterValue=\"KuzuVolumeManager\""
+                ParameterKey=ComponentTag,ParameterValue=\"GraphVolumeManager\""
 
           # Add volume registry table if provided
           if [ -n "${{ inputs.volume_registry_table }}" ]; then
@@ -143,23 +143,35 @@ jobs:
             # Fetch S3 keys from manifest (which includes hashes in filenames)
             MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
             
-            VOLUME_MANAGER_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."kuzu-volume-manager".s3_key // empty')
-            VOLUME_MONITOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."kuzu-volume-monitor".s3_key // empty')
-            VOLUME_DETACHMENT_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."kuzu-volume-detachment".s3_key // empty')
-            
+            VOLUME_MANAGER_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-manager".s3_key // empty')
+            VOLUME_MONITOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-monitor".s3_key // empty')
+            VOLUME_DETACHMENT_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-detachment".s3_key // empty')
+            SNAPSHOT_CREATOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-snapshot-creator".s3_key // empty')
+            SNAPSHOT_SELECTOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-snapshot-selector".s3_key // empty')
+
             if [ -n "$VOLUME_MANAGER_KEY" ]; then
               STACK_PARAMS="$STACK_PARAMS \
                     ParameterKey=VolumeManagerCodeKey,ParameterValue=$VOLUME_MANAGER_KEY"
             fi
-            
+
             if [ -n "$VOLUME_MONITOR_KEY" ]; then
               STACK_PARAMS="$STACK_PARAMS \
                     ParameterKey=VolumeMonitorCodeKey,ParameterValue=$VOLUME_MONITOR_KEY"
             fi
-            
+
             if [ -n "$VOLUME_DETACHMENT_KEY" ]; then
               STACK_PARAMS="$STACK_PARAMS \
                     ParameterKey=VolumeDetachmentCodeKey,ParameterValue=$VOLUME_DETACHMENT_KEY"
+            fi
+
+            if [ -n "$SNAPSHOT_CREATOR_KEY" ]; then
+              STACK_PARAMS="$STACK_PARAMS \
+                    ParameterKey=SnapshotCreatorCodeKey,ParameterValue=$SNAPSHOT_CREATOR_KEY"
+            fi
+
+            if [ -n "$SNAPSHOT_SELECTOR_KEY" ]; then
+              STACK_PARAMS="$STACK_PARAMS \
+                    ParameterKey=SnapshotSelectorCodeKey,ParameterValue=$SNAPSHOT_SELECTOR_KEY"
             fi
           fi
 
@@ -174,26 +186,26 @@ jobs:
             # Create new stack
             aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              --template-body file://cloudformation/kuzu-volumes.yaml \
+              --template-body file://cloudformation/graph-volumes.yaml \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
               --parameters $STACK_PARAMS \
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=KuzuVolumeManager \
+                Key=Component,Value=GraphVolumeManager \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions
           else
             # Update existing stack, handling "No updates" error
             UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              --template-body file://cloudformation/kuzu-volumes.yaml \
+              --template-body file://cloudformation/graph-volumes.yaml \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
               --parameters $STACK_PARAMS \
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=KuzuVolumeManager \
+                Key=Component,Value=GraphVolumeManager \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions 2>&1) || true
 
@@ -250,7 +262,7 @@ jobs:
         run: |
           # Output deployment status for the main workflow
           if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
-            echo "✅ Kuzu Volumes infrastructure created successfully"
+            echo "✅ Graph Volumes infrastructure created successfully"
           else
-            echo "✅ Kuzu Volumes infrastructure updated successfully"
+            echo "✅ Graph Volumes infrastructure updated successfully"
           fi

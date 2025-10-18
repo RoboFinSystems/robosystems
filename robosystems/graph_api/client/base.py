@@ -1,7 +1,7 @@
 """
-Base Kuzu API Client.
+Base Graph API Client.
 
-Shared functionality for sync and async clients.
+Shared functionality for sync and async clients (works with all backends: Kuzu, Neo4j).
 """
 
 import time
@@ -10,24 +10,24 @@ from typing import Optional, Dict, Any, TypeVar
 from urllib.parse import urljoin
 
 from robosystems.logger import logger
-from .config import KuzuClientConfig
+from .config import GraphClientConfig
 from .exceptions import (
-  KuzuAPIError,
-  KuzuTransientError,
-  KuzuClientError,
-  KuzuServerError,
+  GraphAPIError,
+  GraphTransientError,
+  GraphClientError,
+  GraphServerError,
 )
 
 T = TypeVar("T")
 
 
-class BaseKuzuClient:
-  """Base class for Kuzu API clients with shared functionality."""
+class BaseGraphClient:
+  """Base class for Graph API clients with shared functionality (works with all backends)."""
 
   def __init__(
     self,
     base_url: Optional[str] = None,
-    config: Optional[KuzuClientConfig] = None,
+    config: Optional[GraphClientConfig] = None,
     **kwargs,
   ):
     """
@@ -39,7 +39,7 @@ class BaseKuzuClient:
         **kwargs: Additional config overrides
     """
     # Use provided config or create from environment
-    self.config = config or KuzuClientConfig.from_env()
+    self.config = config or GraphClientConfig.from_env()
 
     # Override with provided values
     if base_url:
@@ -54,13 +54,13 @@ class BaseKuzuClient:
       if "headers" not in kwargs:
         kwargs["headers"] = {}
       kwargs["headers"]["X-Kuzu-API-Key"] = api_key
-      logger.debug("KuzuClient configured with API key")
+      logger.debug("GraphClient configured with API key")
     else:
       # Only warn about missing API key in production environments
       if env.ENVIRONMENT in ("prod", "production", "staging"):
-        logger.warning("KuzuClient initialized without API key")
+        logger.warning("GraphClient initialized without API key")
       else:
-        logger.debug("KuzuClient initialized without API key (development mode)")
+        logger.debug("GraphClient initialized without API key (development mode)")
 
     if kwargs:
       self.config = self.config.with_overrides(**kwargs)
@@ -98,21 +98,21 @@ class BaseKuzuClient:
       return False
 
     # Import here to avoid circular imports
-    from .exceptions import KuzuSyntaxError
+    from .exceptions import GraphSyntaxError
 
     # Syntax errors should NEVER be retried - fail fast
-    if isinstance(error, KuzuSyntaxError):
+    if isinstance(error, GraphSyntaxError):
       return False
 
     # Check if error is retriable
-    if isinstance(error, KuzuTransientError):
+    if isinstance(error, GraphTransientError):
       return True
 
-    if isinstance(error, KuzuServerError):
+    if isinstance(error, GraphServerError):
       # 500 errors might be retriable
       return True
 
-    if isinstance(error, KuzuClientError):
+    if isinstance(error, GraphClientError):
       # Client errors are not retriable
       return False
 
@@ -139,7 +139,7 @@ class BaseKuzuClient:
     Check if circuit breaker is open.
 
     Raises:
-        KuzuTransientError: If circuit breaker is open
+        GraphTransientError: If circuit breaker is open
     """
     if not self._circuit_breaker_open:
       return
@@ -152,7 +152,7 @@ class BaseKuzuClient:
       self._circuit_breaker_failures = 0
       logger.info("Circuit breaker reset")
     else:
-      raise KuzuTransientError(
+      raise GraphTransientError(
         f"Circuit breaker open. Retry after {self.config.circuit_breaker_timeout - time_since_failure:.0f}s"
       )
 
@@ -174,7 +174,7 @@ class BaseKuzuClient:
 
   def _handle_response_error(
     self, status_code: int, response_data: Optional[Dict[str, Any]] = None
-  ) -> KuzuAPIError:
+  ) -> GraphAPIError:
     """
     Convert HTTP status code to appropriate exception.
 
@@ -183,7 +183,7 @@ class BaseKuzuClient:
         response_data: Response body data
 
     Returns:
-        Appropriate KuzuAPIError subclass
+        Appropriate GraphAPIError subclass
     """
     error_message = "API request failed"
     if response_data and isinstance(response_data, dict):
@@ -205,15 +205,15 @@ class BaseKuzuClient:
       ]
 
       if any(pattern in error_message for pattern in syntax_error_patterns):
-        from .exceptions import KuzuSyntaxError
+        from .exceptions import GraphSyntaxError
 
-        return KuzuSyntaxError(error_message, status_code, response_data)
+        return GraphSyntaxError(error_message, status_code, response_data)
 
     if status_code in (502, 503, 504):
-      return KuzuTransientError(error_message, status_code, response_data)
+      return GraphTransientError(error_message, status_code, response_data)
     elif status_code in (400, 401, 403, 404, 422):
-      return KuzuClientError(error_message, status_code, response_data)
+      return GraphClientError(error_message, status_code, response_data)
     elif status_code >= 500:
-      return KuzuServerError(error_message, status_code, response_data)
+      return GraphServerError(error_message, status_code, response_data)
     else:
-      return KuzuAPIError(error_message, status_code, response_data)
+      return GraphAPIError(error_message, status_code, response_data)

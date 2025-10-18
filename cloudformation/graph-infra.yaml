@@ -1,4 +1,4 @@
-Description: RoboSystems Kuzu Infrastructure - DynamoDB, Lambda, and Secrets Manager
+Description: RoboSystems Graph Database Infrastructure - DynamoDB, Lambda, and Secrets Manager (Shared by Kuzu and Neo4j)
 
 Parameters:
   # Environment
@@ -33,14 +33,14 @@ Parameters:
     Type: String
     Description: S3 bucket containing Lambda deployment packages
     ConstraintDescription: Must be a valid S3 bucket name
-  KuzuApiRotationCodeKey:
+  GraphApiRotationCodeKey:
     Type: String
-    Description: S3 key for Kuzu API Rotation Lambda deployment package
+    Description: S3 key for Graph API Rotation Lambda deployment package
     ConstraintDescription: Must be a valid S3 object key
   InstanceMonitorCodeKey:
     Type: String
     Description: S3 key for Instance Monitor Lambda deployment package
-    Default: lambdas/kuzu_instance_monitor.zip
+    Default: lambdas/graph_instance_monitor.zip
     ConstraintDescription: Must be a valid S3 object key
 
   # Monitoring & Alerting
@@ -57,7 +57,7 @@ Parameters:
     ConstraintDescription: Must be a valid tag value
   ComponentTag:
     Type: String
-    Default: KuzuInfra
+    Default: GraphInfra
     Description: Component tag for resource identification and billing
     ConstraintDescription: Must be a valid tag value
 
@@ -69,13 +69,13 @@ Resources:
   # ===== Security Groups =====
 
   # ===== DynamoDB Tables =====
-  # Single instance registry for all Kuzu instances
+  # Single instance registry for all graph database instances (Kuzu and Neo4j)
   InstanceRegistry:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: !Sub "robosystems-kuzu-${Environment}-instance-registry"
+      TableName: !Sub "robosystems-graph-${Environment}-instance-registry"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: instance_id
@@ -85,6 +85,8 @@ Resources:
         - AttributeName: database_count
           AttributeType: N
         - AttributeName: cluster_tier
+          AttributeType: S
+        - AttributeName: backend_type
           AttributeType: S
       KeySchema:
         - AttributeName: instance_id
@@ -106,13 +108,21 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        - IndexName: backend-type-status-index
+          KeySchema:
+            - AttributeName: backend_type
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       Tags:
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
           Value: RoboSystems
         - Key: Component
-          Value: KuzuInfra
+          Value: GraphInfra
         - Key: CreatedBy
           Value: CloudFormation
 
@@ -122,7 +132,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: !Sub "robosystems-kuzu-${Environment}-graph-registry"
+      TableName: !Sub "robosystems-graph-${Environment}-graph-registry"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: graph_id
@@ -153,17 +163,17 @@ Resources:
         - Key: Service
           Value: RoboSystems
         - Key: Component
-          Value: KuzuInfra
+          Value: GraphInfra
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Volume registry for tracking Kuzu database volumes
+  # Volume registry for tracking graph database volumes (Kuzu and Neo4j)
   VolumeRegistry:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      TableName: !Sub "robosystems-kuzu-${Environment}-volume-registry"
+      TableName: !Sub "robosystems-graph-${Environment}-volume-registry"
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: volume_id
@@ -202,7 +212,7 @@ Resources:
         PointInTimeRecoveryEnabled: true
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-kuzu-${Environment}-volume-registry"
+          Value: !Sub "robosystems-graph-${Environment}-volume-registry"
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -213,14 +223,14 @@ Resources:
           Value: CloudFormation
 
   # ===== Authentication Infrastructure =====
-  # Single secret containing all three API keys
-  KuzuApiSecret:
+  # Graph API authentication secret (used by all backends on port 8001)
+  GraphApiSecret:
     Type: AWS::SecretsManager::Secret
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      Name: !Sub robosystems/${Environment}/kuzu
-      Description: !Sub Kuzu API authentication key for ${Environment}
+      Name: !Sub robosystems/${Environment}/graph-api
+      Description: !Sub Graph API authentication key for ${Environment} (used by all backends)
       SecretString: !Sub
         - |
           {
@@ -274,9 +284,9 @@ Resources:
       Code:
         ZipFile: |
           """
-          Kuzu API Key Generator Lambda Function
+          Graph API Key Generator Lambda Function
 
-          CloudFormation custom resource that generates initial API keys for Kuzu services.
+          CloudFormation custom resource that generates initial API keys for Graph services.
           This function is called during stack creation to generate the initial set of API keys.
           """
 
@@ -329,7 +339,7 @@ Resources:
 
               # Generate a single high-entropy API key
               response_data = {
-                "ApiKey": generate_api_key(f"kuzu_{environment}"),
+                "ApiKey": generate_api_key(f"graph_{environment}"),
                 "GeneratedAt": datetime.now(timezone.utc).isoformat(),
               }
 
@@ -370,7 +380,7 @@ Resources:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-kuzu-${Environment}-api-key-generator-role"
+          Value: !Sub "robosystems-graph-${Environment}-api-key-generator-role"
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -388,7 +398,7 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-secret-rotation"
-      Description: "Kuzu API Rotation Lambda - auto-updates via S3 key hash"
+      Description: "Graph API Rotation Lambda - auto-updates via S3 key hash"
       Runtime: python3.12
       Handler: index.lambda_handler
       Role: !GetAtt SecretRotationRole.Arn
@@ -399,7 +409,7 @@ Resources:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
       Code:
         S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref KuzuApiRotationCodeKey
+        S3Key: !Ref GraphApiRotationCodeKey
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-api-secret-rotation"
@@ -419,7 +429,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      RoleName: !Sub "robosystems-kuzu-${Environment}-secret-rotation-role"
+      RoleName: !Sub "robosystems-graph-${Environment}-secret-rotation-role"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -440,7 +450,7 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:PutSecretValue
                   - secretsmanager:UpdateSecretVersionStage
-                Resource: !Ref KuzuApiSecret
+                Resource: !Ref GraphApiSecret
               # KMS permissions for secret rotation
               - Effect: Allow
                 Action:
@@ -455,7 +465,7 @@ Resources:
                       - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-kuzu-${Environment}-secret-rotation-role"
+          Value: !Sub "robosystems-graph-${Environment}-secret-rotation-role"
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -473,7 +483,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      SecretId: !Ref KuzuApiSecret
+      SecretId: !Ref GraphApiSecret
       RotationLambdaARN: !GetAtt SecretRotationLambda.Arn
       RotationRules:
         ScheduleExpression: !Sub "rate(${RotationScheduleDays} days)"
@@ -497,11 +507,11 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TopicName: !Sub robosystems-kuzu-${Environment}-infra-alerts
-      DisplayName: !Sub "RoboSystems Kuzu ${Environment} Infrastructure Alerts"
+      TopicName: !Sub robosystems-graph-${Environment}-infra-alerts
+      DisplayName: !Sub "RoboSystems Graph Database ${Environment} Infrastructure Alerts"
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-kuzu-${Environment}-infra-alerts"
+          Value: !Sub "robosystems-graph-${Environment}-infra-alerts"
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -520,10 +530,10 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      AlarmName: !Sub robosystems-kuzu-${Environment}-database-capacity
-      AlarmDescription: RoboSystems Kuzu database capacity is running low
+      AlarmName: !Sub robosystems-graph-${Environment}-database-capacity
+      AlarmDescription: RoboSystems graph database capacity is running low
       MetricName: DatabaseUtilizationPercent
-      Namespace: RoboSystemsKuzu
+      Namespace: !Sub "RoboSystemsGraph/${Environment}"
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2
@@ -604,7 +614,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      RoleName: !Sub "robosystems-kuzu-${Environment}-instance-monitor-role"
+      RoleName: !Sub "robosystems-graph-${Environment}-instance-monitor-role"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -647,16 +657,16 @@ Resources:
                 Condition:
                   StringEquals:
                     cloudwatch:namespace:
-                      - !Sub "RoboSystemsKuzu/${Environment}"
+                      - !Sub "RoboSystemsGraph/${Environment}"
                       - !Sub
-                        - "RoboSystemsKuzu/${CapitalizedEnv}"
+                        - "RoboSystemsGraph/${CapitalizedEnv}"
                         - CapitalizedEnv: !If
                             - IsProduction
                             - "Prod"
                             - "Staging"
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-kuzu-${Environment}-instance-monitor-role"
+          Value: !Sub "robosystems-graph-${Environment}-instance-monitor-role"
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -673,7 +683,7 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub "${AWS::StackName}-instance-health-check"
-      Description: Hourly health check for Kuzu instances
+      Description: Hourly health check for graph database instances
       ScheduleExpression: "rate(1 hour)"
       State: ENABLED
       Targets:
@@ -694,7 +704,7 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub "${AWS::StackName}-metrics-collection"
-      Description: Collect Kuzu cluster metrics for monitoring and autoscaling
+      Description: Collect graph database cluster metrics for monitoring and autoscaling
       ScheduleExpression: "rate(5 minutes)"
       State: ENABLED
       Targets:
@@ -863,8 +873,8 @@ Outputs:
 
   # Authentication
   SecretArn:
-    Description: ARN of the Kuzu API authentication secret
-    Value: !Ref KuzuApiSecret
+    Description: ARN of the Graph API authentication secret
+    Value: !Ref GraphApiSecret
     Export:
       Name: !Sub "${AWS::StackName}-SecretArn"
 

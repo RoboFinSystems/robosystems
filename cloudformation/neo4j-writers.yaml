@@ -1,4 +1,4 @@
-Description: RoboSystems Kuzu Writers - EC2 Tier Auto Scaling Group
+Description: RoboSystems Neo4j Writers - EC2 Tier Auto Scaling Group with Neo4j Community Edition
 
 Parameters:
   # Environment
@@ -50,35 +50,32 @@ Parameters:
     Description: Maximum number of writer instances
     ConstraintDescription: Must be at least 1
 
-  # Kuzu Configuration
+  # Neo4j Configuration
   WriterTier:
     Type: String
-    Default: standard
+    Default: enterprise
     AllowedValues:
-      - standard
       - enterprise
       - premium
-      - shared
-    Description: Writer tier determines capacity allocation per instance
-    ConstraintDescription: Must be standard, enterprise, premium, or shared
-  SharedRepositories:
+    Description: Writer tier determines capacity allocation per instance (Neo4j used for Enterprise/Premium only)
+    ConstraintDescription: Must be enterprise or premium
+  Neo4jVersion:
+    Type: String
+    Default: "5.15.0"
+    Description: Neo4j version to deploy (Community for Enterprise tier, Enterprise for Premium tier)
+    AllowedPattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    ConstraintDescription: Must be a valid semantic version (e.g., 5.15.0)
+  Neo4jLicenseKey:
     Type: String
     Default: ""
-    Description: Comma-separated list of shared repositories to host (e.g., sec,industry,economic). Only used when WriterTier is shared
-    AllowedPattern: "^$|^[a-z]+(,[a-z]+)*$"
-    ConstraintDescription: Must be a comma-separated list of repository names (sec, industry, economic, regulatory, market, esg)
+    Description: Neo4j Enterprise license key (required for Premium tier, leave empty for Enterprise tier)
+    NoEcho: true
 
-  # Tier Configuration Parameters (passed from kuzu.yml via workflow)
+  # Tier Configuration Parameters
   InstanceType:
     Type: String
     Description: EC2 instance type for this tier
     AllowedPattern: ^[a-z][0-9][a-z]\.(micro|small|medium|large|xlarge|2xlarge|4xlarge)$
-
-  # Docker Configuration
-  ECRImageTag:
-    Type: String
-    Description: Docker image tag for Kuzu containers
-    Default: latest
 
   # Lambda Configuration
   VolumeManagerFunctionArn:
@@ -106,11 +103,10 @@ Parameters:
     Description: Service tag for resource identification and billing
   ComponentTag:
     Type: String
-    Default: KuzuWriter
+    Default: Neo4jWriter
     Description: Component tag for resource identification and billing
 
 Mappings:
-  # Environment name capitalization mapping (still needed for naming)
   EnvironmentMap:
     staging:
       Capitalized: Staging
@@ -119,21 +115,23 @@ Mappings:
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
-  IsSharedWriter: !Equals [!Ref WriterTier, "shared"]
+  IsPremiumTier: !Equals [!Ref WriterTier, premium]
+  HasLicenseKey: !And
+    - !Condition IsPremiumTier
+    - !Not [!Equals [!Ref Neo4jLicenseKey, ""]]
 
 Resources:
   # ========================================
   # SNS TOPICS
   # ========================================
 
-  # SNS Topic for database alerts
-  KuzuAlertTopic:
+  Neo4jAlertTopic:
     Type: AWS::SNS::Topic
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TopicName: !Sub "robosystems-kuzu-${WriterTier}-${Environment}-alerts"
-      DisplayName: !Sub "RoboSystems Kuzu ${WriterTier} ${Environment} Alerts"
+      TopicName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-alerts"
+      DisplayName: !Sub "RoboSystems Neo4j ${WriterTier} ${Environment} Alerts"
       Subscription:
         - Endpoint: !Ref SNSAlertEmail
           Protocol: email
@@ -148,24 +146,195 @@ Resources:
           Value: CloudFormation
 
   # ========================================
+  # SECRETS MANAGEMENT
+  # ========================================
+
+  # Neo4j password secret (shared by all Neo4j instances in this tier)
+  Neo4jPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/neo4j/${WriterTier}
+      Description: !Sub Neo4j database password for ${WriterTier} tier in ${Environment}
+      SecretString: !Sub
+        - |
+          {
+            "NEO4J_PASSWORD": "${Password}",
+            "TIER": "${WriterTier}",
+            "ENVIRONMENT": "${Environment}",
+            "GENERATED_AT": "${GeneratedAt}"
+          }
+        - Password: !GetAtt Neo4jPasswordGenerator.Password
+          GeneratedAt: !GetAtt Neo4jPasswordGenerator.GeneratedAt
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Tier
+          Value: !Ref WriterTier
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Neo4j Enterprise license key secret (Premium tier only)
+  Neo4jLicenseSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasLicenseKey
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub robosystems/${Environment}/neo4j/${WriterTier}/license
+      Description: !Sub Neo4j Enterprise license key for ${WriterTier} tier in ${Environment}
+      SecretString: !Sub
+        - |
+          {
+            "NEO4J_LICENSE_KEY": "${LicenseKey}",
+            "TIER": "${WriterTier}",
+            "ENVIRONMENT": "${Environment}",
+            "EDITION": "enterprise"
+          }
+        - LicenseKey: !Ref Neo4jLicenseKey
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Tier
+          Value: !Ref WriterTier
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Custom resource to generate Neo4j password
+  Neo4jPasswordGenerator:
+    Type: Custom::PasswordGenerator
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ServiceToken: !GetAtt PasswordGeneratorFunction.Arn
+      Environment: !Ref Environment
+      Tier: !Ref WriterTier
+
+  PasswordGeneratorFunction:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-password-generator"
+      Description: "Neo4j Password Generator Lambda - inline code (no S3)"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt PasswordGeneratorRole.Arn
+      Timeout: 60
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-password-generator"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      Code:
+        ZipFile: |
+          import secrets
+          import string
+          import cfnresponse
+          from datetime import datetime, timezone
+
+          def generate_password(length=32):
+              alphabet = string.ascii_letters + string.digits + "!@#$%^&*()-_=+[]{}|;:,.<>?"
+              password = "".join(secrets.choice(alphabet) for _ in range(length))
+              return password
+
+          def lambda_handler(event, context):
+              try:
+                  request_type = event.get("RequestType", "")
+
+                  if request_type == "Delete":
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      return
+
+                  resource_properties = event.get("ResourceProperties", {})
+                  environment = resource_properties.get("Environment", "unknown")
+                  tier = resource_properties.get("Tier", "unknown")
+
+                  response_data = {
+                      "Password": generate_password(),
+                      "GeneratedAt": datetime.now(timezone.utc).isoformat(),
+                  }
+
+                  print(f"Generated Neo4j password for tier: {tier}, environment: {environment}")
+                  print(f"Request Type: {request_type}")
+                  print(f"Generated at: {response_data['GeneratedAt']}")
+
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+
+              except Exception as e:
+                  print(f"Error generating Neo4j password: {str(e)}")
+                  cfnresponse.send(
+                      event,
+                      context,
+                      cfnresponse.FAILED,
+                      {},
+                      reason=f"Failed to generate password: {str(e)}",
+                  )
+
+  PasswordGeneratorRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-password-generator-role"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ========================================
   # NETWORKING & SECURITY
   # ========================================
 
-  # Security Group for Writers
   WriterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       GroupName: !Sub "${AWS::StackName}-writers-sg"
-      GroupDescription: Security group for Kuzu database writers
+      GroupDescription: Security group for Neo4j database writers
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 8001
           ToPort: 8001
           CidrIp: !Ref VpcCidr
-          Description: Allow Kuzu API access from VPC
+          Description: Allow Graph API access from VPC (unified interface for all backends)
+        - IpProtocol: tcp
+          FromPort: 7687
+          ToPort: 7687
+          CidrIp: !Ref VpcCidr
+          Description: Allow Neo4j Bolt protocol access for database administration via bastion
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-writers-sg"
@@ -182,7 +351,6 @@ Resources:
   # IAM ROLES & POLICIES
   # ========================================
 
-  # IAM Role for Writers
   WriterInstanceRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
@@ -200,7 +368,7 @@ Resources:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
       Policies:
-        - PolicyName: KuzuWriterPolicy
+        - PolicyName: Neo4jWriterPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -233,11 +401,8 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:DescribeSecret
                 Resource:
-                  # Base secret: robosystems/prod or robosystems/staging
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
-                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/kuzu, etc.
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
-              # KMS permissions for AWS managed keys with service conditions
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -279,8 +444,6 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
               - Effect: Allow
                 Action:
                   - ec2:CreateSnapshot
@@ -316,7 +479,6 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Instance Profile for Writers
   WriterInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     DeletionPolicy: Delete
@@ -330,7 +492,6 @@ Resources:
   # COMPUTE RESOURCES
   # ========================================
 
-  # Launch Template for Writers
   WriterLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     DeletionPolicy: Delete
@@ -352,15 +513,16 @@ Resources:
               VolumeType: gp3
               Encrypted: true
               DeleteOnTermination: true
-          # Data volume removed - now managed dynamically by Volume Manager
         TagSpecifications:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value: !Sub "robosystems-kuzu-writer-${WriterTier}-${Environment}"
+                Value: !Sub "robosystems-neo4j-writer-${WriterTier}-${Environment}"
               - Key: Environment
                 Value: !Ref Environment
-              - Key: KuzuRole
+              - Key: GraphBackend
+                Value: neo4j
+              - Key: GraphRole
                 Value: writer
               - Key: WriterTier
                 Value: !Ref WriterTier
@@ -381,146 +543,125 @@ Resources:
 
               cat >> /etc/environment << EOF
               ENVIRONMENT=${Environment}
-              KUZU_ROLE=writer
+              GRAPH_BACKEND=neo4j
+              GRAPH_ROLE=writer
               WRITER_TIER=${WriterTier}
               CLUSTER_TIER=${WriterTier}
-              KUZU_PORT=8001
-              KUZU_ACCESS_PATTERN=api_writer
-              KUZU_DATABASE_PATH=/data/kuzu-dbs
+              NEO4J_VERSION=${Neo4jVersion}
+              NEO4J_BOLT_PORT=7687
+              NEO4J_HTTP_PORT=7474
+              GRAPH_API_PORT=8001
+              NEO4J_DATABASE_PATH=/data/neo4j
               AWS_DEFAULT_REGION=${AWS::Region}
               AWS_STACK_NAME=${AWS::StackName}
               INSTANCE_ID=$INSTANCE_ID
               PRIVATE_IP=$PRIVATE_IP
-              $([ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ] && echo "SHARED_REPOSITORIES=${SharedRepositories}")
               EOF
 
               # Ensure cfn-signal will run even if setup has issues
               trap '/opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource WriterAutoScalingGroup --region ${AWS::Region}' ERR
 
-              # Export critical environment variables for the setup script
-              export AWS_ACCOUNT_ID="${AWS::AccountId}"
-              export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
-              export ECR_IMAGE_TAG="${ECRImageTag}"
+              # Export critical environment variables
               export INSTANCE_REGISTRY_TABLE="robosystems-graph-${Environment}-instance-registry"
               export ALLOCATION_TABLE="robosystems-graph-${Environment}-graph-registry"
               export CLUSTER_TIER="${WriterTier}"
-              export KUZU_NODE_TYPE="$(if [ "${WriterTier}" = "shared" ]; then echo "shared_master"; else echo "writer"; fi)"
+              export GRAPH_BACKEND="neo4j"
+              export GRAPH_NODE_TYPE="writer"
 
-              # Secrets will be fetched directly by the container from AWS Secrets Manager
-
-              # Register instance in DynamoDB with cluster_tier
-              echo "Registering instance in DynamoDB..."
-
-              # Build the base item JSON
-              if [ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ]; then
-                # Include repository_types for shared repositories (multiple)
-                aws dynamodb put-item \
-                  --table-name "$INSTANCE_REGISTRY_TABLE" \
-                  --item "{
-                    \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
-                    \"cluster_tier\": {\"S\": \"${WriterTier}\"},
-                    \"private_ip\": {\"S\": \"$PRIVATE_IP\"},
-                    \"stack_name\": {\"S\": \"${AWS::StackName}\"},
-                    \"node_type\": {\"S\": \"writer\"},
-                    \"status\": {\"S\": \"initializing\"},
-                    \"database_count\": {\"N\": \"0\"},
-                    \"max_databases\": {\"N\": \"10\"},
-                    \"created_at\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"},
-                    \"repository_types\": {\"S\": \"${SharedRepositories}\"}
-                  }" \
-                  --region ${AWS::Region}
+              # Determine Neo4j edition based on tier
+              if [ "${WriterTier}" = "premium" ]; then
+                NEO4J_EDITION="enterprise"
               else
-                # Standard writer without repository_type
-                aws dynamodb put-item \
-                  --table-name "$INSTANCE_REGISTRY_TABLE" \
-                  --item "{
-                    \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
-                    \"cluster_tier\": {\"S\": \"${WriterTier}\"},
-                    \"private_ip\": {\"S\": \"$PRIVATE_IP\"},
-                    \"stack_name\": {\"S\": \"${AWS::StackName}\"},
-                    \"node_type\": {\"S\": \"writer\"},
-                    \"status\": {\"S\": \"initializing\"},
-                    \"database_count\": {\"N\": \"0\"},
-                    \"max_databases\": {\"N\": \"10\"},
-                    \"created_at\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}
-                  }" \
-                  --region ${AWS::Region}
+                NEO4J_EDITION="community"
               fi
+
+              # Register instance in DynamoDB with backend_type and neo4j_edition
+              echo "Registering Neo4j instance in DynamoDB with backend_type: neo4j, edition: $NEO4J_EDITION..."
+              aws dynamodb put-item \
+                --table-name "$INSTANCE_REGISTRY_TABLE" \
+                --item "{
+                  \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
+                  \"cluster_tier\": {\"S\": \"${WriterTier}\"},
+                  \"backend_type\": {\"S\": \"neo4j\"},
+                  \"neo4j_edition\": {\"S\": \"$NEO4J_EDITION\"},
+                  \"private_ip\": {\"S\": \"$PRIVATE_IP\"},
+                  \"stack_name\": {\"S\": \"${AWS::StackName}\"},
+                  \"node_type\": {\"S\": \"writer\"},
+                  \"status\": {\"S\": \"initializing\"},
+                  \"database_count\": {\"N\": \"0\"},
+                  \"max_databases\": {\"N\": \"1\"},
+                  \"created_at\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}
+                }" \
+                --region ${AWS::Region}
 
               if [ $? -eq 0 ]; then
-                echo "Successfully registered instance in DynamoDB"
+                echo "Successfully registered Neo4j instance in DynamoDB"
               else
                 echo "WARNING: Failed to register instance in DynamoDB"
-                # Continue anyway - instance can still function
               fi
 
-              # Register shared repositories in graph registry if applicable
-              if [ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ]; then
-                echo "Registering shared repositories in graph registry..."
-                # Convert comma-separated list to space-separated for iteration
-                REPOS_LIST=$(echo "${SharedRepositories}" | tr ',' ' ')
-                for repo in $REPOS_LIST; do
-                  repo=$(echo "$repo" | xargs) # Trim whitespace
-                  if [ -n "$repo" ]; then
-                    echo "Registering shared repository: $repo"
-                    aws dynamodb put-item \
-                      --table-name "robosystems-graph-${Environment}-graph-registry" \
-                      --item "{
-                        \"graph_id\": {\"S\": \"$repo\"},
-                        \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
-                        \"status\": {\"S\": \"active\"},
-                        \"repository_type\": {\"S\": \"shared\"},
-                        \"created_at\": {\"S\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"},
-                        \"entity_id\": {\"S\": \"shared_$repo\"}
-                      }" \
-                      --region ${AWS::Region} || echo "WARNING: Failed to register shared repository $repo"
-                  fi
-                done
-              fi
-
-              # Download and execute setup script
-              aws s3 cp s3://robosystems-${Environment}-deployment/userdata/kuzu-writer.sh /tmp/kuzu-setup.sh || {
-                echo "ERROR: Failed to download setup script from S3"
+              # Download and execute Neo4j setup script
+              aws s3 cp s3://robosystems-${Environment}-deployment/userdata/neo4j-writer.sh /tmp/neo4j-setup.sh || {
+                echo "ERROR: Failed to download Neo4j setup script from S3"
                 exit 1
               }
-              chmod +x /tmp/kuzu-setup.sh
+              chmod +x /tmp/neo4j-setup.sh
+
+              # Retrieve Neo4j password from Secrets Manager
+              NEO4J_PASSWORD=$(aws secretsmanager get-secret-value \
+                --secret-id "robosystems/${Environment}/neo4j/${WriterTier}" \
+                --query SecretString \
+                --output text \
+                --region ${AWS::Region} | jq -r '.NEO4J_PASSWORD')
+
+              if [ -z "$NEO4J_PASSWORD" ] || [ "$NEO4J_PASSWORD" = "null" ]; then
+                echo "ERROR: Failed to retrieve Neo4j password from Secrets Manager"
+                exit 1
+              fi
+
+              # Retrieve Neo4j Enterprise license key for Premium tier
+              if [ "${WriterTier}" = "premium" ]; then
+                echo "Retrieving Neo4j Enterprise license key for Premium tier..."
+                NEO4J_LICENSE_KEY=$(aws secretsmanager get-secret-value \
+                  --secret-id "robosystems/${Environment}/neo4j/${WriterTier}/license" \
+                  --query SecretString \
+                  --output text \
+                  --region ${AWS::Region} 2>/dev/null | jq -r '.NEO4J_LICENSE_KEY' || echo "")
+
+                if [ -n "$NEO4J_LICENSE_KEY" ] && [ "$NEO4J_LICENSE_KEY" != "null" ]; then
+                  export NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+                  export NEO4J_LICENSE_KEY="$NEO4J_LICENSE_KEY"
+                  echo "Neo4j Enterprise license key retrieved successfully"
+                else
+                  echo "WARNING: No license key found for Premium tier - Neo4j will run in evaluation mode"
+                fi
+              fi
 
               # Export required environment variables for the setup script
               export ENVIRONMENT="${Environment}"
-              # Export SHARED_REPOSITORIES for shared repository deployments
-              [ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ] && export SHARED_REPOSITORIES="${SharedRepositories}"
               export INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type)
-              export KUZU_PORT="8001"
+              export NEO4J_VERSION="${Neo4jVersion}"
+              export NEO4J_AUTH="neo4j/$NEO4J_PASSWORD"
               export WRITER_TIER="${WriterTier}"
-              export AWS_ACCOUNT_ID="${AWS::AccountId}"
-              export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
-              export ECR_IMAGE_TAG="${ECRImageTag}"
-              # Set CloudWatch namespace with environment suffix
-              export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Kuzu"
-
-              # Critical missing variables
+              # Determine Neo4j edition for CloudWatch namespace
+              if [ "${WriterTier}" = "premium" ]; then
+                export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Neo4jEnterprise"
+              else
+                export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Neo4jCommunity"
+              fi
               export AWS_REGION="${AWS::Region}"
               export AWS_DEFAULT_REGION="${AWS::Region}"
-
-              # Set KUZU_NODE_TYPE based on WriterTier
-              if [ "${WriterTier}" = "shared" ]; then
-                export KUZU_NODE_TYPE="shared_master"
-              else
-                export KUZU_NODE_TYPE="writer"
-                # Standard tier writers need REPOSITORY_TYPE set to "user"
-                export REPOSITORY_TYPE="user"
-              fi
+              export GRAPH_NODE_TYPE="writer"
 
               # Execute setup script with error handling
-              # Temporarily disable exit on error to ensure cfn-signal runs
               set +e
-              bash /tmp/kuzu-setup.sh
+              bash /tmp/neo4j-setup.sh
               SETUP_EXIT_CODE=$?
 
               if [ $SETUP_EXIT_CODE -eq 0 ]; then
-                echo "Setup script completed successfully"
+                echo "Neo4j setup script completed successfully"
               else
-                echo "ERROR: Setup script failed with exit code $SETUP_EXIT_CODE"
+                echo "ERROR: Neo4j setup script failed with exit code $SETUP_EXIT_CODE"
               fi
 
               # Signal CloudFormation (always runs)
@@ -529,17 +670,14 @@ Resources:
                 --resource WriterAutoScalingGroup \
                 --region ${AWS::Region}
 
-              # Re-enable exit on error after cfn-signal
               set -e
-            - # Tier config parameters removed - loaded from kuzu.yml
-              EnvironmentCapitalized:
+            - EnvironmentCapitalized:
                 !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
 
   # ========================================
   # AUTO SCALING
   # ========================================
 
-  # Auto Scaling Group for Writers
   WriterAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     DeletionPolicy: Delete
@@ -548,17 +686,16 @@ Resources:
       AutoScalingGroupName: !Sub "${AWS::StackName}-writers-asg"
       MinSize: !Ref MinInstances
       MaxSize: !Ref MaxInstances
-      # DesiredCapacity intentionally omitted - managed by application
-      NewInstancesProtectedFromScaleIn: true # Protect all new instances
+      NewInstancesProtectedFromScaleIn: true
       HealthCheckType: EC2
-      HealthCheckGracePeriod: 300
+      HealthCheckGracePeriod: 400  # Neo4j needs more time to start than Kuzu (300s) but less than 10 minutes
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref WriterLaunchTemplate
         Version: !GetAtt WriterLaunchTemplate.LatestVersionNumber
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-kuzu-writer-${WriterTier}-${Environment}"
+          Value: !Sub "robosystems-neo4j-writer-${WriterTier}-${Environment}"
           PropagateAtLaunch: true
         - Key: Environment
           Value: !Ref Environment
@@ -567,20 +704,19 @@ Resources:
       - HasMinInstances
       - ResourceSignal:
           Count: !Ref MinInstances
-          Timeout: PT15M
+          Timeout: PT15M  # Neo4j needs more time than Kuzu (15 min vs 5 min)
       - !Ref AWS::NoValue
     UpdatePolicy:
       AutoScalingRollingUpdate:
-        MinInstancesInService: 0 # Allow full flexibility since instances are protected
+        MinInstancesInService: 0
         MaxBatchSize: 1
-        PauseTime: PT5M
+        PauseTime: PT7M  # Moderate pause for Neo4j startup (Kuzu uses 5 min)
         WaitOnResourceSignals: true
         SuspendProcesses:
           - AlarmNotification
           - AZRebalance
           - ScheduledActions
 
-  # Scaling Policies
   ScaleUpPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     DeletionPolicy: Delete
@@ -595,22 +731,17 @@ Resources:
   # ========================================
   # LIFECYCLE HOOKS
   # ========================================
-  # Instance protection is automatically managed by the lifecycle hook
-  # to prevent scale-in during volume operations. The Volume Manager Lambda
-  # handles instance protection/unprotection based on database allocation status.
 
-  # Lifecycle Hook for Instance Termination
   TerminationLifecycleHook:
     Type: AWS::AutoScaling::LifecycleHook
     Properties:
       AutoScalingGroupName: !Ref WriterAutoScalingGroup
       LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
       DefaultResult: CONTINUE
-      HeartbeatTimeout: 300
+      HeartbeatTimeout: 600  # More time for Neo4j graceful shutdown
       NotificationTargetARN: !Ref VolumeDetachmentTopicArn
       RoleARN: !GetAtt LifecycleHookRole.Arn
 
-  # IAM Role for Lifecycle Hook
   LifecycleHookRole:
     Type: AWS::IAM::Role
     Properties:
@@ -635,13 +766,12 @@ Resources:
   # MONITORING & ALARMS
   # ========================================
 
-  # CloudWatch Alarms
   HighCPUAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-${WriterTier}-${Environment}-high-cpu"
+      AlarmName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-high-cpu"
       AlarmDescription: Triggers when CPU exceeds 80% for 5 minutes
       MetricName: CPUUtilization
       Namespace: AWS/EC2
@@ -655,20 +785,26 @@ Resources:
           Value: !Ref WriterAutoScalingGroup
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref KuzuAlertTopic
+        - !Ref Neo4jAlertTopic
 
   HighMemoryAlarm:
     Type: AWS::CloudWatch::Alarm
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-${WriterTier}-${Environment}-high-memory"
+      AlarmName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-high-memory"
       AlarmDescription: Triggers when memory usage exceeds 85% for 5 minutes
       MetricName: mem_used_percent
-      Namespace: !Sub
-        - "RoboSystemsKuzu/${EnvCapitalized}"
-        - EnvCapitalized:
-            !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+      Namespace: !If
+        - IsPremiumTier
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jEnterprise"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jCommunity"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
       Statistic: Average
       Period: 300
       EvaluationPeriods: 1
@@ -679,19 +815,24 @@ Resources:
           Value: !Ref WriterAutoScalingGroup
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref KuzuAlertTopic
+        - !Ref Neo4jAlertTopic
 
-  # CloudWatch Alarms for Critical Metrics
   AllocationFailureAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-${WriterTier}-${Environment}-allocation-failures"
+      AlarmName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-allocation-failures"
       AlarmDescription: "Alert when database allocations fail"
       MetricName: AllocationFailures
-      Namespace: !Sub
-        - "RoboSystemsKuzu/${EnvCapitalized}"
-        - EnvCapitalized:
-            !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+      Namespace: !If
+        - IsPremiumTier
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jEnterprise"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
+        - !Sub
+          - "RoboSystemsGraph/${EnvCapitalized}/Neo4jCommunity"
+          - EnvCapitalized:
+              !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -699,26 +840,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
-        - !Ref KuzuAlertTopic
-
-  HighCapacityUtilizationAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "robosystems-kuzu-${WriterTier}-${Environment}-high-capacity-utilization"
-      AlarmDescription: "Alert when capacity utilization exceeds 80%"
-      MetricName: CapacityUtilization
-      Namespace: !Sub
-        - "RoboSystemsKuzu/${EnvCapitalized}"
-        - EnvCapitalized:
-            !FindInMap [EnvironmentMap, !Ref Environment, Capitalized]
-      Statistic: Average
-      Period: 300
-      EvaluationPeriods: 2
-      Threshold: 80
-      ComparisonOperator: GreaterThanThreshold
-      TreatMissingData: notBreaching
-      AlarmActions:
-        - !Ref KuzuAlertTopic
+        - !Ref Neo4jAlertTopic
 
 Outputs:
   WriterAutoScalingGroupName:
@@ -732,3 +854,9 @@ Outputs:
     Value: !Ref WriterSecurityGroup
     Export:
       Name: !Sub "${AWS::StackName}-sg-id"
+
+  Neo4jBoltEndpoint:
+    Description: Neo4j Bolt protocol endpoint (internal VPC access)
+    Value: !Sub "${AWS::StackName}:7687"
+    Export:
+      Name: !Sub "${AWS::StackName}-bolt-endpoint"

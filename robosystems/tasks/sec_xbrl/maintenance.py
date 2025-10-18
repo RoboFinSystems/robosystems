@@ -14,6 +14,7 @@ from datetime import datetime
 from robosystems.celery import celery_app
 from robosystems.config import env
 from robosystems.logger import logger
+from robosystems.graph_api.client.factory import GraphClientFactory
 
 
 @celery_app.task(
@@ -54,11 +55,10 @@ def reset_sec_database(confirm: bool = False) -> Dict:
 
   async def reset_database():
     """Async function to reset the database."""
-    from robosystems.graph_api.client.factory import KuzuClientFactory
 
     try:
       # Get a client for the SEC database
-      client = await KuzuClientFactory.create_client(
+      client = await GraphClientFactory.create_client(
         graph_id=graph_id, operation_type="write"
       )
 

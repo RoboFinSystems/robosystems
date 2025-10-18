@@ -2,7 +2,7 @@
 Kuzu MCP Client - Main client class for Model Context Protocol adapter.
 
 This module contains the KuzuMCPClient class which provides MCP functionality
-using the Kuzu API instead of direct database connections.
+using the Graph API instead of direct database connections.
 """
 
 import json
@@ -16,16 +16,16 @@ from httpx import HTTPError, TimeoutException
 
 from robosystems.logger import logger
 from robosystems.config import env
-from robosystems.graph_api.client import KuzuClient
+from robosystems.graph_api.client import GraphClient
 
 from .exceptions import KuzuAPIError, KuzuQueryTimeoutError, KuzuQueryComplexityError
 
 
 class KuzuMCPClient:
   """
-  MCP client that communicates with Kuzu databases via REST API.
+  MCP client that communicates with graph databases via REST API.
 
-  This replaces direct graph database connections with HTTP-based Kuzu API calls,
+  This replaces direct graph database connections with HTTP-based Graph API calls,
   enabling deployment in read-only cluster environments.
   """
 
@@ -47,7 +47,7 @@ class KuzuMCPClient:
     Initialize Kuzu MCP client.
 
     Args:
-        api_base_url: Base URL for Kuzu API (e.g., http://kuzu-api:8001)
+        api_base_url: Base URL for Graph API (e.g., http://kuzu-api:8001)
         timeout: HTTP request timeout in seconds
         query_timeout: Maximum query execution time in seconds
         max_query_length: Maximum allowed query length in characters
@@ -62,11 +62,11 @@ class KuzuMCPClient:
     # Load and cache configuration
     self._load_cached_config()
 
-    # Create KuzuClient with unified API key from centralized config
+    # Create GraphClient with unified API key from centralized config
     # This ensures we get the key from Secrets Manager in production
     api_key = env.GRAPH_API_KEY
 
-    self.kuzu_client = KuzuClient(base_url=api_base_url, api_key=api_key)
+    self.kuzu_client = GraphClient(base_url=api_base_url, api_key=api_key)
     self.kuzu_client.graph_id = graph_id  # Set the graph_id for queries
 
     # Keep the httpx client for any non-Kuzu HTTP operations if needed
@@ -113,13 +113,13 @@ class KuzuMCPClient:
 
   async def close(self):
     """Close HTTP clients in proper order."""
-    # Close the Kuzu client first (handles database connections, may need httpx for cleanup)
+    # Close the Graph client first (handles database connections, may need httpx for cleanup)
     try:
       await self.kuzu_client.close()
     except Exception as e:
-      logger.error(f"Error closing Kuzu client: {e}")
+      logger.error(f"Error closing Graph client: {e}")
 
-    # Then close the httpx client (after Kuzu client is done with any cleanup requests)
+    # Then close the httpx client (after Graph client is done with any cleanup requests)
     try:
       await self.client.aclose()
     except Exception as e:
@@ -184,7 +184,7 @@ class KuzuMCPClient:
     self, cypher: str, parameters: Optional[Dict[str, Any]] = None
   ) -> List[Dict[str, Any]]:
     """
-    Execute a Cypher query via Kuzu API with timeout and complexity controls.
+    Execute a Cypher query via Graph API with timeout and complexity controls.
 
     Args:
         cypher: Cypher query string

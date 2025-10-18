@@ -22,8 +22,8 @@ from sqlalchemy.orm import Session, scoped_session
 from ...models.iam import UserGraph, UserLimits
 from ...config import env
 from ...models.api import EntityCreate, EntityResponse
-from ...graph_api.client import KuzuClient, get_kuzu_client_for_instance
-from ...graph_api.client.exceptions import KuzuClientError
+from ...graph_api.client import GraphClient, get_graph_client_for_instance
+from ...graph_api.client.exceptions import GraphClientError
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
 from ...middleware.graph.types import InstanceTier
 from ...exceptions import (
@@ -161,7 +161,7 @@ class EntityGraphService:
       # Create KuzuClient directly with the allocated instance endpoint
       # For database creation, we need direct instance access
       # Create client with direct instance access
-      kuzu_client = await get_kuzu_client_for_instance(db_location.private_ip)
+      kuzu_client = await get_graph_client_for_instance(db_location.private_ip)
 
       logger.info(f"Creating graph database: {graph_id} on allocated instance")
 
@@ -343,7 +343,7 @@ class EntityGraphService:
     return graph_id
 
   async def _install_entity_schema_kuzu(
-    self, kuzu_client: KuzuClient, graph_id: str, extensions: Optional[list] = None
+    self, kuzu_client: GraphClient, graph_id: str, extensions: Optional[list] = None
   ) -> None:
     """
     Install entity graph schema via KuzuClient API using selected extensions.
@@ -389,7 +389,7 @@ class EntityGraphService:
       raise
 
   async def _install_entity_schema(
-    self, repository: KuzuClient, graph_id: str, extensions: Optional[list] = None
+    self, repository: GraphClient, graph_id: str, extensions: Optional[list] = None
   ) -> None:
     """
     Install entity graph schema via API using selected extensions.
@@ -558,7 +558,7 @@ class EntityGraphService:
     return type_mapping.get(schema_type.upper(), "STRING")
 
   async def _create_entity_in_graph_kuzu(
-    self, kuzu_client: KuzuClient, entity_data: EntityCreate, graph_id: str
+    self, kuzu_client: GraphClient, entity_data: EntityCreate, graph_id: str
   ) -> EntityResponse:
     """
     Create entity node in the graph using KuzuClient directly.
@@ -623,7 +623,7 @@ class EntityGraphService:
       )
 
       # Extract the created entity from result
-      # The Kuzu API returns data in result["data"] not result["rows"]
+      # The Graph API returns data in result["data"] not result["rows"]
       if isinstance(result, dict) and result.get("data") and len(result["data"]) > 0:
         # The entity data comes directly with field names
         created_entity = result["data"][0]
@@ -654,7 +654,7 @@ class EntityGraphService:
 
   async def _create_graph_metadata_node(
     self,
-    kuzu_client: KuzuClient,
+    kuzu_client: GraphClient,
     graph_id: str,
     entity_name: str,
     user_id: str,
@@ -724,7 +724,7 @@ class EntityGraphService:
         cypher=create_query, graph_id=graph_id, parameters=metadata_properties
       )
       logger.info("GraphMetadata node created successfully")
-    except KuzuClientError as e:
+    except GraphClientError as e:
       # Suppress Kuzu-specific errors (e.g., schema issues, duplicate nodes)
       logger.error(f"Failed to create GraphMetadata node (Kuzu error): {e}")
       # Don't fail the entire graph creation if metadata node fails
@@ -740,7 +740,7 @@ class EntityGraphService:
 
   async def _create_user_access_in_graph(
     self,
-    kuzu_client: KuzuClient,
+    kuzu_client: GraphClient,
     graph_id: str,
     user_id: str,
     entity_identifier: str,
@@ -822,7 +822,7 @@ class EntityGraphService:
       # The graph is still functional, just without proper access control
 
   async def _create_entity_in_graph(
-    self, repository: KuzuClient, entity_data: EntityCreate, graph_id: str
+    self, repository: GraphClient, entity_data: EntityCreate, graph_id: str
   ) -> EntityResponse:
     """Create entity node in the graph."""
     logger.info(f"Creating entity node in graph: {graph_id}")
@@ -946,7 +946,7 @@ class EntityGraphService:
       raise RuntimeError(f"User-graph relationship creation failed: {e}")
 
   async def _cleanup_failed_database(
-    self, repository: KuzuClient, graph_id: str
+    self, repository: GraphClient, graph_id: str
   ) -> None:
     """Clean up database resources after failed creation."""
     logger.warning(f"Cleaning up failed database creation: {graph_id}")

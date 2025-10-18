@@ -163,9 +163,9 @@ class GenericGraphService:
     logger.info(f"Creating database {graph_id} on Kuzu writer")
 
     # Use KuzuClient with proper API key
-    from ...graph_api.client import get_kuzu_client_for_instance
+    from ...graph_api.client import get_graph_client_for_instance
 
-    kuzu_client = await get_kuzu_client_for_instance(cluster_info.private_ip)
+    kuzu_client = await get_graph_client_for_instance(cluster_info.private_ip)
 
     try:
       schema_type = "custom" if custom_schema else "entity"
@@ -187,7 +187,7 @@ class GenericGraphService:
       logger.info(f"Extensions requested: {schema_extensions}")
 
       # Use KuzuClient for schema installation with proper API key
-      kuzu_client = await get_kuzu_client_for_instance(cluster_info.private_ip)
+      kuzu_client = await get_graph_client_for_instance(cluster_info.private_ip)
 
       try:
         # Use the new install_schema method
@@ -217,7 +217,7 @@ class GenericGraphService:
 
     # Use direct connection to writer instance for metadata storage
     # since the graph was just created and readers may not be available yet
-    kuzu_client = await get_kuzu_client_for_instance(cluster_info.private_ip)
+    kuzu_client = await get_graph_client_for_instance(cluster_info.private_ip)
 
     try:
       # Create metadata node

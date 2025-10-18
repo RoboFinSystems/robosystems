@@ -6,19 +6,19 @@ from unittest.mock import Mock, patch, AsyncMock
 import pytest
 import httpx
 
-from robosystems.graph_api.client.client import KuzuClient
+from robosystems.graph_api.client.client import GraphClient
 from robosystems.graph_api.client.exceptions import (
-  KuzuAPIError,
-  KuzuTimeoutError,
-  KuzuTransientError,
-  KuzuSyntaxError,
-  KuzuClientError,
-  KuzuServerError,
+  GraphAPIError,
+  GraphTimeoutError,
+  GraphTransientError,
+  GraphSyntaxError,
+  GraphClientError,
+  GraphServerError,
 )
 
 
 class TestKuzuClientExtended:
-  """Extended test cases for async KuzuClient."""
+  """Extended test cases for async GraphClient."""
 
   @pytest.fixture
   def mock_env(self):
@@ -33,7 +33,7 @@ class TestKuzuClientExtended:
     """Create a test client."""
     # mock_env ensures environment is properly mocked
     _ = mock_env  # Use the fixture to avoid unused warning
-    client = KuzuClient(base_url="http://localhost:8001")
+    client = GraphClient(base_url="http://localhost:8001")
     yield client
     await client.close()
 
@@ -146,7 +146,7 @@ class TestKuzuClientExtended:
     with patch.object(client.client, "stream", return_value=mock_stream):
       result_gen = await client.query("INVALID", graph_id="test_db", streaming=True)
 
-      with pytest.raises(KuzuClientError):  # 400 errors are client errors
+      with pytest.raises(GraphClientError):  # 400 errors are client errors
         async for _ in result_gen:
           pass
 
@@ -524,7 +524,7 @@ class TestKuzuClientExtended:
     mock_response.json.return_value = {"detail": "Database not found"}
 
     with patch.object(client.client, "request", return_value=mock_response):
-      with pytest.raises(KuzuClientError):  # 404 is a client error
+      with pytest.raises(GraphClientError):  # 404 is a client error
         await client._request("GET", "/databases/missing")
 
   # Test error handling - 403
@@ -536,7 +536,7 @@ class TestKuzuClientExtended:
     mock_response.json.return_value = {"detail": "Access denied"}
 
     with patch.object(client.client, "request", return_value=mock_response):
-      with pytest.raises(KuzuClientError):  # 403 is a client error
+      with pytest.raises(GraphClientError):  # 403 is a client error
         await client._request("DELETE", "/databases/protected")
 
   # Test circuit breaker recovery
@@ -618,8 +618,8 @@ class TestKuzuClientExtended:
   # Test various exception types
   @pytest.mark.asyncio
   async def test_kuzu_api_error_handling(self, client):
-    """Test KuzuAPIError base exception."""
-    error = KuzuAPIError(
+    """Test GraphAPIError base exception."""
+    error = GraphAPIError(
       "API Error", status_code=400, response_data={"detail": "Bad request"}
     )
     assert str(error) == "API Error"
@@ -628,14 +628,14 @@ class TestKuzuClientExtended:
 
   @pytest.mark.asyncio
   async def test_kuzu_timeout_error_retry(self, client):
-    """Test that KuzuTimeoutError triggers retry."""
+    """Test that GraphTimeoutError triggers retry."""
     attempt_count = 0
 
     async def mock_func():
       nonlocal attempt_count
       attempt_count += 1
       if attempt_count < 2:
-        raise KuzuTimeoutError("Operation timed out")
+        raise GraphTimeoutError("Operation timed out")
       return {"success": True}
 
     client.config.retry_delay = 0.01
@@ -645,14 +645,14 @@ class TestKuzuClientExtended:
 
   @pytest.mark.asyncio
   async def test_kuzu_transient_error_retry(self, client):
-    """Test that KuzuTransientError triggers retry."""
+    """Test that GraphTransientError triggers retry."""
     attempt_count = 0
 
     async def mock_func():
       nonlocal attempt_count
       attempt_count += 1
       if attempt_count < 3:
-        raise KuzuTransientError("Service temporarily unavailable")
+        raise GraphTransientError("Service temporarily unavailable")
       return {"data": "success"}
 
     client.config.retry_delay = 0.01
@@ -662,29 +662,29 @@ class TestKuzuClientExtended:
 
   @pytest.mark.asyncio
   async def test_kuzu_syntax_error_no_retry(self, client):
-    """Test that KuzuSyntaxError does not trigger retry."""
+    """Test that GraphSyntaxError does not trigger retry."""
     attempt_count = 0
 
     async def mock_func():
       nonlocal attempt_count
       attempt_count += 1
-      raise KuzuSyntaxError("Invalid Cypher syntax")
+      raise GraphSyntaxError("Invalid Cypher syntax")
 
-    with pytest.raises(KuzuSyntaxError, match="Invalid Cypher syntax"):
+    with pytest.raises(GraphSyntaxError, match="Invalid Cypher syntax"):
       await client._execute_with_retry(mock_func)
 
     assert attempt_count == 1  # Should not retry
 
   @pytest.mark.asyncio
   async def test_kuzu_server_error_retry(self, client):
-    """Test that KuzuServerError triggers retry."""
+    """Test that GraphServerError triggers retry."""
     attempt_count = 0
 
     async def mock_func():
       nonlocal attempt_count
       attempt_count += 1
       if attempt_count < 2:
-        raise KuzuServerError("Internal server error", status_code=500)
+        raise GraphServerError("Internal server error", status_code=500)
       return {"status": "recovered"}
 
     client.config.retry_delay = 0.01
@@ -700,7 +700,7 @@ class TestKuzuClientExtended:
     mock_response.json.return_value = {"detail": "Internal server error"}
 
     with patch.object(client.client, "request", return_value=mock_response):
-      with pytest.raises(KuzuServerError):
+      with pytest.raises(GraphServerError):
         await client._request("GET", "/databases/test")
 
   @pytest.mark.asyncio
@@ -711,5 +711,5 @@ class TestKuzuClientExtended:
     mock_response.json.return_value = {"detail": "Validation error"}
 
     with patch.object(client.client, "request", return_value=mock_response):
-      with pytest.raises(KuzuClientError):
+      with pytest.raises(GraphClientError):
         await client._request("POST", "/databases/test/query")

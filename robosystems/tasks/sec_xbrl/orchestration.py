@@ -585,15 +585,15 @@ def cleanup_phase_connections(phase: str) -> Dict:
 
     # Clear Kuzu client factory connection pools
     try:
-      from robosystems.graph_api.client.factory import KuzuClientFactory
+      from robosystems.graph_api.client.factory import GraphClientFactory
 
-      if hasattr(KuzuClientFactory, "_connection_pools"):
-        pool_count = len(KuzuClientFactory._connection_pools)
-        KuzuClientFactory._connection_pools.clear()
+      if hasattr(GraphClientFactory, "_connection_pools"):
+        pool_count = len(GraphClientFactory._connection_pools)
+        GraphClientFactory._connection_pools.clear()
         logger.info(f"Cleared {pool_count} Kuzu connection pools")
 
-      if hasattr(KuzuClientFactory, "_pool_stats"):
-        KuzuClientFactory._pool_stats.clear()
+      if hasattr(GraphClientFactory, "_pool_stats"):
+        GraphClientFactory._pool_stats.clear()
         logger.info("Cleared Kuzu pool statistics")
 
     except ImportError:

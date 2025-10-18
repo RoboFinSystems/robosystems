@@ -176,9 +176,9 @@ class BaseAgent(ABC):
     if self.kuzu_client:
       try:
         await self.kuzu_client.close()
-        self.logger.debug("Closed Kuzu client connection")
+        self.logger.debug("Closed Graph client connection")
       except Exception as e:
-        self.logger.error(f"Error closing Kuzu client: {str(e)}")
+        self.logger.error(f"Error closing Graph client: {str(e)}")
 
   def track_tokens(self, input_tokens: int, output_tokens: int):
     """Track token usage for the agent."""

@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any
 import uuid
 
-from robosystems.graph_api.client import KuzuClient
+from robosystems.graph_api.client import GraphClient
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.logger import logger
 from robosystems.middleware.sse.event_storage import (
@@ -34,7 +34,7 @@ class CopyStrategy(ABC):
   async def execute(
     self,
     request: BaseCopyRequest,
-    kuzu_client: KuzuClient,
+    graph_client: GraphClient,
     graph_id: str,
     user_id: str,
     timeout_seconds: int,
@@ -99,12 +99,12 @@ class S3CopyStrategy(CopyStrategy):
   async def execute(
     self,
     request: BaseCopyRequest,
-    kuzu_client: KuzuClient,
+    graph_client: GraphClient,
     graph_id: str,
     user_id: str,
     timeout_seconds: int,
   ) -> Dict[str, Any]:
-    """Execute S3 copy operation via Kuzu API with SSE monitoring."""
+    """Execute S3 copy operation via Graph API with SSE monitoring."""
 
     # Cast to S3CopyRequest for type safety
     s3_request = request
@@ -141,7 +141,7 @@ class S3CopyStrategy(CopyStrategy):
         f"Starting SSE-monitored S3 COPY for user {user_id}: {s3_request.s3_path} -> {graph_id}.{s3_request.table_name}"
       )
 
-      # Build S3 credentials for Kuzu
+      # Build S3 credentials for graph databases
       s3_credentials = {
         "aws_access_key_id": s3_request.s3_access_key_id,
         "aws_secret_access_key": s3_request.s3_secret_access_key,
@@ -156,23 +156,19 @@ class S3CopyStrategy(CopyStrategy):
       if s3_request.s3_url_style:
         s3_credentials["url_style"] = s3_request.s3_url_style
 
-      # Note: We can't easily forward real-time progress from Kuzu's SSE to our SSE
-      # because ingest_with_sse is a blocking call that monitors the entire operation.
-      # Instead, we'll publish periodic progress updates if we enhance this later.
-
       # Store progress event before starting the blocking call
       await event_storage.store_event(
         operation_id=operation_id,
         event_type=EventType.OPERATION_PROGRESS,
         data={
           "status": OperationStatus.RUNNING.value,
-          "message": "Submitting ingestion request to Kuzu database...",
+          "message": "Submitting ingestion request to graph database...",
           "progress_percent": 0,
         },
       )
 
       # Start the SSE-based ingestion (this blocks until complete)
-      response = await kuzu_client.ingest_with_sse(
+      response = await graph_client.ingest_with_sse(
         graph_id=graph_id,
         table_name=s3_request.table_name,
         s3_pattern=s3_request.s3_path,
@@ -275,14 +271,13 @@ class URLCopyStrategy(CopyStrategy):
   async def execute(
     self,
     request: BaseCopyRequest,
-    kuzu_client: KuzuClient,
+    graph_client: GraphClient,
     graph_id: str,
     user_id: str,
     timeout_seconds: int,
   ) -> Dict[str, Any]:
     """Execute URL copy operation."""
     # TODO: Implement URL copy
-    # This would use Kuzu's httpfs extension to load from URLs
     raise NotImplementedError("URL copy not yet implemented")
 
 
@@ -302,7 +297,7 @@ class DataFrameCopyStrategy(CopyStrategy):
   async def execute(
     self,
     request: BaseCopyRequest,
-    kuzu_client: KuzuClient,
+    graph_client: GraphClient,
     graph_id: str,
     user_id: str,
     timeout_seconds: int,

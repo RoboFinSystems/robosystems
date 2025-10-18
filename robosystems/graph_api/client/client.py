@@ -1,7 +1,7 @@
 """
-Asynchronous Kuzu API Client.
+Asynchronous Graph API Client.
 
-Provides asynchronous interface for Kuzu API operations including
+Provides asynchronous interface for Graph API operations including
 SSE-based monitoring for long-running ingestion tasks.
 """
 
@@ -14,25 +14,25 @@ import httpx
 from httpx_sse import aconnect_sse
 
 from robosystems.logger import logger
-from .base import BaseKuzuClient
-from .config import KuzuClientConfig
+from .base import BaseGraphClient
+from .config import GraphClientConfig
 from .exceptions import (
-  KuzuTimeoutError,
-  KuzuTransientError,
+  GraphTimeoutError,
+  GraphTransientError,
 )
 
 
-class KuzuClient(BaseKuzuClient):
-  """Asynchronous client for Kuzu API operations."""
+class GraphClient(BaseGraphClient):
+  """Asynchronous client for Graph API operations."""
 
   def __init__(
     self,
     base_url: Optional[str] = None,
-    config: Optional[KuzuClientConfig] = None,
+    config: Optional[GraphClientConfig] = None,
     **kwargs,
   ):
     """
-    Initialize asynchronous Kuzu client.
+    Initialize asynchronous Graph client.
 
     Args:
         base_url: Base URL for the API
@@ -89,7 +89,7 @@ class KuzuClient(BaseKuzuClient):
         Function result
 
     Raises:
-        KuzuAPIError: If all retries fail
+        GraphAPIError: If all retries fail
     """
     last_error = None
 
@@ -111,11 +111,11 @@ class KuzuClient(BaseKuzuClient):
 
         # Convert to appropriate exception type
         if isinstance(e, httpx.TimeoutException):
-          last_error = KuzuTimeoutError(f"Request timeout: {e}")
+          last_error = GraphTimeoutError(f"Request timeout: {e}")
         elif isinstance(e, httpx.ConnectError):
-          last_error = KuzuTransientError(f"Connection error: {e}")
+          last_error = GraphTransientError(f"Connection error: {e}")
         elif isinstance(e, httpx.RequestError):
-          last_error = KuzuTransientError(f"Request error: {e}")
+          last_error = GraphTransientError(f"Request error: {e}")
 
         # Check if we should retry
         if not self._should_retry(last_error, attempt):
@@ -245,7 +245,7 @@ class KuzuClient(BaseKuzuClient):
 
       # Handle truly empty response body (but be more careful about false positives)
       if response.content is None or len(response.content) == 0:
-        logger.warning("Received empty response body from Kuzu API")
+        logger.warning("Received empty response body from Graph API")
         return {"data": [], "columns": [], "row_count": 0}
 
       try:
@@ -264,9 +264,9 @@ class KuzuClient(BaseKuzuClient):
         }
 
     # For true streaming, use the streaming endpoint
-    # This allows the Kuzu instance to do the chunking
+    # This allows the graph database instance to do the chunking
     async def stream_chunks():
-      """Stream NDJSON chunks from Kuzu API server."""
+      """Stream NDJSON chunks from Graph API server."""
       async with self.client.stream(
         "POST",
         f"/databases/{graph_id}/query",
@@ -339,7 +339,7 @@ class KuzuClient(BaseKuzuClient):
         - error: Error message (if failed)
 
     Example:
-        >>> client = await KuzuClientFactory.create_client("sec", "write")
+        >>> client = await GraphClientFactory.create_client("sec", "write")
         >>> result = await client.ingest_with_sse(
         ...     graph_id="sec",
         ...     table_name="Fact",

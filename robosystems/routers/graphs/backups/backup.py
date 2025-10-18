@@ -190,7 +190,7 @@ async def list_backups(
   summary="Create Backup",
   description="""Create a backup of the graph database.
 
-Creates a complete backup of the Kuzu database (.kuzu file) with:
+Creates a complete backup of the graph database (.kuzu file) with:
 - **Format**: Full database backup only (complete .kuzu file)
 - **Compression**: Always enabled for optimal storage
 - **Encryption**: Optional AES-256 encryption for security

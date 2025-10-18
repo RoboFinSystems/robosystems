@@ -38,7 +38,7 @@ class TestCreateKuzuMCPClient:
 
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
-  @patch("robosystems.graph_api.client.factory.KuzuClientFactory")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_with_discovery_shared_repo(
     self, mock_utils, mock_factory, mock_client_class, mock_env
@@ -81,7 +81,7 @@ class TestCreateKuzuMCPClient:
 
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
-  @patch("robosystems.graph_api.client.factory.KuzuClientFactory")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_with_discovery_user_graph(
     self, mock_utils, mock_factory, mock_client_class, mock_env
@@ -125,7 +125,7 @@ class TestCreateKuzuMCPClient:
 
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
-  @patch("robosystems.graph_api.client.factory.KuzuClientFactory")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_url_discovery_fallback_base_url(
     self, mock_utils, mock_factory, mock_client_class, mock_env
@@ -159,7 +159,7 @@ class TestCreateKuzuMCPClient:
 
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
-  @patch("robosystems.graph_api.client.factory.KuzuClientFactory")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_url_discovery_env_fallback(
     self, mock_utils, mock_factory, mock_client_class, mock_env
@@ -194,7 +194,7 @@ class TestCreateKuzuMCPClient:
 
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
-  @patch("robosystems.graph_api.client.factory.KuzuClientFactory")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_url_discovery_final_fallback(
     self, mock_utils, mock_factory, mock_client_class, mock_env
@@ -274,7 +274,7 @@ class TestCreateKuzuMCPClient:
   @patch("robosystems.middleware.mcp.factory.logger")
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
-  @patch("robosystems.graph_api.client.factory.KuzuClientFactory")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_logs_discovery(
     self, mock_utils, mock_factory, mock_client_class, mock_env, mock_logger
@@ -296,7 +296,7 @@ class TestCreateKuzuMCPClient:
     await create_kuzu_mcp_client("sec")
 
     mock_logger.info.assert_called_once_with(
-      "KuzuClientFactory discovered endpoint: http://discovered.com for graph sec"
+      "GraphClientFactory discovered endpoint: http://discovered.com for graph sec"
     )
 
 

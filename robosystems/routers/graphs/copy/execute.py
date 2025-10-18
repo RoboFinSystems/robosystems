@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user
-from robosystems.graph_api.client.factory import KuzuClientFactory
+from robosystems.graph_api.client.factory import GraphClientFactory
 from robosystems.middleware.graph.types import InstanceTier
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -249,8 +249,8 @@ async def copy_data(
       client_ip=client_ip,
     )
 
-    # 7. Get Kuzu client for the target graph
-    kuzu_client = await KuzuClientFactory.create_client(
+    # 7. Get Graph client for the target graph
+    graph_client = await GraphClientFactory.create_client(
       graph_id=graph_id,
       operation_type="write",
       tier=tier_limits.get("tier", InstanceTier.STANDARD)
@@ -267,7 +267,7 @@ async def copy_data(
     try:
       result = await strategy.execute(
         request=request,
-        kuzu_client=kuzu_client,
+        graph_client=graph_client,
         graph_id=graph_id,
         user_id=current_user.id,
         timeout_seconds=timeout_seconds,

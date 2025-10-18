@@ -1,4 +1,4 @@
-name: Deploy Kuzu Shared Replicas
+name: Deploy Neo4j Writers
 
 on:
   workflow_call:
@@ -33,13 +33,12 @@ on:
         description: "Comma-separated list of private subnet IDs for instances (minimum 2 required)"
         required: true
         type: string
+      valkey_sg_id:
+        description: "Security Group ID for Valkey/Redis client access"
+        required: true
+        type: string
 
       # Instance Configuration
-      instance_type:
-        description: "EC2 instance type for replicas (memory-optimized for Kuzu operations)"
-        required: false
-        type: string
-        default: "r7g.medium"
       ami_id:
         description: "Amazon Linux 2023 ARM64 AMI ID"
         required: false
@@ -48,57 +47,56 @@ on:
 
       # Auto Scaling Configuration
       min_instances:
-        description: "Minimum number of replica instances"
+        description: "Minimum number of instances"
         required: true
         type: string
       max_instances:
-        description: "Maximum number of replica instances"
-        required: true
-        type: string
-      desired_instances:
-        description: "Desired number of replica instances"
+        description: "Maximum number of instances"
         required: true
         type: string
 
-      # Kuzu Configuration
-      shared_repositories:
-        description: "Comma-delimited list of shared repositories (e.g., sec)"
+      # Neo4j Configuration
+      writer_tier:
+        description: "Writer tier (enterprise, premium)"
         required: false
         type: string
-        default: "sec"
+        default: "enterprise"
+      neo4j_version:
+        description: "Neo4j Community Edition version"
+        required: false
+        type: string
+        default: "5.15.0"
 
-      # Note: Secrets are fetched directly by the application using secrets_manager.py
+      # Tier Specifications (from kuzu.yml)
+      instance_type:
+        description: "EC2 instance type for this tier"
+        required: true
+        type: string
 
-      # Other Configuration
-      ecr_image_tag:
-        description: "Docker image tag for Kuzu writers"
-        required: false
+      # Volume Management
+      volume_detachment_topic_arn:
+        description: "ARN of the Volume Detachment SNS topic from volumes stack"
+        required: true
         type: string
-        default: "latest"
-      lambda_code_bucket:
-        description: "S3 bucket containing Lambda deployment packages"
-        required: false
-        type: string
-        default: ""
       volume_manager_function_arn:
-        description: "ARN of the Volume Manager Lambda function"
+        description: "ARN of the Volume Manager Lambda function from volumes stack"
         required: true
         type: string
 
     outputs:
-      # Kuzu Replica Outputs
+      # Neo4j Writer Outputs
       security_group_id:
-        description: "Security Group ID for Kuzu shared infrastructure"
+        description: "Security Group ID for Neo4j writers"
         value: ${{ jobs.action.outputs.security_group_id }}
       instance_role_arn:
-        description: "IAM Role ARN for Kuzu instances"
+        description: "IAM Role ARN for Neo4j writer instances"
         value: ${{ jobs.action.outputs.instance_role_arn }}
-      replica_alb_endpoint:
-        description: "Load balancer endpoint for replica read traffic"
-        value: ${{ jobs.action.outputs.replica_alb_endpoint }}
-      replica_asg_name:
-        description: "Auto Scaling Group Name for replicas"
-        value: ${{ jobs.action.outputs.replica_asg_name }}
+      writer_asg_name:
+        description: "Auto Scaling Group Name for writers"
+        value: ${{ jobs.action.outputs.writer_asg_name }}
+      bolt_endpoint:
+        description: "Neo4j Bolt protocol endpoint"
+        value: ${{ jobs.action.outputs.bolt_endpoint }}
 
     secrets:
       ACTIONS_TOKEN:
@@ -110,7 +108,6 @@ on:
         description: "AWS Secret Access Key for CloudFormation deployment"
         required: true
       AWS_SNS_ALERT_EMAIL:
-        description: "SNS alert email address for CloudWatch alarms"
         required: true
 
 jobs:
@@ -121,8 +118,8 @@ jobs:
     outputs:
       security_group_id: ${{ steps.get-outputs.outputs.security_group_id }}
       instance_role_arn: ${{ steps.get-outputs.outputs.instance_role_arn }}
-      replica_alb_endpoint: ${{ steps.get-outputs.outputs.replica_alb_endpoint }}
-      replica_asg_name: ${{ steps.get-outputs.outputs.replica_asg_name }}
+      writer_asg_name: ${{ steps.get-outputs.outputs.writer_asg_name }}
+      bolt_endpoint: ${{ steps.get-outputs.outputs.bolt_endpoint }}
 
     steps:
       - name: Checkout repository
@@ -142,23 +139,75 @@ jobs:
       - name: Configure ASG parameters
         id: asg_config
         run: |
-          echo "🎯 Configuring ASG for repositories: ${{ inputs.shared_repositories }} in environment: ${{ inputs.environment }}"
+          echo "🎯 Configuring ASG for Neo4j tier: ${{ inputs.writer_tier }} in environment: ${{ inputs.environment }}"
 
           # Use direct inputs for ASG configuration
           MIN_INSTANCES="${{ inputs.min_instances }}"
           MAX_INSTANCES="${{ inputs.max_instances }}"
-          DESIRED_INSTANCES="${{ inputs.desired_instances }}"
 
           echo "min_instances=$MIN_INSTANCES" >> $GITHUB_OUTPUT
           echo "max_instances=$MAX_INSTANCES" >> $GITHUB_OUTPUT
-          echo "desired_instances=$DESIRED_INSTANCES" >> $GITHUB_OUTPUT
 
-          echo "📊 ASG Configuration for repositories (${{ inputs.shared_repositories }}):"
+          echo "📊 ASG Configuration for ${{ inputs.writer_tier }} tier:"
           echo "  Min: $MIN_INSTANCES"
           echo "  Max: $MAX_INSTANCES"
-          echo "  Desired: $DESIRED_INSTANCES"
 
-      - name: Deploy Kuzu Shared Writers CloudFormation stack
+      - name: Select Availability Zone for Persistent Volumes
+        id: az_selection
+        run: |
+          echo "🌐 Selecting availability zone for deployment..."
+          echo "⚠️  IMPORTANT: Neo4j writers use persistent EBS volumes that are AZ-specific"
+
+          # Neo4j Enterprise/Premium tiers need consistent AZ to ensure volume persistence
+          # EBS volumes cannot be moved between AZs, so instance replacement in a different AZ
+          # means data loss unless we restrict to a single AZ
+
+          echo "📍 Selecting single AZ for Neo4j ${{ inputs.writer_tier }} tier to ensure volume persistence"
+
+          # Use zone C for ALL tiers to consolidate resources
+          PREFERRED_AZ="${{ inputs.aws_region }}c"
+
+          echo "📍 Preferred AZ for ${{ inputs.writer_tier }} tier: $PREFERRED_AZ"
+
+          # Get all subnet IDs and their AZs
+          IFS=',' read -ra SUBNET_ARRAY <<< "${{ inputs.subnet_ids }}"
+
+          # Find the subnet in the preferred AZ
+          SELECTED_SUBNET=""
+          for subnet in "${SUBNET_ARRAY[@]}"; do
+            SUBNET_AZ=$(aws ec2 describe-subnets --subnet-ids "$subnet" --query 'Subnets[0].AvailabilityZone' --output text)
+            echo "  Checking subnet $subnet in AZ $SUBNET_AZ"
+
+            if [ "$SUBNET_AZ" = "$PREFERRED_AZ" ]; then
+              SELECTED_SUBNET="$subnet"
+              echo "✅ Found subnet $subnet in preferred AZ $PREFERRED_AZ"
+              break
+            fi
+          done
+
+          # If no subnet found in preferred AZ, use the first available one
+          if [ -z "$SELECTED_SUBNET" ]; then
+            SELECTED_SUBNET="${SUBNET_ARRAY[0]}"
+            SELECTED_AZ=$(aws ec2 describe-subnets --subnet-ids "$SELECTED_SUBNET" --query 'Subnets[0].AvailabilityZone' --output text)
+            echo "⚠️  No subnet found in $PREFERRED_AZ, using $SELECTED_SUBNET in $SELECTED_AZ"
+            echo "selected_az=$SELECTED_AZ" >> $GITHUB_OUTPUT
+          else
+            echo "selected_az=$PREFERRED_AZ" >> $GITHUB_OUTPUT
+          fi
+
+          echo "selected_subnet=$SELECTED_SUBNET" >> $GITHUB_OUTPUT
+          echo "use_single_subnet=true" >> $GITHUB_OUTPUT
+
+          echo "📊 Neo4j Writer Tier AZ Configuration for ${{ inputs.writer_tier }}:"
+          echo "  Subnet: $SELECTED_SUBNET"
+          echo "  Availability Zone: ${SELECTED_AZ:-$PREFERRED_AZ}"
+          echo "  ⚠️  All instances and volumes will be created in this single AZ"
+          echo ""
+          echo "⚠️  TRADE-OFF: Single AZ reduces availability but ensures data persistence"
+          echo "  - Pro: Volumes can always be reattached after instance replacement"
+          echo "  - Con: No multi-AZ redundancy (AZ failure affects this tier)"
+
+      - name: Deploy Neo4j Writers CloudFormation stack
         id: deploy-stack
         run: |
           # Check if stack exists
@@ -172,53 +221,52 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
-          # Use inline template deployment
-          echo "Using inline template deployment"
-          TEMPLATE_PARAM="--template-body file://cloudformation/kuzu-shared-replicas.yaml"
+          # Build parameters
+          # Use selected subnet for single-AZ deployment
+          SUBNET_PARAM="${{ steps.az_selection.outputs.selected_subnet }}"
 
-          # Build parameters for shared writers template
-          KUZU_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+          NEO4J_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
-                ParameterKey=SharedRepositories,ParameterValue=\"${{ inputs.shared_repositories }}\" \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=VpcCidr,ParameterValue=\"10.0.0.0/16\" \
-                ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
+                ParameterKey=SubnetIds,ParameterValue=\"$SUBNET_PARAM\" \
+                ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
-                ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+                ParameterKey=WriterTier,ParameterValue=${{ inputs.writer_tier }} \
+                ParameterKey=Neo4jVersion,ParameterValue=${{ inputs.neo4j_version }} \
                 ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
                 ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \
-                ParameterKey=DesiredInstances,ParameterValue=${{ inputs.desired_instances }} \
-                ParameterKey=EnableWarmPool,ParameterValue=\"false\" \
-                ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
+                ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+                ParameterKey=VolumeDetachmentTopicArn,ParameterValue=\"${{ inputs.volume_detachment_topic_arn }}\" \
                 ParameterKey=VolumeManagerFunctionArn,ParameterValue=\"${{ inputs.volume_manager_function_arn }}\" \
                 ParameterKey=ServiceTag,ParameterValue=\"RoboSystems\" \
-                ParameterKey=ComponentTag,ParameterValue=\"KuzuSharedReplicas\""
+                ParameterKey=ComponentTag,ParameterValue=\"Neo4jWriter\""
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then
             # Create new stack
             aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              $TEMPLATE_PARAM \
+              --template-body file://cloudformation/neo4j-writers.yaml \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-              --parameters $KUZU_STACK_PARAMS \
+              --parameters $NEO4J_STACK_PARAMS \
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=KuzuSharedWriters \
+                Key=Component,Value=Neo4jWriter \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions
           else
             # Update existing stack, handling "No updates" error
             UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              $TEMPLATE_PARAM \
+              --template-body file://cloudformation/neo4j-writers.yaml \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-              --parameters $KUZU_STACK_PARAMS \
+              --parameters $NEO4J_STACK_PARAMS \
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=KuzuSharedWriters \
+                Key=Component,Value=Neo4jWriter \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions 2>&1) || true
 
@@ -251,37 +299,21 @@ jobs:
             --query 'Stacks[0].Outputs' \
             --output json)
 
-          # Extract shared replicas specific outputs
-          REPLICA_ENDPOINT=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="ReplicaLoadBalancerEndpoint") | .OutputValue // empty')
-          REPLICA_STATUS=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="ReplicaInfrastructureStatus") | .OutputValue // empty')
-          SECURITY_GROUP_ID=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="SecurityGroupId") | .OutputValue // empty')
-          INSTANCE_ROLE_ARN=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="InstanceRoleArn") | .OutputValue // empty')
+          # Extract outputs from CloudFormation stack
+          WRITER_ASG_NAME=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="WriterAutoScalingGroupName") | .OutputValue // empty')
+          SECURITY_GROUP_ID=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="WriterSecurityGroupId") | .OutputValue // empty')
+          BOLT_ENDPOINT=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="Neo4jBoltEndpoint") | .OutputValue // empty')
 
-          # Map outputs
-          echo "replica_alb_endpoint=${REPLICA_ENDPOINT}" >> $GITHUB_OUTPUT
+          # Set outputs
+          echo "writer_asg_name=${WRITER_ASG_NAME}" >> $GITHUB_OUTPUT
           echo "security_group_id=${SECURITY_GROUP_ID}" >> $GITHUB_OUTPUT
-          echo "instance_role_arn=${INSTANCE_ROLE_ARN}" >> $GITHUB_OUTPUT
+          echo "bolt_endpoint=${BOLT_ENDPOINT}" >> $GITHUB_OUTPUT
 
-          # Get ASG name if replicas are enabled
-          if [ "${REPLICA_STATUS}" = "ENABLED" ]; then
-            REPLICA_ASG=$(aws cloudformation describe-stack-resources \
-              --stack-name "${{ inputs.stack_name }}" \
-              --logical-resource-id ReplicaAutoScalingGroup \
-              --query 'StackResources[0].PhysicalResourceId' \
-              --output text)
-            echo "replica_asg_name=${REPLICA_ASG}" >> $GITHUB_OUTPUT
+          if [ -n "$WRITER_ASG_NAME" ]; then
+            echo "🏢 Writer ASG: ${WRITER_ASG_NAME}"
           fi
-
-          echo "🔄 Replica Status: ${REPLICA_STATUS}"
-          if [ "${REPLICA_STATUS}" == "ENABLED" ] && [ -n "${REPLICA_ENDPOINT}" ]; then
-            echo "📖 Replica Endpoint: ${REPLICA_ENDPOINT}"
-          fi
-
-          if [ -n "${SECURITY_GROUP_ID}" ]; then
-            echo "🔒 Security Group configured"
-          fi
-          if [ -n "${INSTANCE_ROLE_ARN}" ]; then
-            echo "🔑 Instance Role configured"
+          if [ -n "$BOLT_ENDPOINT" ]; then
+            echo "🔌 Neo4j Bolt Endpoint: ${BOLT_ENDPOINT}"
           fi
 
       - name: Update Deployment Status
@@ -289,7 +321,7 @@ jobs:
         run: |
           # Output deployment status for the main workflow
           if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
-            echo "Kuzu Shared Replicas stack creation completed"
+            echo "✅ Neo4j Writers stack creation completed"
           else
-            echo "Kuzu Shared Replicas stack update completed"
+            echo "✅ Neo4j Writers stack update completed"
           fi

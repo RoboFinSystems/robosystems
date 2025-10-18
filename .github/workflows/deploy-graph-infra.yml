@@ -1,4 +1,4 @@
-name: Deploy Kuzu Infrastructure
+name: Deploy Graph Infrastructure
 
 on:
   workflow_call:
@@ -43,7 +43,7 @@ on:
         type: string
         default: ""
       graph_api_rotation_code_key:
-        description: "S3 key for Kuzu API Rotation Lambda deployment package"
+        description: "S3 key for Graph API Rotation Lambda deployment package"
         required: false
         type: string
         default: ""
@@ -63,7 +63,7 @@ on:
         required: true
     outputs:
       secret_arn:
-        description: "ARN of the Kuzu API authentication secret"
+        description: "ARN of the Graph API authentication secret"
         value: ${{ jobs.action.outputs.secret_arn }}
       instance_registry_table:
         description: "DynamoDB table name for instance registry"
@@ -103,7 +103,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.aws_region }}
 
-      - name: Deploy Kuzu Infrastructure CloudFormation stack
+      - name: Deploy Graph Infrastructure CloudFormation stack
         id: deploy-stack
         run: |
           # Check if stack exists
@@ -132,12 +132,12 @@ jobs:
             # Fetch S3 keys from manifest (which includes hashes in filenames)
             MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
             
-            ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."kuzu-api-rotation".s3_key // empty')
-            MONITOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."kuzu-instance-monitor".s3_key // empty')
+            ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-api-rotation".s3_key // empty')
+            MONITOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-instance-monitor".s3_key // empty')
             
             if [ -n "$ROTATION_KEY" ]; then
               INFRA_STACK_PARAMS="$INFRA_STACK_PARAMS \
-                    ParameterKey=KuzuApiRotationCodeKey,ParameterValue=$ROTATION_KEY"
+                    ParameterKey=GraphApiRotationCodeKey,ParameterValue=$ROTATION_KEY"
             fi
             
             if [ -n "$MONITOR_KEY" ]; then
@@ -151,26 +151,26 @@ jobs:
             # Create new stack
             aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              --template-body file://cloudformation/kuzu-infra.yaml \
+              --template-body file://cloudformation/graph-infra.yaml \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
               --parameters $INFRA_STACK_PARAMS \
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=KuzuInfra \
+                Key=Component,Value=GraphInfra \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions
           else
             # Update existing stack, handling "No updates" error
             UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
               --stack-name ${{ inputs.stack_name }} \
-              --template-body file://cloudformation/kuzu-infra.yaml \
+              --template-body file://cloudformation/graph-infra.yaml \
               --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
               --parameters $INFRA_STACK_PARAMS \
               --tags \
                 Key=Environment,Value=${{ inputs.environment }} \
                 Key=Service,Value=RoboSystems \
-                Key=Component,Value=KuzuInfra \
+                Key=Component,Value=GraphInfra \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions 2>&1) || true
 
@@ -227,7 +227,7 @@ jobs:
         run: |
           # Output deployment status for the main workflow
           if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
-            echo "Kuzu Infrastructure stack creation completed"
+            echo "Graph Infrastructure stack creation completed"
           else
-            echo "Kuzu Infrastructure stack update completed"
+            echo "Graph Infrastructure stack update completed"
           fi

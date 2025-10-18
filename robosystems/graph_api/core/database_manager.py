@@ -915,7 +915,7 @@ class KuzuDatabaseManager:
 
       # Update the instance registry
       dynamodb.update_item(
-        TableName="robosystems-kuzu-dev-instance-registry",
+        TableName=env.INSTANCE_REGISTRY_TABLE,
         Key={"instance_id": {"S": "local-kuzu-writer"}},
         UpdateExpression="SET database_count = :count, available_capacity_pct = :cap",
         ExpressionAttributeValues={
@@ -979,9 +979,8 @@ class KuzuDatabaseManager:
           )
           return
 
-      # Get environment
-      environment = config_env.ENVIRONMENT.lower()
-      table_name = f"robosystems-kuzu-{environment}-instance-registry"
+      # Get table name from centralized config
+      table_name = config_env.INSTANCE_REGISTRY_TABLE
 
       # Get DynamoDB client
       dynamodb = boto3.client("dynamodb", region_name="us-east-1")

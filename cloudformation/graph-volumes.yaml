@@ -48,6 +48,14 @@ Parameters:
   VolumeDetachmentCodeKey:
     Type: String
     Description: S3 key for Volume Detachment Lambda deployment package (includes hash)
+  SnapshotCreatorCodeKey:
+    Type: String
+    Description: S3 key for Snapshot Creator Lambda deployment package (includes hash)
+    Default: ""
+  SnapshotSelectorCodeKey:
+    Type: String
+    Description: S3 key for Snapshot Selector Lambda deployment package (includes hash)
+    Default: ""
 
   # Monitoring & Alerting
   SNSAlertEmail:
@@ -107,7 +115,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TopicName: !Sub "robosystems-kuzu-volumes-${Environment}-alerts"
+      TopicName: !Sub "robosystems-graph-volumes-${Environment}-alerts"
       DisplayName: !Sub "RoboSystems Kuzu Volumes ${Environment} Alerts"
       Subscription:
         - Endpoint: !Ref SNSAlertEmail
@@ -172,11 +180,11 @@ Resources:
                   - !If
                     - UseProvidedVolumeRegistry
                     - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}"
-                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry"
                   - !If
                     - UseProvidedVolumeRegistry
                     - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}/index/*"
-                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry/index/*"
               - Effect: Allow
                 Action:
                   - sns:Publish
@@ -229,7 +237,7 @@ Resources:
           VOLUME_REGISTRY_TABLE: !If
             - UseProvidedVolumeRegistry
             - !Ref VolumeRegistryTable
-            - !Sub "robosystems-kuzu-${Environment}-volume-registry"
+            - !Sub "robosystems-graph-${Environment}-volume-registry"
           ALERT_TOPIC_ARN: !Ref VolumeAlertTopic
           DEFAULT_VOLUME_SIZE:
             !FindInMap [VolumeDefaults, !Ref Environment, Size]
@@ -365,11 +373,11 @@ Resources:
                   - !If
                     - UseProvidedVolumeRegistry
                     - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}"
-                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry"
                   - !If
                     - UseProvidedVolumeRegistry
                     - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VolumeRegistryTable}/index/*"
-                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry/index/*"
               - Effect: Allow
                 Action:
                   - ssm:SendCommand
@@ -436,8 +444,8 @@ Resources:
           VOLUME_REGISTRY_TABLE: !If
             - UseProvidedVolumeRegistry
             - !Ref VolumeRegistryTable
-            - !Sub "robosystems-kuzu-${Environment}-volume-registry"
-          INSTANCE_REGISTRY_TABLE: !Sub "robosystems-kuzu-${Environment}-instance-registry"
+            - !Sub "robosystems-graph-${Environment}-volume-registry"
+          INSTANCE_REGISTRY_TABLE: !Sub "robosystems-graph-${Environment}-instance-registry"
           ALERT_TOPIC_ARN: !Ref VolumeAlertTopic
           EXPANSION_THRESHOLD: "0.8"
           EXPANSION_FACTOR: "1.5"
@@ -504,7 +512,7 @@ Resources:
           RETENTION_DAYS: "7"
       Code:
         S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Sub "lambda/kuzu-snapshot-creator-${Environment}.zip"
+        S3Key: !Ref SnapshotCreatorCodeKey
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-snapshot-creator"
@@ -569,7 +577,7 @@ Resources:
           # AUTO_SCALING_GROUP_NAME will be set by EventBridge rule input
       Code:
         S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Sub "lambda/kuzu-snapshot-selector-${Environment}.zip"
+        S3Key: !Ref SnapshotSelectorCodeKey
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-snapshot-selector"
@@ -588,7 +596,7 @@ Resources:
   OrphanedVolumesAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-orphaned"
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-orphaned"
       AlarmDescription: Alert when orphaned volumes are detected
       MetricName: OrphanedVolumes
       Namespace: !Sub
@@ -607,7 +615,7 @@ Resources:
   FailedAttachmentsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-failed-attachments"
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-failed-attachments"
       AlarmDescription: Alert on volume attachment failures
       MetricName: Errors
       Namespace: AWS/Lambda
@@ -631,7 +639,7 @@ Resources:
   DiskUsageWarningAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-disk-usage-warning"
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-warning"
       AlarmDescription: Disk usage exceeded 70% on any Kuzu instance at /mnt/kuzu-data
       Metrics:
         - Id: m1
@@ -659,7 +667,7 @@ Resources:
   DiskUsageCriticalAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-disk-usage-critical"
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-critical"
       AlarmDescription: CRITICAL - Disk usage exceeded 85% on any Kuzu instance at /mnt/kuzu-data
       Metrics:
         - Id: m1
@@ -690,7 +698,7 @@ Resources:
   DiskUsageEmergencyAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-disk-usage-emergency"
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-emergency"
       AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any Kuzu instance at /mnt/kuzu-data - Database operations at risk!
       Metrics:
         - Id: m1
@@ -721,7 +729,7 @@ Resources:
   RapidDiskGrowthAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "robosystems-kuzu-volumes-${Environment}-rapid-disk-growth"
+      AlarmName: !Sub "robosystems-graph-volumes-${Environment}-rapid-disk-growth"
       AlarmDescription: Disk usage growing rapidly (>10% in 30 minutes)
       Metrics:
         - Id: growth_rate
@@ -966,7 +974,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      TopicName: !Sub "robosystems-kuzu-volumes-${Environment}-detachment"
+      TopicName: !Sub "robosystems-graph-volumes-${Environment}-detachment"
       DisplayName: !Sub "RoboSystems Kuzu Volumes ${Environment} Detachment Notifications"
       Subscription:
         - Endpoint: !GetAtt VolumeDetachmentFunction.Arn
@@ -1056,7 +1064,7 @@ Outputs:
     Value: !If
       - UseProvidedVolumeRegistry
       - !Ref VolumeRegistryTable
-      - !Sub "robosystems-kuzu-${Environment}-volume-registry"
+      - !Sub "robosystems-graph-${Environment}-volume-registry"
     Export:
       Name: !Sub "${AWS::StackName}-volume-registry"
 

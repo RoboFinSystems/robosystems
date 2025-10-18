@@ -118,8 +118,7 @@ RoboSystems supports **pluggable graph database backends** to provide flexibilit
 #### Supported Backends
 
 - **Kuzu** (Default): High-performance embedded graph database, ideal for Standard tier deployments
-- **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers with advanced features
-- **Neo4j Enterprise**: Full enterprise features including multi-database support for Premium tier
+- **Neo4j**: Client-server architecture for Enterprise/Premium tiers with advanced features
 
 #### Graph API System (`/robosystems/graph_api/`)
 
@@ -213,8 +212,7 @@ The client-factory layer provides intelligent routing between application code a
 - **VPC**: AWS VPC with NAT Gateway, CloudTrail, and VPC Flow Logs
 - **API**: ECS Fargate ARM64/Graviton with auto-scaling and WAF
 - **Workers**: ECS Fargate ARM64/Graviton with auto-scaling
-- **Graph Database Writers**: EC2 Graviton instances (Kuzu) or ECS containers (Neo4j) with DynamoDB registry and management lambdas
-- **Graph Database Readers**: EC2 Graviton instances or ECS containers with load balancing for shared repositories
+- **Graph Database Writers**: EC2 Graviton instances with DynamoDB registry and management lambdas
 - **Database & Cache**: RDS PostgreSQL + ElastiCache Valkey instances
 - **Observability**: Amazon Managed Prometheus + Grafana with AWS SSO
 - **Self-Hosted CI/CD**: GitHub Actions runner on dedicated infrastructure

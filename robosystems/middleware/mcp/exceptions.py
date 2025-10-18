@@ -1,14 +1,14 @@
 """
-MCP exceptions for Kuzu client operations.
+MCP exceptions for Graph client operations.
 
-Custom exceptions for Kuzu MCP client error handling with enhanced hierarchy.
+Custom exceptions for graph databases MCP client error handling with enhanced hierarchy.
 """
 
 from typing import Optional
 
 
 class KuzuAPIError(Exception):
-  """Base exception for Kuzu API errors."""
+  """Base exception for Graph API errors."""
 
   def __init__(
     self, message: str, error_code: Optional[str] = None, details: Optional[dict] = None
@@ -76,7 +76,7 @@ class KuzuAuthorizationError(KuzuAPIError):
 
 
 class KuzuConnectionError(KuzuAPIError):
-  """Exception raised when connection to Kuzu API fails."""
+  """Exception raised when connection to Graph API fails."""
 
   def __init__(
     self, message: str = "Connection failed", endpoint: Optional[str] = None

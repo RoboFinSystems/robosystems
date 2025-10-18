@@ -99,7 +99,7 @@ class TestCreditService:
         graph_id="graph123",
         user_id="user123",
         billing_admin_id="user123",
-        monthly_allocation=Decimal("5000"),
+        monthly_allocation=Decimal("10000"),
         session=mock_session,
       )
 

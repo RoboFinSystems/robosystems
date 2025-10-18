@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 from ...logger import logger
-from ...graph_api.client import get_kuzu_client_for_instance
+from ...graph_api.client import get_graph_client_for_instance
 from ...config import env
 
 
@@ -54,10 +54,10 @@ class SharedRepositoryService:
     try:
       # For shared repositories, connect to the shared master directly
       # The shared master is already running and registered in DynamoDB
-      from ...graph_api.client.factory import KuzuClientFactory
+      from ...graph_api.client.factory import GraphClientFactory
 
       # Get the shared master URL from DynamoDB discovery
-      shared_master_url = await KuzuClientFactory._get_shared_master_url()
+      shared_master_url = await GraphClientFactory._get_shared_master_url()
       logger.info(f"Found shared master at {shared_master_url}")
 
       # Extract IP from URL (format: http://IP:PORT)
@@ -70,7 +70,7 @@ class SharedRepositoryService:
       master_ip = match.group(1)
 
       # Create database on the shared master
-      kuzu_client = await get_kuzu_client_for_instance(master_ip)
+      kuzu_client = await get_graph_client_for_instance(master_ip)
 
       try:
         # Create the database with shared schema
@@ -135,11 +135,11 @@ async def ensure_shared_repository_exists(
 
   # Try to get database info first
   try:
-    from ...graph_api.client.factory import KuzuClientFactory
+    from ...graph_api.client.factory import GraphClientFactory
 
     # Use factory to get proper client for shared repository
     # Shared repositories automatically route to shared_master/shared_replica infrastructure
-    client = await KuzuClientFactory.create_client(
+    client = await GraphClientFactory.create_client(
       graph_id=repository_name, operation_type="read"
     )
 

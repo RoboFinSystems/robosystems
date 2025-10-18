@@ -1,8 +1,8 @@
 """
-Streaming wrapper for Kuzu API clients.
+Streaming wrapper for Graph API clients.
 
 This module provides streaming query support for repositories that use
-the Kuzu API client, enabling memory-efficient processing of large result sets.
+the Graph API client, enabling memory-efficient processing of large result sets.
 """
 
 from typing import Dict, Any, Optional, AsyncIterator
@@ -13,7 +13,7 @@ from robosystems.logger import logger
 
 class StreamingRepositoryWrapper:
   """
-  Wrapper that adds streaming support to Kuzu API client repositories.
+  Wrapper that adds streaming support to Graph API client repositories.
 
   This wrapper checks if the underlying client supports streaming and
   provides the execute_query_streaming method for the repository layer.
@@ -24,7 +24,7 @@ class StreamingRepositoryWrapper:
     Initialize the streaming wrapper.
 
     Args:
-        client: The Kuzu API client (sync or async)
+        client: The Graph API client (sync or async)
     """
     self.client = client
 
@@ -51,12 +51,12 @@ class StreamingRepositoryWrapper:
         graph_id = getattr(self.client, "graph_id", "unknown")
 
         # Call the query method with streaming=True
-        # This now returns a true async generator from the Kuzu instance
+        # This now returns a true async generator from the graph database instance
         stream_generator = await self.client.query(
           cypher=cypher, graph_id=graph_id, parameters=params, streaming=True
         )
 
-        # Pass through chunks from Kuzu instance without buffering
+        # Pass through chunks from graph database instance without buffering
         if hasattr(stream_generator, "__aiter__"):
           chunk_count = 0
           total_rows = 0
@@ -64,7 +64,7 @@ class StreamingRepositoryWrapper:
           async for chunk in stream_generator:
             chunk_count += 1
 
-            # The Kuzu instance already provides properly formatted chunks
+            # The graph database instance already provides properly formatted chunks
             # Just pass them through with minimal processing
             if isinstance(chunk, dict):
               # Track total rows for logging
@@ -80,7 +80,7 @@ class StreamingRepositoryWrapper:
                   chunk["execution_time_ms"] = (time.time() - start_time) * 1000
                 logger.info(
                   f"Completed streaming {total_rows} rows in {chunk_count} chunks "
-                  f"from Kuzu instance for graph {graph_id}"
+                  f"from graph database instance for graph {graph_id}"
                 )
 
             # Yield chunk immediately without buffering
@@ -178,13 +178,13 @@ class StreamingRepositoryWrapper:
 
 def add_streaming_support(client):
   """
-  Add streaming support to a Kuzu API client.
+  Add streaming support to a Graph API client.
 
   This function wraps the client with streaming capabilities if it doesn't
   already have them.
 
   Args:
-      client: The Kuzu API client to wrap
+      client: The Graph API client to wrap
 
   Returns:
       Client with execute_query_streaming method

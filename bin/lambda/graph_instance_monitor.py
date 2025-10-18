@@ -1,7 +1,7 @@
 """
-Kuzu Instance Monitor Lambda Function
+Graph Instance Monitor Lambda Function
 
-This Lambda handles infrastructure-level monitoring for Kuzu instances:
+This Lambda handles infrastructure-level monitoring for Graph instances (Kuzu and Neo4j):
 - Health checks for EC2 instances
 - Registry cleanup for stale entries
 - CloudWatch metrics collection
@@ -29,7 +29,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "staging")
 INSTANCE_REGISTRY_TABLE = os.environ.get("INSTANCE_REGISTRY_TABLE")
 GRAPH_REGISTRY_TABLE = os.environ.get("GRAPH_REGISTRY_TABLE")
 VOLUME_REGISTRY_TABLE = os.environ.get("VOLUME_REGISTRY_TABLE")
-CLOUDWATCH_NAMESPACE = f"RoboSystemsKuzu/{ENVIRONMENT.title()}"
+CLOUDWATCH_NAMESPACE = f"RoboSystemsGraph/{ENVIRONMENT.title()}"
 
 # Configuration
 STALE_GRAPH_DAYS = 7  # Days before deleted graphs are removed
@@ -128,7 +128,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 def check_instance_health() -> Dict[str, Any]:
   """
-  Check health of Kuzu instances and update registry.
+  Check health of Graph instances and update registry.
 
   This function:
   1. Queries all instances from DynamoDB registry
@@ -462,14 +462,14 @@ def cleanup_stale_graph_entries() -> Dict[str, int]:
 
 def collect_kuzu_metrics() -> Dict[str, int]:
   """
-  Collect and publish Kuzu cluster capacity metrics to CloudWatch.
+  Collect and publish Graph cluster capacity metrics to CloudWatch.
 
   This function:
   1. Queries instance and graph registries
   2. Calculates capacity, utilization, and health metrics
   3. Publishes metrics to CloudWatch for monitoring and auto-scaling
   """
-  logger.info("Starting Kuzu metrics collection")
+  logger.info("Starting Graph metrics collection")
 
   results = {
     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -700,7 +700,7 @@ def collect_kuzu_metrics() -> Dict[str, int]:
     )
 
   except Exception as e:
-    logger.error(f"Failed to collect Kuzu metrics: {e}", exc_info=True)
+    logger.error(f"Failed to collect Graph metrics: {e}", exc_info=True)
     results["error"] = str(e)
 
   return results

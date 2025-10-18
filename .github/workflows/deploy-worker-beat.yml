@@ -68,17 +68,6 @@ on:
         type: string
         default: "20"
 
-      # Kuzu Configuration
-      kuzu_replica_alb_url:
-        description: "ALB endpoint URL for shared repository read replicas"
-        required: false
-        type: string
-        default: ""
-      shared_replica_alb_enabled:
-        description: "Enable routing to shared replica ALB for read operations"
-        required: false
-        type: string
-        default: "false"
 
       # Cache Configuration
       valkey_url:
@@ -151,8 +140,6 @@ jobs:
                 ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
                 ParameterKey=Cpu,ParameterValue=${{ inputs.cpu }} \
                 ParameterKey=Memory,ParameterValue=${{ inputs.memory }} \
-                ParameterKey=KuzuReplicaAlbUrl,ParameterValue=\"${{ inputs.kuzu_replica_alb_url }}\" \
-                ParameterKey=SharedReplicaAlbEnabled,ParameterValue=${{ inputs.shared_replica_alb_enabled }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=FargateSpotWeight,ParameterValue=${{ inputs.fargate_spot_weight }} \

@@ -1,7 +1,7 @@
 """
-Enhanced Kuzu Volume Manager Lambda Function
+Enhanced Graph Volume Manager Lambda Function
 
-Manages the lifecycle of EBS volumes for Kuzu database instances with proper
+Manages the lifecycle of EBS volumes for Graph database instances with proper
 volume reattachment on instance replacement.
 
 Key improvements:
@@ -339,9 +339,9 @@ def create_and_attach_volume(
 
   # Determine volume name based on node type
   if node_type in ["shared_master", "shared_replica"]:
-    volume_name = f"robosystems-kuzu-shared-{ENVIRONMENT}-data"
+    volume_name = f"robosystems-graph-shared-{ENVIRONMENT}-data"
   else:
-    volume_name = f"robosystems-kuzu-writer-{ENVIRONMENT}-data"
+    volume_name = f"robosystems-graph-writer-{ENVIRONMENT}-data"
 
   # Create volume
   volume_response = ec2.create_volume(
@@ -360,9 +360,9 @@ def create_and_attach_volume(
           {"Key": "Tier", "Value": tier},
           {"Key": "NodeType", "Value": node_type},
           {"Key": "Service", "Value": "RoboSystems"},
-          {"Key": "Component", "Value": "KuzuWriter"},
-          {"Key": "VolumeType", "Value": "KuzuData"},
-          {"Key": "ManagedBy", "Value": "KuzuVolumeManager"},
+          {"Key": "Component", "Value": "GraphWriter"},
+          {"Key": "VolumeType", "Value": "GraphData"},
+          {"Key": "ManagedBy", "Value": "GraphVolumeManager"},
           {"Key": "CreatedAt", "Value": datetime.now(timezone.utc).isoformat()},
           {"Key": "DatabaseId", "Value": databases[0] if databases else "unassigned"},
           {"Key": "InstanceId", "Value": instance_id},
@@ -542,7 +542,7 @@ def cleanup_orphaned_volumes() -> Dict[str, Any]:
 
   # Publish metric
   cloudwatch.put_metric_data(
-    Namespace=f"RoboSystemsKuzu/{ENVIRONMENT}",
+    Namespace=f"RoboSystemsGraph/{ENVIRONMENT}",
     MetricData=[
       {
         "MetricName": "OrphanedVolumes",
@@ -810,7 +810,7 @@ def sync_registry_with_ec2(event: Dict[str, Any]) -> Dict[str, Any]:
     response = ec2.describe_volumes(
       Filters=[
         {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
-        {"Name": "tag:ManagedBy", "Values": ["KuzuVolumeManager"]},
+        {"Name": "tag:ManagedBy", "Values": ["GraphVolumeManager"]},
       ]
     )
 
@@ -942,7 +942,7 @@ Updated {len(corrections_applied["updated"])} mismatched entries: {corrections_a
 
   # Publish metrics
   cloudwatch.put_metric_data(
-    Namespace=f"RoboSystemsKuzu/{ENVIRONMENT}",
+    Namespace=f"RoboSystemsGraph/{ENVIRONMENT}",
     MetricData=[
       {
         "MetricName": "RegistryStaleEntries",
@@ -976,7 +976,7 @@ def send_alert(subject: str, message: str) -> None:
   try:
     sns.publish(
       TopicArn=ALERT_TOPIC,
-      Subject=f"[Kuzu Volume Manager] {subject}",
+      Subject=f"[Graph Volume Manager] {subject}",
       Message=message,
     )
   except Exception as e:

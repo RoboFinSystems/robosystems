@@ -16,6 +16,7 @@ from ...models.iam import GraphBackup, BackupStatus
 from ...database import session
 from ...logger import logger
 from ...operations.kuzu.backup_manager import BackupJob, BackupFormat, BackupType
+from ...graph_api.client.factory import GraphClientFactory
 
 
 class CallbackTask(Task):
@@ -118,10 +119,11 @@ def create_graph_backup(
 
     # Call Kuzu API to create the backup
     logger.info(f"Calling Kuzu API to create backup for graph '{graph_id}'")
-    from robosystems.graph_api.client.factory import get_kuzu_client
 
-    # Get properly routed Kuzu client
-    client = asyncio.run(get_kuzu_client(graph_id, operation_type="read"))
+    # Get properly routed Graph client
+    client = asyncio.run(
+      GraphClientFactory.create_client(graph_id=graph_id, operation_type="read")
+    )
 
     try:
       # First, download the backup from Kuzu
@@ -548,10 +550,9 @@ def restore_graph_backup(
 
     # Call Kuzu API to restore the backup
     logger.info(f"Calling Kuzu API to restore database for graph '{graph_id}'")
-    from ...graph_api.client.factory import get_kuzu_client_sync
 
     # Get properly routed Kuzu client
-    client = get_kuzu_client_sync(graph_id, operation_type="write")
+    client = GraphClientFactory.create_client(graph_id, operation_type="write")
 
     try:
       # Call restore endpoint on Kuzu instance
@@ -589,9 +590,10 @@ def restore_graph_backup(
     if verify_after_restore:
       try:
         # Create a simple verification by checking if we can connect and query
-        from ...graph_api.client.factory import get_kuzu_client
 
-        client = asyncio.run(get_kuzu_client(graph_id, operation_type="read"))
+        client = asyncio.run(
+          GraphClientFactory.create_client(graph_id, operation_type="read")
+        )
 
         # Try to get database info to verify it exists and is accessible
         db_info = asyncio.run(client.get_database_info(graph_id=graph_id))
@@ -1104,9 +1106,10 @@ def restore_graph_backup_sse(
     progress_tracker.emit_progress("Downloading backup from storage...", 40)
 
     # Use Kuzu API client for restoration
-    from ...graph_api.client.factory import get_kuzu_client
 
-    client = asyncio.run(get_kuzu_client(graph_id, operation_type="write"))
+    client = asyncio.run(
+      GraphClientFactory.create_client(graph_id, operation_type="write")
+    )
 
     try:
       # Progress callback for restore operations
@@ -1155,7 +1158,9 @@ def restore_graph_backup_sse(
       progress_tracker.emit_progress("Verifying restored database...", 85)
 
       try:
-        client = asyncio.run(get_kuzu_client(graph_id, operation_type="read"))
+        client = asyncio.run(
+          GraphClientFactory.create_client(graph_id, operation_type="read")
+        )
 
         # Try to get database info to verify it exists and is accessible
         db_info = asyncio.run(client.get_database_info(graph_id=graph_id))

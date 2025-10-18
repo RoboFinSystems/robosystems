@@ -1,17 +1,17 @@
 """
-Synchronous wrapper for KuzuClient.
+Synchronous wrapper for GraphClient.
 
-This module provides a synchronous wrapper around the async KuzuClient
+This module provides a synchronous wrapper around the async GraphClient
 for use in CLI tools and other synchronous contexts.
 """
 
 import asyncio
 from typing import Any, Dict, List, Optional, cast
-from .client import KuzuClient
+from .client import GraphClient
 
 
-class KuzuSyncClient:
-  """Synchronous wrapper around the async KuzuClient."""
+class GraphSyncClient:
+  """Synchronous wrapper around the async GraphClient."""
 
   def __init__(
     self,
@@ -19,7 +19,7 @@ class KuzuSyncClient:
     **kwargs,
   ):
     """Initialize sync client with async client underneath."""
-    self._client = KuzuClient(base_url=base_url, **kwargs)
+    self._client = GraphClient(base_url=base_url, **kwargs)
     self._loop = None
 
   def __enter__(self):

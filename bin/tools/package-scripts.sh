@@ -68,23 +68,23 @@ psycopg2-binary==2.9.9"
 package_lambda "valkey-rotation" "valkey_rotation.py" "boto3==1.34.14
 redis==5.0.1"
 
-package_lambda "kuzu-api-rotation" "graph_api_rotation.py" "boto3==1.34.14"
+package_lambda "graph-api-rotation" "graph_api_rotation.py" "boto3==1.34.14"
 
 # Package snapshot Lambda functions (temporary - will be migrated to volume manager)
-package_lambda "kuzu-snapshot-creator" "kuzu_snapshot_creator.py" "boto3==1.34.14"
+package_lambda "graph-snapshot-creator" "graph_snapshot_creator.py" "boto3==1.34.14"
 
-package_lambda "kuzu-snapshot-selector" "kuzu_snapshot_selector.py" "boto3==1.34.14"
+package_lambda "graph-snapshot-selector" "graph_snapshot_selector.py" "boto3==1.34.14"
 
 # Package volume management Lambda functions
-package_lambda "kuzu-volume-manager" "kuzu_volume_manager.py" "boto3==1.34.14"
+package_lambda "graph-volume-manager" "graph_volume_manager.py" "boto3==1.34.14"
 
-package_lambda "kuzu-volume-monitor" "kuzu_volume_monitor.py" "boto3==1.34.14
+package_lambda "graph-volume-monitor" "graph_volume_monitor.py" "boto3==1.34.14
 urllib3==2.0.7"
 
-package_lambda "kuzu-volume-detachment" "kuzu_volume_detachment.py" "boto3==1.34.14"
+package_lambda "graph-volume-detachment" "graph_volume_detachment.py" "boto3==1.34.14"
 
 # Package instance monitor Lambda function
-package_lambda "kuzu-instance-monitor" "kuzu_instance_monitor.py" "boto3==1.34.14"
+package_lambda "graph-instance-monitor" "graph_instance_monitor.py" "boto3==1.34.14"
 
 # Package worker monitor Lambda function (queue metrics and task protection)
 package_lambda "worker-monitor" "worker_monitor.py" "boto3==1.34.14
@@ -100,11 +100,15 @@ for script in "${REPO_ROOT}"/bin/userdata/*.sh; do
     aws s3 cp "$script" "s3://${BUCKET_NAME}/userdata/${script_name}" --region "$REGION"
 done
 
-# Upload setup scripts that might be referenced
-echo "📤 Uploading setup scripts to S3..."
-aws s3 cp "${REPO_ROOT}/bin/setup/kuzu-lifecycle.sh" \
-    "s3://${BUCKET_NAME}/scripts/kuzu-lifecycle.sh" \
-    --region "$REGION"
+# Upload common userdata scripts (shared between Kuzu and Neo4j)
+echo "📤 Uploading common userdata scripts to S3..."
+for script in "${REPO_ROOT}"/bin/userdata/common/*.sh; do
+    if [ -f "$script" ]; then
+        script_name=$(basename "$script")
+        echo "  Uploading ${script_name}..."
+        aws s3 cp "$script" "s3://${BUCKET_NAME}/userdata/common/${script_name}" --region "$REGION"
+    fi
+done
 
 # Upload large CloudFormation templates to S3
 echo "📤 Uploading CloudFormation templates to S3..."
@@ -145,7 +149,7 @@ echo "  \"Lambdas\": {" >> "$MANIFEST"
 
 # Create manifest with S3 keys and hashes
 FIRST=true
-for lambda_name in postgres-secrets postgres-rotation valkey-rotation kuzu-api-rotation kuzu-snapshot-creator kuzu-snapshot-selector kuzu-volume-manager kuzu-volume-monitor kuzu-volume-detachment kuzu-instance-monitor worker-monitor; do
+for lambda_name in postgres-secrets postgres-rotation valkey-rotation graph-api-rotation graph-snapshot-creator graph-snapshot-selector graph-volume-manager graph-volume-monitor graph-volume-detachment graph-instance-monitor worker-monitor; do
     if [ "$FIRST" = false ]; then
         echo "," >> "$MANIFEST"
     fi
@@ -171,18 +175,19 @@ echo "✅ Lambda functions, scripts, and CloudFormation templates packaged and u
 echo ""
 echo "📍 S3 Artifacts:"
 LAMBDA_COUNT=0
-for lambda_name in postgres-secrets postgres-rotation valkey-rotation kuzu-api-rotation kuzu-snapshot-creator kuzu-snapshot-selector kuzu-volume-manager kuzu-volume-monitor kuzu-volume-detachment kuzu-instance-monitor worker-monitor; do
+for lambda_name in postgres-secrets postgres-rotation valkey-rotation graph-api-rotation graph-snapshot-creator graph-snapshot-selector graph-volume-manager graph-volume-monitor graph-volume-detachment graph-instance-monitor worker-monitor; do
     if [ -f "../${lambda_name}.s3key" ]; then
         LAMBDA_COUNT=$((LAMBDA_COUNT + 1))
     fi
 done
 echo "  Lambda packages uploaded: $LAMBDA_COUNT functions"
 echo "  Lambda manifest uploaded"
-echo "  UserData scripts uploaded: 3 scripts"
+echo "  UserData scripts uploaded: 4 scripts (bastion, gha-runner, kuzu-writer, neo4j-writer)"
+echo "  Shared userdata scripts uploaded: 6 scripts (graph-lifecycle, graph-health-check, register, run-container, setup-cloudwatch, kuzu-lifecycle-legacy)"
 echo ""
 echo "📋 CloudFormation Parameters:"
 echo "  LambdaCodeBucket configured"
 echo "  Lambda Code Keys: Configured for $LAMBDA_COUNT functions"
-echo "  UserData Script Keys: 3 scripts configured"
+echo "  UserData Script Keys: 4 main scripts + 6 shared scripts configured"
 echo ""
 echo "  CloudFormation Templates: Configured for ${ENVIRONMENT} environment"

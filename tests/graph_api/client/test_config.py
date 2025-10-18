@@ -4,15 +4,15 @@ import os
 from unittest.mock import patch
 import pytest
 
-from robosystems.graph_api.client.config import KuzuClientConfig
+from robosystems.graph_api.client.config import GraphClientConfig
 
 
-class TestKuzuClientConfig:
-  """Test cases for KuzuClientConfig."""
+class TestGraphClientConfig:
+  """Test cases for GraphClientConfig."""
 
   def test_default_configuration(self):
     """Test default configuration values."""
-    config = KuzuClientConfig()
+    config = GraphClientConfig()
 
     assert config.base_url == ""
     assert config.timeout == 30
@@ -29,7 +29,7 @@ class TestKuzuClientConfig:
 
   def test_custom_configuration(self):
     """Test creating config with custom values."""
-    config = KuzuClientConfig(
+    config = GraphClientConfig(
       base_url="http://localhost:8001",
       timeout=60,
       max_retries=5,
@@ -46,7 +46,7 @@ class TestKuzuClientConfig:
   def test_from_env_with_defaults(self):
     """Test creating config from environment with no env vars set."""
     with patch.dict(os.environ, {}, clear=True):
-      config = KuzuClientConfig.from_env()
+      config = GraphClientConfig.from_env()
 
       # Should use defaults when no env vars are set
       assert config.base_url == ""
@@ -70,7 +70,7 @@ class TestKuzuClientConfig:
     }
 
     with patch.dict(os.environ, env_vars):
-      config = KuzuClientConfig.from_env()
+      config = GraphClientConfig.from_env()
 
       assert config.base_url == "http://api.example.com"
       assert config.timeout == 120
@@ -93,7 +93,7 @@ class TestKuzuClientConfig:
     }
 
     with patch.dict(os.environ, env_vars):
-      config = KuzuClientConfig.from_env(prefix="MY_KUZU_")
+      config = GraphClientConfig.from_env(prefix="MY_KUZU_")
 
       assert config.base_url == "http://custom.example.com"
       assert config.timeout == 90
@@ -119,7 +119,7 @@ class TestKuzuClientConfig:
 
     for value, expected in test_cases:
       with patch.dict(os.environ, {"KUZU_CLIENT_VERIFY_SSL": value}):
-        config = KuzuClientConfig.from_env()
+        config = GraphClientConfig.from_env()
         assert config.verify_ssl is expected, f"Failed for value: {value}"
 
   def test_from_env_partial_values(self):
@@ -131,7 +131,7 @@ class TestKuzuClientConfig:
     }
 
     with patch.dict(os.environ, env_vars):
-      config = KuzuClientConfig.from_env()
+      config = GraphClientConfig.from_env()
 
       assert config.base_url == "http://partial.example.com"
       assert config.max_retries == 8
@@ -142,7 +142,7 @@ class TestKuzuClientConfig:
 
   def test_with_overrides(self):
     """Test creating new config with overridden values."""
-    original = KuzuClientConfig(
+    original = GraphClientConfig(
       base_url="http://original.com",
       timeout=30,
       max_retries=3,
@@ -169,7 +169,7 @@ class TestKuzuClientConfig:
 
   def test_with_overrides_preserves_defaults(self):
     """Test that with_overrides preserves unspecified values."""
-    original = KuzuClientConfig()
+    original = GraphClientConfig()
 
     modified = original.with_overrides(base_url="http://new.com")
 
@@ -183,7 +183,7 @@ class TestKuzuClientConfig:
   def test_headers_are_copied(self):
     """Test that headers are properly copied in with_overrides."""
     original_headers = {"X-Original": "value"}
-    original = KuzuClientConfig(headers=original_headers)
+    original = GraphClientConfig(headers=original_headers)
 
     modified = original.with_overrides()
 
@@ -202,7 +202,7 @@ class TestKuzuClientConfig:
 
     with patch.dict(os.environ, env_vars):
       with pytest.raises(ValueError):
-        KuzuClientConfig.from_env()
+        GraphClientConfig.from_env()
 
   def test_float_env_parsing(self):
     """Test float parsing from environment variables."""
@@ -213,7 +213,7 @@ class TestKuzuClientConfig:
     }
 
     with patch.dict(os.environ, env_vars):
-      config = KuzuClientConfig.from_env()
+      config = GraphClientConfig.from_env()
 
       assert config.retry_delay == 1.5
       assert config.retry_backoff == 2.75

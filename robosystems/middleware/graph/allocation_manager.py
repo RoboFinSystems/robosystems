@@ -110,7 +110,7 @@ class InstanceInfo:
 
 
 class KuzuAllocationManager:
-  """DynamoDB-based allocation manager for Kuzu databases."""
+  """DynamoDB-based allocation manager for graph databases."""
 
   def __init__(
     self,
@@ -126,25 +126,32 @@ class KuzuAllocationManager:
       else MultiTenantUtils.get_max_databases_per_node()
     )
 
-    # Tier-based configuration for memory, chunk sizes, and backend selection
+    # Tier-based configuration for backend selection and database allocation
+    # Note: Backend-specific settings (Kuzu buffer pools, Neo4j JVM heap) are
+    # configured in their respective userdata scripts, not here.
+    # Backend type mapping: config uses "neo4j" but we need to differentiate editions
     self.tier_configs = {
       InstanceTier.STANDARD: {
+        "backend": "kuzu",
         "backend_type": "kuzu",
-        "max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
-        "chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
         "databases_per_instance": self.max_databases_per_instance,
+        # Kuzu-specific settings (only used by Kuzu backend)
+        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
+        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
       },
       InstanceTier.ENTERPRISE: {
-        "backend_type": "neo4j_community",
-        "max_memory_mb": env.KUZU_ENTERPRISE_MAX_MEMORY_MB,
-        "chunk_size": env.KUZU_ENTERPRISE_CHUNK_SIZE,
+        "backend": "neo4j",
+        "backend_type": "neo4j",
+        "neo4j_edition": "community",
         "databases_per_instance": 1,  # Dedicated instance
+        # Neo4j settings configured in neo4j-writer.sh userdata script
       },
       InstanceTier.PREMIUM: {
-        "backend_type": "neo4j_community",
-        "max_memory_mb": env.KUZU_PREMIUM_MAX_MEMORY_MB,
-        "chunk_size": env.KUZU_PREMIUM_CHUNK_SIZE,
+        "backend": "neo4j",
+        "backend_type": "neo4j",
+        "neo4j_edition": "enterprise",
         "databases_per_instance": 1,  # Dedicated instance
+        # Neo4j Enterprise settings configured in neo4j-writer.sh userdata script
       },
     }
     # ASG name will be determined dynamically from instance data
@@ -159,7 +166,7 @@ class KuzuAllocationManager:
         raise ValueError(f"Invalid environment name: {environment}")
       env_capitalized = environment.capitalize()
       self.default_asg_name = (
-        f"RoboSystemsKuzuWritersStandard{env_capitalized}-writers-asg"
+        f"RoboSystemsGraphWritersStandard{env_capitalized}-writers-asg"
       )
 
     # Get DynamoDB resource with proper endpoint
@@ -168,11 +175,9 @@ class KuzuAllocationManager:
     # Rate limiting for scale-up triggers (one per 5 minutes per tier)
     self._scale_up_timestamps: Dict[str, datetime] = {}
 
-    # DynamoDB tables
-    self.graph_table = dynamodb.Table(f"robosystems-kuzu-{environment}-graph-registry")
-    self.instance_table = dynamodb.Table(
-      f"robosystems-kuzu-{environment}-instance-registry"
-    )
+    # DynamoDB tables - use centralized configuration
+    self.graph_table = dynamodb.Table(env.GRAPH_REGISTRY_TABLE)
+    self.instance_table = dynamodb.Table(env.INSTANCE_REGISTRY_TABLE)
 
     # AWS clients with region configuration
     region = env.AWS_REGION
@@ -994,15 +999,15 @@ class KuzuAllocationManager:
     """Get the CloudFormation stack name for a given tier and environment."""
     if self.environment == "prod":
       tier_map = {
-        "standard": "RoboSystemsKuzuWritersStandardProd",
-        "enterprise": "RoboSystemsKuzuWritersEnterpriseProd",
-        "premium": "RoboSystemsKuzuWritersPremiumProd",
+        "standard": "RoboSystemsGraphWritersStandardProd",
+        "enterprise": "RoboSystemsGraphWritersEnterpriseProd",
+        "premium": "RoboSystemsGraphWritersPremiumProd",
       }
     elif self.environment == "staging":
       tier_map = {
-        "standard": "RoboSystemsKuzuWritersStandardStaging",
-        "enterprise": "RoboSystemsKuzuWritersEnterpriseStaging",
-        "premium": "RoboSystemsKuzuWritersPremiumStaging",
+        "standard": "RoboSystemsGraphWritersStandardStaging",
+        "enterprise": "RoboSystemsGraphWritersEnterpriseStaging",
+        "premium": "RoboSystemsGraphWritersPremiumStaging",
       }
     else:
       # Development or other environments

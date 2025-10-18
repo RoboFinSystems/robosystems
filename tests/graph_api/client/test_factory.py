@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
 from robosystems.graph_api.client.factory import (
-  KuzuClientFactory,
+  GraphClientFactory,
   CircuitBreaker,
-  get_kuzu_client,
-  get_kuzu_client_for_instance,
-  get_kuzu_client_for_sec_ingestion,
+  get_graph_client,
+  get_graph_client_for_instance,
+  get_graph_client_for_sec_ingestion,
 )
 from robosystems.middleware.graph.types import InstanceTier
 
@@ -102,7 +102,7 @@ class TestCircuitBreaker:
     assert breaker.is_open is True
 
 
-class TestKuzuClientFactory:
+class TestGraphClientFactory:
   """Test cases for Kuzu client factory."""
 
   @pytest.fixture
@@ -138,8 +138,8 @@ class TestKuzuClientFactory:
       mock_location.endpoint = "http://instance.example.com"
       mock_manager.find_database_location.return_value = mock_location
 
-      # Mock KuzuClient creation
-      with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
+      # Mock GraphClient creation
+      with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
         mock_client = MagicMock()
         mock_client._graph_id = "kg123456"
         mock_client._database_name = "kg123456"
@@ -147,7 +147,7 @@ class TestKuzuClientFactory:
         mock_client.config.base_url = "http://instance.example.com"
         MockClient.return_value = mock_client
 
-        client = await KuzuClientFactory.create_client("kg123456")
+        client = await GraphClientFactory.create_client("kg123456")
 
         assert client is not None
         assert client._graph_id == "kg123456"
@@ -159,9 +159,9 @@ class TestKuzuClientFactory:
   async def test_create_client_for_shared_repository(self, mock_env):
     """Test creating client for shared repository."""
     # Mock ALB health check
-    with patch.object(KuzuClientFactory, "_check_alb_health", return_value=True):
-      # Mock KuzuClient creation
-      with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
+    with patch.object(GraphClientFactory, "_check_alb_health", return_value=True):
+      # Mock GraphClient creation
+      with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
         mock_client = MagicMock()
         mock_client._graph_id = "sec"
         mock_client._database_name = "sec"
@@ -170,7 +170,7 @@ class TestKuzuClientFactory:
         MockClient.return_value = mock_client
 
         # SEC is in SHARED_REPOSITORIES by default
-        client = await KuzuClientFactory.create_client("sec", operation_type="read")
+        client = await GraphClientFactory.create_client("sec", operation_type="read")
 
         assert client is not None
         assert client._graph_id == "sec"
@@ -198,7 +198,7 @@ class TestKuzuClientFactory:
 
       # Mock httpx client creation
       with patch("robosystems.graph_api.client.factory.httpx.AsyncClient"):
-        client = await KuzuClientFactory.create_client("kg123456:subgraph1")
+        client = await GraphClientFactory.create_client("kg123456:subgraph1")
 
         assert client is not None
         # The factory preserves the full subgraph ID as database_name
@@ -207,8 +207,8 @@ class TestKuzuClientFactory:
   @pytest.mark.asyncio
   async def test_create_client_shared_write_operation(self, mock_env):
     """Test shared repository write goes to master."""
-    # Mock KuzuClient creation to control the response
-    with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
+    # Mock GraphClient creation to control the response
+    with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
       mock_client = MagicMock()
       mock_client._graph_id = "sec"
       mock_client._database_name = "sec"
@@ -216,7 +216,7 @@ class TestKuzuClientFactory:
       mock_client.config.base_url = "http://master.example.com"
       MockClient.return_value = mock_client
 
-      client = await KuzuClientFactory.create_client("sec", operation_type="write")
+      client = await GraphClientFactory.create_client("sec", operation_type="write")
 
       assert client is not None
       # Should use master endpoint for writes
@@ -226,9 +226,9 @@ class TestKuzuClientFactory:
   async def test_create_client_alb_unhealthy_fallback(self, mock_env):
     """Test fallback to master when ALB is unhealthy."""
     # Mock ALB as unhealthy
-    with patch.object(KuzuClientFactory, "_check_alb_health", return_value=False):
-      # Mock KuzuClient creation
-      with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
+    with patch.object(GraphClientFactory, "_check_alb_health", return_value=False):
+      # Mock GraphClient creation
+      with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
         mock_client = MagicMock()
         mock_client._graph_id = "sec"
         mock_client._database_name = "sec"
@@ -236,7 +236,7 @@ class TestKuzuClientFactory:
         mock_client.config.base_url = "http://master.example.com"
         MockClient.return_value = mock_client
 
-        client = await KuzuClientFactory.create_client("sec", operation_type="read")
+        client = await GraphClientFactory.create_client("sec", operation_type="read")
 
         assert client is not None
         # Should fallback to master endpoint
@@ -259,7 +259,7 @@ class TestKuzuClientFactory:
 
       # The factory creates the client even when allocation is None,
       # which fails later when trying to use it
-      client = await KuzuClientFactory.create_client("kg999999")
+      client = await GraphClientFactory.create_client("kg999999")
       assert client is not None  # Client is created with default URL
 
   @pytest.mark.asyncio
@@ -279,8 +279,8 @@ class TestKuzuClientFactory:
       mock_location.endpoint = "http://premium.example.com"
       mock_manager.find_database_location.return_value = mock_location
 
-      # Mock KuzuClient creation
-      with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
+      # Mock GraphClient creation
+      with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
         mock_client = MagicMock()
         mock_client._graph_id = "kg123456"
         mock_client._database_name = "kg123456"
@@ -288,7 +288,7 @@ class TestKuzuClientFactory:
         mock_client.config.base_url = "http://premium.example.com"
         MockClient.return_value = mock_client
 
-        client = await KuzuClientFactory.create_client(
+        client = await GraphClientFactory.create_client(
           "kg123456", tier=InstanceTier.PREMIUM
         )
 
@@ -300,26 +300,26 @@ class TestKuzuClientFactory:
     """Test cleanup closes connection pools."""
     # Create mock connection pools
     mock_client = AsyncMock()
-    KuzuClientFactory._connection_pools = {"http://test.example.com": mock_client}
+    GraphClientFactory._connection_pools = {"http://test.example.com": mock_client}
 
-    await KuzuClientFactory.cleanup()
+    await GraphClientFactory.cleanup()
 
     # Should have closed all clients
     mock_client.aclose.assert_called_once()
-    assert len(KuzuClientFactory._connection_pools) == 0
+    assert len(GraphClientFactory._connection_pools) == 0
 
 
 class TestFactoryFunctions:
   """Test cases for factory convenience functions."""
 
   @pytest.mark.asyncio
-  async def test_get_kuzu_client(self):
-    """Test get_kuzu_client function."""
-    with patch.object(KuzuClientFactory, "create_client") as mock_create:
+  async def test_get_graph_client(self):
+    """Test get_graph_client function."""
+    with patch.object(GraphClientFactory, "create_client") as mock_create:
       mock_client = MagicMock()
       mock_create.return_value = mock_client
 
-      result = await get_kuzu_client("kg123456", operation_type="write")
+      result = await get_graph_client("kg123456", operation_type="write")
 
       assert result == mock_client
       mock_create.assert_called_once_with(
@@ -330,13 +330,13 @@ class TestFactoryFunctions:
       )
 
   @pytest.mark.asyncio
-  async def test_get_kuzu_client_for_instance(self):
-    """Test get_kuzu_client_for_instance function."""
-    with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
+  async def test_get_graph_client_for_instance(self):
+    """Test get_graph_client_for_instance function."""
+    with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
       mock_client = MagicMock()
       MockClient.return_value = mock_client
 
-      result = await get_kuzu_client_for_instance(
+      result = await get_graph_client_for_instance(
         instance_ip="10.0.0.1",
         api_key="test-api-key",
       )
@@ -345,8 +345,8 @@ class TestFactoryFunctions:
       MockClient.assert_called_once()
 
   @pytest.mark.asyncio
-  async def test_get_kuzu_client_for_sec_ingestion(self):
-    """Test get_kuzu_client_for_sec_ingestion function."""
+  async def test_get_graph_client_for_sec_ingestion(self):
+    """Test get_graph_client_for_sec_ingestion function."""
     # Mock the environment to be development to avoid DynamoDB calls
     with patch("robosystems.graph_api.client.factory.env") as mock_env:
       mock_env.is_development.return_value = True
@@ -355,14 +355,14 @@ class TestFactoryFunctions:
       mock_env.GRAPH_CONNECT_TIMEOUT = 5.0
       mock_env.GRAPH_READ_TIMEOUT = 30.0
 
-      # Mock KuzuClient creation
-      with patch("robosystems.graph_api.client.factory.KuzuClient") as MockClient:
+      # Mock GraphClient creation
+      with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
         mock_client = MagicMock()
         mock_client._graph_id = "sec"
         mock_client._database_name = "sec"
         MockClient.return_value = mock_client
 
-        result = await get_kuzu_client_for_sec_ingestion()
+        result = await get_graph_client_for_sec_ingestion()
 
         assert result == mock_client
         MockClient.assert_called_once()
