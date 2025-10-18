@@ -20,6 +20,7 @@ from celery import Task
 from robosystems.celery import celery_app
 from robosystems.config import env
 from robosystems.logger import logger
+from robosystems.graph_api.client.factory import GraphClientFactory
 
 
 # Queue configuration

@@ -314,7 +314,9 @@ class TestBaseGraphClient:
 
       with patch("robosystems.graph_api.client.base.logger") as mock_logger:
         BaseGraphClient(base_url="http://localhost:8001")
-        mock_logger.warning.assert_called_with("GraphClient initialized without API key")
+        mock_logger.warning.assert_called_with(
+          "GraphClient initialized without API key"
+        )
 
   def test_initialization_debug_missing_api_key_in_dev(self):
     """Test that missing API key only debugs in development."""

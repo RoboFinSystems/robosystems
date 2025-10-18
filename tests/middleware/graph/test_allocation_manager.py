@@ -208,7 +208,9 @@ class TestMultiBackendSupport:
     """Test that all tiers have backend_type attribute for DynamoDB."""
     for tier, config in allocation_manager.tier_configs.items():
       assert "backend_type" in config, f"Tier {tier} missing backend_type"
-      assert config["backend_type"] in ["kuzu", "neo4j"], f"Invalid backend_type for tier {tier}"
+      assert config["backend_type"] in ["kuzu", "neo4j"], (
+        f"Invalid backend_type for tier {tier}"
+      )
 
   def test_backend_type_consistency(self, allocation_manager):
     """Test that backend and backend_type are consistent."""
@@ -217,4 +219,6 @@ class TestMultiBackendSupport:
       backend_type = config["backend_type"]
 
       # Both should match (both "kuzu" or both "neo4j")
-      assert backend == backend_type, f"Tier {tier} has inconsistent backend ({backend}) and backend_type ({backend_type})"
+      assert backend == backend_type, (
+        f"Tier {tier} has inconsistent backend ({backend}) and backend_type ({backend_type})"
+      )

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ...celery import celery_app
 from ...models.iam import UserGraph, GraphUsageTracking
+from ...graph_api.client.factory import GraphClientFactory
 
 logger = logging.getLogger(__name__)
 

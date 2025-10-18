@@ -14,6 +14,7 @@ from datetime import datetime
 from robosystems.celery import celery_app
 from robosystems.config import env
 from robosystems.logger import logger
+from robosystems.graph_api.client.factory import GraphClientFactory
 
 
 @celery_app.task(

@@ -22,6 +22,8 @@ from robosystems.middleware.graph.types import (
   AccessPattern as GraphAccessPattern,
 )
 from robosystems.config import env
+from robosystems.graph_api.client import GraphClient
+from robosystems.graph_api.client.exceptions import GraphClientError
 
 
 class AccessPattern(str, Enum):
@@ -605,14 +607,14 @@ class MultiTenantUtils:
     if api_key:
       headers["Authorization"] = f"Bearer {api_key}"
 
-    async with KuzuClient(base_url=kuzu_url, headers=headers) as client:
+    async with GraphClient(base_url=kuzu_url, headers=headers) as client:
       # Check if database already exists
       try:
         db_info = await client.get_database_info(db_name)
         if db_info.get("is_healthy", False):
           logger.info(f"Database {db_name} already exists and is ready")
           return {"created": False, "status": "exists", "database": db_info}
-      except KuzuClientError as e:
+      except GraphClientError as e:
         if "not found" in str(e).lower():
           logger.info(f"Database {db_name} not found, will create")
         else:

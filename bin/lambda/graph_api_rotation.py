@@ -223,7 +223,9 @@ def test_secret(arn: str, token: str) -> None:
     if "ENVIRONMENT" not in pending_dict:
       raise ValueError("Missing ENVIRONMENT field")
 
-    logger.info(f"testSecret: Successfully validated new Neo4j password for tier {pending_dict['TIER']}")
+    logger.info(
+      f"testSecret: Successfully validated new Neo4j password for tier {pending_dict['TIER']}"
+    )
   else:
     # Validate Kuzu API key
     if "KUZU_API_KEY" not in pending_dict:
