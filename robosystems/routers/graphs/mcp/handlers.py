@@ -67,7 +67,7 @@ async def validate_mcp_access(
 
 
 class MCPHandler:
-  """Handle MCP protocol operations using Kuzu API with proper lifecycle management."""
+  """Handle MCP protocol operations using Graph API with proper lifecycle management."""
 
   def __init__(self, repository, graph_id: str, user: Any):
     self.repository = repository
@@ -75,7 +75,7 @@ class MCPHandler:
     self.user = user
     self._closed = False
 
-    # Always use Kuzu API adapter
+    # Always use Graph API adapter
     # Get the correct API URL from the repository
     repository_url = None
     if hasattr(repository, "config") and hasattr(repository.config, "base_url"):
@@ -178,7 +178,7 @@ class MCPHandler:
     return tools
 
   async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute an MCP tool call using Kuzu API backend with comprehensive timeout protection."""
+    """Execute an MCP tool call using Graph API backend with comprehensive timeout protection."""
     self._ensure_not_closed()
     await self._ensure_initialized()
 
@@ -224,9 +224,9 @@ class MCPHandler:
       return {"type": "text", "text": f"Query Error: {str(e)}"}
 
     except KuzuAPIError as e:
-      # Handle Kuzu API errors with their enhanced messages
+      # Handle Graph API errors with their enhanced messages
       # These already include helpful context from the MCP adapter
-      logger.error(f"Kuzu API error in tool '{name}': {e}")
+      logger.error(f"Graph API error in tool '{name}': {e}")
       return {"type": "text", "text": str(e)}
 
     except Exception as e:
@@ -376,9 +376,9 @@ class MCPHandler:
       if self.kuzu_client:
         try:
           await self.kuzu_client.close()
-          logger.debug(f"Closed Kuzu client for graph {self.graph_id}")
+          logger.debug(f"Closed Graph client for graph {self.graph_id}")
         except Exception as e:
-          error_msg = f"Failed to close Kuzu client for graph {self.graph_id}: {e}"
+          error_msg = f"Failed to close Graph client for graph {self.graph_id}: {e}"
           logger.error(error_msg, exc_info=True)
           errors.append(error_msg)
 

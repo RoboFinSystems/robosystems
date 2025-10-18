@@ -1,7 +1,7 @@
 """
-Kuzu API Client Configuration.
+Graph API Client Configuration.
 
-Centralized configuration for Kuzu API clients.
+Centralized configuration for Graph API clients (works with all backends: Kuzu, Neo4j).
 """
 
 import os
@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class KuzuClientConfig:
-  """Configuration for Kuzu API clients."""
+class GraphClientConfig:
+  """Configuration for Graph API clients."""
 
   # Connection settings
   base_url: str = ""
@@ -34,7 +34,7 @@ class KuzuClientConfig:
   verify_ssl: bool = True
 
   @classmethod
-  def from_env(cls, prefix: str = "KUZU_CLIENT_") -> "KuzuClientConfig":
+  def from_env(cls, prefix: str = "KUZU_CLIENT_") -> "GraphClientConfig":
     """
     Create configuration from environment variables.
 
@@ -42,7 +42,7 @@ class KuzuClientConfig:
         prefix: Environment variable prefix
 
     Returns:
-        KuzuClientConfig instance
+        GraphClientConfig instance
     """
     config = cls()
 
@@ -77,7 +77,7 @@ class KuzuClientConfig:
 
     return config
 
-  def with_overrides(self, **kwargs: Any) -> "KuzuClientConfig":
+  def with_overrides(self, **kwargs: Any) -> "GraphClientConfig":
     """
     Create a new config with overridden values.
 
@@ -85,7 +85,7 @@ class KuzuClientConfig:
         **kwargs: Values to override
 
     Returns:
-        New KuzuClientConfig instance
+        New GraphClientConfig instance
     """
     config_dict: Dict[str, Any] = {
       "base_url": self.base_url,
@@ -102,4 +102,4 @@ class KuzuClientConfig:
       "verify_ssl": self.verify_ssl,
     }
     config_dict.update(kwargs)
-    return KuzuClientConfig(**config_dict)
+    return GraphClientConfig(**config_dict)

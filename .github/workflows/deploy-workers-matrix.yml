@@ -323,9 +323,6 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ inputs.valkey_url }}
       valkey_sg_id: ${{ inputs.valkey_sg_id }}
-      # Kuzu Configuration
-      kuzu_replica_alb_url: ${{ inputs.kuzu_replica_alb_url }}
-      shared_replica_alb_enabled: ${{ inputs.shared_replica_alb_enabled }}
       # Other Configuration
       refresh_ecs_service: ${{ inputs.refresh_ecs_service }}
     secrets:
@@ -360,9 +357,6 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ inputs.valkey_url }}
       valkey_sg_id: ${{ inputs.valkey_sg_id }}
-      # Kuzu Configuration
-      kuzu_replica_alb_url: ${{ inputs.kuzu_replica_alb_url }}
-      shared_replica_alb_enabled: ${{ inputs.shared_replica_alb_enabled }}
       # Other Configuration
       refresh_ecs_service: ${{ inputs.refresh_ecs_service }}
     secrets:

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ...celery import celery_app
 from ...models.iam import UserGraph, GraphUsageTracking
+from ...graph_api.client.factory import GraphClientFactory
 
 logger = logging.getLogger(__name__)
 
@@ -118,12 +119,11 @@ def graph_usage_collector(self):
 
 
 async def collect_graph_metrics(graph_id: str) -> Dict:
-  """Collect usage metrics for a specific graph using KuzuClientFactory."""
-  from robosystems.graph_api.client.factory import KuzuClientFactory
+  """Collect usage metrics for a specific graph using GraphClientFactory."""
 
   try:
     # Use factory to create client with proper authentication and routing
-    client = await KuzuClientFactory.create_client(
+    client = await GraphClientFactory.create_client(
       graph_id=graph_id,
       operation_type="read",  # Only reading metrics
     )

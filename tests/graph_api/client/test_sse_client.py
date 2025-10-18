@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch, AsyncMock
 import httpx
 
 from robosystems.graph_api.client.sse_client import (
-  KuzuIngestionSSEClient,
+  GraphIngestionSSEClient,
   monitor_ingestion_sync,
 )
 
@@ -45,7 +45,7 @@ class MockEventSource:
 @pytest.fixture
 def sse_client():
   """Create SSE client instance."""
-  return KuzuIngestionSSEClient(
+  return GraphIngestionSSEClient(
     base_url="http://localhost:8001",
     timeout=300,  # 5 minutes for testing
   )
@@ -58,18 +58,18 @@ def mock_httpx_client():
   return client
 
 
-class TestKuzuIngestionSSEClient:
-  """Tests for KuzuIngestionSSEClient."""
+class TestGraphIngestionSSEClient:
+  """Tests for GraphIngestionSSEClient."""
 
   def test_initialization(self):
     """Test SSE client initialization."""
-    client = KuzuIngestionSSEClient(base_url="http://localhost:8001/", timeout=7200)
+    client = GraphIngestionSSEClient(base_url="http://localhost:8001/", timeout=7200)
     assert client.base_url == "http://localhost:8001"  # Trailing slash removed
     assert client.timeout == 7200
 
   def test_initialization_defaults(self):
     """Test SSE client with default timeout."""
-    client = KuzuIngestionSSEClient(base_url="http://test.com")
+    client = GraphIngestionSSEClient(base_url="http://test.com")
     assert client.base_url == "http://test.com"
     assert client.timeout == 14400  # 4 hours default
 
@@ -374,7 +374,7 @@ class TestKuzuIngestionSSEClient:
   async def test_monitor_via_sse_timeout(self, sse_client):
     """Test timeout handling."""
     # Create a client with short timeout
-    short_timeout_client = KuzuIngestionSSEClient(
+    short_timeout_client = GraphIngestionSSEClient(
       base_url="http://localhost:8001",
       timeout=1,  # 1 second timeout
     )

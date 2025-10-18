@@ -1,7 +1,7 @@
 """
-Graph middleware for Kuzu database operations.
+Graph middleware for graph database operations.
 
-Simplified architecture for Kuzu-only graph database access.
+Simplified architecture for graph databases-only graph database access.
 """
 
 # Graph middleware components

@@ -3,21 +3,21 @@
 import pytest
 
 from robosystems.graph_api.client.exceptions import (
-  KuzuAPIError,
-  KuzuTransientError,
-  KuzuTimeoutError,
-  KuzuClientError,
-  KuzuSyntaxError,
-  KuzuServerError,
+  GraphAPIError,
+  GraphTransientError,
+  GraphTimeoutError,
+  GraphClientError,
+  GraphSyntaxError,
+  GraphServerError,
 )
 
 
-class TestKuzuAPIError:
-  """Test cases for KuzuAPIError base exception."""
+class TestGraphAPIError:
+  """Test cases for GraphAPIError base exception."""
 
   def test_basic_exception(self):
     """Test creating basic exception with message only."""
-    error = KuzuAPIError("Something went wrong")
+    error = GraphAPIError("Something went wrong")
 
     assert str(error) == "Something went wrong"
     assert error.status_code is None
@@ -25,7 +25,7 @@ class TestKuzuAPIError:
 
   def test_exception_with_status_code(self):
     """Test creating exception with status code."""
-    error = KuzuAPIError("Bad request", status_code=400)
+    error = GraphAPIError("Bad request", status_code=400)
 
     assert str(error) == "Bad request"
     assert error.status_code == 400
@@ -34,7 +34,7 @@ class TestKuzuAPIError:
   def test_exception_with_response_data(self):
     """Test creating exception with response data."""
     response_data = {"error": "Invalid query", "details": {"line": 1, "column": 10}}
-    error = KuzuAPIError("Query failed", status_code=422, response_data=response_data)
+    error = GraphAPIError("Query failed", status_code=422, response_data=response_data)
 
     assert str(error) == "Query failed"
     assert error.status_code == 422
@@ -43,28 +43,28 @@ class TestKuzuAPIError:
     assert error.response_data["error"] == "Invalid query"
 
   def test_exception_inheritance(self):
-    """Test that KuzuAPIError inherits from Exception."""
-    error = KuzuAPIError("Test error")
+    """Test that GraphAPIError inherits from Exception."""
+    error = GraphAPIError("Test error")
 
     assert isinstance(error, Exception)
-    assert isinstance(error, KuzuAPIError)
+    assert isinstance(error, GraphAPIError)
 
 
-class TestKuzuTransientError:
-  """Test cases for KuzuTransientError."""
+class TestGraphTransientError:
+  """Test cases for GraphTransientError."""
 
   def test_transient_error_inheritance(self):
     """Test inheritance chain for transient errors."""
-    error = KuzuTransientError("Network issue", status_code=503)
+    error = GraphTransientError("Network issue", status_code=503)
 
-    assert isinstance(error, KuzuAPIError)
-    assert isinstance(error, KuzuTransientError)
-    assert not isinstance(error, KuzuClientError)
-    assert not isinstance(error, KuzuServerError)
+    assert isinstance(error, GraphAPIError)
+    assert isinstance(error, GraphTransientError)
+    assert not isinstance(error, GraphClientError)
+    assert not isinstance(error, GraphServerError)
 
   def test_transient_error_with_details(self):
     """Test transient error with full details."""
-    error = KuzuTransientError(
+    error = GraphTransientError(
       "Service temporarily unavailable",
       status_code=503,
       response_data={"retry_after": 30},
@@ -76,21 +76,21 @@ class TestKuzuTransientError:
     assert error.response_data["retry_after"] == 30
 
 
-class TestKuzuTimeoutError:
-  """Test cases for KuzuTimeoutError."""
+class TestGraphTimeoutError:
+  """Test cases for GraphTimeoutError."""
 
   def test_timeout_error_inheritance(self):
     """Test that timeout error is a transient error."""
-    error = KuzuTimeoutError("Request timed out after 30s")
+    error = GraphTimeoutError("Request timed out after 30s")
 
-    assert isinstance(error, KuzuAPIError)
-    assert isinstance(error, KuzuTransientError)
-    assert isinstance(error, KuzuTimeoutError)
-    assert not isinstance(error, KuzuClientError)
+    assert isinstance(error, GraphAPIError)
+    assert isinstance(error, GraphTransientError)
+    assert isinstance(error, GraphTimeoutError)
+    assert not isinstance(error, GraphClientError)
 
   def test_timeout_error_details(self):
     """Test timeout error with details."""
-    error = KuzuTimeoutError(
+    error = GraphTimeoutError(
       "Query execution timeout",
       status_code=408,
       response_data={"timeout": 30, "query_id": "abc123"},
@@ -102,30 +102,30 @@ class TestKuzuTimeoutError:
     assert error.response_data["query_id"] == "abc123"
 
 
-class TestKuzuClientError:
-  """Test cases for KuzuClientError."""
+class TestGraphClientError:
+  """Test cases for GraphClientError."""
 
   def test_client_error_inheritance(self):
     """Test inheritance for client errors."""
-    error = KuzuClientError("Bad request", status_code=400)
+    error = GraphClientError("Bad request", status_code=400)
 
-    assert isinstance(error, KuzuAPIError)
-    assert isinstance(error, KuzuClientError)
-    assert not isinstance(error, KuzuTransientError)
-    assert not isinstance(error, KuzuServerError)
+    assert isinstance(error, GraphAPIError)
+    assert isinstance(error, GraphClientError)
+    assert not isinstance(error, GraphTransientError)
+    assert not isinstance(error, GraphServerError)
 
   def test_client_error_variants(self):
     """Test different client error scenarios."""
     # 400 Bad Request
-    bad_request = KuzuClientError("Invalid parameters", status_code=400)
+    bad_request = GraphClientError("Invalid parameters", status_code=400)
     assert bad_request.status_code == 400
 
     # 404 Not Found
-    not_found = KuzuClientError("Database not found", status_code=404)
+    not_found = GraphClientError("Database not found", status_code=404)
     assert not_found.status_code == 404
 
     # 422 Unprocessable Entity
-    unprocessable = KuzuClientError(
+    unprocessable = GraphClientError(
       "Validation failed",
       status_code=422,
       response_data={"errors": ["field1 required"]},
@@ -135,21 +135,21 @@ class TestKuzuClientError:
     assert "errors" in unprocessable.response_data
 
 
-class TestKuzuSyntaxError:
-  """Test cases for KuzuSyntaxError."""
+class TestGraphSyntaxError:
+  """Test cases for GraphSyntaxError."""
 
   def test_syntax_error_inheritance(self):
     """Test that syntax error is a client error."""
-    error = KuzuSyntaxError("Invalid Cypher syntax")
+    error = GraphSyntaxError("Invalid Cypher syntax")
 
-    assert isinstance(error, KuzuAPIError)
-    assert isinstance(error, KuzuClientError)
-    assert isinstance(error, KuzuSyntaxError)
-    assert not isinstance(error, KuzuTransientError)
+    assert isinstance(error, GraphAPIError)
+    assert isinstance(error, GraphClientError)
+    assert isinstance(error, GraphSyntaxError)
+    assert not isinstance(error, GraphTransientError)
 
   def test_syntax_error_with_details(self):
     """Test syntax error with parsing details."""
-    error = KuzuSyntaxError(
+    error = GraphSyntaxError(
       "Parser exception: unexpected token",
       status_code=400,
       response_data={
@@ -168,7 +168,7 @@ class TestKuzuSyntaxError:
 
   def test_binder_exception(self):
     """Test syntax error for binder exceptions."""
-    error = KuzuSyntaxError(
+    error = GraphSyntaxError(
       "Binder exception: Table 'users' does not exist",
       status_code=400,
       response_data={"type": "BinderException", "missing_table": "users"},
@@ -179,21 +179,21 @@ class TestKuzuSyntaxError:
     assert error.response_data["missing_table"] == "users"
 
 
-class TestKuzuServerError:
-  """Test cases for KuzuServerError."""
+class TestGraphServerError:
+  """Test cases for GraphServerError."""
 
   def test_server_error_inheritance(self):
     """Test inheritance for server errors."""
-    error = KuzuServerError("Internal server error", status_code=500)
+    error = GraphServerError("Internal server error", status_code=500)
 
-    assert isinstance(error, KuzuAPIError)
-    assert isinstance(error, KuzuServerError)
-    assert not isinstance(error, KuzuClientError)
-    assert not isinstance(error, KuzuTransientError)
+    assert isinstance(error, GraphAPIError)
+    assert isinstance(error, GraphServerError)
+    assert not isinstance(error, GraphClientError)
+    assert not isinstance(error, GraphTransientError)
 
   def test_server_error_with_details(self):
     """Test server error with details."""
-    error = KuzuServerError(
+    error = GraphServerError(
       "Database connection failed",
       status_code=500,
       response_data={"error_id": "err_12345", "timestamp": "2024-01-01T10:00:00Z"},
@@ -210,54 +210,54 @@ class TestExceptionHierarchy:
 
   def test_can_distinguish_error_types(self):
     """Test that we can distinguish between error types for retry logic."""
-    transient = KuzuTransientError("Temporary issue")
-    timeout = KuzuTimeoutError("Timeout")
-    client = KuzuClientError("Bad request")
-    syntax = KuzuSyntaxError("Invalid query")
-    server = KuzuServerError("Server error")
+    transient = GraphTransientError("Temporary issue")
+    timeout = GraphTimeoutError("Timeout")
+    client = GraphClientError("Bad request")
+    syntax = GraphSyntaxError("Invalid query")
+    server = GraphServerError("Server error")
 
     # Transient errors (can retry)
-    assert isinstance(transient, KuzuTransientError)
-    assert isinstance(timeout, KuzuTransientError)
+    assert isinstance(transient, GraphTransientError)
+    assert isinstance(timeout, GraphTransientError)
 
     # Client errors (should not retry)
-    assert isinstance(client, KuzuClientError)
-    assert isinstance(syntax, KuzuClientError)
+    assert isinstance(client, GraphClientError)
+    assert isinstance(syntax, GraphClientError)
 
     # Server errors (might retry)
-    assert isinstance(server, KuzuServerError)
+    assert isinstance(server, GraphServerError)
 
     # Syntax errors should never be retried
-    assert isinstance(syntax, KuzuSyntaxError)
-    assert not isinstance(syntax, KuzuTransientError)
+    assert isinstance(syntax, GraphSyntaxError)
+    assert not isinstance(syntax, GraphTransientError)
 
   def test_raising_and_catching(self):
     """Test raising and catching different exception types."""
-    with pytest.raises(KuzuAPIError):
-      raise KuzuTimeoutError("Timeout occurred")
+    with pytest.raises(GraphAPIError):
+      raise GraphTimeoutError("Timeout occurred")
 
-    with pytest.raises(KuzuTransientError):
-      raise KuzuTimeoutError("Timeout occurred")
+    with pytest.raises(GraphTransientError):
+      raise GraphTimeoutError("Timeout occurred")
 
-    with pytest.raises(KuzuClientError):
-      raise KuzuSyntaxError("Invalid syntax")
+    with pytest.raises(GraphClientError):
+      raise GraphSyntaxError("Invalid syntax")
 
     # Should not catch as transient
-    with pytest.raises(KuzuSyntaxError):
+    with pytest.raises(GraphSyntaxError):
       try:
-        raise KuzuSyntaxError("Invalid syntax")
-      except KuzuTransientError:
+        raise GraphSyntaxError("Invalid syntax")
+      except GraphTransientError:
         pass  # Won't catch
 
   def test_exception_messages(self):
     """Test that exception messages are preserved."""
     test_cases = [
-      (KuzuAPIError, "Base error"),
-      (KuzuTransientError, "Transient error"),
-      (KuzuTimeoutError, "Timeout error"),
-      (KuzuClientError, "Client error"),
-      (KuzuSyntaxError, "Syntax error"),
-      (KuzuServerError, "Server error"),
+      (GraphAPIError, "Base error"),
+      (GraphTransientError, "Transient error"),
+      (GraphTimeoutError, "Timeout error"),
+      (GraphClientError, "Client error"),
+      (GraphSyntaxError, "Syntax error"),
+      (GraphServerError, "Server error"),
     ]
 
     for error_class, message in test_cases:

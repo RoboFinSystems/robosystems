@@ -1,7 +1,7 @@
 """
-Kuzu Volume Monitor and Auto-Expansion Lambda Function
+Graph Volume Monitor and Auto-Expansion Lambda Function
 
-This Lambda handles proactive volume monitoring and expansion for Graph instances:
+This Lambda handles proactive volume monitoring and expansion for Graph instances (Kuzu and Neo4j):
 - Monitors disk usage across all instances
 - Automatically expands volumes when thresholds are exceeded
 - Grows filesystems after EBS expansion

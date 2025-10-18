@@ -1,7 +1,7 @@
 """
 Schema-Driven Kuzu Database Ingestion Operations
 
-This module provides core operations for ingesting processed SEC data into Kuzu databases.
+This module provides core operations for ingesting processed SEC data into graph databases.
 All mapping logic is now schema-driven - no hardcoded arrays.
 These are reusable pipeline operations, not one-off scripts.
 """
@@ -69,11 +69,11 @@ def ingest_from_s3(
   schema_config: Optional[dict] = None,
 ) -> bool:
   """
-  Ingest processed parquet files from S3 into Kuzu database.
+  Ingest processed parquet files from S3 into graph database.
 
   Args:
       bucket: S3 bucket containing processed files
-      db_name: Name of the target Kuzu database
+      db_name: Name of the target graph database
       s3_prefix: S3 prefix for processed files
       schema_config: Schema configuration dict (defaults to base + roboledger)
 
@@ -147,13 +147,13 @@ def ingest_from_local_files(
   file_paths: List[str], db_name: str, schema_config: Optional[dict] = None
 ) -> bool:
   """
-  Ingest parquet files from local filesystem into Kuzu database.
+  Ingest parquet files from local filesystem into graph database.
 
   Uses schema-driven ingestion logic - no hardcoded mappings.
 
   Args:
       file_paths: List of local parquet file paths
-      db_name: Name of the target Kuzu database
+      db_name: Name of the target graph database
       schema_config: Schema configuration dict (defaults to base + roboledger)
 
   Returns:
@@ -185,7 +185,7 @@ def ingest_from_local_files(
     else:
       logger.info("Schema already exists, skipping creation")
 
-    logger.info(f"Opening Kuzu database at: {db_path}")
+    logger.info(f"Opening graph database at: {db_path}")
     engine = Engine(str(db_path))
 
     # Get cached schema adapter for file pattern matching

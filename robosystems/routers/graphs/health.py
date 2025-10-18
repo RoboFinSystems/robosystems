@@ -17,7 +17,7 @@ from robosystems.middleware.rate_limits import (
 from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
 from robosystems.models.api.graph import DatabaseHealthResponse
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.graph_api.client import KuzuClient
+from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
@@ -32,9 +32,9 @@ circuit_breaker = CircuitBreakerManager()
 timeout_coordinator = TimeoutCoordinator()
 
 
-async def _get_kuzu_client(graph_id: str) -> KuzuClient:
-  """Get Kuzu client for the specified graph using factory for endpoint discovery."""
-  from robosystems.graph_api.client.factory import KuzuClientFactory
+async def _get_graph_client(graph_id: str) -> GraphClient:
+  """Get Graph client for the specified graph using factory for endpoint discovery."""
+  from robosystems.graph_api.client.factory import GraphClientFactory
   from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 
   # Determine operation type based on graph
@@ -47,7 +47,7 @@ async def _get_kuzu_client(graph_id: str) -> KuzuClient:
   # Factory automatically handles routing:
   # - Shared repos: Routes to shared_master/shared_replica
   # - User graphs: Looks up tier from database and routes appropriately
-  client = await KuzuClientFactory.create_client(
+  client = await GraphClientFactory.create_client(
     graph_id=graph_id, operation_type=operation_type
   )
 
@@ -123,8 +123,8 @@ async def get_database_health(
       graph_id, current_user, "read", session
     )
 
-    # Get Kuzu client and health information
-    kuzu_client = await _get_kuzu_client(graph_id)
+    # Get Graph client and health information
+    graph_client = await _get_graph_client(graph_id)
 
     try:
       # Calculate timeout for health check
@@ -132,14 +132,14 @@ async def get_database_health(
         "database_health", {"complexity": "low"}
       )
 
-      # Get database metrics and general health from Kuzu API
+      # Get database metrics and general health from Graph API
       db_metrics = await asyncio.wait_for(
-        kuzu_client.get_database_metrics(graph_id=graph_id),
+        graph_client.get_database_metrics(graph_id=graph_id),
         timeout=health_timeout,
       )
 
       # Also get cluster health for uptime
-      cluster_health = await kuzu_client.health_check()
+      cluster_health = await graph_client.health_check()
 
       # Record successful operation
       circuit_breaker.record_success(graph_id, "database_health")
@@ -178,7 +178,7 @@ async def get_database_health(
         detail="Failed to retrieve health information",
       )
     finally:
-      await kuzu_client.close()
+      await graph_client.close()
 
   except HTTPException:
     raise

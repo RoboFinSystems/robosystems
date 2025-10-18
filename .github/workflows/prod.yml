@@ -1,5 +1,10 @@
 name: Deploy Production
 
+permissions:
+  contents: read
+  deployments: write
+  id-token: write
+
 concurrency:
   group: robosystems-deploy-prod
   cancel-in-progress: false
@@ -461,7 +466,6 @@ jobs:
       # Kuzu Enable/Disable Configuration
       enterprise_enabled: ${{ vars.ENTERPRISE_ENABLED_PROD }}
       premium_enabled: ${{ vars.PREMIUM_ENABLED_PROD }}
-      shared_replica_enabled: ${{ vars.SHARED_REPLICA_ENABLED_PROD }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -536,9 +540,6 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
-      # Kuzu Configuration
-      kuzu_replica_alb_url: ${{ needs.deploy-graph.outputs.replica_alb_endpoint || '' }}
-      shared_replica_alb_enabled: ${{ needs.deploy-graph.outputs.replica_alb_endpoint && 'true' || 'false' }}
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       refresh_ecs_service: ${{ vars.API_ASG_REFRESH_PROD || 'false' }}
@@ -585,9 +586,6 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
-      # Kuzu Configuration
-      kuzu_replica_alb_url: ${{ needs.deploy-graph.outputs.replica_alb_endpoint || '' }}
-      shared_replica_alb_enabled: ${{ needs.deploy-graph.outputs.replica_alb_endpoint && 'true' || 'false' }}
       # Other Configuration
       refresh_ecs_service: ${{ vars.WORKER_ASG_REFRESH_PROD || 'false' }}
       # Worker Enable/Disable Configuration

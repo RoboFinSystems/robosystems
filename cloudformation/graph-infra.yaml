@@ -33,14 +33,14 @@ Parameters:
     Type: String
     Description: S3 bucket containing Lambda deployment packages
     ConstraintDescription: Must be a valid S3 bucket name
-  KuzuApiRotationCodeKey:
+  GraphApiRotationCodeKey:
     Type: String
-    Description: S3 key for Kuzu API Rotation Lambda deployment package
+    Description: S3 key for Graph API Rotation Lambda deployment package
     ConstraintDescription: Must be a valid S3 object key
   InstanceMonitorCodeKey:
     Type: String
     Description: S3 key for Instance Monitor Lambda deployment package
-    Default: lambdas/kuzu_instance_monitor.zip
+    Default: lambdas/graph_instance_monitor.zip
     ConstraintDescription: Must be a valid S3 object key
 
   # Monitoring & Alerting
@@ -86,6 +86,8 @@ Resources:
           AttributeType: N
         - AttributeName: cluster_tier
           AttributeType: S
+        - AttributeName: backend_type
+          AttributeType: S
       KeySchema:
         - AttributeName: instance_id
           KeyType: HASH
@@ -101,6 +103,14 @@ Resources:
         - IndexName: tier-status-index
           KeySchema:
             - AttributeName: cluster_tier
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: backend-type-status-index
+          KeySchema:
+            - AttributeName: backend_type
               KeyType: HASH
             - AttributeName: status
               KeyType: RANGE
@@ -213,14 +223,14 @@ Resources:
           Value: CloudFormation
 
   # ===== Authentication Infrastructure =====
-  # Single secret containing all three API keys
-  KuzuApiSecret:
+  # Graph API authentication secret (used by all backends on port 8001)
+  GraphApiSecret:
     Type: AWS::SecretsManager::Secret
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      Name: !Sub robosystems/${Environment}/kuzu
-      Description: !Sub Kuzu API authentication key for ${Environment}
+      Name: !Sub robosystems/${Environment}/graph-api
+      Description: !Sub Graph API authentication key for ${Environment} (used by all backends)
       SecretString: !Sub
         - |
           {
@@ -274,9 +284,9 @@ Resources:
       Code:
         ZipFile: |
           """
-          Kuzu API Key Generator Lambda Function
+          Graph API Key Generator Lambda Function
 
-          CloudFormation custom resource that generates initial API keys for Kuzu services.
+          CloudFormation custom resource that generates initial API keys for Graph services.
           This function is called during stack creation to generate the initial set of API keys.
           """
 
@@ -329,7 +339,7 @@ Resources:
 
               # Generate a single high-entropy API key
               response_data = {
-                "ApiKey": generate_api_key(f"kuzu_{environment}"),
+                "ApiKey": generate_api_key(f"graph_{environment}"),
                 "GeneratedAt": datetime.now(timezone.utc).isoformat(),
               }
 
@@ -388,7 +398,7 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-secret-rotation"
-      Description: "Kuzu API Rotation Lambda - auto-updates via S3 key hash"
+      Description: "Graph API Rotation Lambda - auto-updates via S3 key hash"
       Runtime: python3.12
       Handler: index.lambda_handler
       Role: !GetAtt SecretRotationRole.Arn
@@ -399,7 +409,7 @@ Resources:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
       Code:
         S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref KuzuApiRotationCodeKey
+        S3Key: !Ref GraphApiRotationCodeKey
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-api-secret-rotation"
@@ -440,7 +450,7 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:PutSecretValue
                   - secretsmanager:UpdateSecretVersionStage
-                Resource: !Ref KuzuApiSecret
+                Resource: !Ref GraphApiSecret
               # KMS permissions for secret rotation
               - Effect: Allow
                 Action:
@@ -473,7 +483,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      SecretId: !Ref KuzuApiSecret
+      SecretId: !Ref GraphApiSecret
       RotationLambdaARN: !GetAtt SecretRotationLambda.Arn
       RotationRules:
         ScheduleExpression: !Sub "rate(${RotationScheduleDays} days)"
@@ -863,8 +873,8 @@ Outputs:
 
   # Authentication
   SecretArn:
-    Description: ARN of the Kuzu API authentication secret
-    Value: !Ref KuzuApiSecret
+    Description: ARN of the Graph API authentication secret
+    Value: !Ref GraphApiSecret
     Export:
       Name: !Sub "${AWS::StackName}-SecretArn"
 

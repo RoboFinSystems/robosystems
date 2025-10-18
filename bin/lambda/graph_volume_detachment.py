@@ -1,9 +1,10 @@
 """
-Kuzu Volume Detachment Lambda Function
+Graph Volume Detachment Lambda Function
 
 Handles the safe detachment of EBS volumes when EC2 instances are terminated.
 This function is triggered by Auto Scaling lifecycle hooks to ensure volumes
 are properly unmounted and detached before instance termination.
+Supports both Kuzu and Neo4j backends.
 """
 
 import json

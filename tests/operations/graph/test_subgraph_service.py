@@ -73,7 +73,7 @@ class TestSubgraphService:
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -113,7 +113,7 @@ class TestSubgraphService:
     mock_kuzu_client.list_databases.return_value = ["kg5f2e5e0da65d45d69645_analysis"]
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -134,7 +134,7 @@ class TestSubgraphService:
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -203,7 +203,7 @@ class TestSubgraphService:
     mock_kuzu_client.create_database.side_effect = Exception("Database creation failed")
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -224,7 +224,7 @@ class TestSubgraphService:
     mock_kuzu_client.execute.return_value = [{"node_count": 0}]  # No data
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -247,7 +247,7 @@ class TestSubgraphService:
     mock_kuzu_client.list_databases.return_value = []  # Database doesn't exist
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -267,7 +267,7 @@ class TestSubgraphService:
     mock_kuzu_client.execute.return_value = [{"node_count": 100}]  # Has data
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -290,7 +290,7 @@ class TestSubgraphService:
     mock_kuzu_client.execute.return_value = [{"node_count": 100}]  # Has data
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -312,7 +312,7 @@ class TestSubgraphService:
     mock_kuzu_client.backup.return_value = {"location": "s3://backup/location"}
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -346,7 +346,7 @@ class TestSubgraphService:
     ]
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -377,7 +377,7 @@ class TestSubgraphService:
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.side_effect = Exception("Connection failed")
 
@@ -402,7 +402,7 @@ class TestSubgraphService:
     }
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -424,7 +424,7 @@ class TestSubgraphService:
     mock_kuzu_client.list_databases.return_value = []  # Subgraph doesn't exist
 
     with patch(
-      "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
@@ -564,7 +564,7 @@ class TestSubgraphServiceIntegration:
       mock_find.return_value = mock_location
 
       with patch(
-        "robosystems.operations.graph.subgraph_service.get_kuzu_client_for_instance"
+        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
       ) as mock_get_client:
         mock_get_client.return_value = mock_client
 

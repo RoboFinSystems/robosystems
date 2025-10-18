@@ -496,7 +496,7 @@ Resources:
               export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
               export ECR_IMAGE_TAG="${ECRImageTag}"
               # Set CloudWatch namespace with environment suffix
-              export CloudWatchNamespace="RoboSystemsKuzu/${EnvironmentCapitalized}"
+              export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Kuzu"
 
               # Critical missing variables
               export AWS_REGION="${AWS::Region}"
@@ -675,15 +675,8 @@ Resources:
       Threshold: 85
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
-        - Name: InstanceId
-          Value: "*"
-        - Name: Environment
-          Value: !Ref Environment
-        - Name: NodeType
-          Value: !If
-            - IsSharedWriter
-            - "shared_master"
-            - "writer"
+        - Name: AutoScalingGroupName
+          Value: !Ref WriterAutoScalingGroup
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref KuzuAlertTopic

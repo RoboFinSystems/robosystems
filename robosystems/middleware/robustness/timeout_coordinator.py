@@ -56,7 +56,7 @@ class TimeoutCoordinator:
         endpoint_timeout=30.0,  # 30 seconds total
         queue_timeout=25.0,  # 25 seconds for queue processing
         tool_timeout=20.0,  # 20 seconds for tool execution
-        instance_timeout=15.0,  # 15 seconds for Kuzu instance
+        instance_timeout=15.0,  # 15 seconds for graph database instance
       ),
       "default": TimeoutConfiguration(
         endpoint_timeout=30.0,  # 30s API limit
@@ -96,7 +96,7 @@ class TimeoutCoordinator:
     return config.tool_timeout
 
   def get_instance_timeout(self, tool_name: str) -> float:
-    """Get Kuzu instance timeout."""
+    """Get graph database instance timeout."""
     config = self.get_timeout_config(tool_name)
     return config.instance_timeout
 

@@ -1,14 +1,14 @@
 """
-Kuzu API Client Exceptions.
+Graph API Client Exceptions.
 
-Defines exception hierarchy for Kuzu API operations.
+Defines exception hierarchy for Graph API operations (Kuzu, Neo4j).
 """
 
 from typing import Optional, Dict, Any
 
 
-class KuzuAPIError(Exception):
-  """Base exception for all Kuzu API errors."""
+class GraphAPIError(Exception):
+  """Base exception for all Graph API errors."""
 
   def __init__(
     self,
@@ -21,7 +21,7 @@ class KuzuAPIError(Exception):
     self.response_data = response_data
 
 
-class KuzuTransientError(KuzuAPIError):
+class GraphTransientError(GraphAPIError):
   """
   Transient errors that can be retried.
 
@@ -31,13 +31,13 @@ class KuzuTransientError(KuzuAPIError):
   pass
 
 
-class KuzuTimeoutError(KuzuTransientError):
+class GraphTimeoutError(GraphTransientError):
   """Request timeout errors."""
 
   pass
 
 
-class KuzuClientError(KuzuAPIError):
+class GraphClientError(GraphAPIError):
   """
   Client errors that should not be retried.
 
@@ -47,7 +47,7 @@ class KuzuClientError(KuzuAPIError):
   pass
 
 
-class KuzuSyntaxError(KuzuClientError):
+class GraphSyntaxError(GraphClientError):
   """
   Query syntax/schema errors that should never be retried.
 
@@ -58,7 +58,7 @@ class KuzuSyntaxError(KuzuClientError):
   pass
 
 
-class KuzuServerError(KuzuAPIError):
+class GraphServerError(GraphAPIError):
   """
   Server errors that might be retriable.
 

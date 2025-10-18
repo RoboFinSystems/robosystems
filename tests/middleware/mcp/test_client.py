@@ -8,8 +8,8 @@ from robosystems.middleware.mcp import KuzuMCPClient, KuzuMCPTools, KuzuAPIError
 
 @pytest.fixture
 def mock_async_kuzu_client():
-  """Mock the KuzuClient."""
-  with patch("robosystems.middleware.mcp.client.KuzuClient") as mock:
+  """Mock the GraphClient."""
+  with patch("robosystems.middleware.mcp.client.GraphClient") as mock:
     client_instance = AsyncMock()
     mock.return_value = client_instance
     yield client_instance
@@ -31,7 +31,7 @@ class TestKuzuMCPClient:
   def test_init_with_api_url(self):
     """Test initialization with API URL."""
     with (
-      patch("robosystems.middleware.mcp.client.KuzuClient"),
+      patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
     ):
       client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
@@ -43,7 +43,7 @@ class TestKuzuMCPClient:
   def test_init_custom_timeout(self):
     """Test initialization with custom timeout."""
     with (
-      patch("robosystems.middleware.mcp.client.KuzuClient"),
+      patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
     ):
       client = KuzuMCPClient(
@@ -163,7 +163,7 @@ class TestKuzuMCPClient:
       [{"count": 50}],
     ]
 
-    # Set up the KuzuClient mock to return different responses for each call
+    # Set up the GraphClient mock to return different responses for each call
     mock_async_kuzu_client.query.side_effect = [
       {"data": response, "execution_time_ms": 10} for response in query_responses
     ]
@@ -455,10 +455,10 @@ class TestKuzuMCPFactory:
   async def test_create_kuzu_mcp_client_default(self):
     """Test factory with default parameters."""
     with (
-      patch("robosystems.middleware.mcp.client.KuzuClient"),
+      patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
       patch(
-        "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
+        "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
       ) as mock_factory,
       patch(
         "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository",
@@ -488,10 +488,10 @@ class TestKuzuMCPFactory:
   async def test_create_kuzu_mcp_client_prod(self):
     """Test factory with production environment."""
     with (
-      patch("robosystems.middleware.mcp.client.KuzuClient"),
+      patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
       patch(
-        "robosystems.graph_api.client.factory.KuzuClientFactory.create_client"
+        "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
       ) as mock_factory,
       patch(
         "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository",
@@ -522,7 +522,7 @@ class TestKuzuMCPFactory:
   async def test_create_kuzu_mcp_client_custom_url(self):
     """Test factory with custom URL override."""
     with (
-      patch("robosystems.middleware.mcp.client.KuzuClient"),
+      patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
     ):
       from robosystems.middleware.mcp import create_kuzu_mcp_client
@@ -665,7 +665,7 @@ class TestKuzuMCPReadOnlyValidation:
 
   @pytest.fixture
   def mock_async_kuzu_client(self):
-    """Create a mock KuzuClient."""
+    """Create a mock GraphClient."""
     mock = AsyncMock()
     return mock
 
@@ -750,7 +750,7 @@ class TestKuzuMCPAutoLimit:
 
   @pytest.fixture
   def mock_async_kuzu_client(self):
-    """Create a mock KuzuClient."""
+    """Create a mock GraphClient."""
     mock = AsyncMock()
     return mock
 

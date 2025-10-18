@@ -2,7 +2,7 @@
 Repository Wrapper
 
 This module provides a unified interface for both direct file repositories (synchronous)
-and API-based repositories (asynchronous via KuzuClient), automatically detecting
+and API-based repositories (asynchronous via GraphClient), automatically detecting
 the repository type and conditionally awaiting methods as needed.
 
 Key features:
@@ -19,7 +19,7 @@ from typing import List, Dict, Any, Optional, Union
 
 from .base import GraphOperation
 from .engine import Repository
-from robosystems.graph_api.client import KuzuClient
+from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 
 
@@ -32,16 +32,16 @@ class UniversalRepository:
   method calls accordingly.
   """
 
-  def __init__(self, repository: Union[Repository, KuzuClient]):
+  def __init__(self, repository: Union[Repository, GraphClient]):
     """
     Initialize the universal repository wrapper.
 
     Args:
-        repository: Either a Repository (sync) or KuzuClient (async)
+        repository: Either a Repository (sync) or GraphClient (async)
     """
     self._repository = repository
     # Check if it's async
-    self._is_async = isinstance(repository, KuzuClient)
+    self._is_async = isinstance(repository, GraphClient)
 
     # Cache method inspection results for performance
     self._method_cache = {}
@@ -318,13 +318,13 @@ class UniversalRepository:
     return await self._call_method("get_schema")
 
   # Direct access to underlying repository for advanced use cases
-  def get_underlying_repository(self) -> Union[Repository, KuzuClient]:
+  def get_underlying_repository(self) -> Union[Repository, GraphClient]:
     """Get the underlying repository instance."""
     return self._repository
 
   def __repr__(self) -> str:
     """String representation of the universal repository."""
-    repo_type = "KuzuClient" if self._is_async else "Repository"
+    repo_type = "GraphClient" if self._is_async else "Repository"
     return f"UniversalRepository({repo_type}({self.database_name}))"
 
 
@@ -382,16 +382,16 @@ async def create_universal_repository_with_auth(
 
 # Utility functions for repository detection
 def is_api_repository(
-  repository: Union[Repository, KuzuClient, UniversalRepository],
+  repository: Union[Repository, GraphClient, UniversalRepository],
 ) -> bool:
   """Check if a repository is an API repository."""
   if isinstance(repository, UniversalRepository):
     return repository.is_async
-  return isinstance(repository, KuzuClient)
+  return isinstance(repository, GraphClient)
 
 
 def is_direct_repository(
-  repository: Union[Repository, KuzuClient, UniversalRepository],
+  repository: Union[Repository, GraphClient, UniversalRepository],
 ) -> bool:
   """Check if a repository is a direct file repository."""
   if isinstance(repository, UniversalRepository):
@@ -400,12 +400,12 @@ def is_direct_repository(
 
 
 def get_repository_type(
-  repository: Union[Repository, KuzuClient, UniversalRepository],
+  repository: Union[Repository, GraphClient, UniversalRepository],
 ) -> str:
   """Get the type of a repository."""
   if isinstance(repository, UniversalRepository):
     return repository.repository_type
-  elif isinstance(repository, KuzuClient):
+  elif isinstance(repository, GraphClient):
     return "api"
   elif isinstance(repository, Repository):
     return "direct"

@@ -1,5 +1,5 @@
 """
-Kuzu MCP Tools - MCP tools implementation using Kuzu API.
+Kuzu MCP Tools - MCP tools implementation using Graph API.
 
 This module contains the KuzuMCPTools class which provides all the MCP tool
 functionality for interacting with Kuzu graph databases.
@@ -29,9 +29,9 @@ from . import (
 
 class KuzuMCPTools:
   """
-  MCP tools implementation using Kuzu API.
+  MCP tools implementation using Graph API.
 
-  Provides the same interface as graph database MCP tools but uses Kuzu API backend.
+  Provides the same interface as graph database MCP tools but uses Graph API backend.
   """
 
   def __init__(self, kuzu_client):
@@ -76,7 +76,7 @@ class KuzuMCPTools:
 
   def get_tool_definitions_as_dict(self) -> List[Dict[str, Any]]:
     """
-    Get MCP tool definitions for Kuzu, using compatible naming.
+    Get MCP tool definitions for graph databases, using compatible naming.
 
     Returns:
         List of tool definition dictionaries
@@ -211,7 +211,7 @@ class KuzuMCPTools:
       error_msg = str(e)
       error_context = self._build_error_context(name, arguments, e)
       logger.error(
-        f"Kuzu API error in tool '{name}': {error_msg}",
+        f"Graph API error in tool '{name}': {error_msg}",
         extra={"error_context": error_context},
       )
 
@@ -332,7 +332,7 @@ class KuzuMCPTools:
         enhanced_msg += (
           "\n- Property access: n.property_name (use keys(n) to discover properties)"
         )
-        enhanced_msg += "\n- Ensure proper Cypher syntax for Kuzu database"
+        enhanced_msg += "\n- Ensure proper Cypher syntax for graph database"
 
       elif "property" in error_msg.lower() and "not found" in error_msg.lower():
         enhanced_msg += "\n\n🔧 Property Help:"
@@ -342,7 +342,7 @@ class KuzuMCPTools:
 
       elif "connection" in error_msg.lower():
         enhanced_msg += "\n\n🔧 Connection Help:"
-        enhanced_msg += "\n- Check if Kuzu API service is running"
+        enhanced_msg += "\n- Check if Graph API service is running"
         enhanced_msg += "\n- Verify network connectivity and firewall settings"
         enhanced_msg += "\n- Ensure correct API endpoint configuration"
 

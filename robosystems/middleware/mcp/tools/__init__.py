@@ -1,5 +1,5 @@
 """
-MCP Tools - Individual tool implementations for Kuzu graph database.
+MCP Tools - Individual tool implementations for graph databases graph database.
 
 This module contains individual tool implementations that can be composed
 together to create the full MCP tools interface.
