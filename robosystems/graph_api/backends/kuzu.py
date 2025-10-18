@@ -4,7 +4,7 @@ import shutil
 
 from robosystems.middleware.graph.engine import Engine
 from robosystems.logger import logger
-from .base import GraphBackend, DatabaseInfo, ClusterTopology
+from .base import GraphBackend, DatabaseInfo, ClusterTopology, S3IngestionError
 
 
 class KuzuBackend(GraphBackend):
@@ -139,7 +139,9 @@ class KuzuBackend(GraphBackend):
           logger.debug("Successfully loaded httpfs on retry")
         except Exception as retry_error:
           logger.error(f"Failed to load httpfs after retry: {retry_error}")
-          raise Exception(f"httpfs extension required for S3 access: {retry_error}")
+          raise S3IngestionError(
+            f"httpfs extension required for S3 access: {retry_error}"
+          )
 
     if s3_credentials:
       if s3_credentials.get("aws_access_key_id"):

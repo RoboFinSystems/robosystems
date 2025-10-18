@@ -4,7 +4,7 @@ import boto3
 from neo4j import AsyncGraphDatabase, AsyncDriver
 from robosystems.logger import logger
 from robosystems.config import env
-from .base import GraphBackend, DatabaseInfo, ClusterTopology
+from .base import GraphBackend, DatabaseInfo, ClusterTopology, S3IngestionError
 
 
 class Neo4jBackend(GraphBackend):
@@ -289,7 +289,7 @@ class Neo4jBackend(GraphBackend):
 
     except ClientError as e:
       logger.error(f"Failed to list S3 files: {e}")
-      raise Exception(f"S3 list operation failed: {e}")
+      raise S3IngestionError(f"S3 list operation failed: {e}")
 
     total_records = 0
     start_time = time.time()
@@ -332,8 +332,8 @@ class Neo4jBackend(GraphBackend):
               id_field = "identifier" if "identifier" in batch_records[0] else "id"
               cypher = f"""
               UNWIND $batch as row
-              MERGE (n:{table_name} {{identifier: row.{id_field}}})
-              SET n = row
+              MERGE (n:{table_name} {{{id_field}: row.{id_field}}})
+              SET n += row
               RETURN count(n) as count
               """
               result = await tx.run(cypher, {"batch": batch_records})

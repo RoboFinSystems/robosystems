@@ -223,6 +223,50 @@ async def perform_ingestion(
     duration = result.get("duration_seconds", 0)
     query = result.get("query", "N/A")
 
+    # For Kuzu backends, perform aggressive cleanup for large tables
+    from robosystems.graph_api.backends.kuzu import KuzuBackend
+
+    if (
+      isinstance(backend, KuzuBackend) and table_name in LARGE_TABLES_REQUIRING_CLEANUP
+    ):
+      logger.info(
+        f"[Task {task_id}] Starting aggressive memory cleanup for large table: {table_name}"
+      )
+      try:
+        import asyncio
+        import psutil
+        import gc
+
+        # Force Python garbage collection
+        gc.collect()
+
+        # Get memory stats before cleanup
+        process = psutil.Process()
+        mem_before = process.memory_info().rss / (1024 * 1024)
+
+        # Allow brief settling period for memory to stabilize
+        await asyncio.sleep(2)
+
+        # Force another GC pass
+        gc.collect()
+
+        # Get memory stats after cleanup
+        mem_after = process.memory_info().rss / (1024 * 1024)
+        mem_freed = mem_before - mem_after
+
+        logger.info(
+          f"[Task {task_id}] Memory cleanup complete. Before: {mem_before:.1f}MB, "
+          f"After: {mem_after:.1f}MB, Freed: {mem_freed:.1f}MB"
+        )
+
+        # Additional settling time for admission controller visibility
+        await asyncio.sleep(3)
+
+      except Exception as cleanup_error:
+        logger.warning(
+          f"[Task {task_id}] Memory cleanup encountered issue: {cleanup_error}"
+        )
+
     # Clear the ingestion flag now that we're done
     try:
       redis_client = await task_manager.get_redis()

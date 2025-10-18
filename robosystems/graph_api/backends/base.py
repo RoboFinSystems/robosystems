@@ -3,6 +3,10 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 
+class S3IngestionError(Exception):
+  pass
+
+
 @dataclass
 class DatabaseInfo:
   name: str

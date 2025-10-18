@@ -101,10 +101,11 @@ robosystems/
    - Multi-tenant with graph-scoped endpoints: `/v1/graphs/{graph_id}/*`
    - Authentication via JWT and API keys
 
-2. **Kuzu Graph Database System**
+2. **Graph Database System**
 
+   - **Multi-Backend**: Kuzu (Standard tier) and Neo4j (Enterprise/Premium tiers)
    - **Multi-Tenant**: Separate database per entity
-   - **Tiered Infrastructure**: Standard, Enterprise, Premium
+   - **Tiered Infrastructure**: Standard (Kuzu), Enterprise (Neo4j Community), Premium (Neo4j Enterprise)
    - **Shared Repositories**: SEC, industry, economic data
    - **Cluster-Based**: Writer clusters (EC2), reader clusters (ECS Fargate)
 
@@ -180,31 +181,42 @@ just db-create-test-user           # Creates test user with JWT/API key
 just db-list-users                 # List all users
 ```
 
-### Kuzu Graph Database
+### Graph Database Infrastructure
+
+**Backend Selection by Tier:**
+
+- **Standard**: Kuzu (embedded graph database)
+- **Enterprise**: Neo4j Community (managed graph database)
+- **Premium**: Neo4j Enterprise (managed graph database with clustering)
 
 **Infrastructure Tiers:**
 
 **Production:**
 
-- **Standard**: r7g.large, 10 databases/instance, 2GB per database
-- **Enterprise**: r7g.large, 1 database/instance (isolated), 14GB total
-- **Premium**: r7g.xlarge, 1 database/instance (max performance), 28GB total
-- **Shared**: r7g.large, multiple repositories (SEC, etc.), shared memory pool
+- **Standard (Kuzu)**: r7g.large, 10 databases/instance, 2GB per database
+- **Enterprise (Neo4j)**: r7g.large, 1 database/instance (isolated), 14GB total
+- **Premium (Neo4j)**: r7g.xlarge, 1 database/instance (max performance), 28GB total
+- **Shared (Kuzu)**: r7g.large, multiple repositories (SEC, etc.), shared memory pool
 
 **Staging:**
 
-- **Standard**: r7g.medium, 10 databases/instance, ~700MB per database
-- **Shared**: r7g.medium, multiple repositories, shared memory pool
+- **Standard (Kuzu)**: r7g.medium, 10 databases/instance, ~700MB per database
+- **Shared (Kuzu)**: r7g.medium, multiple repositories, shared memory pool
 
 ```bash
-# Kuzu operations
+# Generic graph operations (works with both Kuzu and Neo4j)
+just graph-query graph_id "MATCH (e:Entity) RETURN e"
+just graph-health                  # Health check
+just graph-info graph_id           # Database info
+
+# Kuzu-specific operations
 just kuzu-query graph_id "MATCH (e:Entity) RETURN e"
 just kuzu-health                   # Health check
 just kuzu-info                     # Database info
 
-# SEC shared database
-just sec-load NVDA 2024      # Load company data
-just sec-health              # SEC database health
+# SEC shared database (Kuzu)
+just sec-load NVDA 2024            # Load company data
+just sec-health                    # SEC database health
 ```
 
 ### Valkey/Redis Configuration
@@ -246,7 +258,7 @@ Database allocation:
 
 ### Configuration Management
 
-**Central Config**: `.github/configs/kuzu.yml` defines all tier specifications
+**Central Config**: `.github/configs/graph.yml` defines all tier specifications
 
 - Instance configuration (hardware specs, memory, performance settings)
 - Scaling configuration (min/max replicas, auto-scaling)
