@@ -675,15 +675,8 @@ Resources:
       Threshold: 85
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
-        - Name: InstanceId
-          Value: "*"
-        - Name: Environment
-          Value: !Ref Environment
-        - Name: NodeType
-          Value: !If
-            - IsSharedWriter
-            - "shared_master"
-            - "writer"
+        - Name: AutoScalingGroupName
+          Value: !Ref WriterAutoScalingGroup
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref KuzuAlertTopic

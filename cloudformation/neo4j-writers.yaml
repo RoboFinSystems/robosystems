@@ -568,21 +568,22 @@ Resources:
               export GRAPH_BACKEND="neo4j"
               export GRAPH_NODE_TYPE="writer"
 
-              # Determine backend_type based on tier
+              # Determine Neo4j edition based on tier
               if [ "${WriterTier}" = "premium" ]; then
-                BACKEND_TYPE="neo4j_enterprise"
+                NEO4J_EDITION="enterprise"
               else
-                BACKEND_TYPE="neo4j_community"
+                NEO4J_EDITION="community"
               fi
 
-              # Register instance in DynamoDB with backend_type
-              echo "Registering Neo4j instance in DynamoDB with backend_type: $BACKEND_TYPE..."
+              # Register instance in DynamoDB with backend_type and neo4j_edition
+              echo "Registering Neo4j instance in DynamoDB with backend_type: neo4j, edition: $NEO4J_EDITION..."
               aws dynamodb put-item \
                 --table-name "$INSTANCE_REGISTRY_TABLE" \
                 --item "{
                   \"instance_id\": {\"S\": \"$INSTANCE_ID\"},
                   \"cluster_tier\": {\"S\": \"${WriterTier}\"},
-                  \"backend_type\": {\"S\": \"$BACKEND_TYPE\"},
+                  \"backend_type\": {\"S\": \"neo4j\"},
+                  \"neo4j_edition\": {\"S\": \"$NEO4J_EDITION\"},
                   \"private_ip\": {\"S\": \"$PRIVATE_IP\"},
                   \"stack_name\": {\"S\": \"${AWS::StackName}\"},
                   \"node_type\": {\"S\": \"writer\"},
@@ -687,7 +688,7 @@ Resources:
       MaxSize: !Ref MaxInstances
       NewInstancesProtectedFromScaleIn: true
       HealthCheckType: EC2
-      HealthCheckGracePeriod: 600  # Neo4j needs more time to start
+      HealthCheckGracePeriod: 400  # Neo4j needs more time to start than Kuzu (300s) but less than 10 minutes
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchTemplate:
         LaunchTemplateId: !Ref WriterLaunchTemplate
@@ -703,13 +704,13 @@ Resources:
       - HasMinInstances
       - ResourceSignal:
           Count: !Ref MinInstances
-          Timeout: PT20M  # Neo4j needs more time than Kuzu
+          Timeout: PT15M  # Neo4j needs more time than Kuzu (15 min vs 5 min)
       - !Ref AWS::NoValue
     UpdatePolicy:
       AutoScalingRollingUpdate:
         MinInstancesInService: 0
         MaxBatchSize: 1
-        PauseTime: PT10M  # More time for Neo4j
+        PauseTime: PT7M  # Moderate pause for Neo4j startup (Kuzu uses 5 min)
         WaitOnResourceSignals: true
         SuspendProcesses:
           - AlarmNotification
@@ -810,12 +811,8 @@ Resources:
       Threshold: 85
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
-        - Name: InstanceId
-          Value: "*"
-        - Name: Environment
-          Value: !Ref Environment
-        - Name: NodeType
-          Value: "writer"
+        - Name: AutoScalingGroupName
+          Value: !Ref WriterAutoScalingGroup
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref Neo4jAlertTopic

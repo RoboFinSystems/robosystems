@@ -1,7 +1,7 @@
 """
 Graph API Key Rotation Lambda Function
 
-Implements AWS Secrets Manager rotation for Graph API keys (Kuzu and Neo4j).
+Implements AWS Secrets Manager rotation for Graph API keys (used by all backends).
 Generates new API keys and stores them securely.
 
 This function handles the 4-step rotation process:
@@ -11,7 +11,7 @@ This function handles the 4-step rotation process:
 4. finishSecret - Complete the rotation
 
 Supports both:
-- Kuzu API keys (KUZU_API_KEY)
+- Graph API keys (GRAPH_API_KEY) - unified authentication for all backends
 - Neo4j credentials (NEO4J_PASSWORD for neo4j-writers)
 """
 
@@ -71,10 +71,10 @@ def is_neo4j_secret(secret_dict: Dict[str, Any]) -> bool:
       secret_dict: The secret dictionary
 
   Returns:
-      True if this is a Neo4j secret, False if it's a Kuzu API key secret
+      True if this is a Neo4j secret, False if it's a Graph API key secret
   """
   # Neo4j secrets have NEO4J_PASSWORD and TIER fields
-  # Kuzu secrets have KUZU_API_KEY
+  # Graph API secrets have GRAPH_API_KEY
   return "NEO4J_PASSWORD" in secret_dict or "TIER" in secret_dict
 
 
@@ -156,15 +156,15 @@ def create_secret(arn: str, token: str) -> None:
     }
     logger.info(f"createSecret: Generating new Neo4j password for tier {tier}")
   else:
-    # Kuzu API key secret
+    # Graph API key secret
     environment = current_dict.get("ENVIRONMENT", "unknown")
     new_secret = {
-      "KUZU_API_KEY": generate_api_key(f"kuzu_{environment}", 64),
+      "GRAPH_API_KEY": generate_api_key(f"graph_{environment}", 64),
       "ENVIRONMENT": environment,
       "GENERATED_AT": datetime.now(timezone.utc).isoformat(),
       "rotation_version": token,
     }
-    logger.info("createSecret: Generating new Kuzu API key")
+    logger.info("createSecret: Generating new Graph API key")
 
   # Put the secret
   secrets_client.put_secret_value(
@@ -227,30 +227,51 @@ def test_secret(arn: str, token: str) -> None:
       f"testSecret: Successfully validated new Neo4j password for tier {pending_dict['TIER']}"
     )
   else:
-    # Validate Kuzu API key
-    if "KUZU_API_KEY" not in pending_dict:
-      raise ValueError("Missing required key: KUZU_API_KEY")
+    # Validate Graph API key
+    if "GRAPH_API_KEY" not in pending_dict:
+      raise ValueError("Missing required key: GRAPH_API_KEY")
 
-    api_key = pending_dict["KUZU_API_KEY"]
+    api_key = pending_dict["GRAPH_API_KEY"]
     if not api_key or not isinstance(api_key, str):
-      raise ValueError("Invalid API key format for KUZU_API_KEY")
+      raise ValueError("Invalid API key format for GRAPH_API_KEY")
 
-    # Validate key format (prefix_randomstring)
+    # Validate minimum total key length (should be at least 70 chars for graph_env_64chars)
+    if len(api_key) < 70:
+      raise ValueError(f"API key too short: {len(api_key)} chars, expected at least 70")
+
+    # Validate key format (graph_environment_randomstring)
     if "_" not in api_key:
       raise ValueError("Invalid API key format: missing underscore")
 
-    parts = api_key.split("_")
-    if len(parts) < 3:  # Should be kuzu_environment_randomstring
-      raise ValueError("Invalid API key format: expected kuzu_environment_randomstring")
+    parts = api_key.split("_", 2)  # Split into max 3 parts: graph, environment, random
+    if len(parts) != 3:
+      raise ValueError("Invalid API key format: expected graph_environment_randomstring")
 
-    # Validate suffix contains only alphanumeric characters and hyphens/underscores
-    random_part = "_".join(parts[2:])
+    # Validate prefix
+    if parts[0] != "graph":
+      raise ValueError(f"Invalid API key prefix: expected 'graph', got '{parts[0]}'")
+
+    # Validate environment
+    valid_environments = ["prod", "staging"]
+    if parts[1] not in valid_environments:
+      raise ValueError(
+        f"Invalid environment: expected one of {valid_environments}, got '{parts[1]}'"
+      )
+
+    # Validate random part has sufficient length (should be 64 chars)
+    random_part = parts[2]
+    if len(random_part) < 64:
+      raise ValueError(
+        f"Random part too short: {len(random_part)} chars, expected at least 64"
+      )
+
+    # Validate random part contains only alphanumeric characters and allowed symbols
     if not all(c.isalnum() or c in "-_" for c in random_part):
       raise ValueError(
         "Invalid API key format: random part must be alphanumeric with - or _"
       )
 
-    logger.info("testSecret: Successfully validated new Kuzu API key")
+    logger.info(f"testSecret: Successfully validated new Graph API key for {parts[1]}")
 
   # Validate metadata
   if "GENERATED_AT" not in pending_dict:
@@ -291,7 +312,7 @@ def finish_secret(arn: str, token: str) -> None:
       SecretId=arn, VersionStage="AWSCURRENT"
     )
     secret_dict = json.loads(new_secret["SecretString"])
-    secret_type = "Neo4j password" if is_neo4j_secret(secret_dict) else "Kuzu API key"
+    secret_type = "Neo4j password" if is_neo4j_secret(secret_dict) else "Graph API key"
     logger.info(
       f"{secret_type} rotation completed successfully. Generated at: {secret_dict.get('GENERATED_AT', 'unknown')}"
     )

@@ -233,7 +233,7 @@ jobs:
     uses: ./.github/workflows/deploy-kuzu-writers.yml
     with:
       # Stack & Repository Configuration
-      stack_name: RoboSystemsKuzuWriters${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
+      stack_name: RoboSystemsGraphWriters${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
       environment: ${{ inputs.environment }}
       # GHA Runner Configuration
       runner_config: ${{ inputs.runner_config }}
