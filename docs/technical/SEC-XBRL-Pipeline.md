@@ -99,9 +99,9 @@ just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE el.
 **Common Cypher Patterns:**
 
 ```cypher
--- Find all facts for a company
+-- Find all facts for a NVDA SEC CIK
 MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
-WHERE e.identifier = '0001045810'  -- NVIDIA's CIK
+WHERE e.identifier = '0001045810' 
 RETURN f
 
 -- Get balance sheet items
