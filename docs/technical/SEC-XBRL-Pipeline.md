@@ -42,7 +42,7 @@ Load SEC filings for a company using their ticker symbol:
 just sec-load NVDA
 
 # Load specific year for Apple
-just sec-load AAPL 2024
+just sec-load AAPL 2025
 
 # Load Tesla data for 2023
 just sec-load TSLA 2023
@@ -236,16 +236,16 @@ If you need to start fresh:
 just sec-reset
 
 # Reset and reload company
-just sec-reset && just sec-load NVDA 2024
+just sec-reset && just sec-load NVDA 2025
 ```
 
 ### Load Multiple Companies
 
 ```bash
 # Load several companies for analysis
-just sec-load NVDA 2024
-just sec-load AMD 2024
-just sec-load INTC 2024
+just sec-load NVDA 2025
+just sec-load AMD 2025
+just sec-load INTC 2025
 
 # Verify all loaded
 just sec-health v
@@ -302,7 +302,7 @@ If queries return no results:
 just sec-health
 
 # If no data, reload
-just sec-load NVDA 2024
+just sec-load NVDA 2025
 ```
 
 ### Loading Failures
@@ -316,7 +316,7 @@ just logs kuzu-api
 
 # Reset and try again
 just sec-reset
-just sec-load NVDA 2024
+just sec-load NVDA 2025
 ```
 
 ## Next Steps
