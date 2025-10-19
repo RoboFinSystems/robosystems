@@ -271,7 +271,7 @@ Use the MCP client's `discover-common-elements` tool or query directly:
 
 ```bash
 # Find most common us-gaap elements
-just kuzu-query sec "MATCH (el:Element) WHERE el.qname STARTS WITH 'us-gaap:' RETURN el.qname, el.name LIMIT 20"
+just graph-query sec "MATCH (el:Element) WHERE el.qname STARTS WITH 'us-gaap:' RETURN el.qname, el.name LIMIT 20"
 ```
 
 Common financial metrics:
@@ -287,10 +287,10 @@ Common financial metrics:
 
 ```bash
 # Find all facts from a specific date
-just kuzu-query sec "MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period) WHERE p.instant_date = '2024-01-28' RETURN COUNT(f)"
+just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period) WHERE p.instant_date = '2024-12-31' RETURN COUNT(f)"
 
 # Find facts for a fiscal year
-just kuzu-query sec "MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period) WHERE p.instant_date >= '2023-01-01' AND p.instant_date < '2024-01-01' RETURN COUNT(f)"
+just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period) WHERE p.instant_date >= '2023-01-01' AND p.instant_date < '2025-01-01' RETURN COUNT(f)"
 ```
 
 ## Troubleshooting
