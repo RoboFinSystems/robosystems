@@ -33,6 +33,7 @@ The SEC pipeline processes XBRL filings through four stages:
 
 #### Stage 2: Process
 - Converts XBRL to parquet using XBRLGraphProcessor
+- Uses modular XBRL processing components (id_utils, naming_utils, dataframe_manager, parquet_writer, textblock_externalizer)
 - Outputs to `processed/year={year}/nodes/` and `processed/year={year}/relationships/`
 - Queue: `shared-processing` (unlimited parallelism)
 - Generates many small files (50KB each)
@@ -179,6 +180,45 @@ If processing fails for specific companies:
 2. Use `smart_retry_failed_companies()` to retry failures
 3. Other companies continue processing
 4. Pipeline provides detailed failure report
+
+## XBRL Processing Architecture
+
+The XBRLGraphProcessor has been modularized into specialized components in `robosystems/processors/xbrl/`:
+
+### Core Components
+
+1. **id_utils.py** - Deterministic UUIDv7 generation
+   - `create_entity_id()`, `create_report_id()`, `create_fact_id()`, etc.
+   - Ensures consistent IDs across processing runs
+
+2. **naming_utils.py** - String transformation utilities
+   - `camel_to_snake()` - Convert PascalCase to snake_case
+   - `make_plural()` - Pluralization for table names
+   - `convert_schema_name_to_filename()` - Schema to file mapping
+
+3. **dataframe_manager.py** - DataFrame lifecycle management
+   - Schema-driven DataFrame initialization
+   - Type mapping and validation
+   - Deduplication strategies
+
+4. **parquet_writer.py** - Schema-aware file I/O
+   - Standardized filename generation
+   - Type prefix support
+   - Column standardization
+   - Handles both nodes/ and relationships/ directories
+
+5. **textblock_externalizer.py** - S3 externalization for large text
+   - Content-based caching (SHA-256 hashing)
+   - Batch upload optimization
+   - Handles HTML and plain text content
+   - CDN URL support for public access
+
+### Benefits
+
+- **Testability**: Each component can be tested in isolation
+- **Maintainability**: Clear separation of concerns
+- **Reusability**: Components can be used beyond SEC processing
+- **Performance**: Optimized batch operations and caching
 
 ## Future Improvements
 

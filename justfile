@@ -139,6 +139,10 @@ setup-aws:
 setup-gha:
     @bin/setup/gha.sh
 
+# Bootstrap infrastructure
+bootstrap branch="main":
+    gh workflow run bootstrap.yml --ref {{branch}}
+
 # Generate secure random key for JWT_SECRET_KEY and other secrets
 generate-key:
     @echo "Generated secure 32-byte base64 key:"

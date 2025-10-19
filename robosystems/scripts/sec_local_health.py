@@ -15,7 +15,6 @@ import json
 from datetime import datetime
 
 from robosystems.logger import logger
-from robosystems.config import env
 
 
 class SECHealthChecker:
@@ -24,7 +23,7 @@ class SECHealthChecker:
   def __init__(self):
     """Initialize the health checker."""
     self.database_path = "./data/kuzu-dbs/sec.kuzu"
-    self.api_url = env.GRAPH_API_URL or "http://localhost:8001"
+    self.api_url = "http://localhost:8001"
     self.results = {
       "timestamp": datetime.now().isoformat(),
       "direct_access": {},
@@ -318,14 +317,17 @@ class SECHealthChecker:
         )
 
     # Overall health determination
-    if self.results["direct_access"]["status"] == "healthy":
-      if self.results["api_access"]["status"] == "healthy":
-        overall = "healthy"
-        symbol = "✅"
-      else:
-        overall = "degraded"
-        symbol = "⚠️"
-    elif self.results["direct_access"]["status"] == "empty":
+    # Priority: API health is primary indicator (direct access expected to fail when API running)
+    if self.results["api_access"]["status"] == "healthy":
+      overall = "healthy"
+      symbol = "✅"
+    elif self.results["direct_access"]["status"] == "healthy":
+      overall = "healthy"
+      symbol = "✅"
+    elif (
+      self.results["api_access"]["status"] == "empty"
+      or self.results["direct_access"]["status"] == "empty"
+    ):
       overall = "empty"
       symbol = "⚠️"
     else:
