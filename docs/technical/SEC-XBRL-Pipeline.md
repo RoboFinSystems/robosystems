@@ -16,7 +16,7 @@ Before starting, ensure you have:
 
 - Docker running locally
 - RoboSystems development environment set up
-- Services started with `just start` or `just compose-up robosystems`
+- Services started with `just start`
 
 ## Authentication Setup
 
