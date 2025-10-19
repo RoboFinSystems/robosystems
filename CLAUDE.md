@@ -204,18 +204,16 @@ just db-list-users                 # List all users
 - **Shared (Kuzu)**: r7g.medium, multiple repositories, shared memory pool
 
 ```bash
-# Generic graph operations (works with both Kuzu and Neo4j)
-just graph-query graph_id "MATCH (e:Entity) RETURN e"
-just graph-health                  # Health check
-just graph-info graph_id           # Database info
+# Graph operations (works with both Kuzu and Neo4j backends)
+just graph-query graph_id "MATCH (e:Entity) RETURN e"  # Execute Cypher query via API
+just graph-health                                       # Health check
+just graph-info graph_id                                # Database info
 
-# Kuzu-specific operations
-just kuzu-query graph_id "MATCH (e:Entity) RETURN e"
-just kuzu-health                   # Health check
-just kuzu-info                     # Database info
+# Kuzu direct database access (bypasses API)
+just kuzu-query graph_id "MATCH (e:Entity) RETURN e"  # Direct embedded database query
 
-# SEC shared database (Kuzu)
-just sec-load NVDA 2024            # Load company data
+# SEC shared database
+just sec-load NVDA 2025            # Load company data (year optional)
 just sec-health                    # SEC database health
 ```
 
@@ -371,11 +369,11 @@ database_url = os.getenv("DATABASE_URL")  # ✗ Wrong
    - Check DATABASE_URL format
    - Verify migration status with `just migrate-current`
 
-4. **Kuzu Database**
+4. **Graph Database**
 
-   - Check Kuzu API health with `just kuzu-health`
-   - Verify cluster status in CloudFormation
-   - Check allocation manager for database assignments
+   - Check Graph API health with `just graph-health`
+   - Get database info with `just graph-info graph_id`
+   - Check CloudFormation stack status in AWS Console
 
 5. **Celery Tasks**
    - Monitor worker logs with `just logs worker`
@@ -388,11 +386,10 @@ database_url = os.getenv("DATABASE_URL")  # ✗ Wrong
 # Logs and monitoring
 just logs api                      # API logs
 just logs-grep worker ERROR        # Search worker logs
-just log-search "ERROR" prod "" 1  # CloudWatch search
 
 # Database debugging
 just db-info                       # Database status
-just kuzu-info                     # Kuzu cluster info
+just graph-info graph_id           # Graph database info
 just credit-admin-health           # Credit system health
 ```
 
