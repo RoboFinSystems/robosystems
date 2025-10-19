@@ -328,7 +328,7 @@ just sec-load NVDA 2024
 
 ## Resources
 
-- **Neo4j Cypher Docs**: [Neo4j Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
+- **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
 - **RoboSystems API**: http://localhost:8000/docs (when running locally)
 - **SEC EDGAR**: [SEC Website](https://www.sec.gov/edgar)
