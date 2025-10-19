@@ -370,8 +370,8 @@ class EnvConfig:
   # ==========================================================================
 
   # Graph Backend Selection
-  BACKEND_TYPE = get_str_env(
-    "BACKEND_TYPE", "kuzu"
+  GRAPH_BACKEND_TYPE = get_str_env(
+    "GRAPH_BACKEND_TYPE", "kuzu"
   )  # Options: kuzu, neo4j_community, neo4j_enterprise
 
   # Graph API Configuration (applies to all backends - unified access layer)
@@ -429,7 +429,7 @@ class EnvConfig:
     "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
   )
 
-  # Kuzu-Specific Configuration (when BACKEND_TYPE=kuzu)
+  # Kuzu-Specific Configuration (when GRAPH_BACKEND_TYPE=kuzu)
   KUZU_DATABASE_PATH = get_str_env("KUZU_DATABASE_PATH", "./data/kuzu-dbs")
   KUZU_ACCESS_PATTERN = get_str_env("KUZU_ACCESS_PATTERN", "api_auto")
   KUZU_NODE_TYPE = get_str_env("KUZU_NODE_TYPE", "writer")
@@ -486,7 +486,7 @@ class EnvConfig:
   KUZU_MAX_CONNECTIONS_PER_DB = get_int_env("KUZU_MAX_CONNECTIONS_PER_DB", 10)
   KUZU_CONNECTION_TTL_MINUTES = get_float_env("KUZU_CONNECTION_TTL_MINUTES", 30.0)
 
-  # Neo4j-Specific Configuration (when BACKEND_TYPE=neo4j_*)
+  # Neo4j-Specific Configuration (when GRAPH_BACKEND_TYPE=neo4j_*)
   NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
   NEO4J_USERNAME = get_str_env("NEO4J_USERNAME", "neo4j")
   NEO4J_PASSWORD = get_secret_value("NEO4J_PASSWORD", "")

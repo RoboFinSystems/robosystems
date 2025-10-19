@@ -148,7 +148,7 @@ case $DOCKER_PROFILE in
   "neo4j-writer")
     echo "Starting Neo4j Graph API..."
     # Graph API with Neo4j backend
-    # Backend type determined by BACKEND_TYPE env var (neo4j_community or neo4j_enterprise)
+    # Backend type determined by GRAPH_BACKEND_TYPE env var (neo4j_community or neo4j_enterprise)
     # Note: base-path is for metadata only (actual data stored in Neo4j database via Bolt)
     exec uv run python -m robosystems.graph_api \
       --node-type writer \

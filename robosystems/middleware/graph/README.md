@@ -14,6 +14,7 @@ The graph middleware:
 - Integrates with the credit system for usage tracking
 
 **Supported Backends:**
+
 - **Kuzu**: Embedded graph database with EC2-based clusters
 - **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers
 - **Neo4j Enterprise**: Multi-database support for Premium tier
@@ -289,7 +290,7 @@ Key environment variables:
 
 ```bash
 # Backend Configuration
-BACKEND_TYPE=kuzu                   # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=kuzu             # kuzu|neo4j_community|neo4j_enterprise
 
 # Routing Configuration (Kuzu)
 KUZU_ACCESS_PATTERN=api_writer      # Access pattern (api_writer/api_reader/direct_file)

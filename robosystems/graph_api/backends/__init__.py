@@ -13,7 +13,7 @@ def get_backend() -> Union[KuzuBackend, Neo4jBackend]:
   global _backend_instance
 
   if _backend_instance is None:
-    backend_type = env.BACKEND_TYPE
+    backend_type = env.GRAPH_BACKEND_TYPE
 
     if backend_type == "kuzu":
       _backend_instance = KuzuBackend(data_path=env.KUZU_DATABASE_PATH)
@@ -27,7 +27,7 @@ def get_backend() -> Union[KuzuBackend, Neo4jBackend]:
       _backend_instance = Neo4jBackend(enterprise=True)
       logger.info("Initialized Neo4j Enterprise backend (Premium tier)")
     else:
-      raise ValueError(f"Unknown BACKEND_TYPE: {backend_type}")
+      raise ValueError(f"Unknown GRAPH_BACKEND_TYPE: {backend_type}")
 
   return _backend_instance
 

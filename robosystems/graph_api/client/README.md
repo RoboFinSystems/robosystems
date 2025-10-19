@@ -232,7 +232,7 @@ except ServiceUnavailableError as e:
 
 ```bash
 # Backend Selection
-BACKEND_TYPE=kuzu                             # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=kuzu                       # kuzu|neo4j_community|neo4j_enterprise
 
 # API Endpoints (Kuzu Backend)
 KUZU_API_URL=http://localhost:8001           # Default API URL (dev/fallback)

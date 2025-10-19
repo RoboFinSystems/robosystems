@@ -152,7 +152,7 @@ results = await backend.execute_query(
 )
 ```
 
-Backend selection is controlled by the `BACKEND_TYPE` environment variable:
+Backend selection is controlled by the `GRAPH_BACKEND_TYPE` environment variable:
 - `kuzu` (default)
 - `neo4j_community`
 - `neo4j_enterprise`
@@ -199,7 +199,7 @@ Backend selection is controlled by the `BACKEND_TYPE` environment variable:
 
 ```bash
 # Backend Selection
-BACKEND_TYPE=kuzu                        # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=kuzu                  # kuzu|neo4j_community|neo4j_enterprise
 
 # Kuzu Configuration
 KUZU_DATABASE_PATH=/data/kuzu-dbs       # Database storage location
@@ -312,8 +312,8 @@ pytest tests/unit/graph_api/backends/test_neo4j_backend.py
 pytest tests/integration/graph_api/ -m backend_integration
 
 # Test specific backend
-BACKEND_TYPE=kuzu pytest tests/integration/graph_api/
-BACKEND_TYPE=neo4j_community pytest tests/integration/graph_api/
+GRAPH_BACKEND_TYPE=kuzu pytest tests/integration/graph_api/
+GRAPH_BACKEND_TYPE=neo4j_community pytest tests/integration/graph_api/
 ```
 
 ## Performance Characteristics
@@ -373,7 +373,7 @@ CREATE (e:Entity {
 
 3. Update configuration:
 ```bash
-BACKEND_TYPE=neo4j_community
+GRAPH_BACKEND_TYPE=neo4j_community
 ```
 
 ### Neo4j to Kuzu
@@ -389,7 +389,7 @@ Reverse process using Neo4j export and Kuzu COPY operations.
 **Symptom**: Getting KuzuBackend when expecting Neo4jBackend
 
 **Solution**:
-- Verify `BACKEND_TYPE` environment variable
+- Verify `GRAPH_BACKEND_TYPE` environment variable
 - Clear backend singleton: `_backend_instance = None`
 - Restart application
 

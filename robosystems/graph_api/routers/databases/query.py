@@ -33,7 +33,7 @@ def track_connection(admission_controller, database_name):
 
 
 def _get_cluster_service_for_request():
-  backend_type = env.BACKEND_TYPE
+  backend_type = env.GRAPH_BACKEND_TYPE
   if backend_type in ["neo4j_community", "neo4j_enterprise"]:
     from robosystems.graph_api.core.backend_cluster_manager import BackendClusterService
 
@@ -92,7 +92,7 @@ async def execute_query(
       database=graph_id, cypher=request.cypher, parameters=request.parameters
     )
 
-    backend_type = env.BACKEND_TYPE
+    backend_type = env.GRAPH_BACKEND_TYPE
 
     if backend_type in ["neo4j_community", "neo4j_enterprise"]:
       # Use async backend cluster service

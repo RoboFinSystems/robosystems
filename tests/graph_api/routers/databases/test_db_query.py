@@ -16,7 +16,7 @@ class TestDatabaseQueryRouter:
   @pytest.fixture
   def client(self, monkeypatch):
     """Create a test client."""
-    monkeypatch.setenv("BACKEND_TYPE", "kuzu")
+    monkeypatch.setenv("GRAPH_BACKEND_TYPE", "kuzu")
 
     app = create_app()
 
