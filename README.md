@@ -140,9 +140,20 @@ The **Graph API** is a FastAPI microservice that provides a unified interface re
 - **API-First Design**: All database access through REST APIs with no direct database connections
 - **Schema-Driven Operations**: All graph operations derive from curated schemas (RoboLedger, RoboInvestor, and more)
 
-#### Client-Factory System (`/robosystems/graph_api/client/`)
+#### Backend Factory System (`/robosystems/graph_api/backends/`)
 
-The client-factory layer provides intelligent routing between application code and graph database infrastructure:
+The backend factory provides pluggable graph database backends with a unified interface:
+
+- **Backend Abstraction**: Common interface for Kuzu and Neo4j implementations
+- **Factory Pattern**: Dynamic backend selection based on configuration (`GRAPH_BACKEND_TYPE`)
+- **Backend-Specific Optimizations**: Each backend implements optimal patterns for their architecture
+- **Connection Management**: Backend-appropriate connection pooling and lifecycle management
+- **Query Translation**: Cypher query execution with backend-specific optimizations
+- **Ingestion Strategies**: Optimized bulk loading for each backend type
+
+#### Client Factory System (`/robosystems/graph_api/client/`)
+
+The client factory layer provides intelligent routing between application code and graph database infrastructure:
 
 - **Backend-Agnostic**: Works seamlessly with both Kuzu and Neo4j backends
 - **Automatic Discovery**: Finds database instances via DynamoDB registry (Kuzu) or direct connection (Neo4j)
@@ -150,15 +161,6 @@ The client-factory layer provides intelligent routing between application code a
 - **Circuit Breakers**: Prevents cascading failures with automatic recovery
 - **Connection Reuse**: HTTP/2 connection pooling for efficiency
 - **Retry Logic**: Exponential backoff with jitter for transient errors
-
-#### Infrastructure Tiers
-
-| Tier           | Instance Type | Databases/Instance | Memory/Graph | Use Case                |
-| -------------- | ------------- | ------------------ | ------------ | ----------------------- |
-| **Standard**   | r7g.xlarge    | 10                 | 2GB          | Shared resources        |
-| **Enterprise** | r7g.large     | 1                  | 14GB         | Isolated resources      |
-| **Premium**    | r7g.xlarge    | 1                  | 28GB         | Maximum performance     |
-| **Shared**     | r7g.xlarge    | N/A                | Pooled       | SEC/public repositories |
 
 ### Key Components
 
@@ -171,18 +173,17 @@ The client-factory layer provides intelligent routing between application code a
 
 #### Operations Layer (`/robosystems/operations/`)
 
-- **EntityGraphService**: Entity-specific graph creation workflows
-- **GenericGraphService**: Generic graph creation with custom schemas
+- **Entity Graph Service**: Entity-specific graph creation workflows
+- **Generic Graph Service**: Generic graph creation with custom schemas
 - **Data Ingestion**: High-performance bulk data loading using COPY operations
-- **CreditService**: AI agent usage with token-based consumption
+- **Credit Service**: AI agent usage with token-based consumption
 
 #### Data Processors (`/robosystems/processors/`)
 
-- **XBRLGraphProcessor**: XBRL filing processing and graph transformation
-- **QBTransactionsProcessor**: QuickBooks data processing and normalization
-- **TrialBalanceProcessor**: Financial calculations and accounting operations
-- **ScheduleProcessor**: Financial schedule generation
-- **SchemaProcessor**: DataFrame schema compatibility validation
+- **XBRL Graph Processor**: XBRL filing processing and graph transformation
+- **QB Transactions Processor**: QuickBooks data processing and normalization
+- **Trial Balance Processor**: Financial calculations and accounting operations
+- **Schedule Processor**: Financial schedule generation
 
 #### Database Models (`/robosystems/models/`)
 
@@ -308,8 +309,8 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 #### Graph Database Infrastructure
 
-- **`kuzu-infra.yaml`**: Base infrastructure for graph database clusters (security groups, roles, registries)
-- **`kuzu-volumes.yaml`**: EBS volume management and snapshot automation
+- **`graph-infra.yaml`**: Base infrastructure for graph database clusters (security groups, roles, registries)
+- **`graph-volumes.yaml`**: EBS volume management and snapshot automation for graph databases
 - **`kuzu-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Kuzu backend)
 - **`neo4j-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Neo4j backend)
 
@@ -396,7 +397,7 @@ Each major system component has detailed documentation:
 
 - **`/robosystems/graph_api/README.md`**: Complete Graph API documentation (supports Kuzu and Neo4j backends)
 - **`/robosystems/graph_api/backends/README.md`**: Backend abstraction layer and implementation details
-- **`/robosystems/graph_api/client/README.md`**: Client-factory system for intelligent routing
+- **`/robosystems/graph_api/client/README.md`**: Client factory system for intelligent routing
 
 ### Middleware Components
 

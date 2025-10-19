@@ -1,7 +1,5 @@
 from datetime import datetime, timedelta
-import hashlib
 import os
-import re
 import pandas as pd
 from pathlib import Path
 from arelle import XbrlConst
@@ -9,73 +7,33 @@ from robosystems.logger import logger
 from robosystems.adapters.arelle import ArelleClient
 from robosystems.adapters.sec import SEC_BASE_URL, SECClient
 from robosystems.adapters.s3 import S3Client
-from robosystems.utils.uuid import (
-  generate_uuid7,
-  generate_deterministic_uuid7,
-)
+from robosystems.utils.uuid import generate_uuid7
 from robosystems.utils import (
   ISO_8601_URI,
   ROLES_FILTERED,
 )
 from robosystems.processors.schema_processor import SchemaProcessor
 from robosystems.processors.schema_ingestion import SchemaIngestionProcessor
+from robosystems.processors.xbrl import (
+  create_element_id,
+  create_label_id,
+  create_taxonomy_id,
+  create_reference_id,
+  create_report_id,
+  create_fact_id,
+  create_entity_id,
+  create_period_id,
+  create_unit_id,
+  create_factset_id,
+  create_dimension_id,
+  create_structure_id,
+  safe_concat,
+  DataFrameManager,
+  ParquetWriter,
+  TextBlockExternalizer,
+)
 
 XBRL_GRAPH_PROCESSOR_VERSION = "1.0.0"
-
-
-# ============================================================================
-# XBRL-Specific ID Creation Functions
-# These use UUIDv7 for optimal database performance
-# ============================================================================
-
-
-def create_element_id(uri: str) -> str:
-  """Create an Element identifier from URI."""
-  return generate_deterministic_uuid7(uri, namespace="element")
-
-
-def create_label_id(value: str, label_type: str, language: str) -> str:
-  """Create a Label identifier from content."""
-  content = f"{value}#{label_type}#{language}"
-  return generate_deterministic_uuid7(content, namespace="label")
-
-
-def create_taxonomy_id(uri: str) -> str:
-  """Create a Taxonomy identifier from URI."""
-  return generate_deterministic_uuid7(uri, namespace="taxonomy")
-
-
-def create_reference_id(value: str, ref_type: str) -> str:
-  """Create a Reference identifier."""
-  content = f"{value}#{ref_type}"
-  return generate_deterministic_uuid7(content, namespace="reference")
-
-
-def create_report_id(uri: str) -> str:
-  """Create a Report identifier from URI."""
-  # Reports must have deterministic IDs based on URI for consistency across pipeline runs
-  return generate_deterministic_uuid7(uri, namespace="report")
-
-
-def create_fact_id(fact_uri: str) -> str:
-  """Create a Fact identifier."""
-  # Facts must have deterministic IDs based on URI for consistency across pipeline runs
-  return generate_deterministic_uuid7(fact_uri, namespace="fact")
-
-
-def create_entity_id(entity_uri: str) -> str:
-  """Create an Entity identifier."""
-  return generate_deterministic_uuid7(entity_uri, namespace="entity")
-
-
-def create_period_id(period_uri: str) -> str:
-  """Create a Period identifier."""
-  return generate_deterministic_uuid7(period_uri, namespace="period")
-
-
-def create_unit_id(unit_uri: str) -> str:
-  """Create a Unit identifier."""
-  return generate_deterministic_uuid7(unit_uri, namespace="unit")
 
 
 class XBRLGraphProcessor:
@@ -105,25 +63,23 @@ class XBRLGraphProcessor:
     # Track which elements have been fully processed to avoid duplicate label/reference creation
     self.processed_elements = set()
 
-    # Initialize S3 client for textblock externalization
+    # Initialize TextBlockExternalizer for S3 externalization
     from robosystems.config import env
 
-    self.s3_client = None
-    self.sec_textblocks_bucket = env.PUBLIC_DATA_BUCKET
-    self.sec_textblocks_cdn_url = env.PUBLIC_DATA_CDN_URL
-    self.externalize_large_values = env.XBRL_EXTERNALIZE_LARGE_VALUES
-    self.externalization_threshold = env.XBRL_EXTERNALIZATION_THRESHOLD
-
-    if self.externalize_large_values and self.sec_textblocks_bucket:
+    s3_client = None
+    if env.XBRL_EXTERNALIZE_LARGE_VALUES and env.PUBLIC_DATA_BUCKET:
       try:
-        self.s3_client = S3Client()
-        logger.info(
-          f"S3 externalization enabled: bucket={self.sec_textblocks_bucket}, "
-          f"threshold={self.externalization_threshold} bytes"
-        )
+        s3_client = S3Client()
       except Exception as e:
         logger.warning(f"Failed to initialize S3 client for externalization: {e}")
-        self.externalize_large_values = False
+
+    self.textblock_externalizer = TextBlockExternalizer(
+      s3_client=s3_client,
+      bucket=env.PUBLIC_DATA_BUCKET,
+      cdn_url=env.PUBLIC_DATA_CDN_URL,
+      threshold=env.XBRL_EXTERNALIZATION_THRESHOLD,
+      enabled=env.XBRL_EXTERNALIZE_LARGE_VALUES,
+    )
 
     # Feature flags for upstream simplification
     self.enable_standardized_filenames = env.XBRL_STANDARDIZED_FILENAMES
@@ -144,631 +100,54 @@ class XBRLGraphProcessor:
     if schema_config:
       logger.debug("Initializing schema adapters for schema-driven DataFrame creation")
       self.schema_adapter = SchemaProcessor(schema_config)
-      self.schema_adapter.print_schema_summary()  # Already uses debug logging
+      self.schema_adapter.print_schema_summary()
 
-      # Also initialize ingestion adapter for filename generation
       self.ingest_adapter = SchemaIngestionProcessor(schema_config)
-    else:
-      logger.warning(
-        "No schema config provided - falling back to manual DataFrame definitions"
+
+      # Initialize DataFrame manager
+      self.df_manager = DataFrameManager(
+        self.schema_adapter, self.ingest_adapter, self.enable_column_standardization
       )
-      self.schema_adapter = None
-      self.ingest_adapter = None
 
-    # Initialize DataFrames using schema adapter or fallback to manual definitions
-    self._initialize_dataframes()
+      # Initialize all DataFrames through the manager
+      dataframes = self.df_manager.initialize_all_dataframes()
 
-    # Create dynamic DataFrame mapping for schema-driven file saving
-    if self.schema_adapter and self.ingest_adapter:
-      self._create_dynamic_dataframe_mapping()
+      # Set DataFrames as instance attributes for backward compatibility
+      for df_attr_name, df in dataframes.items():
+        setattr(self, df_attr_name, df)
+
+      # Create dynamic DataFrame mapping
+      self.schema_to_dataframe_mapping = (
+        self.df_manager.create_dynamic_dataframe_mapping()
+      )
+
+      # Initialize Parquet writer
+      self.parquet_writer = ParquetWriter(
+        self.output_dir,
+        self.schema_adapter,
+        self.ingest_adapter,
+        self.df_manager,
+        self.enable_standardized_filenames,
+        self.enable_type_prefixes,
+        self.enable_column_standardization,
+        self.sec_filer,
+        self.sec_report,
+      )
+    else:
+      raise ValueError(
+        "Schema configuration is required for XBRL processing. "
+        "Please provide a valid schema_config parameter."
+      )
 
     logger.debug(
       f"XBRL processor initialized with version {self.version} for output directory {self.output_dir}"
     )
 
-  def _initialize_dataframes(self):
-    """Initialize all DataFrames using schema adapter dynamically from schema."""
-    if self.schema_adapter:
-      logger.debug("Initializing DataFrames dynamically using SchemaProcessor")
-
-      try:
-        # Use schema from the adapter which was initialized with the correct config
-        schema_builder = self.schema_adapter.schema_builder
-        schema = schema_builder.schema
-
-        if not schema or not schema.nodes:
-          logger.warning("No schema or nodes found in schema builder")
-          return
-
-        # Get node and relationship types from the configured schema
-        node_types = [node.name for node in schema.nodes]
-        for node_type in node_types:
-          df_attr_name = self._convert_schema_name_to_dataframe_attr(
-            node_type, is_node=True
-          )
-          try:
-            df = self.schema_adapter.create_schema_compatible_dataframe(node_type)
-            setattr(self, df_attr_name, df)
-            logger.debug(f"Initialized DataFrame: {df_attr_name} for node {node_type}")
-          except Exception as e:
-            logger.error(f"Failed to create DataFrame for node {node_type}: {e}")
-            raise ValueError(
-              f"Failed to initialize DataFrame for node type '{node_type}': {e}. "
-              f"Schema-based initialization is required."
-            )
-
-        # Initialize DataFrames for all relationship types
-        if schema.relationships:
-          relationship_types = [rel.name for rel in schema.relationships]
-          for rel_type in relationship_types:
-            df_attr_name = self._convert_schema_name_to_dataframe_attr(
-              rel_type, is_node=False
-            )
-            try:
-              df = self.schema_adapter.create_schema_compatible_dataframe(rel_type)
-              setattr(self, df_attr_name, df)
-              logger.debug(
-                f"Initialized DataFrame: {df_attr_name} for relationship {rel_type}"
-              )
-            except Exception as e:
-              logger.error(
-                f"Failed to create DataFrame for relationship {rel_type}: {e}"
-              )
-              raise ValueError(
-                f"Failed to initialize DataFrame for relationship type '{rel_type}': {e}. "
-                f"Schema-based initialization is required."
-              )
-
-          logger.debug(
-            f"All DataFrames initialized dynamically: {len(node_types)} nodes, {len(relationship_types)} relationships"
-          )
-
-        # Initialize additional DataFrames that represent specialized relationships
-        # These may not follow standard schema naming patterns but are needed for XBRL dimension handling
-        additional_relationship_dfs = {
-          "fact_has_dimension_rel_df": "Relationship: fact -> dimension",
-          "fact_dimension_axis_element_rel_df": "Relationship: dimension -> axis element",
-          "fact_dimension_member_element_rel_df": "Relationship: dimension -> member element",
-          "fact_set_contains_facts_df": "Relationship: fact set -> facts",
-        }
-
-        for df_name, description in additional_relationship_dfs.items():
-          if not hasattr(self, df_name):
-            # Try to create a proper DataFrame with schema
-            try:
-              # Extract the relationship type from the df_name and map to correct schema name
-              # fact_has_dimension_rel_df -> FACT_HAS_DIMENSION
-              if df_name == "fact_has_dimension_rel_df":
-                schema_name = "FACT_HAS_DIMENSION"
-              elif df_name == "fact_dimension_axis_element_rel_df":
-                schema_name = "FACT_DIMENSION_AXIS_ELEMENT"
-              elif df_name == "fact_dimension_member_element_rel_df":
-                schema_name = "FACT_DIMENSION_MEMBER_ELEMENT"
-              elif df_name == "fact_set_contains_facts_df":
-                schema_name = "FACT_SET_CONTAINS_FACT"
-              else:
-                # Fallback to original logic for other cases
-                rel_type = df_name.replace("_df", "").replace("_rel", "")
-                parts = rel_type.split("_")
-                schema_name = "".join(p.capitalize() for p in parts) + "Rel"
-
-              df = self.schema_adapter.create_schema_compatible_dataframe(schema_name)
-
-              setattr(self, df_name, df)
-              logger.debug(
-                f"Initialized additional relationship DataFrame: {df_name} ({description})"
-              )
-            except Exception:
-              logger.warning(
-                f"Could not create schema-based DataFrame for {df_name}, trying empty with proper columns"
-              )
-              # Create with minimal columns that are expected
-              import pandas as pd
-
-              if "fact_has_dimension_rel" in df_name:
-                # FACT_HAS_DIMENSION relationship needs these exact columns
-                df = pd.DataFrame(columns=["from", "to"])
-              elif "axis_element" in df_name:
-                df = pd.DataFrame(columns=["from", "to"])
-              elif "member_element" in df_name:
-                df = pd.DataFrame(columns=["from", "to"])
-              elif "fact_set_contains" in df_name:
-                df = pd.DataFrame(columns=["from", "to"])
-              else:
-                df = pd.DataFrame(columns=["from", "to"])
-              setattr(self, df_name, df)
-              logger.debug(
-                f"Initialized {df_name} with basic columns: {list(df.columns)}"
-              )
-
-      except Exception as e:
-        logger.error(f"Failed to initialize DataFrames dynamically: {e}")
-        raise ValueError(
-          f"Failed to initialize DataFrames with schema adapter: {e}. "
-          f"Schema-based initialization is required for XBRL processing."
-        )
-    else:
-      # No fallback - schema config is required
-      raise ValueError(
-        "Schema configuration is required for XBRL processing. "
-        "No manual DataFrame fallback is supported. "
-        "Please provide a valid schema_config parameter."
-      )
-
-  def _create_dynamic_dataframe_mapping(self):
-    """Create mapping from schema names to DataFrame attributes for dynamic file saving."""
-    # Generate mapping dynamically from schema
-    self.schema_to_dataframe_mapping = {}
-
-    if not self.schema_adapter:
-      logger.warning("No schema adapter available for dynamic mapping")
-      return
-
-    try:
-      # Use schema from the adapter which was initialized with the correct config
-      schema_builder = self.schema_adapter.schema_builder
-      schema = schema_builder.schema
-
-      if not schema:
-        logger.warning("No schema available for dynamic mapping")
-        return
-
-      # Map all node types dynamically
-      if schema.nodes:
-        for node in schema.nodes:
-          node_type = node.name
-          # Convert node name to DataFrame attribute name (PascalCase -> snake_case + _df)
-          df_attr_name = self._convert_schema_name_to_dataframe_attr(
-            node_type, is_node=True
-          )
-
-          # Check if we actually have this DataFrame attribute
-          if hasattr(self, df_attr_name):
-            self.schema_to_dataframe_mapping[node_type] = df_attr_name
-            logger.debug(f"Mapped node {node_type} -> {df_attr_name}")
-          else:
-            logger.debug(
-              f"DataFrame attribute {df_attr_name} not found for node {node_type}"
-            )
-
-      # Map all relationship types dynamically
-      if schema.relationships:
-        for rel in schema.relationships:
-          rel_type = rel.name
-          # Convert relationship name to DataFrame attribute name
-          df_attr_name = self._convert_schema_name_to_dataframe_attr(
-            rel_type, is_node=False
-          )
-
-          # Check if we actually have this DataFrame attribute
-          if hasattr(self, df_attr_name):
-            self.schema_to_dataframe_mapping[rel_type] = df_attr_name
-            logger.debug(f"Mapped relationship {rel_type} -> {df_attr_name}")
-          else:
-            logger.debug(
-              f"DataFrame attribute {df_attr_name} not found for relationship {rel_type}"
-            )
-
-      # Add explicit mappings for fact dimension relationships that may not be in the base schema
-      additional_mappings = {
-        "FACT_DIMENSION_AXIS_ELEMENT": "fact_dimension_axis_element_rel_df",
-        "FACT_DIMENSION_MEMBER_ELEMENT": "fact_dimension_member_element_rel_df",
-        "FACT_SET_CONTAINS_FACT": "fact_set_contains_facts_df",
-      }
-
-      for schema_name, df_attr in additional_mappings.items():
-        if hasattr(self, df_attr):
-          self.schema_to_dataframe_mapping[schema_name] = df_attr
-          logger.debug(f"Added explicit mapping for {schema_name} -> {df_attr}")
-
-      logger.debug(
-        f"Dynamic DataFrame mapping created: {len(self.schema_to_dataframe_mapping)} mappings"
-      )
-
-    except Exception as e:
-      logger.error(f"Failed to create dynamic DataFrame mapping: {e}")
-      # Create minimal fallback mapping for core types only
-      self.schema_to_dataframe_mapping = {
-        "Entity": "entities_df",
-        "Report": "reports_df",
-        "Fact": "facts_df",
-        "ENTITY_HAS_REPORT": "entity_reports_df",
-        "REPORT_HAS_FACT": "report_facts_df",
-      }
-      logger.warning("Using fallback minimal DataFrame mapping")
-
-  def _convert_schema_name_to_dataframe_attr(
-    self, schema_name: str, is_node: bool
-  ) -> str:
-    """Convert schema name to DataFrame attribute name following current naming conventions."""
-    if is_node:
-      # Node naming: Entity -> entities_df, FactSet -> fact_sets_df
-      # Convert PascalCase to snake_case, add plural and _df suffix
-      snake_case = self._camel_to_snake(schema_name)
-      plural = self._make_plural(snake_case)
-      return f"{plural}_df"
-    else:
-      # Relationship naming: FACT_HAS_ELEMENT -> fact_elements_df
-      # Special case for FACT_HAS_DIMENSION to avoid conflict with FactDimension node
-      if schema_name == "FACT_HAS_DIMENSION":
-        return "fact_has_dimension_rel_df"  # Use explicit relationship suffix to distinguish from node
-
-      # Convert to snake_case and create descriptive name
-      parts = schema_name.lower().split("_")
-      if len(parts) >= 3 and parts[1] == "has":
-        # Pattern: ENTITY_HAS_PROPERTY -> entity_properties_df
-        entity = parts[0]
-        property_name = "_".join(parts[2:])
-        plural_property = self._make_plural(property_name)
-        return f"{entity}_{plural_property}_df"
-      else:
-        # General pattern: convert to snake_case + _df
-        snake_case = schema_name.lower()
-        return f"{snake_case}_df"
-
-  def _camel_to_snake(self, name: str) -> str:
-    """Convert PascalCase to snake_case."""
-
-    # Insert underscore before uppercase letters (except first)
-    s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
-
-  def _make_plural(self, word: str) -> str:
-    """Convert word to plural form following simple English rules."""
-    if word.endswith("y"):
-      return word[:-1] + "ies"
-    elif word.endswith(("s", "x", "z", "ch", "sh")):
-      return word + "es"
-    else:
-      return word + "s"
-
-  def _convert_schema_name_to_filename(self, schema_name: str) -> str:
-    """Convert schema name to appropriate filename using exact table names."""
-    # Use exact schema names for file naming - no conversion to snake_case
-    # This ensures directories and files match exact table names like Entity, FactDimension, etc.
-    return f"{schema_name}.parquet"
-
   def safe_concat(
     self, existing_df: pd.DataFrame, new_df: pd.DataFrame
   ) -> pd.DataFrame:
-    """Safely concatenate DataFrames, handling empty DataFrame warnings"""
-    if new_df.empty:
-      return existing_df
-    if existing_df.empty:
-      return new_df.copy()
-
-    # Fix for pandas FutureWarning: explicitly handle dtypes when concatenating
-    # Ensure consistent dtypes between DataFrames before concatenation
-    for col in new_df.columns:
-      if col in existing_df.columns:
-        # Convert to common dtype if they differ
-        if existing_df[col].dtype != new_df[col].dtype:
-          # Use object dtype as fallback for mixed types
-          common_dtype = (
-            "object"
-            if existing_df[col].dtype == "object" or new_df[col].dtype == "object"
-            else existing_df[col].dtype
-          )
-          existing_df[col] = existing_df[col].astype(common_dtype)
-          new_df[col] = new_df[col].astype(common_dtype)
-
-    return pd.concat([existing_df, new_df], ignore_index=True, sort=False)
-
-  def _should_externalize_value(self, value):
-    """Determine if a value should be externalized to S3."""
-    if not self.externalize_large_values or not value:
-      return False
-
-    value_str = str(value)
-
-    # Check if it's HTML content (most important criteria)
-    if "<" in value_str and ">" in value_str:
-      return True
-
-    # Check if it exceeds size threshold
-    if len(value_str) > self.externalization_threshold:
-      return True
-
-    return False
-
-  def _queue_value_for_s3(self, value, fact_id, report_data):
-    """
-    Queue large value for batch upload to S3 with content-based caching.
-
-    Args:
-      value: The value to externalize
-      fact_id: The fact identifier (for unique S3 key)
-      report_data: Report metadata for S3 path organization
-
-    Returns:
-      dict: Contains the expected external URL and metadata
-    """
-    if not self.s3_client or not self.sec_textblocks_bucket:
-      logger.warning("S3 client not initialized, cannot externalize value")
-      return None
-
-    try:
-      value_str = str(value)
-
-      # Calculate content hash for caching
-      content_hash = hashlib.sha256(value_str.encode()).hexdigest()
-
-      # Check if this content was already uploaded (cache hit)
-      if content_hash in self.s3_content_cache:
-        cached_result = self.s3_content_cache[content_hash]
-        logger.debug(
-          f"Cache hit for content hash {content_hash[:8]}, reusing URL: {cached_result['url']}"
-        )
-        return cached_result
-
-      # Determine content type
-      content_type = (
-        "text/html" if "<" in value_str and ">" in value_str else "text/plain"
-      )
-      file_extension = "html" if content_type == "text/html" else "txt"
-
-      # Build S3 key using content hash for deduplication
-      # Use content hash in filename to enable content-based deduplication
-      s3_key = self._generate_s3_key_with_hash(
-        content_hash, report_data, file_extension
-      )
-
-      # Check if this key already exists in S3 (persistent cache)
-      if self._check_s3_object_exists(s3_key):
-        logger.debug(
-          f"S3 object already exists for content hash {content_hash[:8]}: {s3_key}"
-        )
-        # Object exists, just return the URL without re-uploading
-        if self.sec_textblocks_cdn_url:
-          external_url = f"{self.sec_textblocks_cdn_url}/{s3_key}"
-        else:
-          external_url = (
-            f"https://{self.sec_textblocks_bucket}.s3.amazonaws.com/{s3_key}"
-          )
-
-        result = {
-          "url": external_url,
-          "value_type": "external",
-          "content_type": content_type,
-        }
-
-        # Cache for future use in this session
-        self.s3_content_cache[content_hash] = result
-        return result
-
-      # Queue for batch upload (new content)
-      self.s3_upload_queue.append((value_str, self.sec_textblocks_bucket, s3_key))
-
-      # Generate expected URL
-      if self.sec_textblocks_cdn_url:
-        external_url = f"{self.sec_textblocks_cdn_url}/{s3_key}"
-      else:
-        external_url = f"https://{self.sec_textblocks_bucket}.s3.amazonaws.com/{s3_key}"
-
-      # Store mapping for later validation
-      self.s3_upload_map[fact_id] = {
-        "url": external_url,
-        "key": s3_key,
-        "content_type": content_type,
-      }
-
-      result = {
-        "url": external_url,
-        "value_type": "external",
-        "content_type": content_type,
-      }
-
-      # Cache for future use in this session
-      self.s3_content_cache[content_hash] = result
-
-      return result
-
-    except Exception as e:
-      logger.error(f"Error queueing value for S3: {e}")
-      return None
-
-  def _process_batch_s3_uploads(self):
-    """Process all queued S3 uploads in batch."""
-    if not self.s3_upload_queue:
-      return
-
-    if not self.s3_client:
-      logger.warning("S3 client not initialized, cannot process batch uploads")
-      return
-
-    logger.info(f"Starting batch upload of {len(self.s3_upload_queue)} items to S3")
-
-    # Use batch upload method from S3 client
-    results = self.s3_client.batch_upload_strings(
-      items=self.s3_upload_queue,
-      content_type=None,  # Content type varies per item
-      max_workers=10,  # Parallel uploads
-      max_retries=3,
-    )
-
-    # Log results
-    successful = sum(1 for success in results.values() if success)
-    failed = len(results) - successful
-
-    if failed > 0:
-      logger.warning(
-        f"Batch S3 upload completed with {failed} failures out of {len(results)} total"
-      )
-      # Log failed keys for debugging
-      for key, success in results.items():
-        if not success:
-          logger.error(f"Failed to upload: {key}")
-    else:
-      logger.info(f"Successfully uploaded all {successful} items to S3")
-
-    # Clear the queue
-    self.s3_upload_queue = []
-
-  def _generate_s3_key(self, fact_id, report_data, file_extension):
-    """Generate S3 key for externalized content."""
-    # Extract metadata for S3 path
-    year = None
-    cik = None
-    accession = None
-
-    if report_data:
-      # Extract year from filing date
-      filing_date = report_data.get("filing_date")
-      if filing_date:
-        year = filing_date[:4]
-
-      # Extract CIK from entity data if available
-      if self.entity_data:
-        cik = self.entity_data.get("cik")
-
-      # Extract accession number
-      accession = report_data.get("accession_number")
-
-    # Fallback to generic path if metadata missing
-    if not year:
-      year = datetime.now().strftime("%Y")
-    if not cik:
-      cik = "unknown"
-    if not accession:
-      accession = "unknown"
-
-    # Build S3 key
-    # Shorten fact_id for readability
-    fact_id_short = fact_id[:8] if len(fact_id) > 8 else fact_id
-    s3_key = f"{year}/{cik}/{accession}/fact_{fact_id_short}.{file_extension}"
-
-    return s3_key
-
-  def _generate_s3_key_with_hash(self, content_hash, report_data, file_extension):
-    """Generate S3 key using content hash for deduplication."""
-    # Extract metadata for S3 path
-    year = None
-    cik = None
-    accession = None
-
-    if report_data:
-      # Extract year from filing date
-      filing_date = report_data.get("filing_date")
-      if filing_date:
-        year = filing_date[:4]
-
-      # Extract CIK from entity data if available
-      if self.entity_data:
-        cik = self.entity_data.get("cik")
-
-      # Extract accession number
-      accession = report_data.get("accession_number")
-
-    # Fallback to generic path if metadata missing
-    if not year:
-      year = datetime.now().strftime("%Y")
-    if not cik:
-      cik = "unknown"
-    if not accession:
-      accession = "unknown"
-
-    # Build S3 key using content hash
-    # Use first 12 chars of hash for reasonable uniqueness + readability
-    content_hash_short = content_hash[:12]
-    s3_key = f"{year}/{cik}/{accession}/fact_{content_hash_short}.{file_extension}"
-
-    return s3_key
-
-  def _check_s3_object_exists(self, s3_key):
-    """Check if an S3 object already exists."""
-    if not self.s3_client or not self.sec_textblocks_bucket:
-      return False
-
-    try:
-      return self.s3_client.object_exists(self.sec_textblocks_bucket, s3_key)
-    except Exception as e:
-      logger.debug(f"Error checking S3 object existence: {e}")
-      return False
-
-  def _externalize_value_to_s3(self, value, fact_id, report_data):
-    """
-    Upload large value to S3 and return the CDN URL.
-    (Legacy method - kept for backward compatibility)
-
-    Args:
-      value: The value to externalize
-      fact_id: The fact identifier (for unique S3 key)
-      report_data: Report metadata for S3 path organization
-
-    Returns:
-      dict: Contains the external URL and metadata
-    """
-    if not self.s3_client or not self.sec_textblocks_bucket:
-      logger.warning("S3 client not initialized, cannot externalize value")
-      return None
-
-    try:
-      value_str = str(value)
-
-      # Determine content type
-      content_type = (
-        "text/html" if "<" in value_str and ">" in value_str else "text/plain"
-      )
-      file_extension = "html" if content_type == "text/html" else "txt"
-
-      # Build S3 key using report metadata
-      # Format: year/cik/accession/fact_{fact_id_short}.{ext}
-      year = None
-      cik = None
-      accession = None
-
-      if report_data:
-        # Extract year from filing date
-        filing_date = report_data.get("filing_date")
-        if filing_date:
-          year = filing_date[:4]
-
-        # Extract CIK from entity data if available
-        if self.entity_data:
-          cik = self.entity_data.get("cik")
-
-        # Extract accession number
-        accession = report_data.get("accession_number")
-
-      # Fallback to generic path if metadata missing
-      if not year:
-        year = datetime.now().strftime("%Y")
-      if not cik:
-        cik = "unknown"
-      if not accession:
-        accession = "unknown"
-
-      # Use first 8 chars of fact_id for filename
-      fact_id_short = fact_id[:8] if len(fact_id) > 8 else fact_id
-      s3_key = f"{year}/{cik}/{accession}/fact_{fact_id_short}.{file_extension}"
-
-      # Upload to S3
-      logger.debug(
-        f"Uploading large value to S3: s3://{self.sec_textblocks_bucket}/{s3_key}"
-      )
-      self.s3_client.upload_string(
-        content=value_str,
-        bucket=self.sec_textblocks_bucket,
-        key=s3_key,
-        content_type=content_type,
-      )
-
-      # Return the CDN URL if available, otherwise S3 URL
-      if self.sec_textblocks_cdn_url:
-        external_url = f"{self.sec_textblocks_cdn_url}/{s3_key}"
-      else:
-        external_url = f"s3://{self.sec_textblocks_bucket}/{s3_key}"
-
-      return {
-        "url": external_url,
-        "value_type": "external_resource",
-        "value_size": len(value_str),
-        "content_type": content_type,
-      }
-
-    except Exception as e:
-      logger.error(f"Failed to externalize value to S3: {e}")
-      return None
+    """Safely concatenate DataFrames (delegates to xbrl.naming_utils)."""
+    return safe_concat(existing_df, new_df)
 
   def process(self):
     """Process XBRL data and output to parquet files."""
@@ -844,624 +223,7 @@ class XBRLGraphProcessor:
 
   def output_parquet_files(self):
     """Output all DataFrames to parquet files organized in nodes/ and relationships/ subdirectories."""
-    logger.debug(f"Creating output directory: {self.output_dir}")
-    self.output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create subdirectories for nodes and relationships
-    nodes_dir = self.output_dir / "nodes"
-    relationships_dir = self.output_dir / "relationships"
-    nodes_dir.mkdir(parents=True, exist_ok=True)
-    relationships_dir.mkdir(parents=True, exist_ok=True)
-
-    logger.debug("Created nodes/ and relationships/ subdirectories")
-
-    if self.schema_adapter and self.ingest_adapter:
-      # Schema-driven approach: save all DataFrames using schema names and patterns
-      logger.debug("Using schema-driven file output with proper directory organization")
-
-      for schema_name, dataframe_attr in self.schema_to_dataframe_mapping.items():
-        if hasattr(self, dataframe_attr):
-          df = getattr(self, dataframe_attr)
-          # Convert schema name to lowercase with underscores for consistent naming
-          filename = self._convert_schema_name_to_filename(schema_name)
-          # Use schema-driven save with correct table name and directory
-          self._save_df_to_parquet_schema_driven(df, filename, schema_name)
-          logger.debug(f"Saved {schema_name} -> {filename} ({len(df)} rows)")
-
-    else:
-      # Fallback approach (should not be reached due to required schema config)
-      logger.warning(
-        "Schema adapter not available, using fallback file output with directory organization"
-      )
-
-      # Node tables - save to nodes/ subdirectory with exact table names
-      # Use exact schema table names as directory names
-      self._save_df_to_parquet(self.entities_df, "nodes/Entity.parquet")
-      self._save_df_to_parquet(self.reports_df, "nodes/Report.parquet")
-      self._save_df_to_parquet(self.facts_df, "nodes/Fact.parquet")
-      self._save_df_to_parquet(self.units_df, "nodes/Unit.parquet")
-      self._save_df_to_parquet(self.fact_dimensions_df, "nodes/FactDimension.parquet")
-      self._save_df_to_parquet(self.elements_df, "nodes/Element.parquet")
-      self._save_df_to_parquet(self.labels_df, "nodes/Label.parquet")
-      self._save_df_to_parquet(self.references_df, "nodes/Reference.parquet")
-      self._save_df_to_parquet(self.structures_df, "nodes/Structure.parquet")
-      self._save_df_to_parquet(self.associations_df, "nodes/Association.parquet")
-      self._save_df_to_parquet(self.periods_df, "nodes/Period.parquet")
-      self._save_df_to_parquet(self.taxonomies_df, "nodes/Taxonomy.parquet")
-      self._save_df_to_parquet(self.fact_sets_df, "nodes/FactSet.parquet")
-      # Note: TaxonomyLabel and TaxonomyReference are stored as Label and Reference
-      # with relationships to Taxonomy nodes
-      self._save_df_to_parquet(self.taxonomy_labels_df, "nodes/Label.parquet")
-      self._save_df_to_parquet(self.taxonomy_references_df, "nodes/Reference.parquet")
-
-      # Relationship tables - save to relationships/ subdirectory with exact table names
-      self._save_df_to_parquet(
-        self.entity_reports_df, "relationships/ENTITY_HAS_REPORT.parquet"
-      )
-      self._save_df_to_parquet(
-        self.report_facts_df, "relationships/REPORT_HAS_FACT.parquet"
-      )
-      self._save_df_to_parquet(
-        self.report_fact_sets_df, "relationships/REPORT_HAS_FACT_SET.parquet"
-      )
-      self._save_df_to_parquet(
-        self.report_uses_taxonomy_df, "relationships/REPORT_USES_TAXONOMY.parquet"
-      )
-      self._save_df_to_parquet(
-        self.fact_units_df, "relationships/FACT_HAS_UNIT.parquet"
-      )
-
-      # Save fact_has_dimension relationship
-      if (
-        hasattr(self, "fact_has_dimension_rel_df")
-        and not self.fact_has_dimension_rel_df.empty
-      ):
-        self._save_df_to_parquet(
-          self.fact_has_dimension_rel_df, "relationships/FACT_HAS_DIMENSION.parquet"
-        )
-
-      self._save_df_to_parquet(
-        self.fact_entities_df, "relationships/FACT_HAS_ENTITY.parquet"
-      )
-      self._save_df_to_parquet(
-        self.fact_elements_df, "relationships/FACT_HAS_ELEMENT.parquet"
-      )
-      self._save_df_to_parquet(
-        self.fact_periods_df, "relationships/FACT_HAS_PERIOD.parquet"
-      )
-      self._save_df_to_parquet(
-        self.fact_set_contains_facts_df, "relationships/FACT_SET_CONTAINS_FACT.parquet"
-      )
-      self._save_df_to_parquet(
-        self.element_labels_df, "relationships/ELEMENT_HAS_LABEL.parquet"
-      )
-      self._save_df_to_parquet(
-        self.element_references_df, "relationships/ELEMENT_HAS_REFERENCE.parquet"
-      )
-      self._save_df_to_parquet(
-        self.structure_taxonomies_df, "relationships/STRUCTURE_HAS_TAXONOMY.parquet"
-      )
-      self._save_df_to_parquet(
-        self.taxonomy_labels_df, "relationships/TAXONOMY_HAS_LABEL.parquet"
-      )
-      self._save_df_to_parquet(
-        self.taxonomy_references_df, "relationships/TAXONOMY_HAS_REFERENCE.parquet"
-      )
-      self._save_df_to_parquet(
-        self.structure_associations_df,
-        "relationships/STRUCTURE_HAS_ASSOCIATION.parquet",
-      )
-      self._save_df_to_parquet(
-        self.association_from_elements_df,
-        "relationships/ASSOCIATION_HAS_FROM_ELEMENT.parquet",
-      )
-      self._save_df_to_parquet(
-        self.association_to_elements_df,
-        "relationships/ASSOCIATION_HAS_TO_ELEMENT.parquet",
-      )
-      self._save_df_to_parquet(
-        self.fact_dimension_axis_element_rel_df,
-        "relationships/FACT_DIMENSION_AXIS_ELEMENT.parquet",
-      )
-      self._save_df_to_parquet(
-        self.fact_dimension_member_element_rel_df,
-        "relationships/FACT_DIMENSION_MEMBER_ELEMENT.parquet",
-      )
-
-    logger.info("All parquet files have been saved successfully")
-
-  def _save_df_to_parquet_schema_driven(self, df, filename, schema_name):
-    """Save a DataFrame to parquet using schema-driven approach with correct table name and directory."""
-    if not df.empty:
-      # Fix column types for specific tables with known type issues
-      # These columns should always be STRING even when all values are null
-      if schema_name == "Entity":
-        # List of string columns in Entity that may be null
-        string_columns = [
-          "ein",
-          "tax_id",
-          "ticker",
-          "exchange",  # Stock exchange
-          "name",
-          "legal_name",
-          "industry",
-          "entity_type",
-          "sic",
-          "sic_description",
-          "category",
-          "state_of_incorporation",
-          "fiscal_year_end",
-          "lei",  # Legal Entity Identifier
-          "phone",  # Main phone number
-          "website",
-          "uri",
-          "scheme",
-          "cik",
-          "status",
-          "parent_entity_id",
-        ]
-        for col in string_columns:
-          if col in df.columns:
-            # Special handling for EIN/tax_id to preserve leading zeros
-            if col in ["ein", "tax_id"]:
-              # Convert numeric EINs to string with proper zero-padding
-              # EINs are 9 digits and may have leading zeros
-              df[col] = df[col].apply(
-                lambda x: str(int(x)).zfill(9)
-                if pd.notna(x) and str(x).strip() != ""
-                else None
-              )
-            # Ensure all string columns are object type for parquet
-            df[col] = df[col].astype("object")
-      elif schema_name == "Unit":
-        # List of string columns in Unit that may be null
-        string_columns = ["numerator_uri", "denominator_uri", "uri", "measure", "value"]
-        for col in string_columns:
-          if col in df.columns:
-            df[col] = df[col].astype("object")
-      elif schema_name == "Report":
-        # List of string columns in Report that may be null
-        string_columns = [
-          "name",
-          "uri",
-          "accession_number",
-          "form",
-          "xbrl_processor_version",
-        ]
-        for col in string_columns:
-          if col in df.columns:
-            df[col] = df[col].astype("object")
-      elif schema_name == "Association":
-        # Ensure weight is always DOUBLE type
-        if "weight" in df.columns:
-          df["weight"] = df["weight"].astype(
-            "float64"
-          )  # float64 maps to DOUBLE in parquet
-
-      # Use the actual schema name for schema completeness check
-      if self.schema_adapter:
-        logger.debug(
-          f"Ensuring schema completeness for {schema_name} (from {filename})"
-        )
-        logger.debug(
-          f"DataFrame before schema completeness: {len(df.columns)} columns: {list(df.columns)}"
-        )
-        df = self._ensure_schema_completeness(df, schema_name)
-        logger.debug(
-          f"DataFrame after schema completeness: {len(df.columns)} columns: {list(df.columns)}"
-        )
-
-      # Apply column standardization if enabled
-      if self.enable_column_standardization:
-        df = self._standardize_dataframe_columns(df, schema_name)
-
-      # Determine if this is a relationship table
-      is_relationship = (
-        schema_name in self.ingest_adapter.get_all_relationship_tables()
-        if self.ingest_adapter
-        else False
-      )
-
-      # Apply deduplication for all node types to prevent primary key violations
-      # Only deduplicate if the dataframe has an 'identifier' column and it's not a relationship
-      if "identifier" in df.columns and not is_relationship:
-        original_count = len(df)
-        df = df.drop_duplicates(subset=["identifier"], keep="first")
-        deduped_count = len(df)
-        if original_count != deduped_count:
-          logger.info(
-            f"Deduplicated {filename}: {original_count} -> {deduped_count} rows"
-          )
-
-      # Determine the appropriate subdirectory
-      subdir = "relationships" if is_relationship else "nodes"
-
-      # Generate filename using exact table name (schema_name)
-      # Use schema_name directly instead of converting through filename
-      final_filename = self._generate_standardized_filename(
-        schema_name, is_relationship
-      )
-
-      # Include subdirectory in filepath
-      filepath = self.output_dir / subdir / final_filename
-
-      # Debug: Log DataFrame info before saving to parquet
-      logger.debug(
-        f"Saving {schema_name} to {final_filename}: {len(df)} rows, {len(df.columns)} columns"
-      )
-      logger.debug(f"Columns in {schema_name}: {list(df.columns)}")
-
-      df.to_parquet(filepath, index=False)
-
-      if final_filename != filename:
-        logger.info(f"📝 Standardized filename: {filename} -> {final_filename}")
-      logger.debug(f"Saved {len(df)} rows to {filepath}")
-    else:
-      logger.debug(f"Skipping empty DataFrame for {filename}")
-
-  def _generate_standardized_filename(
-    self, base_name: str, is_relationship: bool = False
-  ) -> str:
-    """
-    Generate standardized filename based on filing information.
-
-    Args:
-        base_name: Base filename (e.g., "fact_dimensions")
-        is_relationship: Whether this is relationship data
-
-    Returns:
-        Standardized filename
-    """
-    if not self.enable_standardized_filenames and not self.enable_type_prefixes:
-      return f"{base_name}.parquet"
-
-    # Build filename components
-    components = []
-
-    # Add type prefix if enabled
-    if self.enable_type_prefixes:
-      prefix = "rel_" if is_relationship else "node_"
-      components.append(prefix)
-
-    # Add base name
-    components.append(base_name)
-
-    # Add filing metadata if standardized filenames are enabled
-    if self.enable_standardized_filenames and self.sec_filer and self.sec_report:
-      # Use filing date and CIK for uniqueness
-      date_str = getattr(self.sec_report, "filing_date", "").replace("-", "")
-      cik = getattr(self.sec_filer, "cik", "unknown")
-      if date_str and cik != "unknown":
-        components.extend([date_str, cik])
-
-    return "_".join(components) + ".parquet"
-
-  def _standardize_dataframe_columns(
-    self, df: pd.DataFrame, table_name: str
-  ) -> pd.DataFrame:
-    """
-    Standardize DataFrame column names to match target schema.
-
-    Args:
-        df: Input DataFrame
-        table_name: Target table name for column mapping
-
-    Returns:
-        DataFrame with standardized column names
-    """
-    if not self.enable_column_standardization or df.empty:
-      return df
-
-    # Column mappings for known problematic columns
-    column_mappings = {
-      # Column mappings would go here if needed
-      # Example: "Association": {"old_name": "new_name"}
-    }
-
-    if table_name in column_mappings:
-      mapping = column_mappings[table_name]
-      df = df.rename(columns=mapping)
-      if mapping:
-        logger.debug(f"Standardized columns for {table_name}: {mapping}")
-
-    return df
-
-  def _ensure_schema_completeness(self, df, table_name):
-    """
-    Ensure DataFrame has all schema-defined columns before saving to parquet.
-    This prevents missing columns during Kuzu ingestion.
-    """
-    try:
-      logger.debug(f"Checking schema completeness for table: {table_name}")
-      # Get schema information for this table
-      if not self.schema_adapter:
-        logger.warning(f"No schema adapter for table {table_name}")
-        return df
-      table_info = self.schema_adapter.get_schema_info(table_name)
-      logger.debug(f"Schema lookup result for {table_name}: {table_info['type']}")
-      if table_info["type"] == "unknown":
-        logger.warning(f"No schema found for table {table_name}, saving as-is")
-        return df
-
-      schema_info = table_info["schema"]
-
-      # Get expected columns from schema
-      expected_columns = set()
-
-      # For relationships, add foreign key columns
-      if table_info["type"] == "relationship":
-        expected_columns.update(["from", "to"])
-
-      # Add all schema property columns
-      for prop in schema_info["properties"]:
-        expected_columns.add(prop.name)
-
-      # Check which columns are missing
-      current_columns = set(df.columns)
-      missing_columns = expected_columns - current_columns
-
-      if missing_columns:
-        logger.debug(
-          f"Adding missing schema columns to {table_name}: {missing_columns}"
-        )
-
-        # Add missing columns with appropriate default values to prevent column dropping
-        for col in missing_columns:
-          # Find the property definition to get its type
-          prop_type = None
-          for prop in schema_info["properties"]:
-            if prop.name == col:
-              prop_type = prop.type.upper()
-              break
-
-          # Use non-null defaults based on type to prevent parquet from dropping columns
-          if prop_type in ["STRING", "VARCHAR", "TEXT"]:
-            df[col] = ""  # Empty string instead of None
-          elif prop_type in ["INT", "INT64", "INTEGER", "INT32"]:
-            df[col] = 0  # Zero instead of None
-          elif prop_type in ["DOUBLE", "FLOAT", "DECIMAL"]:
-            df[col] = 0.0  # Zero float instead of None
-          elif prop_type in ["BOOLEAN", "BOOL"]:
-            df[col] = False  # False instead of None
-          else:
-            # For dates/timestamps and unknown types, use None (they handle nulls better)
-            df[col] = None
-
-        # Reorder columns to match schema order (put foreign keys first for relationships)
-        ordered_columns = []
-        if table_info["type"] == "relationship":
-          if "from" in expected_columns:
-            ordered_columns.append("from")
-          if "to" in expected_columns:
-            ordered_columns.append("to")
-
-        # Add property columns in schema order
-        for prop in schema_info["properties"]:
-          if prop.name in expected_columns:
-            ordered_columns.append(prop.name)
-
-        # Add any extra columns that aren't in schema
-        extra_columns = current_columns - expected_columns
-        ordered_columns.extend(sorted(extra_columns))
-
-        # Reorder DataFrame columns
-        df = df[ordered_columns]
-
-        logger.debug(
-          f"Schema-complete {table_name} now has {len(df.columns)} columns: {list(df.columns)}"
-        )
-
-      return df
-
-    except Exception as e:
-      logger.warning(f"Failed to ensure schema completeness for {table_name}: {e}")
-      return df
-
-  def _save_df_to_parquet(self, df, filename):
-    """Save a DataFrame to parquet if it's not empty."""
-    if not df.empty:
-      # Fix column types for specific tables with known type issues
-      # These columns should always be STRING even when all values are null
-      if "Entity" in filename:
-        # List of string columns in Entity that may be null
-        string_columns = [
-          "ein",
-          "tax_id",
-          "ticker",
-          "exchange",  # Stock exchange
-          "name",
-          "legal_name",
-          "industry",
-          "entity_type",
-          "sic",
-          "sic_description",
-          "category",
-          "state_of_incorporation",
-          "fiscal_year_end",
-          "lei",  # Legal Entity Identifier
-          "phone",  # Main phone number
-          "website",
-          "uri",
-          "scheme",
-          "cik",
-          "status",
-          "parent_entity_id",
-          "created_at",  # Add timestamp fields
-          "updated_at",  # Add timestamp fields
-        ]
-        for col in string_columns:
-          if col in df.columns:
-            # Special handling for EIN/tax_id to preserve leading zeros
-            if col in ["ein", "tax_id"]:
-              # Convert numeric EINs to string with proper zero-padding
-              # EINs are 9 digits and may have leading zeros
-              df[col] = df[col].apply(
-                lambda x: str(int(x)).zfill(9)
-                if pd.notna(x) and str(x).strip() != ""
-                else ""  # Use empty string instead of None to preserve string type
-              )
-            else:
-              # For all other string columns, use empty string for null values
-              # This preserves string type in PyArrow even when all values would be null
-              df[col] = df[col].fillna("").astype("object")
-      elif "Unit" in filename:
-        # List of string columns in Unit that may be null
-        string_columns = ["numerator_uri", "denominator_uri", "uri", "measure", "value"]
-        for col in string_columns:
-          if col in df.columns:
-            # Ensure string type even when all values are null
-            df[col] = df[col].fillna("").astype("object")
-            df.loc[df[col] == "", col] = None
-      elif "Report" in filename:
-        # List of string columns in Report that may be null
-        string_columns = [
-          "name",
-          "uri",
-          "accession_number",
-          "form",
-          "xbrl_processor_version",
-          "filing_date",
-          "report_date",
-          "acceptance_date",
-          "period_end_date",
-          "entity_identifier",
-          "updated_at",
-        ]
-        for col in string_columns:
-          if col in df.columns:
-            # Ensure string type even when all values are null
-            df[col] = df[col].fillna("").astype("object")
-            df.loc[df[col] == "", col] = None
-      elif "Fact" in filename:
-        # List of string columns in Fact that may be null
-        string_columns = [
-          "identifier",
-          "uri",
-          "value",
-          "fact_type",
-          "decimals",
-          "value_type",
-          "content_type",  # This was causing issues
-        ]
-        for col in string_columns:
-          if col in df.columns:
-            # Ensure string type even when all values are null
-            df[col] = df[col].fillna("").astype("object")
-            df.loc[df[col] == "", col] = None
-      elif "Association" in filename:
-        # Ensure weight is always DOUBLE type
-        if "weight" in df.columns:
-          df["weight"] = df["weight"].astype(
-            "float64"
-          )  # float64 maps to DOUBLE in parquet
-      # Handle path components for subdirectory support
-      # If filename contains a path separator, extract the base name
-      if "/" in filename:
-        # Extract subdirectory and base filename
-        parts = filename.rsplit("/", 1)
-        subdir = parts[0]
-        base_filename = parts[1]
-      else:
-        subdir = ""
-        base_filename = filename
-
-      # Determine table name from filename for column standardization
-      base_name = base_filename.replace(".parquet", "")
-
-      # Handle relationship table name mapping for schema resolution
-      # Convert fact_has_dimension -> FactDimensionsRel to match schema mapping
-      if base_name == "fact_has_dimension":
-        table_name = "FactDimensionsRel"  # Maps to FACT_HAS_DIMENSION relationship
-      else:
-        # Use the original title case conversion for other tables
-        table_name = base_name.replace("_", " ").title().replace(" ", "")
-
-      # Ensure schema completeness if schema adapter is available
-      if self.schema_adapter:
-        logger.info(
-          f"Ensuring schema completeness for {table_name} (from {base_filename})"
-        )
-        logger.debug(
-          f"DataFrame before schema completeness: {len(df.columns)} columns: {list(df.columns)}"
-        )
-        df = self._ensure_schema_completeness(df, table_name)
-        logger.debug(
-          f"DataFrame after schema completeness: {len(df.columns)} columns: {list(df.columns)}"
-        )
-
-      # Apply column standardization if enabled
-      if self.enable_column_standardization:
-        df = self._standardize_dataframe_columns(df, table_name)
-
-      # Determine if this is a relationship table
-      is_relationship = (
-        table_name in self.ingest_adapter.get_all_relationship_tables()
-        if self.ingest_adapter
-        else False
-      )
-
-      # Apply deduplication for all node types to prevent primary key violations
-      # Only deduplicate if the dataframe has an 'identifier' column and it's not a relationship
-      if "identifier" in df.columns and not is_relationship:
-        original_count = len(df)
-        df = df.drop_duplicates(subset=["identifier"], keep="first")
-        deduped_count = len(df)
-        if original_count != deduped_count:
-          logger.info(
-            f"Deduplicated {base_filename}: {original_count} -> {deduped_count} rows"
-          )
-
-      # Generate filename (may be different if standardization is enabled)
-      base_name_clean = base_filename.replace(".parquet", "")
-      is_relationship = self._is_relationship_filename(base_name_clean)
-      final_filename = self._generate_standardized_filename(
-        base_name_clean, is_relationship
-      )
-
-      # Construct filepath with subdirectory if provided
-      if subdir:
-        filepath = self.output_dir / subdir / final_filename
-      else:
-        filepath = self.output_dir / final_filename
-
-      # Debug: Log DataFrame info before saving to parquet
-      logger.info(
-        f"Saving {table_name} to {final_filename}: {len(df)} rows, {len(df.columns)} columns"
-      )
-      logger.debug(f"Columns in {table_name}: {list(df.columns)}")
-
-      df.to_parquet(filepath, index=False)
-
-      if final_filename != filename:
-        logger.info(f"📝 Standardized filename: {filename} -> {final_filename}")
-      logger.debug(f"Saved {len(df)} rows to {filepath}")
-    else:
-      logger.debug(f"Skipping empty DataFrame for {filename}")
-
-  def _is_relationship_filename(self, base_name: str) -> bool:
-    """Determine if a filename represents relationship data."""
-    relationship_patterns = [
-      "entity_reports",
-      "report_facts",
-      "report_fact_sets",
-      "report_taxonomies",
-      "fact_units",
-      "fact_has_dimension_rel",
-      "fact_entities",
-      "fact_elements",
-      "fact_periods",
-      "fact_set_facts",
-      "element_labels",
-      "element_references",
-      "structure_taxonomies",
-      "taxonomy_labels",
-      "taxonomy_references",
-      "structure_associations",
-      "association_from_elements",
-      "association_to_elements",
-      "fact_dimension_elements",
-    ]
-    return base_name in relationship_patterns
+    self.parquet_writer.write_all_dataframes(self.schema_to_dataframe_mapping, self)
 
   def make_entity(self):
     """Create the main entity (formerly entity) for this graph."""
@@ -1768,7 +530,7 @@ class XBRLGraphProcessor:
 
     # Create fact set - deterministic based on report URI
     factset_uri = f"{self.report_uri}#factset"
-    factset_id = generate_deterministic_uuid7(factset_uri, namespace="factset")
+    factset_id = create_factset_id(factset_uri)
     factset_data = {"identifier": factset_id}
     new_factset_df = pd.DataFrame([factset_data])
     self.fact_sets_df = self.safe_concat(self.fact_sets_df, new_factset_df)
@@ -1788,22 +550,13 @@ class XBRLGraphProcessor:
     self.report_factset_id = factset_id
     logger.debug(f"Created fact set with ID: {factset_id}")
 
-    # Initialize batch upload queue and cache for S3 externalization
-    self.s3_upload_queue = []  # List of (content, bucket, key) tuples
-    self.s3_upload_map = {}  # Map fact_id to expected S3 URL
-    self.s3_content_cache = {}  # Map content hash to S3 URL (avoids duplicate uploads)
-
     fact_count = 0
     for xfact in self.arelle_cntlr.facts:
       self.make_fact(xfact)
       fact_count += 1
 
     # Process batch S3 uploads if any were queued
-    if self.s3_upload_queue:
-      logger.info(
-        f"Processing batch upload of {len(self.s3_upload_queue)} large values to S3"
-      )
-      self._process_batch_s3_uploads()
+    self.textblock_externalizer.process_batch_uploads()
 
     logger.info(f"Processed {fact_count} facts")
 
@@ -1840,13 +593,13 @@ class XBRLGraphProcessor:
     content_type = None
 
     # Check if value should be externalized
-    if fact_value and self._should_externalize_value(fact_value):
+    if fact_value and self.textblock_externalizer.should_externalize(fact_value):
       logger.debug(
         f"Queueing large value ({len(fact_value)} bytes) for batch upload: {fact_uri}"
       )
       # Queue for batch upload instead of immediate upload
-      external_result = self._queue_value_for_s3(
-        fact_value, identifier, self.report_data
+      external_result = self.textblock_externalizer.queue_value_for_s3(
+        fact_value, identifier, self.entity_data, self.report_data
       )
 
       if external_result:
@@ -2045,9 +798,7 @@ class XBRLGraphProcessor:
 
         # Fact dimensions should be deterministic based on their axis and member
         fact_dim_uri = f"{self.report_uri}#dimension-{axis_uri}-{member_uri}"
-        fact_dim_identifier = generate_deterministic_uuid7(
-          fact_dim_uri, namespace="dimension"
-        )
+        fact_dim_identifier = create_dimension_id(fact_dim_uri)
 
         # Check if fact dimension already exists
         if (
@@ -2131,9 +882,7 @@ class XBRLGraphProcessor:
 
         # Fact dimensions should be deterministic based on their axis and member value
         fact_dim_uri = f"{self.report_uri}#dimension-{axis_uri}-typed-{typed_member}"
-        fact_dim_identifier = generate_deterministic_uuid7(
-          fact_dim_uri, namespace="dimension"
-        )
+        fact_dim_identifier = create_dimension_id(fact_dim_uri)
 
         # Check if fact dimension already exists
         if (
@@ -2610,7 +1359,7 @@ class XBRLGraphProcessor:
         )
         # Use deterministic UUID for structures to allow deduplication
         # Structures are specific to each filing (accession number)
-        structure_id = generate_deterministic_uuid7(
+        structure_id = create_structure_id(
           f"structure:{accession_number}#{structure_uri}"
         )
         network_uri = role_uri
@@ -2662,10 +1411,6 @@ class XBRLGraphProcessor:
         )
 
       self.make_associations(role_uri, arcrole, structure_data)
-
-      if arcrole == XbrlConst.parentChild:
-        logger.debug("Processing parent-child associations")
-        self.make_association_metadata(structure_data["identifier"])
 
   def make_associations(self, role_uri, arcrole, structure_data):
     logger.debug(f"Processing associations for role: {role_uri}")
@@ -2982,9 +1727,3 @@ class XBRLGraphProcessor:
           self.taxonomy_references_df = self.safe_concat(
             self.taxonomy_references_df, new_taxonomy_ref_df
           )
-
-  def make_association_metadata(self, structure_id):
-    logger.debug(f"Processing association metadata for structure: {structure_id}")
-    # Note: Association metadata classification will be handled during Kuzu import
-    # This method is simplified for parquet output
-    logger.debug("Association metadata processing completed (deferred to Kuzu import)")

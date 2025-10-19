@@ -13,6 +13,7 @@ from robosystems.processors.xbrl_graph import (
   XBRLGraphProcessor,
   XBRL_GRAPH_PROCESSOR_VERSION,
 )
+from robosystems.processors.xbrl import camel_to_snake, make_plural
 
 
 def setup_mock_schema_processor(mock_schema_processor, node_names=None, rel_names=None):
@@ -683,18 +684,18 @@ class TestS3Externalization:
 
     # Test HTML content detection
     html_value = "<div>Some HTML content</div>"
-    assert processor._should_externalize_value(html_value) is True
+    assert processor.textblock_externalizer.should_externalize(html_value) is True
 
     # Test large value detection
     large_value = "x" * 10000  # Assuming threshold is less than 10000
-    assert processor._should_externalize_value(large_value) is True
+    assert processor.textblock_externalizer.should_externalize(large_value) is True
 
     # Test small non-HTML value
     small_value = "Small plain text"
-    assert processor._should_externalize_value(small_value) is False
+    assert processor.textblock_externalizer.should_externalize(small_value) is False
 
     # Test None value
-    assert processor._should_externalize_value(None) is False
+    assert processor.textblock_externalizer.should_externalize(None) is False
 
   @patch("robosystems.processors.xbrl_graph.S3Client")
   @patch("robosystems.processors.xbrl_graph.SchemaProcessor")
@@ -713,13 +714,15 @@ class TestS3Externalization:
       schema_config=self.mock_schema_config,
     )
 
-    processor.entity_data = {"cik": "0000320193"}
+    entity_data = {"cik": "0000320193"}
     report_data = {
       "filing_date": "2023-11-03",
       "accession_number": "0000320193-23-000077",
     }
 
-    s3_key = processor._generate_s3_key("fact123456", report_data, "html")
+    s3_key = processor.textblock_externalizer._generate_s3_key(
+      "fact123456", entity_data, report_data, "html"
+    )
     assert s3_key == "2023/0000320193/0000320193-23-000077/fact_fact1234.html"
 
   @patch("robosystems.processors.xbrl_graph.S3Client")
@@ -741,7 +744,9 @@ class TestS3Externalization:
 
     # No entity_data or report_data
     current_year = datetime.datetime.now().strftime("%Y")
-    s3_key = processor._generate_s3_key("fact123456", None, "txt")
+    s3_key = processor.textblock_externalizer._generate_s3_key(
+      "fact123456", None, None, "txt"
+    )
     assert s3_key == f"{current_year}/unknown/unknown/fact_fact1234.txt"
 
 
@@ -833,8 +838,10 @@ class TestParquetOutput:
     nodes_dir = Path(self.temp_dir) / "nodes"
     nodes_dir.mkdir(exist_ok=True)
 
-    # Save using the internal method
-    processor._save_df_to_parquet(df_with_duplicates, "nodes/Entity.parquet")
+    # Save using the ParquetWriter's write_dataframe_schema_driven method
+    processor.parquet_writer.write_dataframe_schema_driven(
+      df_with_duplicates, "Entity.parquet", "Entity"
+    )
 
     # Load saved file and check deduplication
     saved_file = Path(self.temp_dir) / "nodes" / "Entity.parquet"
@@ -877,72 +884,53 @@ class TestDataFrameHelpers:
 
     # Test node conversions
     assert (
-      processor._convert_schema_name_to_dataframe_attr("Entity", True) == "entities_df"
+      processor.df_manager._convert_schema_name_to_dataframe_attr("Entity", True)
+      == "entities_df"
     )
     assert (
-      processor._convert_schema_name_to_dataframe_attr("FactSet", True)
+      processor.df_manager._convert_schema_name_to_dataframe_attr("FactSet", True)
       == "fact_sets_df"
     )
     assert (
-      processor._convert_schema_name_to_dataframe_attr("FactDimension", True)
+      processor.df_manager._convert_schema_name_to_dataframe_attr("FactDimension", True)
       == "fact_dimensions_df"
     )
 
     # Test relationship conversions
     assert (
-      processor._convert_schema_name_to_dataframe_attr("ENTITY_HAS_REPORT", False)
+      processor.df_manager._convert_schema_name_to_dataframe_attr(
+        "ENTITY_HAS_REPORT", False
+      )
       == "entity_reports_df"
     )
     assert (
-      processor._convert_schema_name_to_dataframe_attr("FACT_HAS_ELEMENT", False)
+      processor.df_manager._convert_schema_name_to_dataframe_attr(
+        "FACT_HAS_ELEMENT", False
+      )
       == "fact_elements_df"
     )
     # Special case for FACT_HAS_DIMENSION
     assert (
-      processor._convert_schema_name_to_dataframe_attr("FACT_HAS_DIMENSION", False)
+      processor.df_manager._convert_schema_name_to_dataframe_attr(
+        "FACT_HAS_DIMENSION", False
+      )
       == "fact_has_dimension_rel_df"
     )
 
-  @patch("robosystems.processors.xbrl_graph.SchemaProcessor")
-  @patch("robosystems.processors.xbrl_graph.SchemaIngestionProcessor")
-  def test_camel_to_snake_conversion(
-    self, mock_schema_ingestion_processor, mock_schema_processor
-  ):
+  def test_camel_to_snake_conversion(self):
     """Test PascalCase to snake_case conversion."""
-    setup_mock_schema_processor(mock_schema_processor)
-    mock_schema_ingestion_processor.return_value = MagicMock()
+    assert camel_to_snake("Entity") == "entity"
+    assert camel_to_snake("FactSet") == "fact_set"
+    assert camel_to_snake("FactDimension") == "fact_dimension"
+    assert camel_to_snake("TaxonomyLabel") == "taxonomy_label"
 
-    processor = XBRLGraphProcessor(
-      report_uri="file:///test.xml",
-      entityId="test",
-      output_dir=self.temp_dir,
-      schema_config=self.mock_schema_config,
-    )
-
-    assert processor._camel_to_snake("Entity") == "entity"
-    assert processor._camel_to_snake("FactSet") == "fact_set"
-    assert processor._camel_to_snake("FactDimension") == "fact_dimension"
-    assert processor._camel_to_snake("TaxonomyLabel") == "taxonomy_label"
-
-  @patch("robosystems.processors.xbrl_graph.SchemaProcessor")
-  @patch("robosystems.processors.xbrl_graph.SchemaIngestionProcessor")
-  def test_make_plural(self, mock_schema_ingestion_processor, mock_schema_processor):
+  def test_make_plural(self):
     """Test pluralization of words."""
-    setup_mock_schema_processor(mock_schema_processor)
-    mock_schema_ingestion_processor.return_value = MagicMock()
-
-    processor = XBRLGraphProcessor(
-      report_uri="file:///test.xml",
-      entityId="test",
-      output_dir=self.temp_dir,
-      schema_config=self.mock_schema_config,
-    )
-
-    assert processor._make_plural("entity") == "entities"
-    assert processor._make_plural("fact") == "facts"
-    assert processor._make_plural("taxonomy") == "taxonomies"
-    assert processor._make_plural("class") == "classes"
-    assert processor._make_plural("box") == "boxes"
+    assert make_plural("entity") == "entities"
+    assert make_plural("fact") == "facts"
+    assert make_plural("taxonomy") == "taxonomies"
+    assert make_plural("class") == "classes"
+    assert make_plural("box") == "boxes"
 
 
 class TestProcessMethod:
@@ -1153,7 +1141,7 @@ class TestSchemaCompleteness:
     df = pd.DataFrame([{"identifier": "id1"}])
 
     # Apply schema completeness
-    complete_df = processor._ensure_schema_completeness(df, "Entity")
+    complete_df = processor.df_manager.ensure_schema_completeness(df, "Entity")
 
     # Check that missing columns were added
     assert "name" in complete_df.columns
@@ -1201,7 +1189,9 @@ class TestSchemaCompleteness:
     df = pd.DataFrame([{"from": "entity1", "to": "report1"}])
 
     # Apply schema completeness
-    complete_df = processor._ensure_schema_completeness(df, "ENTITY_HAS_REPORT")
+    complete_df = processor.df_manager.ensure_schema_completeness(
+      df, "ENTITY_HAS_REPORT"
+    )
 
     # Check that foreign keys and properties are present
     assert "from" in complete_df.columns
