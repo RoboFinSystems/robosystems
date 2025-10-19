@@ -149,7 +149,7 @@ services:
       - NEO4J_USERNAME=neo4j
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - GRAPH_API_PORT=8002
-      - CLUSTER_TIER=shared
+      - CLUSTER_TIER=enterprise
     env_file:
       - .env
     ports:

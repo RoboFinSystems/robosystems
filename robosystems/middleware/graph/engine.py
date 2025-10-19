@@ -52,11 +52,37 @@ class Engine(GraphEngineInterface):
 
     self._connect()
 
+  @property
+  def conn(self):
+    """Get the Kuzu connection object."""
+    return self._conn
+
+  @property
+  def db(self):
+    """Get the Kuzu database object."""
+    return self._db
+
   def _connect(self) -> None:
     """Establish connection to graph database."""
     try:
       logger.debug(f"Connecting to graph database: {self.database_path}")
-      self._db = kuzu.Database(self.database_path, read_only=self.read_only)
+
+      # Determine checkpoint threshold based on database
+      # SEC has huge tables (Fact, Association) that need more frequent checkpoints
+      db_name = Path(self.database_path).stem
+      if db_name == "sec":
+        checkpoint_threshold = 134217728  # 128MB for SEC
+      else:
+        checkpoint_threshold = 536870912  # 512MB for regular databases
+
+      # Create database with auto_checkpoint enabled
+      # This is CRITICAL for ensuring data is visible after ingestion
+      self._db = kuzu.Database(
+        self.database_path,
+        read_only=self.read_only,
+        auto_checkpoint=True,
+        checkpoint_threshold=checkpoint_threshold,
+      )
       self._conn = kuzu.Connection(self._db)
       logger.info(f"Successfully connected to graph database: {self.database_path}")
     except Exception as e:

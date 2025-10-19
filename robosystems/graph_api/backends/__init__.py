@@ -16,8 +16,8 @@ def get_backend() -> Union[KuzuBackend, Neo4jBackend]:
     backend_type = env.BACKEND_TYPE
 
     if backend_type == "kuzu":
-      _backend_instance = KuzuBackend()
-      logger.info("Initialized Kuzu backend (Standard tier)")
+      _backend_instance = KuzuBackend(data_path=env.KUZU_DATABASE_PATH)
+      logger.info(f"Initialized Kuzu backend (Standard tier) at {env.KUZU_DATABASE_PATH}")
     elif backend_type == "neo4j_community":
       _backend_instance = Neo4jBackend(enterprise=False)
       logger.info("Initialized Neo4j Community backend (Professional/Enterprise tiers)")

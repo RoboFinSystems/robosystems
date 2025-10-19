@@ -15,7 +15,7 @@ class KuzuBackend(GraphBackend):
 
   def _get_engine(self, graph_id: str) -> Engine:
     if graph_id not in self._engines:
-      database_path = f"{self.data_path}/{graph_id}"
+      database_path = f"{self.data_path}/{graph_id}.kuzu"
       self._engines[graph_id] = Engine(database_path)
       logger.debug(f"Created Kuzu engine for {graph_id}: {database_path}")
     return self._engines[graph_id]
@@ -50,9 +50,12 @@ class KuzuBackend(GraphBackend):
       self._engines[database_name].close()
       del self._engines[database_name]
 
-    db_path = Path(f"{self.data_path}/{database_name}")
+    db_path = Path(f"{self.data_path}/{database_name}.kuzu")
     if db_path.exists():
-      shutil.rmtree(db_path)
+      if db_path.is_file():
+        db_path.unlink()
+      else:
+        shutil.rmtree(db_path)
       logger.info(f"Deleted Kuzu database for {database_name}")
     return True
 
@@ -60,7 +63,7 @@ class KuzuBackend(GraphBackend):
     db_path = Path(self.data_path)
     if not db_path.exists():
       return []
-    return [d.name for d in db_path.iterdir() if d.is_dir()]
+    return [f.stem for f in db_path.iterdir() if f.suffix == ".kuzu"]
 
   async def get_database_info(self, database_name: str) -> DatabaseInfo:
     engine = self._get_engine(database_name)
@@ -79,12 +82,14 @@ class KuzuBackend(GraphBackend):
     except Exception as e:
       logger.warning(f"Failed to get database stats for {database_name}: {e}")
 
-    db_path = Path(f"{self.data_path}/{database_name}")
-    size_bytes = (
-      sum(f.stat().st_size for f in db_path.rglob("*") if f.is_file())
-      if db_path.exists()
-      else 0
-    )
+    db_path = Path(f"{self.data_path}/{database_name}.kuzu")
+    if db_path.exists():
+      if db_path.is_file():
+        size_bytes = db_path.stat().st_size
+      else:
+        size_bytes = sum(f.stat().st_size for f in db_path.rglob("*") if f.is_file())
+    else:
+      size_bytes = 0
 
     return DatabaseInfo(
       name=database_name,
@@ -207,6 +212,11 @@ class KuzuBackend(GraphBackend):
     except Exception as checkpoint_error:
       logger.warning(f"Failed to execute checkpoint: {checkpoint_error}")
 
+    # CRITICAL: Force cleanup after ingestion to ensure data is immediately queryable
+    # This closes the Database object and removes it from cache, forcing the next
+    # query to create a fresh connection that sees all committed data
+    self.force_cleanup(graph_id)
+
     logger.info(
       f"Kuzu ingestion completed: {records_loaded:,} records in {duration:.2f}s"
     )
@@ -216,6 +226,41 @@ class KuzuBackend(GraphBackend):
       "duration_seconds": duration,
       "query": query,
     }
+
+  def force_cleanup(self, graph_id: str, aggressive: bool = True) -> None:
+    """
+    Force cleanup of all connections and database object for a specific database.
+
+    This is critical after ingestion operations to ensure:
+    1. All data is flushed to disk via checkpoint
+    2. Database object is closed to release buffer pool memory
+    3. Next query creates fresh connection that sees committed data
+
+    Args:
+        graph_id: The graph database to cleanup
+        aggressive: If True, use aggressive memory cleanup (garbage collection, malloc_trim)
+    """
+    if graph_id in self._engines:
+      engine = self._engines[graph_id]
+
+      # Close the engine (closes both connection and database)
+      engine.close()
+
+      # Remove from cache
+      del self._engines[graph_id]
+
+      logger.info(f"Force cleanup completed for {graph_id} - database object removed from cache")
+
+    if aggressive:
+      # Aggressive memory cleanup matching v1.0.1 behavior
+      import gc
+
+      # Force multiple rounds of garbage collection
+      for generation in range(3):
+        collected = gc.collect(generation)
+        logger.debug(f"GC generation {generation}: collected {collected} objects")
+
+      logger.info(f"Completed aggressive cleanup for {graph_id}")
 
   async def close(self) -> None:
     for engine in self._engines.values():

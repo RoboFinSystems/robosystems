@@ -378,6 +378,11 @@ class EnvConfig:
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
   GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
 
+  # Shared repository backend selection (dev/local only)
+  # In AWS environments, backend is determined by graph.yml tier configuration
+  # Values: "kuzu" or "neo4j"
+  GRAPH_SHARED_REPOSITORY_BACKEND = get_str_env("GRAPH_SHARED_REPOSITORY_BACKEND", "")
+
   # Graph API Timeouts and Limits (applies to all backends)
   GRAPH_HTTP_TIMEOUT = get_int_env("GRAPH_HTTP_TIMEOUT", DEFAULT_HTTP_TIMEOUT)
   GRAPH_QUERY_TIMEOUT = get_int_env("GRAPH_QUERY_TIMEOUT", DEFAULT_QUERY_TIMEOUT)
