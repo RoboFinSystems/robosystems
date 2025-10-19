@@ -12,8 +12,10 @@ from robosystems.utils import (
   ISO_8601_URI,
   ROLES_FILTERED,
 )
-from robosystems.processors.schema_processor import SchemaProcessor
-from robosystems.processors.schema_ingestion import SchemaIngestionProcessor
+from robosystems.processors.xbrl.schema_adapter import XBRLSchemaAdapter
+from robosystems.processors.xbrl.schema_config_generator import (
+  XBRLSchemaConfigGenerator,
+)
 from robosystems.processors.xbrl import (
   create_element_id,
   create_label_id,
@@ -98,10 +100,10 @@ class XBRLGraphProcessor:
     # Initialize schema adapters for dynamic DataFrame creation and filename generation
     if schema_config:
       logger.debug("Initializing schema adapters for schema-driven DataFrame creation")
-      self.schema_adapter = SchemaProcessor(schema_config)
+      self.schema_adapter = XBRLSchemaAdapter(schema_config)
       self.schema_adapter.print_schema_summary()
 
-      self.ingest_adapter = SchemaIngestionProcessor(schema_config)
+      self.ingest_adapter = XBRLSchemaConfigGenerator(schema_config)
 
       # Initialize DataFrame manager
       self.df_manager = DataFrameManager(

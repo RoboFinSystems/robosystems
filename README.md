@@ -250,42 +250,12 @@ The client factory layer provides intelligent routing between application code a
 
 ### GitHub Actions Workflows
 
-#### Primary Deployment Workflows
+All deployments automated through GitHub Actions with self-hosted runners for infrastructure operations
 
 - **`prod.yml`**: Production deployment orchestrator
-
-  - Triggered on release tags (e.g., `v1.0.0`)
-  - Full stack deployment with health checks and rollback capability
-  - Run database migrations separately with dedicated workflow
-
 - **`staging.yml`**: Staging environment deployment
-
-  - Triggered on manual dispatch on branches or release tags
-  - Used for integration testing before production releases
-  - Identical infrastructure to production at reduced scale
-
 - **`bootstrap.yml`**: One-time infrastructure initialization
-
-  - Creates base AWS resources (VPC, networking)
-  - Sets up GitHub Actions runner infrastructure
-  - Run once per AWS account setup
-
 - **`run-migrations.yml`**: Database migrations on RDS instances
-  - Connect to bastion host via AWS SSM
-  - Run migrations script with deployed environment container
-
-#### Infrastructure Features
-
-- **Self-Hosted Runner**: Dedicated ARM64 EC2 spot instance for CI/CD
-
-  - Cost-optimized CI/CD - up to 90% savings compared to GitHub Hosted
-  - Pre-configured with Python, NodeJS, AWS CLI, Docker, and build tools
-
-- **Multi-Architecture Builds**:
-
-  - Native ARM64 builds for Graviton instances
-  - AMD64 compatibility for development environments
-  - Parallel builds with layer caching
 
 ### CloudFormation Templates
 

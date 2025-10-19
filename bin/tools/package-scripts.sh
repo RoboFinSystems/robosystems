@@ -44,15 +44,15 @@ package_lambda() {
     # Create a short hash for the filename (first 8 chars, alphanumeric only)
     local short_hash=$(echo "$code_hash" | tr -d '/+=' | cut -c1-8)
     echo "  Hash: ${code_hash} (short: ${short_hash})"
-    
+
     # Upload to S3 with hash in filename
     echo "📤 Uploading ${lambda_name} to S3..."
     local s3_key="lambda/${lambda_name}-${ENVIRONMENT}-${short_hash}.zip"
     aws s3 cp "../${lambda_name}.zip" "s3://${BUCKET_NAME}/${s3_key}" --region "$REGION"
-    
+
     # Store the S3 key for CloudFormation to use
     echo "${s3_key}" > "../${lambda_name}.s3key"
-    
+
     # Also store the full hash for reference
     echo "${code_hash}" > "../${lambda_name}.hash"
     aws s3 cp "../${lambda_name}.hash" "s3://${BUCKET_NAME}/lambda/${lambda_name}-${ENVIRONMENT}.hash" --region "$REGION"
@@ -153,7 +153,7 @@ for lambda_name in postgres-secrets postgres-rotation valkey-rotation graph-api-
     if [ "$FIRST" = false ]; then
         echo "," >> "$MANIFEST"
     fi
-    
+
     # Read the S3 key and hash from local files
     if [ -f "../${lambda_name}.s3key" ] && [ -f "../${lambda_name}.hash" ]; then
         S3_KEY=$(cat "../${lambda_name}.s3key")
@@ -183,7 +183,7 @@ done
 echo "  Lambda packages uploaded: $LAMBDA_COUNT functions"
 echo "  Lambda manifest uploaded"
 echo "  UserData scripts uploaded: 4 scripts (bastion, gha-runner, kuzu-writer, neo4j-writer)"
-echo "  Shared userdata scripts uploaded: 6 scripts (graph-lifecycle, graph-health-check, register, run-container, setup-cloudwatch, kuzu-lifecycle-legacy)"
+echo "  Shared userdata scripts uploaded: 6 scripts (graph-lifecycle, graph-health-check, register, run-container, setup-cloudwatch)"
 echo ""
 echo "📋 CloudFormation Parameters:"
 echo "  LambdaCodeBucket configured"

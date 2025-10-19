@@ -1,7 +1,7 @@
 """
-Schema Ingestion Processor
+XBRL Schema Configuration Generator
 
-Processes schema definitions to generate dynamic ingestion configurations.
+Generates dynamic ingestion configurations from XBRL schema definitions.
 This processor eliminates hardcoded mappings by deriving all ingestion logic
 from schema definitions.
 
@@ -13,6 +13,7 @@ Capabilities:
 - Provides dynamic ingestion methods
 
 All configurations are derived from schema definitions - no hardcoded arrays.
+This is XBRL-specific and tailored for XBRL graph ingestion workflows.
 """
 
 from typing import Dict, List, Tuple, Optional, Any
@@ -50,13 +51,13 @@ class SchemaIngestConfig:
   extensions: List[str]
   node_tables: Dict[str, IngestTableInfo]
   relationship_tables: Dict[str, IngestTableInfo]
-  file_pattern_mapping: Dict[str, str]  # pattern -> table_name
-  table_name_mapping: Dict[str, str]  # lowercase -> proper_name
+  file_pattern_mapping: Dict[str, str]
+  table_name_mapping: Dict[str, str]
 
 
-class SchemaIngestionProcessor:
+class XBRLSchemaConfigGenerator:
   """
-  Processes schema definitions to generate dynamic ingestion configurations.
+  Generates dynamic ingestion configurations from XBRL schema definitions.
 
   This processor takes schema configurations (base + extensions) and creates
   comprehensive ingestion mappings by:
@@ -72,18 +73,18 @@ class SchemaIngestionProcessor:
 
   def __init__(self, schema_config: Dict[str, Any]):
     """
-    Initialize adapter with schema configuration.
+    Initialize generator with schema configuration.
 
     Args:
         schema_config: Schema configuration with base_schema and extensions
     """
     self.schema_manager = SchemaManager()
-    self.schema_config = schema_config  # Store original config for ingestion mode info
+    self.schema_config = schema_config
     self.config = self._create_schema_configuration(schema_config)
     self.compiled_schema = self.schema_manager.load_and_compile_schema(self.config)
     self.ingest_config = self._generate_ingest_config()
 
-    logger.debug("Schema ingestion processor initialized")
+    logger.debug("XBRL schema config generator initialized")
     logger.debug(f"Schema: {self.config.name}")
     logger.debug(
       f"Base: {self.config.base_schema}, Extensions: {self.config.extensions}"
@@ -112,28 +113,22 @@ class SchemaIngestionProcessor:
     file_pattern_mapping = {}
     table_name_mapping = {}
 
-    # Process all nodes
     for node in self.compiled_schema.nodes:
       table_info = self._create_node_table_info(node)
       node_tables[node.name] = table_info
 
-      # Add file patterns
       for pattern in table_info.file_patterns:
         file_pattern_mapping[pattern] = node.name
 
-      # Add name mappings
       table_name_mapping[node.name.lower()] = node.name
 
-    # Process all relationships
     for relationship in self.compiled_schema.relationships:
       table_info = self._create_relationship_table_info(relationship)
       relationship_tables[relationship.name] = table_info
 
-      # Add file patterns
       for pattern in table_info.file_patterns:
         file_pattern_mapping[pattern] = relationship.name
 
-      # Add name mappings
       table_name_mapping[relationship.name.lower()] = relationship.name
 
     return SchemaIngestConfig(
@@ -148,13 +143,10 @@ class SchemaIngestionProcessor:
 
   def _create_node_table_info(self, node: Node) -> IngestTableInfo:
     """Create table info for a node."""
-    # Generate file patterns based on node name
     patterns = self._generate_file_patterns(node.name, is_relationship=False)
 
-    # Extract primary keys
     primary_keys = [prop.name for prop in node.properties if prop.is_primary_key]
 
-    # Extract all columns
     columns = [prop.name for prop in node.properties]
 
     return IngestTableInfo(
@@ -169,18 +161,14 @@ class SchemaIngestionProcessor:
     self, relationship: Relationship
   ) -> IngestTableInfo:
     """Create table info for a relationship."""
-    # Generate file patterns based on relationship name
     patterns = self._generate_file_patterns(relationship.name, is_relationship=True)
 
-    # Relationships don't have primary keys in the same way
     primary_keys = []
 
-    # Relationship columns include 'from', 'to', plus any properties
     columns = ["from", "to"]
     if relationship.properties:
       columns.extend([prop.name for prop in relationship.properties])
 
-    # Extract property names for metadata
     properties = (
       [prop.name for prop in relationship.properties] if relationship.properties else []
     )
@@ -206,34 +194,24 @@ class SchemaIngestionProcessor:
     """
     patterns = []
 
-    # Convert PascalCase to snake_case for file patterns
     snake_case_name = self._pascal_to_snake(table_name)
 
-    # Add the base pattern
     patterns.append(snake_case_name)
 
-    # Add prefix patterns if enabled
     if is_relationship:
       patterns.append(f"rel_{snake_case_name}")
     else:
       patterns.append(f"node_{snake_case_name}")
 
-    # Add common variations
-    patterns.append(f"{snake_case_name}_")  # Pattern with trailing underscore
-    patterns.append(
-      f"{snake_case_name.replace('_', '')}"
-    )  # Pattern without underscores
+    patterns.append(f"{snake_case_name}_")
+    patterns.append(f"{snake_case_name.replace('_', '')}")
 
     return patterns
 
   def _pascal_to_snake(self, name: str) -> str:
     """Convert PascalCase to snake_case."""
-    # Insert underscores before uppercase letters (except first)
     s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    # Insert underscores before uppercase letters preceded by lowercase
     return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
-
-  # Public interface methods
 
   def is_relationship_file(self, filename: str) -> bool:
     """
@@ -245,10 +223,8 @@ class SchemaIngestionProcessor:
     Returns:
         True if file contains relationship data
     """
-    # Use the same logic as get_table_name_from_file to ensure consistency
     table_name = self.get_table_name_from_file(filename)
     if table_name:
-      # Check if this table is a relationship
       return table_name in self.ingest_config.relationship_tables
 
     return False
@@ -265,27 +241,17 @@ class SchemaIngestionProcessor:
     Returns:
         Proper table name or None if not found
     """
-    # Extract table name from directory structure
-    # Pattern: .../nodes/Entity/file.parquet or .../relationships/ENTITY_HAS_REPORT/file.parquet
     if "/" in filename or "\\" in filename:
       path_parts = filename.replace("\\", "/").split("/")
 
-      # The second-to-last part is the table name (directory before the file)
-      # E.g., /tmp/xyz/Entity/20241231_batch00000.parquet -> Entity
-      # E.g., s3://bucket/processed/year=2025/nodes/Entity/file.parquet -> Entity
       if len(path_parts) >= 2:
-        # The directory name IS the table name (exact match)
         potential_table = path_parts[-2]
 
-        # Check if this matches a known table in our schema
-        # Check both node and relationship tables (exact match, no case conversion)
         if potential_table in self.ingest_config.node_tables:
           return potential_table
         if potential_table in self.ingest_config.relationship_tables:
           return potential_table
 
-    # Fallback: If we can't find it from path structure, return None
-    # This should rarely happen with the new naming convention
     return None
 
   def get_table_info(self, table_name: str) -> Optional[IngestTableInfo]:
@@ -298,11 +264,9 @@ class SchemaIngestionProcessor:
     Returns:
         Table information or None if not found
     """
-    # Check nodes first
     if table_name in self.ingest_config.node_tables:
       return self.ingest_config.node_tables[table_name]
 
-    # Check relationships
     if table_name in self.ingest_config.relationship_tables:
       return self.ingest_config.relationship_tables[table_name]
 
@@ -320,7 +284,6 @@ class SchemaIngestionProcessor:
     """
     if table_name in self.ingest_config.relationship_tables:
       table_info = self.ingest_config.relationship_tables[table_name]
-      # Ensure from_node and to_node are not None for relationship tables
       if table_info.from_node and table_info.to_node:
         return (table_info.name, table_info.from_node, table_info.to_node)
 
@@ -351,7 +314,7 @@ class SchemaIngestionProcessor:
     """Print a summary of the generated configuration."""
     stats = self.get_schema_statistics()
 
-    logger.debug("=== Schema-Driven Ingestion Configuration ===")
+    logger.debug("=== XBRL Schema-Driven Ingestion Configuration ===")
     logger.debug(f"Schema: {stats['schema_name']}")
     logger.debug(f"Base: {stats['base_schema']}")
     logger.debug(f"Extensions: {', '.join(stats['extensions'])}")
@@ -374,7 +337,7 @@ class SchemaIngestionProcessor:
       )
 
 
-def create_roboledger_ingestion_processor() -> SchemaIngestionProcessor:
+def create_roboledger_ingestion_processor() -> XBRLSchemaConfigGenerator:
   """Create ingestion processor for RoboLedger schema (base + roboledger)."""
   config = {
     "name": "RoboLedger Ingestion Schema",
@@ -382,12 +345,12 @@ def create_roboledger_ingestion_processor() -> SchemaIngestionProcessor:
     "base_schema": "base",
     "extensions": ["roboledger"],
   }
-  return SchemaIngestionProcessor(config)
+  return XBRLSchemaConfigGenerator(config)
 
 
 def create_custom_ingestion_processor(
   extensions: List[str],
-) -> SchemaIngestionProcessor:
+) -> XBRLSchemaConfigGenerator:
   """Create ingestion processor for custom schema extensions."""
   config = {
     "name": f"Custom Ingestion Schema ({', '.join(extensions)})",
@@ -395,4 +358,4 @@ def create_custom_ingestion_processor(
     "base_schema": "base",
     "extensions": extensions,
   }
-  return SchemaIngestionProcessor(config)
+  return XBRLSchemaConfigGenerator(config)

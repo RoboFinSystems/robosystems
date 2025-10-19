@@ -11,8 +11,8 @@ from pathlib import Path
 
 from ...logger import logger
 from ...middleware.graph.engine import Engine
-from ...processors.schema_ingestion import (
-  SchemaIngestionProcessor,
+from ...processors.xbrl.schema_config_generator import (
+  XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
 )
 
@@ -101,7 +101,7 @@ class KuzuSchemaManager:
 
     # Create schema processor
     if schema_config:
-      schema_processor = SchemaIngestionProcessor(schema_config)
+      schema_processor = XBRLSchemaConfigGenerator(schema_config)
     else:
       schema_processor = create_roboledger_ingestion_processor()
       logger.info("Using default RoboLedger schema configuration")

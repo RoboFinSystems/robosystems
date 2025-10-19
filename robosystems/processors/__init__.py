@@ -6,8 +6,8 @@ calculations, and business logic for the RoboSystems platform.
 
 Key processors:
 - XBRLGraphProcessor: SEC XBRL filing processing and graph transformation
-- SchemaProcessor: DataFrame schema adaptation and validation
-- SchemaIngestionProcessor: Schema-driven ingestion configuration generation
+- XBRLSchemaAdapter: DataFrame schema adaptation and validation for XBRL
+- XBRLSchemaConfigGenerator: Schema-driven ingestion configuration for XBRL
 - TrialBalanceProcessor: Financial trial balance calculations
 - ScheduleProcessor: Financial schedule generation and analysis
 - QBTransactionsProcessor: QuickBooks transaction processing and normalization
@@ -15,9 +15,9 @@ Key processors:
 
 # Core processors
 from .xbrl_graph import XBRLGraphProcessor
-from .schema_processor import SchemaProcessor
-from .schema_ingestion import (
-  SchemaIngestionProcessor,
+from .xbrl.schema_adapter import XBRLSchemaAdapter
+from .xbrl.schema_config_generator import (
+  XBRLSchemaConfigGenerator,
   SchemaIngestConfig,
   IngestTableInfo,
   create_roboledger_ingestion_processor,
@@ -29,8 +29,8 @@ from .qb_transactions import QBTransactionsProcessor
 
 __all__ = [
   "XBRLGraphProcessor",
-  "SchemaProcessor",
-  "SchemaIngestionProcessor",
+  "XBRLSchemaAdapter",
+  "XBRLSchemaConfigGenerator",
   "SchemaIngestConfig",
   "IngestTableInfo",
   "create_roboledger_ingestion_processor",
