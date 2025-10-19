@@ -1,8 +1,12 @@
 {
   "folders": [
     {
-      "name": "robosystems-service",
-      "path": "../../robosystems-service"
+      "name": "robosystems",
+      "path": "../../robosystems"
+    },
+    {
+      "name": "robosystems-app",
+      "path": "../../robosystems-app"
     },
     {
       "name": "roboledger-app",
@@ -11,14 +15,6 @@
     {
       "name": "roboinvestor-app",
       "path": "../../roboinvestor-app"
-    },
-    {
-      "name": "robosystems-app",
-      "path": "../../robosystems-app"
-    },
-    {
-      "name": "robosystems-core",
-      "path": "../../robosystems-core"
     },
     {
       "name": "robosystems-mcp-client",

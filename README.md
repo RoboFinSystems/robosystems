@@ -166,10 +166,10 @@ The client factory layer provides intelligent routing between application code a
 
 #### Middleware Layer (`/robosystems/middleware/graph/`)
 
-- **GraphRouter**: Intelligent cluster selection and routing logic
-- **AllocationManager**: DynamoDB-based database allocation across writer instances
-- **MultiTenantUtils**: Database name resolution, validation, and routing utilities
-- **QueryQueue**: Advanced query queue with admission control and long polling
+- **Graph Router**: Intelligent cluster selection and routing logic
+- **Allocation Manager**: DynamoDB-based database allocation across writer instances
+- **Multi Tenant Utils**: Database name resolution, validation, and routing utilities
+- **Query Queue**: Advanced query queue with admission control and long polling
 
 #### Operations Layer (`/robosystems/operations/`)
 
@@ -185,7 +185,7 @@ The client factory layer provides intelligent routing between application code a
 - **Trial Balance Processor**: Financial calculations and accounting operations
 - **Schedule Processor**: Financial schedule generation
 
-#### Database Models (`/robosystems/models/`)
+#### Models (`/robosystems/models/`)
 
 **IAM Models** (`/robosystems/models/iam/`):
 
@@ -304,8 +304,8 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`api.yaml`**: ECS Fargate API service with auto-scaling, load balancing, and health checks
 - **`waf.yaml`**: AWS Web Application Firewall for protecting the API from web exploits
 - **`worker.yaml`**: ECS Fargate Celery workers with priority queues and spot capacity
-- **`beat.yaml`**: Celery beat scheduler for periodic tasks and cron jobs
 - **`worker-monitor.yaml`**: Lambda function for monitoring worker health and queue depths
+- **`beat.yaml`**: Celery beat scheduler for periodic tasks and cron jobs
 
 #### Graph Database Infrastructure
 
