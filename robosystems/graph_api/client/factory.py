@@ -375,6 +375,7 @@ class GraphClientFactory:
       else:
         # Fall back to tier config (for consistency with AWS environments)
         from robosystems.config.tier_config import TierConfig
+
         tier_config = TierConfig.get_tier_config("shared", "staging")
         if tier_config.get("backend"):
           backend = tier_config.get("backend")

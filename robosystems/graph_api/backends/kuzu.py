@@ -228,7 +228,9 @@ class KuzuBackend(GraphBackend):
         conn.execute("CHECKPOINT;")
         logger.info(f"Executed checkpoint for {graph_id} after COPY operation")
       except Exception as checkpoint_error:
-        logger.warning(f"Failed to execute checkpoint for {graph_id}: {checkpoint_error}")
+        logger.warning(
+          f"Failed to execute checkpoint for {graph_id}: {checkpoint_error}"
+        )
 
     # Connection is now returned to pool
     # Database object stays alive in ConnectionPool._databases

@@ -3,17 +3,21 @@ from robosystems.graph_api.backends import get_backend, KuzuBackend, Neo4jBacken
 
 
 def test_backend_factory_kuzu(monkeypatch, tmp_path):
+  from unittest.mock import MagicMock
+
   monkeypatch.setenv("BACKEND_TYPE", "kuzu")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
+
+  # Mock the global ConnectionPool
+  mock_pool = MagicMock()
   monkeypatch.setattr(
-    "robosystems.graph_api.backends.kuzu.KuzuBackend.__init__",
-    lambda self: setattr(self, "data_path", str(tmp_path))
-    or setattr(self, "_engines", {}),
+    "robosystems.graph_api.backends.kuzu.get_connection_pool", lambda: mock_pool
   )
 
   backend = get_backend()
 
   assert isinstance(backend, KuzuBackend)
+  assert backend.connection_pool is mock_pool
 
 
 def test_backend_factory_neo4j_community(monkeypatch):
@@ -60,12 +64,15 @@ def test_backend_factory_invalid_type(monkeypatch):
 
 
 def test_backend_factory_singleton(monkeypatch, tmp_path):
+  from unittest.mock import MagicMock
+
   monkeypatch.setenv("BACKEND_TYPE", "kuzu")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
+
+  # Mock the global ConnectionPool
+  mock_pool = MagicMock()
   monkeypatch.setattr(
-    "robosystems.graph_api.backends.kuzu.KuzuBackend.__init__",
-    lambda self: setattr(self, "data_path", str(tmp_path))
-    or setattr(self, "_engines", {}),
+    "robosystems.graph_api.backends.kuzu.get_connection_pool", lambda: mock_pool
   )
 
   backend1 = get_backend()
