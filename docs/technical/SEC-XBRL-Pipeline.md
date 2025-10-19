@@ -342,7 +342,7 @@ just sec-load NVDA 2024
 
 ## Resources
 
-- **Kuzu Cypher Documentation**: [Kuzu Cypher Manual](https://docs.kuzudb.com/cypher/)
+- **Neo4j Cypher Docs**: [Neo4j Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
 - **RoboSystems API**: http://localhost:8000/docs (when running locally)
 - **SEC EDGAR**: [SEC Website](https://www.sec.gov/edgar)
