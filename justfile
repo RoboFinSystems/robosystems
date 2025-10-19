@@ -269,8 +269,8 @@ graph-info graph_id url="http://localhost:8001" env=".env":
 graph-query graph_id query format="table" url="http://localhost:8001" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
 
-# Kuzu embedded database direct query tool (bypasses API, Kuzu-specific)
-kuzu-db-query graph_id query format="table" env=".env":
+# Kuzu embedded database direct query (bypasses API, Kuzu-specific)
+kuzu-query graph_id query format="table" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
 
 ## SEC Local Pipeline - Testing and Development ##
