@@ -632,7 +632,7 @@ main() {
             print_warning "WARNING: This will reset the SEC database!"
             read -p "Type 'CONFIRM' to proceed: " confirmation
             if [ "$confirmation" == "CONFIRM" ]; then
-                run_in_docker "uv run python robosystems/scripts/reset_sec_pipeline.py $parameters"
+                run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator reset --confirm $parameters"
             else
                 print_error "Operation cancelled"
                 log_operation "$operation" "$parameters" "CANCELLED"
@@ -640,20 +640,28 @@ main() {
             fi
             ;;
 
-        sec-load)
-            run_in_docker "uv run python robosystems/scripts/sec_pipeline.py full $parameters"
+        sec-plan)
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator plan $parameters"
             ;;
 
-        sec-collect)
-            run_in_docker "uv run python robosystems/scripts/sec_pipeline.py collect $parameters"
+        sec-download)
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase download $parameters"
             ;;
 
         sec-process)
-            run_in_docker "uv run python robosystems/scripts/sec_pipeline.py process $parameters"
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase process $parameters"
+            ;;
+
+        sec-consolidate)
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase consolidate $parameters"
             ;;
 
         sec-ingest)
-            run_in_docker "uv run python robosystems/scripts/sec_pipeline.py ingest $parameters"
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase ingest $parameters"
+            ;;
+
+        sec-status)
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator status $parameters"
             ;;
 
         # Help
@@ -681,16 +689,21 @@ main() {
             echo "  dlq-purge"
             echo ""
             echo "SEC Pipeline:"
-            echo "  sec-reset [--soft]"
-            echo "  sec-load --year YEAR --companies N --filings N [--refresh] [--parallel]"
-            echo "  sec-collect --year YEAR --companies N --filings N"
-            echo "  sec-process --year YEAR [--refresh]"
-            echo "  sec-ingest --year YEAR"
+            echo "  sec-reset"
+            echo "  sec-plan --start-year YEAR --end-year YEAR [--max-companies N]"
+            echo "  sec-download [--resume] [--retry-failed]"
+            echo "  sec-process [--resume] [--retry-failed]"
+            echo "  sec-consolidate [--resume] [--retry-failed]"
+            echo "  sec-ingest [--resume] [--retry-failed]"
+            echo "  sec-status"
             echo ""
             echo "Examples:"
             echo "  admin credit-allocate-user user_123"
             echo "  admin repo-grant user_123 sec admin"
-            echo "  admin sec-load --year 2024 --companies 10 --filings 5"
+            echo "  admin sec-plan --start-year 2024 --end-year 2025 --max-companies 10"
+            echo "  admin sec-download"
+            echo "  admin sec-process"
+            echo "  admin sec-status"
             ;;
 
         *)

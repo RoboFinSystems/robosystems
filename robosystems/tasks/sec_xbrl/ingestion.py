@@ -208,7 +208,7 @@ def ingest_sec_data(
 
       This will NOT create or recreate the database.
       If database doesn't exist or lacks schema, it will raise an error.
-      Use 'just sec-reset' to create/reset the database.
+      Use 'just sec-reset-remote' to create/reset the database.
       """
       try:
         # Get a client for the SEC database - this will route correctly
@@ -290,7 +290,7 @@ def ingest_sec_data(
             error_parts.append("SEC database exists but lacks proper RoboLedger schema")
 
           error_parts.append(
-            "Please run 'just sec-reset' to create/reset the SEC database"
+            "Please run 'just sec-reset-remote' to create/reset the SEC database"
           )
           error_msg = ". ".join(error_parts)
           logger.error(error_msg)
@@ -310,7 +310,7 @@ def ingest_sec_data(
       if not success:
         raise RuntimeError(
           "SEC database verification failed. "
-          "Please run 'just sec-reset' to create/reset the database."
+          "Please run 'just sec-reset-remote' to create/reset the database."
         )
     finally:
       loop.close()
