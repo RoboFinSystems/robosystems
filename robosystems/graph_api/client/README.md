@@ -5,8 +5,9 @@
 The Graph Client and Factory system provides the critical interface between the RoboSystems application (API and workers) and the Graph API running on infrastructure. This layer handles intelligent routing, connection pooling, circuit breaking, and automatic failover to ensure reliable graph database operations at scale.
 
 **Backend Support:**
+
 - **Kuzu**: EC2-based instances with DynamoDB registry discovery
-- **Neo4j**: Direct Bolt connection or service discovery
+- **Neo4j**: EC2-based instances with Graph API HTTP interface
 
 ## Architecture
 
@@ -25,12 +26,11 @@ The Graph Client and Factory system provides the critical interface between the 
 │                                                                 │
 │  Kuzu Backend:          │  Neo4j Backend:                       │
 │  ┌──────────────────┐   │  ┌──────────────────┐                 │
-│  │ EC2 Instances    │   │  │ Neo4j Database   │                 │
-│  │ - Standard       │   │  │ - Community      │                 │
-│  │ - Enterprise     │   │  │ - Enterprise     │                 │
-│  │ - Premium        │   │  │ (Bolt Protocol)  │                 │
+│  │ EC2 Instances    │   │  │ EC2 Instances    │                 │
+│  │ - Multi-Tenant   │   │  │ - Dedicated      │                 │
+│  │ - Dedicated      │   │  │ - High-Perf      │                 │
+│  │ - High-Perf      │   │  │ (Graph API HTTP) │                 │
 │  │ - Shared Master  │   │  └──────────────────┘                 │
-│  │ - Replica ALB    │   │                                       │
 │  └──────────────────┘   │                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -69,18 +69,18 @@ The factory is responsible for intelligent routing decisions based on:
 
 ```python
 # All Operations (User and Shared)
-├── Development → Local Neo4j instance (bolt://neo4j-db:7687)
-└── Production/Staging → Neo4j cluster or single instance
-    ├── Community → Single database endpoint
-    └── Enterprise → Multi-database support
+├── Development → Local Graph API (http://localhost:8002)
+└── Production/Staging → Graph API on EC2 instances
+    └── Community → Single database support
+    # Note: Enterprise edition with clustering is TODO
 ```
 
 #### Key Features
 
-- **Dynamic Discovery**: Automatically discovers instances (DynamoDB for Kuzu, service discovery for Neo4j)
-- **Backend Abstraction**: Consistent interface regardless of backend
+- **Dynamic Discovery**: Automatically discovers instances via DynamoDB registry
+- **Backend Abstraction**: Consistent HTTP interface regardless of backend
 - **Circuit Breakers**: Prevents cascading failures with configurable thresholds
-- **Connection Pooling**: Reuses connections for efficiency (HTTP/2 for Kuzu, Bolt for Neo4j)
+- **Connection Pooling**: HTTP/2 connection reuse for efficiency
 - **Redis Caching**: Caches instance locations to reduce lookups
 - **Automatic Failover**: Falls back to alternative endpoints when primary unavailable
 - **Retry Logic**: Exponential backoff with jitter for transient errors
@@ -239,8 +239,8 @@ GRAPH_API_URL=http://localhost:8001          # Default API URL (dev/fallback)
 GRAPH_API_KEY=graph_api_64chars...           # Authentication key
 
 # API Endpoints (Neo4j Backend)
-NEO4J_URI=bolt://neo4j-db:7687               # Neo4j Bolt connection
 GRAPH_API_PORT=8002                           # Graph API port for Neo4j
+# Note: NEO4J_URI is used internally by Graph API backend, not by client
 
 # Feature Flags
 GRAPH_RETRY_LOGIC_ENABLED=true               # Enable automatic retries
@@ -254,17 +254,15 @@ KUZU_CLIENT_MAX_RETRIES=3                    # Maximum retry attempts
 KUZU_CIRCUIT_BREAKER_THRESHOLD=5             # Failures before opening
 KUZU_CIRCUIT_BREAKER_TIMEOUT=60              # Seconds before reset
 KUZU_CACHE_TTL=300                           # Cache TTL (seconds)
-NEO4J_MAX_CONNECTION_POOL_SIZE=50            # Neo4j connection pool size
 ```
 
-### DynamoDB Configuration (Kuzu Backend)
+### DynamoDB Configuration
 
 ```bash
-# For instance discovery (Kuzu only)
-KUZU_INSTANCE_REGISTRY_TABLE=robosystems-kuzu-{env}-instance-registry
-KUZU_GRAPH_REGISTRY_TABLE=robosystems-kuzu-{env}-graph-registry
-
-# Note: Neo4j backend uses direct connection URIs instead of DynamoDB discovery
+# For instance discovery (both Kuzu and Neo4j backends)
+INSTANCE_REGISTRY_TABLE=robosystems-graph-{env}-instance-registry
+GRAPH_REGISTRY_TABLE=robosystems-graph-{env}-graph-registry
+VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
 ```
 
 ## Instance Discovery Flow
@@ -289,18 +287,20 @@ KUZU_GRAPH_REGISTRY_TABLE=robosystems-kuzu-{env}-graph-registry
 
 ### Neo4j Backend
 
-1. **Direct Connection**: Uses configured NEO4J_URI
-2. **Database Selection**: Routes to correct database (Community: single, Enterprise: multi)
-3. **Connection Pool**: Manages Bolt protocol connections
-4. **Health Check**: Verifies Neo4j database availability
+1. **Check Cache**: Redis cache with 5-minute TTL
+2. **Query DynamoDB**: Find instance hosting the graph
+3. **Health Check**: Verify instance is healthy
+4. **Create Client**: Initialize HTTP client with discovered endpoint
+5. **Cache Result**: Store for future requests
 
 ```python
-# Internal connection flow (handled automatically)
+# Internal discovery flow (handled automatically)
 1. GraphClientFactory.create_client("kg1a2b3c4d5")
-2. → Use NEO4J_URI from configuration
-3. → Select database: kg_kg1a2b3c4d5_main (Enterprise) or neo4j (Community)
-4. → Create Bolt connection via Graph API
-5. → Pool connections for efficiency
+2. → Check Redis: neo4j:prod:location:kg1a2b3c4d5
+3. → Query DynamoDB: GraphRegistry[graph_id=kg1a2b3c4d5]
+4. → Get instance: i-1234567890 at 10.0.1.100
+5. → Create client: http://10.0.1.100:8002
+6. → Cache location for 300 seconds
 ```
 
 ## Circuit Breaker Pattern
@@ -468,13 +468,13 @@ result = await client.query(
 ```bash
 # Check instance registry
 aws dynamodb scan \
-  --table-name robosystems-kuzu-prod-instance-registry \
+  --table-name robosystems-graph-prod-instance-registry \
   --filter-expression "status = :healthy" \
   --expression-attribute-values '{":healthy":{"S":"healthy"}}'
 
 # Check graph location
 aws dynamodb get-item \
-  --table-name robosystems-kuzu-prod-graph-registry \
+  --table-name robosystems-graph-prod-graph-registry \
   --key '{"graph_id":{"S":"kg1a2b3c4d5"}}'
 
 # Test direct connection
@@ -550,31 +550,3 @@ async def process_graph_data(graph_id: str, data_files: list):
 
     return status
 ```
-
-## Performance Benchmarks
-
-Typical latencies in production:
-
-| Operation         | P50   | P95    | P99    |
-| ----------------- | ----- | ------ | ------ |
-| Simple Query      | 15ms  | 45ms   | 120ms  |
-| Complex Query     | 200ms | 800ms  | 2000ms |
-| Ingestion (Sync)  | 500ms | 2000ms | 5000ms |
-| Ingestion (Async) | 50ms  | 100ms  | 200ms  |
-| Health Check      | 5ms   | 15ms   | 30ms   |
-
-## Future Enhancements
-
-1. **GraphQL Support**: Native GraphQL to Cypher translation
-2. **Query Caching**: Cache frequent query results in Redis
-3. **Load Balancing**: Client-side load balancing for writers
-4. **Metrics Export**: Prometheus/OpenTelemetry integration
-5. **Connection Multiplexing**: HTTP/3 with QUIC support
-
-## Support
-
-For issues or questions:
-
-- Check CloudWatch logs: `/robosystems/{env}/kuzu-client`
-- Review metrics in Grafana dashboards
-- Consult runbooks in `/runbooks/kuzu-client/`

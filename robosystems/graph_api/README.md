@@ -6,7 +6,7 @@ High-performance HTTP API server for graph database cluster management with plug
 
 - **Kuzu** (Default): High-performance embedded graph database based on columnar storage
 - **Neo4j Community**: Client-server architecture with advanced features
-- **Neo4j Enterprise**: Full enterprise features including multi-database support and clustering
+- **Neo4j Enterprise**: TODO - Multi-database support and clustering not yet implemented
 
 ## Table of Contents
 
@@ -110,8 +110,8 @@ When using the Kuzu backend, the system deploys different node types:
 
 When using Neo4j backend:
 
-- **Community Edition**: Single database instance with core graph features
-- **Enterprise Edition**: Multi-database support with clustering, security, and advanced features
+- **Community Edition**: Single database instance with core graph features (currently implemented)
+- **Enterprise Edition**: TODO - Multi-database support with clustering not yet implemented
 
 ## Deployment Infrastructure
 
@@ -714,7 +714,7 @@ curl -X POST http://localhost:8001/databases/test_db/query \
 ```bash
 # Check instance status (replace 'standard' with your actual tier)
 aws dynamodb scan \
-  --table-name robosystems-kuzu-prod-instance-registry \
+  --table-name robosystems-graph-prod-instance-registry \
   --filter-expression "cluster_tier = :tier" \
   --expression-attribute-values '{":tier":{"S":"standard"}}'
 
@@ -767,10 +767,10 @@ aws autoscaling start-instance-refresh \
 
 ### Neo4j Backend
 
-1. **Multi-Database**: Only available in Enterprise edition
-2. **Connection Pooling**: Limited by Neo4j configuration
-3. **Bolt Protocol**: Requires network connectivity to Neo4j instance
-4. **Licensing**: Enterprise features require Neo4j Enterprise license
+1. **Single Database**: Community edition supports single database only
+2. **Connection Pooling**: Managed by Neo4j driver within Graph API
+3. **Bolt Protocol**: Internal connection between Graph API and Neo4j
+4. **Multi-Database**: TODO - Enterprise edition with clustering not yet implemented
 
 ## Contributing
 
