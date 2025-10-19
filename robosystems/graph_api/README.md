@@ -4,9 +4,9 @@ High-performance HTTP API server for graph database cluster management with plug
 
 **Supported Backends:**
 
-- **Kuzu** (Default): High-performance embedded graph database, ideal for Standard tier deployments
-- **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers with advanced features
-- **Neo4j Enterprise**: Full enterprise features including multi-database support for Premium tier
+- **Kuzu** (Default): High-performance embedded graph database based on columnar storage
+- **Neo4j Community**: Client-server architecture with advanced features
+- **Neo4j Enterprise**: Full enterprise features including multi-database support and clustering
 
 ## Table of Contents
 
@@ -104,15 +104,14 @@ graph_api/
 When using the Kuzu backend, the system deploys different node types:
 
 - **Writer Nodes** (`writer`): Entity database read/write operations on EC2
-- **Shared Master** (`shared_master`): Repository ingestion and writes on EC2
-- **Shared Replica** (`shared_replica`): Read-only replicas on EC2 with ALB
+- **Shared Master** (`shared_master`): Shared repository ingestion and writes on EC2
 
 ### Backend Selection (Neo4j)
 
 When using Neo4j backend:
 
-- **Community Edition**: Single database, suitable for development and Professional/Enterprise tiers
-- **Enterprise Edition**: Multi-database support for Premium tier with advanced features
+- **Community Edition**: Single database instance with core graph features
+- **Enterprise Edition**: Multi-database support with clustering, security, and advanced features
 
 ## Deployment Infrastructure
 
@@ -138,20 +137,15 @@ For Kuzu deployments, the system uses a sophisticated multi-stack CloudFormation
    └─ SNS Topics (Volume alerts)
 
 3. Writer Stacks (kuzu-writers.yaml) - Deployed in parallel
-   ├─ Standard Writers (r7g.large, 10 DBs/instance)
-   ├─ Enterprise Writers (r7g.large, 1 DB/instance)
-   ├─ Premium Writers (r7g.xlarge, 1 DB/instance)
-   └─ Shared Master (r7g.large, SEC repository)
-
-4. Replica Stack (kuzu-shared-replicas.yaml)
-   ├─ Auto Scaling Group (2-20 instances)
-   ├─ Application Load Balancer
-   └─ Read-only EC2 instances (r7g.medium)
+   ├─ Multi-Tenant Writers (configurable instance types and capacity)
+   ├─ Dedicated Writers (single database per instance)
+   ├─ High-Performance Writers (larger instances for demanding workloads)
+   └─ Shared Master (shared repository infrastructure)
 ```
 
 #### Neo4j Backend Infrastructure
 
-For Neo4j deployments (future implementation):
+For Neo4j deployments:
 
 ```
 1. Neo4j Database Stack (neo4j-db.yaml)
@@ -166,23 +160,25 @@ For Neo4j deployments (future implementation):
    └─ Health checks and auto-scaling
 ```
 
-### Infrastructure Tiers
+### Infrastructure Configuration
+
+Infrastructure is configurable based on workload requirements. Example configurations:
 
 #### Production Environment
 
-| Tier           | Instance Type | DBs/Instance | Memory/DB | Scaling | Use Case            |
-| -------------- | ------------- | ------------ | --------- | ------- | ------------------- |
-| **Standard**   | r7g.xlarge    | 10           | 2GB       | 1-10    | Most customers      |
-| **Enterprise** | r7g.large     | 1            | 14GB      | 0-5     | Isolated workloads  |
-| **Premium**    | r7g.xlarge    | 1            | 28GB      | 0-3     | Maximum performance |
-| **Shared**     | r7g.large     | N/A          | Shared    | 1       | SEC/Industry data   |
+| Configuration Type      | Instance Type | DBs/Instance | Memory/DB | Scaling | Use Case                        |
+| ----------------------- | ------------- | ------------ | --------- | ------- | ------------------------------- |
+| **Multi-Tenant**        | r7g.xlarge    | 10           | 2GB       | 1-10    | Cost-effective shared resources |
+| **Dedicated**           | r7g.large     | 1            | 14GB      | 0-5     | Isolated workloads              |
+| **High-Performance**    | r7g.xlarge    | 1            | 28GB      | 0-3     | Maximum performance             |
+| **Shared Repositories** | r7g.large     | N/A          | Shared    | 1       | Public data (SEC, etc.)         |
 
 #### Staging Environment
 
-| Tier         | Instance Type | DBs/Instance | Memory/DB | Scaling |
-| ------------ | ------------- | ------------ | --------- | ------- |
-| **Standard** | r7g.medium    | 10           | 700MB     | 1-5     |
-| **Shared**   | r7g.medium    | N/A          | Shared    | 1       |
+| Configuration Type      | Instance Type | DBs/Instance | Memory/DB | Scaling |
+| ----------------------- | ------------- | ------------ | --------- | ------- |
+| **Multi-Tenant**        | r7g.medium    | 10           | 700MB     | 1-5     |
+| **Shared Repositories** | r7g.medium    | N/A          | Shared    | 1       |
 
 ### DynamoDB Registry Tables
 
@@ -193,11 +189,11 @@ Tracks all Kuzu instances across the infrastructure:
 ```python
 {
     "instance_id": "i-1234567890",      # EC2 instance ID
-    "cluster_tier": "standard",         # Tier designation
+    "cluster_tier": "standard",         # Actual tier from deployment config
     "private_ip": "10.0.1.100",
     "status": "healthy",                # initializing|healthy|unhealthy
     "database_count": 5,                # Current databases
-    "max_databases": 10,                # Tier limit
+    "max_databases": 10,                # Configuration-based limit
     "created_at": "2024-01-01T00:00:00Z"
 }
 ```
@@ -288,8 +284,6 @@ Content-Type: application/json
   "graph_id": "kg1a2b3c4d5",
   "schema_type": "entity"  // entity|shared|custom
 }
-
-Note: Both X-Graph-API-Key and X-Kuzu-API-Key headers are supported for backward compatibility
 ```
 
 #### Execute Query
@@ -384,11 +378,11 @@ Response: {
 ### Async Client
 
 ```python
-from robosystems.graph_api.client import AsyncKuzuClient
+from robosystems.graph_api.client import AsyncGraphClient
 
-async with AsyncKuzuClient(
-    base_url="http://kuzu-writer:8001",
-    api_key="kuzu_prod_..."
+async with AsyncGraphClient(
+    base_url="http://graph-api:8001",
+    api_key="graph_api_..."
 ) as client:
     # Create database
     await client.create_database(
@@ -417,11 +411,11 @@ async with AsyncKuzuClient(
 ### Sync Client
 
 ```python
-from robosystems.graph_api.client import KuzuClient
+from robosystems.graph_api.client import GraphClient
 
-client = KuzuClient(
-    base_url="http://kuzu-writer:8001",
-    api_key="kuzu_prod_..."
+client = GraphClient(
+    base_url="http://graph-api:8001",
+    api_key="graph_api_..."
 )
 
 # Synchronous operations
@@ -434,11 +428,11 @@ data = client.query(
 ### Client Factory with Intelligent Routing
 
 ```python
-from robosystems.graph_api.client.factory import get_kuzu_client
+from robosystems.graph_api.client.factory import get_graph_client
 
 # Factory handles routing based on graph type and operation
-client = await get_kuzu_client(
-    graph_id="sec",              # Routes to shared master
+client = await get_graph_client(
+    graph_id="sec",              # Routes to shared infrastructure
     operation_type="read",        # Could use replica
     environment="prod",
     tier=InstanceTier.STANDARD
@@ -454,7 +448,7 @@ client = await get_kuzu_client(
 GRAPH_BACKEND_TYPE=kuzu                 # kuzu|neo4j_community|neo4j_enterprise
 
 # Node Configuration (Kuzu Backend)
-KUZU_NODE_TYPE=writer                    # writer|shared_master|shared_replica
+KUZU_NODE_TYPE=writer                    # writer|shared_master
 WRITER_TIER=standard                     # standard|enterprise|premium|shared
 KUZU_DATABASE_PATH=/data/kuzu-dbs       # Storage location
 KUZU_PORT=8001                           # API port (8001 for Kuzu, 8002 for Neo4j)
@@ -467,7 +461,7 @@ NEO4J_ENTERPRISE=false                   # Enable multi-database support
 GRAPH_API_PORT=8002                      # API port for Neo4j backend
 
 # Performance Settings
-KUZU_MAX_DATABASES_PER_NODE=10          # Tier-specific limit (Kuzu)
+KUZU_MAX_DATABASES_PER_NODE=10          # Configuration-based limit (Kuzu)
 KUZU_MAX_MEMORY_MB=14336                # Total memory allocation (Kuzu)
 KUZU_MEMORY_PER_DB_MB=2048              # Per-database memory (Kuzu)
 KUZU_CHUNK_SIZE=1000                    # Streaming chunk size
@@ -477,7 +471,7 @@ KUZU_CONNECTION_POOL_SIZE=10            # Connections per database
 NEO4J_MAX_CONNECTION_POOL_SIZE=50       # Neo4j connection pool size
 
 # Authentication
-KUZU_API_KEY=                            # Unified API key (both backends)
+GRAPH_API_KEY=                           # Unified API key (both backends)
 
 # AWS Configuration
 AWS_DEFAULT_REGION=us-east-1
@@ -489,8 +483,6 @@ KUZU_CIRCUIT_BREAKERS_ENABLED=true     # Enable circuit breakers
 KUZU_REDIS_CACHE_ENABLED=true          # Enable Redis caching
 KUZU_RETRY_LOGIC_ENABLED=true          # Enable automatic retries
 KUZU_HEALTH_CHECKS_ENABLED=true        # Enable health checking
-SHARED_REPLICA_ALB_ENABLED=false       # Enable replica ALB routing (Kuzu)
-ALLOW_SHARED_MASTER_READS=true         # Allow reads from master (Kuzu)
 ```
 
 ### Schema Types
@@ -507,12 +499,6 @@ All API requests require authentication via API key header:
 
 ```http
 X-Graph-API-Key: graph_api_64_character_random_string
-```
-
-Or the legacy header (still supported):
-
-```http
-X-Kuzu-API-Key: kuzu_prod_64_character_random_string
 ```
 
 ### API Key Management
@@ -589,14 +575,6 @@ curl http://kuzu-writer:8001/metrics
   "duration_ms": 45,
   "status": "success"
 }
-```
-
-### OpenTelemetry Integration
-
-```python
-# Automatic tracing for all operations
-OTEL_SERVICE_NAME=kuzu-writer-standard
-OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4318
 ```
 
 ## Development
@@ -680,13 +658,13 @@ locust -f tests/graph_api/loadtest.py \
 ```bash
 # Create database
 curl -X POST http://localhost:8001/databases \
-  -H "X-Kuzu-API-Key: test-key" \
+  -H "X-Graph-API-Key: test-key" \
   -H "Content-Type: application/json" \
   -d '{"graph_id": "test_db", "schema_type": "entity"}'
 
 # Execute query
 curl -X POST http://localhost:8001/databases/test_db/query \
-  -H "X-Kuzu-API-Key: test-key" \
+  -H "X-Graph-API-Key: test-key" \
   -H "Content-Type: application/json" \
   -d '{"cypher": "RETURN 1 as num"}'
 ```
@@ -734,13 +712,13 @@ curl -X POST http://localhost:8001/databases/test_db/query \
 ### Debugging Commands
 
 ```bash
-# Check instance status
+# Check instance status (replace 'standard' with your actual tier)
 aws dynamodb scan \
   --table-name robosystems-kuzu-prod-instance-registry \
   --filter-expression "cluster_tier = :tier" \
   --expression-attribute-values '{":tier":{"S":"standard"}}'
 
-# View recent logs
+# View recent logs (replace with actual log group name for your tier)
 aws logs tail /robosystems/prod/kuzu-writer-standard \
   --follow --filter-pattern ERROR
 
@@ -749,7 +727,7 @@ aws ec2 describe-volumes \
   --filters "Name=tag:Component,Values=KuzuWriter" \
   --query 'Volumes[*].[VolumeId,Size,State]'
 
-# Force instance refresh
+# Force instance refresh (replace 'standard' with your actual tier)
 aws autoscaling start-instance-refresh \
   --auto-scaling-group-name kuzu-writers-standard-prod
 ```
@@ -772,10 +750,10 @@ aws autoscaling start-instance-refresh \
 
 #### Memory Optimization
 
-- Standard tier provides 2GB per database with 10 databases per instance
-- Enterprise/Premium have dedicated memory allocations
+- Multi-tenant configurations share memory across databases (e.g., 2GB per database with 10 databases per instance)
+- Dedicated configurations provide isolated memory per database (e.g., 14GB or 28GB)
 - Shared repositories use memory pooling
-- Monitor memory usage metrics in CloudWatch
+- Monitor memory usage metrics in CloudWatch for your configuration
 
 ## Known Limitations
 

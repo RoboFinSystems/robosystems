@@ -145,10 +145,10 @@ circuit_breaker_timeout: 60 seconds
 ### Basic Usage
 
 ```python
-from robosystems.graph_api.client.factory import KuzuClientFactory
+from robosystems.graph_api.client.factory import GraphClientFactory
 
 # Create client with automatic routing
-client = await KuzuClientFactory.create_client(
+client = await GraphClientFactory.create_client(
     graph_id="sec",           # Routes to shared infrastructure
     operation_type="read",    # Determines read vs write routing
     environment="prod",       # Optional, defaults to env.ENVIRONMENT
@@ -166,7 +166,7 @@ async with client:
 from robosystems.middleware.graph.types import InstanceTier
 
 # Create client for user graph
-client = await KuzuClientFactory.create_client(
+client = await GraphClientFactory.create_client(
     graph_id="kg1a2b3c4d5",           # User graph ID
     operation_type="write",            # Write operation
     tier=InstanceTier.ENTERPRISE      # Tier determines routing
@@ -201,23 +201,23 @@ async for chunk in result:
 
 ```python
 from robosystems.graph_api.client.exceptions import (
-    KuzuTimeoutError,
-    KuzuSyntaxError,
+    GraphTimeoutError,
+    GraphSyntaxError,
     ServiceUnavailableError
 )
 
 try:
-    client = await KuzuClientFactory.create_client(
+    client = await GraphClientFactory.create_client(
         graph_id="kg1a2b3c4d5",
         operation_type="write"
     )
     result = await client.query("INVALID CYPHER")
 
-except KuzuSyntaxError as e:
+except GraphSyntaxError as e:
     # Syntax errors are never retried
     logger.error(f"Invalid Cypher syntax: {e}")
 
-except KuzuTimeoutError as e:
+except GraphTimeoutError as e:
     # Timeouts are automatically retried
     logger.warning(f"Query timeout after retries: {e}")
 
@@ -235,21 +235,18 @@ except ServiceUnavailableError as e:
 GRAPH_BACKEND_TYPE=kuzu                       # kuzu|neo4j_community|neo4j_enterprise
 
 # API Endpoints (Kuzu Backend)
-KUZU_API_URL=http://localhost:8001           # Default API URL (dev/fallback)
-KUZU_REPLICA_ALB_URL=http://alb.internal     # Replica ALB endpoint
-KUZU_API_KEY=kuzu_prod_64chars...            # Authentication key
+GRAPH_API_URL=http://localhost:8001          # Default API URL (dev/fallback)
+GRAPH_API_KEY=graph_api_64chars...           # Authentication key
 
 # API Endpoints (Neo4j Backend)
 NEO4J_URI=bolt://neo4j-db:7687               # Neo4j Bolt connection
 GRAPH_API_PORT=8002                           # Graph API port for Neo4j
 
 # Feature Flags
-KUZU_RETRY_LOGIC_ENABLED=true                # Enable automatic retries
-KUZU_CIRCUIT_BREAKERS_ENABLED=true           # Enable circuit breakers
-KUZU_HEALTH_CHECKS_ENABLED=true              # Enable health checking
-KUZU_REDIS_CACHE_ENABLED=true                # Enable Redis caching
-SHARED_REPLICA_ALB_ENABLED=true              # Enable replica ALB routing (Kuzu)
-ALLOW_SHARED_MASTER_READS=true               # Allow reads from master (Kuzu)
+GRAPH_RETRY_LOGIC_ENABLED=true               # Enable automatic retries
+GRAPH_CIRCUIT_BREAKERS_ENABLED=true          # Enable circuit breakers
+GRAPH_HEALTH_CHECKS_ENABLED=true             # Enable health checking
+GRAPH_REDIS_CACHE_ENABLED=true               # Enable Redis caching
 
 # Performance Tuning
 KUZU_CLIENT_TIMEOUT=30                       # Request timeout (seconds)
@@ -381,7 +378,7 @@ The client tracks:
 
 ```python
 # Check specific endpoint health
-client = await KuzuClientFactory.create_client("sec", "read")
+client = await GraphClientFactory.create_client("sec", "read")
 health = await client.health_check()
 print(f"Status: {health['status']}")
 print(f"Databases: {health['databases']}")
@@ -394,7 +391,7 @@ print(f"Memory: {health['memory_usage_mb']}MB")
 
 ```python
 # Ensures proper cleanup
-async with await KuzuClientFactory.create_client("sec") as client:
+async with await GraphClientFactory.create_client("sec") as client:
     result = await client.query("MATCH (n) RETURN n")
 ```
 
@@ -402,7 +399,7 @@ async with await KuzuClientFactory.create_client("sec") as client:
 
 ```python
 # The client automatically retries, but set appropriate timeouts
-client = await KuzuClientFactory.create_client(
+client = await GraphClientFactory.create_client(
     "kg1a2b3c4d5",
     timeout=60  # Longer timeout for complex queries
 )
@@ -418,13 +415,12 @@ result = await client.query(
 )
 ```
 
-### 4. Use Appropriate Tiers
+### 4. Use Appropriate Configuration
 
 ```python
-# Match tier to workload requirements
-InstanceTier.STANDARD    # Most workloads (10 DBs/instance)
-InstanceTier.ENTERPRISE  # Isolated resources (1 DB/instance)
-InstanceTier.PREMIUM     # Maximum performance (1 DB/instance, xlarge)
+# Match configuration to workload requirements
+# Configuration types are defined in deployment (e.g., standard, enterprise, premium)
+# Consult your infrastructure setup for available tiers
 ```
 
 ## Troubleshooting
@@ -454,7 +450,7 @@ InstanceTier.PREMIUM     # Maximum performance (1 DB/instance, xlarge)
 **Cause**: Invalid or missing API key
 **Solution**:
 
-- Verify KUZU_API_KEY is set
+- Verify GRAPH_API_KEY is set
 - Check Secrets Manager for correct key
 - Ensure key matches environment
 
@@ -483,7 +479,7 @@ aws dynamodb get-item \
 
 # Test direct connection
 curl -X GET http://10.0.1.100:8001/health \
-  -H "X-Kuzu-API-Key: $KUZU_API_KEY"
+  -H "X-Graph-API-Key: $GRAPH_API_KEY"
 ```
 
 ## Security Considerations
@@ -500,7 +496,7 @@ curl -X GET http://10.0.1.100:8001/health \
 
 ```python
 from fastapi import APIRouter, Depends
-from robosystems.graph_api.client.factory import KuzuClientFactory
+from robosystems.graph_api.client.factory import GraphClientFactory
 
 router = APIRouter()
 
@@ -508,14 +504,14 @@ router = APIRouter()
 async def execute_query(
     graph_id: str,
     cypher: str,
-    client = Depends(get_kuzu_client)
+    client = Depends(get_graph_client)
 ):
     # Client is automatically created with proper routing
     result = await client.query(cypher, graph_id)
     return result
 
-async def get_kuzu_client(graph_id: str):
-    return await KuzuClientFactory.create_client(
+async def get_graph_client(graph_id: str):
+    return await GraphClientFactory.create_client(
         graph_id=graph_id,
         operation_type="read"
     )
@@ -525,12 +521,12 @@ async def get_kuzu_client(graph_id: str):
 
 ```python
 from celery import shared_task
-from robosystems.graph_api.client.factory import KuzuClientFactory
+from robosystems.graph_api.client.factory import GraphClientFactory
 
 @shared_task
 async def process_graph_data(graph_id: str, data_files: list):
     # Create client for write operations
-    client = await KuzuClientFactory.create_client(
+    client = await GraphClientFactory.create_client(
         graph_id=graph_id,
         operation_type="write",
         tier=InstanceTier.STANDARD

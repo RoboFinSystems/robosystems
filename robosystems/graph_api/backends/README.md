@@ -15,8 +15,8 @@ The backend abstraction layer allows RoboSystems to support different graph data
 
 ### Kuzu (Default)
 
-**Type**: Embedded graph database
-**Best For**: Standard tier, high-performance single-instance deployments
+**Type**: Embedded graph database based on columnar storage
+**Best For**: Multi-tenant and dedicated configurations, high-performance deployments
 **Status**: Production-ready
 
 **Key Features:**
@@ -30,12 +30,12 @@ The backend abstraction layer allows RoboSystems to support different graph data
 - EC2-based writer instances
 - DynamoDB registry for allocation
 - EBS volumes for persistence
-- Auto-scaling groups by tier
+- Auto-scaling groups by configuration type
 
 ### Neo4j Community
 
 **Type**: Client-server graph database
-**Best For**: Professional/Enterprise tiers, multi-user access
+**Best For**: Dedicated configurations requiring advanced graph features
 **Status**: Development/Testing
 
 **Key Features:**
@@ -53,7 +53,7 @@ The backend abstraction layer allows RoboSystems to support different graph data
 ### Neo4j Enterprise
 
 **Type**: Client-server graph database with enterprise features
-**Best For**: Premium tier, enterprise customers
+**Best For**: High-performance configurations requiring clustering and advanced security
 **Status**: Future implementation
 
 **Key Features:**
@@ -142,10 +142,10 @@ The backend factory in `__init__.py` provides singleton access to the configured
 ```python
 from robosystems.graph_api.backends import get_backend
 
-# Get the configured backend (singleton)
+# Get the configured backend (singleton, automatically selects Kuzu or Neo4j)
 backend = get_backend()
 
-# Use the backend
+# Use the backend (same interface regardless of backend type)
 results = await backend.execute_query(
     graph_id="kg1a2b3c4d5",
     cypher="MATCH (n:Entity) RETURN n LIMIT 10"

@@ -2,18 +2,18 @@
 
 RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial data into actionable intelligence through graph-based analytics and AI-powered insights.
 
-- **Graph-Based Financial Intelligence**: Leverages graph database technology (Kuzu or Neo4j) to model complex financial relationships, enabling deep analysis of relationships between accounting, financial reporting, portfolio management, and public XBRL data
+- **Graph-Based Financial Intelligence**: Leverages graph database technology (Kuzu or Neo4j) to model complex financial relationships, enabling deep analysis between accounting, financial reporting, security analysis, portfolio management, and public XBRL filings
 - **GraphRAG Architecture**: Knowledge graph-based retrieval-augmented generation for LLM-powered financial analysis over enterprise financial and operating data
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration with natural language querying
-- **Multi-Source Data Integration**: Seamlessly integrates QuickBooks accounting data, SEC XBRL filings (10-K, 10-Q), and custom financial datasets into a unified knowledge graph
-- **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling (Standard/Enterprise/Premium), production-grade query management, and credit-based billing for sustainable operations
+- **Multi-Source Data Integration**: Seamlessly integrates SEC XBRL filings (10-K, 10-Q), QuickBooks accounting data, and custom financial datasets into a unified knowledge graph
+- **Enterprise-Ready Infrastructure**: Multi-tenant architecture with tiered scaling, production-grade query management, and token-based AI agent billing for sustainable operations
 - **Developer-First API**: RESTful API with comprehensive endpoints for graph operations, data ingestion, and analysis - designed for integration with financial applications like RoboLedger and RoboInvestor
 
 ## Core Features
 
 RoboSystems bridges the gap between raw financial data and actionable business intelligence by creating interconnected knowledge graphs that reveal hidden relationships, patterns, and insights that traditional databases miss. It's the backbone for next-generation financial applications that need to understand not just numbers, but the relationships and context behind them.
 
-- **Multi-Tenant Graph Databases**: Create isolated graph database instances (Kuzu or Neo4j) with cluster-based scaling
+- **Multi-Tenant Graph Databases**: Create isolated graph databases (Kuzu or Neo4j) with tiered cluster-based scaling
 - **AI Agent Interface**: Natural language financial analysis through Claude powered agents via Model Context Protocol (MCP)
 - **Entity Graph Creation**: Curated enterprise financial data schemas for defined use cases with RoboLedger, RoboInvestor and more
 - **Generic Graph Creation**: Custom schema definitions with custom node/relationship types
@@ -80,7 +80,7 @@ just cf-validate worker     # CloudFormation AWS validation
 ```bash
 just logs worker 200                 # View worker logs
 just logs-grep api "pipeline" 500    # Search API logs
-just logs-follow worker              # CloudWatch log search
+just logs-follow worker              # Tail worker logs
 ```
 
 ### Prerequisites
@@ -117,8 +117,8 @@ RoboSystems supports **pluggable graph database backends** to provide flexibilit
 
 #### Supported Backends
 
-- **Kuzu** (Default): High-performance embedded graph database, ideal for Standard tier deployments
-- **Neo4j**: Client-server architecture for Enterprise/Premium tiers with advanced features
+- **Kuzu**: High-performance embedded graph database based on columnar storage
+- **Neo4j**: Client-server architecture for dedicated instance isolation with advanced features
 
 #### Graph API System (`/robosystems/graph_api/`)
 
@@ -134,7 +134,7 @@ The **Graph API** is a FastAPI microservice that provides a unified interface re
 
 #### Infrastructure Design
 
-- **Cluster-Based Infrastructure**: Tiered instances (Standard/Enterprise/Premium) for different workload requirements
+- **Cluster-Based Infrastructure**: Tiered graph database instances for different workload requirements
 - **Multi-Tenant Isolation**: Each entity gets a dedicated database (`kg12345abc`) with complete data isolation
 - **Shared Repositories**: Common databases for SEC filings, industry benchmarks, and economic indicators
 - **API-First Design**: All database access through REST APIs with no direct database connections
@@ -149,14 +149,14 @@ The backend factory provides pluggable graph database backends with a unified in
 - **Backend-Specific Optimizations**: Each backend implements optimal patterns for their architecture
 - **Connection Management**: Backend-appropriate connection pooling and lifecycle management
 - **Query Translation**: Cypher query execution with backend-specific optimizations
-- **Ingestion Strategies**: Optimized bulk loading for each backend type
+- **Ingestion Strategies**: Parquet-optimized bulk data loading for each backend type
 
 #### Client Factory System (`/robosystems/graph_api/client/`)
 
 The client factory layer provides intelligent routing between application code and graph database infrastructure:
 
 - **Backend-Agnostic**: Works seamlessly with both Kuzu and Neo4j backends
-- **Automatic Discovery**: Finds database instances via DynamoDB registry (Kuzu) or direct connection (Neo4j)
+- **Automatic Discovery**: Finds database instances via DynamoDB registry
 - **Redis Caching**: Caches instance locations to reduce lookups
 - **Circuit Breakers**: Prevents cascading failures with automatic recovery
 - **Connection Reuse**: HTTP/2 connection pooling for efficiency
@@ -202,7 +202,7 @@ The client factory layer provides intelligent routing between application code a
 
 ### Data Layer
 
-- **Graph Database**: Pluggable backend (Kuzu or Neo4j) for financial knowledge graphs with cluster-based scaling
+- **Graph Database**: Pluggable backend for financial knowledge graphs with cluster-based scaling
 - **DynamoDB**: Database allocation registry, instance and volume management
 - **PostgreSQL**: Primary relational database for identity and access management
 - **Valkey**: Message broker and caching (separate DBs for queues, cache, progress tracking)
