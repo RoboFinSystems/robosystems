@@ -26,15 +26,22 @@ class KuzuBackend(GraphBackend):
     database: Optional[str] = None,
   ) -> List[Dict[str, Any]]:
     # Use connection pool's get_connection context manager
+    # Note: database parameter is unused for Kuzu - graph_id directly maps to a .kuzu database file
     with self.connection_pool.get_connection(graph_id, read_only=False) as conn:
       try:
-        result = conn.execute(cypher)
+        # Bind query parameters if provided
+        if parameters:
+          result = conn.execute(cypher, parameters)
+        else:
+          result = conn.execute(cypher)
 
-        # Convert Kuzu result to list of dicts
+        # Convert Kuzu result to list of dicts with column names
         rows = []
+        column_names = result.get_column_names()
         while result.has_next():
-          row = result.get_next()
-          rows.append(row)
+          row_data = result.get_next()
+          row_dict = dict(zip(column_names, row_data))
+          rows.append(row_dict)
 
         return rows
       except Exception as e:
@@ -62,7 +69,13 @@ class KuzuBackend(GraphBackend):
 
   async def delete_database(self, database_name: str) -> bool:
     # First, clean up any pooled connections and Database objects
-    self.connection_pool.force_database_cleanup(database_name, aggressive=True)
+    try:
+      self.connection_pool.force_database_cleanup(database_name, aggressive=True)
+      logger.debug(f"Cleaned up connection pool for {database_name}")
+    except Exception as e:
+      logger.warning(
+        f"Failed to cleanup connection pool for {database_name}: {e}. Proceeding with file deletion."
+      )
 
     # Then delete the physical files
     db_path = self.data_path / f"{database_name}.kuzu"
