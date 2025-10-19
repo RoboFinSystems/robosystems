@@ -19,8 +19,15 @@ def main():
   """Main entry point for the cluster server."""
   parser = argparse.ArgumentParser(description="Kuzu Cluster Server")
 
+  # Get default base path from environment
+  from robosystems.config import env
+
+  default_base_path = env.KUZU_DATABASE_PATH
+
   parser.add_argument(
-    "--base-path", required=True, help="Base directory for Kuzu databases"
+    "--base-path",
+    default=default_base_path,
+    help=f"Base directory for Kuzu databases (default: {default_base_path})",
   )
   parser.add_argument("--port", type=int, default=8001, help="Port to run server on")
   parser.add_argument("--host", default="0.0.0.0", help="Host to bind server to")
@@ -86,8 +93,6 @@ def main():
   # Get max_databases from tier configuration if available
   max_databases = args.max_databases
   try:
-    from robosystems.config import env
-
     # Get tier from environment using centralized config
     cluster_tier = env.CLUSTER_TIER
     if cluster_tier and cluster_tier != "unknown":
