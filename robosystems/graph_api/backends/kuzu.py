@@ -206,15 +206,9 @@ class KuzuBackend(GraphBackend):
           except (ValueError, IndexError):
             pass
 
-    try:
-      conn.execute("CHECKPOINT;")
-      logger.debug("Executed checkpoint to flush WAL to disk")
-    except Exception as checkpoint_error:
-      logger.warning(f"Failed to execute checkpoint: {checkpoint_error}")
-
     # CRITICAL: Force cleanup after ingestion to ensure data is immediately queryable
-    # This closes the Database object and removes it from cache, forcing the next
-    # query to create a fresh connection that sees all committed data
+    # This executes CHECKPOINT, closes the Database object, and removes it from cache,
+    # forcing the next query to create a fresh connection that sees all committed data
     self.force_cleanup(graph_id)
 
     logger.info(
@@ -243,22 +237,70 @@ class KuzuBackend(GraphBackend):
     if graph_id in self._engines:
       engine = self._engines[graph_id]
 
-      # Close the engine (closes both connection and database)
-      engine.close()
+      # CRITICAL: Close the engine's connection FIRST
+      # Kuzu requires all connections to be closed before CHECKPOINT can fully flush
+      engine.conn.close()
+      logger.debug(f"Closed primary connection for {graph_id}")
+
+      # For SEC database, execute a final CHECKPOINT after closing all connections
+      # This ensures all WAL data is flushed to disk
+      if graph_id == "sec":
+        try:
+          import kuzu
+
+          # Create temporary connection just for CHECKPOINT
+          temp_conn = kuzu.Connection(engine.db)
+          temp_conn.execute("CHECKPOINT;")
+          temp_conn.close()
+          logger.info(f"Executed final checkpoint for {graph_id}")
+        except Exception as cp_err:
+          logger.debug(f"Could not execute final checkpoint: {cp_err}")
+
+      # Close the database object
+      engine.db.close()
+      logger.debug(f"Closed database object for {graph_id}")
 
       # Remove from cache
       del self._engines[graph_id]
 
-      logger.info(f"Force cleanup completed for {graph_id} - database object removed from cache")
+      logger.info(
+        f"Force cleanup completed for {graph_id} - database object removed from cache"
+      )
 
     if aggressive:
       # Aggressive memory cleanup matching v1.0.1 behavior
       import gc
+      import ctypes
 
       # Force multiple rounds of garbage collection
+      # Generation 2 contains long-lived objects
       for generation in range(3):
         collected = gc.collect(generation)
         logger.debug(f"GC generation {generation}: collected {collected} objects")
+
+      # Try to trim memory back to OS (Linux/Unix specific)
+      # This is critical for ensuring freed memory is actually returned to the system
+      if hasattr(ctypes, "CDLL"):
+        try:
+          libc = ctypes.CDLL("libc.so.6")
+          # malloc_trim returns 1 on success, 0 on failure
+          if libc.malloc_trim(0) == 1:
+            logger.info("Successfully trimmed memory back to OS")
+        except Exception as e:
+          logger.debug(f"Could not trim memory (not Linux?): {e}")
+
+      # Log memory usage for monitoring
+      try:
+        import psutil
+
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        logger.info(
+          f"Memory after cleanup - RSS: {mem_info.rss / (1024 * 1024):.1f}MB, "
+          f"VMS: {mem_info.vms / (1024 * 1024):.1f}MB"
+        )
+      except ImportError:
+        pass
 
       logger.info(f"Completed aggressive cleanup for {graph_id}")
 
