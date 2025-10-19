@@ -5,9 +5,9 @@ robosystems/arelle/cache/
 # Ignore other common files
 .git/
 .github/
-# But allow the kuzu config file (explicitly copied in Dockerfile)
+# But allow the graph config file (explicitly copied in Dockerfile)
 !.github/configs/
-!.github/configs/kuzu.yml
+!.github/configs/graph.yml
 .pytest_cache/
 __pycache__/
 *.pyc
