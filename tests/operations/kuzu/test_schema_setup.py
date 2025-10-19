@@ -265,7 +265,7 @@ class TestKuzuSchemaManager:
 class TestKuzuSchemaManagerAdditional:
   """Additional test cases for KuzuSchemaManager to improve coverage."""
 
-  @patch("robosystems.operations.kuzu.schema_setup.SchemaIngestionProcessor")
+  @patch("robosystems.operations.kuzu.schema_setup.XBRLSchemaConfigGenerator")
   @patch("robosystems.operations.kuzu.schema_setup.logger")
   def test_initialize_schema_with_custom_config(
     self, mock_logger, mock_processor_class
@@ -296,7 +296,7 @@ class TestKuzuSchemaManagerAdditional:
     # Initialize with custom schema
     manager.initialize_schema(schema_config=custom_schema)
 
-    # Verify SchemaIngestionProcessor was called with custom schema (line 104 coverage)
+    # Verify XBRLSchemaConfigGenerator was called with custom schema (line 104 coverage)
     mock_processor_class.assert_called_once_with(custom_schema)
     assert mock_engine.execute_query.called
 

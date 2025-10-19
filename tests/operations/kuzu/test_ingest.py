@@ -14,7 +14,7 @@ from robosystems.operations.kuzu.ingest import (
 class TestSchemaAdapterCache:
   """Test cases for schema adapter caching."""
 
-  @patch("robosystems.operations.kuzu.ingest.SchemaIngestionProcessor")
+  @patch("robosystems.operations.kuzu.ingest.XBRLSchemaConfigGenerator")
   @patch("robosystems.operations.kuzu.ingest.create_roboledger_ingestion_processor")
   def test_get_cached_schema_adapter_default(
     self, mock_create_roboledger, mock_processor_class
@@ -37,7 +37,7 @@ class TestSchemaAdapterCache:
     assert adapter2 == mock_adapter
     mock_create_roboledger.assert_called_once()  # Still only called once
 
-  @patch("robosystems.operations.kuzu.ingest.SchemaIngestionProcessor")
+  @patch("robosystems.operations.kuzu.ingest.XBRLSchemaConfigGenerator")
   def test_get_cached_schema_adapter_custom(self, mock_processor_class):
     """Test getting custom schema adapter with caching."""
     # Clear cache first

@@ -1,10 +1,12 @@
-#!/usr/bin/env python3
 """
-Schema Processor for DataFrame-to-Schema Transformation
+XBRL Schema Adapter
 
-Processes and transforms XBRLGraphProcessor DataFrames to match Kuzu schema definitions.
-Handles schema validation, column mapping, and DataFrame structure compatibility for
-seamless data ingestion into the graph database.
+Adapts XBRL DataFrame structures to match Kuzu schema definitions.
+Handles schema validation, column mapping, and DataFrame structure compatibility
+for seamless XBRL data ingestion into the graph database.
+
+This is XBRL-specific and handles the transformation of XBRL processor output
+(DataFrames) to match the required schema format for graph database ingestion.
 """
 
 import pandas as pd
@@ -13,11 +15,11 @@ from robosystems.logger import logger
 from robosystems.schemas.builder import KuzuSchemaBuilder
 
 
-class SchemaProcessor:
+class XBRLSchemaAdapter:
   """
-  Processes DataFrame structures to ensure compatibility with Kuzu schemas.
+  Adapts XBRL DataFrame structures to ensure compatibility with Kuzu schemas.
 
-  This processor bridges the gap between data extraction and graph ingestion by:
+  This adapter bridges the gap between XBRL data extraction and graph ingestion by:
   - Validating DataFrame structures against schema definitions
   - Creating schema-compatible DataFrames with proper columns
   - Transforming data to match expected schema formats
@@ -34,7 +36,7 @@ class SchemaProcessor:
     "ReportTaxonomies": "REPORT_USES_TAXONOMY",
     "FactUnits": "FACT_HAS_UNIT",
     "FactDimensions": "FACT_HAS_DIMENSION",
-    "FactDimensionsRel": "FACT_HAS_DIMENSION",  # Alternative naming
+    "FactDimensionsRel": "FACT_HAS_DIMENSION",
     "FactEntities": "FACT_HAS_ENTITY",
     "FactElements": "FACT_HAS_ELEMENT",
     "FactPeriods": "FACT_HAS_PERIOD",
@@ -52,7 +54,7 @@ class SchemaProcessor:
 
   def __init__(self, schema_config: Dict[str, Any]):
     """
-    Initialize processor with schema configuration.
+    Initialize adapter with schema configuration.
 
     Args:
         schema_config: Configuration dict for schema building
@@ -61,7 +63,6 @@ class SchemaProcessor:
     self.schema_builder = KuzuSchemaBuilder(schema_config)
     self.schema_builder.load_schemas()
 
-    # Extract schema information for processing
     self.compiled_schema = self.schema_builder.schema
     self.node_schemas: Dict[str, Dict[str, Any]] = {}
     self.relationship_schemas: Dict[str, Dict[str, Any]] = {}
@@ -76,7 +77,6 @@ class SchemaProcessor:
       logger.warning("No compiled schema available for extraction")
       return
 
-    # Process node schemas
     if self.compiled_schema.nodes:
       for node in self.compiled_schema.nodes:
         primary_keys = [prop.name for prop in node.properties if prop.is_primary_key]
@@ -90,7 +90,6 @@ class SchemaProcessor:
           f"primary keys: {primary_keys}"
         )
 
-    # Process relationship schemas
     if self.compiled_schema.relationships:
       for relationship in self.compiled_schema.relationships:
         self.relationship_schemas[relationship.name] = {
@@ -197,7 +196,6 @@ class SchemaProcessor:
     expected_columns = self._build_column_list(schema_info)
     actual_columns = list(df.columns)
 
-    # Check column count
     if len(actual_columns) != len(expected_columns):
       return {
         "valid": False,
@@ -209,7 +207,6 @@ class SchemaProcessor:
         "extra_columns": set(actual_columns) - set(expected_columns),
       }
 
-    # Check column names match
     if set(actual_columns) != set(expected_columns):
       return {
         "valid": False,
@@ -252,7 +249,7 @@ class SchemaProcessor:
 
   def print_schema_summary(self) -> None:
     """Print comprehensive schema summary for debugging."""
-    logger.debug("=== SCHEMA PROCESSOR SUMMARY ===")
+    logger.debug("=== XBRL SCHEMA ADAPTER SUMMARY ===")
     logger.debug(f"Node Schemas: {len(self.node_schemas)}")
     for name, info in self.node_schemas.items():
       logger.debug(f"  {name}: {len(info['properties'])} properties")
@@ -264,8 +261,6 @@ class SchemaProcessor:
     logger.debug(f"XBRL Table Mappings: {len(self.XBRL_TABLE_MAPPING)}")
     for source, target in self.XBRL_TABLE_MAPPING.items():
       logger.debug(f"  {source} -> {target}")
-
-  # Private helper methods
 
   def _resolve_schema_name(self, table_name: str) -> str:
     """Resolve table name to schema name using mapping."""
@@ -283,11 +278,9 @@ class SchemaProcessor:
     """Build complete column list for a schema."""
     columns = []
 
-    # Add foreign key columns for relationships
     if schema_info["table_type"] == "relationship":
       columns.extend(["from", "to"])
 
-    # Add schema property columns
     for prop in schema_info["properties"]:
       columns.append(prop.name)
 
@@ -299,20 +292,17 @@ class SchemaProcessor:
     """Process data dictionary with schema requirements."""
     processed_data = {}
 
-    # Handle relationship foreign keys
     if schema_info["table_type"] == "relationship":
       for fk_col in ["from", "to"]:
         if fk_col in data_dict:
           processed_data[fk_col] = data_dict[fk_col]
 
-    # Process schema properties
     for prop in schema_info["properties"]:
       column_name = prop.name
 
       if column_name in data_dict:
         processed_data[column_name] = data_dict[column_name]
       else:
-        # Use appropriate default value
         default_value = self._get_default_value_for_type(prop.type)
         processed_data[column_name] = default_value
 
@@ -326,17 +316,16 @@ class SchemaProcessor:
     """Get appropriate default value for a data type."""
     data_type = data_type.upper()
 
-    # Use non-null defaults to prevent column dropping during serialization
     type_defaults = {
       ("STRING", "VARCHAR", "TEXT"): "",
       ("INT", "INT64", "INTEGER", "INT32"): 0,
       ("DOUBLE", "FLOAT", "DECIMAL"): 0.0,
       ("BOOLEAN", "BOOL"): False,
-      ("DATE", "TIMESTAMP"): None,  # These handle nulls better
+      ("DATE", "TIMESTAMP"): None,
     }
 
     for type_group, default in type_defaults.items():
       if data_type in type_group:
         return default
 
-    return None  # Default for unknown types
+    return None

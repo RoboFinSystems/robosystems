@@ -14,8 +14,8 @@ from typing import Optional, List, Tuple, Dict
 
 from ...logger import logger
 from ...security import SecurityAuditLogger
-from ...processors.schema_ingestion import (
-  SchemaIngestionProcessor,
+from ...processors.xbrl.schema_config_generator import (
+  XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
   IngestTableInfo,
 )
@@ -23,12 +23,12 @@ from ...config import env
 
 
 # Cache schema adapters to avoid recompilation
-_schema_adapter_cache: Dict[str, SchemaIngestionProcessor] = {}
+_schema_adapter_cache: Dict[str, XBRLSchemaConfigGenerator] = {}
 
 
 def _get_cached_schema_adapter(
   schema_config: Optional[dict] = None,
-) -> SchemaIngestionProcessor:
+) -> XBRLSchemaConfigGenerator:
   """
   Get a cached schema adapter to avoid recompilation.
 
@@ -52,7 +52,7 @@ def _get_cached_schema_adapter(
   # Create new adapter
   logger.info(f"Creating new schema adapter: {cache_key}")
   if schema_config:
-    adapter = SchemaIngestionProcessor(schema_config)
+    adapter = XBRLSchemaConfigGenerator(schema_config)
   else:
     adapter = create_roboledger_ingestion_processor()
 
@@ -230,7 +230,7 @@ def ingest_from_local_files(
 
 
 def _categorize_files_schema_driven(
-  file_paths: List[str], schema_adapter: SchemaIngestionProcessor
+  file_paths: List[str], schema_adapter: XBRLSchemaConfigGenerator
 ) -> Tuple[List[str], List[str]]:
   """
   Categorize files into nodes and relationships using schema-driven logic.
@@ -254,7 +254,7 @@ def _categorize_files_schema_driven(
 
 
 def _parse_filename_schema_driven(
-  file_path: str, schema_adapter: SchemaIngestionProcessor
+  file_path: str, schema_adapter: XBRLSchemaConfigGenerator
 ) -> Optional[dict]:
   """
   Parse filename using schema-driven logic to extract table information.
@@ -288,7 +288,7 @@ def _parse_filename_schema_driven(
 
 
 def _ingest_node_schema_driven(
-  engine, file_path: str, table_info: dict, schema_adapter: SchemaIngestionProcessor
+  engine, file_path: str, table_info: dict, schema_adapter: XBRLSchemaConfigGenerator
 ) -> bool:
   """
   Schema-driven node ingestion - create table from schema, then copy with appropriate settings.
@@ -314,7 +314,7 @@ def _ingest_node_schema_driven(
 
 
 def _ingest_relationship_schema_driven(
-  engine, file_path: str, table_info: dict, schema_adapter: SchemaIngestionProcessor
+  engine, file_path: str, table_info: dict, schema_adapter: XBRLSchemaConfigGenerator
 ) -> bool:
   """
   Schema-driven relationship ingestion - create rel table from schema, then COPY with IGNORE_ERRORS.
@@ -784,7 +784,7 @@ def _copy_relationship_data_schema_driven(
   file_path: str,
   table_name: str,
   ingest_info: IngestTableInfo,
-  schema_adapter: SchemaIngestionProcessor,
+  schema_adapter: XBRLSchemaConfigGenerator,
 ) -> bool:
   """
   Copy relationship data using schema-driven approach with Kuzu's COPY FROM functionality.

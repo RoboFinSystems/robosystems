@@ -1,15 +1,15 @@
 """
-Tests for Schema Processor
+Tests for XBRL Schema Adapter
 
-Tests the DataFrame-to-Schema transformation processor that handles schema validation,
-column mapping, and DataFrame structure compatibility.
+Tests the DataFrame-to-Schema transformation adapter that handles schema validation,
+column mapping, and DataFrame structure compatibility for XBRL processing.
 """
 
 import pytest
 import pandas as pd
 from unittest.mock import Mock, patch
 
-from robosystems.processors.schema_processor import SchemaProcessor
+from robosystems.processors.xbrl.schema_adapter import XBRLSchemaAdapter
 from robosystems.schemas.models import Node, Relationship, Property, Schema
 
 
@@ -17,7 +17,7 @@ from robosystems.schemas.models import Node, Relationship, Property, Schema
 def mock_schema_builder():
   """Create a mock schema builder with test schema data."""
   with patch(
-    "robosystems.processors.schema_processor.KuzuSchemaBuilder"
+    "robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder"
   ) as MockBuilder:
     builder_instance = MockBuilder.return_value
 
@@ -101,11 +101,11 @@ def basic_schema_config():
 @pytest.fixture
 def processor_with_mock_schema(mock_schema_builder, basic_schema_config):
   """Create a processor with mocked schema builder."""
-  return SchemaProcessor(basic_schema_config)
+  return XBRLSchemaAdapter(basic_schema_config)
 
 
-class TestSchemaProcessor:
-  """Test suite for SchemaProcessor."""
+class TestXBRLSchemaAdapter:
+  """Test suite for XBRLSchemaAdapter."""
 
   def test_initialization(self, processor_with_mock_schema, basic_schema_config):
     """Test processor initialization."""
@@ -394,7 +394,7 @@ class TestSchemaProcessor:
     assert "REPORT_HAS_FACT" in schemas
     assert "FACT_HAS_DIMENSION" in schemas
 
-  @patch("robosystems.processors.schema_processor.logger")
+  @patch("robosystems.processors.xbrl.schema_adapter.logger")
   def test_print_schema_summary(self, mock_logger, processor_with_mock_schema):
     """Test printing schema summary."""
     processor = processor_with_mock_schema
@@ -407,7 +407,7 @@ class TestSchemaProcessor:
 
     # Check for key messages
     debug_messages = [str(call[0][0]) for call in calls]
-    assert any("SCHEMA PROCESSOR SUMMARY" in msg for msg in debug_messages)
+    assert any("XBRL SCHEMA ADAPTER SUMMARY" in msg for msg in debug_messages)
     assert any("Node Schemas:" in msg for msg in debug_messages)
     assert any("Relationship Schemas:" in msg for msg in debug_messages)
     assert any("XBRL Table Mappings:" in msg for msg in debug_messages)
@@ -554,7 +554,7 @@ class TestXBRLTableMapping:
 class TestEdgeCases:
   """Test edge cases and error handling."""
 
-  @patch("robosystems.processors.schema_processor.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
   def test_empty_schema(self, mock_builder, basic_schema_config):
     """Test processor with empty schema."""
     builder_instance = mock_builder.return_value
@@ -565,13 +565,13 @@ class TestEdgeCases:
     )
     builder_instance.schema = compiled_schema
 
-    processor = SchemaProcessor(basic_schema_config)
+    processor = XBRLSchemaAdapter(basic_schema_config)
 
     assert len(processor.node_schemas) == 0
     assert len(processor.relationship_schemas) == 0
     assert processor.get_available_schemas() == []
 
-  @patch("robosystems.processors.schema_processor.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
   def test_node_with_no_properties(self, mock_builder, basic_schema_config):
     """Test node with no properties."""
     builder_instance = mock_builder.return_value
@@ -584,12 +584,12 @@ class TestEdgeCases:
     )
     builder_instance.schema = compiled_schema
 
-    processor = SchemaProcessor(basic_schema_config)
+    processor = XBRLSchemaAdapter(basic_schema_config)
 
     df = processor.create_schema_compatible_dataframe("EmptyNode")
     assert list(df.columns) == []
 
-  @patch("robosystems.processors.schema_processor.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
   def test_relationship_with_no_properties(self, mock_builder, basic_schema_config):
     """Test relationship with no properties."""
     builder_instance = mock_builder.return_value
@@ -610,12 +610,12 @@ class TestEdgeCases:
     )
     builder_instance.schema = compiled_schema
 
-    processor = SchemaProcessor(basic_schema_config)
+    processor = XBRLSchemaAdapter(basic_schema_config)
 
     df = processor.create_schema_compatible_dataframe("SIMPLE_REL")
     assert list(df.columns) == ["from", "to"]  # Only foreign keys
 
-  @patch("robosystems.processors.schema_processor.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
   def test_multiple_primary_keys(self, mock_builder, basic_schema_config):
     """Test node with multiple primary keys."""
     builder_instance = mock_builder.return_value
@@ -635,7 +635,7 @@ class TestEdgeCases:
     )
     builder_instance.schema = compiled_schema
 
-    processor = SchemaProcessor(basic_schema_config)
+    processor = XBRLSchemaAdapter(basic_schema_config)
 
     assert processor.node_schemas["CompositeKeyNode"]["primary_keys"] == [
       "key1",
