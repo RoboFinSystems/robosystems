@@ -87,13 +87,13 @@ Query the database directly using Cypher (no authentication required for local q
 
 ```bash
 # List all companies in the database
-just kuzu-query sec "MATCH (e:Entity) RETURN e.name, e.identifier LIMIT 10"
+just graph-query sec "MATCH (e:Entity) RETURN e.name, e.identifier LIMIT 10"
 
 # Get reports for a specific company
-just kuzu-query sec "MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report) WHERE e.name CONTAINS 'NVIDIA' RETURN r.form, r.filing_date LIMIT 10"
+just graph-query sec "MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report) WHERE e.name CONTAINS 'NVIDIA' RETURN r.form, r.filing_date LIMIT 10"
 
 # Find revenue facts
-just kuzu-query sec "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE el.qname = 'us-gaap:Revenues' RETURN f.numeric_value, f.value LIMIT 10"
+just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE el.name = 'NetIncomeLoss' RETURN el.name, f.numeric_value, f.value LIMIT 10"
 ```
 
 **Common Cypher Patterns:**
@@ -106,8 +106,8 @@ RETURN f
 
 -- Get balance sheet items
 MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
-WHERE el.qname STARTS WITH 'us-gaap:Assets'
-RETURN el.qname, el.name, f.numeric_value
+WHERE el.name STARTS WITH 'Assets'
+RETURN el.name, el.name, f.numeric_value
 
 -- Find facts by period
 MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
