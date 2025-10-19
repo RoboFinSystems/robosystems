@@ -191,20 +191,6 @@ schema = client.get_schema()
 print(schema)
 ```
 
-**Testing with curl:**
-
-```bash
-# Use your API key in the X-API-Key header
-curl -X POST "http://localhost:8000/v1/graphs/sec/query" \
-  -H "X-API-Key: rfsabc123xyz..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "MATCH (e:Entity) RETURN e.name LIMIT 5"
-  }'
-```
-
-**Note:** Always use the `X-API-Key` header with your API key, not `Authorization: Bearer` tokens.
-
 ## Understanding the Data Model
 
 The SEC graph database has the following structure:
@@ -304,7 +290,7 @@ If you get connection errors:
 docker ps
 
 # Restart if needed
-just restart robosystems
+just restart
 ```
 
 ### Database Empty
