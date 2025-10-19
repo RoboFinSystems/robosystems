@@ -4,6 +4,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from robosystems.logger import logger
 
+# S3 key truncation lengths for readability
+FACT_ID_TRUNCATE_LENGTH = 8
+CONTENT_HASH_TRUNCATE_LENGTH = 12
+CONTENT_HASH_LOG_LENGTH = 8
+
 
 class TextBlockExternalizer:
   def __init__(
@@ -62,7 +67,7 @@ class TextBlockExternalizer:
       if content_hash in self.content_cache:
         cached_result = self.content_cache[content_hash]
         logger.debug(
-          f"Cache hit for content hash {content_hash[:8]}, reusing URL: {cached_result['url']}"
+          f"Cache hit for content hash {content_hash[:CONTENT_HASH_LOG_LENGTH]}, reusing URL: {cached_result['url']}"
         )
         return cached_result
 
@@ -77,7 +82,7 @@ class TextBlockExternalizer:
 
       if self._check_s3_object_exists(s3_key):
         logger.debug(
-          f"S3 object already exists for content hash {content_hash[:8]}: {s3_key}"
+          f"S3 object already exists for content hash {content_hash[:CONTENT_HASH_LOG_LENGTH]}: {s3_key}"
         )
         if self.cdn_url:
           external_url = f"{self.cdn_url}/{s3_key}"
@@ -192,7 +197,11 @@ class TextBlockExternalizer:
       if not accession:
         accession = "unknown"
 
-      fact_id_short = fact_id[:8] if len(fact_id) > 8 else fact_id
+      fact_id_short = (
+        fact_id[:FACT_ID_TRUNCATE_LENGTH]
+        if len(fact_id) > FACT_ID_TRUNCATE_LENGTH
+        else fact_id
+      )
       s3_key = f"{year}/{cik}/{accession}/fact_{fact_id_short}.{file_extension}"
 
       logger.debug(f"Uploading large value to S3: s3://{self.bucket}/{s3_key}")
@@ -247,7 +256,11 @@ class TextBlockExternalizer:
     if not accession:
       accession = "unknown"
 
-    fact_id_short = fact_id[:8] if len(fact_id) > 8 else fact_id
+    fact_id_short = (
+      fact_id[:FACT_ID_TRUNCATE_LENGTH]
+      if len(fact_id) > FACT_ID_TRUNCATE_LENGTH
+      else fact_id
+    )
     s3_key = f"{year}/{cik}/{accession}/fact_{fact_id_short}.{file_extension}"
 
     return s3_key
@@ -280,7 +293,7 @@ class TextBlockExternalizer:
     if not accession:
       accession = "unknown"
 
-    content_hash_short = content_hash[:12]
+    content_hash_short = content_hash[:CONTENT_HASH_TRUNCATE_LENGTH]
     s3_key = f"{year}/{cik}/{accession}/fact_{content_hash_short}.{file_extension}"
 
     return s3_key

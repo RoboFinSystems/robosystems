@@ -15,7 +15,6 @@ import json
 from datetime import datetime
 
 from robosystems.logger import logger
-from robosystems.config import env
 
 
 class SECHealthChecker:
@@ -325,7 +324,10 @@ class SECHealthChecker:
     elif self.results["direct_access"]["status"] == "healthy":
       overall = "healthy"
       symbol = "✅"
-    elif self.results["api_access"]["status"] == "empty" or self.results["direct_access"]["status"] == "empty":
+    elif (
+      self.results["api_access"]["status"] == "empty"
+      or self.results["direct_access"]["status"] == "empty"
+    ):
       overall = "empty"
       symbol = "⚠️"
     else:

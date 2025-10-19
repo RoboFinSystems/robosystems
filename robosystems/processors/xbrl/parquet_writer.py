@@ -390,10 +390,10 @@ class ParquetWriter:
             df[col] = df[col].apply(
               lambda x: str(int(x)).zfill(9)
               if pd.notna(x) and str(x).strip() != ""
-              else ""
+              else None
             )
           else:
-            df[col] = df[col].fillna("").astype("object")
+            df[col] = df[col].astype("object")
 
     elif "Unit" in filename:
       string_columns = ["numerator_uri", "denominator_uri", "uri", "measure", "value"]

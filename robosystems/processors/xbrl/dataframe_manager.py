@@ -252,7 +252,7 @@ class DataFrameManager:
     """
     return self.dataframes.get(df_attr_name)
 
-  def set_dataframe(self, df_attr_name: str, df: pd.DataFrame):
+  def set_dataframe(self, df_attr_name: str, df: pd.DataFrame) -> None:
     """
     Set or update a DataFrame.
 

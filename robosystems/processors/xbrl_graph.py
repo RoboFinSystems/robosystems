@@ -57,7 +57,6 @@ class XBRLGraphProcessor:
     self.version = XBRL_GRAPH_PROCESSOR_VERSION
     self.instance_path = None
     self.entity_data = None
-    self.entity_data = None  # Backward compatibility
     self.report_data = None
 
     # Track which elements have been fully processed to avoid duplicate label/reference creation

@@ -108,7 +108,7 @@ just logs-follow worker              # CloudWatch log search
 
 - **FastAPI Backend** (`main.py`) with async REST API and versioned endpoints (`/v1/`)
 - **Multi-Database Routing**: Database-scoped endpoints (`/v1/graphs/{graph_id}/`) for multi-tenant operations
-- **MCP Integration**: Model Context Protocol for AI-powered financial analytics
+- **MCP Server**: Model Context Protocol Server for AI-powered financial analytics
 - **Celery Workers** with priority queues for asynchronous processing
 
 ### Graph Database System
@@ -335,9 +335,9 @@ Environment variables are managed through:
 ### Infrastructure Setup
 
 ```bash
-just setup-gha                     # Interactive GitHub secrets/variables setup
-just setup-aws                     # Interactive AWS secrets manager setup
-gh workflow run bootstrap.yml      # Bootstrap infrastructure
+just setup-gha     # Interactive GitHub secrets/variables setup
+just setup-aws     # Interactive AWS secrets manager setup
+just bootstrap     # Bootstrap infrastructure
 ```
 
 ## Client Libraries
