@@ -233,10 +233,10 @@ If you need to start fresh:
 
 ```bash
 # Reset database and clear all data
-just sec-reset-local
+just sec-reset
 
 # Reset and reload company
-just sec-reset-local && just sec-load NVDA 2024
+just sec-reset && just sec-load NVDA 2024
 ```
 
 ### Load Multiple Companies
@@ -315,7 +315,7 @@ just logs worker
 just logs kuzu-api
 
 # Reset and try again
-just sec-reset-local
+just sec-reset
 just sec-load NVDA 2024
 ```
 
