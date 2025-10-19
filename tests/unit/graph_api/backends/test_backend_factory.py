@@ -3,25 +3,29 @@ from robosystems.graph_api.backends import get_backend, KuzuBackend, Neo4jBacken
 
 
 def test_backend_factory_kuzu(monkeypatch, tmp_path):
-  monkeypatch.setenv("BACKEND_TYPE", "kuzu")
+  from unittest.mock import MagicMock
+
+  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "kuzu")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
+
+  # Mock the global ConnectionPool
+  mock_pool = MagicMock()
   monkeypatch.setattr(
-    "robosystems.graph_api.backends.kuzu.KuzuBackend.__init__",
-    lambda self: setattr(self, "data_path", str(tmp_path))
-    or setattr(self, "_engines", {}),
+    "robosystems.graph_api.backends.kuzu.get_connection_pool", lambda: mock_pool
   )
 
   backend = get_backend()
 
   assert isinstance(backend, KuzuBackend)
+  assert backend.connection_pool is mock_pool
 
 
 def test_backend_factory_neo4j_community(monkeypatch):
-  monkeypatch.setenv("BACKEND_TYPE", "neo4j_community")
+  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "neo4j_community")
   monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
   monkeypatch.setenv("NEO4J_USERNAME", "neo4j")
   monkeypatch.setenv("NEO4J_PASSWORD", "password")
-  monkeypatch.setattr("robosystems.config.env.BACKEND_TYPE", "neo4j_community")
+  monkeypatch.setattr("robosystems.config.env.GRAPH_BACKEND_TYPE", "neo4j_community")
   monkeypatch.setattr("robosystems.config.env.NEO4J_URI", "bolt://localhost:7687")
   monkeypatch.setattr("robosystems.config.env.NEO4J_USERNAME", "neo4j")
   monkeypatch.setattr("robosystems.config.env.NEO4J_PASSWORD", "password")
@@ -34,11 +38,11 @@ def test_backend_factory_neo4j_community(monkeypatch):
 
 
 def test_backend_factory_neo4j_enterprise(monkeypatch):
-  monkeypatch.setenv("BACKEND_TYPE", "neo4j_enterprise")
+  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "neo4j_enterprise")
   monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
   monkeypatch.setenv("NEO4J_USERNAME", "neo4j")
   monkeypatch.setenv("NEO4J_PASSWORD", "password")
-  monkeypatch.setattr("robosystems.config.env.BACKEND_TYPE", "neo4j_enterprise")
+  monkeypatch.setattr("robosystems.config.env.GRAPH_BACKEND_TYPE", "neo4j_enterprise")
   monkeypatch.setattr("robosystems.config.env.NEO4J_URI", "bolt://localhost:7687")
   monkeypatch.setattr("robosystems.config.env.NEO4J_USERNAME", "neo4j")
   monkeypatch.setattr("robosystems.config.env.NEO4J_PASSWORD", "password")
@@ -51,21 +55,24 @@ def test_backend_factory_neo4j_enterprise(monkeypatch):
 
 
 def test_backend_factory_invalid_type(monkeypatch):
-  monkeypatch.setenv("BACKEND_TYPE", "invalid_backend")
-  monkeypatch.setattr("robosystems.config.env.BACKEND_TYPE", "invalid_backend")
+  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "invalid_backend")
+  monkeypatch.setattr("robosystems.config.env.GRAPH_BACKEND_TYPE", "invalid_backend")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
 
-  with pytest.raises(ValueError, match="Unknown BACKEND_TYPE"):
+  with pytest.raises(ValueError, match="Unknown GRAPH_BACKEND_TYPE"):
     get_backend()
 
 
 def test_backend_factory_singleton(monkeypatch, tmp_path):
-  monkeypatch.setenv("BACKEND_TYPE", "kuzu")
+  from unittest.mock import MagicMock
+
+  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "kuzu")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
+
+  # Mock the global ConnectionPool
+  mock_pool = MagicMock()
   monkeypatch.setattr(
-    "robosystems.graph_api.backends.kuzu.KuzuBackend.__init__",
-    lambda self: setattr(self, "data_path", str(tmp_path))
-    or setattr(self, "_engines", {}),
+    "robosystems.graph_api.backends.kuzu.get_connection_pool", lambda: mock_pool
   )
 
   backend1 = get_backend()

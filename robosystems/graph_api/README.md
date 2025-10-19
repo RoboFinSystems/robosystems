@@ -3,6 +3,7 @@
 High-performance HTTP API server for graph database cluster management with pluggable backend support. FastAPI-based microservice that provides REST endpoints for multi-tenant graph operations with enterprise-grade reliability and security.
 
 **Supported Backends:**
+
 - **Kuzu** (Default): High-performance embedded graph database, ideal for Standard tier deployments
 - **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers with advanced features
 - **Neo4j Enterprise**: Full enterprise features including multi-database support for Premium tier
@@ -450,7 +451,7 @@ client = await get_kuzu_client(
 
 ```bash
 # Backend Configuration
-BACKEND_TYPE=kuzu                        # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=kuzu                 # kuzu|neo4j_community|neo4j_enterprise
 
 # Node Configuration (Kuzu Backend)
 KUZU_NODE_TYPE=writer                    # writer|shared_master|shared_replica

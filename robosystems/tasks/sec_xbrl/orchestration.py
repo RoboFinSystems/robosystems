@@ -1024,10 +1024,7 @@ def start_phase(
   years = state["years"]
   config = state["config"]
 
-  # Use backend from state if not specified (for backward compatibility)
-  if backend == "kuzu" and config.get("backend"):
-    backend = config["backend"]
-    logger.info(f"Using backend from state: {backend}")
+  logger.info(f"Starting phase '{phase}' with backend: {backend}")
 
   # Check for checkpoint if resuming
   if resume:

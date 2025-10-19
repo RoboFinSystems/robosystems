@@ -311,8 +311,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`kuzu-infra.yaml`**: Base infrastructure for graph database clusters (security groups, roles, registries)
 - **`kuzu-volumes.yaml`**: EBS volume management and snapshot automation
 - **`kuzu-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Kuzu backend)
-- **`kuzu-shared-replicas.yaml`**: ECS Fargate read replicas for shared repositories (SEC)
-- **`neo4j-*.yaml`**: Neo4j-specific infrastructure templates (when using Neo4j backend)
+- **`neo4j-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Neo4j backend)
 
 #### Observability
 
@@ -321,7 +320,6 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 #### CI/CD & Support
 
-- **`run-migrations.yaml`**: Run the database migrations on the environment RDS database
 - **`gha-runner.yaml`**: Self-hosted GitHub Actions runner on EC2 spot instances
 - **`bastion.yaml`**: Bastion host for secure access and troubleshooting
 
@@ -414,24 +412,23 @@ Each major system component has detailed documentation:
 - **`/SECURITY.md`**: Security features
 - **`/COMPLIANCE.md`**: SOC 2 compliance features
 
-### Testing & Development
+### Development & Testing
 
 - **`/CLAUDE.md`**: Curated Claude memory to improve usefulness
-- **`/.github/CONTRIBUTING.md`**: Open source contribution guide
 - **`/tests/README.md`**: Testing framework and test organization
 
 ## API Reference
 
-- API reference: [https://api.robosystems.ai](https://api.robosystems.ai)
-- API documentation: [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs)
-- OpenAPI specification: [https://api.robosystems.ai/openapi.json](https://api.robosystems.ai/openapi.json)
+- [API reference](https://api.robosystems.ai)
+- [API documentation](https://api.robosystems.ai/docs)
+- [OpenAPI specification](https://api.robosystems.ai/openapi.json)
 
 ## Support
 
-- Issues: [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- Discussions: [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
-- Projects: [Projects](https://github.com/RoboFinSystems/robosystems/projects)
-- Wiki: [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Issues](https://github.com/RoboFinSystems/robosystems/issues)
+- [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
+- [Projects](https://github.com/RoboFinSystems/robosystems/projects)
+- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
 
 ## License
 

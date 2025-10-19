@@ -43,7 +43,9 @@ class GraphRouter:
 
   def __init__(self):
     """Initialize the graph router."""
-    logger.info(f"Initialized multi-backend graph router (backend: {env.BACKEND_TYPE})")
+    logger.info(
+      f"Initialized multi-backend graph router (backend: {env.GRAPH_BACKEND_TYPE})"
+    )
 
   async def get_repository(
     self,
