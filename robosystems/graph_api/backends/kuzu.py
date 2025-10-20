@@ -145,7 +145,11 @@ class KuzuBackend(GraphBackend):
   ) -> Dict[str, Any]:
     # Use ConnectionPool's context manager - this is the 1.0.1 pattern
     with self.connection_pool.get_connection(graph_id, read_only=False) as conn:
-      # Load httpfs extension
+      # Load httpfs extension from bundled location
+      # Since Kuzu's extension server is down, we use the pre-bundled extension
+      # See bin/kuzu-extensions/README.md for provenance
+      import platform
+
       try:
         result = conn.execute("CALL show_loaded_extensions() RETURN *")
         loaded_extensions = []
@@ -153,28 +157,38 @@ class KuzuBackend(GraphBackend):
           loaded_extensions.append(str(result.get_next()).lower())
 
         if "httpfs" not in loaded_extensions:
-          try:
-            conn.execute("INSTALL httpfs")
-            logger.debug("Installed httpfs extension for S3 support")
-          except Exception as e:
-            logger.debug(f"Could not install httpfs (may already be installed): {e}")
+          # Determine extension path based on architecture and Kuzu version
+          arch = platform.machine().lower()
+          if arch == "aarch64":
+            arch = "arm64"
+          elif arch in ["x86_64", "amd64"]:
+            arch = "amd64"
 
-          conn.execute("LOAD httpfs")
-          logger.debug("Loaded httpfs extension")
+          # Bundled extension path (copied during Docker build)
+          extension_path = f"/home/appuser/.kuzu/extension/v0.11.2/linux_{arch}/httpfs/libhttpfs.kuzu_extension"
+
+          try:
+            # Load extension using full path (bypasses INSTALL download requirement)
+            conn.execute(f"LOAD EXTENSION '{extension_path}'")
+            logger.debug(f"Loaded httpfs extension from bundled path: {extension_path}")
+          except Exception as e:
+            # Check if the error is because the extension is already loaded
+            # This can happen if another connection already loaded it
+            if "already loaded" in str(e).lower():
+              logger.debug("httpfs extension already loaded by another connection")
+            else:
+              logger.error(
+                f"Failed to load httpfs extension from {extension_path}: {e}"
+              )
+              raise S3IngestionError(
+                f"httpfs extension required for S3 access but could not load from bundled path: {e}"
+              )
         else:
           logger.debug("httpfs extension already loaded")
       except Exception as e:
         if "already loaded" not in str(e).lower():
-          logger.warning(f"Could not load httpfs extension: {e}")
-          try:
-            conn.execute("INSTALL httpfs")
-            conn.execute("LOAD httpfs")
-            logger.debug("Successfully loaded httpfs on retry")
-          except Exception as retry_error:
-            logger.error(f"Failed to load httpfs after retry: {retry_error}")
-            raise S3IngestionError(
-              f"httpfs extension required for S3 access: {retry_error}"
-            )
+          logger.error(f"Could not load httpfs extension: {e}")
+          raise S3IngestionError(f"httpfs extension required for S3 access: {e}")
 
       # Configure S3 credentials
       if s3_credentials:
