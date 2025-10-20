@@ -20,16 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the Kuzu httpfs extension from local archive with architecture support
 # Extensions are bundled locally to eliminate network dependencies during build
 # See bin/kuzu-extensions/README.md for provenance and update procedures
-# Kuzu expects extensions at: ~/.kuzu/extension/v<version>/<platform>/<extension_name>/lib<extension_name>.kuzu_extension
-# OR the exact format that Kuzu's INSTALL command creates
 ARG TARGETARCH=arm64
-RUN mkdir -p /kuzu-extension/v0.11.2/linux_${TARGETARCH}/httpfs
+RUN mkdir -p /kuzu-extension/0.11.2/linux_${TARGETARCH}/httpfs
 COPY bin/kuzu-extensions/v0.11.2/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension \
-    /kuzu-extension/v0.11.2/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension
+    /kuzu-extension/0.11.2/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension
 
 # Verify extension integrity with checksum
 RUN if [ "${TARGETARCH}" = "arm64" ]; then \
-        echo "ea1b8f35234e57e961e1e0ca540769fc0192ff2e360b825a7e7b0e532f0f696e  /kuzu-extension/v0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
+        echo "ea1b8f35234e57e961e1e0ca540769fc0192ff2e360b825a7e7b0e532f0f696e  /kuzu-extension/0.11.2/linux_arm64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
         (echo "ERROR: ARM64 httpfs extension checksum verification failed!" && exit 1); \
     fi
 # Note: Add AMD64 checksum verification when AMD64 binary is available
@@ -129,11 +127,11 @@ RUN mkdir -p /home/appuser/.kuzu/extension && chown -R appuser:appuser /home/app
 RUN chown -R appuser:appuser /app
 
 # Copy pre-downloaded Kuzu httpfs extension to user home directory
-# Kuzu always looks for extensions in ~/.kuzu/extension regardless of database location
-COPY --from=builder --chown=appuser:appuser /kuzu-extension /home/appuser/.kuzu/extension
+# Kuzu expects extensions at ~/.kuzu/extension/<extension_name>/ without version/arch subdirs
+COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.2/linux_${TARGETARCH}/httpfs /home/appuser/.kuzu/extension/httpfs
 
 # Also copy to data location for consistency (optional, but keeps structure clean)
-COPY --from=builder --chown=appuser:appuser /kuzu-extension /app/data/.kuzu/extension
+COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.2/linux_${TARGETARCH}/httpfs /app/data/.kuzu/extension/httpfs
 
 # Switch to non-root user
 USER appuser
