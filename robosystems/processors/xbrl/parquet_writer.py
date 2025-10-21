@@ -413,7 +413,6 @@ class ParquetWriter:
         "report_date",
         "acceptance_date",
         "period_end_date",
-        "entity_identifier",
         "updated_at",
       ]
       for col in string_columns:

@@ -468,7 +468,6 @@ class KuzuMCPClient:
         "filing_date",
         "accession_number",
         "period_end_date",
-        "entity_identifier",
       ],
       "Period": [
         "start_date",
