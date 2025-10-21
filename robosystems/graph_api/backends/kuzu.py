@@ -157,15 +157,8 @@ class KuzuBackend(GraphBackend):
 
         if "httpfs" not in loaded_extensions:
           extension_path = self._get_httpfs_extension_path()
-          try:
-            conn.execute(f"LOAD EXTENSION '{extension_path}'")
-            logger.debug(f"Loaded httpfs extension from {extension_path}")
-          except Exception as e:
-            logger.debug(
-              f"Could not load httpfs from bundled path ({extension_path}): {e}"
-            )
-            conn.execute("LOAD httpfs")
-            logger.debug("Loaded httpfs extension using standard method")
+          conn.execute(f"LOAD EXTENSION '{extension_path}'")
+          logger.debug(f"Loaded httpfs extension from {extension_path}")
         else:
           logger.debug("httpfs extension already loaded")
       except Exception as e:
