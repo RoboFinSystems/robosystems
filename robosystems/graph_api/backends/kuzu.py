@@ -153,7 +153,9 @@ class KuzuBackend(GraphBackend):
           loaded_extensions.append(str(result.get_next()).lower())
 
         if "httpfs" not in loaded_extensions:
-          extension_path = "/home/appuser/.kuzu/extension/httpfs/libhttpfs.kuzu_extension"
+          extension_path = (
+            "/home/appuser/.kuzu/extension/httpfs/libhttpfs.kuzu_extension"
+          )
           conn.execute(f"LOAD EXTENSION '{extension_path}'")
           logger.debug(f"Loaded httpfs extension from {extension_path}")
         else:
@@ -162,7 +164,9 @@ class KuzuBackend(GraphBackend):
         if "already loaded" not in str(e).lower():
           logger.warning(f"Could not load httpfs extension: {e}")
           try:
-            extension_path = "/home/appuser/.kuzu/extension/httpfs/libhttpfs.kuzu_extension"
+            extension_path = (
+              "/home/appuser/.kuzu/extension/httpfs/libhttpfs.kuzu_extension"
+            )
             conn.execute(f"LOAD EXTENSION '{extension_path}'")
             logger.debug(f"Successfully loaded httpfs extension from {extension_path}")
           except Exception as retry_error:
