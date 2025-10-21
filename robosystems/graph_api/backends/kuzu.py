@@ -18,6 +18,9 @@ class KuzuBackend(GraphBackend):
     self.connection_pool = get_connection_pool()
     logger.info(f"Initialized KuzuBackend using global ConnectionPool at {data_path}")
 
+  def _get_httpfs_extension_path(self) -> Path:
+    return Path.home() / ".kuzu" / "extension" / "httpfs" / "libhttpfs.kuzu_extension"
+
   async def execute_query(
     self,
     graph_id: str,
@@ -145,7 +148,7 @@ class KuzuBackend(GraphBackend):
   ) -> Dict[str, Any]:
     # Use ConnectionPool's context manager - this is the 1.0.1 pattern
     with self.connection_pool.get_connection(graph_id, read_only=False) as conn:
-      # Load httpfs extension from local file
+      # Load httpfs extension (try bundled local file first, fallback to standard load)
       try:
         result = conn.execute("CALL show_loaded_extensions() RETURN *")
         loaded_extensions = []
@@ -153,27 +156,22 @@ class KuzuBackend(GraphBackend):
           loaded_extensions.append(str(result.get_next()).lower())
 
         if "httpfs" not in loaded_extensions:
-          extension_path = (
-            "/home/appuser/.kuzu/extension/httpfs/libhttpfs.kuzu_extension"
-          )
-          conn.execute(f"LOAD EXTENSION '{extension_path}'")
-          logger.debug(f"Loaded httpfs extension from {extension_path}")
+          extension_path = self._get_httpfs_extension_path()
+          try:
+            conn.execute(f"LOAD EXTENSION '{extension_path}'")
+            logger.debug(f"Loaded httpfs extension from {extension_path}")
+          except Exception as e:
+            logger.debug(
+              f"Could not load httpfs from bundled path ({extension_path}): {e}"
+            )
+            conn.execute("LOAD httpfs")
+            logger.debug("Loaded httpfs extension using standard method")
         else:
           logger.debug("httpfs extension already loaded")
       except Exception as e:
         if "already loaded" not in str(e).lower():
-          logger.warning(f"Could not load httpfs extension: {e}")
-          try:
-            extension_path = (
-              "/home/appuser/.kuzu/extension/httpfs/libhttpfs.kuzu_extension"
-            )
-            conn.execute(f"LOAD EXTENSION '{extension_path}'")
-            logger.debug(f"Successfully loaded httpfs extension from {extension_path}")
-          except Exception as retry_error:
-            logger.error(f"Failed to load httpfs after retry: {retry_error}")
-            raise S3IngestionError(
-              f"httpfs extension required for S3 access: {retry_error}"
-            )
+          logger.error(f"Failed to load httpfs extension: {e}")
+          raise S3IngestionError(f"httpfs extension required for S3 access: {e}")
 
       # Configure S3 credentials
       if s3_credentials:
