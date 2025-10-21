@@ -408,20 +408,6 @@ class XBRLGraphProcessor:
       report_data["is_inline_xbrl"] = self.sec_report.get("isInlineXBRL", False)
       logger.info(f"Report {report_data['name']} data prepared")
 
-    # Set entity_identifier to link report to entity
-    if self.entity_data and self.entity_data.get("identifier"):
-      report_data["entity_identifier"] = self.entity_data["identifier"]
-      logger.info(
-        f"Set report entity_identifier to UUID: {self.entity_data['identifier']} (CIK: {self.entityId})"
-      )
-    elif self.entityId:
-      # Fallback: Generate the entity UUID if entity_data not available
-      entity_uri = f"https://www.sec.gov/CIK{self.entityId.zfill(10)}"
-      report_data["entity_identifier"] = create_entity_id(entity_uri)
-      logger.info(
-        f"Generated entity_identifier UUID for CIK {self.entityId}: {report_data['entity_identifier']}"
-      )
-
     # Add to reports DataFrame using schema adapter if available
     if self.schema_adapter:
       new_report_df = self.schema_adapter.process_dataframe_for_schema(

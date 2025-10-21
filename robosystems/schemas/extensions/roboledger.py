@@ -54,7 +54,6 @@ REPORTING_NODES = [
       Property(name="report_date", type="STRING"),
       Property(name="acceptance_date", type="STRING"),
       Property(name="period_end_date", type="STRING"),
-      Property(name="entity_identifier", type="STRING"),
       Property(name="is_inline_xbrl", type="BOOLEAN"),
       Property(name="xbrl_processor_version", type="STRING"),
       Property(name="processed", type="BOOLEAN"),
