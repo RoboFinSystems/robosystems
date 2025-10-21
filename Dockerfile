@@ -19,7 +19,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy the Kuzu httpfs extension from local archive with architecture support
 # Extensions are bundled locally to eliminate network dependencies during build
-# See bin/kuzu-extensions/README.md for provenance and update procedures
 ARG TARGETARCH=arm64
 RUN mkdir -p /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs
 COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension \
