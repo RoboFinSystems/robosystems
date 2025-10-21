@@ -44,7 +44,7 @@ dependencies = [
     "python-multipart>=0.0.16,<1.0",
     "sse-starlette>=2.4.1,<3.0",
     # Graph database
-    "kuzu==0.11.2",
+    "kuzu==0.11.3",
     "neo4j>=5.15.0,<6.0",
     # Database and ORM
     "alembic>=1.16.0,<2.0",
