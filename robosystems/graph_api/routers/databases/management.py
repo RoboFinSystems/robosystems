@@ -18,7 +18,7 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.middleware.graph.clusters import NodeType
 from robosystems.logger import logger
 
-router = APIRouter(prefix="/databases", tags=["Database Management"])
+router = APIRouter(prefix="/databases", tags=["Graph Management"])
 
 
 @router.get("", response_model=DatabaseListResponse)

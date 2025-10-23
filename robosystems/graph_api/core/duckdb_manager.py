@@ -107,17 +107,12 @@ class DuckDBTableManager:
   for transformation/staging before ingestion into Kuzu graph database.
   """
 
-  def __init__(self, base_path: str = None):
+  def __init__(self):
     """
     Initialize DuckDB Table Manager.
 
-    Args:
-        base_path: Deprecated - pool manages paths. Kept for backward compatibility.
+    The connection pool manages all database paths automatically.
     """
-    if base_path:
-      logger.warning(
-        "DuckDBTableManager base_path parameter is deprecated - pool manages paths"
-      )
     logger.info("Initialized DuckDB Table Manager (staging layer for Kuzu ingestion)")
 
   @validate_table_name_decorator

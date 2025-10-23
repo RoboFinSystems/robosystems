@@ -14,7 +14,7 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.task_manager import backup_task_manager
 from robosystems.logger import logger
 
-router = APIRouter(prefix="/databases", tags=["Database Backup"])
+router = APIRouter(prefix="/databases", tags=["Backup"])
 
 
 @router.post("/{graph_id}/backup", response_model=BackupResponse)

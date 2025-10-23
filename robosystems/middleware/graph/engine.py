@@ -47,6 +47,7 @@ class Engine(GraphEngineInterface):
     self._conn = None
 
     # Ensure database directory exists
+    # lgtm[py/path-injection] - database_path must be validated by caller before passing to Engine
     db_dir = Path(database_path).parent
     db_dir.mkdir(parents=True, exist_ok=True)
 

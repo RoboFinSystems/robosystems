@@ -22,7 +22,7 @@ from robosystems.config.valkey_registry import ValkeyDatabase
 import redis.asyncio as redis_async
 import json
 
-router = APIRouter(prefix="/tasks", tags=["Task Management"])
+router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
 
 class UnifiedTaskManager:

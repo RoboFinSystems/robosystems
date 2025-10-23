@@ -22,7 +22,7 @@ from robosystems.config import env
 from robosystems.database import get_db_session
 from robosystems.models.iam import Graph
 
-router = APIRouter(prefix="/databases", tags=["Database Queries"])
+router = APIRouter(prefix="/databases", tags=["Graph Query"])
 
 
 @contextmanager

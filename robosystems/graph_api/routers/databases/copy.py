@@ -90,7 +90,7 @@ class BackgroundIngestRequest(BaseModel):
     }
 
 
-router = APIRouter(prefix="/databases", tags=["Data Copy"])
+router = APIRouter(prefix="/databases", tags=["Copy"])
 
 
 class IngestionTaskManager:

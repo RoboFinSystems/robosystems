@@ -67,7 +67,7 @@ class TestValidateTableName:
 class TestDuckDBTableManager:
   def setup_method(self):
     self.temp_dir = tempfile.mkdtemp()
-    self.manager = DuckDBTableManager(base_path=self.temp_dir)
+    self.manager = DuckDBTableManager()
 
   def teardown_method(self):
     shutil.rmtree(self.temp_dir, ignore_errors=True)

@@ -13,7 +13,7 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
-router = APIRouter(prefix="/databases", tags=["Database Metrics"])
+router = APIRouter(prefix="/databases", tags=["Metrics"])
 
 
 @router.get("/{graph_id}/metrics")

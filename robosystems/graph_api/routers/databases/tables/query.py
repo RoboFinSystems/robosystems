@@ -16,7 +16,7 @@ from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases/{graph_id}/tables")
 
-table_manager = DuckDBTableManager(base_path="/app/data/staging")
+table_manager = DuckDBTableManager()
 
 
 @router.post("/query", response_model=None)
