@@ -70,9 +70,9 @@ class CreateGraphRequest(BaseModel):
 
   # Instance tier configuration
   instance_tier: str = Field(
-    "standard",
-    description="Instance tier: standard, enterprise, or premium",
-    pattern="^(standard|enterprise|premium)$",
+    "kuzu-standard",
+    description="Instance tier: kuzu-standard, kuzu-large, kuzu-xlarge, neo4j-community-large, neo4j-enterprise-xlarge",
+    pattern="^(kuzu-standard|kuzu-large|kuzu-xlarge|neo4j-community-large|neo4j-enterprise-xlarge)$",
   )
 
   # Optional custom schema
@@ -102,7 +102,7 @@ class CreateGraphRequest(BaseModel):
           "description": "Main production graph",
           "schema_extensions": ["roboledger"],
         },
-        "instance_tier": "standard",
+        "instance_tier": "kuzu-standard",
         "initial_entity": {
           "name": "Acme Corp",
           "uri": "https://acme.com",
@@ -318,11 +318,15 @@ async def create_graph(
 
       # Map tier to GraphTier enum
       tier_map = {
-        "standard": GraphTier.STANDARD,
-        "enterprise": GraphTier.ENTERPRISE,
-        "premium": GraphTier.PREMIUM,
+        "kuzu-standard": GraphTier.KUZU_STANDARD,
+        "kuzu-large": GraphTier.KUZU_LARGE,
+        "kuzu-xlarge": GraphTier.KUZU_XLARGE,
+        "standard": GraphTier.KUZU_STANDARD,
+        "professional": GraphTier.KUZU_LARGE,
+        "enterprise": GraphTier.KUZU_XLARGE,
+        "premium": GraphTier.KUZU_XLARGE,
       }
-      graph_tier = tier_map.get(request.instance_tier.lower(), GraphTier.STANDARD)
+      graph_tier = tier_map.get(request.instance_tier.lower(), GraphTier.KUZU_STANDARD)
 
       # Log the request
       logger.info("=== GRAPH CREATION REQUEST (SSE) ===")

@@ -264,6 +264,15 @@ class KuzuDatabaseManager:
       conn.close()
       db.close()
 
+      # Create DuckDB staging directory for this graph
+      try:
+        staging_base = Path("/app/data/staging")
+        staging_dir = staging_base / request.graph_id
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created DuckDB staging directory: {staging_dir}")
+      except (OSError, PermissionError) as e:
+        logger.warning(f"Could not create DuckDB staging directory: {e}")
+
       execution_time = (time.time() - start_time) * 1000
 
       logger.info(

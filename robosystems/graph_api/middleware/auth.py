@@ -219,12 +219,12 @@ def get_api_key_from_secrets_manager(
       logger.info("Successfully retrieved Graph API key from Secrets Manager")
       return api_key
     else:
-      logger.error(f"No GRAPH_API_KEY found in secret: {secret_name}")
+      logger.error(f"No GRAPH_API_KEY found in secret: {secret_name[:50]}")
       return None
 
   except ClientError as e:
     if e.response["Error"]["Code"] == "ResourceNotFoundException":
-      logger.warning(f"Secret not found: {secret_name}")
+      logger.warning(f"Secret not found: {secret_name[:50]}")
     else:
       logger.error(f"Error retrieving secret: {e}")
     return None

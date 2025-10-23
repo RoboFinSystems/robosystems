@@ -536,8 +536,8 @@ class TestKuzuDatabaseManager:
 
     # Verify some key tables are present
     all_calls_str = " ".join(call_args)
-    assert "CREATE NODE TABLE IF NOT EXISTS User" in all_calls_str
     assert "CREATE NODE TABLE IF NOT EXISTS Entity" in all_calls_str
+    assert "CREATE NODE TABLE IF NOT EXISTS Element" in all_calls_str
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
   def test_apply_shared_schema(self, mock_init_pool):

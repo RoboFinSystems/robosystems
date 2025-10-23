@@ -233,7 +233,7 @@ class TestKuzuDatabaseCreation:
           "description": "Test entity graph created via API",
           "schema_extensions": ["roboledger"],
         },
-        "instance_tier": "standard",
+        "instance_tier": "kuzu-standard",
         "initial_entity": {
           "name": f"API Test Entity {unique_id}",
           "uri": f"https://apitestentity{unique_id}.com",

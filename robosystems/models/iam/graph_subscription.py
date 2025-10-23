@@ -31,7 +31,9 @@ class GraphSubscription(Base):
 
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
   graph_id = Column(String, nullable=False)
-  plan_name = Column(String, nullable=True)  # e.g., "standard", "enterprise", "premium"
+  plan_name = Column(
+    String, nullable=True
+  )  # e.g., "kuzu-standard", "kuzu-large", "kuzu-xlarge"
   status = Column(
     SQLEnum(SubscriptionStatus), nullable=False, default=SubscriptionStatus.ACTIVE
   )

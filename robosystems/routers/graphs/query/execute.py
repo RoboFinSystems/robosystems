@@ -40,6 +40,7 @@ from robosystems.security.cypher_analyzer import (
   is_write_operation,
   is_bulk_operation,
   is_admin_operation,
+  is_schema_ddl,
 )
 from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 from robosystems.middleware.graph.query_queue import get_query_queue
@@ -86,8 +87,13 @@ router = APIRouter()
 @router.post(
   "/query",  # Full path without trailing slash
   response_model=None,  # Dynamic response type
-  summary="Execute Cypher Query",
-  description="""Execute a Cypher query with intelligent response optimization.
+  summary="Execute Cypher Query (Read-Only)",
+  description="""Execute a read-only Cypher query with intelligent response optimization.
+
+**IMPORTANT: This endpoint is READ-ONLY.** Write operations (CREATE, MERGE, SET, DELETE) are not allowed.
+To load data into your graph, use the staging pipeline:
+1. Create file upload: `POST /v1/graphs/{graph_id}/tables/{table_name}/files`
+2. Ingest to graph: `POST /v1/graphs/{graph_id}/tables/ingest`
 
 This endpoint automatically selects the best execution strategy based on:
 - Query characteristics (size, complexity)
@@ -204,7 +210,21 @@ async def execute_cypher_query(
     is_write = is_write_operation(request.query)
     access_type = "write" if is_write else "read"
 
-    # Check for bulk operations (COPY, LOAD, IMPORT)
+    # Block ALL write operations - query endpoint is read-only
+    if is_write:
+      logger.warning(
+        f"User {current_user.id} attempted write operation through query endpoint: {request.query[:100]}"
+      )
+      raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail="Write operations (CREATE, MERGE, SET, DELETE) are not allowed. "
+        "The query endpoint is read-only. Use the staging pipeline to load data:\n"
+        "1. Create file upload: POST /v1/graphs/{graph_id}/tables/{table_name}/files\n"
+        "2. Ingest to graph: POST /v1/graphs/{graph_id}/tables/ingest\n"
+        "This ensures data integrity and enables pipeline benefits (audit, rollback, validation).",
+      )
+
+    # Check for bulk operations (COPY, LOAD, IMPORT) - should never reach here due to write check above
     if is_bulk_operation(request.query):
       logger.warning(
         f"User {current_user.id} attempted bulk operation through query endpoint: {request.query[:100]}"
@@ -212,7 +232,7 @@ async def execute_cypher_query(
       raise HTTPException(
         status_code=http_status.HTTP_400_BAD_REQUEST,
         detail="Bulk operations (COPY, LOAD, IMPORT) are not allowed through the query endpoint. "
-        "Please use the /v1/graphs/{graph_id}/copy endpoint for bulk data ingestion.",
+        "Please use the staging pipeline for data ingestion.",
       )
 
     # Check for admin operations (EXPORT, INSTALL, ATTACH, etc.)
@@ -228,6 +248,17 @@ async def execute_cypher_query(
       # Even for admins, we might want to restrict these through the query endpoint
       logger.info(
         f"Admin user {current_user.id} performing admin operation: {request.query[:100]}"
+      )
+
+    # Check for schema DDL operations (CREATE/DROP/ALTER TABLE, etc.)
+    if is_schema_ddl(request.query):
+      logger.warning(
+        f"User {current_user.id} attempted schema DDL through query endpoint: {request.query[:100]}"
+      )
+      raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail="Schema DDL operations (CREATE/DROP/ALTER TABLE, etc.) are not allowed. "
+        "Graph schemas are immutable after creation to ensure consistency with staging tables.",
       )
 
     # Block writes on shared repositories

@@ -23,15 +23,26 @@ from ...models.iam import UserGraph, UserLimits
 from ...config import env
 from ...models.api import EntityCreate, EntityResponse
 from ...graph_api.client import GraphClient, get_graph_client_for_instance
-from ...graph_api.client.exceptions import GraphClientError
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
-from ...middleware.graph.types import InstanceTier
+from ...models.iam.graph_credits import GraphTier
 from ...exceptions import (
   InsufficientPermissionsError,
   GraphAllocationError,
 )
 
 logger = logging.getLogger(__name__)
+
+
+SUBSCRIPTION_TO_GRAPH_TIER = {
+  "kuzu-standard": GraphTier.KUZU_STANDARD,
+  "kuzu-large": GraphTier.KUZU_LARGE,
+  "kuzu-xlarge": GraphTier.KUZU_XLARGE,
+  # Legacy mappings for backward compatibility
+  "standard": GraphTier.KUZU_STANDARD,
+  "professional": GraphTier.KUZU_LARGE,
+  "enterprise": GraphTier.KUZU_XLARGE,
+  "premium": GraphTier.KUZU_XLARGE,
+}
 
 
 class EntityGraphService:
@@ -117,15 +128,12 @@ class EntityGraphService:
     graph_id = self._generate_graph_id(entity_data.name)
     logger.info(f"Generated graph_id: {graph_id}")
 
-    # Determine service tier
-    if tier == "enterprise":
-      instance_tier = InstanceTier.ENTERPRISE
-    elif tier == "premium":
-      instance_tier = InstanceTier.PREMIUM
-    else:
-      instance_tier = InstanceTier.STANDARD
+    # Determine graph tier from subscription
+    graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
+      tier if tier else "kuzu-standard", GraphTier.KUZU_STANDARD
+    )
 
-    logger.info(f"Service tier: {instance_tier.value}")
+    logger.info(f"Graph tier: {graph_tier.value}")
 
     # Check for cancellation before cluster selection
     if cancellation_callback:
@@ -151,7 +159,7 @@ class EntityGraphService:
         entity_id=graph_id,  # Use graph_id as entity_id
         graph_id=graph_id,
         graph_type="entity",  # This is a entity graph
-        instance_tier=instance_tier,
+        instance_tier=graph_tier,
       )
 
       logger.info(
@@ -189,8 +197,36 @@ class EntityGraphService:
       if progress_callback:
         progress_callback("Installing schema extensions...", 60)
 
-      await self._install_entity_schema_kuzu(
+      schema_ddl = await self._install_entity_schema_kuzu(
         kuzu_client, graph_id, entity_data.extensions
+      )
+
+      # Persist schema DDL to PostgreSQL for validation and versioning
+      from ...models.iam import GraphSchema
+
+      GraphSchema.create(
+        graph_id=graph_id,
+        schema_type="entity" if not entity_data.extensions else "extensions",
+        schema_ddl=schema_ddl,
+        schema_json={
+          "base": "entity",
+          "extensions": entity_data.extensions or [],
+        },
+        session=self.session,
+      )
+      logger.info(f"Persisted schema DDL for graph {graph_id} to PostgreSQL")
+
+      # Auto-create DuckDB staging tables from schema
+      from ..graph.table_service import TableService
+
+      table_service = TableService(self.session)
+      created_tables = table_service.create_tables_from_schema(
+        graph_id=graph_id,
+        user_id=user_id,
+        schema_ddl=schema_ddl,
+      )
+      logger.info(
+        f"Auto-created {len(created_tables)} DuckDB staging tables for graph {graph_id}"
       )
 
       # Create entity node in graph
@@ -201,23 +237,17 @@ class EntityGraphService:
         kuzu_client, entity_data, graph_id
       )
 
-      # Create GraphMetadata node to store graph information
-      await self._create_graph_metadata_node(
-        kuzu_client, graph_id, entity_data.name, user_id, tier, entity_data.extensions
-      )
+      # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
+      # stored exclusively in PostgreSQL, not in the Kuzu graph database.
+      # This keeps the graph focused on business data only.
 
-      # Create User node and USER_HAS_ACCESS relationship for admin access
+      # Get graph tier from entity data for consistency
+      graph_tier_str = entity_data_dict.get("graph_tier", "kuzu-standard")
+
+      # Create user-graph relationship in PostgreSQL
       if progress_callback:
         progress_callback("Setting up user access...", 80)
 
-      await self._create_user_access_in_graph(
-        kuzu_client, graph_id, user_id, entity_response.id
-      )
-
-      # Get graph tier from entity data for consistency
-      graph_tier_str = entity_data_dict.get("graph_tier", "standard")
-
-      # Create user-graph relationship in PostgreSQL
       self._create_user_graph_relationship(
         user_id,
         graph_id,
@@ -230,26 +260,22 @@ class EntityGraphService:
       # Create credit pool for the new graph
       try:
         from .credit_service import CreditService
-        from ...models.iam.graph_credits import GraphTier
 
         # Get graph tier from entity data (passed from the request)
         # This determines credit costs and allocation
-        graph_tier_str = entity_data_dict.get("graph_tier", "standard")
-        if graph_tier_str == "enterprise":
-          graph_tier = GraphTier.ENTERPRISE
-        elif graph_tier_str == "premium":
-          graph_tier = GraphTier.PREMIUM
-        else:
-          graph_tier = GraphTier.STANDARD
+        graph_tier_str = entity_data_dict.get("graph_tier", "kuzu-standard")
+        credit_graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
+          graph_tier_str, GraphTier.KUZU_STANDARD
+        )
 
-        # Map graph tier to subscription tier for credit allocation
+        # Map graph tier directly to subscription tier (1:1 mapping)
         # This determines the monthly credit allocation for the graph
-        if graph_tier == GraphTier.ENTERPRISE:
-          subscription_tier = "enterprise"  # 1M credits/month
-        elif graph_tier == GraphTier.PREMIUM:
-          subscription_tier = "premium"  # 3M credits/month
+        if credit_graph_tier == GraphTier.KUZU_XLARGE:
+          subscription_tier = "kuzu-xlarge"
+        elif credit_graph_tier == GraphTier.KUZU_LARGE:
+          subscription_tier = "kuzu-large"
         else:
-          subscription_tier = "standard"  # 100k credits/month
+          subscription_tier = "kuzu-standard"
 
         # Create credit pool
         if progress_callback:
@@ -261,7 +287,7 @@ class EntityGraphService:
           user_id=user_id,
           billing_admin_id=user_id,  # Creator is billing admin
           subscription_tier=subscription_tier,
-          graph_tier=graph_tier,
+          graph_tier=credit_graph_tier,
         )
         logger.info(f"Credit pool created for graph: {graph_id}")
       except Exception as credit_error:
@@ -344,11 +370,14 @@ class EntityGraphService:
 
   async def _install_entity_schema_kuzu(
     self, kuzu_client: GraphClient, graph_id: str, extensions: Optional[list] = None
-  ) -> None:
+  ) -> str:
     """
     Install entity graph schema via KuzuClient API using selected extensions.
 
     This is a direct version that uses KuzuClient instead of repository.
+
+    Returns:
+        str: The generated DDL that was installed
     """
     logger.info(f"Installing entity schema for graph: {graph_id}")
     logger.info("Schema type: base + extensions")
@@ -384,6 +413,8 @@ class EntityGraphService:
       logger.info(
         f"Entity graph schema installed with base + {len(extensions or [])} extensions"
       )
+
+      return ddl
     except Exception as e:
       logger.error(f"Failed to install schema: {e}")
       raise
@@ -652,175 +683,6 @@ class EntityGraphService:
         logger.error(f"Response details: {response_detail}")
       raise RuntimeError(f"Failed to create entity node: {str(e)}")
 
-  async def _create_graph_metadata_node(
-    self,
-    kuzu_client: GraphClient,
-    graph_id: str,
-    entity_name: str,
-    user_id: str,
-    tier: Optional[str],
-    extensions: Optional[list],
-  ) -> None:
-    """
-    Create GraphMetadata node to store information about the graph itself.
-
-    This is a protected node that stores metadata about the graph database
-    for internal tracking and management purposes.
-    """
-    logger.info(f"Creating GraphMetadata node for graph: {graph_id}")
-
-    import datetime
-    import json
-
-    current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-    from ...utils.uuid import generate_deterministic_uuid7
-
-    metadata_properties = {
-      "identifier": generate_deterministic_uuid7(graph_id, namespace="graph_metadata"),
-      "graph_id": graph_id,
-      "name": entity_name,
-      "description": f"Entity graph for {entity_name}",
-      "type": "entity",
-      "created_at": current_time,
-      "updated_at": current_time,
-      "created_by": user_id,
-      "tier": tier or "standard",
-      "schema_type": "extensions",  # Entity graphs use base + extensions
-      "custom_schema_name": None,
-      "custom_schema_version": None,
-      "schema_extensions": json.dumps(extensions or []),
-      "tags": json.dumps(["entity", "business"]),
-      "custom_metadata": json.dumps({"entity_type": "entity"}),
-      "status": "active",
-      "access_level": "private",
-    }
-
-    create_query = """
-    CREATE (m:GraphMetadata {
-      identifier: $identifier,
-      graph_id: $graph_id,
-      name: $name,
-      description: $description,
-      type: $type,
-      created_at: $created_at,
-      updated_at: $updated_at,
-      created_by: $created_by,
-      tier: $tier,
-      schema_type: $schema_type,
-      custom_schema_name: $custom_schema_name,
-      custom_schema_version: $custom_schema_version,
-      schema_extensions: $schema_extensions,
-      tags: $tags,
-      custom_metadata: $custom_metadata,
-      status: $status,
-      access_level: $access_level
-    })
-    RETURN m
-    """
-
-    try:
-      await kuzu_client.query(
-        cypher=create_query, graph_id=graph_id, parameters=metadata_properties
-      )
-      logger.info("GraphMetadata node created successfully")
-    except GraphClientError as e:
-      # Suppress Kuzu-specific errors (e.g., schema issues, duplicate nodes)
-      logger.error(f"Failed to create GraphMetadata node (Kuzu error): {e}")
-      # Don't fail the entire graph creation if metadata node fails
-      # The graph is already functional without it
-    except Exception as e:
-      # Log but don't fail - metadata is supplementary, not critical
-      logger.error(
-        f"Unexpected error creating GraphMetadata node: {e}. "
-        "Continuing without metadata - graph is still functional."
-      )
-      # NOTE: We suppress all metadata creation errors since the graph
-      # is already operational and metadata is for tracking/UI purposes only
-
-  async def _create_user_access_in_graph(
-    self,
-    kuzu_client: GraphClient,
-    graph_id: str,
-    user_id: str,
-    entity_identifier: str,
-  ) -> None:
-    """
-    Create User node and USER_HAS_ACCESS relationship for graph access control.
-
-    This establishes the admin relationship between the creating user and the entity.
-    The User node stores basic user information and the relationship defines access rights.
-    """
-    logger.info(f"Creating User node and access relationship for user: {user_id}")
-
-    import datetime
-
-    current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-    # Get user information from the session if available
-    from ...models.iam import User as UserModel
-
-    user = self.session.query(UserModel).filter_by(id=user_id).first()
-
-    if user:
-      user_email = user.email
-      user_name = user.name or user.email
-      user_is_active = user.is_active
-    else:
-      # Fallback if user not found in database
-      user_email = f"{user_id}@unknown"
-      user_name = user_id
-      user_is_active = True  # Default to active for unknown users
-
-    # Create or merge User node and create relationship with admin role
-    create_query = """
-    MERGE (u:User {identifier: $user_id})
-    ON CREATE SET
-      u.email = $email,
-      u.name = $name,
-      u.is_active = $is_active,
-      u.created_at = $created_at,
-      u.updated_at = $created_at
-    ON MATCH SET
-      u.updated_at = $created_at
-    WITH u
-    MATCH (e:Entity {identifier: $entity_identifier})
-    MERGE (u)-[r:USER_HAS_ACCESS]->(e)
-    ON CREATE SET
-      r.role = 'admin',
-      r.access_level = 'full',
-      r.created_at = $created_at
-    RETURN u.identifier as user_id, e.identifier as entity_id, r.role as role
-    """
-
-    try:
-      result = await kuzu_client.query(
-        cypher=create_query,
-        graph_id=graph_id,
-        parameters={
-          "user_id": user_id,
-          "email": user_email,
-          "name": user_name,
-          "is_active": user_is_active,
-          "entity_identifier": entity_identifier,
-          "created_at": current_time,
-        },
-      )
-
-      if isinstance(result, dict) and result.get("data") and len(result["data"]) > 0:
-        created_rel = result["data"][0]
-        logger.info(
-          f"User access created: {created_rel.get('user_id')} -> "
-          f"{created_rel.get('entity_id')} with role: {created_rel.get('role')}"
-        )
-      else:
-        logger.warning("User access relationship created but no data returned")
-
-    except Exception as e:
-      logger.error(f"Failed to create User node and access relationship: {e}")
-      # Don't fail the entire graph creation if user access fails
-      # The graph is still functional, just without proper access control
-
   async def _create_entity_in_graph(
     self, repository: GraphClient, entity_data: EntityCreate, graph_id: str
   ) -> EntityResponse:
@@ -884,7 +746,7 @@ class EntityGraphService:
     entity_name: str,
     cluster_id: str,
     extensions: Optional[list] = None,
-    graph_tier_str: str = "standard",
+    graph_tier_str: str = "kuzu-standard",
   ) -> None:
     """Create user-graph relationship in PostgreSQL."""
     logger.info(f"Creating user-graph relationship: {user_id} -> {graph_id}")
@@ -898,12 +760,9 @@ class EntityGraphService:
       schema_extensions = extensions or []
 
       # Convert tier string to GraphTier enum
-      if graph_tier_str == "enterprise":
-        graph_tier = GraphTier.ENTERPRISE
-      elif graph_tier_str == "premium":
-        graph_tier = GraphTier.PREMIUM
-      else:
-        graph_tier = GraphTier.STANDARD
+      graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
+        graph_tier_str, GraphTier.KUZU_STANDARD
+      )
 
       graph = Graph.create(
         graph_id=graph_id,

@@ -48,7 +48,7 @@ class TestGraphCreationEndpoint:
         description="Test graph description",
         schema_extensions=["roboledger"],
       ),
-      instance_tier="standard",
+      instance_tier="kuzu-standard",
       custom_schema=None,
       initial_entity=None,
       tags=["test", "production"],
@@ -63,7 +63,7 @@ class TestGraphCreationEndpoint:
         description="Entity graph description",
         schema_extensions=["roboledger"],
       ),
-      instance_tier="enterprise",
+      instance_tier="kuzu-xlarge",
       custom_schema=None,
       initial_entity=InitialEntityData(
         name="Test Corp",
@@ -127,7 +127,7 @@ class TestGraphCreationEndpoint:
             task_data = mock_task.delay.call_args[0][0]
             assert task_data["graph_id"] is None
             assert task_data["schema_extensions"] == ["roboledger"]
-            assert task_data["tier"] == "standard"
+            assert task_data["tier"] == "kuzu-standard"
 
   async def test_create_entity_graph_success(
     self, async_client: AsyncClient, sample_entity_graph_request, mock_user_limits
@@ -176,7 +176,7 @@ class TestGraphCreationEndpoint:
             entity_data = mock_task.delay.call_args[0][0]
             assert entity_data["name"] == "Test Corp"
             assert entity_data["cik"] == "0001234567"
-            assert entity_data["graph_tier"] == GraphTier.ENTERPRISE.value
+            assert entity_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
 
   async def test_create_graph_with_custom_schema(
     self, async_client: AsyncClient, mock_user_limits
@@ -188,7 +188,7 @@ class TestGraphCreationEndpoint:
         description="Graph with custom schema",
         schema_extensions=["roboledger"],
       ),
-      instance_tier="premium",
+      instance_tier="kuzu-xlarge",
       custom_schema=CustomSchemaDefinition(
         name="custom_schema",
         version="1.0.0",
@@ -252,7 +252,7 @@ class TestGraphCreationEndpoint:
             task_data = mock_task.delay.call_args[0][0]
             assert task_data["custom_schema"] is not None
             assert task_data["custom_schema"]["nodes"][0]["name"] == "CustomNode"
-            assert task_data["graph_tier"] == GraphTier.PREMIUM.value
+            assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
 
   async def test_create_graph_user_limits_not_found(
     self, async_client: AsyncClient, sample_graph_request
@@ -322,7 +322,7 @@ class TestGraphCreationEndpoint:
   async def test_create_graph_missing_metadata(self, async_client: AsyncClient):
     """Test graph creation without required metadata."""
     request_data = {
-      "instance_tier": "standard",
+      "instance_tier": "kuzu-standard",
       # Missing metadata
     }
 
@@ -343,7 +343,7 @@ class TestGraphCreationEndpoint:
         "description": "Test",
         "schema_extensions": ["roboledger"],
       },
-      "instance_tier": "standard",
+      "instance_tier": "kuzu-standard",
       "tags": [f"tag_{i}" for i in range(15)],  # More than 10 tags
     }
 
@@ -663,12 +663,12 @@ class TestDataModels:
         description="Test graph",
         schema_extensions=["roboledger"],
       ),
-      instance_tier="standard",
+      instance_tier="kuzu-standard",
       custom_schema=None,
       initial_entity=None,
       tags=[],
     )
-    assert request.instance_tier == "standard"  # Default
+    assert request.instance_tier == "kuzu-standard"  # Default
     assert request.tags == []  # Default
     assert request.initial_entity is None
     assert request.custom_schema is None
@@ -680,7 +680,7 @@ class TestDataModels:
         description="Full test graph",
         schema_extensions=["roboledger", "roboinvestor"],
       ),
-      instance_tier="premium",
+      instance_tier="kuzu-xlarge",
       custom_schema=CustomSchemaDefinition(
         name="test_schema",
         version="1.0.0",
@@ -702,7 +702,7 @@ class TestDataModels:
       ),
       tags=["tag1", "tag2"],
     )
-    assert request_full.instance_tier == "premium"
+    assert request_full.instance_tier == "kuzu-xlarge"
     assert len(request_full.tags) == 2
 
   def test_create_graph_request_tier_validation(self):
@@ -736,7 +736,7 @@ class TestDataModels:
           description="Test",
           schema_extensions=["roboledger"],
         ),
-        instance_tier="standard",
+        instance_tier="kuzu-standard",
         custom_schema=None,
         initial_entity=None,
         tags=[f"tag_{i}" for i in range(11)],  # 11 tags, max is 10
@@ -765,7 +765,7 @@ class TestTierMapping:
         description="Test",
         schema_extensions=["roboledger"],
       ),
-      instance_tier="standard",
+      instance_tier="kuzu-standard",
       custom_schema=None,
       initial_entity=None,
       tags=[],
@@ -800,7 +800,7 @@ class TestTierMapping:
             )
 
             task_data = mock_task.delay.call_args[0][0]
-            assert task_data["graph_tier"] == GraphTier.STANDARD.value
+            assert task_data["graph_tier"] == GraphTier.KUZU_STANDARD.value
 
   async def test_tier_mapping_enterprise(
     self, async_client: AsyncClient, mock_user_limits
@@ -812,7 +812,7 @@ class TestTierMapping:
         description="Test",
         schema_extensions=["roboledger"],
       ),
-      instance_tier="enterprise",
+      instance_tier="kuzu-xlarge",
       custom_schema=None,
       initial_entity=None,
       tags=[],
@@ -847,7 +847,7 @@ class TestTierMapping:
             )
 
             task_data = mock_task.delay.call_args[0][0]
-            assert task_data["graph_tier"] == GraphTier.ENTERPRISE.value
+            assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
 
   async def test_tier_mapping_premium(
     self, async_client: AsyncClient, mock_user_limits
@@ -859,7 +859,7 @@ class TestTierMapping:
         description="Test",
         schema_extensions=["roboledger"],
       ),
-      instance_tier="premium",
+      instance_tier="kuzu-xlarge",
       custom_schema=None,
       initial_entity=None,
       tags=[],
@@ -894,4 +894,4 @@ class TestTierMapping:
             )
 
             task_data = mock_task.delay.call_args[0][0]
-            assert task_data["graph_tier"] == GraphTier.PREMIUM.value
+            assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value

@@ -169,7 +169,7 @@ class ListSubgraphsResponse(BaseModel):
   )
 
   parent_graph_tier: str = Field(
-    ..., description="Parent graph tier", examples=["enterprise", "premium"]
+    ..., description="Parent graph tier", examples=["kuzu-large", "kuzu-xlarge"]
   )
 
   subgraph_count: int = Field(..., description="Total number of subgraphs", ge=0)
@@ -224,7 +224,9 @@ class SubgraphQuotaResponse(BaseModel):
 
   parent_graph_id: str = Field(..., description="Parent graph identifier")
 
-  tier: str = Field(..., description="Graph tier", examples=["enterprise", "premium"])
+  tier: str = Field(
+    ..., description="Graph tier", examples=["kuzu-large", "kuzu-xlarge"]
+  )
 
   current_count: int = Field(..., description="Current number of subgraphs", ge=0)
 

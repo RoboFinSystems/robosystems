@@ -85,6 +85,8 @@ jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
     timeout-minutes: 20
+    permissions:
+      contents: read
 
     outputs:
       volume_registry_table: ${{ steps.get-outputs.outputs.volume_registry_table }}

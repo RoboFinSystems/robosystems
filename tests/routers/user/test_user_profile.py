@@ -261,17 +261,17 @@ class TestUserGraphs:
     # Create mock Graph objects for each UserGraph
     mock_graph1 = Mock()
     mock_graph1.graph_name = "Test Graph 1"
-    mock_graph1.graph_tier = "standard"
+    mock_graph1.graph_tier = "kuzu-standard"
     mock_graph1.graph_type = "entity"
 
     mock_graph2 = Mock()
     mock_graph2.graph_name = "Test Graph 2"
-    mock_graph2.graph_tier = "standard"
+    mock_graph2.graph_tier = "kuzu-standard"
     mock_graph2.graph_type = "entity"
 
     mock_graph3 = Mock()
     mock_graph3.graph_name = "Test Graph 3"
-    mock_graph3.graph_tier = "standard"
+    mock_graph3.graph_tier = "kuzu-standard"
     mock_graph3.graph_type = "entity"
 
     mock_graphs = [

@@ -219,6 +219,41 @@ class GraphSyncClient:
     """Get comprehensive database information and statistics."""
     return self._run_async(self._client.get_database_info(graph_id))
 
+  # DuckDB Table Management Methods
+
+  def create_table(
+    self,
+    graph_id: str,
+    table_name: str,
+    s3_pattern: str,
+  ) -> Dict[str, Any]:
+    """Create a DuckDB staging table (sync wrapper)."""
+    return self._run_async(self._client.create_table(graph_id, table_name, s3_pattern))
+
+  def list_tables(self, graph_id: str) -> List[Dict[str, Any]]:
+    """List all DuckDB staging tables for a graph (sync wrapper)."""
+    return self._run_async(self._client.list_tables(graph_id))
+
+  def query_table(self, graph_id: str, sql: str) -> Dict[str, Any]:
+    """Execute SQL query on DuckDB staging tables (sync wrapper)."""
+    return self._run_async(self._client.query_table(graph_id, sql))
+
+  def delete_table(self, graph_id: str, table_name: str) -> Dict[str, Any]:
+    """Delete a DuckDB staging table (sync wrapper)."""
+    return self._run_async(self._client.delete_table(graph_id, table_name))
+
+  def ingest_table_to_graph(
+    self,
+    graph_id: str,
+    table_name: str,
+    ignore_errors: bool = True,
+    rebuild: bool = False,
+  ) -> Dict[str, Any]:
+    """Ingest a DuckDB staging table into the Kuzu graph (sync wrapper)."""
+    return self._run_async(
+      self._client.ingest_table_to_graph(graph_id, table_name, ignore_errors, rebuild)
+    )
+
   # Setters for compatibility
   @property
   def graph_id(self):

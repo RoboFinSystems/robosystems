@@ -19,7 +19,7 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
-router = APIRouter(prefix="/databases", tags=["Database Schema"])
+router = APIRouter(prefix="/databases", tags=["Graph Schema"])
 
 
 # DDL Statement validation patterns

@@ -19,12 +19,12 @@ MAIN_API_TAGS = [
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph databases",
   },
   {
-    "name": "Copy",
-    "description": "📥 Data ingestion - Copy data from S3, URLs, and other sources into graph databases",
-  },
-  {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
+  },
+  {
+    "name": "Tables",
+    "description": "📊 Staging tables - Upload files and query DuckDB staging tables before ingestion",
   },
   {
     "name": "Connections",
@@ -99,31 +99,35 @@ MAIN_API_TAGS = [
 # Kuzu API OpenAPI tags
 KUZU_API_TAGS = [
   {
-    "name": "Database Management",
-    "description": "💾 Database management - Create, list, delete, and manage graph databases",
+    "name": "Graph Management",
+    "description": "💾 Graph management - Create, list, delete, and manage graph databases",
   },
   {
-    "name": "Database Queries",
-    "description": "🔍 Database queries - Execute Cypher queries against a specific graph database",
+    "name": "Graph Query",
+    "description": "🔍 Graph query - Execute Cypher queries against a specific graph database",
   },
   {
-    "name": "Data Copy",
-    "description": "📥 Data copy - Copy data from S3, URLs, and other sources into graph databases",
+    "name": "Graph Schema",
+    "description": "📋 Graph schema - Retrieve and install graph schemas",
   },
   {
-    "name": "Database Schema",
-    "description": "📋 Database schema - Retrieve and install database schemas",
+    "name": "Tables",
+    "description": "📊 Tables - Create and query DuckDB staging tables, ingest to graph",
   },
   {
-    "name": "Database Backup",
-    "description": "💽 Database backup - Create production-ready database backups with multiple formats",
+    "name": "Copy",
+    "description": "📥 Graph Copy - Copy data from S3, URLs, and other sources into graph databases",
   },
   {
-    "name": "Database Metrics",
-    "description": "📈 Database metrics - Monitor database usage and performance",
+    "name": "Backup",
+    "description": "💽 Graph Backup - Create production-ready graph backups with multiple formats",
   },
   {
-    "name": "Task Management",
+    "name": "Metrics",
+    "description": "📈 Graph metrics - Monitor graph usage and performance",
+  },
+  {
+    "name": "Tasks",
     "description": "⏱️ Task management - Monitor background tasks and queue operations",
   },
   {

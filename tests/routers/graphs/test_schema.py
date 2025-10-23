@@ -21,14 +21,31 @@ def mock_database_session(test_user_graph):
   mock_user_graph_query = MagicMock()
   mock_user_graph_query.filter_by.return_value.first.return_value = test_user_graph
 
+  # Mock Graph query - return the actual graph from test_graph_with_credits
+  mock_graph_query = MagicMock()
+  from robosystems.models.iam import Graph
+
+  test_graph = test_user_graph.graph if hasattr(test_user_graph, "graph") else None
+  mock_graph_query.filter.return_value.first.return_value = test_graph
+
+  # Mock GraphSchema query - return None (no custom schema)
+  mock_schema_query = MagicMock()
+  mock_schema_query.filter.return_value.order_by.return_value.first.return_value = None
+
   # Configure db.query to return the right mock based on the model
   def mock_query(model):
-    from robosystems.models.iam import UserGraph
+    from robosystems.models.iam import UserGraph, GraphSchema
 
     if model == UserGraph or (
       hasattr(model, "__name__") and model.__name__ == "UserGraph"
     ):
       return mock_user_graph_query
+    elif model == Graph or (hasattr(model, "__name__") and model.__name__ == "Graph"):
+      return mock_graph_query
+    elif model == GraphSchema or (
+      hasattr(model, "__name__") and model.__name__ == "GraphSchema"
+    ):
+      return mock_schema_query
     return MagicMock()
 
   mock_db.query = mock_query

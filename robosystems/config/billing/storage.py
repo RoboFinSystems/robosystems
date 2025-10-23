@@ -12,18 +12,26 @@ from typing import Dict
 class StorageBillingConfig:
   """Configuration for storage-based billing."""
 
-  # Storage included by tier (in GB)
+  # Storage included by tier (in GB) - technical tier names
   STORAGE_INCLUDED = {
-    "standard": 100,  # 100 GB included
-    "enterprise": 500,  # 500 GB included
-    "premium": 2000,  # 2 TB included
+    "kuzu-standard": 100,  # 100 GB included
+    "kuzu-large": 500,  # 500 GB included
+    "kuzu-xlarge": 2000,  # 2 TB included
+    # Legacy tier names for backward compatibility
+    "standard": 100,
+    "enterprise": 500,
+    "premium": 2000,
   }
 
   # Overage costs per GB per month (in dollars)
   OVERAGE_COSTS = {
-    "standard": Decimal("1.00"),  # $1.00/GB/month
-    "enterprise": Decimal("0.50"),  # $0.50/GB/month
-    "premium": Decimal("0.25"),  # $0.25/GB/month
+    "kuzu-standard": Decimal("1.00"),  # $1.00/GB/month
+    "kuzu-large": Decimal("0.50"),  # $0.50/GB/month
+    "kuzu-xlarge": Decimal("0.25"),  # $0.25/GB/month
+    # Legacy tier names for backward compatibility
+    "standard": Decimal("1.00"),
+    "enterprise": Decimal("0.50"),
+    "premium": Decimal("0.25"),
   }
 
   # Storage types and their multipliers

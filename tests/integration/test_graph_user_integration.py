@@ -20,7 +20,7 @@ class TestGraphUserIntegration:
       session=test_db,
       base_schema="base",
       schema_extensions=["roboledger"],
-      graph_tier=GraphTier.STANDARD,
+      graph_tier=GraphTier.KUZU_STANDARD,
       graph_metadata={
         "created_by": test_user.id,
         "purpose": "integration testing",
@@ -44,7 +44,7 @@ class TestGraphUserIntegration:
     # Verify we can query through relationships
     user_graphs = UserGraph.get_by_user_id(test_user.id, test_db)
     assert len(user_graphs) == 1
-    assert user_graphs[0].graph.graph_tier == GraphTier.STANDARD.value
+    assert user_graphs[0].graph.graph_tier == GraphTier.KUZU_STANDARD.value
 
   def test_graph_deletion_cascades(self, test_db, test_user):
     """Test that deleting a graph removes all UserGraph relationships."""
@@ -244,7 +244,7 @@ class TestGraphUserIntegration:
       graph_name="Standard Entity",
       graph_type="entity",
       session=test_db,
-      graph_tier=GraphTier.STANDARD,
+      graph_tier=GraphTier.KUZU_STANDARD,
     )
 
     premium_graph = Graph.create(
@@ -252,7 +252,7 @@ class TestGraphUserIntegration:
       graph_name="Premium Entity",
       graph_type="entity",
       session=test_db,
-      graph_tier=GraphTier.PREMIUM,
+      graph_tier=GraphTier.KUZU_XLARGE,
     )
 
     # Grant access
@@ -299,9 +299,10 @@ class TestGraphUserIntegration:
     test_db.add_all([standard_credits, premium_credits])
     test_db.commit()
 
-    # Verify credit multipliers match graph tiers
+    # Verify credit multipliers are consistent (simplified credit system)
+    # All tiers use 1.0 multiplier since credits are only for AI operations
     assert standard_credits.credit_multiplier == 1.0
-    assert premium_credits.credit_multiplier == 4.0
+    assert premium_credits.credit_multiplier == 1.0
 
   def test_graph_metadata_access_through_user_graph(self, test_db, test_user):
     """Test accessing graph metadata through UserGraph relationship."""

@@ -85,7 +85,7 @@ class TestGraphSubscriptionService:
     graph_id = "graph456"
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "standard", "price": 4999}
+    plan_config = {"name": "kuzu-standard", "price": 4999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -94,7 +94,7 @@ class TestGraphSubscriptionService:
       mock_session.query.return_value.filter.return_value.first.return_value = None
 
       subscription_service.create_graph_subscription(
-        user_id, graph_id, plan_name="standard"
+        user_id, graph_id, plan_name="kuzu-standard"
       )
 
       # Verify subscription creation
@@ -103,7 +103,7 @@ class TestGraphSubscriptionService:
       added_subscription = mock_session.add.call_args[0][0]
       assert added_subscription.user_id == user_id
       assert added_subscription.graph_id == graph_id
-      assert added_subscription.plan_name == "standard"
+      assert added_subscription.plan_name == "kuzu-standard"
       assert added_subscription.status == SubscriptionStatus.ACTIVE.value
 
   def test_create_graph_subscription_new(
@@ -112,10 +112,10 @@ class TestGraphSubscriptionService:
     """Test creating a new graph subscription."""
     user_id = "user123"
     graph_id = "graph456"
-    plan_name = "standard"  # Use a plan that's in the available plans
+    plan_name = "kuzu-standard"  # Use a plan that's in the available plans
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "standard", "price": 1999}
+    plan_config = {"name": "kuzu-standard", "price": 1999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -132,7 +132,7 @@ class TestGraphSubscriptionService:
       added_subscription = mock_session.add.call_args[0][0]
       assert added_subscription.user_id == user_id
       assert added_subscription.graph_id == graph_id
-      assert added_subscription.plan_name == "standard"
+      assert added_subscription.plan_name == "kuzu-standard"
       assert added_subscription.status == SubscriptionStatus.ACTIVE.value
 
   def test_create_graph_subscription_existing(self, subscription_service, mock_session):
@@ -141,7 +141,7 @@ class TestGraphSubscriptionService:
     graph_id = "graph456"
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "standard", "price": 0}
+    plan_config = {"name": "kuzu-standard", "price": 0}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -166,8 +166,8 @@ class TestGraphSubscriptionService:
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=None,
     ):
-      # Since "invalid" will be downgraded to "premium" (max tier), the error will mention premium
-      with pytest.raises(ValueError, match="Billing plan 'premium' not found"):
+      # Since "invalid" will be downgraded to "kuzu-xlarge" (max tier), the error will mention kuzu-xlarge
+      with pytest.raises(ValueError, match="Billing plan 'kuzu-xlarge' not found"):
         subscription_service.create_graph_subscription("user123", "graph456", "invalid")
 
   def test_create_graph_subscription_commit_failure(
@@ -175,7 +175,7 @@ class TestGraphSubscriptionService:
   ):
     """Test handling database commit failure."""
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "standard", "price": 0}
+    plan_config = {"name": "kuzu-standard", "price": 0}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -218,7 +218,7 @@ class TestSubscriptionHelperFunctions:
       patch.object(sub_service, "ENVIRONMENT", "dev"),
     ):
       plans = sub_service.get_available_plans()
-      assert plans == ["standard"]  # Updated to match actual return values
+      assert plans == ["kuzu-standard"]  # Updated to match actual return values
 
   def test_get_available_plans_dev_unrestricted(self):
     """Test available plans in dev with premium enabled."""
@@ -230,7 +230,7 @@ class TestSubscriptionHelperFunctions:
       patch.object(sub_service, "ENVIRONMENT", "dev"),
     ):
       plans = sub_service.get_available_plans()
-      assert plans == ["standard", "enterprise", "premium"]
+      assert plans == ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
 
   def test_get_available_plans_prod(self):
     """Test available plans in prod (restrictions don't apply)."""
@@ -243,7 +243,7 @@ class TestSubscriptionHelperFunctions:
     ):
       plans = sub_service.get_available_plans()
       # In prod, restrictions don't apply
-      assert plans == ["standard", "enterprise", "premium"]
+      assert plans == ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
 
   def test_is_payment_required_dev_bypass(self):
     """Test payment requirement in dev with bypass."""
@@ -287,7 +287,7 @@ class TestSubscriptionHelperFunctions:
       patch.object(sub_service, "BILLING_PREMIUM_PLANS_ENABLED", False),
       patch.object(sub_service, "ENVIRONMENT", "dev"),
     ):
-      assert sub_service.get_max_plan_tier() == "standard"
+      assert sub_service.get_max_plan_tier() == "kuzu-standard"
 
   def test_get_max_plan_tier_dev_unrestricted(self):
     """Test max plan tier in dev with premium enabled."""
@@ -298,4 +298,4 @@ class TestSubscriptionHelperFunctions:
       patch.object(sub_service, "BILLING_PREMIUM_PLANS_ENABLED", True),
       patch.object(sub_service, "ENVIRONMENT", "dev"),
     ):
-      assert sub_service.get_max_plan_tier() == "premium"
+      assert sub_service.get_max_plan_tier() == "kuzu-xlarge"

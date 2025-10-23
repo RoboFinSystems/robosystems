@@ -58,8 +58,8 @@ class TestSubscriptionEdgeCases:
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=None,
     ):
-      # starter is not in available plans, so it gets converted to 'premium' (max tier)
-      with pytest.raises(ValueError, match="Billing plan 'premium' not found"):
+      # starter is not in available plans, so it gets converted to 'kuzu-xlarge' (max tier)
+      with pytest.raises(ValueError, match="Billing plan 'kuzu-xlarge' not found"):
         subscription_service.create_graph_subscription("user123", "graph456", "starter")
 
   def test_timezone_handling_edge_cases(self, subscription_service):

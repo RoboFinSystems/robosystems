@@ -1,3 +1,17 @@
+"""
+QuickBooks Transactions Processor.
+
+NOTE: This module is currently NOT IN USE. Connection nodes and ENTITY_HAS_CONNECTION
+relationships have been removed from the graph schema. Platform metadata (users,
+connections) is now stored exclusively in PostgreSQL.
+
+When connections are re-implemented, they will be managed in PostgreSQL tables,
+not in the Kuzu graph database. This file needs refactoring to:
+1. Query connections from PostgreSQL instead of Kuzu
+2. Remove all Connection node queries from Cypher
+3. Use connection_id references instead of graph relationships
+"""
+
 import asyncio
 import json
 from datetime import datetime

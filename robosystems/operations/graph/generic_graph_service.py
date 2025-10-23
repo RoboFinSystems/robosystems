@@ -7,7 +7,6 @@ configurations including custom schemas and schema extensions.
 """
 
 import asyncio
-import json
 import uuid
 from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime, timezone
@@ -16,7 +15,7 @@ from ...config import env
 from ...models.iam import UserGraph
 from ...database import get_db_session
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
-from ...middleware.graph.types import InstanceTier
+from ...models.iam.graph_credits import GraphTier
 
 
 class GenericGraphService:
@@ -101,12 +100,16 @@ class GenericGraphService:
 
     # Get environment from centralized config
     allocation_manager = KuzuAllocationManager(environment=env.ENVIRONMENT)
-    # Note: tier is not used by allocation manager in current implementation
+
+    # Parse tier string to GraphTier enum
+    # Tier should already be a valid GraphTier value (e.g., "kuzu-standard")
+    graph_tier = GraphTier(tier.lower()) if tier else None
+
     cluster_info = await allocation_manager.allocate_database(
       entity_id=user_id,  # Use user_id as entity
       graph_id=graph_id,
       graph_type=metadata.get("type", "custom"),
-      instance_tier=InstanceTier(tier) if tier else None,
+      instance_tier=graph_tier,
     )
 
     if not cluster_info:
@@ -175,6 +178,43 @@ class GenericGraphService:
         custom_schema_ddl=custom_ddl if custom_schema else None,
       )
       logger.info(f"Database {graph_id} created successfully with schema: {result}")
+
+      # Persist custom schema DDL to PostgreSQL if provided
+      if custom_schema and custom_ddl:
+        from ...models.iam import GraphSchema
+
+        db_gen = get_db_session()
+        db = next(db_gen)
+        try:
+          GraphSchema.create(
+            graph_id=graph_id,
+            schema_type="custom",
+            schema_ddl=custom_ddl,
+            schema_json=custom_schema,
+            custom_schema_name=custom_schema.get("name"),
+            custom_schema_version=custom_schema.get("version"),
+            session=db,
+          )
+          logger.info(f"Persisted custom schema DDL for graph {graph_id} to PostgreSQL")
+
+          # Auto-create DuckDB staging tables from schema
+          from .table_service import TableService
+
+          table_service = TableService(db)
+          created_tables = table_service.create_tables_from_schema(
+            graph_id=graph_id,
+            user_id=user_id,
+            schema_ddl=custom_ddl,
+          )
+          logger.info(
+            f"Auto-created {len(created_tables)} DuckDB staging tables for custom schema graph {graph_id}"
+          )
+        finally:
+          try:
+            next(db_gen)
+          except StopIteration:
+            pass
+
     finally:
       await kuzu_client.close()
 
@@ -185,6 +225,18 @@ class GenericGraphService:
 
       logger.info("Installing schema extensions for generic graph")
       logger.info(f"Extensions requested: {schema_extensions}")
+
+      # Generate DDL from schema extensions for persistence
+      from ...schemas.manager import SchemaManager
+
+      manager = SchemaManager()
+      config = manager.create_schema_configuration(
+        name="GenericSchema",
+        description="Generic graph schema with extensions",
+        extensions=schema_extensions,
+      )
+      schema = manager.load_and_compile_schema(config)
+      extensions_ddl = schema.to_cypher()
 
       # Use KuzuClient for schema installation with proper API key
       kuzu_client = await get_graph_client_for_instance(cluster_info.private_ip)
@@ -199,6 +251,45 @@ class GenericGraphService:
         logger.info(
           f"Generic graph schema installed with base + {len(schema_extensions)} extensions"
         )
+
+        # Persist extensions schema DDL to PostgreSQL
+        from ...models.iam import GraphSchema
+
+        db_gen = get_db_session()
+        db = next(db_gen)
+        try:
+          GraphSchema.create(
+            graph_id=graph_id,
+            schema_type="extensions",
+            schema_ddl=extensions_ddl,
+            schema_json={
+              "base": "base",
+              "extensions": schema_extensions,
+            },
+            session=db,
+          )
+          logger.info(
+            f"Persisted extensions schema DDL for graph {graph_id} to PostgreSQL"
+          )
+
+          # Auto-create DuckDB staging tables from schema
+          from .table_service import TableService
+
+          table_service = TableService(db)
+          created_tables = table_service.create_tables_from_schema(
+            graph_id=graph_id,
+            user_id=user_id,
+            schema_ddl=extensions_ddl,
+          )
+          logger.info(
+            f"Auto-created {len(created_tables)} DuckDB staging tables for extensions graph {graph_id}"
+          )
+        finally:
+          try:
+            next(db_gen)
+          except StopIteration:
+            pass
+
       except Exception as e:
         logger.error(f"Failed to install schema extensions: {e}")
         raise RuntimeError(f"Schema installation failed: {e}")
@@ -209,97 +300,13 @@ class GenericGraphService:
     if cancellation_callback:
       cancellation_callback()
 
-    # Step 4: Store graph metadata in the graph
-    if progress_callback:
-      progress_callback("Storing graph metadata...", 70)
-
-    logger.info("Storing graph metadata in the graph")
-
-    # Use direct connection to writer instance for metadata storage
-    # since the graph was just created and readers may not be available yet
-    kuzu_client = await get_graph_client_for_instance(cluster_info.private_ip)
-
-    try:
-      # Create metadata node
-      metadata_cypher = """
-        CREATE (m:GraphMetadata {
-            identifier: $identifier,
-            graph_id: $graph_id,
-            name: $name,
-            description: $description,
-            type: $type,
-            tags: $tags,
-            created_at: $created_at,
-            updated_at: $updated_at,
-            created_by: $user_id,
-            tier: $tier,
-            schema_extensions: $schema_extensions,
-            schema_type: $schema_type,
-            custom_schema_name: $custom_schema_name,
-            custom_schema_version: $custom_schema_version,
-            status: $status,
-            access_level: $access_level
-        })
-        RETURN m
-        """
-
-      # Get current timestamp as string
-      current_time = datetime.now(timezone.utc).isoformat()
-
-      from ...utils.uuid import generate_deterministic_uuid7
-
-      metadata_params = {
-        "identifier": generate_deterministic_uuid7(
-          graph_id, namespace="graph_metadata"
-        ),
-        "graph_id": graph_id,
-        "name": metadata.get("name", graph_id),
-        "description": metadata.get("description", ""),
-        "type": metadata.get("type", "generic"),
-        "tags": json.dumps(metadata.get("tags", [])),  # Convert to JSON string
-        "created_at": current_time,
-        "updated_at": current_time,
-        "user_id": user_id,
-        "tier": tier,
-        "schema_extensions": json.dumps(
-          schema_extensions if not custom_schema else []
-        ),  # Convert to JSON string
-        "schema_type": "custom" if custom_schema else "extensions",
-        "custom_schema_name": custom_schema.get("name") if custom_schema else None,
-        "custom_schema_version": custom_schema.get("version")
-        if custom_schema
-        else None,
-        "status": "active",
-        "access_level": metadata.get("access_level", "private"),
-      }
-
-      try:
-        await kuzu_client.query(metadata_cypher, graph_id, metadata_params)
-      except Exception as e:
-        logger.error(f"Failed to store graph metadata: {e}")
-        # Don't fail the entire creation if metadata storage fails
-        logger.warning("Graph created but metadata storage failed - will retry later")
-
-      # Store custom metadata if provided
-      if metadata.get("custom_metadata"):
-        custom_cypher = """
-              MATCH (m:GraphMetadata {graph_id: $graph_id})
-              SET m.custom_metadata = $custom_metadata
-              """
-        try:
-          await kuzu_client.query(
-            custom_cypher,
-            graph_id,
-            {
-              "graph_id": graph_id,
-              "custom_metadata": json.dumps(metadata["custom_metadata"]),
-            },
-          )
-        except Exception as e:
-          logger.warning(f"Failed to store custom metadata: {e}")
-    finally:
-      # Close the kuzu client connection
-      await kuzu_client.close()
+    # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
+    # stored exclusively in PostgreSQL, not in the Kuzu graph database.
+    # This keeps the graph focused on business data only.
+    logger.info(
+      f"Skipping GraphMetadata node creation for {graph_id} - "
+      "metadata is managed in PostgreSQL only"
+    )
 
     # Step 5: Populate initial data if provided
     if initial_data:
@@ -367,19 +374,13 @@ class GenericGraphService:
       logger.info("Creating credit pool for the new graph")
       try:
         from .credit_service import CreditService
-        from ...models.iam.graph_credits import GraphTier
 
         # For now, use the graph tier as the subscription tier
         # TODO: When subscription management is implemented, get from user's subscription
         subscription_tier = tier.lower()  # Use the requested tier
 
-        # Map instance tier to graph tier
-        tier_mapping = {
-          "enterprise": GraphTier.ENTERPRISE,
-          "premium": GraphTier.PREMIUM,
-          "standard": GraphTier.STANDARD,
-        }
-        graph_tier = tier_mapping.get(tier.lower(), GraphTier.STANDARD)
+        # Parse tier to GraphTier enum (tier should already be valid)
+        graph_tier = GraphTier(tier.lower())
 
         # Create credit pool
         credit_service = CreditService(db)

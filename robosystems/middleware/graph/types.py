@@ -11,13 +11,7 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 import re
 
-
-class InstanceTier(str, Enum):
-  """Database instance tiers for routing and resource allocation."""
-
-  STANDARD = "standard"  # Standard multi-tenant instances
-  ENTERPRISE = "enterprise"  # Dedicated instances for enterprise customers
-  PREMIUM = "premium"  # High-performance dedicated instances
+from ...models.iam.graph_credits import GraphTier
 
 
 class GraphCategory(str, Enum):
@@ -62,9 +56,7 @@ class GraphIdentity(BaseModel):
   graph_id: str = Field(..., description="Unique graph identifier")
   category: GraphCategory = Field(..., description="High-level graph category")
   graph_type: Optional[str] = Field(None, description="Specific type within category")
-  instance_tier: Optional[InstanceTier] = Field(
-    None, description="Instance tier for routing"
-  )
+  graph_tier: Optional[GraphTier] = Field(None, description="Graph tier for routing")
   access_pattern: Optional[AccessPattern] = Field(
     None, description="Access pattern for this graph"
   )
@@ -106,7 +98,7 @@ class GraphIdentity(BaseModel):
         "access_mode": access.value,
         "cache_enabled": True,
         "ttl_seconds": 3600,  # Cache for 1 hour
-        "instance_tier": InstanceTier.STANDARD,
+        "graph_tier": GraphTier.KUZU_STANDARD,
       }
     elif self.is_user_graph:
       return {
@@ -114,14 +106,14 @@ class GraphIdentity(BaseModel):
         "access_mode": access.value,
         "cache_enabled": False,
         "requires_allocation": True,
-        "instance_tier": self.instance_tier or InstanceTier.STANDARD,
+        "graph_tier": self.graph_tier or GraphTier.KUZU_STANDARD,
       }
     else:
       return {
         "cluster_type": "system",
         "access_mode": access.value,
         "cache_enabled": False,
-        "instance_tier": InstanceTier.STANDARD,
+        "graph_tier": GraphTier.KUZU_STANDARD,
       }
 
 
@@ -150,14 +142,14 @@ class GraphTypeRegistry:
 
   @classmethod
   def identify_graph(
-    cls, graph_id: str, instance_tier: Optional[InstanceTier] = None
+    cls, graph_id: str, graph_tier: Optional[GraphTier] = None
   ) -> GraphIdentity:
     """
     Identify a graph from its ID.
 
     Args:
         graph_id: The graph identifier
-        instance_tier: Optional instance tier override
+        graph_tier: Optional graph tier override
 
     Returns:
         GraphIdentity with category and type information
@@ -168,7 +160,7 @@ class GraphTypeRegistry:
         graph_id=graph_id,
         category=GraphCategory.SHARED,
         graph_type=cls.SHARED_REPOSITORIES[graph_id].value,
-        instance_tier=InstanceTier.STANDARD,
+        graph_tier=GraphTier.KUZU_STANDARD,
         access_pattern=AccessPattern.READ_ONLY,
       )
 
@@ -178,7 +170,7 @@ class GraphTypeRegistry:
         graph_id=graph_id,
         category=GraphCategory.SYSTEM,
         graph_type="internal",
-        instance_tier=InstanceTier.STANDARD,
+        graph_tier=GraphTier.KUZU_STANDARD,
         access_pattern=AccessPattern.RESTRICTED,
       )
 
@@ -189,7 +181,7 @@ class GraphTypeRegistry:
           graph_id=graph_id,
           category=GraphCategory.USER,
           graph_type=UserGraphType.CUSTOM.value,  # Default to custom for all user graphs
-          instance_tier=instance_tier or InstanceTier.STANDARD,
+          graph_tier=graph_tier or GraphTier.KUZU_STANDARD,
           access_pattern=AccessPattern.READ_WRITE,
         )
 
@@ -198,7 +190,7 @@ class GraphTypeRegistry:
       graph_id=graph_id,
       category=GraphCategory.USER,
       graph_type=UserGraphType.CUSTOM.value,
-      instance_tier=instance_tier or InstanceTier.STANDARD,
+      graph_tier=graph_tier or GraphTier.KUZU_STANDARD,
       access_pattern=AccessPattern.READ_WRITE,
     )
 

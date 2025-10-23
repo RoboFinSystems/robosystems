@@ -55,10 +55,26 @@ def create_app() -> FastAPI:
     # Startup
     logger.info("Kuzu API starting up")
 
+    # Initialize DuckDB connection pool for staging tables
+    from robosystems.graph_api.core.duckdb_pool import initialize_duckdb_pool
+
+    duckdb_base_path = Path(env.DATA_DIR) / "duckdb-staging"
+    duckdb_pool = initialize_duckdb_pool(
+      base_path=str(duckdb_base_path),
+      max_connections_per_db=3,
+      connection_ttl_minutes=30,
+    )
+    logger.info(
+      f"Initialized DuckDB connection pool at {duckdb_base_path} "
+      "(databases persist with graph lifecycle)"
+    )
+
     yield  # Application runs here
 
     # Shutdown
     logger.info("Kuzu API shutting down")
+    duckdb_pool.close_all_connections()
+    logger.info("Closed all DuckDB connections")
 
   # Load description from markdown file
   base_dir = Path(__file__).parent.parent.parent  # Go up to project root
@@ -218,12 +234,15 @@ def create_app() -> FastAPI:
   app.include_router(databases.backup.router)
   app.include_router(databases.restore.router)
   app.include_router(
-    databases.ingest.router
-  )  # SSE-enabled ingestion for long-running operations
+    databases.copy.router
+  )  # Direct S3 → Kuzu copy (legacy/internal for SEC workers)
   app.include_router(databases.metrics.router)
 
   # Task management (generic for all task types)
   app.include_router(tasks.router)
+
+  # Table routers (DuckDB staging) - now database-scoped under /databases/{graph_id}/tables
+  app.include_router(databases.tables.router)
 
   # Volume management (only on EC2)
 

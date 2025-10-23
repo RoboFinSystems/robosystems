@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Path, HTTPException, status
 from fastapi.responses import StreamingResponse
 import json
 from contextlib import contextmanager
+from sqlalchemy.orm import Session
 
 from robosystems.graph_api.models.database import QueryRequest
 from robosystems.graph_api.core.cluster_manager import get_cluster_service
@@ -18,8 +19,10 @@ from robosystems.graph_api.core.admission_control import (
 )
 from robosystems.logger import logger
 from robosystems.config import env
+from robosystems.database import get_db_session
+from robosystems.models.iam import Graph
 
-router = APIRouter(prefix="/databases", tags=["Database Queries"])
+router = APIRouter(prefix="/databases", tags=["Graph Query"])
 
 
 @contextmanager
@@ -48,6 +51,7 @@ async def execute_query(
   streaming: bool = False,
   database: str = None,
   cluster_service=Depends(_get_cluster_service_for_request),
+  db: Session = Depends(get_db_session),
 ):
   """
   Execute a Cypher query against a specific database with admission control.
@@ -66,7 +70,24 @@ async def execute_query(
 
   Raises:
       HTTPException: 503 if server is overloaded (admission control)
+      HTTPException: 503 if graph is rebuilding
   """
+  # Check if graph is rebuilding
+  graph = Graph.get_by_id(graph_id, db)
+  if graph and graph.graph_metadata:
+    graph_status = graph.graph_metadata.get("status")
+    if graph_status == "rebuilding":
+      logger.warning(f"Query rejected for {graph_id}: graph is rebuilding")
+      raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+          "error": "Graph temporarily unavailable",
+          "reason": "Graph database is being rebuilt",
+          "status": "rebuilding",
+          "retry_after": 30,
+        },
+      )
+
   # Get admission controller
   admission_controller = get_admission_controller()
 

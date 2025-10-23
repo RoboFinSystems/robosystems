@@ -23,7 +23,7 @@ from robosystems.graph_api.core.task_manager import restore_task_manager
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
-router = APIRouter(prefix="/databases", tags=["Database Backup"])
+router = APIRouter(prefix="/databases", tags=["Backup"])
 
 
 @router.post("/{graph_id}/restore", response_model=RestoreResponse)

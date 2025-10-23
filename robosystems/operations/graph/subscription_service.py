@@ -25,11 +25,11 @@ ENVIRONMENT = env.ENVIRONMENT
 def get_available_plans() -> List[str]:
   """Get list of available billing plans based on environment settings."""
   if not BILLING_PREMIUM_PLANS_ENABLED and ENVIRONMENT == "dev":
-    # In dev with premium disabled, only allow standard
-    return ["standard"]
+    # In dev with premium disabled, only allow kuzu-standard
+    return ["kuzu-standard"]
   else:
     # All plans available
-    return ["standard", "enterprise", "premium"]
+    return ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
 
 
 def is_payment_required() -> bool:
@@ -44,8 +44,8 @@ def is_payment_required() -> bool:
 def get_max_plan_tier() -> str:
   """Get the maximum plan tier allowed in current environment."""
   if not BILLING_PREMIUM_PLANS_ENABLED and ENVIRONMENT == "dev":
-    return "standard"
-  return "premium"
+    return "kuzu-standard"
+  return "kuzu-xlarge"
 
 
 class GraphSubscriptionService:
@@ -59,7 +59,7 @@ class GraphSubscriptionService:
     self,
     user_id: str,
     graph_id: str,
-    plan_name: str = "standard",
+    plan_name: str = "kuzu-standard",
   ) -> GraphSubscription:
     """
     Create a subscription for a specific graph database.

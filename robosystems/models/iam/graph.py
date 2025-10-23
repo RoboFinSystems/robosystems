@@ -71,8 +71,8 @@ class Graph(Model):
 
   # Credit system integration
   graph_tier = Column(
-    String, nullable=False, default=GraphTier.STANDARD.value
-  )  # standard, enterprise, premium (determines credit multiplier)
+    String, nullable=False, default=GraphTier.KUZU_STANDARD.value
+  )  # kuzu-standard, kuzu-large, kuzu-xlarge, etc. (infrastructure tier)
 
   # Subgraph support (Enterprise/Premium only)
   parent_graph_id = Column(
@@ -141,7 +141,11 @@ class Graph(Model):
   @property
   def can_have_subgraphs(self) -> bool:
     """Check if this graph tier supports subgraphs."""
-    return str(self.graph_tier) in [GraphTier.ENTERPRISE.value, GraphTier.PREMIUM.value]
+    return str(self.graph_tier) in [
+      GraphTier.KUZU_LARGE.value,
+      GraphTier.KUZU_XLARGE.value,
+      GraphTier.NEO4J_ENTERPRISE_XLARGE.value,
+    ]
 
   def has_specific_extension(self, extension: str) -> bool:
     """Check if this graph has a specific schema extension."""
@@ -149,13 +153,13 @@ class Graph(Model):
     return extension in extensions
 
   def get_credit_multiplier(self) -> float:
-    """Get the credit multiplier for this graph's tier."""
-    multiplier_map = {
-      GraphTier.STANDARD.value: 1.0,
-      GraphTier.ENTERPRISE.value: 2.0,
-      GraphTier.PREMIUM.value: 4.0,
-    }
-    return multiplier_map.get(str(self.graph_tier), 1.0)
+    """
+    Get the credit multiplier for this graph's tier.
+
+    In the simplified credit system, all tiers use 1.0x multiplier.
+    Credits are consumed based on actual token usage post-operation.
+    """
+    return 1.0
 
   @classmethod
   def create(
@@ -168,7 +172,7 @@ class Graph(Model):
     schema_extensions: Optional[List[str]] = None,
     graph_instance_id: str = "default",
     graph_cluster_region: Optional[str] = None,
-    graph_tier: GraphTier = GraphTier.STANDARD,
+    graph_tier: GraphTier = GraphTier.KUZU_STANDARD,
     graph_metadata: Optional[Dict[str, Any]] = None,
     parent_graph_id: Optional[str] = None,
     subgraph_index: Optional[int] = None,

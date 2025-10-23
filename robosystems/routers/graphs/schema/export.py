@@ -88,29 +88,31 @@ async def export_graph_schema(
         detail=f"Invalid graph identifier: {graph_id}",
       )
 
-    # Try to get graph metadata from the graph itself
+    # Get graph metadata from PostgreSQL (not from Kuzu graph)
+    # Platform metadata is stored in PostgreSQL, not in the graph database
     try:
-      from robosystems.middleware.graph import get_graph_repository
+      from robosystems.models.iam import Graph, GraphSchema
 
-      repository = await get_graph_repository(graph_id, operation_type="read")
-
-      # Query for GraphMetadata
-      result = await repository.execute_query(
-        "MATCH (m:GraphMetadata {graph_id: $graph_id}) RETURN m", {"graph_id": graph_id}
-      )
-
-      if result and len(result) > 0:
-        graph_meta = result[0].get("m", {})
-        schema_name = graph_meta.get("custom_schema_name") or f"{graph_id}_schema"
-        schema_version = graph_meta.get("custom_schema_version") or "1.0.0"
-        schema_type = graph_meta.get("schema_type") or "standard"
+      graph = Graph.get_by_id(graph_id, db)
+      if graph:
+        # Try to get schema from graph_schemas table
+        schema_record = GraphSchema.get_active_schema(graph_id, db)
+        if schema_record:
+          schema_name = schema_record.custom_schema_name or f"{graph_id}_schema"
+          schema_version = schema_record.custom_schema_version or "1.0.0"
+          schema_type = schema_record.schema_type or "standard"
+        else:
+          # Use graph metadata
+          schema_name = f"{graph.graph_name}_schema"
+          schema_version = "1.0.0"
+          schema_type = "extensions" if graph.schema_extensions else "standard"
       else:
-        # Fallback if no metadata found
+        # Fallback if no graph found in PostgreSQL
         schema_name = f"{graph_id}_schema"
         schema_version = "1.0.0"
         schema_type = "standard"
     except Exception as e:
-      logger.warning(f"Could not retrieve graph metadata: {e}")
+      logger.warning(f"Could not retrieve graph metadata from PostgreSQL: {e}")
       # Fallback values
       schema_name = f"{graph_id}_schema"
       schema_version = "1.0.0"

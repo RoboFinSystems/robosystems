@@ -45,7 +45,7 @@ class TestGraphCredits:
       graph_id=f"test_graph_credits_{unique_id}",
       graph_name="Test Graph",
       graph_type="entity",
-      graph_tier=GraphTier.STANDARD.value,
+      graph_tier=GraphTier.KUZU_STANDARD.value,
     )
     self.session.add(self.graph)
     self.session.commit()
@@ -59,9 +59,9 @@ class TestGraphCredits:
 
   def test_graph_tier_enum_values(self):
     """Test GraphTier enum values."""
-    assert GraphTier.STANDARD.value == "standard"
-    assert GraphTier.ENTERPRISE.value == "enterprise"
-    assert GraphTier.PREMIUM.value == "premium"
+    assert GraphTier.KUZU_STANDARD.value == "kuzu-standard"
+    assert GraphTier.KUZU_LARGE.value == "kuzu-large"
+    assert GraphTier.KUZU_XLARGE.value == "kuzu-xlarge"
 
   def test_credit_transaction_type_enum_values(self):
     """Test CreditTransactionType enum values."""
@@ -127,7 +127,7 @@ class TestGraphCredits:
       graph_id=f"test_graph_credits_2_{unique_id2}",
       graph_name="Test Graph 2",
       graph_type="entity",
-      graph_tier=GraphTier.ENTERPRISE.value,
+      graph_tier=GraphTier.KUZU_LARGE.value,
     )
     self.session.add(graph2)
     self.session.commit()
@@ -177,11 +177,11 @@ class TestGraphCredits:
     )
     credits.graph = self.graph
 
-    assert credits.graph_tier == GraphTier.STANDARD.value
+    assert credits.graph_tier == GraphTier.KUZU_STANDARD.value
 
     # Test fallback when graph is None
     credits.graph = None
-    assert credits.graph_tier == GraphTier.STANDARD.value
+    assert credits.graph_tier == GraphTier.KUZU_STANDARD.value
 
   def test_consume_credits_atomic_success(self):
     """Test successful atomic credit consumption."""
@@ -439,7 +439,7 @@ class TestGraphCredits:
     summary = credits.get_usage_summary(self.session)
 
     assert summary["graph_id"] == self.graph.graph_id
-    assert summary["graph_tier"] == GraphTier.STANDARD.value
+    assert summary["graph_tier"] == GraphTier.KUZU_STANDARD.value
     assert summary["monthly_allocation"] == 1000.0
     assert summary["consumed_this_month"] == 300.0
     assert summary["transaction_count"] == 3
@@ -485,7 +485,7 @@ class TestGraphCreditTransaction:
       graph_id=f"test_graph_trans_{unique_id}",
       graph_name="Test Graph",
       graph_type="entity",
-      graph_tier=GraphTier.STANDARD.value,
+      graph_tier=GraphTier.KUZU_STANDARD.value,
     )
     self.session.add(self.graph)
     self.session.commit()

@@ -448,18 +448,17 @@ class ContextAwareSchemaLoader(KuzuSchemaLoader):
     """
     # For SEC repository, filter out base nodes and relationships that aren't populated
     if context == "sec_repository":
-      # These base nodes are not populated by SEC data
-      excluded_base_nodes = {
-        "User",  # No user data in SEC
-        "GraphMetadata",  # Metadata is managed separately
-        "Connection",  # No connection data in SEC
-      }
+      # NOTE: User, GraphMetadata, and Connection nodes have been removed from base.py
+      # They are now managed exclusively in PostgreSQL, not in Kuzu graphs.
+      # These exclusions are kept for backward compatibility but are no longer needed.
+      excluded_base_nodes = (
+        set()
+      )  # No exclusions needed - platform nodes removed from base
       all_nodes = [node for node in BASE_NODES if node.name not in excluded_base_nodes]
 
       # These base relationships are not populated by SEC data
+      # NOTE: USER_HAS_ACCESS and ENTITY_HAS_CONNECTION removed from base.py
       excluded_base_rels = {
-        "USER_HAS_ACCESS",
-        "ENTITY_HAS_CONNECTION",
         "ENTITY_EVOLVED_FROM",
         "ENTITY_OWNS_ENTITY",
         "ELEMENT_IN_TAXONOMY",

@@ -82,6 +82,8 @@ jobs:
   # Step 1: Prepare Writer Matrix
   prepare-writer-matrix:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       kuzu_matrix: ${{ steps.set-matrix.outputs.kuzu_matrix }}
       neo4j_matrix: ${{ steps.set-matrix.outputs.neo4j_matrix }}
@@ -226,6 +228,7 @@ jobs:
   deploy-kuzu-writers:
     needs: [prepare-writer-matrix]
     if: needs.prepare-writer-matrix.outputs.kuzu_matrix != '{"include":[]}'
+    permissions: {}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.kuzu_matrix) }}
@@ -265,6 +268,7 @@ jobs:
   deploy-neo4j-writers:
     needs: [prepare-writer-matrix]
     if: needs.prepare-writer-matrix.outputs.neo4j_matrix != '{"include":[]}'
+    permissions: {}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.neo4j_matrix) }}

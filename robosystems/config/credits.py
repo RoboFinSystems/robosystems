@@ -84,12 +84,12 @@ class CreditConfig:
     "database_write": Decimal("0"),  # Write operations - included
   }
 
-  # Monthly AI credit allocations by subscription tier
+  # Monthly AI credit allocations by subscription tier (aligned with GraphTier)
   # Now sourced from centralized tier configuration with fallback
   MONTHLY_ALLOCATIONS = {
-    "standard": get_tier_monthly_credits("standard"),
-    "enterprise": get_tier_monthly_credits("enterprise"),
-    "premium": get_tier_monthly_credits("premium"),
+    "kuzu-standard": get_tier_monthly_credits("kuzu-standard"),
+    "kuzu-large": get_tier_monthly_credits("kuzu-large"),
+    "kuzu-xlarge": get_tier_monthly_credits("kuzu-xlarge"),
   }
 
   # Credit balance thresholds for alerts

@@ -436,6 +436,9 @@ class EnvConfig:
   KUZU_S3_BUCKET = get_str_env("KUZU_S3_BUCKET", "")
   KUZU_HOME = get_str_env("KUZU_HOME", "/app/data/.kuzu")
 
+  # DuckDB Staging Configuration
+  DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
+
   # Kuzu Capacity and Performance
   KUZU_MAX_DATABASES_PER_NODE = get_int_env(
     "KUZU_MAX_DATABASES_PER_NODE", MAX_DATABASES_PER_NODE

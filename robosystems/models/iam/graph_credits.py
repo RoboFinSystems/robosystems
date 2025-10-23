@@ -41,11 +41,18 @@ def safe_float(value: Any) -> float:
 
 
 class GraphTier(str, Enum):
-  """Database tier types with different performance characteristics."""
+  """Database tier types aligned with infrastructure."""
 
-  STANDARD = "standard"  # Standard tier
-  ENTERPRISE = "enterprise"  # Enterprise tier with higher limits
-  PREMIUM = "premium"  # Premium tier with maximum resources
+  KUZU_STANDARD = "kuzu-standard"  # Multi-tenant Kuzu (scalable instance size)
+  KUZU_LARGE = "kuzu-large"  # r7g.large dedicated (10 subgraphs)
+  KUZU_XLARGE = "kuzu-xlarge"  # r7g.xlarge dedicated (25 subgraphs)
+  KUZU_SHARED = "kuzu-shared"  # Shared public repositories (SEC, industry, economic)
+  NEO4J_COMMUNITY_LARGE = (
+    "neo4j-community-large"  # r7g.large, Neo4j Community (0 subgraphs)
+  )
+  NEO4J_ENTERPRISE_XLARGE = (
+    "neo4j-enterprise-xlarge"  # r7g.xlarge, Neo4j Enterprise (25 subgraphs)
+  )
 
 
 class CreditTransactionType(str, Enum):
@@ -134,7 +141,7 @@ class GraphCredits(Base):
     if self.graph:
       return self.graph.graph_tier
     # Fallback for backwards compatibility during migration
-    return GraphTier.STANDARD.value
+    return GraphTier.KUZU_STANDARD.value
 
   @classmethod
   def get_by_graph_id(cls, graph_id: str, session: Session) -> Optional["GraphCredits"]:

@@ -172,7 +172,7 @@ mount $DATA_DEVICE /mnt/kuzu-data
 echo "$DATA_DEVICE /mnt/kuzu-data xfs defaults,nofail 0 2" >> /etc/fstab
 
 # Create directory structure with proper ownership
-mkdir -p /mnt/kuzu-data/{databases,backups,logs}
+mkdir -p /mnt/kuzu-data/{databases,backups,logs,staging}
 
 # Docker containers typically run as UID 1000, set ownership accordingly
 chown -R 1000:1000 /mnt/kuzu-data
@@ -375,6 +375,8 @@ export DATA_MOUNT_SOURCE="/mnt/kuzu-data/databases"
 export DATA_MOUNT_TARGET="/app/data/kuzu-dbs"
 export LOGS_MOUNT_SOURCE="/mnt/kuzu-data/logs"
 export LOGS_MOUNT_TARGET="/app/logs"
+export STAGING_MOUNT_SOURCE="/mnt/kuzu-data/staging"
+export STAGING_MOUNT_TARGET="/app/data/staging"
 export DOCKER_PROFILE="kuzu-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE:-shared}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"

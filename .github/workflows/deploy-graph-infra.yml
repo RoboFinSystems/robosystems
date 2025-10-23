@@ -82,6 +82,8 @@ jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
     timeout-minutes: 30
+    permissions:
+      contents: read
     outputs:
       secret_arn: ${{ steps.get-outputs.outputs.secret_arn }}
       instance_registry_table: ${{ steps.get-outputs.outputs.instance_registry_table }}

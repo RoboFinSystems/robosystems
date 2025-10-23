@@ -114,21 +114,25 @@ async def get_graph_limits(
     await get_universal_repository_with_auth(graph_id, current_user, "read", session)
 
     # Import needed functions
-    from robosystems.routers.graphs.copy.validation import (
-      get_tier_limits as get_copy_tier_limits,
-    )
     from robosystems.models.iam.graph import Graph
     from robosystems.models.iam.graph_credits import GraphCredits
     from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+    from robosystems.config.tier_config import (
+      TierConfig,
+      get_tier_copy_operation_limits,
+      get_tier_backup_limits,
+    )
 
     # Get user's subscription tier
     user_tier = getattr(current_user, "subscription_tier", "standard")
 
     # Get graph information if it exists
     graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
-    graph_tier = graph.graph_tier if graph else user_tier
+    # Default to kuzu-standard if graph doesn't exist (shouldn't happen in practice)
+    graph_tier = graph.graph_tier if graph else "kuzu-standard"
 
-    # Get storage information
+    # Get storage information (based on graph tier)
+    max_storage_gb = TierConfig.get_storage_limit_gb(graph_tier)
     storage_limits = {}
     try:
       graph_client = await _get_graph_client(graph_id)
@@ -138,11 +142,6 @@ async def get_graph_limits(
       await graph_client.close()
 
       current_storage_gb = db_info.get("database_size_bytes", 0) / (1024**3)
-      max_storage_gb = {
-        "standard": 10,
-        "enterprise": 50,
-        "premium": 100,
-      }.get(user_tier, 10)
 
       storage_limits = {
         "current_usage_gb": round(current_storage_gb, 2),
@@ -153,77 +152,42 @@ async def get_graph_limits(
       logger.warning(f"Could not get storage info for {graph_id}: {e}")
       storage_limits = {
         "current_usage_gb": None,
-        "max_storage_gb": {
-          "standard": 10,
-          "enterprise": 50,
-          "premium": 100,
-        }.get(user_tier, 10),
+        "max_storage_gb": max_storage_gb,
         "approaching_limit": False,
       }
 
-    # Get copy/ingestion limits
-    copy_limits = get_copy_tier_limits(current_user)
+    # Get copy/ingestion limits from tier configuration (based on graph tier)
+    copy_limits = get_tier_copy_operation_limits(graph_tier)
 
-    # Define query limits based on tier
+    # Define query limits based on graph tier
     query_limits = {
-      "max_timeout_seconds": {
-        "standard": 60,
-        "enterprise": 120,
-        "premium": 300,
-      }.get(user_tier, 60),
-      "max_rows_per_query": {
-        "standard": 10000,
-        "enterprise": 100000,
-        "premium": -1,  # Unlimited
-      }.get(user_tier, 10000),
-      "chunk_size": {
-        "standard": 1000,
-        "enterprise": 5000,
-        "premium": 10000,
-      }.get(user_tier, 1000),
-      "concurrent_queries": {
-        "standard": 1,
-        "enterprise": 3,
-        "premium": 5,
-      }.get(user_tier, 1),
+      "max_timeout_seconds": TierConfig.get_query_timeout(graph_tier),
+      "chunk_size": TierConfig.get_chunk_size(graph_tier),
+      # These are application-level limits not in YAML config
+      "max_rows_per_query": 10000,  # TODO: Add to graph.yml if needed
+      "concurrent_queries": 1,  # TODO: Add to graph.yml if needed
     }
 
-    # Define backup limits based on tier
-    backup_limits = {
-      "max_backup_size_gb": {
-        "standard": 10,
-        "enterprise": 50,
-        "premium": 100,
-      }.get(user_tier, 10),
-      "backup_retention_days": {
-        "standard": 7,
-        "enterprise": 30,
-        "premium": 90,
-      }.get(user_tier, 7),
-      "max_backups_per_day": {
-        "standard": 2,
-        "enterprise": 10,
-        "premium": -1,  # Unlimited
-      }.get(user_tier, 2),
-    }
+    # Get backup limits from tier configuration (based on graph tier)
+    backup_limits = get_tier_backup_limits(graph_tier)
 
-    # Define rate limits based on tier
+    # Define rate limits based on graph tier (using rate_limit_multiplier from config)
+    base_requests_per_minute = 60
+    base_requests_per_hour = 1000
+    base_burst_capacity = 10
+
+    multiplier = TierConfig.get_rate_limit_multiplier(graph_tier)
+
     rate_limits = {
-      "requests_per_minute": {
-        "standard": 60,
-        "enterprise": 300,
-        "premium": 600,
-      }.get(user_tier, 60),
-      "requests_per_hour": {
-        "standard": 1000,
-        "enterprise": 10000,
-        "premium": 50000,
-      }.get(user_tier, 1000),
-      "burst_capacity": {
-        "standard": 10,
-        "enterprise": 50,
-        "premium": 100,
-      }.get(user_tier, 10),
+      "requests_per_minute": int(base_requests_per_minute * multiplier)
+      if multiplier
+      else base_requests_per_minute,
+      "requests_per_hour": int(base_requests_per_hour * multiplier)
+      if multiplier
+      else base_requests_per_hour,
+      "burst_capacity": int(base_burst_capacity * multiplier)
+      if multiplier
+      else base_burst_capacity,
     }
 
     # Get credit limits if applicable

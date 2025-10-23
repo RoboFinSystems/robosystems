@@ -8,42 +8,9 @@ This serves as the foundation that all application-specific schemas extend.
 from .models import Node, Relationship, Property
 
 # Base Schema Definition - Common Foundation
+# NOTE: Platform metadata (users, connections, graph metadata) are stored in PostgreSQL,
+# not in the Kuzu graph database. This schema contains only business domain concepts.
 BASE_NODES = [
-  Node(
-    name="GraphMetadata",
-    description="Metadata about the graph database itself",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="graph_id", type="STRING"),  # the actual graph ID (e.g., kg1234)
-      Property(name="name", type="STRING"),
-      Property(name="description", type="STRING"),
-      Property(name="type", type="STRING"),  # generic, entity, research, network
-      Property(name="created_at", type="STRING"),
-      Property(name="updated_at", type="STRING"),
-      Property(name="created_by", type="STRING"),  # user_id who created
-      Property(name="tier", type="STRING"),  # shared, enterprise, premium
-      Property(name="schema_type", type="STRING"),  # extensions, custom
-      Property(name="custom_schema_name", type="STRING"),
-      Property(name="custom_schema_version", type="STRING"),
-      Property(name="schema_extensions", type="STRING"),  # JSON array as string
-      Property(name="tags", type="STRING"),  # JSON array as string
-      Property(name="custom_metadata", type="STRING"),  # JSON object as string
-      Property(name="status", type="STRING"),  # active, archived, maintenance
-      Property(name="access_level", type="STRING"),  # public, private, restricted
-    ],
-  ),
-  Node(
-    name="User",
-    description="System users with authentication and authorization",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="email", type="STRING"),
-      Property(name="name", type="STRING"),
-      Property(name="is_active", type="BOOLEAN"),
-      Property(name="created_at", type="STRING"),
-      Property(name="updated_at", type="STRING"),
-    ],
-  ),
   Node(
     name="Entity",
     description="Core entity representing organizations, companies, subsidiaries, or other business units",
@@ -126,26 +93,6 @@ BASE_NODES = [
       Property(name="denominator_uri", type="STRING"),
     ],
   ),
-  Node(
-    name="Connection",
-    description="External system connections and integrations",
-    properties=[
-      Property(name="identifier", type="STRING", is_primary_key=True),
-      Property(name="provider", type="STRING"),  # QuickBooks, Plaid, SEC, etc.
-      Property(name="uri", type="STRING"),  # indexed
-      Property(name="connection_id", type="STRING"),  # unique
-      Property(name="realm_id", type="STRING"),  # QuickBooks specific
-      Property(name="item_id", type="STRING"),  # Plaid specific
-      Property(name="cik", type="STRING"),  # SEC specific
-      Property(name="status", type="STRING"),  # connected, disconnected, error, pending
-      Property(name="entity_name", type="STRING"),
-      Property(name="institution_name", type="STRING"),
-      Property(name="created_at", type="STRING"),
-      Property(name="last_sync", type="STRING"),
-      Property(name="expires_at", type="STRING"),
-      Property(name="auto_sync_enabled", type="BOOLEAN"),
-    ],
-  ),
   # XBRL Taxonomy Nodes - Global entities shared across all reports
   Node(
     name="Element",
@@ -206,30 +153,9 @@ BASE_NODES = [
 ]
 
 # Base Relationships - Common Foundation
+# NOTE: Platform relationships (user access, connections) are managed in PostgreSQL.
+# This schema contains only business domain relationships.
 BASE_RELATIONSHIPS = [
-  Relationship(
-    name="USER_HAS_ACCESS",
-    from_node="User",
-    to_node="Entity",
-    description="Links users to entities they manage",
-    properties=[
-      Property(name="role", type="STRING"),  # admin, write, read
-      Property(name="access_level", type="STRING"),
-      Property(name="created_at", type="STRING"),
-    ],
-  ),
-  # Connection relationships
-  Relationship(
-    name="ENTITY_HAS_CONNECTION",
-    from_node="Entity",
-    to_node="Connection",
-    description="Entity has external system connections",
-    properties=[
-      Property(name="connection_context", type="STRING"),
-      Property(name="is_primary", type="BOOLEAN"),
-      Property(name="created_at", type="STRING"),
-    ],
-  ),
   # Evolution and lineage tracking
   Relationship(
     name="ENTITY_EVOLVED_FROM",

@@ -33,40 +33,44 @@ class TestSubscriptionRateLimits:
 
     # Graph-scoped endpoints
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/entity/", "GET")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/entity/", "GET")
       == EndpointCategory.GRAPH_READ
     )
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/entity/", "POST")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/entity/", "POST")
       == EndpointCategory.GRAPH_WRITE
     )
-    assert get_endpoint_category("/v1/kg1a2b3c/mcp/query") == EndpointCategory.GRAPH_MCP
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/agent/query") == EndpointCategory.GRAPH_AGENT
+      get_endpoint_category("/v1/graphs/kg1a2b3c/mcp/query")
+      == EndpointCategory.GRAPH_MCP
     )
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/graph/query/cypher")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/agent/query")
+      == EndpointCategory.GRAPH_AGENT
+    )
+    assert (
+      get_endpoint_category("/v1/graphs/kg1a2b3c/graph/query/cypher")
       == EndpointCategory.GRAPH_QUERY
     )
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/graph/analytics/metrics")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/graph/analytics/metrics")
       == EndpointCategory.GRAPH_ANALYTICS
     )
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/graph/backup/create")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/graph/backup/create")
       == EndpointCategory.GRAPH_BACKUP
     )
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/sync/quickbooks")
+      get_endpoint_category("/v1/graphs/kg1a2b3c/sync/quickbooks")
       == EndpointCategory.GRAPH_SYNC
     )
 
   def test_should_use_subscription_limits(self):
     """Test which endpoints should use subscription limits."""
     # Graph-scoped endpoints should use subscription limits
-    assert should_use_subscription_limits("/v1/kg1a2b3c/entity/")
-    assert should_use_subscription_limits("/v1/kg1a2b3c/mcp/query")
-    assert should_use_subscription_limits("/v1/sec/entity/")
+    assert should_use_subscription_limits("/v1/graphs/kg1a2b3c/entity/")
+    assert should_use_subscription_limits("/v1/graphs/kg1a2b3c/mcp/query")
+    assert should_use_subscription_limits("/v1/graphs/sec/entity/")
 
     # Non-graph endpoints that should use subscription limits
     assert should_use_subscription_limits("/v1/user/subscription/status")
@@ -124,7 +128,7 @@ class TestSubscriptionAwareRateLimiting:
   def mock_request(self):
     """Create a mock request."""
     request = MagicMock(spec=Request)
-    request.url.path = "/v1/kg1a2b3c/entity/"
+    request.url.path = "/v1/graphs/kg1a2b3c/entity/"
     request.method = "GET"
     request.client = MagicMock()
     request.client.host = "192.168.1.1"
@@ -244,9 +248,13 @@ class TestSubscriptionAwareRateLimiting:
   def test_mcp_endpoint_category(self):
     """Test MCP endpoints get correct category and limits."""
     # MCP endpoints should be categorized correctly
-    assert get_endpoint_category("/v1/kg1a2b3c/mcp/query") == EndpointCategory.GRAPH_MCP
     assert (
-      get_endpoint_category("/v1/kg1a2b3c/mcp/benchmark") == EndpointCategory.GRAPH_MCP
+      get_endpoint_category("/v1/graphs/kg1a2b3c/mcp/query")
+      == EndpointCategory.GRAPH_MCP
+    )
+    assert (
+      get_endpoint_category("/v1/graphs/kg1a2b3c/mcp/benchmark")
+      == EndpointCategory.GRAPH_MCP
     )
 
     # Check MCP limits for different tiers
