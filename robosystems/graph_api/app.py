@@ -58,7 +58,7 @@ def create_app() -> FastAPI:
     # Initialize DuckDB connection pool for staging tables
     from robosystems.graph_api.core.duckdb_pool import initialize_duckdb_pool
 
-    duckdb_base_path = Path(env.DATA_DIR) / "duckdb-staging"
+    duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
     duckdb_pool = initialize_duckdb_pool(
       base_path=str(duckdb_base_path),
       max_connections_per_db=3,
