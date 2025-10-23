@@ -231,28 +231,6 @@ class TestEntityGraphService:
     assert "Schema module 'unknown_extension' not found" in str(exc_info.value)
 
   @pytest.mark.asyncio
-  async def test_create_graph_metadata_node_error_suppression(self, mocker):
-    """Test that GraphMetadata creation errors are suppressed."""
-    from robosystems.graph_api.client.exceptions import GraphClientError
-
-    mock_kuzu_client = mocker.AsyncMock()
-    mock_kuzu_client.query.side_effect = GraphClientError("Duplicate node")
-
-    service = EntityGraphService(session=mocker.MagicMock())
-
-    # This should not raise an exception
-    await service._create_graph_metadata_node(
-      kuzu_client=mock_kuzu_client,
-      graph_id="kg12345",
-      entity_name="Test Entity",
-      user_id="user-123",
-      tier="standard",
-      extensions=None,
-    )
-
-    # Verify query was attempted
-    mock_kuzu_client.query.assert_called_once()
-
   def test_generate_graph_id_consistency(self):
     """Test that graph ID generation is consistent for same inputs."""
     service = EntityGraphService()

@@ -14,41 +14,44 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# Unified billing plans configuration
+# Unified billing plans configuration (aligned with GraphTier infrastructure)
 DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
   {
-    "name": "standard",
-    "display_name": "Standard",
-    "description": "Perfect for most applications with AI credit allocation",
+    "name": "kuzu-standard",
+    "display_name": "Kuzu Standard",
+    "description": "Multi-tenant Kuzu infrastructure - perfect for most applications",
     "base_price_cents": 4999,  # $49.99
     "included_gb": 100,  # 100 GB storage included
     "overage_price_cents_per_gb": 100,  # $1.00 per GB overage
     "monthly_credit_allocation": 10000,  # 10k AI credits per month (100 agent calls)
     "max_queries_per_hour": 10000,
+    "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
     "backup_retention_days": 30,
     "priority_support": True,
   },
   {
-    "name": "enterprise",
-    "display_name": "Enterprise",
-    "description": "For high-performance applications with extensive AI capabilities",
+    "name": "kuzu-large",
+    "display_name": "Kuzu Large",
+    "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
     "base_price_cents": 19999,  # $199.99
     "included_gb": 500,  # 500 GB storage included
     "overage_price_cents_per_gb": 50,  # $0.50 per GB overage
     "monthly_credit_allocation": 50000,  # 50k AI credits per month (500 agent calls)
     "max_queries_per_hour": 50000,
+    "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
     "backup_retention_days": 90,
     "priority_support": True,
   },
   {
-    "name": "premium",
-    "display_name": "Premium",
-    "description": "Maximum performance and scale with abundant AI credits",
+    "name": "kuzu-xlarge",
+    "display_name": "Kuzu XLarge",
+    "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
     "base_price_cents": 49999,  # $499.99
     "included_gb": 2000,  # 2 TB storage included
     "overage_price_cents_per_gb": 25,  # $0.25 per GB overage
     "monthly_credit_allocation": 200000,  # 200k AI credits per month (2000 agent calls)
     "max_queries_per_hour": None,  # Unlimited
+    "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
     "backup_retention_days": 365,
     "priority_support": True,
   },
@@ -198,7 +201,7 @@ class BillingConfig:
     return {
       "subscription_tiers": {
         tier: cls.get_subscription_plan(tier)
-        for tier in ["standard", "enterprise", "premium"]
+        for tier in ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
         if cls.get_subscription_plan(tier)
       },
       "ai_operation_costs": {
@@ -219,14 +222,14 @@ class BillingConfig:
       ],
       "storage_pricing": {
         "included_per_tier": {
-          "standard": 100,  # GB
-          "enterprise": 500,  # GB
-          "premium": 2000,  # GB
+          "kuzu-standard": 100,  # GB
+          "kuzu-large": 500,  # GB
+          "kuzu-xlarge": 2000,  # GB
         },
         "overage_per_gb_per_month": {
-          "standard": 1.00,  # $1.00/GB
-          "enterprise": 0.50,  # $0.50/GB
-          "premium": 0.25,  # $0.25/GB
+          "kuzu-standard": 1.00,  # $1.00/GB
+          "kuzu-large": 0.50,  # $0.50/GB
+          "kuzu-xlarge": 0.25,  # $0.25/GB
         },
       },
     }

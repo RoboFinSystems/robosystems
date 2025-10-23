@@ -167,7 +167,7 @@ class TestSchemaManagementIntegration:
             "description": "Production inventory tracking",
             "schema_extensions": [],
           },
-          "instance_tier": "standard",  # Changed from "shared" to valid tier
+          "instance_tier": "kuzu-standard",  # Updated to new tier naming
           "custom_schema": schema_def,
           "tags": ["retail", "inventory", "production"],
         },

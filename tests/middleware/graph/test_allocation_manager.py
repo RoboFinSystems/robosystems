@@ -10,7 +10,7 @@ from robosystems.middleware.graph.allocation_manager import (
   InstanceStatus,
   DatabaseLocation,
   InstanceInfo,
-  InstanceTier,
+  GraphTier,
 )
 
 
@@ -110,18 +110,18 @@ class TestMultiBackendSupport:
 
         # Set up tier configurations matching allocation_manager.py
         manager.tier_configs = {
-          InstanceTier.STANDARD: {
+          GraphTier.KUZU_STANDARD: {
             "backend": "kuzu",
             "backend_type": "kuzu",
             "databases_per_instance": 10,
           },
-          InstanceTier.ENTERPRISE: {
+          GraphTier.NEO4J_COMMUNITY_LARGE: {
             "backend": "neo4j",
             "backend_type": "neo4j",
             "neo4j_edition": "community",
             "databases_per_instance": 1,
           },
-          InstanceTier.PREMIUM: {
+          GraphTier.NEO4J_ENTERPRISE_XLARGE: {
             "backend": "neo4j",
             "backend_type": "neo4j",
             "neo4j_edition": "enterprise",
@@ -134,9 +134,9 @@ class TestMultiBackendSupport:
   @pytest.mark.parametrize(
     "tier,expected_backend,expected_backend_type,expected_edition,expected_capacity",
     [
-      (InstanceTier.STANDARD, "kuzu", "kuzu", None, 10),
-      (InstanceTier.ENTERPRISE, "neo4j", "neo4j", "community", 1),
-      (InstanceTier.PREMIUM, "neo4j", "neo4j", "enterprise", 1),
+      (GraphTier.KUZU_STANDARD, "kuzu", "kuzu", None, 10),
+      (GraphTier.NEO4J_COMMUNITY_LARGE, "neo4j", "neo4j", "community", 1),
+      (GraphTier.NEO4J_ENTERPRISE_XLARGE, "neo4j", "neo4j", "enterprise", 1),
     ],
   )
   def test_tier_backend_configuration(
@@ -162,7 +162,7 @@ class TestMultiBackendSupport:
 
   def test_kuzu_backend_standard_tier(self, allocation_manager):
     """Test Kuzu backend is used for Standard tier."""
-    config = allocation_manager.tier_configs[InstanceTier.STANDARD]
+    config = allocation_manager.tier_configs[GraphTier.KUZU_STANDARD]
 
     assert config["backend"] == "kuzu"
     assert config["backend_type"] == "kuzu"
@@ -171,7 +171,7 @@ class TestMultiBackendSupport:
 
   def test_neo4j_community_enterprise_tier(self, allocation_manager):
     """Test Neo4j Community backend is used for Enterprise tier."""
-    config = allocation_manager.tier_configs[InstanceTier.ENTERPRISE]
+    config = allocation_manager.tier_configs[GraphTier.NEO4J_COMMUNITY_LARGE]
 
     assert config["backend"] == "neo4j"
     assert config["backend_type"] == "neo4j"
@@ -180,7 +180,7 @@ class TestMultiBackendSupport:
 
   def test_neo4j_enterprise_premium_tier(self, allocation_manager):
     """Test Neo4j Enterprise backend is used for Premium tier."""
-    config = allocation_manager.tier_configs[InstanceTier.PREMIUM]
+    config = allocation_manager.tier_configs[GraphTier.NEO4J_ENTERPRISE_XLARGE]
 
     assert config["backend"] == "neo4j"
     assert config["backend_type"] == "neo4j"
@@ -190,9 +190,9 @@ class TestMultiBackendSupport:
   @pytest.mark.parametrize(
     "tier,expected_isolation",
     [
-      (InstanceTier.STANDARD, False),  # Shared resources
-      (InstanceTier.ENTERPRISE, True),  # Isolated resources
-      (InstanceTier.PREMIUM, True),  # Isolated resources
+      (GraphTier.KUZU_STANDARD, False),  # Shared resources
+      (GraphTier.NEO4J_COMMUNITY_LARGE, True),  # Isolated resources
+      (GraphTier.NEO4J_ENTERPRISE_XLARGE, True),  # Isolated resources
     ],
   )
   def test_tier_resource_isolation(self, allocation_manager, tier, expected_isolation):

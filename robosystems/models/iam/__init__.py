@@ -31,6 +31,9 @@ from .user_repository_credits import (
   UserRepositoryCreditTransaction,
   UserRepositoryCreditTransactionType,
 )
+from .graph_schema import GraphSchema
+from .graph_table import GraphTable
+from .graph_file import GraphFile
 
 __all__ = [
   "User",
@@ -60,4 +63,7 @@ __all__ = [
   "UserRepositoryCredits",
   "UserRepositoryCreditTransaction",
   "UserRepositoryCreditTransactionType",
+  "GraphSchema",
+  "GraphTable",
+  "GraphFile",
 ]

@@ -16,8 +16,8 @@ class EntityCreate(BaseModel):
   ein: str | None = None
   tier: str | None = Field(
     default=None,
-    description="Graph tier to create (standard, enterprise, premium). If not specified, defaults to standard.",
-    examples=["standard"],
+    description="Graph tier to create (kuzu-standard, kuzu-large, kuzu-xlarge). If not specified, defaults to kuzu-standard.",
+    examples=["kuzu-standard"],
   )
   extensions: list[str] | None = Field(
     default=None,

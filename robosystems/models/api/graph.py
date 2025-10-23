@@ -356,9 +356,9 @@ class CreateGraphRequest(BaseModel):
 
   metadata: GraphMetadata = Field(..., description="Graph metadata")
   instance_tier: str = Field(
-    "standard",
-    description="Instance tier: standard, enterprise, or premium",
-    examples=["standard"],
+    "kuzu-standard",
+    description="Instance tier: kuzu-standard, kuzu-large, or kuzu-xlarge",
+    examples=["kuzu-standard"],
   )
   custom_schema: Optional[CustomSchemaDefinition] = Field(
     None,

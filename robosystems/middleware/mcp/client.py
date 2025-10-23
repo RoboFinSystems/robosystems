@@ -489,119 +489,108 @@ class KuzuMCPClient:
     )
 
   def _get_node_description(self, node_name: str) -> str:
-    """Get description for common node types."""
+    """Get description for common node types (base + roboledger extension only)."""
     descriptions = {
+      # Base nodes
       "Entity": "Business entities (companies, subsidiaries) with financial data and SEC filings",
-      "User": "System users with authentication and authorization",
-      "Report": "SEC filings (10-K annual, 10-Q quarterly reports)",
-      "Fact": "XBRL data points with financial values and contexts",
-      "Element": "XBRL taxonomy elements defining financial concepts",
-      "Transaction": "Financial transactions from accounting systems",
-      "LineItem": "Individual accounting entries with debits/credits",
-      "Account": "Chart of accounts for financial categorization",
       "Period": "Time periods for financial reporting (instant/duration)",
       "Unit": "Measurement units (USD, shares, percentages)",
-      "Connection": "External system integrations (QuickBooks, etc.)",
-      "GraphMetadata": "Metadata about the graph database itself",
-      "Address": "Physical or mailing addresses",
-      "Contact": "Contact information for people or organizations",
-      "Document": "Files and documents associated with entities",
-      "Event": "Business events and activities",
-      "Security": "Financial securities (stocks, bonds, etc.)",
+      "Element": "XBRL taxonomy elements defining financial concepts",
+      "Label": "Human-readable labels for XBRL elements",
+      "Reference": "Authoritative references for XBRL elements",
+      "Taxonomy": "XBRL taxonomy definitions and structures",
+      # RoboLedger extension nodes - Reporting section
+      "Report": "SEC filings (10-K annual, 10-Q quarterly reports)",
+      "Fact": "XBRL data points with financial values and contexts",
+      "Structure": "XBRL presentation and calculation structures",
+      "FactDimension": "Dimensional qualifiers for facts (segments, breakdowns)",
+      "Association": "XBRL calculation relationships between elements",
+      "FactSet": "Logical groupings of related facts",
+      # RoboLedger extension nodes - Transaction section (entity graphs only)
+      "Transaction": "Financial transactions from accounting systems",
+      "LineItem": "Individual accounting entries with debits/credits",
+      "Process": "Business processes and workflows",
     }
     return descriptions.get(node_name, f"{node_name} entities in the graph")
 
   def _get_relationship_description(self, rel_name: str) -> str:
-    """Get description for common relationship types."""
+    """Get description for common relationship types (base + roboledger extension only)."""
     descriptions = {
-      # Entity relationships
-      "ENTITY_HAS_REPORT": "Links companies to their SEC filings (10-K, 10-Q, etc.)",
-      "ENTITY_HAS_CONNECTION": "Links entities to external system integrations",
-      "ENTITY_OWNS_ENTITY": "Parent-subsidiary ownership relationships",
+      # Base relationships
       "ENTITY_EVOLVED_FROM": "Tracks entity changes over time (mergers, acquisitions)",
-      "ENTITY_HAS_ADDRESS": "Links entities to their addresses",
-      # Report relationships
+      "ENTITY_OWNS_ENTITY": "Parent-subsidiary ownership relationships",
+      "ELEMENT_HAS_LABEL": "Links XBRL elements to their human-readable labels",
+      "ELEMENT_HAS_REFERENCE": "Links elements to authoritative references",
+      "ELEMENT_IN_TAXONOMY": "Places elements within taxonomy structure",
+      "TAXONOMY_HAS_LABEL": "Links taxonomies to their labels",
+      "TAXONOMY_HAS_REFERENCE": "Links taxonomies to references",
+      # RoboLedger extension relationships - Reporting section
+      "ENTITY_HAS_REPORT": "Links companies to their SEC filings (10-K, 10-Q, etc.)",
       "REPORT_HAS_FACT": "Links reports to their financial data points",
-      "REPORT_HAS_FACT_SET": "Groups related facts within a report",
-      "REPORT_USES_TAXONOMY": "Links reports to their XBRL taxonomy definitions",
-      "REPORTED_IN": "Links facts to the reports they appear in",
-      # Fact relationships
       "FACT_HAS_ELEMENT": "Links facts to their XBRL taxonomy elements (concept definitions)",
       "FACT_HAS_ENTITY": "Links facts to the reporting entity",
       "FACT_HAS_PERIOD": "Links facts to their time periods (instant or duration)",
       "FACT_HAS_UNIT": "Links facts to their measurement units (USD, shares, etc.)",
+      "STRUCTURE_HAS_TAXONOMY": "Links presentation structure to taxonomy",
       "FACT_HAS_DIMENSION": "Links facts to dimensional qualifiers",
-      "FACT_SET_CONTAINS_FACT": "Groups related facts together",
       "FACT_DIMENSION_AXIS_ELEMENT": "Defines dimensional axes for facts",
       "FACT_DIMENSION_MEMBER_ELEMENT": "Defines dimensional members for facts",
-      # Element relationships
-      "ELEMENT_HAS_LABEL": "Links XBRL elements to their human-readable labels",
-      "ELEMENT_HAS_REFERENCE": "Links elements to authoritative references",
-      "ELEMENT_IN_TAXONOMY": "Places elements within taxonomy structure",
-      # Taxonomy relationships
-      "TAXONOMY_HAS_LABEL": "Links taxonomies to their labels",
-      "TAXONOMY_HAS_REFERENCE": "Links taxonomies to references",
-      # Structure relationships
-      "STRUCTURE_HAS_PARENT": "Parent relationship in presentation hierarchy",
-      "STRUCTURE_HAS_CHILD": "Child relationship in presentation hierarchy",
-      "STRUCTURE_HAS_TAXONOMY": "Links presentation structure to taxonomy",
+      "FACT_SET_CONTAINS_FACT": "Groups related facts together",
+      "REPORT_HAS_FACT_SET": "Groups related facts within a report",
+      "REPORT_USES_TAXONOMY": "Links reports to their XBRL taxonomy definitions",
       "STRUCTURE_HAS_ASSOCIATION": "Links structure to calculation relationships",
-      # Association relationships
       "ASSOCIATION_HAS_FROM_ELEMENT": "Source element in calculation relationship",
       "ASSOCIATION_HAS_TO_ELEMENT": "Target element in calculation relationship",
-      # User relationships
-      "USER_HAS_ACCESS": "Links users to entities they can access",
-      # Transaction relationships (for accounting data)
-      "HAS_LINE_ITEM": "Links transactions to their line items",
-      "HAS_ACCOUNT": "Links line items to chart of accounts",
-      "HAS_CONNECTION": "Links entities to external integrations",
-      # Contact relationships
-      "CONTACT_HAS_ADDRESS": "Links contacts to their addresses",
+      # RoboLedger extension relationships - Transaction section (entity graphs only)
+      "ENTITY_HAS_TRANSACTION": "Links entities to their financial transactions",
+      "TRANSACTION_HAS_LINE_ITEM": "Links transactions to their line items",
+      "LINE_ITEM_RELATES_TO_ELEMENT": "Maps line items to XBRL elements for reporting",
     }
     return descriptions.get(rel_name, f"{rel_name} relationship in the graph")
 
   def _infer_relationship_nodes(self, rel_name: str) -> tuple[str, str]:
-    """Infer source and target nodes from relationship name."""
-    # SEC-specific relationship mappings
-    sec_relationships = {
-      "ENTITY_HAS_REPORT": ("Entity", "Report"),
-      "ENTITY_HAS_CONNECTION": ("Entity", "Connection"),
-      "ENTITY_OWNS_ENTITY": ("Entity", "Entity"),
+    """Infer source and target nodes from relationship name (base + roboledger only)."""
+    # Complete relationship mappings for base + roboledger extension
+    known_relationships = {
+      # Base relationships
       "ENTITY_EVOLVED_FROM": ("Entity", "Entity"),
-      "REPORT_HAS_FACT": ("Report", "Fact"),
-      "REPORT_HAS_FACT_SET": ("Report", "FactSet"),
-      "REPORT_USES_TAXONOMY": ("Report", "Taxonomy"),
-      "FACT_HAS_ELEMENT": ("Fact", "Element"),
-      "FACT_HAS_ENTITY": ("Fact", "Entity"),
-      "FACT_HAS_PERIOD": ("Fact", "Period"),
-      "FACT_HAS_UNIT": ("Fact", "Unit"),
-      "FACT_HAS_DIMENSION": ("Fact", "FactDimension"),
-      "FACT_SET_CONTAINS_FACT": ("FactSet", "Fact"),
-      "FACT_DIMENSION_AXIS_ELEMENT": ("FactDimension", "Element"),
-      "FACT_DIMENSION_MEMBER_ELEMENT": ("FactDimension", "Element"),
+      "ENTITY_OWNS_ENTITY": ("Entity", "Entity"),
       "ELEMENT_HAS_LABEL": ("Element", "Label"),
       "ELEMENT_HAS_REFERENCE": ("Element", "Reference"),
       "ELEMENT_IN_TAXONOMY": ("Element", "Taxonomy"),
       "TAXONOMY_HAS_LABEL": ("Taxonomy", "Label"),
       "TAXONOMY_HAS_REFERENCE": ("Taxonomy", "Reference"),
-      "STRUCTURE_HAS_PARENT": ("Structure", "Structure"),
-      "STRUCTURE_HAS_CHILD": ("Structure", "Structure"),
+      # RoboLedger extension - Reporting section
+      "ENTITY_HAS_REPORT": ("Entity", "Report"),
+      "REPORT_HAS_FACT": ("Report", "Fact"),
+      "FACT_HAS_ELEMENT": ("Fact", "Element"),
+      "FACT_HAS_ENTITY": ("Fact", "Entity"),
+      "FACT_HAS_PERIOD": ("Fact", "Period"),
+      "FACT_HAS_UNIT": ("Fact", "Unit"),
       "STRUCTURE_HAS_TAXONOMY": ("Structure", "Taxonomy"),
+      "FACT_HAS_DIMENSION": ("Fact", "FactDimension"),
+      "FACT_DIMENSION_AXIS_ELEMENT": ("FactDimension", "Element"),
+      "FACT_DIMENSION_MEMBER_ELEMENT": ("FactDimension", "Element"),
+      "FACT_SET_CONTAINS_FACT": ("FactSet", "Fact"),
+      "REPORT_HAS_FACT_SET": ("Report", "FactSet"),
+      "REPORT_USES_TAXONOMY": ("Report", "Taxonomy"),
       "STRUCTURE_HAS_ASSOCIATION": ("Structure", "Association"),
       "ASSOCIATION_HAS_FROM_ELEMENT": ("Association", "Element"),
       "ASSOCIATION_HAS_TO_ELEMENT": ("Association", "Element"),
-      "USER_HAS_ACCESS": ("User", "Entity"),
+      # RoboLedger extension - Transaction section
+      "ENTITY_HAS_TRANSACTION": ("Entity", "Transaction"),
+      "TRANSACTION_HAS_LINE_ITEM": ("Transaction", "LineItem"),
+      "LINE_ITEM_RELATES_TO_ELEMENT": ("LineItem", "Element"),
     }
 
     # Check if we have a known mapping
-    if rel_name in sec_relationships:
-      return sec_relationships[rel_name]
+    if rel_name in known_relationships:
+      return known_relationships[rel_name]
 
     # Try pattern-based inference for unknown relationships
     if "_HAS_" in rel_name:
       parts = rel_name.split("_HAS_")
       if len(parts) == 2:
-        # Clean up the parts - capitalize properly
         from_node = parts[0].replace("_", " ").title().replace(" ", "")
         to_node = parts[1].replace("_", " ").title().replace(" ", "")
         return (from_node, to_node)
@@ -611,8 +600,12 @@ class KuzuMCPClient:
         from_node = parts[0].replace("_", " ").title().replace(" ", "")
         to_node = parts[1].replace("_", " ").title().replace(" ", "")
         return (from_node, to_node)
-    elif "REPORTED_IN" in rel_name:
-      return ("Fact", "Report")
+    elif "_RELATES_TO_" in rel_name:
+      parts = rel_name.split("_RELATES_TO_")
+      if len(parts) == 2:
+        from_node = parts[0].replace("_", " ").title().replace(" ", "")
+        to_node = parts[1].replace("_", " ").title().replace(" ", "")
+        return (from_node, to_node)
 
     # If we can't infer, return Unknown
     return ("Unknown", "Unknown")

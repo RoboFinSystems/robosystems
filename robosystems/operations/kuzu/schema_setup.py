@@ -148,9 +148,9 @@ class KuzuSchemaManager:
       f"and {created_relationships} relationship tables"
     )
 
-    # For SEC database, create GraphMetadata node if this is first initialization
-    if created_nodes > 0 or created_relationships > 0:
-      self._create_graph_metadata_if_needed()
+    # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
+    # stored exclusively in PostgreSQL, not in the Kuzu graph database.
+    # Shared repositories (SEC, industry, economic) no longer create GraphMetadata nodes.
 
     return True
 
@@ -199,156 +199,6 @@ class KuzuSchemaManager:
     except Exception as e:
       logger.error(f"Failed to create node table {table_name}: {e}")
       return False
-
-  def _create_graph_metadata_if_needed(self) -> None:
-    """
-    Create GraphMetadata node for SEC or other shared repositories.
-    This provides metadata about the graph database itself.
-    """
-    try:
-      import os
-      from datetime import datetime, timezone
-      import json
-
-      # Get database path to determine the database name
-      # This is a bit hacky but works for now
-      db_path = (
-        str(self.engine.database.database_path)
-        if hasattr(self.engine, "database")
-        else ""
-      )
-      db_name = os.path.basename(db_path).replace(".kuzu", "").replace(".db", "")
-
-      # Only create metadata for known shared repositories
-      if db_name not in ["sec", "industry", "economic"]:
-        return
-
-      logger.info(f"Creating GraphMetadata node for {db_name} repository")
-
-      # Check if GraphMetadata already exists
-      try:
-        result = self.engine.execute_query(
-          "MATCH (m:GraphMetadata) RETURN count(m) as count"
-        )
-        if result and len(result) > 0 and result[0].get("count", 0) > 0:
-          logger.info("GraphMetadata already exists, skipping creation")
-          return
-      except Exception:
-        # Table might not exist yet, continue with creation
-        pass
-
-      current_time = datetime.now(timezone.utc).isoformat()
-
-      # Define metadata based on repository type
-      metadata_configs = {
-        "sec": {
-          "name": "SEC EDGAR Repository",
-          "description": "SEC EDGAR financial filings and XBRL data shared repository",
-          "type": "repository",
-          "tags": ["sec", "edgar", "xbrl", "financial", "regulatory"],
-          "tier": "shared",
-          "schema_type": "extensions",
-          "schema_extensions": ["roboledger"],
-          "status": "active",
-          "access_level": "public",
-          "custom_metadata": {
-            "repository_type": "sec",
-            "data_source": "SEC EDGAR",
-            "update_frequency": "continuous",
-            "coverage": "US public companies",
-            "managed_by": "system",
-          },
-        },
-        "industry": {
-          "name": "Industry Data Repository",
-          "description": "Industry benchmarks and metrics shared repository",
-          "type": "repository",
-          "tags": ["industry", "benchmarks", "metrics", "analysis"],
-          "tier": "shared",
-          "schema_type": "extensions",
-          "schema_extensions": ["roboledger"],
-          "status": "active",
-          "access_level": "public",
-          "custom_metadata": {
-            "repository_type": "industry",
-            "data_source": "Aggregated",
-            "managed_by": "system",
-          },
-        },
-        "economic": {
-          "name": "Economic Data Repository",
-          "description": "Economic indicators and macro data shared repository",
-          "type": "repository",
-          "tags": ["economic", "macro", "indicators", "federal"],
-          "tier": "shared",
-          "schema_type": "extensions",
-          "schema_extensions": ["roboledger"],
-          "status": "active",
-          "access_level": "public",
-          "custom_metadata": {
-            "repository_type": "economic",
-            "data_source": "Federal Reserve",
-            "managed_by": "system",
-          },
-        },
-      }
-
-      config = metadata_configs.get(db_name, {})
-      if not config:
-        return
-
-      # Create the metadata node
-      create_query = """
-        CREATE (m:GraphMetadata {
-          identifier: $identifier,
-          graph_id: $graph_id,
-          name: $name,
-          description: $description,
-          type: $type,
-          created_at: $created_at,
-          updated_at: $updated_at,
-          created_by: $created_by,
-          tier: $tier,
-          schema_type: $schema_type,
-          custom_schema_name: $custom_schema_name,
-          custom_schema_version: $custom_schema_version,
-          schema_extensions: $schema_extensions,
-          tags: $tags,
-          custom_metadata: $custom_metadata,
-          status: $status,
-          access_level: $access_level
-        })
-        RETURN m.graph_id as id
-      """
-
-      from ...utils.uuid import generate_deterministic_uuid7
-
-      parameters = {
-        "identifier": generate_deterministic_uuid7(db_name, namespace="graph_metadata"),
-        "graph_id": db_name,
-        "name": config["name"],
-        "description": config["description"],
-        "type": config["type"],
-        "created_at": current_time,
-        "updated_at": current_time,
-        "created_by": "system",
-        "tier": config["tier"],
-        "schema_type": config["schema_type"],
-        "custom_schema_name": None,
-        "custom_schema_version": None,
-        "schema_extensions": json.dumps(config["schema_extensions"]),
-        "tags": json.dumps(config["tags"]),
-        "custom_metadata": json.dumps(config["custom_metadata"]),
-        "status": config["status"],
-        "access_level": config["access_level"],
-      }
-
-      result = self.engine.execute_query(create_query, parameters)
-      logger.info(f"GraphMetadata node created for {db_name} repository")
-
-    except Exception as e:
-      logger.error(f"Failed to create GraphMetadata node: {e}")
-      # Don't fail the entire schema creation if metadata fails
 
   def _create_relationship_table(self, table_name: str, table_info: Any) -> bool:
     """

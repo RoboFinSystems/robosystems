@@ -46,6 +46,7 @@ dependencies = [
     # Graph database
     "kuzu==0.11.3",
     "neo4j>=5.15.0,<6.0",
+    "duckdb>=1.1.0,<2.0",
     # Database and ORM
     "alembic>=1.16.0,<2.0",
     "sqlalchemy>=2.0.0,<3.0",

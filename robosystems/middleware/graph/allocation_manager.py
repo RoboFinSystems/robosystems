@@ -24,7 +24,7 @@ from botocore.exceptions import ClientError
 
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.middleware.graph.types import GraphTypeRegistry, InstanceTier
+from robosystems.middleware.graph.types import GraphTypeRegistry, GraphTier
 from .multitenant_utils import MultiTenantUtils
 from .subgraph_utils import parse_subgraph_id
 from robosystems.config import env
@@ -129,29 +129,46 @@ class KuzuAllocationManager:
     # Tier-based configuration for backend selection and database allocation
     # Note: Backend-specific settings (Kuzu buffer pools, Neo4j JVM heap) are
     # configured in their respective userdata scripts, not here.
-    # Backend type mapping: config uses "neo4j" but we need to differentiate editions
     self.tier_configs = {
-      InstanceTier.STANDARD: {
+      GraphTier.KUZU_STANDARD: {
         "backend": "kuzu",
         "backend_type": "kuzu",
-        "databases_per_instance": self.max_databases_per_instance,
-        # Kuzu-specific settings (only used by Kuzu backend)
+        "databases_per_instance": self.max_databases_per_instance,  # Multi-tenant (10 per instance)
         "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
         "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
       },
-      InstanceTier.ENTERPRISE: {
+      GraphTier.KUZU_LARGE: {
+        "backend": "kuzu",
+        "backend_type": "kuzu",
+        "databases_per_instance": 1,  # Dedicated instance (parent + subgraphs)
+        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,  # Same as standard (r7g.large)
+        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
+      },
+      GraphTier.KUZU_XLARGE: {
+        "backend": "kuzu",
+        "backend_type": "kuzu",
+        "databases_per_instance": 1,  # Large dedicated instance (parent + subgraphs)
+        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,  # r7g.xlarge has more memory
+        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
+      },
+      GraphTier.KUZU_SHARED: {
+        "backend": "kuzu",
+        "backend_type": "kuzu",
+        "databases_per_instance": 1,  # One repository per instance
+        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
+        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
+      },
+      GraphTier.NEO4J_COMMUNITY_LARGE: {
         "backend": "neo4j",
         "backend_type": "neo4j",
         "neo4j_edition": "community",
-        "databases_per_instance": 1,  # Dedicated instance
-        # Neo4j settings configured in neo4j-writer.sh userdata script
+        "databases_per_instance": 1,  # Dedicated instance (no subgraphs - restricted to 1 DB)
       },
-      InstanceTier.PREMIUM: {
+      GraphTier.NEO4J_ENTERPRISE_XLARGE: {
         "backend": "neo4j",
         "backend_type": "neo4j",
         "neo4j_edition": "enterprise",
-        "databases_per_instance": 1,  # Dedicated instance
-        # Neo4j Enterprise settings configured in neo4j-writer.sh userdata script
+        "databases_per_instance": 1,  # Dedicated instance (parent + subgraphs)
       },
     }
     # ASG name will be determined dynamically from instance data
@@ -199,20 +216,20 @@ class KuzuAllocationManager:
 
     logger.info(f"Initialized KuzuAllocationManagerV2 for environment: {environment}")
 
-  def get_tier_config(self, tier: InstanceTier) -> Dict[str, Any]:
+  def get_tier_config(self, tier: GraphTier) -> Dict[str, Any]:
     """
     Get configuration for a specific tier.
 
     Returns memory limits and chunk sizes optimized for each tier.
     """
-    return self.tier_configs.get(tier, self.tier_configs[InstanceTier.STANDARD])
+    return self.tier_configs.get(tier, self.tier_configs[GraphTier.KUZU_STANDARD])
 
   async def allocate_database(
     self,
     entity_id: str,
     graph_id: Optional[str] = None,
     graph_type: Optional[str] = None,
-    instance_tier: Optional[InstanceTier] = None,
+    instance_tier: Optional[GraphTier] = None,
   ) -> DatabaseLocation:
     """
     Allocate a new database for an entity.
@@ -301,7 +318,7 @@ class KuzuAllocationManager:
       identity = GraphTypeRegistry.identify_graph(graph_id, instance_tier)
 
       # Get backend type for this tier
-      tier_config = self.get_tier_config(instance_tier or InstanceTier.STANDARD)
+      tier_config = self.get_tier_config(instance_tier or GraphTier.KUZU_STANDARD)
       backend_type = tier_config.get("backend_type", "kuzu")
 
       # Find instance with capacity for the specified tier (do this first to fail fast)
@@ -309,9 +326,9 @@ class KuzuAllocationManager:
 
       if not instance:
         # No capacity - trigger scale up or provide tier-specific error
-        if instance_tier and instance_tier != InstanceTier.STANDARD:
-          # Enterprise/Premium tiers require manual provisioning
-          tier_name = instance_tier.value.title()
+        if instance_tier and instance_tier != GraphTier.KUZU_STANDARD:
+          # Dedicated tiers require manual provisioning
+          tier_name = instance_tier.value.replace("-", " ").title()
           await self._publish_failure_metric(
             f"no_{instance_tier.value}_capacity", entity_id, None
           )
@@ -327,7 +344,7 @@ class KuzuAllocationManager:
           # Publish allocation failure metric
           await self._publish_failure_metric("no_capacity", entity_id, None)
           raise Exception(
-            "No Standard tier capacity available. Our system is automatically scaling up to meet demand. "
+            "No Kuzu Standard tier capacity available. Our system is automatically scaling up to meet demand. "
             "Please retry in 3-5 minutes. If this persists, contact support."
           )
 
@@ -847,26 +864,33 @@ class KuzuAllocationManager:
 
   async def _find_best_instance(
     self,
-    instance_tier: Optional[InstanceTier] = None,
+    instance_tier: Optional[GraphTier] = None,
     exclude_instance: Optional[str] = None,
   ) -> Optional[InstanceInfo]:
     """Find the instance with most available capacity for the specified tier."""
     try:
       # Default to standard tier if not specified
       target_tier = (
-        instance_tier.value if instance_tier else InstanceTier.STANDARD.value
+        instance_tier.value if instance_tier else GraphTier.KUZU_STANDARD.value
       )
 
       # Validate tier is supported in this environment
       if self.environment in ["prod", "staging"]:
-        supported_tiers = ["standard", "enterprise", "premium"]
+        supported_tiers = [
+          "kuzu-standard",
+          "kuzu-large",
+          "kuzu-xlarge",
+          "kuzu-shared",
+          "neo4j-community-large",
+          "neo4j-enterprise-xlarge",
+        ]
         if target_tier not in supported_tiers:
           logger.error(
             f"Invalid tier {target_tier}. Supported tiers: {supported_tiers}"
           )
           return None
 
-        # Check if the tier's ASG exists (especially for enterprise/premium in prod)
+        # Check if the tier's ASG exists (especially for optional tiers in prod)
         stack_name = self._get_stack_name_for_tier(target_tier)
         if not stack_name:
           logger.warning(
@@ -934,11 +958,11 @@ class KuzuAllocationManager:
       logger.error(f"Error finding best instance: {e}")
       return None
 
-  async def _trigger_scale_up(self, instance_tier: Optional[InstanceTier] = None):
+  async def _trigger_scale_up(self, instance_tier: Optional[GraphTier] = None):
     """Trigger auto scaling group to add an instance for the specified tier."""
     try:
       # Determine ASG name based on tier
-      target_tier = instance_tier.value if instance_tier else "standard"
+      target_tier = instance_tier.value if instance_tier else "kuzu-standard"
 
       # Rate limiting: Check if we've recently triggered scale-up for this tier
       now = datetime.now(timezone.utc)
@@ -999,15 +1023,21 @@ class KuzuAllocationManager:
     """Get the CloudFormation stack name for a given tier and environment."""
     if self.environment == "prod":
       tier_map = {
-        "standard": "RoboSystemsGraphWritersStandardProd",
-        "enterprise": "RoboSystemsGraphWritersEnterpriseProd",
-        "premium": "RoboSystemsGraphWritersPremiumProd",
+        "kuzu-standard": "RoboSystemsGraphWritersKuzuStandardProd",
+        "kuzu-large": "RoboSystemsGraphWritersKuzuLargeProd",
+        "kuzu-xlarge": "RoboSystemsGraphWritersKuzuXlargeProd",
+        "kuzu-shared": "RoboSystemsGraphWritersKuzuSharedProd",
+        "neo4j-community-large": "RoboSystemsGraphWritersNeo4jCommunityLargeProd",
+        "neo4j-enterprise-xlarge": "RoboSystemsGraphWritersNeo4jEnterpriseXlargeProd",
       }
     elif self.environment == "staging":
       tier_map = {
-        "standard": "RoboSystemsGraphWritersStandardStaging",
-        "enterprise": "RoboSystemsGraphWritersEnterpriseStaging",
-        "premium": "RoboSystemsGraphWritersPremiumStaging",
+        "kuzu-standard": "RoboSystemsGraphWritersKuzuStandardStaging",
+        "kuzu-large": "RoboSystemsGraphWritersKuzuLargeStaging",
+        "kuzu-xlarge": "RoboSystemsGraphWritersKuzuXlargeStaging",
+        "kuzu-shared": "RoboSystemsGraphWritersKuzuSharedStaging",
+        "neo4j-community-large": "RoboSystemsGraphWritersNeo4jCommunityLargeStaging",
+        "neo4j-enterprise-xlarge": "RoboSystemsGraphWritersNeo4jEnterpriseXlargeStaging",
       }
     else:
       # Development or other environments
@@ -1033,7 +1063,7 @@ class KuzuAllocationManager:
         return f"{stack_name}-writers-asg"
 
       # Fallback: construct from tier and environment
-      cluster_tier = item.get("cluster_tier", "standard")
+      cluster_tier = item.get("cluster_tier", "kuzu-standard")
       stack_name = self._get_stack_name_for_tier(cluster_tier)
       if stack_name:
         return f"{stack_name}-writers-asg"

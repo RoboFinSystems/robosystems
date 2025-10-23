@@ -589,7 +589,7 @@ class TestGraphOperationFeatureFlags:
         ):
           # Mock parent graph
           mock_parent_graph = MagicMock()
-          mock_parent_graph.graph_tier = "enterprise"
+          mock_parent_graph.graph_tier = "kuzu-large"
           mock_verify_access.return_value = mock_parent_graph
 
           # Mock subgraph service

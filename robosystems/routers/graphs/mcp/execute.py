@@ -249,7 +249,7 @@ async def call_mcp_tool(
         raise HTTPException(
           status_code=http_status.HTTP_400_BAD_REQUEST,
           detail="Bulk operations (COPY, LOAD, IMPORT) are not allowed through the MCP endpoint. "
-          "Please use the /v1/graphs/{graph_id}/copy endpoint for bulk data ingestion.",
+          "Please use file upload (/v1/graphs/{graph_id}/tables/files/upload) to ingest data via DuckDB staging.",
         )
 
       # Check for admin operations

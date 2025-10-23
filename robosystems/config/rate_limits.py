@@ -49,6 +49,11 @@ class EndpointCategory(str, Enum):
   GRAPH_QUERY = "graph_query"  # Direct Cypher queries
   GRAPH_IMPORT = "graph_import"  # Bulk data imports
 
+  # Table operations (DuckDB staging tables)
+  TABLE_QUERY = "table_query"  # SQL queries on staging tables
+  TABLE_UPLOAD = "table_upload"  # File uploads to staging tables
+  TABLE_MANAGEMENT = "table_management"  # Table creation/deletion
+
 
 class RateLimitConfig:
   """Centralized rate limiting configuration."""
@@ -101,8 +106,13 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_AGENT: (5, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_QUERY: (50, RateLimitPeriod.MINUTE),
       EndpointCategory.GRAPH_IMPORT: (2, RateLimitPeriod.MINUTE),
+      # Table operations - free tier
+      EndpointCategory.TABLE_QUERY: (30, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_UPLOAD: (10, RateLimitPeriod.MINUTE),
+      EndpointCategory.TABLE_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
     },
-    "standard": {
+    # Technical tier names (primary)
+    "kuzu-standard": {
       # Non-graph endpoints - generous burst limits
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (600, RateLimitPeriod.MINUTE),
@@ -125,8 +135,15 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_AGENT: (50, RateLimitPeriod.MINUTE),  # 3k/hour possible
       EndpointCategory.GRAPH_QUERY: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
       EndpointCategory.GRAPH_IMPORT: (50, RateLimitPeriod.MINUTE),  # 3k/hour possible
+      # Table operations - standard tier (generous burst limits)
+      EndpointCategory.TABLE_QUERY: (60, RateLimitPeriod.MINUTE),  # 3.6k/hour possible
+      EndpointCategory.TABLE_UPLOAD: (20, RateLimitPeriod.MINUTE),  # 1.2k/hour possible
+      EndpointCategory.TABLE_MANAGEMENT: (
+        30,
+        RateLimitPeriod.MINUTE,
+      ),  # 1.8k/hour possible
     },
-    "enterprise": {
+    "kuzu-large": {
       # Non-graph endpoints - very high burst limits
       EndpointCategory.AUTH: (50, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (1000, RateLimitPeriod.MINUTE),
@@ -135,7 +152,7 @@ class RateLimitConfig:
       EndpointCategory.SSE: (
         30,
         RateLimitPeriod.MINUTE,
-      ),  # More SSE connections for enterprise
+      ),  # More SSE connections for large tier
       # Graph-scoped endpoints - VERY HIGH BURST LIMITS
       EndpointCategory.GRAPH_READ: (2000, RateLimitPeriod.MINUTE),  # 120k/hour possible
       EndpointCategory.GRAPH_WRITE: (500, RateLimitPeriod.MINUTE),  # 30k/hour possible
@@ -149,8 +166,15 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_AGENT: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
       EndpointCategory.GRAPH_QUERY: (1000, RateLimitPeriod.MINUTE),  # 60k/hour possible
       EndpointCategory.GRAPH_IMPORT: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
+      # Table operations - large tier (very high burst limits)
+      EndpointCategory.TABLE_QUERY: (300, RateLimitPeriod.MINUTE),  # 18k/hour possible
+      EndpointCategory.TABLE_UPLOAD: (100, RateLimitPeriod.MINUTE),  # 6k/hour possible
+      EndpointCategory.TABLE_MANAGEMENT: (
+        150,
+        RateLimitPeriod.MINUTE,
+      ),  # 9k/hour possible
     },
-    "premium": {
+    "kuzu-xlarge": {
       # Premium gets extreme burst limits - essentially unlimited
       # Only safety limits to prevent complete system abuse
       EndpointCategory.AUTH: (100, RateLimitPeriod.MINUTE),
@@ -189,8 +213,26 @@ class RateLimitConfig:
         1000,
         RateLimitPeriod.MINUTE,
       ),  # 60k/hour possible
+      # Table operations - xlarge tier (extreme burst limits)
+      EndpointCategory.TABLE_QUERY: (
+        1000,
+        RateLimitPeriod.MINUTE,
+      ),  # 60k/hour possible
+      EndpointCategory.TABLE_UPLOAD: (
+        500,
+        RateLimitPeriod.MINUTE,
+      ),  # 30k/hour possible
+      EndpointCategory.TABLE_MANAGEMENT: (
+        500,
+        RateLimitPeriod.MINUTE,
+      ),  # 30k/hour possible
     },
   }
+
+  # Add legacy tier name mappings directly in the class after definition
+  SUBSCRIPTION_RATE_LIMITS["standard"] = SUBSCRIPTION_RATE_LIMITS["kuzu-standard"]
+  SUBSCRIPTION_RATE_LIMITS["enterprise"] = SUBSCRIPTION_RATE_LIMITS["kuzu-large"]
+  SUBSCRIPTION_RATE_LIMITS["premium"] = SUBSCRIPTION_RATE_LIMITS["kuzu-xlarge"]
 
   @classmethod
   def get_rate_limit(
@@ -277,12 +319,27 @@ class RateLimitConfig:
     # Check if it's a graph-scoped endpoint
     path_parts = path.strip("/").split("/")
 
-    # Graph-scoped endpoints (format: /{graph_id}/...)
-    if len(path_parts) >= 2:
-      endpoint_type = path_parts[1]
+    # Graph-scoped endpoints (format: /graphs/{graph_id}/...)
+    if len(path_parts) >= 2 and path_parts[0] == "graphs":
+      # For graph-scoped endpoints, endpoint_type is the part after graph_id
+      # path_parts: ['graphs', '{graph_id}', 'endpoint_type', ...]
+      endpoint_type = path_parts[2] if len(path_parts) >= 3 else None
+
+      # Table operations (DuckDB staging tables) - check first for specificity
+      if endpoint_type == "tables" or "/tables/" in path:
+        if "query" in path:
+          return EndpointCategory.TABLE_QUERY
+        elif "ingest" in path:
+          return EndpointCategory.GRAPH_IMPORT  # Table ingestion is bulk import
+        elif "/files" in path and method in ["POST", "PUT"]:
+          return EndpointCategory.TABLE_UPLOAD
+        elif method in ["POST", "PUT", "DELETE", "PATCH"]:
+          return EndpointCategory.TABLE_MANAGEMENT
+        else:
+          return EndpointCategory.GRAPH_READ  # Table listing/info
 
       # MCP and Agent endpoints
-      if endpoint_type == "mcp":
+      elif endpoint_type == "mcp":
         return EndpointCategory.GRAPH_MCP
       elif endpoint_type == "agent":
         return EndpointCategory.GRAPH_AGENT

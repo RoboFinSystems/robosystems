@@ -17,20 +17,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv
 
-# Copy the Kuzu httpfs extension from local archive with architecture support
+# Copy Kuzu extensions from local archive with architecture support
 # Extensions are bundled locally to eliminate network dependencies during build
 ARG TARGETARCH=arm64
-RUN mkdir -p /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs
+RUN mkdir -p /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs \
+             /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb
+
+# Copy httpfs extension
 COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension \
     /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension
 
-# Verify extension integrity with checksum
+# Copy duckdb extension (required for DuckDB → Kuzu direct ingestion)
+COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/duckdb/libduckdb.kuzu_extension \
+    /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb/libduckdb.kuzu_extension
+
+# Verify extension integrity with checksums
 RUN if [ "${TARGETARCH}" = "arm64" ]; then \
         echo "ea1b8f35234e57e961e1e0ca540769fc0192ff2e360b825a7e7b0e532f0f696e  /kuzu-extension/0.11.3/linux_arm64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
         (echo "ERROR: ARM64 httpfs extension checksum verification failed!" && exit 1); \
+        echo "268150b3c5691febfe2f7ddd5a92270b9946a7053eec29613d385f60c7ee8e56  /kuzu-extension/0.11.3/linux_arm64/duckdb/libduckdb.kuzu_extension" | sha256sum -c - || \
+        (echo "ERROR: ARM64 duckdb extension checksum verification failed!" && exit 1); \
     elif [ "${TARGETARCH}" = "amd64" ]; then \
         echo "f7ba3e34b801d8d023a5247f797b99f99fa6c4be104f6c9bbf4ae15d4c97d1da  /kuzu-extension/0.11.3/linux_amd64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
         (echo "ERROR: AMD64 httpfs extension checksum verification failed!" && exit 1); \
+        echo "f3c118567f1806298ceb05f24c6f3fcd40b3f5b5ef76f2286658c1804b779523  /kuzu-extension/0.11.3/linux_amd64/duckdb/libduckdb.kuzu_extension" | sha256sum -c - || \
+        (echo "ERROR: AMD64 duckdb extension checksum verification failed!" && exit 1); \
     fi
 
 WORKDIR /build
@@ -127,12 +138,14 @@ RUN mkdir -p /home/appuser/.kuzu/extension && chown -R appuser:appuser /home/app
 # Give appuser write access to /app for log files
 RUN chown -R appuser:appuser /app
 
-# Copy pre-downloaded Kuzu httpfs extension to user home directory
+# Copy pre-downloaded Kuzu extensions to user home directory
 # Kuzu expects extensions at ~/.kuzu/extension/<extension_name>/ without version/arch subdirs
 COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs /home/appuser/.kuzu/extension/httpfs
+COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb /home/appuser/.kuzu/extension/duckdb
 
 # Also copy to data location for consistency (optional, but keeps structure clean)
 COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs /app/data/.kuzu/extension/httpfs
+COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb /app/data/.kuzu/extension/duckdb
 
 # Switch to non-root user
 USER appuser

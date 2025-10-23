@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 from enum import Enum
 from dataclasses import dataclass, field
 
-from .types import InstanceTier
+from .types import GraphTier
 from robosystems.logger import logger
 from robosystems.config import env
 
@@ -51,7 +51,7 @@ class NodeConfig:
   node_type: NodeType  # Type of node (writer/reader)
   api_base_url: str  # REST API endpoint for this node
   region: str  # AWS region
-  tier: InstanceTier  # Service tier
+  tier: GraphTier  # Service tier
   max_databases: int = 200  # Max databases this node can handle
   current_databases: int = 0  # Current database count
   repository_type: RepositoryType = RepositoryType.ENTITY
@@ -87,7 +87,7 @@ class ClusterConfig:
   reader_nodes: List[NodeConfig] = field(default_factory=list)  # Reader nodes
   alb_endpoint: Optional[str] = None  # ALB endpoint for readers
   region: str = "us-east-1"  # AWS region
-  tier: InstanceTier = InstanceTier.STANDARD
+  tier: GraphTier = GraphTier.KUZU_STANDARD
 
   @property
   def max_databases(self) -> int:
@@ -149,12 +149,12 @@ def load_cluster_configs_from_environment() -> Dict[str, ClusterConfig]:
       node_type=NodeType.WRITER,
       api_base_url=writer_url,
       region="us-east-1",
-      tier=InstanceTier.STANDARD,
+      tier=GraphTier.KUZU_STANDARD,
       max_databases=200,
       repository_type=RepositoryType.ENTITY,
     ),
     region="us-east-1",
-    tier=InstanceTier.STANDARD,
+    tier=GraphTier.KUZU_STANDARD,
   )
 
   # Shared repositories now use the same infrastructure as entity graphs
@@ -184,7 +184,7 @@ def load_cluster_configs() -> Dict[str, ClusterConfig]:
 
 
 def get_cluster_for_entity_graphs(
-  tier: InstanceTier, region: str = "us-east-1"
+  tier: GraphTier, region: str = "us-east-1"
 ) -> ClusterConfig:
   """
   Get the best available Kuzu cluster for entity graph creation.
@@ -263,7 +263,7 @@ def get_cluster_for_shared_repository(
   logger.info(
     f"Routing shared repository '{repository_name}' to standard tier entity clusters"
   )
-  return get_cluster_for_entity_graphs(InstanceTier.STANDARD, region)
+  return get_cluster_for_entity_graphs(GraphTier.KUZU_STANDARD, region)
 
 
 def get_cluster_by_id(cluster_id: str) -> ClusterConfig:

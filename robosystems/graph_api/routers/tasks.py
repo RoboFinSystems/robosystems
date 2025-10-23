@@ -11,7 +11,7 @@ from fastapi import status as http_status
 from sse_starlette.sse import EventSourceResponse
 
 from robosystems.graph_api.core.task_sse import generate_task_sse_events, TaskType
-from robosystems.graph_api.routers.databases.ingest import (
+from robosystems.graph_api.routers.databases.copy import (
   task_manager as ingestion_task_manager,
 )
 from robosystems.graph_api.core.task_manager import (

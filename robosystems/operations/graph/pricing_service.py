@@ -44,8 +44,8 @@ class GraphPricingService:
     if subscription and subscription.plan_name:
       return BillingConfig.get_subscription_plan(subscription.plan_name)
 
-    # Default to standard plan if no subscription
-    return BillingConfig.get_subscription_plan("standard")
+    # Default to kuzu-standard plan if no subscription
+    return BillingConfig.get_subscription_plan("kuzu-standard")
 
   def calculate_graph_monthly_bill(
     self,

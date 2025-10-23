@@ -68,7 +68,7 @@ class TestCreditService:
     credits.billing_admin_id = "user123"
     credits.current_balance = Decimal("1000.0")
     credits.monthly_allocation = Decimal("1000.0")
-    credits.graph_tier = GraphTier.STANDARD.value
+    credits.graph_tier = GraphTier.KUZU_STANDARD.value
     credits.credit_multiplier = Decimal("1.0")
     credits.is_active = True
     credits.last_allocation_date = datetime.now(timezone.utc)
@@ -89,8 +89,8 @@ class TestCreditService:
         graph_id="graph123",
         user_id="user123",
         billing_admin_id="user123",
-        subscription_tier="standard",
-        graph_tier=GraphTier.STANDARD,
+        subscription_tier="kuzu-standard",
+        graph_tier=GraphTier.KUZU_STANDARD,
       )
 
       # Verify the result
@@ -112,7 +112,7 @@ class TestCreditService:
         user_id="user123",
         billing_admin_id="user123",
         subscription_tier="invalid",
-        graph_tier=GraphTier.STANDARD,
+        graph_tier=GraphTier.KUZU_STANDARD,
       )
 
   def test_consume_ai_credits_success(
@@ -228,7 +228,7 @@ class TestCreditService:
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.current_balance = Decimal("5.0")
     mock_credits.credit_multiplier = Decimal("1.0")
-    mock_credits.graph_tier = GraphTier.STANDARD
+    mock_credits.graph_tier = GraphTier.KUZU_STANDARD
 
     # Mock cache import
     with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
@@ -386,7 +386,7 @@ class TestCreditService:
     # Attempt to upgrade tier
     result = credit_service.upgrade_graph_tier(
       graph_id="graph123",
-      new_tier=GraphTier.ENTERPRISE,
+      new_tier=GraphTier.KUZU_LARGE,
       user_subscription_tier="enterprise",
     )
 
@@ -402,7 +402,7 @@ class TestCreditService:
     mock_credits.credit_multiplier = Decimal("0.8")  # 20% discount
     mock_credits.graph_id = "graph123"
     mock_credits.is_active = True
-    mock_credits.graph_tier = "standard"
+    mock_credits.graph_tier = "kuzu-standard"
     mock_credits.consume_credits_atomic = Mock(
       return_value={
         "success": True,
@@ -455,7 +455,7 @@ class TestCreditService:
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.current_balance = Decimal("750.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
-    mock_credits.graph_tier = GraphTier.ENTERPRISE.value
+    mock_credits.graph_tier = GraphTier.KUZU_LARGE.value
     mock_credits.credit_multiplier = Decimal("0.9")
     mock_credits.last_allocation_date = datetime.now(timezone.utc)
     mock_credits.get_usage_summary = Mock(

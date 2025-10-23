@@ -23,9 +23,9 @@ from .graphs import (
   info_router,
   limits_router,
   subgraphs_router,
+  tables_router,
 )  # Removed allocation_router - too dangerous for public API
 from .graphs.mcp import router as mcp_router
-from .graphs.copy import router as copy_router
 from .offering import offering_router
 from .operations import router as operations_router
 
@@ -46,7 +46,9 @@ router.include_router(health_router)  # No prefix - handles /health internally
 router.include_router(info_router)  # No prefix - handles /info internally
 router.include_router(limits_router)  # No prefix - handles /limits internally
 router.include_router(subgraphs_router, prefix="/subgraphs")
-router.include_router(copy_router)  # No prefix - handled in the copy module itself
+router.include_router(
+  tables_router
+)  # No prefix - handles all /tables and /files paths internally
 
 # Non-graph-scoped routes that don't require a graph_id
 user_router_v1 = APIRouter(prefix="/v1", tags=[])

@@ -59,6 +59,19 @@ class CypherSecurityAnalyzer:
     "USE",
   }
 
+  # Schema DDL operations that modify graph structure
+  SCHEMA_DDL_KEYWORDS = {
+    "CREATE NODE TABLE",
+    "CREATE REL TABLE",
+    "DROP NODE TABLE",
+    "DROP REL TABLE",
+    "ALTER TABLE",
+    "ADD COLUMN",
+    "DROP COLUMN",
+    "RENAME TABLE",
+    "RENAME COLUMN",
+  }
+
   # System procedure calls that may need restrictions
   SYSTEM_PROCEDURES = {
     "show_warnings",
@@ -176,6 +189,24 @@ class CypherSecurityAnalyzer:
       logger.warning(f"Query analysis failed, defaulting to write operation: {e}")
       # Default to treating as write operation for security
       return True
+
+  def is_schema_ddl(self, query: str) -> bool:
+    """
+    Check if a query contains schema DDL operations that modify graph structure.
+
+    Args:
+        query: The Cypher query to check
+
+    Returns:
+        True if the query contains schema DDL operations, False otherwise
+    """
+    try:
+      cleaned_query = self._clean_query(query)
+      schema_ops = self._find_schema_ddl(cleaned_query)
+      return len(schema_ops) > 0
+    except Exception as e:
+      logger.warning(f"Schema DDL analysis failed: {e}")
+      return False
 
   def is_bulk_operation(self, query: str) -> bool:
     """
@@ -417,6 +448,40 @@ class CypherSecurityAnalyzer:
 
     return found_calls
 
+  def _find_schema_ddl(self, query: str) -> Set[str]:
+    """
+    Find schema DDL keywords in the cleaned query.
+
+    Args:
+        query: The cleaned query to analyze
+
+    Returns:
+        Set of schema DDL operation patterns found
+    """
+    found_operations = set()
+
+    # Check for CREATE NODE/REL TABLE
+    if re.search(r"\bCREATE\s+(NODE|REL)\s+TABLE\b", query, re.IGNORECASE):
+      found_operations.add("CREATE_TABLE")
+
+    # Check for DROP NODE/REL TABLE
+    if re.search(r"\bDROP\s+(NODE|REL)\s+TABLE\b", query, re.IGNORECASE):
+      found_operations.add("DROP_TABLE")
+
+    # Check for ALTER TABLE
+    if re.search(r"\bALTER\s+TABLE\b", query, re.IGNORECASE):
+      found_operations.add("ALTER_TABLE")
+
+    # Check for ADD/DROP/RENAME COLUMN
+    if re.search(r"\b(ADD|DROP|RENAME)\s+COLUMN\b", query, re.IGNORECASE):
+      found_operations.add("MODIFY_COLUMN")
+
+    # Check for RENAME TABLE
+    if re.search(r"\bRENAME\s+TABLE\b", query, re.IGNORECASE):
+      found_operations.add("RENAME_TABLE")
+
+    return found_operations
+
   def _validate_keyword_context(self, query: str, keyword: str, position: int) -> bool:
     """
     Validate that a keyword is in a valid context and not part of an identifier.
@@ -551,6 +616,22 @@ def has_system_calls(query: str) -> bool:
       True if the query contains system calls, False otherwise
   """
   return cypher_analyzer.has_system_calls(query)
+
+
+def is_schema_ddl(query: str) -> bool:
+  """
+  Determine if a Cypher query contains schema DDL operations.
+
+  These operations modify the graph structure (CREATE/DROP/ALTER TABLE, etc.)
+  and are restricted to ensure schema immutability after graph creation.
+
+  Args:
+      query: The Cypher query to analyze
+
+  Returns:
+      True if the query contains schema DDL operations, False otherwise
+  """
+  return cypher_analyzer.is_schema_ddl(query)
 
 
 def analyze_cypher_query(query: str) -> dict:

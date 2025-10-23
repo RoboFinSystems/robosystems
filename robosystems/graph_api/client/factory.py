@@ -28,7 +28,8 @@ from robosystems.config import env
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.logger import logger
 from robosystems.middleware.graph.allocation_manager import KuzuAllocationManager
-from robosystems.middleware.graph.types import InstanceTier, GraphTypeRegistry
+from robosystems.models.iam.graph_credits import GraphTier
+from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
 
 
@@ -286,7 +287,7 @@ class GraphClientFactory:
     graph_id: str,
     operation_type: str = "read",
     environment: str | None = None,
-    tier: InstanceTier | None = None,
+    tier: GraphTier | None = None,
   ) -> GraphClient:
     """
     Create a graph database client with intelligent routing.
@@ -759,7 +760,7 @@ class GraphClientFactory:
 
   @classmethod
   async def _create_user_graph_client(
-    cls, graph_id: str, environment: str | None, tier: InstanceTier | None
+    cls, graph_id: str, environment: str | None, tier: GraphTier | None
   ) -> GraphClient:
     """
     Create client for user graph with tier-based routing.
@@ -887,7 +888,7 @@ class GraphClientFactory:
     graph_id: str,
     operation_type: str = "read",
     environment: str | None = None,
-    tier: InstanceTier | None = None,
+    tier: GraphTier | None = None,
   ) -> GraphClient:
     """
     Synchronous wrapper for create_client.
@@ -1019,7 +1020,7 @@ async def get_graph_client(
   graph_id: str,
   operation_type: str = "read",
   environment: str | None = None,
-  tier: InstanceTier | None = None,
+  tier: GraphTier | None = None,
 ) -> GraphClient:
   """
   Convenience function to get a properly routed graph database client.
@@ -1049,7 +1050,7 @@ def get_graph_client_sync(
   graph_id: str,
   operation_type: str = "read",
   environment: str | None = None,
-  tier: InstanceTier | None = None,
+  tier: GraphTier | None = None,
 ) -> GraphClient:
   """
   Convenience function to get a properly routed graph database client (sync version).

@@ -18,6 +18,7 @@ from .health import router as health_router
 from .info import router as info_router
 from .limits import router as limits_router
 from .subgraphs import router as subgraphs_router
+from .tables import router as tables_router
 
 __all__ = [
   "main_router",
@@ -32,4 +33,5 @@ __all__ = [
   "info_router",
   "limits_router",
   "subgraphs_router",
+  "tables_router",
 ]

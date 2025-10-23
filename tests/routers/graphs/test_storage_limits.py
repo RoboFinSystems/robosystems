@@ -302,7 +302,7 @@ class TestStorageUsageAPI:
     data = response.json()
 
     assert data["graph_id"] == sample_graph_credits.graph_id
-    assert data["graph_tier"] == "standard"
+    assert data["graph_tier"] == "kuzu-standard"
     assert data["storage_multiplier"] == 1.0
     assert data["base_storage_cost_per_gb"] == 10.0
     assert len(data["recent_usage"]) >= 4  # May have 4-5 records due to date filtering
@@ -377,7 +377,7 @@ def sample_graph_credits(db_session, test_user):
     graph_name="Test Graph",
     graph_type="generic",
     session=db_session,
-    graph_tier=GraphTier.STANDARD,
+    graph_tier=GraphTier.KUZU_STANDARD,
   )
 
   # Create UserGraph to give the test user access

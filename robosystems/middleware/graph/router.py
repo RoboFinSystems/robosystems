@@ -21,7 +21,7 @@ import asyncio
 
 from robosystems.config import env
 from .engine import Repository
-from .types import InstanceTier
+from .types import GraphTier
 from .clusters import ClusterConfig, load_cluster_configs
 from robosystems.logger import logger
 from robosystems.graph_api.client import GraphClient
@@ -51,7 +51,7 @@ class GraphRouter:
     self,
     graph_id: str,
     operation_type: str = "write",
-    tier: InstanceTier = InstanceTier.STANDARD,
+    tier: GraphTier = GraphTier.KUZU_STANDARD,
   ) -> Union[Repository, Any]:
     """
     Get a repository for the specified graph.
@@ -174,7 +174,7 @@ def get_graph_router() -> GraphRouter:
 async def get_graph_repository(
   graph_id: str,
   operation_type: str = "write",
-  tier: InstanceTier = InstanceTier.STANDARD,
+  tier: GraphTier = GraphTier.KUZU_STANDARD,
 ) -> Union[Repository, Any]:
   """
   Get a graph repository for the specified database.
@@ -196,7 +196,7 @@ async def get_graph_repository(
 async def get_universal_repository(
   graph_id: str,
   operation_type: str = "write",
-  tier: InstanceTier = InstanceTier.STANDARD,
+  tier: GraphTier = GraphTier.KUZU_STANDARD,
 ):
   """
   Get a universal repository wrapper for the specified database.

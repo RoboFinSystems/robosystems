@@ -292,7 +292,7 @@ def sample_graph(test_db):
     session=test_db,
     base_schema="base",
     schema_extensions=["roboledger"],
-    graph_tier=GraphTier.STANDARD,
+    graph_tier=GraphTier.KUZU_STANDARD,
     graph_instance_id="test-instance",
     graph_metadata={
       "purpose": "testing",

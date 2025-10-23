@@ -99,12 +99,13 @@ def verify_subgraph_tier_support(parent_graph: Graph):
       HTTPException: If tier doesn't support subgraphs
   """
   if parent_graph.graph_tier not in [
-    GraphTier.ENTERPRISE.value,
-    GraphTier.PREMIUM.value,
+    GraphTier.KUZU_LARGE.value,
+    GraphTier.KUZU_XLARGE.value,
+    GraphTier.NEO4J_ENTERPRISE_XLARGE.value,
   ]:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail=f"Subgraphs are only available for Enterprise and Premium tiers. "
+      detail=f"Subgraphs are only available for Kuzu Large, Kuzu XLarge, and Neo4j Enterprise XLarge tiers. "
       f"Current tier: {parent_graph.graph_tier}",
     )
 

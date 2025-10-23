@@ -218,6 +218,50 @@ class TierConfig:
     return tier_config.get("rate_limit_multiplier", 1.0)
 
   @classmethod
+  def get_copy_operation_limits(
+    cls, tier: str, environment: Optional[str] = None
+  ) -> Dict[str, Any]:
+    """Get copy operation limits for a tier.
+
+    Args:
+        tier: The tier name (standard, enterprise, premium)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        Copy operation limits dictionary
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    default_limits = {
+      "max_file_size_gb": 1.0,
+      "timeout_seconds": 300,
+      "concurrent_operations": 1,
+      "max_files_per_operation": 100,
+      "daily_copy_operations": 10,
+    }
+    return tier_config.get("copy_operations", default_limits)
+
+  @classmethod
+  def get_backup_limits(
+    cls, tier: str, environment: Optional[str] = None
+  ) -> Dict[str, Any]:
+    """Get backup limits for a tier.
+
+    Args:
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        Backup limits dictionary
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    default_limits = {
+      "max_backup_size_gb": 10,
+      "backup_retention_days": 7,
+      "max_backups_per_day": 2,
+    }
+    return tier_config.get("backup_limits", default_limits)
+
+  @classmethod
   def clear_cache(cls) -> None:
     """Clear the configuration cache (useful for testing)."""
     cls._config_cache = None
@@ -281,3 +325,35 @@ def get_tier_rate_limit_multiplier(
       Rate limit multiplier (1.0 = base limits)
   """
   return TierConfig.get_rate_limit_multiplier(tier, environment)
+
+
+@lru_cache(maxsize=32)
+def get_tier_copy_operation_limits(
+  tier: str, environment: Optional[str] = None
+) -> Dict[str, Any]:
+  """Cached function to get copy operation limits for a tier.
+
+  Args:
+      tier: The tier name (standard, enterprise, premium)
+      environment: Environment (defaults to current env)
+
+  Returns:
+      Copy operation limits dictionary
+  """
+  return TierConfig.get_copy_operation_limits(tier, environment)
+
+
+@lru_cache(maxsize=32)
+def get_tier_backup_limits(
+  tier: str, environment: Optional[str] = None
+) -> Dict[str, Any]:
+  """Cached function to get backup limits for a tier.
+
+  Args:
+      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
+      environment: Environment (defaults to current env)
+
+  Returns:
+      Backup limits dictionary
+  """
+  return TierConfig.get_backup_limits(tier, environment)

@@ -129,7 +129,7 @@ async def test_cypher_query_with_parameters(
 @pytest.mark.asyncio
 @patch("robosystems.routers.graphs.query.execute.get_query_queue")
 @patch("robosystems.routers.graphs.query.execute.get_universal_repository_with_auth")
-async def test_cypher_query_write_operations_allowed(
+async def test_cypher_query_write_operations_blocked(
   mock_get_repo,
   mock_get_queue,
   async_client: AsyncClient,
@@ -137,23 +137,10 @@ async def test_cypher_query_write_operations_allowed(
   test_graph_with_credits: dict,
   db_session: Session,
 ):
-  """Test that write operations are now allowed."""
+  """Test that write operations are blocked at query endpoint (use staging pipeline instead)."""
   test_user_graph = test_graph_with_credits["user_graph"]
   token = create_jwt_token(test_user.id)
   headers = {"Authorization": f"Bearer {token}"}
-
-  # Configure mock repository to return success for write operations
-  mock_repo = AsyncMock()
-  mock_repo.execute_query = AsyncMock(return_value=[])
-  mock_get_repo.return_value = mock_repo
-
-  # Configure mock queue manager
-  mock_queue_manager = Mock()
-  mock_queue_manager.get_stats.return_value = {"queue_size": 0, "running_queries": 1}
-  mock_queue_manager.submit_query = AsyncMock(
-    side_effect=lambda **kwargs: f"q_{kwargs['cypher'][:10].replace(' ', '_')}"
-  )
-  mock_get_queue.return_value = mock_queue_manager
 
   # Try various write operations
   write_queries = [
@@ -171,18 +158,14 @@ async def test_cypher_query_write_operations_allowed(
       f"/v1/graphs/{test_user_graph.graph_id}/query", json=request_data, headers=headers
     )
 
-    # Write operations are allowed and should return either 200 (immediate) or 202 (queued)
-    assert response.status_code in [200, 202], f"Query failed: {response.text}"
+    # Write operations are blocked and should return 403
+    assert response.status_code == 403, f"Expected 403 for write query: {query}"
 
     data = response.json()
-    if response.status_code == 200:
-      # Direct execution
-      assert data["success"] is True
-      assert "data" in data
-    else:
-      # Queued execution
-      assert data["status"] == "queued"
-      assert "query_id" in data
+    assert "not allowed" in data["detail"].lower()
+    assert (
+      "staging pipeline" in data["detail"].lower() or "tables" in data["detail"].lower()
+    )
 
 
 @pytest.mark.asyncio

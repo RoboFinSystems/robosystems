@@ -11,7 +11,7 @@ from robosystems.graph_api.client.factory import (
   get_graph_client_for_instance,
   get_graph_client_for_sec_ingestion,
 )
-from robosystems.middleware.graph.types import InstanceTier
+from robosystems.middleware.graph.types import GraphTier
 
 
 class TestCircuitBreaker:
@@ -133,7 +133,7 @@ class TestGraphClientFactory:
       mock_location = MagicMock()
       mock_location.graph_id = "kg123456"
       mock_location.database_name = "kg123456"
-      mock_location.tier = InstanceTier.STANDARD
+      mock_location.tier = GraphTier.KUZU_STANDARD
       mock_location.instance_id = "i-abc123"
       mock_location.endpoint = "http://instance.example.com"
       mock_manager.find_database_location.return_value = mock_location
@@ -191,7 +191,7 @@ class TestGraphClientFactory:
       mock_location = MagicMock()
       mock_location.graph_id = "kg123456"
       mock_location.database_name = "kg123456"
-      mock_location.tier = InstanceTier.ENTERPRISE
+      mock_location.tier = GraphTier.KUZU_XLARGE
       mock_location.instance_id = "i-xyz789"
       mock_location.endpoint = "http://parent.example.com"
       mock_manager.find_database_location.return_value = mock_location
@@ -274,7 +274,7 @@ class TestGraphClientFactory:
       mock_location = MagicMock()
       mock_location.graph_id = "kg123456"
       mock_location.database_name = "kg123456"
-      mock_location.tier = InstanceTier.PREMIUM
+      mock_location.tier = GraphTier.KUZU_XLARGE
       mock_location.instance_id = "i-premium"
       mock_location.endpoint = "http://premium.example.com"
       mock_manager.find_database_location.return_value = mock_location
@@ -289,7 +289,7 @@ class TestGraphClientFactory:
         MockClient.return_value = mock_client
 
         client = await GraphClientFactory.create_client(
-          "kg123456", tier=InstanceTier.PREMIUM
+          "kg123456", tier=GraphTier.KUZU_XLARGE
         )
 
         assert client is not None

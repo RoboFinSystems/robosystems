@@ -22,6 +22,8 @@ DATA_MOUNT_SOURCE="${DATA_MOUNT_SOURCE:-/mnt/${DATABASE_TYPE}-data/databases}"
 DATA_MOUNT_TARGET="${DATA_MOUNT_TARGET:-/app/data}"
 LOGS_MOUNT_SOURCE="${LOGS_MOUNT_SOURCE:-/mnt/${DATABASE_TYPE}-data/logs}"
 LOGS_MOUNT_TARGET="${LOGS_MOUNT_TARGET:-/app/logs}"
+STAGING_MOUNT_SOURCE="${STAGING_MOUNT_SOURCE:-}"
+STAGING_MOUNT_TARGET="${STAGING_MOUNT_TARGET:-}"
 LOG_GROUP_NAME="${LOG_GROUP_NAME:?"LOG_GROUP_NAME must be set"}"
 DOCKER_PROFILE="${DOCKER_PROFILE:-${DATABASE_TYPE}-writer}"
 
@@ -124,6 +126,13 @@ case "${DATABASE_TYPE}" in
         ;;
 esac
 
+# Build optional volume mounts
+VOLUME_MOUNTS="-v ${DATA_MOUNT_SOURCE}:${DATA_MOUNT_TARGET} -v ${LOGS_MOUNT_SOURCE}:${LOGS_MOUNT_TARGET}"
+if [ -n "${STAGING_MOUNT_SOURCE}" ] && [ -n "${STAGING_MOUNT_TARGET}" ]; then
+  VOLUME_MOUNTS="${VOLUME_MOUNTS} -v ${STAGING_MOUNT_SOURCE}:${STAGING_MOUNT_TARGET}"
+  echo "Adding staging volume mount: ${STAGING_MOUNT_SOURCE} -> ${STAGING_MOUNT_TARGET}"
+fi
+
 # Run the container with CloudWatch logging
 echo "Starting ${DATABASE_TYPE} container..."
 docker run -d \
@@ -141,8 +150,7 @@ docker run -d \
   --log-opt awslogs-stream="${INSTANCE_ID}/${PRIVATE_IP}/${NODE_TYPE}" \
   --log-opt awslogs-create-group=false \
   -p ${CONTAINER_PORT}:${CONTAINER_PORT} \
-  -v ${DATA_MOUNT_SOURCE}:${DATA_MOUNT_TARGET} \
-  -v ${LOGS_MOUNT_SOURCE}:${LOGS_MOUNT_TARGET} \
+  ${VOLUME_MOUNTS} \
   -e ENVIRONMENT=${ENVIRONMENT} \
   -e INSTANCE_ID=${INSTANCE_ID} \
   -e INSTANCE_IP=${PRIVATE_IP} \

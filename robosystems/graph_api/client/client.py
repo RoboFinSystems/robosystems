@@ -1083,3 +1083,110 @@ class GraphClient(BaseGraphClient):
     except Exception as e:
       logger.error(f"Failed to start/monitor restore: {e}")
       return {"status": "failed", "error": str(e)}
+
+  # DuckDB Table Management Methods
+
+  async def create_table(
+    self,
+    graph_id: str,
+    table_name: str,
+    s3_pattern: str,
+  ) -> Dict[str, Any]:
+    """
+    Create a DuckDB staging table (external view over S3).
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Name for the table
+        s3_pattern: S3 glob pattern for parquet files
+
+    Returns:
+        Table creation response with status and metadata
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables",
+      json_data={
+        "graph_id": graph_id,
+        "table_name": table_name,
+        "s3_pattern": s3_pattern,
+      },
+    )
+    return response.json()
+
+  async def list_tables(self, graph_id: str) -> List[Dict[str, Any]]:
+    """
+    List all DuckDB staging tables for a graph.
+
+    Args:
+        graph_id: Graph database identifier
+
+    Returns:
+        List of table info dictionaries
+    """
+    response = await self._request("GET", f"/databases/{graph_id}/tables")
+    return response.json()
+
+  async def query_table(self, graph_id: str, sql: str) -> Dict[str, Any]:
+    """
+    Execute SQL query on DuckDB staging tables.
+
+    Args:
+        graph_id: Graph database identifier
+        sql: SQL query to execute
+
+    Returns:
+        Query results with columns and rows
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/query",
+      json_data={"graph_id": graph_id, "sql": sql},
+    )
+    return response.json()
+
+  async def delete_table(self, graph_id: str, table_name: str) -> Dict[str, Any]:
+    """
+    Delete a DuckDB staging table.
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Table name to delete
+
+    Returns:
+        Deletion response
+    """
+    response = await self._request(
+      "DELETE", f"/databases/{graph_id}/tables/{table_name}"
+    )
+    return response.json()
+
+  async def ingest_table_to_graph(
+    self,
+    graph_id: str,
+    table_name: str,
+    ignore_errors: bool = True,
+    rebuild: bool = False,
+  ) -> Dict[str, Any]:
+    """
+    Ingest a DuckDB staging table into the Kuzu graph.
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Table name to ingest
+        ignore_errors: Continue on row errors
+        rebuild: Rebuild graph database from scratch before ingestion
+
+    Returns:
+        Ingestion response with rows ingested and timing
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{graph_id}/tables/ingest",
+      json_data={
+        "table_name": table_name,
+        "ignore_errors": ignore_errors,
+        "rebuild": rebuild,
+      },
+    )
+    return response.json()

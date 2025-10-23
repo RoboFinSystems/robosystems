@@ -1,163 +1,514 @@
 # Graph Database Deployment Configuration
 # This file defines all graph database writer configurations for both environments
-# Supports multiple backends: Kuzu (standard tier), Neo4j (enterprise/premium tiers)
+#
+# ARCHITECTURE: Kuzu-only graph tier system
+# - All tiers use Kuzu backend (embedded graph database)
+# - Tiers differentiated by: instance isolation, subgraph support, resource allocation
+# - Platform metadata stored in PostgreSQL, graphs contain only business data
+# - Supports "MotherDuck for Graphs" pattern: DuckDB staging → Kuzu materialization
+#
+# TIER PHILOSOPHY:
+# - Standard: Multi-tenant, single database, cost-efficient entry
+# - Professional: Dedicated instance, subgraphs for organization, team collaboration
+# - Enterprise: Large dedicated instance, unlimited subgraphs, advanced scale
+# - Shared: Public data repositories (SEC, industry, economic) - separate infrastructure
 
 production:
   writers:
-    - name: standard
-      description: Standard tier for most customers (Kuzu backend)
+    # =========================================================================
+    # KUZU STANDARD TIER - Multi-tenant
+    # =========================================================================
+    - name: kuzu-standard
+      description: Multi-tenant Kuzu tier for cost-efficient entry (scalable instance size)
       backend: kuzu
-      stack_suffix: Standard
-      tier: standard
-      max_subgraphs: 0 # Standard tier does not support subgraphs
-      storage_limit_gb: 500 # 500 GB storage limit
-      monthly_credits: 10000 # 10K AI credits per month
-      rate_limit_multiplier: 1.0 # Base rate limits
-      instance:
-        type: r7g.large
-        databases_per_instance: 10
-        # Kuzu-specific settings
-        max_memory_mb: 14336 # 14GB for r7g.large (16GB total - 2GB OS)
-        memory_per_db_mb: 2048 # 2GB per database (intentional oversubscription: 10 DBs × 2GB = 20GB on 14GB instance)
-        chunk_size: 1000
-        query_timeout: 30
-        max_query_length: 10000
-        ingestion_batch_size: 1000
-        connection_pool_size: 10
-      scaling:
-        min: 1
-        max: 10
-      deployment:
-        enable_var: STANDARD_ENABLED_PROD
-        enabled_default: true
-        always_enabled: true # Standard tier must always be available
+      stack_suffix: KuzuStandard
+      tier: kuzu-standard
 
-    - name: enterprise
-      description: Enterprise tier with isolated resources (Neo4j Community Edition)
-      backend: neo4j
-      stack_suffix: Enterprise
-      tier: enterprise
-      max_subgraphs: 10 # Enterprise tier supports up to 10 subgraphs
-      storage_limit_gb: 2000 # 2 TB storage limit
-      monthly_credits: 50000 # 50K AI credits per month
-      rate_limit_multiplier: 2.0 # 2x rate limits
+      # Subgraph configuration
+      max_subgraphs: 0  # Single database only, no subgraph support
+
+      # Resource limits
+      storage_limit_gb: 500  # 500 GB storage limit per database
+      monthly_credits: 10000  # 10K AI credits per month
+      rate_limit_multiplier: 1.0  # Base rate limits (1x)
+
+      # Copy operation limits
+      copy_operations:
+        max_file_size_gb: 1.0  # Maximum file size per copy operation
+        timeout_seconds: 300  # 5 minute timeout for copy operations
+        concurrent_operations: 1  # One copy operation at a time
+        max_files_per_operation: 100  # Maximum files per batch copy
+        daily_copy_operations: 10  # Daily copy operation limit
+
+      # Backup limits
+      backup_limits:
+        max_backup_size_gb: 10  # Maximum backup size for standard tier
+        backup_retention_days: 7  # Backup retention period
+        max_backups_per_day: 2  # Daily backup limit
+
+      # Instance configuration
       instance:
-        type: r7g.large
-        databases_per_instance: 1 # Dedicated instance per customer
+        type: r7g.large  # 16GB RAM, 2 vCPUs, ARM64
+        databases_per_instance: 10  # Multi-tenant: 10 customer databases per instance
+
+        # Memory configuration
+        max_memory_mb: 14336  # 14GB available (16GB - 2GB OS overhead)
+        memory_per_db_mb: 2048  # 2GB per database (intentional oversubscription for cost efficiency)
+
+        # Kuzu-specific performance settings
+        chunk_size: 1000  # Batch operation chunk size
+        query_timeout: 30  # Query timeout in seconds
+        max_query_length: 10000  # Maximum query size in characters
+        ingestion_batch_size: 1000  # Batch size for data ingestion
+        connection_pool_size: 10  # Max concurrent connections per database
+
+      # Auto-scaling configuration
+      scaling:
+        min: 1  # Always maintain 1 instance (standard tier must be available)
+        max: 10  # Scale up to 10 instances for customer growth
+
+      # Deployment configuration
+      deployment:
+        enable_var: KUZU_STANDARD_ENABLED_PROD
+        enabled_default: true
+        always_enabled: true  # Kuzu standard tier is the foundation - always available
+
+    # =========================================================================
+    # KUZU LARGE TIER - Dedicated r7g.large
+    # =========================================================================
+    - name: kuzu-large
+      description: Dedicated r7g.large with subgraph support (10 subgraphs)
+      backend: kuzu
+      stack_suffix: KuzuLarge
+      tier: kuzu-large
+
+      # Subgraph configuration
+      max_subgraphs: 10  # Support up to 10 subgraphs (1 parent + 10 children = 11 databases total)
+
+      # Resource limits
+      storage_limit_gb: 2000  # 2 TB total storage across all databases (parent + subgraphs)
+      monthly_credits: 50000  # 50K AI credits per month (5x standard)
+      rate_limit_multiplier: 2.5  # 2.5x rate limits for team usage
+
+      # Copy operation limits
+      copy_operations:
+        max_file_size_gb: 5.0  # Larger files for professional workloads
+        timeout_seconds: 1800  # 30 minute timeout for large operations
+        concurrent_operations: 3  # Support concurrent operations for team
+        max_files_per_operation: 1000  # Higher batch limits
+        daily_copy_operations: 50  # More operations for active development
+
+      # Backup limits
+      backup_limits:
+        max_backup_size_gb: 50  # Larger backup capacity for professional workloads
+        backup_retention_days: 30  # Extended retention for team collaboration
+        max_backups_per_day: 10  # More frequent backups for active development
+
+      # Instance configuration
+      instance:
+        type: r7g.large  # 16GB RAM, 2 vCPUs, ARM64 - dedicated per customer
+        databases_per_instance: 1  # One parent database per instance (subgraphs on same instance)
+
+        # Memory configuration
+        max_memory_mb: 14336  # 14GB total available for parent + subgraphs
+        memory_per_db_mb: 1300  # ~1.3GB average per database (14GB / 11 databases)
+        # Note: Memory is dynamically shared among parent and subgraphs
+
+        # Kuzu-specific performance settings
+        chunk_size: 1500  # Larger chunks for better performance
+        query_timeout: 60  # 60 second timeout for complex queries
+        max_query_length: 25000  # Support more complex queries
+        ingestion_batch_size: 2500  # Faster ingestion with dedicated resources
+        connection_pool_size: 25  # Higher concurrency for team usage
+
+      # Auto-scaling configuration
+      scaling:
+        min: 0  # Can scale to zero when no professional customers
+        max: 20  # Support up to 20 professional customers (20 dedicated instances)
+
+      # Deployment configuration
+      deployment:
+        enable_var: KUZU_LARGE_ENABLED_PROD
+        enabled_default: true
+
+    # =========================================================================
+    # KUZU XLARGE TIER - Dedicated r7g.xlarge
+    # =========================================================================
+    - name: kuzu-xlarge
+      description: Dedicated r7g.xlarge with maximum subgraph support (25 subgraphs)
+      backend: kuzu
+      stack_suffix: KuzuXlarge
+      tier: kuzu-xlarge
+
+      # Subgraph configuration
+      max_subgraphs: 25  # Practical limit of 25 subgraphs (marketed as "unlimited")
+      # Note: 1 parent + 25 subgraphs = 26 databases total on xlarge instance
+
+      # Resource limits
+      storage_limit_gb: 10000  # 10 TB total storage across all databases
+      monthly_credits: 200000  # 200K AI credits per month (20x standard)
+      rate_limit_multiplier: 5.0  # 5x rate limits for enterprise usage
+
+      # Copy operation limits
+      copy_operations:
+        max_file_size_gb: 10.0  # Maximum file size for enterprise workloads
+        timeout_seconds: 3600  # 1 hour timeout for massive operations
+        concurrent_operations: 5  # Maximum concurrency for enterprise
+        max_files_per_operation: 10000  # Very high batch limits
+        daily_copy_operations: -1  # Unlimited for enterprise (no daily limit)
+
+      # Backup limits
+      backup_limits:
+        max_backup_size_gb: 100  # Maximum backup capacity for enterprise
+        backup_retention_days: 90  # Extended retention for compliance
+        max_backups_per_day: -1  # Unlimited backups for enterprise (no daily limit)
+
+      # Instance configuration
+      instance:
+        type: r7g.xlarge  # 32GB RAM, 4 vCPUs, ARM64 - large dedicated per customer
+        databases_per_instance: 1  # One parent database per instance (many subgraphs on same instance)
+
+        # Memory configuration
+        max_memory_mb: 30720  # 30GB available (32GB - 2GB OS overhead)
+        memory_per_db_mb: 1180  # ~1.2GB average per database (30GB / 26 databases)
+        # Note: Memory is dynamically shared, some databases can use more when needed
+
+        # Kuzu-specific performance settings
+        chunk_size: 2000  # Maximum chunk size for best performance
+        query_timeout: 120  # 2 minute timeout for complex analytical queries
+        max_query_length: 50000  # Support very complex queries
+        ingestion_batch_size: 5000  # Fast bulk ingestion
+        connection_pool_size: 50  # High concurrency for enterprise applications
+
+      # Auto-scaling configuration
+      scaling:
+        min: 0  # Can scale to zero when no enterprise customers
+        max: 10  # Support up to 10 enterprise customers (costly xlarge instances)
+
+      # Deployment configuration
+      deployment:
+        enable_var: KUZU_XLARGE_ENABLED_PROD
+        enabled_default: true
+
+    # =========================================================================
+    # KUZU SHARED TIER - Public Data Repositories
+    # =========================================================================
+    - name: kuzu-shared
+      description: Shared public data repositories (SEC, industry, economic) - Kuzu backend
+      backend: kuzu
+      stack_suffix: KuzuShared
+      tier: kuzu-shared
+
+      # Repository configuration
+      shared_repositories: "sec,industry,economic"  # Comma-separated list of public repositories
+      max_subgraphs: null  # N/A - repositories don't use subgraphs
+
+      # Resource limits
+      storage_limit_gb: 5000  # 5 TB total for all shared repositories (SEC alone may be 2-3TB)
+      monthly_credits: null  # No credit limits - platform managed
+      rate_limit_multiplier: null  # Separate rate limiting for public access
+
+      # Copy operation limits (for platform data loading)
+      copy_operations:
+        max_file_size_gb: 10.0  # Large files for bulk data loading
+        timeout_seconds: 3600  # 1 hour for massive SEC filings
+        concurrent_operations: 3  # Moderate concurrency for platform operations
+        max_files_per_operation: 10000  # High batch limits for quarterly filings
+        daily_copy_operations: -1  # Unlimited for platform operations
+
+      # Backup limits
+      backup_limits:
+        max_backup_size_gb: 100  # Large capacity for public data repositories
+        backup_retention_days: 90  # Extended retention for public data
+        max_backups_per_day: 5  # Moderate backup frequency
+
+      # Instance configuration
+      instance:
+        type: r7g.large  # 16GB RAM per repository instance
+        databases_per_instance: 1  # One repository per instance (SEC gets dedicated instance)
+        # Note: Major repositories like SEC get dedicated instances for performance
+
+        # Memory configuration
+        max_memory_mb: 14336  # 14GB available for repository
+        memory_per_db_mb: 14336  # Full instance memory for single repository
+
+        # Kuzu-specific performance settings (optimized for read-heavy analytical queries)
+        chunk_size: 2500  # Large chunks for bulk operations
+        query_timeout: 300  # 5 minute timeout for complex analytical queries on public data
+        max_query_length: 100000  # Very large queries supported for analytics
+        ingestion_batch_size: 10000  # Fast bulk loading for public data updates
+        connection_pool_size: 100  # High concurrency - many users accessing public data
+
+      # Auto-scaling configuration
+      scaling:
+        min: 1  # Always maintain at least 1 instance (SEC repository always available)
+        max: 3  # Scale to 3 instances (one per major repository if needed)
+
+      # Deployment configuration
+      deployment:
+        enable_var: KUZU_SHARED_ENABLED_PROD
+        enabled_default: true
+
+    # =========================================================================
+    # NEO4J COMMUNITY LARGE TIER - Optional (DISABLED)
+    # =========================================================================
+    - name: neo4j-community-large
+      description: Neo4j Community Edition on r7g.large (OPTIONAL - disabled by default)
+      backend: neo4j
+      stack_suffix: Neo4jCommunityLarge
+      tier: neo4j-community-large
+
+      # Subgraph configuration
+      max_subgraphs: 0  # Neo4j Community restricted to 1 database (default graph only)
+
+      # Resource limits
+      storage_limit_gb: 2000  # 2 TB storage limit
+      monthly_credits: 75000  # 75K AI credits per month
+      rate_limit_multiplier: 3.0  # 3x rate limits
+
+      # Instance configuration
+      instance:
+        type: r7g.large  # 16GB RAM, dedicated per customer
+        databases_per_instance: 1  # One Neo4j instance per customer
+
         # Neo4j-specific settings
         neo4j_version: "5.15.0"
         neo4j_edition: "community"
-        query_timeout: 120
+        neo4j_heap_size_mb: 8192  # 8GB heap for Neo4j
+        neo4j_page_cache_mb: 4096  # 4GB page cache
+        query_timeout: 90  # 90 second timeout
         max_query_length: 50000
         ingestion_batch_size: 5000
         connection_pool_size: 50
-      scaling:
-        min: 0
-        max: 5
-      deployment:
-        enable_var: ENTERPRISE_ENABLED_PROD
-        enabled_default: false
 
-    - name: premium
-      description: Premium tier with maximum performance (Neo4j Enterprise Edition)
+      # Auto-scaling configuration
+      scaling:
+        min: 0  # Can scale to zero (disabled by default)
+        max: 5  # Support up to 5 Neo4j Community customers
+
+      # Deployment configuration
+      deployment:
+        enable_var: NEO4J_COMMUNITY_LARGE_ENABLED_PROD
+        enabled_default: false  # DISABLED - Do not deploy unless explicitly enabled
+        optional: true  # Mark as optional tier
+
+    # =========================================================================
+    # NEO4J ENTERPRISE XLARGE TIER - Optional (DISABLED)
+    # =========================================================================
+    - name: neo4j-enterprise-xlarge
+      description: Neo4j Enterprise Edition on r7g.xlarge (OPTIONAL - disabled by default)
       backend: neo4j
-      stack_suffix: Premium
-      tier: premium
-      max_subgraphs: null # Premium tier supports unlimited subgraphs
-      storage_limit_gb: 10000 # 10 TB storage limit
-      monthly_credits: 200000 # 200K AI credits per month
-      rate_limit_multiplier: 5.0 # 5x rate limits
+      stack_suffix: Neo4jEnterpriseXlarge
+      tier: neo4j-enterprise-xlarge
+
+      # Subgraph configuration
+      max_subgraphs: 25  # Neo4j Enterprise supports more databases
+
+      # Resource limits
+      storage_limit_gb: 10000  # 10 TB storage limit
+      monthly_credits: 250000  # 250K AI credits per month
+      rate_limit_multiplier: 6.0  # 6x rate limits
+
+      # Instance configuration
       instance:
-        type: r7g.xlarge
-        databases_per_instance: 1 # Dedicated instance per customer
+        type: r7g.xlarge  # 32GB RAM, large dedicated per customer
+        databases_per_instance: 1  # One Neo4j Enterprise instance per customer
+
         # Neo4j-specific settings
         neo4j_version: "5.15.0"
         neo4j_edition: "enterprise"
-        query_timeout: 300
+        neo4j_heap_size_mb: 16384  # 16GB heap for Neo4j
+        neo4j_page_cache_mb: 12288  # 12GB page cache
+        neo4j_clustering: true  # Enterprise supports clustering
+        query_timeout: 180  # 3 minute timeout
         max_query_length: 100000
         ingestion_batch_size: 10000
         connection_pool_size: 100
-      scaling:
-        min: 0
-        max: 3
-      deployment:
-        enable_var: PREMIUM_ENABLED_PROD
-        enabled_default: false
 
-    - name: shared
-      description: Shared repositories for public data (SEC, industry, economic)
-      backend: neo4j # Currently using Neo4j - can be switched to kuzu by changing this line
-      stack_suffix: Shared
-      tier: shared
-      shared_repositories: "sec" # Comma-separated list of shared repositories
-      storage_limit_gb: 5000 # 5 TB storage for shared public data
-      instance:
-        type: r7g.large
-        databases_per_instance: 3 # Multiple shared repositories per instance
-        # Neo4j-specific settings
-        neo4j_version: "5.15.0"
-        neo4j_edition: "community"
-        query_timeout: 300 # Longer timeout for complex analytical queries
-        max_query_length: 100000
-        ingestion_batch_size: 10000 # Large batch size for bulk data loading
-        connection_pool_size: 100 # High connection pool for many concurrent readers
+      # Auto-scaling configuration
       scaling:
-        min: 1
-        max: 3
-      deployment:
-        enable_var: SHARED_ENABLED_PROD
-        enabled_default: false
+        min: 0  # Can scale to zero (disabled by default)
+        max: 3  # Support up to 3 Neo4j Enterprise customers (expensive)
 
+      # Deployment configuration
+      deployment:
+        enable_var: NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD
+        enabled_default: false  # DISABLED - Do not deploy unless explicitly enabled
+        optional: true  # Mark as optional tier
+
+# =============================================================================
+# STAGING ENVIRONMENT
+# =============================================================================
 staging:
   writers:
-    - name: standard
-      description: Standard tier for staging (Kuzu backend)
+    # =========================================================================
+    # KUZU STANDARD TIER - Staging (reduced resources)
+    # =========================================================================
+    - name: kuzu-standard
+      description: Multi-tenant Kuzu tier for staging (reduced resources)
       backend: kuzu
-      stack_suffix: Standard
-      tier: standard
-      max_subgraphs: 0 # Standard tier does not support subgraphs
-      storage_limit_gb: 100 # 100 GB storage limit (reduced for staging)
-      monthly_credits: 5000 # 5K AI credits per month (reduced for staging)
-      rate_limit_multiplier: 1.0 # Base rate limits
+      stack_suffix: KuzuStandard
+      tier: kuzu-standard
+
+      max_subgraphs: 0
+      storage_limit_gb: 100  # Reduced for staging
+      monthly_credits: 5000  # Reduced for staging
+      rate_limit_multiplier: 1.0
+
       instance:
-        type: r7g.medium
+        type: r7g.medium  # 8GB RAM - smaller for staging
         databases_per_instance: 10
-        # Kuzu-specific settings
-        max_memory_mb: 7168 # 7GB for r7g.medium (8GB total - 1GB OS)
-        memory_per_db_mb: 716 # ~700MB per database
+        max_memory_mb: 7168  # 7GB available (8GB - 1GB OS)
+        memory_per_db_mb: 716  # ~700MB per database
         chunk_size: 750
         query_timeout: 30
         max_query_length: 10000
         ingestion_batch_size: 750
         connection_pool_size: 10
+
       scaling:
         min: 1
         max: 5
+
       deployment:
         enable_var: STANDARD_ENABLED_STAGING
         enabled_default: true
-        always_enabled: true # Standard tier must always be available
+        always_enabled: true
 
-    - name: shared
-      description: Shared repositories for public data (SEC, industry, economic)
-      backend: neo4j # Currently using Neo4j - can be switched to kuzu by changing this line
-      stack_suffix: Shared
-      tier: shared
-      shared_repositories: "sec" # Comma-separated list of shared repositories
-      storage_limit_gb: 1000 # 1 TB storage for staging (reduced from production)
+    # =========================================================================
+    # KUZU LARGE TIER - Staging (testing subgraph features)
+    # =========================================================================
+    - name: kuzu-large
+      description: Dedicated r7g.medium with subgraph support for staging (10 subgraphs)
+      backend: kuzu
+      stack_suffix: KuzuLarge
+      tier: kuzu-large
+
+      max_subgraphs: 10
+      storage_limit_gb: 500  # Reduced for staging
+      monthly_credits: 10000  # Reduced for staging
+      rate_limit_multiplier: 2.5
+
       instance:
-        type: r7g.medium
-        databases_per_instance: 3 # Multiple shared repositories per instance
-        # Neo4j-specific settings
-        neo4j_version: "5.15.0"
-        neo4j_edition: "community"
-        query_timeout: 300 # Longer timeout for complex analytical queries
+        type: r7g.medium  # Smaller for staging
+        databases_per_instance: 1
+        max_memory_mb: 7168  # 7GB total
+        memory_per_db_mb: 650  # ~650MB per database (7GB / 11)
+        chunk_size: 1000
+        query_timeout: 60
+        max_query_length: 25000
+        ingestion_batch_size: 1500
+        connection_pool_size: 15
+
+      scaling:
+        min: 0
+        max: 5
+
+      deployment:
+        enable_var: KUZU_LARGE_ENABLED_STAGING
+        enabled_default: false  # Enable manually for testing
+
+    # =========================================================================
+    # KUZU SHARED TIER - Staging (testing public repositories)
+    # =========================================================================
+    - name: kuzu-shared
+      description: Shared repositories for staging environment (Kuzu backend)
+      backend: kuzu
+      stack_suffix: KuzuShared
+      tier: kuzu-shared
+
+      shared_repositories: "sec"  # Only SEC in staging for testing
+      max_subgraphs: null
+      storage_limit_gb: 1000  # Smaller dataset in staging
+      monthly_credits: null
+      rate_limit_multiplier: null
+
+      instance:
+        type: r7g.medium  # Smaller for staging
+        databases_per_instance: 1
+        max_memory_mb: 7168
+        memory_per_db_mb: 7168
+        chunk_size: 2000
+        query_timeout: 300
         max_query_length: 100000
-        ingestion_batch_size: 5000 # Smaller batch size for staging
-        connection_pool_size: 50 # Smaller connection pool for staging
+        ingestion_batch_size: 5000
+        connection_pool_size: 50
+
       scaling:
         min: 1
         max: 2
+
       deployment:
-        enable_var: SHARED_ENABLED_STAGING
-        enabled_default: true # Enable by default in staging for testing
+        enable_var: KUZU_SHARED_ENABLED_STAGING
+        enabled_default: true
+
+    # =========================================================================
+    # NEO4J COMMUNITY LARGE TIER - Staging (DISABLED)
+    # =========================================================================
+    - name: neo4j-community-large
+      description: Neo4j Community Edition on r7g.medium for staging (OPTIONAL - disabled)
+      backend: neo4j
+      stack_suffix: Neo4jCommunityLarge
+      tier: neo4j-community-large
+
+      max_subgraphs: 0  # Neo4j Community restricted to 1 database
+      storage_limit_gb: 500  # Reduced for staging
+      monthly_credits: 15000  # Reduced for staging
+      rate_limit_multiplier: 3.0
+
+      instance:
+        type: r7g.medium  # Smaller for staging
+        databases_per_instance: 1
+        neo4j_version: "5.15.0"
+        neo4j_edition: "community"
+        neo4j_heap_size_mb: 4096  # 4GB heap
+        neo4j_page_cache_mb: 2048  # 2GB page cache
+        query_timeout: 90
+        max_query_length: 50000
+        ingestion_batch_size: 2500
+        connection_pool_size: 25
+
+      scaling:
+        min: 0
+        max: 2
+
+      deployment:
+        enable_var: NEO4J_COMMUNITY_LARGE_ENABLED_STAGING
+        enabled_default: false  # DISABLED
+        optional: true
+
+    # =========================================================================
+    # NEO4J ENTERPRISE XLARGE TIER - Staging (DISABLED)
+    # =========================================================================
+    - name: neo4j-enterprise-xlarge
+      description: Neo4j Enterprise Edition on r7g.large for staging (OPTIONAL - disabled)
+      backend: neo4j
+      stack_suffix: Neo4jEnterpriseXlarge
+      tier: neo4j-enterprise-xlarge
+
+      max_subgraphs: 25
+      storage_limit_gb: 1000  # Reduced for staging
+      monthly_credits: 25000  # Reduced for staging
+      rate_limit_multiplier: 6.0
+
+      instance:
+        type: r7g.large  # Medium-large for staging testing
+        databases_per_instance: 1
+        neo4j_version: "5.15.0"
+        neo4j_edition: "enterprise"
+        neo4j_heap_size_mb: 8192  # 8GB heap
+        neo4j_page_cache_mb: 4096  # 4GB page cache
+        neo4j_clustering: false  # No clustering in staging
+        query_timeout: 180
+        max_query_length: 100000
+        ingestion_batch_size: 5000
+        connection_pool_size: 50
+
+      scaling:
+        min: 0
+        max: 1
+
+      deployment:
+        enable_var: NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING
+        enabled_default: false  # DISABLED
+        optional: true

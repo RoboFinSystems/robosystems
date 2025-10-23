@@ -76,8 +76,9 @@ class CustomSchemaParser:
   }
 
   # Reserved node names that cannot be used in custom schemas
+  # NOTE: Platform metadata (GraphMetadata, User, Connection) are stored in PostgreSQL,
+  # not in the Kuzu graph database. These reserved names are for future system nodes.
   RESERVED_NODE_NAMES = {
-    "GraphMetadata",  # System metadata node (included automatically)
     "SystemConfig",  # System configuration node
     "SchemaVersion",  # Schema versioning node
     "AuditLog",  # Audit logging node

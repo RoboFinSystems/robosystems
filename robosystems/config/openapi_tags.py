@@ -19,12 +19,12 @@ MAIN_API_TAGS = [
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph databases",
   },
   {
-    "name": "Copy",
-    "description": "📥 Data ingestion - Copy data from S3, URLs, and other sources into graph databases",
-  },
-  {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
+  },
+  {
+    "name": "Tables",
+    "description": "📊 Staging tables - Upload files and query DuckDB staging tables before ingestion",
   },
   {
     "name": "Connections",
@@ -113,6 +113,10 @@ KUZU_API_TAGS = [
   {
     "name": "Database Schema",
     "description": "📋 Database schema - Retrieve and install database schemas",
+  },
+  {
+    "name": "Tables",
+    "description": "📊 Staging tables - Create and query DuckDB staging tables, ingest to graph",
   },
   {
     "name": "Database Backup",

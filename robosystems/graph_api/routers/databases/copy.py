@@ -1,11 +1,15 @@
 """
-SSE-enabled ingestion endpoint for long-running operations.
+Direct S3 → Kuzu copy endpoint for internal/legacy operations.
 
 This module provides:
+- Direct COPY FROM S3 with user-provided credentials
 - Background task execution for multi-hour ingestion
 - Server-Sent Events (SSE) for real-time progress monitoring
 - Heartbeat events to prevent connection timeouts
 - Robust error handling and status tracking
+
+Used by: SEC pipeline workers and other internal VPC processes.
+For user-facing operations, use the file upload + DuckDB staging workflow instead.
 """
 
 import json

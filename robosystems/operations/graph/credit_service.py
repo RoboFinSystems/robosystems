@@ -53,7 +53,7 @@ class CreditService:
     user_id: str,
     billing_admin_id: str,
     subscription_tier: str,
-    graph_tier: GraphTier = GraphTier.STANDARD,
+    graph_tier: GraphTier = GraphTier.KUZU_STANDARD,
   ) -> GraphCredits:
     """
     Create credit pool for a new graph.
@@ -490,9 +490,29 @@ class CreditService:
   def get_subscription_tier_limits(self, subscription_tier: str) -> Dict[str, Any]:
     """Get limits and features for a subscription tier."""
     allowed_tiers = {
-      "standard": [GraphTier.STANDARD],
-      "enterprise": [GraphTier.STANDARD, GraphTier.ENTERPRISE],
-      "premium": [GraphTier.STANDARD, GraphTier.ENTERPRISE, GraphTier.PREMIUM],
+      "kuzu-standard": [GraphTier.KUZU_STANDARD],
+      "kuzu-large": [GraphTier.KUZU_STANDARD, GraphTier.KUZU_LARGE],
+      "kuzu-xlarge": [
+        GraphTier.KUZU_STANDARD,
+        GraphTier.KUZU_LARGE,
+        GraphTier.KUZU_XLARGE,
+        GraphTier.NEO4J_COMMUNITY_LARGE,
+        GraphTier.NEO4J_ENTERPRISE_XLARGE,
+      ],
+      # Legacy tier names for backward compatibility
+      "standard": [GraphTier.KUZU_STANDARD],
+      "enterprise": [
+        GraphTier.KUZU_STANDARD,
+        GraphTier.KUZU_LARGE,
+        GraphTier.KUZU_XLARGE,
+      ],
+      "premium": [
+        GraphTier.KUZU_STANDARD,
+        GraphTier.KUZU_LARGE,
+        GraphTier.KUZU_XLARGE,
+        GraphTier.NEO4J_COMMUNITY_LARGE,
+        GraphTier.NEO4J_ENTERPRISE_XLARGE,
+      ],
     }
 
     plan_config = BillingConfig.get_subscription_plan(subscription_tier)
@@ -563,9 +583,29 @@ class CreditService:
   ) -> bool:
     """Check if subscription tier allows creating a graph of the specified tier."""
     tier_restrictions = {
-      "standard": [GraphTier.STANDARD],
-      "enterprise": [GraphTier.STANDARD, GraphTier.ENTERPRISE],
-      "premium": [GraphTier.STANDARD, GraphTier.ENTERPRISE, GraphTier.PREMIUM],
+      "kuzu-standard": [GraphTier.KUZU_STANDARD],
+      "kuzu-large": [GraphTier.KUZU_STANDARD, GraphTier.KUZU_LARGE],
+      "kuzu-xlarge": [
+        GraphTier.KUZU_STANDARD,
+        GraphTier.KUZU_LARGE,
+        GraphTier.KUZU_XLARGE,
+        GraphTier.NEO4J_COMMUNITY_LARGE,
+        GraphTier.NEO4J_ENTERPRISE_XLARGE,
+      ],
+      # Legacy tier names for backward compatibility
+      "standard": [GraphTier.KUZU_STANDARD],
+      "enterprise": [
+        GraphTier.KUZU_STANDARD,
+        GraphTier.KUZU_LARGE,
+        GraphTier.KUZU_XLARGE,
+      ],
+      "premium": [
+        GraphTier.KUZU_STANDARD,
+        GraphTier.KUZU_LARGE,
+        GraphTier.KUZU_XLARGE,
+        GraphTier.NEO4J_COMMUNITY_LARGE,
+        GraphTier.NEO4J_ENTERPRISE_XLARGE,
+      ],
     }
 
     allowed_tiers = tier_restrictions.get(subscription_tier, [])

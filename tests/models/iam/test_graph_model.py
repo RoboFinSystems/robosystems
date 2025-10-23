@@ -33,7 +33,7 @@ class TestGraphModel:
     # Default values are not set until the object is added to session
     assert graph.schema_extensions is None or graph.schema_extensions == []
     assert graph.graph_instance_id is None or graph.graph_instance_id == "default"
-    assert graph.graph_tier is None or graph.graph_tier == GraphTier.STANDARD.value
+    assert graph.graph_tier is None or graph.graph_tier == GraphTier.KUZU_STANDARD.value
     assert graph.is_subgraph is None or graph.is_subgraph is False
     assert graph.parent_graph_id is None
 
@@ -124,7 +124,7 @@ class TestGraphModel:
       graph_id="kg1",
       graph_name="Standard",
       graph_type="entity",
-      graph_tier=GraphTier.STANDARD.value,
+      graph_tier=GraphTier.KUZU_STANDARD.value,
     )
     assert standard_graph.can_have_subgraphs is False
 
@@ -133,7 +133,7 @@ class TestGraphModel:
       graph_id="kg2",
       graph_name="Enterprise",
       graph_type="entity",
-      graph_tier=GraphTier.ENTERPRISE.value,
+      graph_tier=GraphTier.KUZU_LARGE.value,
     )
     assert enterprise_graph.can_have_subgraphs is True
 
@@ -142,7 +142,7 @@ class TestGraphModel:
       graph_id="kg3",
       graph_name="Premium",
       graph_type="entity",
-      graph_tier=GraphTier.PREMIUM.value,
+      graph_tier=GraphTier.KUZU_XLARGE.value,
     )
     assert premium_graph.can_have_subgraphs is True
 
@@ -174,27 +174,27 @@ class TestGraphModel:
       graph_id="kg1",
       graph_name="Standard",
       graph_type="entity",
-      graph_tier=GraphTier.STANDARD.value,
+      graph_tier=GraphTier.KUZU_STANDARD.value,
     )
     assert standard_graph.get_credit_multiplier() == 1.0
 
-    # Enterprise tier
-    enterprise_graph = Graph(
+    # Large tier (simplified credit system - all tiers use 1.0)
+    large_graph = Graph(
       graph_id="kg2",
-      graph_name="Enterprise",
+      graph_name="Large",
       graph_type="entity",
-      graph_tier=GraphTier.ENTERPRISE.value,
+      graph_tier=GraphTier.KUZU_LARGE.value,
     )
-    assert enterprise_graph.get_credit_multiplier() == 2.0
+    assert large_graph.get_credit_multiplier() == 1.0
 
-    # Premium tier
-    premium_graph = Graph(
+    # XLarge tier (simplified credit system - all tiers use 1.0)
+    xlarge_graph = Graph(
       graph_id="kg3",
-      graph_name="Premium",
+      graph_name="XLarge",
       graph_type="entity",
-      graph_tier=GraphTier.PREMIUM.value,
+      graph_tier=GraphTier.KUZU_XLARGE.value,
     )
-    assert premium_graph.get_credit_multiplier() == 4.0
+    assert xlarge_graph.get_credit_multiplier() == 1.0
 
     # Unknown tier defaults to 1.0
     unknown_graph = Graph(
@@ -216,7 +216,7 @@ class TestGraphModel:
       schema_extensions=["roboledger", "roboinvestor"],
       graph_instance_id="cluster1",
       graph_cluster_region="us-east-1",
-      graph_tier=GraphTier.ENTERPRISE,
+      graph_tier=GraphTier.KUZU_LARGE,
       graph_metadata={"test": "metadata"},
     )
 
@@ -227,7 +227,7 @@ class TestGraphModel:
     assert graph.schema_extensions == ["roboledger", "roboinvestor"]
     assert graph.graph_instance_id == "cluster1"
     assert graph.graph_cluster_region == "us-east-1"
-    assert graph.graph_tier == GraphTier.ENTERPRISE.value
+    assert graph.graph_tier == GraphTier.KUZU_LARGE.value
     assert graph.graph_metadata == {"test": "metadata"}
     assert graph.is_subgraph is False
     assert graph.created_at is not None
@@ -256,7 +256,7 @@ class TestGraphModel:
     assert graph.graph_type == "generic"
     assert graph.base_schema is None
     assert graph.schema_extensions == []
-    assert graph.graph_tier == GraphTier.STANDARD.value
+    assert graph.graph_tier == GraphTier.KUZU_STANDARD.value
 
   def test_create_entity_graph_auto_base_schema(self, db_session):
     """Test that entity graphs automatically get base_schema if not provided."""
@@ -276,7 +276,7 @@ class TestGraphModel:
       graph_id="kg_parent",
       graph_name="Parent Graph",
       graph_type="entity",
-      graph_tier=GraphTier.ENTERPRISE,
+      graph_tier=GraphTier.KUZU_LARGE,
       session=db_session,
     )
 
@@ -575,7 +575,7 @@ class TestGraphModel:
       graph_id="kg_parent",
       graph_name="Parent",
       graph_type="entity",
-      graph_tier=GraphTier.ENTERPRISE,
+      graph_tier=GraphTier.KUZU_LARGE,
       session=db_session,
     )
 
@@ -711,20 +711,20 @@ class TestGraphModel:
       graph_id="kg_enum",
       graph_name="Enum Test",
       graph_type="entity",
-      graph_tier=GraphTier.ENTERPRISE,
+      graph_tier=GraphTier.KUZU_LARGE,
       session=db_session,
     )
-    assert graph1.graph_tier == "enterprise"
+    assert graph1.graph_tier == "kuzu-large"
 
     # Create with string
     graph2 = Graph.create(
       graph_id="kg_string",
       graph_name="String Test",
       graph_type="entity",
-      graph_tier="premium",
+      graph_tier="kuzu-xlarge",
       session=db_session,
     )
-    assert graph2.graph_tier == "premium"
+    assert graph2.graph_tier == "kuzu-xlarge"
 
   def test_graph_constraints(self, db_session):
     """Test database constraints are enforced."""
