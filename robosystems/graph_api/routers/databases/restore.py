@@ -134,10 +134,8 @@ async def download_backup(
     import zipfile
     from pathlib import Path
 
-    # lgtm[py/path-injection] - path is validated by MultiTenantUtils.get_database_path_for_graph
     db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
 
-    # lgtm[py/path-injection] - path is validated by MultiTenantUtils.get_database_path_for_graph
     if not os.path.exists(db_path):
       raise HTTPException(
         status_code=http_status.HTTP_404_NOT_FOUND,
@@ -149,20 +147,16 @@ async def download_backup(
       temp_path = Path(temp_dir)
 
       # Copy database files
-      # lgtm[py/path-injection] - path is validated by MultiTenantUtils.get_database_path_for_graph
       if os.path.isfile(db_path):
         # Single file database
-        # lgtm[py/path-injection] - path is validated by MultiTenantUtils.get_database_path_for_graph
         shutil.copy2(db_path, temp_path / f"{graph_id}.kuzu")
       else:
         # Directory-based database
-        # lgtm[py/path-injection] - path is validated by MultiTenantUtils.get_database_path_for_graph
         shutil.copytree(db_path, temp_path / graph_id)
 
       # Create ZIP archive
       zip_file = temp_path / f"{graph_id}_backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
-        # lgtm[py/path-injection] - path is validated by MultiTenantUtils.get_database_path_for_graph
         if os.path.isfile(db_path):
           zf.write(temp_path / f"{graph_id}.kuzu", f"{graph_id}.kuzu")
         else:
@@ -173,7 +167,6 @@ async def download_backup(
               zf.write(file_path, arc_path)
 
       # Read ZIP file content
-      # lgtm[py/path-injection] - zip_file is derived from validated temp directory
       with open(zip_file, "rb") as f:
         backup_data = f.read()
 

@@ -115,14 +115,10 @@ async def ingest_table_to_graph(
       cluster_service.db_manager.connection_pool.close_all_connections(graph_id)
 
       # Delete Kuzu database file (using validated path)
-      # lgtm[py/path-injection] - path is validated by get_kuzu_database_path
       if db_path.exists():
-        # lgtm[py/path-injection] - path is validated by get_kuzu_database_path
         if db_path.is_dir():
-          # lgtm[py/path-injection] - path is validated by get_kuzu_database_path
           shutil.rmtree(db_path)
         else:
-          # lgtm[py/path-injection] - path is validated by get_kuzu_database_path
           db_path.unlink()
         logger.info(f"Deleted Kuzu database: {db_path}")
 
