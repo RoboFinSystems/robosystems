@@ -373,7 +373,7 @@ class TestDuckDBConnectionPool:
     ]
 
     for malicious_id in malicious_ids:
-      with pytest.raises(ValueError, match="path traversal"):
+      with pytest.raises(ValueError, match="Invalid graph_id"):
         pool._get_database_path(malicious_id)
 
   def test_automatic_cleanup_is_disabled(self):

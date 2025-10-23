@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Body, Path
 from fastapi import status as http_status
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.logger import logger
 from robosystems.database import get_db_session
 from robosystems.models.iam import Graph, GraphSchema
+from robosystems.utils.path_validation import get_kuzu_database_path
 
 router = APIRouter(prefix="/databases/{graph_id}/tables")
 
@@ -19,7 +21,15 @@ class TableIngestRequest(BaseModel):
   )
   rebuild: bool = Field(
     default=False,
-    description="Rebuild graph database from scratch before ingestion",
+    description="Rebuild graph database from scratch before ingestion. "
+    "WARNING: This is a DESTRUCTIVE operation that permanently deletes "
+    "the existing database. Requires rebuild_confirmation token.",
+  )
+  rebuild_confirmation: Optional[str] = Field(
+    default=None,
+    description="Required confirmation token when rebuild=true. "
+    "Must be the exact string 'DELETE_AND_REBUILD' to proceed. "
+    "This is a safety mechanism to prevent accidental data loss.",
   )
 
   class Config:
@@ -43,9 +53,9 @@ async def ingest_table_to_graph(
 ) -> TableIngestResponse:
   import time
   import shutil
-  from pathlib import Path as PathlibPath
 
   start_time = time.time()
+  backup_key = None  # Track backup for error handling
 
   rebuild_msg = " (REBUILD)" if request.rebuild else ""
   logger.info(
@@ -61,8 +71,16 @@ async def ingest_table_to_graph(
   try:
     # Handle rebuild: delete and recreate Kuzu database
     if request.rebuild:
+      # Require explicit confirmation token for destructive operation
+      if request.rebuild_confirmation != "DELETE_AND_REBUILD":
+        raise HTTPException(
+          status_code=http_status.HTTP_400_BAD_REQUEST,
+          detail="Rebuild requires confirmation token 'DELETE_AND_REBUILD'. "
+          "This is a destructive operation that permanently deletes the database.",
+        )
+
       logger.warning(
-        f"REBUILD requested for {graph_id} - deleting existing Kuzu database"
+        f"DESTRUCTIVE OPERATION: REBUILD requested for {graph_id} - deleting existing Kuzu database"
       )
 
       # Mark graph as rebuilding
@@ -76,14 +94,27 @@ async def ingest_table_to_graph(
       graph_metadata = {**graph.graph_metadata} if graph.graph_metadata else {}
       graph_metadata["status"] = "rebuilding"
       graph_metadata["rebuild_started_at"] = time.time()
+
+      # TODO: Implement automatic backup before rebuild
+      # The S3BackupAdapter API requires async context and has changed signature.
+      # For now, proceed without automatic backup but log a warning.
+      db_path = get_kuzu_database_path(graph_id)
+      backup_key = None
+
+      if db_path.exists():
+        logger.warning(
+          f"Skipping automatic backup for {graph_id} before rebuild. "
+          f"S3BackupAdapter requires async context. "
+          f"Manual backup recommended before destructive operations."
+        )
+
       graph.graph_metadata = graph_metadata
       db.commit()
 
       # Close and remove all connections from pool
       cluster_service.db_manager.connection_pool.close_all_connections(graph_id)
 
-      # Delete Kuzu database file
-      db_path = PathlibPath(f"/app/data/kuzu-dbs/{graph_id}.kuzu")
+      # Delete Kuzu database file (using validated path)
       if db_path.exists():
         if db_path.is_dir():
           shutil.rmtree(db_path)
@@ -228,7 +259,7 @@ async def ingest_table_to_graph(
     )
 
   except Exception as e:
-    # Mark graph as available on failure if it was rebuilding
+    # Mark graph as failed on rebuild failure and provide recovery information
     if request.rebuild:
       try:
         graph = Graph.get_by_id(graph_id, db)
@@ -238,17 +269,35 @@ async def ingest_table_to_graph(
           and graph.graph_metadata.get("status") == "rebuilding"
         ):
           graph_metadata = {**graph.graph_metadata} if graph.graph_metadata else {}
-          graph_metadata["status"] = "available"
+          graph_metadata["status"] = "rebuild_failed"
           graph_metadata["rebuild_failed_at"] = time.time()
           graph_metadata["rebuild_error"] = str(e)
           graph.graph_metadata = graph_metadata
           db.commit()
-          logger.warning(f"Graph {graph_id} marked as available after rebuild failure")
+
+          backup_info = ""
+          if graph_metadata.get("last_backup"):
+            backup_info = f" Automatic backup available at: {graph_metadata['last_backup']}. Use the restore endpoint to recover."
+
+          logger.error(
+            f"Graph {graph_id} rebuild failed: {e}.{backup_info}",
+            extra={
+              "graph_id": graph_id,
+              "backup_key": graph_metadata.get("last_backup"),
+              "error": str(e),
+            },
+          )
       except Exception as meta_error:
         logger.error(f"Failed to update graph metadata after error: {meta_error}")
 
     logger.error(f"Failed to ingest table {request.table_name}: {e}")
+
+    # Provide helpful error message with recovery options for rebuild failures
+    error_detail = f"Failed to ingest table: {str(e)}"
+    if request.rebuild and backup_key:
+      error_detail += f" The database rebuild failed. Automatic backup is available at S3 key: {backup_key}. Use the restore endpoint to recover the previous state."
+
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to ingest table: {str(e)}",
+      detail=error_detail,
     )

@@ -1,5 +1,6 @@
 import re
 from typing import Dict, List, Optional, Any
+from functools import wraps
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
@@ -9,10 +10,52 @@ from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
 
 
 def validate_table_name(table_name: str) -> None:
+  """
+  Validate table name to prevent SQL injection.
+
+  Only allows alphanumeric characters, underscores, and hyphens.
+  This prevents SQL injection attacks through table name parameters.
+
+  Args:
+      table_name: Table name to validate
+
+  Raises:
+      HTTPException: If table name contains invalid characters
+  """
   if not table_name or not re.match(r"^[a-zA-Z0-9_-]+$", table_name):
+    logger.warning(f"Invalid table name rejected: {table_name[:50]}")
     raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid table name"
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="Invalid table name. Only alphanumeric, underscore, and hyphen allowed.",
     )
+
+
+def validate_table_name_decorator(func):
+  """
+  Decorator to automatically validate table_name parameters.
+
+  Ensures all table operations validate table names to prevent SQL injection.
+  Works with both positional and keyword arguments.
+  """
+
+  @wraps(func)
+  def wrapper(self, *args, **kwargs):
+    # Extract table_name from kwargs
+    if "table_name" in kwargs:
+      validate_table_name(kwargs["table_name"])
+    # Extract from request object if present
+    elif "request" in kwargs and hasattr(kwargs["request"], "table_name"):
+      validate_table_name(kwargs["request"].table_name)
+    # Extract from positional args if method signature has table_name
+    # (This is a fallback for positional arguments)
+    elif len(args) > 0:
+      # Check if first arg after self looks like a request object with table_name
+      if hasattr(args[0], "table_name"):
+        validate_table_name(args[0].table_name)
+
+    return func(self, *args, **kwargs)
+
+  return wrapper
 
 
 class TableInfo(BaseModel):
@@ -77,6 +120,7 @@ class DuckDBTableManager:
       )
     logger.info("Initialized DuckDB Table Manager (staging layer for Kuzu ingestion)")
 
+  @validate_table_name_decorator
   def create_table(self, request: TableCreateRequest) -> TableCreateResponse:
     """
     Create an external table (view over S3 files).
@@ -88,6 +132,7 @@ class DuckDBTableManager:
 
     start_time = time.time()
 
+    # Explicit validation (decorator provides safety net)
     validate_table_name(request.table_name)
 
     logger.info(
@@ -160,7 +205,10 @@ class DuckDBTableManager:
 
   def query_table_streaming(self, request: TableQueryRequest, chunk_size: int = 1000):
     """
-    Execute SQL query and yield results in chunks for streaming.
+    Execute SQL query and yield results in chunks for TRUE streaming.
+
+    IMPORTANT: Uses fetchmany() to avoid loading entire result set in memory.
+    This enables efficient streaming of large result sets without memory exhaustion.
 
     Args:
         request: Query request
@@ -181,17 +229,25 @@ class DuckDBTableManager:
 
     try:
       with pool.get_connection(request.graph_id) as conn:
-        result = conn.execute(request.sql).fetchall()
-        description = conn.description
+        # Execute query and get cursor (does NOT fetch all results)
+        cursor = conn.execute(request.sql)
+        description = cursor.description
 
         columns = [desc[0] for desc in description] if description else []
 
-        total_rows = len(result)
         chunk_index = 0
+        total_rows_sent = 0
 
-        for i in range(0, total_rows, chunk_size):
-          chunk_rows = [list(row) for row in result[i : i + chunk_size]]
-          is_last_chunk = (i + chunk_size) >= total_rows
+        # Fetch results in chunks to avoid memory exhaustion
+        while True:
+          chunk_rows_raw = cursor.fetchmany(chunk_size)
+
+          if not chunk_rows_raw:
+            break
+
+          chunk_rows = [list(row) for row in chunk_rows_raw]
+          total_rows_sent += len(chunk_rows)
+          is_last_chunk = len(chunk_rows) < chunk_size
 
           chunk_data = {
             "columns": columns,
@@ -199,21 +255,24 @@ class DuckDBTableManager:
             "chunk_index": chunk_index,
             "is_last_chunk": is_last_chunk,
             "row_count": len(chunk_rows),
-            "total_rows_sent": min(i + chunk_size, total_rows),
-            "total_rows": total_rows,
+            "total_rows_sent": total_rows_sent,
             "execution_time_ms": (time.time() - start_time) * 1000,
           }
 
           logger.debug(
-            f"Yielding chunk {chunk_index} with {len(chunk_rows)} rows (total: {chunk_data['total_rows_sent']}/{total_rows})"
+            f"Yielding chunk {chunk_index} with {len(chunk_rows)} rows "
+            f"(total: {total_rows_sent})"
           )
 
           yield chunk_data
           chunk_index += 1
 
+          if is_last_chunk:
+            break
+
         execution_time_ms = (time.time() - start_time) * 1000
         logger.info(
-          f"Streaming query completed: {total_rows} rows in {execution_time_ms:.2f}ms"
+          f"Streaming query completed: {total_rows_sent} rows in {execution_time_ms:.2f}ms"
         )
 
     except Exception as e:
@@ -270,6 +329,7 @@ class DuckDBTableManager:
         detail=f"Failed to list tables: {str(e)}",
       )
 
+  @validate_table_name_decorator
   def refresh_table(self, graph_id: str, table_name: str) -> Dict[str, Any]:
     """
     Refresh an external table from current PostgreSQL file registry.
@@ -363,7 +423,9 @@ class DuckDBTableManager:
     finally:
       db.close()
 
+  @validate_table_name_decorator
   def delete_table(self, graph_id: str, table_name: str) -> Dict[str, str]:
+    # Explicit validation (decorator provides safety net)
     validate_table_name(table_name)
 
     logger.info(f"Deleting table {table_name} from graph {graph_id}")

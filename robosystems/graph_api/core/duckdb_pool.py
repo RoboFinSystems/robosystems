@@ -26,6 +26,7 @@ import weakref
 
 import duckdb
 from robosystems.logger import logger
+from robosystems.utils.path_validation import get_duckdb_staging_path
 
 
 @dataclass
@@ -241,21 +242,13 @@ class DuckDBConnectionPool:
     """
     Get the database path for a graph_id.
 
-    Validates that the path is within the base directory to prevent path traversal.
+    Uses centralized path validation to prevent path traversal attacks.
     """
-    # Sanitize graph_id to prevent path traversal
-    if ".." in graph_id or "/" in graph_id or "\\" in graph_id:
-      raise ValueError(f"Invalid graph_id: path traversal detected in '{graph_id}'")
-
-    db_path = self.base_path / f"{graph_id}.duckdb"
-
-    # Double-check resolved path is within base directory
     try:
-      db_path.resolve().relative_to(self.base_path.resolve())
-    except ValueError:
-      raise ValueError(f"Invalid graph_id: path outside base directory '{graph_id}'")
-
-    return db_path
+      return get_duckdb_staging_path(graph_id, base_path=str(self.base_path))
+    except Exception as e:
+      logger.error(f"Path validation failed for DuckDB graph_id {graph_id}: {e}")
+      raise ValueError(f"Invalid graph_id: {str(e)}") from e
 
   def _configure_connection(self, conn: duckdb.DuckDBPyConnection):
     """Configure a DuckDB connection with extensions and settings."""

@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path as PathLib
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
 from sqlalchemy.orm import Session
@@ -74,10 +75,8 @@ async def get_upload_url(
       detail=f"Unsupported file format: {request.content_type}. Allowed: {', '.join(allowed_formats)}",
     )
 
-  # Validate file extension matches content type
-  file_extension = (
-    request.file_name.lower().split(".")[-1] if "." in request.file_name else ""
-  )
+  # Validate file extension matches content type (using pathlib for robust extraction)
+  file_extension = PathLib(request.file_name).suffix.lstrip(".").lower()
   expected_extensions = {
     "application/x-parquet": "parquet",
     "text/csv": "csv",
