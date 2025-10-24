@@ -495,7 +495,7 @@ just sec-load NVDA 2025
 
 ## Next Steps
 
-- **Visualize with G.V()**: Use our partner tool [G.V()](https://gdotv.com/) to explore graph relationships interactively
+- **Visualize with G.V()**: Use our favorite tool [G.V()](https://gdotv.com/) to explore graph relationships interactively
 - **Learn Cypher**: Explore graph query patterns with [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **Validate Staging**: Use DuckDB CLI or SQL IDEs to inspect staging tables before ingestion
 - **Build Analysis**: Use MCP client in Claude for financial analysis
@@ -504,7 +504,7 @@ just sec-load NVDA 2025
 
 ## Resources
 
-- **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Kuzu (Partner)
+- **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Kuzu
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
 - **RoboSystems API**: http://localhost:8000/docs (when running locally)
