@@ -71,7 +71,9 @@ graph_api/
 ├── core/                      # Core services
 │   ├── cluster_manager.py    # Cluster orchestration
 │   ├── database_manager.py   # Database lifecycle management
-│   ├── connection_pool.py    # Connection pooling
+│   ├── duckdb_manager.py     # DuckDB staging database management
+│   ├── duckdb_pool.py        # DuckDB connection pooling
+│   ├── connection_pool.py    # Graph connection pooling
 │   ├── admission_control.py  # Backpressure management
 │   └── metrics_collector.py  # Performance metrics
 │
@@ -80,6 +82,10 @@ graph_api/
 │   │   ├── management.py     # Create/delete databases
 │   │   ├── query.py          # Cypher query execution
 │   │   ├── ingest.py         # S3 bulk copy operations
+│   │   ├── tables/           # DuckDB staging table management
+│   │   │   ├── management.py # Create/list staging tables
+│   │   │   ├── ingest.py     # Parquet file ingestion to tables
+│   │   │   └── query.py      # DuckDB SQL queries on tables
 │   │   ├── schema.py         # Schema management
 │   │   ├── metrics.py        # Database metrics
 │   │   ├── backup.py         # Backup operations
@@ -328,6 +334,82 @@ This returns a task ID that can be monitored via Server-Sent Events:
 ```http
 GET /tasks/{task_id}/monitor
 Authorization: X-Graph-API-Key: {api_key}
+```
+
+#### Table Operations
+
+**DuckDB Staging Tables** provide an intermediate staging layer for data validation and transformation before graph ingestion.
+
+**List Tables:**
+
+```http
+GET /databases/{graph_id}/tables
+Authorization: X-Graph-API-Key: {api_key}
+
+Response: {
+  "tables": [
+    {
+      "table_name": "Entity",
+      "row_count": 1523,
+      "file_count": 3,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+**Upload File to Table:**
+
+```http
+POST /databases/{graph_id}/tables/{table_name}/upload
+Authorization: X-Graph-API-Key: {api_key}
+Content-Type: multipart/form-data
+
+file: entities.parquet
+
+Response: {
+  "file_id": "file_abc123",
+  "table_name": "Entity",
+  "rows_added": 150,
+  "status": "uploaded"
+}
+```
+
+**Query Staging Table:**
+
+```http
+POST /databases/{graph_id}/tables/{table_name}/query
+Authorization: X-Graph-API-Key: {api_key}
+Content-Type: application/json
+
+{
+  "sql": "SELECT * FROM Entity WHERE status = 'active' LIMIT 10"
+}
+
+Response: {
+  "columns": ["identifier", "name", "status"],
+  "rows": [
+    ["entity-1", "Company A", "active"],
+    ["entity-2", "Company B", "active"]
+  ],
+  "row_count": 2
+}
+```
+
+**Ingest Table to Graph:**
+
+```http
+POST /databases/{graph_id}/tables/{table_name}/ingest
+Authorization: X-Graph-API-Key: {api_key}
+
+Response: {
+  "task_id": "task_xyz789",
+  "status": "queued",
+  "rows_to_ingest": 1523
+}
+
+Note: This performs direct DuckDB → Graph ingestion via database extensions.
+Monitor progress via /tasks/{task_id}/monitor endpoint.
 ```
 
 ### System Operations
