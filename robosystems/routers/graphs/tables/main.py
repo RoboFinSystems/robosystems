@@ -30,7 +30,7 @@ async def list_tables(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> TableListResponse:
-  graph, repo = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
 
   if not graph:
     raise HTTPException(

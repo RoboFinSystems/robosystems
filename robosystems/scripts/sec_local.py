@@ -150,7 +150,7 @@ class SECLocalPipeline:
     self, ticker: str, year: int = None, force_reconsolidate: bool = False
   ) -> bool:
     """
-    Load a single company's data by ticker symbol using orchestrated Celery tasks.
+    Load a single company's data using traditional COPY pipeline (fallback/prod emulation).
 
     Pipeline phases:
     1. Download - Fetch XBRL files from SEC
@@ -373,6 +373,197 @@ class SECLocalPipeline:
       traceback.print_exc()
       return False
 
+  def load_company_via_api(self, ticker: str, year: int = None) -> bool:
+    """
+    Load a single company's data using DuckDB-based ingestion (default method).
+
+    This method:
+    1. Downloads and processes the company data
+    2. Skips consolidation step (S3 is source of truth)
+    3. Uses DuckDB-based ingestion directly with processed files
+
+    Args:
+        ticker: Company ticker symbol (e.g., "NVDA", "AAPL")
+        year: Year to load data for (None for all available years)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if year is None:
+      logger.info(
+        f"📊 Loading {ticker} data for ALL YEARS using DuckDB-based ingestion ({self.backend})..."
+      )
+      start_year = 2019
+      end_year = datetime.now().year
+    else:
+      logger.info(
+        f"📊 Loading {ticker} data for {year} using DuckDB-based ingestion ({self.backend})..."
+      )
+      start_year = year
+      end_year = year
+
+    try:
+      from robosystems.tasks.sec_xbrl.orchestration import (
+        plan_phased_processing,
+        start_phase,
+      )
+      from robosystems.adapters.sec import SECClient
+
+      # Get CIK from ticker
+      sec_client = SECClient()
+      companies_df = sec_client.get_companies_df()
+      company = companies_df[companies_df["ticker"] == ticker.upper()]
+      if company.empty:
+        logger.error(f"Company not found: {ticker}")
+        return False
+
+      cik = str(company.iloc[0]["cik_str"])
+      company_name = company.iloc[0]["title"]
+      logger.info(f"Found: {company_name} (CIK: {cik})")
+
+      # Step 1: Create processing plan
+      logger.info(
+        f"Creating processing plan for years {start_year}-{end_year} ({self.backend})..."
+      )
+      plan_task = plan_phased_processing.apply_async(
+        kwargs={
+          "start_year": start_year,
+          "end_year": end_year,
+          "cik_filter": cik,
+          "backend": self.backend,
+        }
+      )
+
+      plan_result = plan_task.get(timeout=60)
+      if plan_result.get("status") != "success":
+        logger.error(f"Failed to create plan: {plan_result.get('error')}")
+        return False
+
+      year_display = (
+        f"{start_year}-{end_year}" if start_year != end_year else str(start_year)
+      )
+      logger.info(f"✅ Plan created for {company_name} ({year_display})")
+
+      # Calculate timeouts
+      num_years = end_year - start_year + 1
+      base_timeout = 120
+      per_year_timeout = 60
+      phase_timeout = base_timeout + (num_years * per_year_timeout)
+
+      logger.info(f"Using timeout of {phase_timeout}s for {num_years} years of data")
+
+      # Step 2: Run download phase
+      logger.info("Starting download phase...")
+      download_task = start_phase.apply_async(
+        kwargs={"phase": "download", "backend": self.backend}
+      )
+
+      download_result = download_task.get(timeout=phase_timeout)
+      if download_result.get("status") != "started":
+        logger.error(f"Failed to start download: {download_result.get('error')}")
+        return False
+
+      # Wait for downloads
+      import time
+      from robosystems.config import env
+
+      wait_time = (0.5 if env.is_development() else 5) * min(num_years, 3)
+      time.sleep(wait_time)
+
+      # Step 3: Run process phase
+      logger.info("Starting processing phase...")
+      process_task = start_phase.apply_async(
+        kwargs={"phase": "process", "backend": self.backend}
+      )
+
+      process_result = process_task.get(timeout=phase_timeout)
+      if process_result.get("status") != "started":
+        logger.error(f"Failed to start processing: {process_result.get('error')}")
+        return False
+
+      # Wait for processing
+      time.sleep(wait_time)
+
+      # Step 4: Use DuckDB-based ingestion (skips consolidation)
+      logger.info(
+        "🚀 Using DuckDB-based ingestion (skipping consolidation, working with processed files)..."
+      )
+
+      # Call the DuckDB ingestion method (always rebuild since DuckDB discovers ALL files)
+      return self.ingest_via_api(year=year, rebuild=True)
+
+    except Exception as e:
+      logger.error(f"Failed to load company via DuckDB ingestion: {e}")
+      import traceback
+
+      traceback.print_exc()
+      return False
+
+  def ingest_via_api(self, year: int = None, rebuild: bool = True) -> bool:
+    """
+    Test DuckDB-based ingestion with processed files (skips consolidation).
+
+    This uses the XBRLDuckDBGraphProcessor that works directly with
+    processed files instead of consolidated files to test performance with
+    many small files vs fewer large files.
+
+    IMPORTANT: Always rebuilds the graph by default (rebuild=True) because
+    DuckDB staging tables discover and load ALL processed files from S3,
+    not just new ones.
+
+    Args:
+        year: Optional year filter for processing
+        rebuild: Whether to rebuild graph database from scratch (default: True).
+                 Should remain True to avoid duplicate key errors.
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if year:
+      logger.info(
+        f"📊 Testing DuckDB-based ingestion for year {year} ({self.backend})..."
+      )
+    else:
+      logger.info(
+        f"📊 Testing DuckDB-based ingestion for ALL YEARS ({self.backend})..."
+      )
+
+    try:
+      from robosystems.tasks.sec_xbrl.duckdb_ingestion import ingest_via_duckdb
+
+      logger.info("Starting DuckDB-based ingestion task...")
+      task = ingest_via_duckdb.apply_async(
+        kwargs={
+          "rebuild": rebuild,
+          "year": year,
+        }
+      )
+
+      logger.info("⏳ Waiting for ingestion to complete...")
+      result = task.get(timeout=1800)
+
+      if result.get("status") == "success":
+        logger.info("✅ DuckDB-based ingestion completed successfully")
+        logger.info(f"  Tables processed: {result.get('tables_processed', 0)}")
+        logger.info(f"  Total files: {result.get('total_files', 0)}")
+        logger.info(f"  Duration: {result.get('duration_seconds', 0):.2f}s")
+
+        ingestion = result.get("ingestion_results", {})
+        logger.info(f"  Rows ingested: {ingestion.get('total_rows_ingested', 0)}")
+        logger.info(f"  Ingestion time: {ingestion.get('total_time_ms', 0):.2f}ms")
+
+        return True
+      else:
+        logger.error(f"Ingestion failed: {result.get('error', 'Unknown error')}")
+        return False
+
+    except Exception as e:
+      logger.error(f"Failed to run DuckDB-based ingestion: {e}")
+      import traceback
+
+      traceback.print_exc()
+      return False
+
 
 def main():
   """Main entry point for local SEC pipeline."""
@@ -388,14 +579,20 @@ Examples:
   # Reset Neo4j database
   %(prog)s reset --backend neo4j
 
-  # Load NVIDIA data for 2024 into Kuzu
+  # Load NVIDIA data for 2024 using DuckDB-based ingestion (default, many small files)
   %(prog)s load --ticker NVDA --year 2024
 
-  # Load Apple data for 2023 into Neo4j
+  # Load NVIDIA data for 2024 using traditional COPY pipeline (fallback, with consolidation)
+  %(prog)s load --ticker NVDA --year 2024 --use-copy-pipeline
+
+  # Load Apple data for 2023 into Neo4j using DuckDB approach
   %(prog)s load --ticker AAPL --year 2023 --backend neo4j
 
-  # Full reset and load NVIDIA into Neo4j
-  %(prog)s reset --backend neo4j && %(prog)s load --ticker NVDA --year 2024 --backend neo4j
+  # Test DuckDB-based ingestion for all processed files for 2025
+  %(prog)s ingest-api --year 2025
+
+  # Test DuckDB-based ingestion with rebuild
+  %(prog)s ingest-api --year 2025 --rebuild
 """,
   )
 
@@ -425,11 +622,39 @@ Examples:
     help=f"Year to load (default: all years from 2019 to {datetime.now().year})",
   )
   load_parser.add_argument(
-    "--force-reconsolidate",
+    "--use-copy-pipeline",
     action="store_true",
-    help="Force reconsolidation by clearing existing consolidated files",
+    help="Use traditional COPY pipeline (consolidation + COPY ingestion, emulates production)",
   )
   load_parser.add_argument(
+    "--force-reconsolidate",
+    action="store_true",
+    help="Force reconsolidation by clearing existing consolidated files (only with --use-copy-pipeline)",
+  )
+  load_parser.add_argument(
+    "--backend",
+    default="kuzu",
+    choices=["kuzu", "neo4j"],
+    help="Database backend to use (default: kuzu)",
+  )
+
+  # Ingest API command
+  ingest_api_parser = subparsers.add_parser(
+    "ingest-api",
+    help="Test DuckDB-based ingestion with processed files (skips consolidation)",
+  )
+  ingest_api_parser.add_argument(
+    "--year",
+    type=int,
+    default=None,
+    help="Year to process (default: all years)",
+  )
+  ingest_api_parser.add_argument(
+    "--rebuild",
+    action="store_true",
+    help="Rebuild graph database from scratch before ingestion",
+  )
+  ingest_api_parser.add_argument(
     "--backend",
     default="kuzu",
     choices=["kuzu", "neo4j"],
@@ -451,10 +676,25 @@ Examples:
     sys.exit(0 if success else 1)
 
   elif args.command == "load":
-    success = pipeline.load_company(
-      ticker=args.ticker,
+    if args.use_copy_pipeline:
+      # Use traditional COPY pipeline (with consolidation) - fallback/prod emulation
+      success = pipeline.load_company(
+        ticker=args.ticker,
+        year=args.year,
+        force_reconsolidate=args.force_reconsolidate,
+      )
+    else:
+      # Use DuckDB-based ingestion (default: skips consolidation, many small files)
+      success = pipeline.load_company_via_api(
+        ticker=args.ticker,
+        year=args.year,
+      )
+    sys.exit(0 if success else 1)
+
+  elif args.command == "ingest-api":
+    success = pipeline.ingest_via_api(
       year=args.year,
-      force_reconsolidate=args.force_reconsolidate,
+      rebuild=args.rebuild,
     )
     sys.exit(0 if success else 1)
 

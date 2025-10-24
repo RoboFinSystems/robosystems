@@ -1090,7 +1090,7 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     table_name: str,
-    s3_pattern: str,
+    s3_pattern: str | List[str],
   ) -> Dict[str, Any]:
     """
     Create a DuckDB staging table (external view over S3).
@@ -1098,7 +1098,7 @@ class GraphClient(BaseGraphClient):
     Args:
         graph_id: Graph database identifier
         table_name: Name for the table
-        s3_pattern: S3 glob pattern for parquet files
+        s3_pattern: S3 glob pattern (string) or list of S3 file paths
 
     Returns:
         Table creation response with status and metadata
@@ -1182,9 +1182,8 @@ class GraphClient(BaseGraphClient):
     """
     response = await self._request(
       "POST",
-      f"/databases/{graph_id}/tables/ingest",
+      f"/databases/{graph_id}/tables/{table_name}/ingest",
       json_data={
-        "table_name": table_name,
         "ignore_errors": ignore_errors,
         "rebuild": rebuild,
       },

@@ -8,7 +8,7 @@ from robosystems.models.iam import User, GraphTable, GraphFile
 from robosystems.models.api.table import (
   FileUploadRequest,
   FileUploadResponse,
-  FileUploadCompleteRequest,
+  FileUpdateRequest,
 )
 from robosystems.models.api.common import ErrorResponse
 from robosystems.middleware.auth.dependencies import get_current_user
@@ -52,7 +52,7 @@ async def get_upload_url(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  graph, repo = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
 
   if not graph:
     raise HTTPException(
@@ -176,24 +176,22 @@ async def get_upload_url(
     )
 
 
-@router.post(
-  "/files/{file_id}/complete",
+@router.patch(
+  "/tables/files/{file_id}",
   response_model=dict,
-  summary="Complete File Upload",
-  description="Mark a file upload as completed and update table statistics",
+  summary="Update File",
+  description="Update file metadata after upload (size, row count). Marks file as completed.",
   responses={
-    200: {"description": "Upload completed successfully"},
+    200: {"description": "File updated successfully"},
     400: {"description": "Invalid file size", "model": ErrorResponse},
     403: {"description": "Access denied to graph", "model": ErrorResponse},
     404: {"description": "Graph or file not found", "model": ErrorResponse},
   },
 )
-async def complete_upload(
+async def update_file(
   graph_id: str = Path(..., description="Graph database identifier"),
   file_id: str = Path(..., description="File identifier"),
-  request: FileUploadCompleteRequest = Body(
-    ..., description="Upload completion details"
-  ),
+  request: FileUpdateRequest = Body(..., description="File update details"),
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
@@ -205,7 +203,7 @@ async def complete_upload(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  graph, repo = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
 
   if not graph:
     raise HTTPException(
@@ -220,7 +218,7 @@ async def complete_upload(
       detail=f"File {file_id} not found",
     )
 
-  logger.info(f"Completing upload for file {file_id} in graph {graph_id}")
+  logger.info(f"Updating file metadata for {file_id} in graph {graph_id}")
 
   # Validate file size
   if request.file_size_bytes <= 0:
@@ -291,7 +289,7 @@ async def complete_upload(
           )
 
     logger.info(
-      f"Completed upload for file {file_id}: {graph_file.file_size_bytes} bytes"
+      f"Updated file {file_id}: {graph_file.file_size_bytes} bytes, status=completed"
     )
 
     return {
@@ -301,8 +299,8 @@ async def complete_upload(
     }
 
   except Exception as e:
-    logger.error(f"Failed to complete upload for file {file_id}: {e}")
+    logger.error(f"Failed to update file {file_id}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to complete upload: {str(e)}",
+      detail=f"Failed to update file: {str(e)}",
     )

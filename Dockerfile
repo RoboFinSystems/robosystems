@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     libpq-dev \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/* \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv
@@ -28,21 +29,56 @@ COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_exten
     /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension
 
 # Copy duckdb extension (required for DuckDB → Kuzu direct ingestion)
+# DuckDB extension requires 3 files: main extension + installer + loader
 COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/duckdb/libduckdb.kuzu_extension \
     /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb/libduckdb.kuzu_extension
+COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_installer.kuzu_extension \
+    /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_installer.kuzu_extension
+COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_loader.kuzu_extension \
+    /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_loader.kuzu_extension
 
-# Verify extension integrity with checksums
+# Download DuckDB shared library from official release (required by Kuzu DuckDB extension)
+# Architecture-specific URLs: amd64 vs aarch64 (arm64)
+RUN DUCKDB_VERSION=1.1.3 && \
+    if [ "${TARGETARCH}" = "arm64" ]; then \
+        DUCKDB_ARCH="aarch64"; \
+        DUCKDB_SHA256="45850fb50c72163cbf1c8840c4ecd140a00910d285c01cd1939361cb9422f79d"; \
+    elif [ "${TARGETARCH}" = "amd64" ]; then \
+        DUCKDB_ARCH="amd64"; \
+        DUCKDB_SHA256="cd7648e1eed7f7b125def72a3924eacc218c99c66e49e5be8ddd3c391f1fe466"; \
+    else \
+        echo "ERROR: Unsupported architecture: ${TARGETARCH}" && exit 1; \
+    fi && \
+    curl -L -o /tmp/libduckdb.zip \
+        "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-${DUCKDB_ARCH}.zip" && \
+    unzip -j /tmp/libduckdb.zip "libduckdb.so" -d /usr/local/lib/ && \
+    rm /tmp/libduckdb.zip && \
+    echo "${DUCKDB_SHA256}  /usr/local/lib/libduckdb.so" | sha256sum -c - || \
+        (echo "ERROR: libduckdb.so checksum verification failed!" && exit 1)
+
+# Verify Kuzu extension integrity with checksums
 RUN if [ "${TARGETARCH}" = "arm64" ]; then \
         echo "ea1b8f35234e57e961e1e0ca540769fc0192ff2e360b825a7e7b0e532f0f696e  /kuzu-extension/0.11.3/linux_arm64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
         (echo "ERROR: ARM64 httpfs extension checksum verification failed!" && exit 1); \
         echo "268150b3c5691febfe2f7ddd5a92270b9946a7053eec29613d385f60c7ee8e56  /kuzu-extension/0.11.3/linux_arm64/duckdb/libduckdb.kuzu_extension" | sha256sum -c - || \
         (echo "ERROR: ARM64 duckdb extension checksum verification failed!" && exit 1); \
+        echo "20dfdaed5f6820cc9c0b9aafaf09a5710a817c51d0be853898435bdbcc56125d  /kuzu-extension/0.11.3/linux_arm64/duckdb/libduckdb_installer.kuzu_extension" | sha256sum -c - || \
+        (echo "ERROR: ARM64 duckdb_installer extension checksum verification failed!" && exit 1); \
+        echo "06f7ed5629d754d38fc69ae4e7e854ae82d52f5c836c59cfa826d7d31a424474  /kuzu-extension/0.11.3/linux_arm64/duckdb/libduckdb_loader.kuzu_extension" | sha256sum -c - || \
+        (echo "ERROR: ARM64 duckdb_loader extension checksum verification failed!" && exit 1); \
     elif [ "${TARGETARCH}" = "amd64" ]; then \
         echo "f7ba3e34b801d8d023a5247f797b99f99fa6c4be104f6c9bbf4ae15d4c97d1da  /kuzu-extension/0.11.3/linux_amd64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
         (echo "ERROR: AMD64 httpfs extension checksum verification failed!" && exit 1); \
         echo "f3c118567f1806298ceb05f24c6f3fcd40b3f5b5ef76f2286658c1804b779523  /kuzu-extension/0.11.3/linux_amd64/duckdb/libduckdb.kuzu_extension" | sha256sum -c - || \
         (echo "ERROR: AMD64 duckdb extension checksum verification failed!" && exit 1); \
+        echo "cdf75357e259c82977068f0f03fe74da05a3ec2d90bab52172277a180e61adc3  /kuzu-extension/0.11.3/linux_amd64/duckdb/libduckdb_installer.kuzu_extension" | sha256sum -c - || \
+        (echo "ERROR: AMD64 duckdb_installer extension checksum verification failed!" && exit 1); \
+        echo "6ef742cbfc21a329c67e9ad8f9f720e58defb3dd3fc1f8948b9974278a4f64d0  /kuzu-extension/0.11.3/linux_amd64/duckdb/libduckdb_loader.kuzu_extension" | sha256sum -c - || \
+        (echo "ERROR: AMD64 duckdb_loader extension checksum verification failed!" && exit 1); \
     fi
+
+# Register libduckdb.so with the dynamic linker
+RUN ldconfig
 
 WORKDIR /build
 
@@ -126,6 +162,10 @@ COPY .github/configs/stacks.yml /app/configs/stacks.yml
 
 # Make entrypoint script executable
 RUN chmod +x bin/entrypoint.sh
+
+# Copy DuckDB shared library from builder (required by Kuzu DuckDB extension)
+COPY --from=builder /usr/local/lib/libduckdb.so /usr/local/lib/libduckdb.so
+RUN ldconfig
 
 # Use non-root user for better security
 RUN useradd -m appuser

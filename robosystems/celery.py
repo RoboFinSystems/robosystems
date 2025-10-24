@@ -37,6 +37,7 @@ celery_app = Celery(
     "robosystems.tasks.sec_xbrl.ingestion",
     "robosystems.tasks.sec_xbrl.consolidation",
     "robosystems.tasks.sec_xbrl.maintenance",
+    "robosystems.tasks.sec_xbrl.duckdb_ingestion",
     # Graph operations
     "robosystems.tasks.graph_operations.backup",
     "robosystems.tasks.graph_operations.create_entity_graph",

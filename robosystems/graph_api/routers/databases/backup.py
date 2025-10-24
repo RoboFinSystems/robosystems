@@ -5,7 +5,6 @@ This module provides endpoints for creating backups and restoring
 Kuzu databases.
 """
 
-from typing import Dict, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path
 from fastapi import status as http_status
 
@@ -77,48 +76,3 @@ async def create_backup(
     monitor_url=f"/tasks/{task_id}/monitor",
     estimated_completion_time=None,  # Could calculate based on database size
   )
-
-
-@router.post("/{graph_id}/restore")
-async def restore_database(
-  backup_path: str,
-  graph_id: str = Path(..., description="Graph database identifier"),
-  cluster_service=Depends(get_cluster_service),
-) -> Dict[str, Any]:
-  """
-  Restore a database from backup.
-
-  Restores a database from a previously created backup.
-  The database must not already exist.
-  """
-  if cluster_service.read_only:
-    raise HTTPException(
-      status_code=http_status.HTTP_403_FORBIDDEN,
-      detail="Restore operations not allowed on read-only nodes",
-    )
-
-  # Validate database doesn't already exist
-  if graph_id in cluster_service.db_manager.list_databases():
-    raise HTTPException(
-      status_code=http_status.HTTP_409_CONFLICT,
-      detail=f"Database {graph_id} already exists",
-    )
-
-  # Restore functionality would require:
-  # 1. Downloading backup from S3
-  # 2. Extracting to proper database location
-  # 3. Registering in database manager
-
-  logger.warning(
-    f"Restore requested for {graph_id} from {backup_path} - NOT IMPLEMENTED"
-  )
-
-  return {
-    "status": "not_implemented",
-    "message": "Database restore functionality is not yet implemented",
-    "details": "Restore requires coordination with backup manager and S3 adapter",
-  }
-
-
-# NOTE: SSE monitoring has been moved to the generic /tasks/{task_id}/monitor endpoint
-# This endpoint is no longer needed as all task monitoring is centralized

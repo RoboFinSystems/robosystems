@@ -274,9 +274,18 @@ kuzu-query graph_id query format="table" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
 
 ## SEC Local Pipeline - Testing and Development ##
-# SEC Local - Load single company by ticker and (all) years (e.g., just sec-load NVDA)
-sec-load ticker year="" backend="kuzu" env=".env":
-    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} --force-reconsolidate
+# SEC Local supports two ingestion approaches:
+#   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
+#   - "copy": Consolidation → COPY-based ingestion (fallback, emulates production pipeline, uses consolidated files)
+#
+# Examples:
+#   just sec-load NVDA 2025                    # Load NVIDIA 2025 data using DuckDB approach (default)
+#   just sec-load NVDA 2025 kuzu copy          # Load using traditional COPY approach (fallback/prod emulation)
+#   just sec-load AAPL "" neo4j duckdb         # Load Apple all years to Neo4j using DuckDB approach
+
+# SEC Local - Load single company by ticker and year(s)
+sec-load ticker year="" backend="kuzu" ingestion_method="duckdb" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} {{ if ingestion_method == "copy" { "--use-copy-pipeline" } else { "" } }}
 
 # SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
 sec-health verbose="" env=".env":
@@ -286,28 +295,39 @@ sec-health verbose="" env=".env":
 sec-reset backend="kuzu" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
 
-## SEC Orchestrator - For large-scale production processing ##
-# SEC - Plan processing with optional company limit for testing
+## SEC Production Pipeline - Large-scale orchestrated processing ##
+# Uses proven consolidation + COPY approach for large-scale data processing.
+# This is the production-grade pipeline that has been validated at scale.
+#
+# Pipeline phases: download → process → consolidate → ingest (COPY-based)
+#
+# Examples:
+#   just sec-plan 2020 2025 100              # Plan processing for 100 companies (testing)
+#   just sec-phase download                   # Start download phase
+#   just sec-phase-resume consolidate         # Resume consolidation from checkpoint
+#   just sec-status                           # Check pipeline status
+
+# SEC Production - Plan processing with optional company limit for testing
 sec-plan start_year="2020" end_year="2025" max_companies="" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {{start_year}} --end-year {{end_year}} --max-companies {{max_companies}}
 
-# SEC - Start a specific phase: download, process, consolidate, ingest
+# SEC Production - Start a specific phase: download, process, consolidate, ingest
 sec-phase phase env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}}
 
-# SEC - Resume a phase from last checkpoint
+# SEC Production - Resume a phase from last checkpoint
 sec-phase-resume phase env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --resume
 
-# SEC - Retry failed companies in a phase
+# SEC Production - Retry failed companies in a phase
 sec-phase-retry phase env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --retry-failed
 
-# SEC - Get status of all phases
+# SEC Production - Get status of all phases
 sec-status env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator status
 
-# SEC - Reset database (requires confirmation)
+# SEC Production - Reset database (requires confirmation)
 sec-reset-remote confirm="" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
 

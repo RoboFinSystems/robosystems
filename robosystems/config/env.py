@@ -106,6 +106,9 @@ from .constants import (
   KUZU_STANDARD_CHUNK_SIZE,
   KUZU_ENTERPRISE_CHUNK_SIZE,
   KUZU_PREMIUM_CHUNK_SIZE,
+  # DuckDB configuration
+  DUCKDB_MAX_THREADS,
+  DUCKDB_MEMORY_LIMIT,
 )
 
 
@@ -478,6 +481,10 @@ class EnvConfig:
   KUZU_PREMIUM_CHUNK_SIZE = get_int_env(
     "KUZU_PREMIUM_CHUNK_SIZE", KUZU_PREMIUM_CHUNK_SIZE
   )
+
+  # DuckDB Configuration (with environment variable overrides)
+  DUCKDB_MAX_THREADS = get_int_env("DUCKDB_MAX_THREADS", DUCKDB_MAX_THREADS)
+  DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", DUCKDB_MEMORY_LIMIT)
 
   # Kuzu-specific admission control
   KUZU_ADMISSION_MEMORY_THRESHOLD = get_float_env(
