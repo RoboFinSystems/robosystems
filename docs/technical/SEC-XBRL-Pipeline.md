@@ -49,6 +49,8 @@ just sec-load AAPL 2025
 just sec-load TSLA 2023
 ```
 
+**Note:** All query examples throughout this guide use NVIDIA (NVDA) data. You can substitute any other company ticker symbol in the queries.
+
 **What happens during loading:**
 
 1. **Download** - Fetches XBRL files from SEC EDGAR
@@ -85,7 +87,14 @@ The health check shows:
 
 ## Accessing the Data
 
-You have four options for querying the loaded SEC data:
+You have multiple options for accessing and querying the loaded SEC data:
+
+1. **[Direct Cypher Queries](#option-1-direct-cypher-queries-for-development)** - Command-line Cypher queries via `just graph-query` (no authentication)
+2. **[Query Staging Tables](#option-2-query-staging-tables-for-data-validation)** - SQL queries on DuckDB staging via `just tables-query`
+3. **[MCP Client](#option-3-mcp-client-for-ai-agents)** - AI agent integration through Claude Desktop
+4. **[Python API](#option-4-python-api-for-applications)** - Programmatic access via RoboSystems Python client
+5. **[G.V() Visual Explorer](#option-5-gv-visual-graph-explorer-for-interactive-exploration)** - Interactive graph visualization (recommended partner tool)
+6. **[SQL IDE Tools](#option-6-sql-ide-tools-for-staging-data-validation)** - Direct database access with DuckDB-compatible IDEs
 
 ### Option 1: Direct Cypher Queries (For Development)
 
@@ -107,13 +116,13 @@ just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE el.
 ```cypher
 -- Find all facts for a NVDA SEC CIK
 MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
-WHERE e.identifier = '0001045810'
+WHERE e.cik = '0001045810'
 RETURN f
 
 -- Get balance sheet items
 MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
 WHERE el.name STARTS WITH 'Assets'
-RETURN el.name, el.name, f.numeric_value
+RETURN el.name, f.numeric_value
 
 -- Find facts by period
 MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
@@ -236,67 +245,7 @@ schema = client.get_schema()
 print(schema)
 ```
 
-## Database Visualization Tools
-
-### DuckDB Staging with SQL IDEs
-
-You can open the DuckDB staging database directly in any SQL IDE that supports DuckDB:
-
-**Database Location:**
-- **Path**: `./data/staging/sec.duckdb` (from RoboSystems root directory)
-
-**Using DuckDB CLI:**
-
-```bash
-# Connect directly to the staging database
-duckdb ./data/staging/sec.duckdb
-
-# Run SQL queries interactively
-D> SELECT identifier, name, country FROM Entity LIMIT 10;
-D> .tables  # List all tables
-D> .schema Entity  # Show table schema
-```
-
-**Using SQL IDE Tools:**
-
-Any SQL IDE with DuckDB support can connect to the staging database for visual exploration and querying.
-
-**Example queries:**
-```sql
--- See all companies loaded
-SELECT identifier, name, country FROM Entity;
-
--- Check facts by year
-SELECT
-  strftime(p.instant_date, '%Y') as year,
-  COUNT(DISTINCT f.identifier) as fact_count
-FROM Fact f
-JOIN Period p ON f.period_identifier = p.identifier
-GROUP BY year
-ORDER BY year DESC;
-
--- Find largest revenue figures
-SELECT
-  e.name,
-  f.numeric_value,
-  p.instant_date
-FROM Fact f
-JOIN Entity e ON f.entity_identifier = e.identifier
-JOIN Element el ON f.element_identifier = el.identifier
-JOIN Period p ON f.period_identifier = p.identifier
-WHERE el.name = 'Revenues'
-ORDER BY f.numeric_value DESC
-LIMIT 10;
-```
-
-**Benefits of Direct SQL Access:**
-- Browse all staging tables
-- Run SQL queries with full DuckDB features
-- Export query results to CSV/JSON
-- View table schemas and row counts
-- Data quality checks before graph ingestion
-
-### Visualize Kuzu Graphs with G.V()
+### Option 5: G.V() Visual Graph Explorer (For Interactive Exploration)
 
 [G.V()](https://gdotv.com/) is a powerful graph visualization tool and our recommended partner for visualizing Kuzu databases:
 
@@ -342,7 +291,7 @@ LIMIT 20
 
 -- Explore full entity context
 MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
-WHERE e.identifier = '0001045810'
+WHERE e.cik = '0001045810'
 RETURN e, r, f
 LIMIT 10
 ```
@@ -352,6 +301,70 @@ LIMIT 10
 - Use WHERE clauses to filter to specific companies or time periods
 - Click nodes to see properties
 - Use the layout options to organize the graph
+
+### Option 6: SQL IDE Tools (For Staging Data Validation)
+
+You can open the DuckDB staging database directly in any SQL IDE that supports DuckDB:
+
+**Database Location:**
+- **Path**: `./data/staging/sec.duckdb` (from RoboSystems root directory)
+
+**Using DuckDB CLI:**
+
+```bash
+# Connect directly to the staging database
+duckdb ./data/staging/sec.duckdb
+
+# Run SQL queries interactively
+D> SELECT identifier, name, industry FROM Entity LIMIT 10;
+D> .tables  # List all tables
+D> .schema Entity  # Show table schema
+```
+
+**Using SQL IDE Tools:**
+
+Any SQL IDE with DuckDB support can connect to the staging database for visual exploration and querying.
+
+**Example queries:**
+```sql
+-- See all companies loaded
+SELECT identifier, name, industry, ticker FROM Entity;
+
+-- Check facts by year
+SELECT
+  strftime(CAST(p.instant_date AS DATE), '%Y') as year,
+  COUNT(DISTINCT f.identifier) as fact_count
+FROM Fact f
+JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src
+JOIN Period p ON fhp.dst = p.identifier
+WHERE p.instant_date IS NOT NULL
+GROUP BY year
+ORDER BY year DESC;
+
+-- Find largest revenue figures
+SELECT
+  e.name,
+  f.numeric_value,
+  p.instant_date
+FROM Fact f
+JOIN FACT_HAS_ELEMENT fhe ON f.identifier = fhe.src
+JOIN Element el ON fhe.dst = el.identifier
+JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src
+JOIN Period p ON fhp.dst = p.identifier
+JOIN REPORT_HAS_FACT rhf ON f.identifier = rhf.dst
+JOIN ENTITY_HAS_REPORT ehr ON rhf.src = ehr.dst
+JOIN Entity e ON ehr.src = e.identifier
+WHERE el.name = 'Revenues'
+ORDER BY f.numeric_value DESC
+LIMIT 10;
+```
+
+**Benefits of Direct SQL Access:**
+- Browse all staging tables
+- Run SQL queries with full DuckDB features
+- Export query results to CSV/JSON
+- View table schemas and row counts
+- Data quality checks before graph ingestion
 
 ## Understanding the Data Model
 
