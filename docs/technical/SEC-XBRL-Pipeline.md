@@ -254,7 +254,6 @@ print(schema)
 - Interactive graph exploration
 - Real-time Cypher query visualization
 - Perfect for understanding complex financial relationships
-- Free and open-source
 
 ![Example graph visualization in G.V()](images/report-graph-viz.png)
 
