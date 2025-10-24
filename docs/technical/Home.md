@@ -6,8 +6,9 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 
 New to RoboSystems? Start here:
 
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
 - **Quick Start**: See the [README](https://github.com/RoboFinSystems/robosystems#quick-start) for installation
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
+
 
 ## Core Documentation
 
