@@ -380,9 +380,8 @@ All deployments automated through GitHub Actions with self-hosted runners for in
 - **`run-migrations.yml`**: Database migrations on RDS instances
 
 **Runner Configuration**:
-- Self-hosted runner for infrastructure operations
-- GitHub-hosted for Docker builds
-- Automated deployments: `staging` branch → staging, `main` → production
+- Self-hosted runner available if deployed with `bootstrap.yml`
+- GitHub-hosted for Docker builds and as a fallback if self-hosted is not available
 
 ### CloudFormation Templates
 
