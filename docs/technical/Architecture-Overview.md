@@ -109,7 +109,7 @@ FastAPI microservice providing unified interface for all backends:
 - **Streaming Support**: NDJSON for large query results
 - **Admission Control**: CPU/memory backpressure
 
-**See**: [Graph API Documentation](/robosystems/graph_api/README.md) in codebase
+**See**: [Graph API Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md) in codebase
 
 ### Backend Factory System
 
@@ -124,7 +124,7 @@ The backend factory provides pluggable graph database backends with a unified in
 - **Query Translation**: Cypher query execution with backend-specific optimizations
 - **Ingestion Strategies**: Parquet-optimized bulk data loading for each backend type
 
-**See**: [Backend Documentation](/robosystems/graph_api/backends/README.md) in codebase
+**See**: [Backend Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/backends/README.md) in codebase
 
 ### Client Factory System
 
@@ -139,7 +139,7 @@ The client factory layer provides intelligent routing between application code a
 - **Connection Reuse**: HTTP/2 connection pooling for efficiency
 - **Retry Logic**: Exponential backoff with jitter for transient errors
 
-**See**: [Client Factory Documentation](/robosystems/graph_api/client/README.md) in codebase
+**See**: [Client Factory Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/client/README.md) in codebase
 
 ### DuckDB Staging System
 
@@ -211,7 +211,7 @@ Business workflow orchestration and service layer:
 - **Data Ingestion**: High-performance bulk data loading using COPY operations
 - **Credit Service**: AI agent usage tracking with token-based consumption
 
-**See**: [Operations Documentation](/robosystems/operations/README.md) in codebase
+**See**: [Operations Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md) in codebase
 
 ### Processors
 
@@ -230,7 +230,7 @@ Data transformation pipeline and business logic:
 - **`ScheduleProcessor`**: Financial schedule generation and formatting
 - **`QBTransactionsProcessor`**: QuickBooks data processing and normalization
 
-**See**: [Processors Documentation](/robosystems/processors/README.md) in codebase
+**See**: [Processors Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/processors/README.md) in codebase
 
 ### Middleware Components
 
@@ -262,14 +262,14 @@ Data transformation pipeline and business logic:
 - Multi-tenant architecture with user management and access control
 - Credit system and usage analytics models
 
-**See**: [IAM Models Documentation](/robosystems/models/iam/README.md) in codebase
+**See**: [IAM Models Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/iam/README.md) in codebase
 
 **API Models** (`/robosystems/models/api/`):
 - Centralized Pydantic models for API request/response validation
 - OpenAPI documentation generation and type safety
 - Consistent structure across all API endpoints
 
-**See**: [API Models Documentation](/robosystems/models/api/README.md) in codebase
+**See**: [API Models Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/models/api/README.md) in codebase
 
 ## Data Storage
 
