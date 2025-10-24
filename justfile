@@ -269,23 +269,29 @@ graph-info graph_id url="http://localhost:8001" env=".env":
 graph-query graph_id query format="table" url="http://localhost:8001" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
 
-# Kuzu embedded database direct query (bypasses API, Kuzu-specific)
+# Graph API - execute SQL query on staging tables (DuckDB-based)
+tables-query graph_id query format="table" url="http://localhost:8001" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
+
+# Kuzu embedded database direct query (bypasses API)
 kuzu-query graph_id query format="table" env=".env":
     {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
+
+# DuckDB staging database direct query (bypasses API)
+duckdb-query db_name query format="table" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{db_name}}.duckdb --query "{{query}}" --format {{format}}
 
 ## SEC Local Pipeline - Testing and Development ##
 # SEC Local supports two ingestion approaches:
 #   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
-#   - "copy": Consolidation → COPY-based ingestion (fallback, emulates production pipeline, uses consolidated files)
-#
+#   - "copy": Consolidation → COPY-based ingestion (emulates production pipeline, uses consolidated files)
 # Examples:
-#   just sec-load NVDA 2025                    # Load NVIDIA 2025 data using DuckDB approach (default)
-#   just sec-load NVDA 2025 kuzu copy          # Load using traditional COPY approach (fallback/prod emulation)
-#   just sec-load AAPL "" neo4j duckdb         # Load Apple all years to Neo4j using DuckDB approach
+#   just sec-load NVDA 2025                           # Load NVIDIA 2025 data using DuckDB approach (default)
+#   just sec-load NVDA 2025 duckdb|copy kuzu|neo4j    # Load using traditional COPY approach (prod emulation)
 
 # SEC Local - Load single company by ticker and year(s)
-sec-load ticker year="" backend="kuzu" ingestion_method="duckdb" env=".env":
-    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} {{ if ingestion_method == "copy" { "--use-copy-pipeline" } else { "" } }}
+sec-load ticker year="" ingest_method="duckdb" backend="kuzu" env=".env":
+    {{_dev}} UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} {{ if ingest_method == "copy" { "--use-copy-pipeline" } else { "" } }}
 
 # SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
 sec-health verbose="" env=".env":
@@ -297,15 +303,10 @@ sec-reset backend="kuzu" env=".env":
 
 ## SEC Production Pipeline - Large-scale orchestrated processing ##
 # Uses proven consolidation + COPY approach for large-scale data processing.
-# This is the production-grade pipeline that has been validated at scale.
-#
 # Pipeline phases: download → process → consolidate → ingest (COPY-based)
-#
 # Examples:
-#   just sec-plan 2020 2025 100              # Plan processing for 100 companies (testing)
-#   just sec-phase download                   # Start download phase
-#   just sec-phase-resume consolidate         # Resume consolidation from checkpoint
-#   just sec-status                           # Check pipeline status
+#   just sec-plan 2020 2025 100                            # Plan processing for 100 companies
+#   just sec-phase download|process|consolidate|ingest     # Start a specific phase
 
 # SEC Production - Plan processing with optional company limit for testing
 sec-plan start_year="2020" end_year="2025" max_companies="" env=".env":
