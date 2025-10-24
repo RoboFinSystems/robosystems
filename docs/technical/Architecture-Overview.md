@@ -60,7 +60,7 @@ The FastAPI backend provides a RESTful API with:
 
 **Location**: `/robosystems/middleware/mcp/`
 
-Model Context Protocol server for AI integration:
+Model Context Protocol server for AI integration via the FastAPI Backend:
 
 - **Claude Integration**: Native support for Claude Desktop
 - **Natural Language Queries**: Convert user intent to Cypher
