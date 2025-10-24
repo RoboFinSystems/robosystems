@@ -86,11 +86,10 @@ RoboSystems supports multiple graph database backends:
 
 **Active Backends:**
 - **Kuzu**: Primary backend - high-performance embedded graph database with columnar storage
-  - All production tiers use Kuzu
   - Optimized for analytical workloads
   - Native DuckDB integration for bulk ingestion
 
-**Optional Backends (Disabled by Default):**
+**Optional Backends:**
 - **Neo4j Community**: Client-server architecture with advanced query features
 - **Neo4j Enterprise**: Clustering and advanced security features
 
