@@ -245,7 +245,7 @@ schema = client.get_schema()
 print(schema)
 ```
 
-### Option 5: G.V() Visual Graph Explorer (For Interactive Exploration)
+### Option 5: G.V() Graph IDE For Interactive Exploration
 
 [G.V()](https://gdotv.com/) is a powerful graph visualization tool and our recommended partner for visualizing Kuzu databases:
 
