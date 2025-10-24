@@ -89,7 +89,7 @@ The health check shows:
 
 You have multiple options for accessing and querying the loaded SEC data:
 
-1. **[Direct Cypher Queries](#option-1-direct-cypher-queries-for-development)** - Command-line Cypher queries via `just graph-query` (no authentication)
+1. **[Direct Cypher Queries](#option-1-direct-cypher-queries-for-development)** - Command-line Cypher queries via `just graph-query` 
 2. **[Query Staging Tables](#option-2-query-staging-tables-for-data-validation)** - SQL queries on DuckDB staging via `just tables-query`
 3. **[MCP Client](#option-3-mcp-client-for-ai-agents)** - AI agent integration through Claude Desktop
 4. **[Python API](#option-4-python-api-for-applications)** - Programmatic access via RoboSystems Python client
