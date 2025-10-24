@@ -265,7 +265,7 @@ print(schema)
 1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
 2. Open the application
 3. Connect to your local Kuzu database:
-   - **Database Path**: `./data/kuzu/sec/` (from RoboSystems root directory)
+   - **Database Path**: `./data/kuzu-dbs/sec.kuzu` (from RoboSystems root directory)
 4. Run Cypher queries and visualize results interactively
 
 **What you can do:**
