@@ -15,9 +15,9 @@ Architecture:
 - Works directly with processed files (many small files) instead of consolidated files
 - Tests performance with high file counts
 
-IMPORTANT: This approach ALWAYS rebuilds the graph from scratch because it discovers
-and loads ALL files from S3, not just new/changed files. This is fundamentally different
-from the COPY-based approach which works incrementally with consolidated files.
+LIMITATION: This approach currently ALWAYS rebuilds the graph from scratch because it
+discovers and loads ALL files from S3, not just new/changed files. This is fundamentally
+different from the COPY-based approach which works incrementally with consolidated files.
 
 To add a new company:
 1. Process the company's filings (creates processed files in S3)
@@ -96,7 +96,18 @@ class XBRLDuckDBGraphProcessor:
 
     try:
       # Get graph client for API calls
-      client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
+      try:
+        client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
+      except Exception as client_err:
+        logger.error(
+          f"Failed to initialize graph client for {self.graph_id}: {client_err}",
+          exc_info=True,
+        )
+        return {
+          "status": "error",
+          "error": f"Graph client initialization failed: {str(client_err)}",
+          "duration_seconds": time.time() - start_time,
+        }
 
       # Step 1: Discover processed files
       logger.info("Step 1: Discovering processed Parquet files...")

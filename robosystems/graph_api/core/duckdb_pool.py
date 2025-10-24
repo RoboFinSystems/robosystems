@@ -279,11 +279,16 @@ class DuckDBConnectionPool:
           f"Configured DuckDB to use S3 endpoint: {endpoint} (from {env.AWS_ENDPOINT_URL})"
         )
 
-      # Performance settings
-      conn.execute("SET threads TO 4")  # Limit threads to prevent oversubscription
-      conn.execute("SET memory_limit='2GB'")  # Per-connection memory limit
+      # Performance settings (configurable via environment variables)
+      from robosystems.config import env
 
-      logger.debug("Configured DuckDB connection with S3 access and extensions")
+      conn.execute(f"SET threads TO {env.DUCKDB_MAX_THREADS}")
+      conn.execute(f"SET memory_limit='{env.DUCKDB_MEMORY_LIMIT}'")
+
+      logger.debug(
+        f"Configured DuckDB connection with S3 access, extensions, "
+        f"threads={env.DUCKDB_MAX_THREADS}, memory_limit={env.DUCKDB_MEMORY_LIMIT}"
+      )
 
     except Exception as e:
       logger.warning(f"Could not fully configure DuckDB connection: {e}")

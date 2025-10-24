@@ -68,7 +68,3 @@ def ingest_via_duckdb(
   except Exception as e:
     logger.error(f"SEC DuckDB-based ingestion task failed: {e}", exc_info=True)
     raise self.retry(exc=e)
-
-
-# Backwards compatibility alias (deprecated)
-ingest_via_api_pattern = ingest_via_duckdb

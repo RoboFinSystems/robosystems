@@ -76,10 +76,3 @@ async def create_backup(
     monitor_url=f"/tasks/{task_id}/monitor",
     estimated_completion_time=None,  # Could calculate based on database size
   )
-
-
-# NOTE: Database restore functionality has been moved to restore.py
-# The restore endpoint is fully implemented there with S3 integration
-
-# NOTE: SSE monitoring has been moved to the generic /tasks/{task_id}/monitor endpoint
-# This endpoint is no longer needed as all task monitoring is centralized

@@ -210,6 +210,14 @@ KUZU_ENTERPRISE_CHUNK_SIZE = 5000  # rows
 KUZU_PREMIUM_CHUNK_SIZE = 10000  # rows
 
 # =============================================================================
+# DUCKDB CONFIGURATION
+# =============================================================================
+
+# DuckDB Performance Settings
+DUCKDB_MAX_THREADS = 4  # Limit threads to prevent oversubscription
+DUCKDB_MEMORY_LIMIT = "2GB"  # Per-connection memory limit
+
+# =============================================================================
 # STATIC STRING/URI CONSTANTS
 # =============================================================================
 
