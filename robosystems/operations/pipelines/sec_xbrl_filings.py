@@ -369,105 +369,10 @@ class SECXBRLPipeline:
       )
       raise
 
-  # STAGE 3: Ingestion
-  def ingest_year_data(self, year: int, batch_size: int = 1000) -> Dict:
-    """
-    Stage 3: Ingest processed parquet files for a year into Kuzu.
-
-    Uses COPY with IGNORE_ERRORS for all ingestion operations,
-    providing optimal performance with automatic duplicate handling.
-
-    Args:
-        year: Year to ingest
-        batch_size: Number of files per ingestion batch
-
-    Returns:
-        Dict with ingestion results
-    """
-    logger.info(f"Starting Stage 3: Ingesting year {year} data")
-
-    # Initialize tracking
-    stage_key = f"{self.redis_key}:stage3:year{year}"
-
-    try:
-      # Get list of processed files for this year
-      processed_files = self._list_processed_files_by_year(year)
-
-      if not processed_files:
-        logger.warning(f"No processed files found for year {year}")
-        return {
-          "stage": "ingestion",
-          "status": "completed",
-          "year": year,
-          "message": "No processed files to ingest",
-        }
-
-      stage_data = {
-        "stage": "ingestion",
-        "year": year,
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "total_files": len(processed_files),
-        "ingested_files": 0,
-        "batch_size": batch_size,
-      }
-
-      self.redis_client.hset(stage_key, mapping=stage_data)
-      self.redis_client.expire(stage_key, self.ttl)
-
-      # Trigger Kuzu ingestion for this year's data
-      from ...tasks.sec_xbrl.ingestion import ingest_sec_data
-      from ...celery import QUEUE_SHARED_PROCESSING
-
-      # Create year-specific ingestion task
-      ingestion_task = ingest_sec_data.apply_async(  # type: ignore[attr-defined]
-        kwargs={
-          "pipeline_run_id": f"{self.pipeline_run_id}_ingestion_year{year}",
-          "year": year,
-          "bucket": self.processed_bucket,
-          "prefix": f"processed/year={year}/",
-          "db_name": "sec",
-          "graph_id": "sec",
-          "batch_mode": True,
-        },
-        queue=QUEUE_SHARED_PROCESSING,
-        priority=10,
-      )
-
-      # Mark stage complete
-      stage_data.update(
-        {
-          "status": "completed",
-          "completed_at": datetime.now(timezone.utc).isoformat(),
-          "ingested_files": len(processed_files),
-          "ingestion_task_id": ingestion_task.id,
-        }
-      )
-      self.redis_client.hset(stage_key, mapping=stage_data)
-
-      logger.info(
-        f"Stage 3 complete: Triggered ingestion of {len(processed_files)} files for year {year}"
-      )
-
-      return {
-        "stage": "ingestion",
-        "status": "completed",
-        "year": year,
-        "ingested_files": len(processed_files),
-        "ingestion_task_id": ingestion_task.id,
-      }
-
-    except Exception as e:
-      logger.error(f"Stage 3 failed for year {year}: {e}")
-      self.redis_client.hset(
-        stage_key,
-        mapping={
-          "status": "failed",
-          "error": str(e),
-          "failed_at": datetime.now(timezone.utc).isoformat(),
-        },
-      )
-      raise
+  # STAGE 3: Ingestion - DEPRECATED
+  # This method is no longer used. The DuckDB-based ingestion pattern
+  # (robosystems/tasks/sec_xbrl/duckdb_ingestion.py) is now the default.
+  # The consolidation-based approach has been replaced.
 
   # Helper methods
   def _discover_companies(self, max_companies: Optional[int] = None) -> List[Dict]:

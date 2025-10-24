@@ -79,6 +79,10 @@ class TestDuckDBTableManager:
     mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
 
+    mock_probe_result = MagicMock()
+    mock_probe_result.description = [("identifier", None), ("name", None)]
+    mock_conn.execute.return_value = mock_probe_result
+
     request = TableCreateRequest(
       graph_id="test_graph",
       table_name="customers",
@@ -94,7 +98,7 @@ class TestDuckDBTableManager:
 
     mock_conn.execute.assert_called()
     execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
-    assert any("CREATE OR REPLACE VIEW" in call for call in execute_calls)
+    assert any("CREATE OR REPLACE TABLE" in call for call in execute_calls)
     assert any("read_parquet" in call for call in execute_calls)
 
   @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
@@ -118,6 +122,10 @@ class TestDuckDBTableManager:
     mock_conn = MagicMock()
     mock_pool.get_connection.return_value.__enter__.return_value = mock_conn
     mock_get_pool.return_value = mock_pool
+
+    mock_probe_result = MagicMock()
+    mock_probe_result.description = [("identifier", None), ("name", None)]
+    mock_conn.execute.return_value = mock_probe_result
 
     request = TableCreateRequest(
       graph_id="test_graph",

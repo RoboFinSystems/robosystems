@@ -50,6 +50,7 @@ services:
       - "8001:8001"
     volumes:
       - ./data/kuzu-dbs:/app/data/kuzu-dbs
+      - ./data/staging:/app/data/staging # DuckDB staging tables for table ingestion
       - ./robosystems:/app/robosystems # Mount code for hot reload (rw for EDGAR init)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]

@@ -82,7 +82,7 @@ def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
         try:
           logger.info(f"Deleting database {graph_id}...")
           await client.delete_database(graph_id)
-          logger.info("✅ Database deleted successfully")
+          logger.info("✅ Database deleted successfully (including DuckDB staging)")
         except Exception as del_err:
           logger.warning(f"Could not delete database (may already be gone): {del_err}")
 
@@ -98,15 +98,58 @@ def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
 
       logger.info(f"✅ Database recreated successfully: {result}")
 
+      # Create Graph record in PostgreSQL for the SEC repository
+      # This is required for ingestion and rebuild operations
+      from robosystems.models.iam.graph import Graph
+      from robosystems.models.iam.graph_credits import GraphTier
+      from robosystems.database import get_db_session
+
+      db_session = next(get_db_session())
+      try:
+        # Check if Graph record already exists
+        existing_graph = Graph.get_by_id(graph_id, db_session)
+        if not existing_graph:
+          # Create Graph record for shared repository
+          Graph.create(
+            graph_id=graph_id,
+            graph_name="SEC XBRL Repository",
+            graph_type="generic",
+            session=db_session,
+            base_schema="base",
+            schema_extensions=["roboledger"],
+            graph_instance_id="shared-kuzu-writer",  # SEC uses shared writer cluster
+            graph_tier=GraphTier.KUZU_XLARGE,  # SEC shared repository tier
+            graph_metadata={
+              "repository_type": "shared",
+              "repository_name": repository_name,
+              "description": "Shared SEC XBRL financial reporting data repository",
+              "status": "available",
+            },
+          )
+          logger.info(f"✅ Created PostgreSQL Graph record for {graph_id}")
+        else:
+          # Update existing graph to ensure it's marked as available
+          graph_metadata = (
+            {**existing_graph.graph_metadata} if existing_graph.graph_metadata else {}
+          )
+          graph_metadata["status"] = "available"
+          existing_graph.graph_metadata = graph_metadata
+          db_session.commit()
+          logger.info(f"✅ Updated existing PostgreSQL Graph record for {graph_id}")
+      finally:
+        db_session.close()
+
       # Verify the schema was applied
       node_count = 0
       rel_count = 0
+      schema_ddl = None
       try:
         schema = await client.get_schema()
         # Handle both dict and list responses
         if isinstance(schema, dict):
           node_count = len(schema.get("node_tables", []))
           rel_count = len(schema.get("rel_tables", []))
+          schema_ddl = schema.get("ddl")
         elif isinstance(schema, list):
           # If it's a list of tables, count node vs rel types
           node_count = sum(1 for t in schema if t.get("type") == "NODE")
@@ -119,11 +162,84 @@ def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
       except Exception as e:
         logger.warning(f"Could not verify schema: {e}")
 
+      # Generate schema DDL using SchemaManager (like entity graphs do)
+      schema_ddl = None
+      try:
+        logger.info("Generating schema DDL from SchemaManager...")
+        from robosystems.schemas.manager import SchemaManager
+
+        manager = SchemaManager()
+        config = manager.create_schema_configuration(
+          name="SEC Database Schema",
+          description="Complete financial reporting schema with XBRL taxonomy support",
+          extensions=["roboledger"],  # SEC schema uses roboledger extension
+        )
+
+        schema = manager.load_and_compile_schema(config)
+        schema_ddl = schema.to_cypher()
+        logger.info(f"✅ Generated schema DDL: {len(schema_ddl)} characters")
+        logger.debug(f"DDL preview: {schema_ddl[:500]}...")
+
+        # Persist schema DDL to PostgreSQL for rebuild operations
+        from robosystems.models.iam import GraphSchema
+
+        db_session_for_schema = next(get_db_session())
+        try:
+          # Check if schema already exists
+          existing_schema = GraphSchema.get_active_schema(
+            graph_id, db_session_for_schema
+          )
+          if not existing_schema:
+            GraphSchema.create(
+              graph_id=graph_id,
+              schema_type="shared",
+              schema_ddl=schema_ddl,
+              schema_json={
+                "base": "base",
+                "extensions": ["roboledger"],
+              },
+              session=db_session_for_schema,
+            )
+            logger.info(f"✅ Persisted schema DDL to PostgreSQL for {graph_id}")
+          else:
+            logger.info(f"Schema DDL already exists in PostgreSQL for {graph_id}")
+        finally:
+          db_session_for_schema.close()
+
+      except Exception as e:
+        logger.warning(f"Could not generate schema DDL: {e}")
+
+      # Auto-create DuckDB staging tables from schema (like entity graphs do)
+      duckdb_tables_created = 0
+      if schema_ddl:
+        try:
+          logger.info("Creating DuckDB staging tables from schema...")
+          from robosystems.operations.graph.table_service import TableService
+          from robosystems.database import get_db_session
+
+          db = next(get_db_session())
+          try:
+            table_service = TableService(db)
+            created_tables = table_service.create_tables_from_schema(
+              graph_id=graph_id,
+              user_id="system",  # Shared repository, no specific user
+              schema_ddl=schema_ddl,
+            )
+            duckdb_tables_created = len(created_tables)
+            logger.info(
+              f"✅ Auto-created {duckdb_tables_created} DuckDB staging tables for SEC graph"
+            )
+          finally:
+            db.close()
+        except Exception as e:
+          logger.warning(f"Could not create DuckDB staging tables: {e}")
+
       return {
         "status": "success",
         "result": result,
         "node_types": node_count,
         "relationship_types": rel_count,
+        "duckdb_tables_created": duckdb_tables_created,
       }
 
     except Exception as e:

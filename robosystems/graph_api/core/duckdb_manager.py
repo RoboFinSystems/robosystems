@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from functools import wraps
 
 from fastapi import HTTPException, status
@@ -71,7 +71,9 @@ class TableInfo(BaseModel):
 class TableCreateRequest(BaseModel):
   graph_id: str = Field(..., description="Graph database identifier")
   table_name: str = Field(..., description="Table name")
-  s3_pattern: str = Field(..., description="S3 glob pattern for parquet files")
+  s3_pattern: Union[str, List[str]] = Field(
+    ..., description="S3 glob pattern or list of S3 file paths"
+  )
 
   class Config:
     extra = "forbid"
@@ -118,20 +120,36 @@ class DuckDBTableManager:
   @validate_table_name_decorator
   def create_table(self, request: TableCreateRequest) -> TableCreateResponse:
     """
-    Create an external table (view over S3 files).
+    Create an external table (materialized from S3 files).
 
-    All DuckDB tables are external views - they query S3 directly without
-    storing data locally. This is purely a staging layer for Kuzu ingestion.
+    DuckDB tables are materialized (not views) to enable Kuzu ingestion.
+
+    CRITICAL: We use CREATE TABLE (not CREATE VIEW) because:
+    - S3 credentials are session-level in DuckDB, not persisted in .duckdb file
+    - When Kuzu's DuckDB extension attaches the database, it creates a new session
+    - New session = no S3 config = views fail with "Unsupported duckdb type: NULL"
+    - Materialized tables contain the actual data, so no S3 access needed during ingestion
+
+    This is a staging layer for Kuzu ingestion - tables are dropped after use.
+
+    Supports both:
+    - s3_pattern as string: wildcard pattern (e.g., "s3://bucket/path/*.parquet")
+    - s3_pattern as list: explicit file paths (avoids prepared statement issues)
     """
     import time
+    import json
 
     start_time = time.time()
 
     # Explicit validation (decorator provides safety net)
     validate_table_name(request.table_name)
 
+    is_list = isinstance(request.s3_pattern, list)
+    file_count = len(request.s3_pattern) if is_list else "pattern"
+
     logger.info(
-      f"Creating external table {request.table_name} for graph {request.graph_id} from {request.s3_pattern}"
+      f"Creating external table {request.table_name} for graph {request.graph_id} "
+      f"from {file_count} {'files' if is_list else ''}"
     )
 
     pool = get_duckdb_pool()
@@ -140,13 +158,109 @@ class DuckDBTableManager:
       with pool.get_connection(request.graph_id) as conn:
         quoted_table = f'"{request.table_name}"'
 
-        sql = f"CREATE OR REPLACE VIEW {quoted_table} AS SELECT * FROM read_parquet(?)"
-        conn.execute(sql, [request.s3_pattern])
+        # Determine if this is a node table (has identifier) or relationship table (has from/to)
+        # Peek at the first file to check schema
+        if isinstance(request.s3_pattern, list):
+          sample_file = request.s3_pattern[0]
+        else:
+          sample_file = request.s3_pattern
+
+        # Check if 'identifier' column exists (node table) or 'from' column exists (relationship table)
+        # Use hive_partitioning=false to prevent DuckDB from auto-adding partition columns
+        probe_result = conn.execute(
+          "SELECT * FROM read_parquet(?, hive_partitioning=false) LIMIT 0",
+          [sample_file],
+        ).description
+        column_names = [col[0] for col in probe_result]
+        has_identifier = "identifier" in column_names
+        has_from_to = "from" in column_names and "to" in column_names
+
+        if isinstance(request.s3_pattern, list):
+          # Materialize data from S3 into DuckDB table (not view)
+          # This is required because Kuzu's DuckDB extension won't have S3 credentials
+          # Use hive_partitioning=false to exclude partition columns (e.g., year, month)
+          # from Hive-style directory structures like s3://bucket/year=2024/month=01/
+          files_json = json.dumps(request.s3_pattern)
+
+          if has_identifier:
+            # Node table: deduplicate on identifier
+            sql = f"""
+              CREATE OR REPLACE TABLE {quoted_table} AS
+              SELECT DISTINCT ON (identifier) *
+              FROM read_parquet({files_json}, hive_partitioning=false)
+              ORDER BY identifier
+            """
+          elif has_from_to:
+            # Relationship table: deduplicate on (from, to)
+            # Rename 'from' and 'to' to 'src' and 'dst' to avoid SQL keyword conflicts in Kuzu
+            # IMPORTANT: Kuzu expects columns in order: src, dst, then properties
+            sql = f"""
+              CREATE OR REPLACE TABLE {quoted_table} AS
+              WITH data AS (
+                SELECT DISTINCT ON ("from", "to") *
+                FROM read_parquet({files_json}, hive_partitioning=false)
+                ORDER BY "from", "to"
+              )
+              SELECT
+                "from" as src,
+                "to" as dst,
+                * EXCLUDE ("from", "to")
+              FROM data
+            """
+          else:
+            # Unknown table type: just read without deduplication
+            sql = f"""
+              CREATE OR REPLACE TABLE {quoted_table} AS
+              SELECT *
+              FROM read_parquet({files_json}, hive_partitioning=false)
+            """
+
+          conn.execute(sql)
+        else:
+          # Materialize data from S3 into DuckDB table (not view)
+          # This is required because Kuzu's DuckDB extension won't have S3 credentials
+          # Use hive_partitioning=false to exclude partition columns (e.g., year, month)
+
+          if has_identifier:
+            # Node table: deduplicate on identifier
+            sql = f"""
+              CREATE OR REPLACE TABLE {quoted_table} AS
+              SELECT DISTINCT ON (identifier) *
+              FROM read_parquet(?, hive_partitioning=false)
+              ORDER BY identifier
+            """
+          elif has_from_to:
+            # Relationship table: deduplicate on (from, to)
+            # Rename 'from' and 'to' to 'src' and 'dst' to avoid SQL keyword conflicts in Kuzu
+            # IMPORTANT: Kuzu expects columns in order: src, dst, then properties
+            sql = f"""
+              CREATE OR REPLACE TABLE {quoted_table} AS
+              WITH data AS (
+                SELECT DISTINCT ON ("from", "to") *
+                FROM read_parquet(?, hive_partitioning=false)
+                ORDER BY "from", "to"
+              )
+              SELECT
+                "from" as src,
+                "to" as dst,
+                * EXCLUDE ("from", "to")
+              FROM data
+            """
+          else:
+            # Unknown table type: just read without deduplication
+            sql = f"""
+              CREATE OR REPLACE TABLE {quoted_table} AS
+              SELECT *
+              FROM read_parquet(?, hive_partitioning=false)
+            """
+
+          conn.execute(sql, [request.s3_pattern])
 
         execution_time_ms = (time.time() - start_time) * 1000
 
         logger.info(
-          f"Created external table {request.table_name} for graph {request.graph_id} in {execution_time_ms:.2f}ms"
+          f"Created external table {request.table_name} for graph {request.graph_id} "
+          f"in {execution_time_ms:.2f}ms ({file_count} {'files' if is_list else ''})"
         )
 
         return TableCreateResponse(

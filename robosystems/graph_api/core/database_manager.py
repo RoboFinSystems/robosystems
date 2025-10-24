@@ -264,15 +264,6 @@ class KuzuDatabaseManager:
       conn.close()
       db.close()
 
-      # Create DuckDB staging directory for this graph
-      try:
-        staging_base = Path("/app/data/staging")
-        staging_dir = staging_base / request.graph_id
-        staging_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Created DuckDB staging directory: {staging_dir}")
-      except (OSError, PermissionError) as e:
-        logger.warning(f"Could not create DuckDB staging directory: {e}")
-
       execution_time = (time.time() - start_time) * 1000
 
       logger.info(
@@ -344,6 +335,18 @@ class KuzuDatabaseManager:
       elif db_path.is_dir():
         # Legacy cleanup for old .db directories
         shutil.rmtree(db_path)
+
+      # Clean up DuckDB staging database alongside Kuzu database
+      from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
+
+      try:
+        duckdb_pool = get_duckdb_pool()
+        duckdb_pool.force_database_cleanup(graph_id)
+        logger.info(f"Deleted DuckDB staging database for {graph_id}")
+      except Exception as duck_err:
+        logger.warning(
+          f"Could not delete DuckDB staging database for {graph_id}: {duck_err}"
+        )
 
       logger.info(f"Database {graph_id} deleted successfully")
 

@@ -262,15 +262,22 @@ class DuckDBConnectionPool:
       conn.execute("LOAD parquet")
 
       # Configure S3 access if credentials available
-      if env.AWS_ACCESS_KEY_ID and env.AWS_SECRET_ACCESS_KEY:
-        conn.execute("SET s3_access_key_id=?", [env.AWS_ACCESS_KEY_ID])
-        conn.execute("SET s3_secret_access_key=?", [env.AWS_SECRET_ACCESS_KEY])
+      # Use S3-specific credentials (AWS_S3_*) for compatibility with local dev and cross-account access
+      if env.AWS_S3_ACCESS_KEY_ID and env.AWS_S3_SECRET_ACCESS_KEY:
+        conn.execute("SET s3_access_key_id=?", [env.AWS_S3_ACCESS_KEY_ID])
+        conn.execute("SET s3_secret_access_key=?", [env.AWS_S3_SECRET_ACCESS_KEY])
         conn.execute("SET s3_region=?", [env.AWS_DEFAULT_REGION])
 
       # Configure S3 endpoint if using LocalStack or custom endpoint
       if env.AWS_ENDPOINT_URL:
-        conn.execute("SET s3_endpoint=?", [env.AWS_ENDPOINT_URL])
+        # DuckDB expects endpoint without protocol (e.g., "localstack:4566" not "http://localstack:4566")
+        endpoint = env.AWS_ENDPOINT_URL.replace("http://", "").replace("https://", "")
+        conn.execute("SET s3_endpoint=?", [endpoint])
         conn.execute("SET s3_url_style='path'")
+        conn.execute("SET s3_use_ssl=false")  # LocalStack doesn't use SSL
+        logger.debug(
+          f"Configured DuckDB to use S3 endpoint: {endpoint} (from {env.AWS_ENDPOINT_URL})"
+        )
 
       # Performance settings
       conn.execute("SET threads TO 4")  # Limit threads to prevent oversubscription
@@ -326,6 +333,13 @@ class DuckDBConnectionPool:
     connection_info = self._pools[graph_id][connection_id]
 
     try:
+      # Execute checkpoint to flush WAL to main database file
+      try:
+        connection_info.connection.execute("CHECKPOINT")
+        logger.debug(f"Checkpointed DuckDB connection {connection_id} for {graph_id}")
+      except Exception as cp_err:
+        logger.debug(f"Could not checkpoint DuckDB connection: {cp_err}")
+
       connection_info.connection.close()
     except Exception as e:
       logger.warning(f"Error closing DuckDB connection {connection_id}: {e}")
@@ -445,6 +459,13 @@ class DuckDBConnectionPool:
       if graph_id in self._pools:
         for conn_id, conn_info in self._pools[graph_id].items():
           try:
+            # Execute checkpoint to flush WAL to main database file
+            try:
+              conn_info.connection.execute("CHECKPOINT")
+              logger.debug(f"Checkpointed DuckDB connection {conn_id} for {graph_id}")
+            except Exception as cp_err:
+              logger.debug(f"Could not checkpoint DuckDB connection: {cp_err}")
+
             conn_info.connection.close()
             self._stats["connections_closed"] += 1
           except Exception as e:
