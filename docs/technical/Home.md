@@ -2,14 +2,14 @@
 
 RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial data into actionable intelligence through graph-based analytics and AI-powered insights.
 
-## 🚀 Getting Started
+## Getting Started
 
 New to RoboSystems? Start here:
 
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
 - **Quick Start**: See the [README](https://github.com/RoboFinSystems/robosystems#quick-start) for installation
 
-## 📚 Core Documentation
+## Core Documentation
 
 ### Architecture & Design
 
@@ -23,21 +23,10 @@ New to RoboSystems? Start here:
 
 ### Reference
 
-- **Component READMEs**: Detailed technical docs in the [codebase](https://github.com/RoboFinSystems/robosystems/tree/main/robosystems)
-  - [Graph API](/robosystems/graph_api/README.md)
-  - [DuckDB Core](/robosystems/graph_api/core/README.md)
-  - [Backend System](/robosystems/graph_api/backends/README.md)
-  - [Processors](/robosystems/processors/README.md)
+- **Component READMEs**: Detailed technical docs in the codebase
 - **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs) (local) or [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (production)
 
-## 🎯 Common Tasks
-
-- **Load SEC Data**: `just sec-load NVDA 2024`
-- **Query Data**: `just graph-query sec "MATCH (e:Entity) RETURN e LIMIT 10"`
-- **Health Check**: `just sec-health`
-- **View Logs**: `just logs api`
-
-## 💬 Support
+## Support
 
 - **Issues**: [GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
