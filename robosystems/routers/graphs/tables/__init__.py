@@ -11,29 +11,10 @@ router = APIRouter(
   },
 )
 
-for route in main.router.routes:
-  if not hasattr(route, "tags") or not route.tags:
-    route.tags = ["Tables"]
-  router.routes.append(route)
-
-for route in upload.router.routes:
-  if not hasattr(route, "tags") or not route.tags:
-    route.tags = ["Tables"]
-  router.routes.append(route)
-
-for route in query.router.routes:
-  if not hasattr(route, "tags") or not route.tags:
-    route.tags = ["Tables"]
-  router.routes.append(route)
-
-for route in ingest.router.routes:
-  if not hasattr(route, "tags") or not route.tags:
-    route.tags = ["Tables"]
-  router.routes.append(route)
-
-for route in files.router.routes:
-  if not hasattr(route, "tags") or not route.tags:
-    route.tags = ["Tables"]
-  router.routes.append(route)
+router.include_router(main.router)
+router.include_router(files.router)
+router.include_router(upload.router)
+router.include_router(ingest.router)
+router.include_router(query.router)
 
 __all__ = ["router"]

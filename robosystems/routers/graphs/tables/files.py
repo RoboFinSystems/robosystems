@@ -33,7 +33,7 @@ async def list_table_files(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
-  graph, repo = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
 
   if not graph:
     raise HTTPException(
@@ -83,8 +83,59 @@ async def list_table_files(
     )
 
 
+@router.get(
+  "/tables/files/{file_id}",
+  summary="Get File Info",
+  description="Get detailed information about a specific file",
+  responses={
+    200: {"description": "File info retrieved successfully"},
+    403: {"description": "Access denied to graph", "model": ErrorResponse},
+    404: {"description": "File not found", "model": ErrorResponse},
+  },
+)
+async def get_file_info(
+  graph_id: str = Path(..., description="Graph database identifier"),
+  file_id: str = Path(..., description="File ID"),
+  current_user: User = Depends(get_current_user),
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
+  db: Session = Depends(get_db_session),
+) -> dict:
+  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+
+  if not graph:
+    raise HTTPException(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail=f"Graph {graph_id} not found",
+    )
+
+  file = GraphFile.get_by_id(file_id, db)
+  if not file or file.graph_id != graph_id:
+    raise HTTPException(
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail=f"File {file_id} not found in graph {graph_id}",
+    )
+
+  table = GraphTable.get_by_id(file.table_id, db)
+
+  return {
+    "file_id": file.id,
+    "graph_id": file.graph_id,
+    "table_id": file.table_id,
+    "table_name": table.table_name if table else None,
+    "file_name": file.file_name,
+    "file_format": file.file_format,
+    "size_bytes": file.file_size_bytes,
+    "row_count": file.row_count,
+    "upload_status": file.upload_status,
+    "upload_method": file.upload_method,
+    "created_at": file.created_at.isoformat() if file.created_at else None,
+    "uploaded_at": file.uploaded_at.isoformat() if file.uploaded_at else None,
+    "s3_key": file.s3_key,
+  }
+
+
 @router.delete(
-  "/files/{file_id}",
+  "/tables/files/{file_id}",
   summary="Delete File",
   description="Delete a specific file from S3 and database tracking. DuckDB will automatically exclude it from queries.",
   responses={
@@ -107,7 +158,7 @@ async def delete_file(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  graph, repo = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
 
   if not graph:
     raise HTTPException(
@@ -180,54 +231,3 @@ async def delete_file(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to delete file: {str(e)}",
     )
-
-
-@router.get(
-  "/files/{file_id}",
-  summary="Get File Info",
-  description="Get detailed information about a specific file",
-  responses={
-    200: {"description": "File info retrieved successfully"},
-    403: {"description": "Access denied to graph", "model": ErrorResponse},
-    404: {"description": "File not found", "model": ErrorResponse},
-  },
-)
-async def get_file_info(
-  graph_id: str = Path(..., description="Graph database identifier"),
-  file_id: str = Path(..., description="File ID"),
-  current_user: User = Depends(get_current_user),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-  db: Session = Depends(get_db_session),
-) -> dict:
-  graph, repo = await get_universal_repository_with_auth(graph_id, current_user.id, db)
-
-  if not graph:
-    raise HTTPException(
-      status_code=status.HTTP_404_NOT_FOUND,
-      detail=f"Graph {graph_id} not found",
-    )
-
-  file = GraphFile.get_by_id(file_id, db)
-  if not file or file.graph_id != graph_id:
-    raise HTTPException(
-      status_code=status.HTTP_404_NOT_FOUND,
-      detail=f"File {file_id} not found in graph {graph_id}",
-    )
-
-  table = GraphTable.get_by_id(file.table_id, db)
-
-  return {
-    "file_id": file.id,
-    "graph_id": file.graph_id,
-    "table_id": file.table_id,
-    "table_name": table.table_name if table else None,
-    "file_name": file.file_name,
-    "file_format": file.file_format,
-    "size_bytes": file.file_size_bytes,
-    "row_count": file.row_count,
-    "upload_status": file.upload_status,
-    "upload_method": file.upload_method,
-    "created_at": file.created_at.isoformat() if file.created_at else None,
-    "uploaded_at": file.uploaded_at.isoformat() if file.uploaded_at else None,
-    "s3_key": file.s3_key,
-  }

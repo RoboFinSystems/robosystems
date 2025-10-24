@@ -7,32 +7,32 @@ MAIN_API_TAGS = [
     "description": "🏗️ Graphs - Create and manage graph databases",
   },
   {
+    "name": "Query",
+    "description": "🔍 Graph queries - Execute Cypher (read/write) queries against graph databases",
+  },
+  {
     "name": "MCP",
     "description": "🔌 MCP - Model Context Protocol for AI interactions with graph databases",
   },
   {
-    "name": "Query",
-    "description": "🔍 Graph queries - Execute Cypher (read/write) queries against graph databases",
+    "name": "Tables",
+    "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
   },
   {
     "name": "Agent",
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph databases",
   },
   {
+    "name": "Subgraphs",
+    "description": "🌳 Subgraphs - Manage subgraph databases for Enterprise/Premium tiers",
+  },
+  {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
   },
   {
-    "name": "Tables",
-    "description": "📊 Staging tables - Upload files and query DuckDB staging tables before ingestion",
-  },
-  {
     "name": "Connections",
     "description": "🔗 Connections - Manage external service integrations and data connections",
-  },
-  {
-    "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Manage subgraph databases for Enterprise/Premium tiers",
   },
   {
     "name": "Backup",
@@ -112,7 +112,7 @@ KUZU_API_TAGS = [
   },
   {
     "name": "Tables",
-    "description": "📊 Tables - Create and query DuckDB staging tables, ingest to graph",
+    "description": "🗃️ Tables - Create and query DuckDB staging tables, ingest to graph",
   },
   {
     "name": "Copy",

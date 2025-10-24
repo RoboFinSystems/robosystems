@@ -21,7 +21,7 @@ router = APIRouter()
 
 
 @router.post(
-  "/ingest",
+  "/tables/ingest",
   response_model=BulkIngestResponse,
   summary="Ingest Tables to Graph",
   description="Load all files from S3 into DuckDB staging tables and ingest into Kuzu graph database. "
