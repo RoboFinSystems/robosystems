@@ -8,9 +8,17 @@ This directory contains specialized processors that handle complex data transfor
 processors/
 ├── README.md                          # This file
 ├── __init__.py                        # Exports all processors
-├── xbrl_graph.py                      # XBRLGraphProcessor - SEC XBRL filing processing
-├── schema_processor.py                # SchemaProcessor - DataFrame schema compatibility
-├── schema_ingestion_processor.py      # SchemaIngestionProcessor - Ingestion config generation
+├── xbrl_graph.py                      # XBRLGraphProcessor - XBRL to graph data model conversion
+├── xbrl/                              # XBRL utility components (extracted for cleaner code)
+│   ├── __init__.py                    # XBRL module exports
+│   ├── dataframe_manager.py           # DataFrame validation and processing
+│   ├── duckdb_graph_ingestion.py      # DuckDB → Graph ingestion
+│   ├── parquet_writer.py              # Parquet file generation
+│   ├── id_utils.py                    # Identifier generation utilities
+│   ├── naming_utils.py                # Naming convention utilities
+│   ├── textblock_externalizer.py      # Text block extraction
+│   ├── schema_adapter.py              # XBRLSchemaAdapter - DataFrame schema adaptation
+│   └── schema_config_generator.py     # XBRLSchemaConfigGenerator - Schema config generation
 ├── trial_balance.py                   # TrialBalanceProcessor - Financial calculations
 ├── schedule.py                        # ScheduleProcessor - Financial schedule generation
 └── qb_transactions.py                 # QBTransactionsProcessor - QuickBooks processing
@@ -30,23 +38,61 @@ Processors handle the "heavy lifting" of data transformation and business logic 
 
 ### **Data Processing & Transformation**
 
-- **`XBRLGraphProcessor`** - Processes SEC XBRL filings into graph database format
-  - Handles complex XBRL taxonomy structures
-  - Converts financial data into nodes and relationships
-  - Manages entity relationships and fact processing
+- **`XBRLGraphProcessor`** (`xbrl_graph.py`) - Core XBRL to graph data model conversion
 
-### **Schema Management**
+  Converts SEC XBRL filings from the Arelle/XBRL data model into RoboSystems graph data model:
 
-- **`SchemaProcessor`** - Ensures DataFrame compatibility with Kuzu schemas
+  - **Data Model Transformation** - Maps XBRL concepts to graph nodes and relationships
+  - **Entity Processing** - Extracts company information and identifiers
+  - **Fact Processing** - Converts financial facts with contexts, units, and dimensions
+  - **Taxonomy Processing** - Handles us-gaap and custom taxonomies
+  - **Report Processing** - Structures 10-K and 10-Q filing data
+  - **Schema Integration** - Uses XBRLSchemaAdapter for DataFrame compatibility
 
-  - Validates DataFrame structures against schema definitions
-  - Creates schema-compatible DataFrames with proper columns
-  - Handles XBRL table mappings and data validation
+  The main conversion logic resides here, with utility components extracted to `/xbrl/` for cleaner code organization.
 
-- **`SchemaIngestionProcessor`** - Generates dynamic ingestion configurations
-  - Creates file pattern recognition for parquet files
-  - Maps relationship structures for graph ingestion
-  - Produces column structures from schema properties
+- **XBRL Utility Components** (`/processors/xbrl/`) - Supporting utilities extracted for code clarity
+
+  **Core Utilities:**
+
+  - **`DataFrameManager`** - DataFrame validation, cleaning, and transformation
+
+    - Schema-driven validation and type conversion
+    - Null handling and data normalization
+    - Duplicate detection and resolution
+
+  - **`XBRLDuckDBGraphProcessor`** - Direct DuckDB staging to graph database ingestion
+
+    - Native DuckDB → Kuzu via database extensions
+    - Batch processing with comprehensive error handling
+    - Progress tracking and monitoring integration
+
+  - **`ParquetWriter`** - Optimized Parquet file generation
+
+    - Schema-based file writing with compression
+    - S3 upload integration and optimization
+    - Memory-efficient processing for large datasets
+
+  - **`TextBlockExternalizer`** - Large text block extraction and storage
+
+    - Separates narrative content from structured data
+    - Reduces graph database size and improves performance
+
+  - **`XBRLSchemaAdapter`** - DataFrame schema adaptation for XBRL data
+
+    - Validates DataFrame structures against schema definitions
+    - Creates schema-compatible DataFrames with proper columns
+    - Handles XBRL table mappings and data validation
+
+  - **`XBRLSchemaConfigGenerator`** - Dynamic schema configuration generation
+
+    - Creates file pattern recognition for parquet files
+    - Maps relationship structures for graph ingestion
+    - Produces column structures from schema properties
+
+  - **Helper Modules**
+    - `id_utils.py` - Standardized identifier generation
+    - `naming_utils.py` - Consistent naming conventions
 
 ### **Financial Processing**
 
@@ -105,23 +151,49 @@ Processors are designed to be:
 ### Importing Processors
 
 ```python
-from robosystems.processors import (
-    XBRLGraphProcessor,
-    SchemaProcessor,
-    TrialBalanceProcessor
+from robosystems.processors import XBRLGraphProcessor
+from robosystems.processors.xbrl import (
+    DataFrameManager,
+    ParquetWriter,
+    XBRLDuckDBGraphProcessor
 )
 
-# Use in business logic
-processor = XBRLGraphProcessor(config)
-result = processor.process_filing(filing_data)
+# Main XBRL to graph conversion
+processor = XBRLGraphProcessor(
+    report_uri="https://www.sec.gov/...",
+    output_dir="./data/output"
+)
+processor.process()  # Converts XBRL/Arelle data model to graph data model
+
+# Use XBRL utility components directly if needed
+df_manager = DataFrameManager()
+validated_df = df_manager.validate_and_process(raw_data)
+
+parquet_writer = ParquetWriter()
+parquet_writer.write_to_s3(validated_df, s3_path)
+
+# Note: Graph ingestion is typically handled by the Graph API endpoint
+# but the utility can be used programmatically
+ingestion_processor = XBRLDuckDBGraphProcessor()
+ingestion_processor.ingest_to_graph(graph_id, table_name)
 ```
 
 ### Processing Pipeline
 
-Processors often work together in pipelines:
+**XBRL Filing Processing Pipeline:**
 
 ```
-Raw Data → SchemaIngestionProcessor → SchemaProcessor → XBRLGraphProcessor → Database
+SEC XBRL Filing
+       ↓
+XBRLGraphProcessor (xbrl_graph.py)
+  - Arelle/XBRL → Graph Data Model Conversion
+  - Uses: DataFrameManager, ParquetWriter, XBRLSchemaAdapter
+       ↓
+Parquet Files → S3 Storage
+       ↓
+DuckDB Staging Table (Upload)
+       ↓
+XBRLDuckDBGraphProcessor → Graph Database (Kuzu/Neo4j)
 ```
 
 ### Configuration
@@ -174,32 +246,3 @@ When creating new processors:
 4. **Add Logging** - Detailed processing logs for debugging
 5. **Write Tests** - Unit tests for all processing logic
 6. **Document Thoroughly** - Clear docstrings and examples
-
-## 🎯 Examples
-
-### Financial Data Processing
-
-```python
-# Process trial balance
-tb_processor = TrialBalanceProcessor(entity_id="123")
-tb_processor.generate()
-
-# Generate financial schedule
-schedule_processor = ScheduleProcessor(
-    transaction_id="tx_456",
-    start_date="2024-01-01",
-    months=12
-)
-schedule = schedule_processor.create()
-```
-
-### Schema Processing
-
-```python
-# Ensure data fits schema
-schema_processor = SchemaProcessor(config)
-df = schema_processor.create_schema_compatible_dataframe("Entity")
-validated_df = schema_processor.process_dataframe_for_schema("Entity", data)
-```
-
-This directory represents the core data processing engine of the RoboSystems platform, handling the complex transformations needed to convert raw financial data into structured, queryable information.

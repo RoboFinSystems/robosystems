@@ -71,7 +71,9 @@ graph_api/
 ├── core/                      # Core services
 │   ├── cluster_manager.py    # Cluster orchestration
 │   ├── database_manager.py   # Database lifecycle management
-│   ├── connection_pool.py    # Connection pooling
+│   ├── duckdb_manager.py     # DuckDB staging database management
+│   ├── duckdb_pool.py        # DuckDB connection pooling
+│   ├── connection_pool.py    # Graph connection pooling
 │   ├── admission_control.py  # Backpressure management
 │   └── metrics_collector.py  # Performance metrics
 │
@@ -80,6 +82,10 @@ graph_api/
 │   │   ├── management.py     # Create/delete databases
 │   │   ├── query.py          # Cypher query execution
 │   │   ├── ingest.py         # S3 bulk copy operations
+│   │   ├── tables/           # DuckDB staging table management
+│   │   │   ├── management.py # Create/list staging tables
+│   │   │   ├── ingest.py     # Parquet file ingestion to tables
+│   │   │   └── query.py      # DuckDB SQL queries on tables
 │   │   ├── schema.py         # Schema management
 │   │   ├── metrics.py        # Database metrics
 │   │   ├── backup.py         # Backup operations
@@ -328,6 +334,113 @@ This returns a task ID that can be monitored via Server-Sent Events:
 ```http
 GET /tasks/{task_id}/monitor
 Authorization: X-Graph-API-Key: {api_key}
+```
+
+#### Table Operations
+
+**DuckDB Staging Tables** provide an intermediate staging layer for data validation and transformation before graph ingestion.
+
+**Note:** This is the low-level Graph API (port 8001). Individual file uploads and tracking are handled by the main API layer (port 8000):
+- `POST /v1/graphs/{graph_id}/tables/{table_name}/files` - Get presigned S3 upload URL
+- `PATCH /v1/graphs/{graph_id}/tables/files/{file_id}` - Mark upload complete (automatically calls create table here)
+
+**Create Table:**
+
+```http
+POST /databases/{graph_id}/tables
+Authorization: X-Graph-API-Key: {api_key}
+Content-Type: application/json
+
+{
+  "table_name": "Entity",
+  "s3_pattern": "s3://bucket/path/*.parquet"
+}
+
+Response: {
+  "status": "success",
+  "graph_id": "kg1a2b3c4d5",
+  "table_name": "Entity",
+  "execution_time_ms": 1250.5
+}
+```
+
+**List Tables:**
+
+```http
+GET /databases/{graph_id}/tables
+Authorization: X-Graph-API-Key: {api_key}
+
+Response: [
+  {
+    "graph_id": "kg1a2b3c4d5",
+    "table_name": "Entity",
+    "row_count": 1523,
+    "size_bytes": 45678912,
+    "s3_location": "s3://bucket/path/*.parquet"
+  }
+]
+```
+
+**Query Staging Table:**
+
+```http
+POST /databases/{graph_id}/tables/query
+Authorization: X-Graph-API-Key: {api_key}
+Content-Type: application/json
+
+{
+  "sql": "SELECT * FROM Entity WHERE status = 'active' LIMIT 10"
+}
+
+Response: {
+  "graph_id": "kg1a2b3c4d5",
+  "columns": ["identifier", "name", "status"],
+  "rows": [
+    ["entity-1", "Company A", "active"],
+    ["entity-2", "Company B", "active"]
+  ],
+  "row_count": 2,
+  "execution_time_ms": 45.2
+}
+
+Note: Table name is specified in the SQL query, not the path.
+Supports streaming via Accept: application/x-ndjson or text/event-stream headers.
+```
+
+**Ingest Table to Graph:**
+
+```http
+POST /databases/{graph_id}/tables/{table_name}/ingest
+Authorization: X-Graph-API-Key: {api_key}
+Content-Type: application/json
+
+{
+  "ignore_errors": true,
+  "rebuild": false
+}
+
+Response: {
+  "status": "success",
+  "graph_id": "kg1a2b3c4d5",
+  "table_name": "Entity",
+  "rows_ingested": 1523,
+  "execution_time_ms": 2340.8
+}
+
+Note: This performs direct DuckDB → Kuzu ingestion via database extensions.
+Use rebuild=true to regenerate the graph database from scratch (safe operation).
+```
+
+**Delete Table:**
+
+```http
+DELETE /databases/{graph_id}/tables/{table_name}
+Authorization: X-Graph-API-Key: {api_key}
+
+Response: {
+  "status": "success",
+  "message": "Table deleted successfully"
+}
 ```
 
 ### System Operations
