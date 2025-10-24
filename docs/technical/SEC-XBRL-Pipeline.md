@@ -9,6 +9,7 @@ The SEC local pipeline allows you to:
 - Load company financial filings (10-K, 10-Q) by ticker symbol
 - Store XBRL data in a local Kuzu graph database
 - Query financial data using Cypher or the MCP client
+- Inspect staged data in DuckDB before ingestion
 
 ## Prerequisites
 
@@ -51,11 +52,16 @@ just sec-load TSLA 2023
 **What happens during loading:**
 
 1. **Download** - Fetches XBRL files from SEC EDGAR
-2. **Process** - Converts XBRL to parquet format
-3. **Consolidate** - Combines files for optimal performance
-4. **Ingest** - Loads data into Kuzu graph database
+2. **Process** - XBRL processors transform data to structured format
+3. **Generate** - Creates Parquet files optimized for graph ingestion
+4. **Stage** - Uploads to S3 and creates DuckDB staging tables
+5. **Validate** - Automatic data quality checks and deduplication
+6. **Ingest** - Direct DuckDB → Kuzu via database extension
 
 **Note:** Loading can take 1-5 minutes depending on the number of years.
+
+**Behind the Scenes:**
+The SEC pipeline uses a staging-first architecture. Data goes through DuckDB staging tables before reaching the graph database. This enables validation, transformation, and quality checks before final ingestion.
 
 ### 2. Verify Data Loading
 
@@ -79,7 +85,7 @@ The health check shows:
 
 ## Accessing the Data
 
-You have three options for querying the loaded SEC data:
+You have four options for querying the loaded SEC data:
 
 ### Option 1: Direct Cypher Queries (For Development)
 
@@ -101,7 +107,7 @@ just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE el.
 ```cypher
 -- Find all facts for a NVDA SEC CIK
 MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
-WHERE e.identifier = '0001045810' 
+WHERE e.identifier = '0001045810'
 RETURN f
 
 -- Get balance sheet items
@@ -115,7 +121,46 @@ WHERE p.instant_date = '2024-01-28'
 RETURN f
 ```
 
-### Option 2: MCP Client (For AI Agents)
+### Option 2: Query Staging Tables (For Data Validation)
+
+Query the DuckDB staging tables to inspect data before it reaches the graph:
+
+```bash
+# List all entities in staging
+just tables-query sec "SELECT * FROM Entity LIMIT 10"
+
+# Count facts by element
+just tables-query sec "SELECT el.name, COUNT(*) as fact_count FROM Fact f JOIN FACT_HAS_ELEMENT fhe ON f.identifier = fhe.src JOIN Element el ON fhe.dst = el.identifier GROUP BY el.name ORDER BY fact_count DESC LIMIT 20"
+
+# Check data quality - find null values
+just tables-query sec "SELECT COUNT(*) as null_count FROM Entity WHERE name IS NULL"
+
+# Explore specific company's reports
+just tables-query sec "SELECT r.* FROM Report r JOIN ENTITY_HAS_REPORT ehr ON r.identifier = ehr.dst JOIN Entity e ON ehr.src = e.identifier WHERE e.name LIKE '%NVIDIA%'"
+
+# Check available time periods
+just tables-query sec "SELECT DISTINCT instant_date FROM Period ORDER BY instant_date DESC LIMIT 10"
+
+# Find revenue facts with full details
+just tables-query sec "SELECT f.value, f.numeric_value, p.instant_date, u.measure FROM Fact f JOIN FACT_HAS_ELEMENT fhe ON f.identifier = fhe.src JOIN Element el ON fhe.dst = el.identifier JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src JOIN Period p ON fhp.dst = p.identifier JOIN FACT_HAS_UNIT fhu ON f.identifier = fhu.src JOIN Unit u ON fhu.dst = u.identifier WHERE el.name = 'Revenues' LIMIT 10"
+```
+
+**Why Query Staging Tables?**
+- **Pre-ingestion validation**: Check data quality before it enters the graph
+- **SQL familiarity**: Use SQL joins and aggregations you already know
+- **Performance**: DuckDB's columnar storage is extremely fast for analytics
+- **Debugging**: Identify issues in source data before graph ingestion
+
+**Available Staging Tables:**
+- `Entity` - Companies with SEC CIK identifiers
+- `Report` - 10-K and 10-Q filings
+- `Fact` - Financial metrics with values
+- `Element` - us-gaap metric definitions
+- `Period` - Date/duration contexts
+- `Unit` - Measurement units (USD, shares, etc.)
+- `FactDimension` - Segments and breakdowns
+
+### Option 3: MCP Client (For AI Agents)
 
 Access data through Claude Desktop or other AI agents using the MCP client.
 
@@ -164,7 +209,7 @@ Claude will use:
 3. read-graph-cypher to query for NVIDIA's revenue facts
 ```
 
-### Option 3: Python API (For Applications)
+### Option 4: Python API (For Applications)
 
 Access via the RoboSystems Python client:
 
@@ -190,6 +235,123 @@ result = client.query_graph("""
 schema = client.get_schema()
 print(schema)
 ```
+
+## Database Visualization Tools
+
+### DuckDB Staging with SQL IDEs
+
+You can open the DuckDB staging database directly in any SQL IDE that supports DuckDB:
+
+**Database Location:**
+- **Path**: `./data/staging/sec.duckdb` (from RoboSystems root directory)
+
+**Using DuckDB CLI:**
+
+```bash
+# Connect directly to the staging database
+duckdb ./data/staging/sec.duckdb
+
+# Run SQL queries interactively
+D> SELECT identifier, name, country FROM Entity LIMIT 10;
+D> .tables  # List all tables
+D> .schema Entity  # Show table schema
+```
+
+**Using SQL IDE Tools:**
+
+Any SQL IDE with DuckDB support can connect to the staging database for visual exploration and querying.
+
+**Example queries:**
+```sql
+-- See all companies loaded
+SELECT identifier, name, country FROM Entity;
+
+-- Check facts by year
+SELECT
+  strftime(p.instant_date, '%Y') as year,
+  COUNT(DISTINCT f.identifier) as fact_count
+FROM Fact f
+JOIN Period p ON f.period_identifier = p.identifier
+GROUP BY year
+ORDER BY year DESC;
+
+-- Find largest revenue figures
+SELECT
+  e.name,
+  f.numeric_value,
+  p.instant_date
+FROM Fact f
+JOIN Entity e ON f.entity_identifier = e.identifier
+JOIN Element el ON f.element_identifier = el.identifier
+JOIN Period p ON f.period_identifier = p.identifier
+WHERE el.name = 'Revenues'
+ORDER BY f.numeric_value DESC
+LIMIT 10;
+```
+
+**Benefits of Direct SQL Access:**
+- Browse all staging tables
+- Run SQL queries with full DuckDB features
+- Export query results to CSV/JSON
+- View table schemas and row counts
+- Data quality checks before graph ingestion
+
+### Visualize Kuzu Graphs with G.V()
+
+[G.V()](https://gdotv.com/) is a powerful graph visualization tool and our recommended partner for visualizing Kuzu databases:
+
+**Why G.V() for Kuzu?**
+- Native Kuzu database support
+- Interactive graph exploration
+- Real-time Cypher query visualization
+- Perfect for understanding complex financial relationships
+- Free and open-source
+
+![Example graph visualization in G.V()](images/report-graph-viz.png)
+
+*Example: Financial report graph visualized in G.V() showing entities, reports, facts, and their relationships*
+
+**Getting Started with G.V():**
+
+1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
+2. Open the application
+3. Connect to your local Kuzu database:
+   - **Database Path**: `./data/kuzu/sec/` (from RoboSystems root directory)
+4. Run Cypher queries and visualize results interactively
+
+**What you can do:**
+- Visualize graph relationships interactively
+- Explore entity connections visually
+- Debug complex graph patterns
+- Understand data model structure
+- Click nodes to see properties and relationships
+- Export visualizations for presentations
+
+**Example visualization queries:**
+```cypher
+-- Visualize a company and its reports
+MATCH (e:Entity {name: 'NVIDIA CORP'})-[:ENTITY_HAS_REPORT]->(r:Report)
+RETURN e, r
+LIMIT 5
+
+-- See fact relationships
+MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
+WHERE r.form = '10-K'
+RETURN r, f, el
+LIMIT 20
+
+-- Explore full entity context
+MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
+WHERE e.identifier = '0001045810'
+RETURN e, r, f
+LIMIT 10
+```
+
+**Visualization Tips:**
+- Start with small LIMIT values (5-20 nodes) to avoid cluttering
+- Use WHERE clauses to filter to specific companies or time periods
+- Click nodes to see properties
+- Use the layout options to organize the graph
 
 ## Understanding the Data Model
 
@@ -321,17 +483,21 @@ just sec-load NVDA 2025
 
 ## Next Steps
 
-- **Learn Cypher**: Explore graph query patterns
+- **Visualize with G.V()**: Use our partner tool [G.V()](https://gdotv.com/) to explore graph relationships interactively
+- **Learn Cypher**: Explore graph query patterns with [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
+- **Validate Staging**: Use DuckDB CLI or SQL IDEs to inspect staging tables before ingestion
 - **Build Analysis**: Use MCP client in Claude for financial analysis
 - **Create Reports**: Build automated reporting with Python client
 - **Add More Data**: Load additional companies and years
 
 ## Resources
 
+- **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Kuzu (Partner)
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
 - **RoboSystems API**: http://localhost:8000/docs (when running locally)
 - **SEC EDGAR**: [SEC Website](https://www.sec.gov/edgar)
+- **DuckDB**: [Documentation](https://duckdb.org/docs/) - SQL database for staging
 
 ## Support
 
