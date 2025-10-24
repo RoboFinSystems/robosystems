@@ -286,8 +286,8 @@ duckdb-query db_name query format="table" env=".env":
 #   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
 #   - "copy": Consolidation → COPY-based ingestion (emulates production pipeline, uses consolidated files)
 # Examples:
-#   just sec-load NVDA 2025                           # Load NVIDIA 2025 data using DuckDB approach (default)
-#   just sec-load NVDA 2025 duckdb|copy kuzu|neo4j    # Load using traditional COPY approach (prod emulation)
+#   just sec-load NVDA 2025                              # Load NVIDIA 2025 data using defaults (duckdb, kuzu)
+#   just sec-load NVDA 2025 [duckdb|copy] [kuzu|neo4j]   # Specify ingestion method and/or backend
 
 # SEC Local - Load single company by ticker and year(s)
 sec-load ticker year="" ingest_method="duckdb" backend="kuzu" env=".env":
@@ -305,8 +305,8 @@ sec-reset backend="kuzu" env=".env":
 # Uses proven consolidation + COPY approach for large-scale data processing.
 # Pipeline phases: download → process → consolidate → ingest (COPY-based)
 # Examples:
-#   just sec-plan 2020 2025 100                            # Plan processing for 100 companies
-#   just sec-phase download|process|consolidate|ingest     # Start a specific phase
+#   just sec-plan 2020 2025 100                                 # Plan processing for 100 companies
+#   just sec-phase [download|process|consolidate|ingest]        # Start a specific phase
 
 # SEC Production - Plan processing with optional company limit for testing
 sec-plan start_year="2020" end_year="2025" max_companies="" env=".env":
@@ -438,8 +438,8 @@ clean:
 # Clean up development data (more aggressive cleanup)
 clean-data:
     @just clean
-    rm -rf ./data/output
     rm -rf ./data/kuzu-dbs
+    rm -rf ./data/staging
 
 # Show help
 help:

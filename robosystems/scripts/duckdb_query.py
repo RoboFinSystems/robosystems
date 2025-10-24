@@ -15,8 +15,9 @@ from pathlib import Path
 import duckdb
 
 
-def execute_query(db_path: str, query: str, format_output: str = "table"):
+def execute_query(db_path: str, query: str, format_output: str = "table") -> bool:
   """Execute a SQL query against the DuckDB database."""
+  conn = None
   try:
     db_path_obj = Path(db_path)
     if not db_path_obj.exists():
@@ -86,12 +87,14 @@ def execute_query(db_path: str, query: str, format_output: str = "table"):
 
       print(output.getvalue())
 
-    conn.close()
     return True
 
   except Exception as e:
     print(f"Error executing query: {e}")
     return False
+  finally:
+    if conn is not None:
+      conn.close()
 
 
 def main():
