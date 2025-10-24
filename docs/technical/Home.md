@@ -35,7 +35,7 @@ New to RoboSystems? Start here:
 - **Load SEC Data**: `just sec-load NVDA 2024`
 - **Query Data**: `just graph-query sec "MATCH (e:Entity) RETURN e LIMIT 10"`
 - **Health Check**: `just sec-health`
-- **View Logs**: `just logs graph-api`
+- **View Logs**: `just logs api`
 
 ## 💬 Support
 
