@@ -1,3 +1,19 @@
+# =============================================================================
+# ROBOSYSTEMS JUSTFILE DEVELOPMENT & DEPLOYMENT COMMANDS
+# =============================================================================
+#
+# ENVIRONMENT CONFIGURATION:
+#   - .env: Container hostnames for Docker services (required by compose.yaml)
+#   - .env.local: Localhost overrides for justfile commands (default: most recipes use this)
+#
+# QUICK START:
+#   just start             # Full Docker setup (creates .env files automatically)
+#   just restart           # After code changes (no rebuild)
+#   just test              # Run tests
+#   just logs api          # View API logs
+#
+# =============================================================================
+
 _default_env := ".env.local"
 
 ## Default ##
@@ -29,7 +45,7 @@ rebuild profile="robosystems" env=_default_env:
 # Docker commands
 compose-up profile="robosystems" env=_default_env build="--build" detached="":
     test -f .env || cp .env.example .env
-    test -f {{env}} || cp .env.example {{env}}
+    test -f {{env}} || cp .env.local.example {{env}}
     docker compose -f compose.yaml --env-file {{env}} --profile {{profile}} up {{build}} {{detached}}
 
 compose-down profile="robosystems":

@@ -52,6 +52,22 @@ just start robosystems    # Starts full stack
 just restart robosystems  # Restarts full stack
 ```
 
+### Environment Files
+
+The repository uses a dual `.env` pattern for Docker/localhost URL management:
+
+- **`.env`**: Container hostnames for Docker services (required by `compose.yaml`)
+  - Example: `DATABASE_URL=postgresql://postgres:postgres@pg:5432/robosystems`
+  - Used by containers running inside Docker network
+
+- **`.env.local`**: Localhost URL overrides for justfile commands (default for most commands)
+  - Example: `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/robosystems`
+  - Used by justfile commands running on host machine
+
+**Setup**: Both files are created automatically by `just start` or `just venv` from their `.example` templates.
+
+**Key Point**: Docker containers use container hostnames (pg, valkey, graph-api), while justfile commands need localhost URLs since they run on the host machine.
+
 ### Core Services
 
 - **FastAPI API** (`api` container) - Port 8000

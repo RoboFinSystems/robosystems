@@ -81,6 +81,7 @@ services:
       - "8002:8002"
     volumes:
       - ./robosystems:/app/robosystems # Mount code for hot reload
+      - ./data/staging:/app/data/staging # DuckDB embedded database for staging tables
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 30s
