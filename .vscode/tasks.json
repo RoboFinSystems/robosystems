@@ -123,6 +123,13 @@
       "problemMatcher": []
     },
     {
+      "label": "Test Code Quality",
+      "type": "shell",
+      "command": "just",
+      "args": ["test-code-quality"],
+      "problemMatcher": []
+    },
+    {
       "label": "Lint",
       "type": "shell",
       "command": "just",

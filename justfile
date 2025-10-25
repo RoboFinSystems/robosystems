@@ -1,3 +1,5 @@
+_default_env := ".env.local"
+
 ## Default ##
 default:
     @just --list
@@ -93,6 +95,12 @@ test:
 test-cov:
     uv run pytest --cov=robosystems tests/ --ignore=tests/integration
 
+# Run code quality checks
+test-code-quality:
+    @just lint
+    @just format
+    @just typecheck
+
 # Run linting
 lint:
     uv run ruff check .
@@ -178,12 +186,6 @@ install-apps:
     test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
 
 ## Development Server ##
-# Environment Detection and Hostname Overrides
-# Default environment file for justfile commands
-# .env.local contains localhost URLs for connecting to Docker services from host
-# Use `env=".env"` parameter to override for Docker-based execution
-_default_env := ".env.local"
-
 # Start development server
 api env=_default_env:
     UV_ENV_FILE={{env}} uv run uvicorn main:app --reload
@@ -329,7 +331,9 @@ sec-reset-remote confirm="" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 ## Repository Access Management ##
-# Repository Access Management
+# Manage user access to shared repositories (SEC, industry data, etc.)
+
+# Grant repository access
 repo-grant-access user_id repository access_level="read" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}}
 
@@ -362,8 +366,7 @@ repo-check-access-repo user_id repository env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
 
 ## Credit Admin Tools ##
-# NOTE: Monthly credit allocation is automated via Celery Beat (1st of month at 3:00 AM UTC)
-# These commands are for manual operations only (bonus credits, health checks, emergency allocation)
+# Monthly credit allocation is automated via Celery Beat - these commands are for manual operations only
 
 # Credit admin - add bonus credits to a user graph
 credit-bonus-graph graph_id amount description env=_default_env:
@@ -377,13 +380,13 @@ credit-bonus-repository user_id repository_name amount description env=_default_
 credit-health env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin health
 
-# Credit admin - EMERGENCY manual allocation for specific user (DANGEROUS - requires --confirm)
-credit-force-allocate-user user_id env=_default_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-user {{user_id}} --confirm
+# Credit admin - manual allocation for specific user (DANGEROUS - requires confirm="yes")
+credit-force-allocate-user user_id confirm="" env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-user {{user_id}} {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
-# Credit admin - EMERGENCY manual allocation for ALL users (EXTREMELY DANGEROUS - requires --confirm)
-credit-force-allocate-all env=_default_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-all --confirm
+# Credit admin - manual allocation for ALL users (DANGEROUS - requires confirm="yes")
+credit-force-allocate-all confirm="" env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-all {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 ## Valkey/Redis ##
 # Clear Valkey/Redis queues
@@ -413,6 +416,11 @@ clean-data:
     @just clean
     rm -rf ./data/kuzu-dbs
     rm -rf ./data/staging
+    rm -rf ./data/arelle
+    rm -rf ./data/neo4j
+    rm -rf ./data/localstack
+    rm -rf ./data/postgres
+    rm -rf ./data/valkey
 
 # Show help
 help:

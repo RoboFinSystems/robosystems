@@ -27,12 +27,10 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/robosystems_test
       POSTGRES_PASSWORD: postgres
-      # Kuzu Configuration
+      # Graph API Configuration
+      GRAPH_API_URL: http://localhost:8001
       KUZU_DATABASE_PATH: ./data/kuzu-dbs
       KUZU_MAX_DATABASES_PER_NODE: "50"
-      KUZU_API_URL: http://localhost:8001
-      KUZU_REPLICA_ALB_URL: http://localhost:8003
-      AWS_ENDPOINT_URL: http://localhost:4566
       # JWT and security secrets for authentication (test environment)
       JWT_SECRET_KEY: test-jwt-secret-key-12345678901234567890abcdef
       CONNECTION_CREDENTIALS_KEY: test-connection-credentials-key-12345678901234567890abcdef
@@ -50,6 +48,7 @@ jobs:
       SEC_GOV_USER_AGENT: test-user-agent test@example.com
       OPENFIGI_API_KEY: test-openfigi-key
       # LocalStack S3 Configuration for testing
+      AWS_ENDPOINT_URL: http://localhost:4566
       AWS_S3_BUCKET: robosystems-local
       AWS_S3_ACCESS_KEY_ID: test
       AWS_S3_SECRET_ACCESS_KEY: test

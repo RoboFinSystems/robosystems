@@ -16,7 +16,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data/arelle-cache:/app/robosystems/arelle/cache # Writable Arelle cache directory
       - ./robosystems:/app/robosystems # Mount code for hot reload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://api:8000/v1/status"]
@@ -48,9 +47,9 @@ services:
     ports:
       - "8001:8001"
     volumes:
+      - ./robosystems:/app/robosystems # Mount code for hot reload
       - ./data/kuzu-dbs:/app/data/kuzu-dbs # Kuzu embedded database for graph storage
       - ./data/staging:/app/data/staging # DuckDB embedded database for staging tables
-      - ./robosystems:/app/robosystems # Mount code for hot reload (rw for EDGAR init)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -108,8 +107,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data/arelle-cache:/app/robosystems/arelle/cache # Writable Arelle cache directory
-      - ./robosystems:/app/robosystems # Mount code for hot reload (rw for EDGAR init)
+      - ./robosystems:/app/robosystems # Mount code for hot reload
+      - ./data/arelle:/app/robosystems/arelle # Writable Arelle cache directory
     restart: always
     profiles: ["worker", "robosystems", "all"]
 

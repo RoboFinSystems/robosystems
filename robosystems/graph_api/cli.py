@@ -3,7 +3,7 @@ Graph API Client - Command-line interface for Graph API
 
 Usage:
     python -m robosystems.graph_api query "MATCH (c:Entity) RETURN c.name LIMIT 5"
-    python -m robosystems.graph_api health --url $KUZU_API_URL
+    python -m robosystems.graph_api health --url $GRAPH_API_URL
 
 This module provides a CLI interface using the new unified client structure.
 """

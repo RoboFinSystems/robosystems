@@ -294,7 +294,7 @@ GRAPH_BACKEND_TYPE=kuzu             # kuzu|neo4j_community|neo4j_enterprise
 
 # Routing Configuration (Kuzu)
 KUZU_ACCESS_PATTERN=api_writer      # Access pattern (api_writer/api_reader/direct_file)
-KUZU_API_URL=                        # Localhost endpoint for routing (dynamic lookup in prod)
+GRAPH_API_URL=                       # Localhost endpoint for routing (dynamic lookup in prod)
 
 # Routing Configuration (Neo4j)
 NEO4J_URI=bolt://neo4j-db:7687      # Neo4j Bolt connection
