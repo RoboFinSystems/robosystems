@@ -52,9 +52,9 @@ async def get_upload_url(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  repository = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
 
-  if not graph:
+  if not repository:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
@@ -62,9 +62,13 @@ async def get_upload_url(
 
   table = GraphTable.get_by_name(graph_id, table_name, db)
   if not table:
-    raise HTTPException(
-      status_code=status.HTTP_404_NOT_FOUND,
-      detail=f"Table {table_name} not found",
+    logger.info(f"Auto-creating table {table_name} for graph {graph_id} on first file upload")
+    table = GraphTable.create(
+      graph_id=graph_id,
+      table_name=table_name,
+      table_type="external",
+      schema_json={"columns": []},
+      session=db,
     )
 
   # Validate file format
@@ -103,27 +107,6 @@ async def get_upload_url(
       detail="File name contains invalid characters",
     )
 
-  max_file_size_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
-  if request.file_size_bytes > max_file_size_bytes:
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail=f"File size {request.file_size_bytes / (1024 * 1024):.2f} MB exceeds maximum of {MAX_FILE_SIZE_MB} MB",
-    )
-
-  storage_limit_gb = get_tier_storage_limit(graph.tier)
-  storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
-
-  all_tables = GraphTable.get_all_for_graph(graph_id, db)
-  current_storage_bytes = sum(t.total_size_bytes or 0 for t in all_tables)
-
-  if current_storage_bytes + request.file_size_bytes > storage_limit_bytes:
-    raise HTTPException(
-      status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-      detail=f"Storage limit exceeded. Current: {current_storage_bytes / (1024 * 1024 * 1024):.2f} GB, "
-      f"Limit: {storage_limit_gb} GB, "
-      f"Attempted upload: {request.file_size_bytes / (1024 * 1024 * 1024):.2f} GB",
-    )
-
   logger.info(
     f"Generating upload URL for {request.file_name} to table {table_name} in graph {graph_id}"
   )
@@ -134,7 +117,7 @@ async def get_upload_url(
   s3_client = S3Client()
 
   try:
-    bucket = env.AWS_S3_BUCKET_NAME
+    bucket = env.AWS_S3_BUCKET
 
     upload_url = s3_client.s3_client.generate_presigned_url(
       "put_object",
@@ -203,9 +186,9 @@ async def update_file(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  repository = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
 
-  if not graph:
+  if not repository:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
@@ -226,6 +209,32 @@ async def update_file(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail="File size must be greater than 0",
     )
+
+  # Validate max file size
+  max_file_size_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+  if request.file_size_bytes > max_file_size_bytes:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail=f"File size {request.file_size_bytes / (1024 * 1024):.2f} MB exceeds maximum of {MAX_FILE_SIZE_MB} MB",
+    )
+
+  # Validate storage limit
+  from robosystems.models.iam import Graph
+  graph = Graph.get_by_id(graph_id, db)
+  if graph:
+    storage_limit_gb = get_tier_storage_limit(graph.graph_tier)
+    storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
+
+    all_tables = GraphTable.get_all_for_graph(graph_id, db)
+    current_storage_bytes = sum(t.total_size_bytes or 0 for t in all_tables)
+
+    if current_storage_bytes + request.file_size_bytes > storage_limit_bytes:
+      raise HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail=f"Storage limit exceeded. Current: {current_storage_bytes / (1024 * 1024 * 1024):.2f} GB, "
+        f"Limit: {storage_limit_gb} GB, "
+        f"Attempted upload: {request.file_size_bytes / (1024 * 1024 * 1024):.2f} GB",
+      )
 
   # Validate row count if provided
   if request.row_count is not None and request.row_count < 0:

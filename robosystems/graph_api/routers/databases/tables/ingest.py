@@ -146,12 +146,12 @@ async def ingest_table_to_graph(
           )
 
           duckdb_manager = DuckDBTableManager()
-          bucket = env.AWS_S3_BUCKET_NAME
+          bucket = env.AWS_S3_BUCKET
 
           for table_rec in tables_to_register:
             if table_rec.file_count and table_rec.file_count > 0:
               # Construct S3 pattern using actual user_id
-              s3_pattern = f"s3://{bucket}/user-staging/{user_graph.user_id}/{graph_id}/{table_rec.table_name}/*.parquet"
+              s3_pattern = f"s3://{bucket}/user-staging/{user_graph.user_id}/{graph_id}/{table_rec.table_name}/**/*.parquet"
               try:
                 create_req = TableCreateRequest(
                   graph_id=graph_id,
@@ -226,7 +226,12 @@ async def ingest_table_to_graph(
       rows_ingested = 0
       if result and hasattr(result, "get_as_arrow"):
         arrow_table = result.get_as_arrow()
-        rows_ingested = arrow_table.num_rows
+        if arrow_table.num_rows > 0 and arrow_table.num_columns > 0:
+          result_msg = str(arrow_table.column(0)[0].as_py())
+          import re
+          match = re.search(r'(\d+)\s+tuples?', result_msg)
+          if match:
+            rows_ingested = int(match.group(1))
 
     # Mark graph as available after successful rebuild
     if request.rebuild:
