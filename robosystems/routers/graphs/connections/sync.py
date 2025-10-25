@@ -55,7 +55,7 @@ Initiates data sync based on provider type:
 - Categorizes new transactions
 
 Note:
-This operation is FREE - no credit consumption required.
+This operation is included - no credit consumption required.
 
 Returns a task ID for monitoring sync progress.""",
   operation_id="syncConnection",

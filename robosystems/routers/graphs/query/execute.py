@@ -138,7 +138,7 @@ This endpoint automatically selects the best execution strategy based on:
 - Clients should implement exponential backoff
 
 **Note:**
-Query operations are FREE - no credit consumption required.
+Query operations are included - no credit consumption required.
 Queue position is based on subscription tier for priority.""",
   operation_id="executeCypherQuery",
   responses={
@@ -613,7 +613,7 @@ async def execute_cypher_query(
         parameters=request.parameters,
         graph_id=graph_id,
         user_id=current_user.id,
-        credits_required=0.0,  # Queries are FREE
+        credits_required=0.0,  # Queries are included
         priority=_get_user_priority(current_user),
       )
 
@@ -824,7 +824,7 @@ async def _check_shared_repository_limits(
   """
   Check dual-layer rate limits for shared repositories.
 
-  Direct API queries are FREE (no credits consumed) but still rate limited.
+  Direct API queries are included (no credits consumed) but still rate limited.
 
   Args:
       graph_id: The graph/repository ID
@@ -901,5 +901,5 @@ async def _check_shared_repository_limits(
   finally:
     await redis_client.close()
 
-  # Note: Direct API queries are FREE - no credit consumption
+  # Note: Direct API queries are included - no credit consumption
   # Only MCP queries (AI-mediated) consume credits

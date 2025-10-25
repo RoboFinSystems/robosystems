@@ -110,7 +110,7 @@ This data helps with:
 - Performance optimization
 
 Note:
-This operation is FREE - no credit consumption required.""",
+This operation is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
   operation_id="getGraphMetrics",
   responses={
@@ -362,7 +362,7 @@ Useful for:
 - Performance tuning
 
 Note:
-This operation is FREE - no credit consumption required.""",
+This operation is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
   operation_id="getGraphUsageStats",
   responses={

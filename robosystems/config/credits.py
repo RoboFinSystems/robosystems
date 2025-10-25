@@ -4,7 +4,7 @@ Centralized credit system configuration - AI-focused billing.
 SIMPLIFIED CREDIT MODEL:
 ========================
 Credits are now exclusively for AI operations that use external AI APIs
-(Anthropic Claude or OpenAI GPT). All other operations are FREE as they
+(Anthropic Claude or OpenAI GPT). All other operations are included as they
 use resources already included with the Kuzu instance provisioning.
 
 AI CREDITS:

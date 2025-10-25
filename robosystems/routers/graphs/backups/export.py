@@ -65,7 +65,7 @@ async def export_backup(
   Note: Encrypted backups cannot be exported and will return an error.
   """
   try:
-    # Backup operations are now FREE - no credit consumption
+    # Backup operations are included - no credit consumption
 
     # Verify user has access to this graph
     verify_graph_access(current_user, graph_id, db)
@@ -81,7 +81,7 @@ async def export_backup(
         target_format=None,  # Only original format supported for now
       )
 
-      # Backup operations are now FREE - no credit consumption
+      # Backup operations are included - no credit consumption
 
       # Record business event
       metrics_instance = get_endpoint_metrics()

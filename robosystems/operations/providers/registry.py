@@ -109,7 +109,7 @@ class ProviderRegistry:
             "enabled": str(enabled).lower(),
           },
         )
-        logger.info(
+        logger.debug(
           f"Provider {provider} feature flag: {'enabled' if enabled else 'disabled'}"
         )
     except Exception as e:

@@ -4,7 +4,7 @@ Repository-specific rate limiting for shared repositories like SEC.
 This module implements the second layer of rate limiting specifically for
 shared repositories, working in conjunction with the existing burst protection.
 
-IMPORTANT: Both direct API queries and MCP queries are FREE.
+IMPORTANT: Both direct API queries and MCP queries are included.
 Rate limits are applied to prevent abuse and ensure fair usage across tiers.
 No credits are consumed for any query operations.
 """

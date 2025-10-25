@@ -10,7 +10,7 @@ The credits middleware:
 - Handles token-based billing using actual API usage
 - Enforces credit limits for AI operations
 - Provides caching for high-performance credit checks
-- All database operations (queries, imports, backups) are completely FREE
+- All database operations (queries, imports, backups) are included
 
 ## Architecture
 
@@ -28,7 +28,7 @@ The platform uses a simplified credit model focused exclusively on AI operations
 
 1. Users receive monthly AI credit allocations based on their tier
 2. ONLY AI operations (Anthropic/OpenAI) consume credits based on actual token usage
-3. All database operations are completely FREE (queries, imports, backups, etc.)
+3. All database operations are included (queries, imports, backups, etc.)
 4. Storage is billed separately in USD (not credits) for overages
 5. AI operations are blocked when credits are exhausted
 
@@ -112,8 +112,8 @@ STORAGE_COSTS = {
     "per_gb_over_limit": 100,  # 100 credits per GB over monthly limit
 }
 
-# All database operations are FREE
-FREE_OPERATIONS = [
+# All database operations are included
+INCLUDED_OPERATIONS = [
     "query", "analytics", "backup", "sync", "import",
     "mcp_call", "api_call", "connection_sync"
 ]
@@ -125,7 +125,7 @@ FREE_OPERATIONS = [
 # No multipliers in the simplified model
 # AI operations use actual token counts
 # Storage has fixed per-GB pricing per tier
-# All database operations are completely FREE
+# All database operations are included
 ```
 
 ## Configuration
@@ -173,7 +173,7 @@ async def agent_endpoint(
     return response
 ```
 
-### 2. For Database Operations (FREE)
+### 2. For Database Operations (Included)
 
 ```python
 @router.post("/v1/graphs/{graph_id}/query")
@@ -183,7 +183,7 @@ async def execute_query(
     current_user: User = Depends(get_current_user),
     repo: Repository = Depends(get_graph_repository)
 ):
-    # No credit decorator needed - queries are FREE
+    # No credit decorator needed - queries are included
     return await repo.execute_query(query.cypher)
 ```
 

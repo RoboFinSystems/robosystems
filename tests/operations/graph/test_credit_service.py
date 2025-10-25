@@ -179,7 +179,7 @@ class TestCreditService:
   def test_free_operations_dont_consume_credits(
     self, credit_service, mock_session, sample_graph_credits
   ):
-    """Test that FREE operations (queries, imports, etc.) don't consume credits."""
+    """Test that included operations (queries, imports, etc.) don't consume credits."""
     # Mock cache import
     with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
       # Setup mock cache to return cached data
@@ -206,7 +206,7 @@ class TestCreditService:
           }
         )
 
-        # Test various FREE operations
+        # Test various included operations
         free_operations = ["query", "import", "backup", "analytics", "sync", "api_call"]
 
         for operation in free_operations:
@@ -214,7 +214,7 @@ class TestCreditService:
           result = credit_service.consume_credits(
             graph_id="graph123",
             operation_type=operation,
-            base_cost=Decimal("0"),  # FREE operations have 0 cost
+            base_cost=Decimal("0"),  # Included operations have 0 cost
           )
 
           # Should return success but consume 0 credits
@@ -366,9 +366,9 @@ class TestCreditService:
     # Test AI operations (consume credits)
     assert get_operation_cost("agent_call") == Decimal("100")
     assert get_operation_cost("ai_analysis") == Decimal("100")
-    assert get_operation_cost("mcp_call") == Decimal("0")  # MCP calls are free/included
+    assert get_operation_cost("mcp_call") == Decimal("0")  # MCP calls are included
 
-    # Test FREE operations (all database operations)
+    # Test included operations (all database operations)
     assert get_operation_cost("query") == Decimal("0")
     assert get_operation_cost("cypher_query") == Decimal("0")
     assert get_operation_cost("analytics") == Decimal("0")

@@ -2,7 +2,7 @@
 
 RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial data into actionable intelligence through graph-based analytics and AI-powered insights.
 
-- **Graph-Based Financial Intelligence**: Leverages graph database technology (Kuzu or Neo4j) to model complex financial relationships
+- **Graph-Based Financial Intelligence**: Leverages graph database technology to model complex financial relationships
 - **GraphRAG Architecture**: Knowledge graph-based retrieval-augmented generation for LLM-powered financial analysis
 - **Model Context Protocol (MCP)**: Standardized server and [client](https://www.npmjs.com/package/@robosystems/mcp) for LLM integration
 - **Multi-Source Data Integration**: SEC XBRL filings, QuickBooks accounting data, and custom financial datasets
@@ -11,13 +11,13 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 
 ## Core Features
 
-- **Multi-Tenant Graph Databases**: Isolated databases (Kuzu or Neo4j) with tiered cluster-based scaling
+- **Multi-Tenant Graph Databases**: Isolated graph databases with tiered cluster-based scaling
 - **AI Agent Interface**: Natural language financial analysis via Model Context Protocol (MCP)
 - **Entity & Generic Graphs**: Curated schemas for RoboLedger/RoboInvestor, plus custom schema support
 - **Shared Repositories**: SEC XBRL filings knowledge graph for context mining
 - **QuickBooks Integration**: Complete accounting synchronization with trial balance creation
 - **DuckDB Staging System**: High-performance data validation and bulk ingestion pipeline
-- **Credit-Based Billing**: AI operations consume credits based on token usage (all database ops are FREE)
+- **Credit-Based Billing**: AI operations consume credits based on token usage
 - **Query Queue System**: Production-ready query management with admission control
 
 ## Quick Start
@@ -109,17 +109,17 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Graph Database System:**
 
-- Pluggable backends (Kuzu for Standard tier, Neo4j for Enterprise/Premium)
+- Pluggable backends (Kuzu by default, Neo4j optional)
 - Multi-tenant isolation with dedicated databases per entity
 - DuckDB staging system for high-performance data ingestion
-- Tiered infrastructure (Standard/Enterprise/Premium)
+- Tiered infrastructure from multi-tenant to dedicated instances
 
 **Data Layer:**
 
-- PostgreSQL for IAM and metadata
-- DynamoDB for service registry
+- PostgreSQL for IAM and graph metadata
 - Valkey for caching and message broker
-- AWS S3 for document storage
+- AWS S3 for data lake storage and static assets
+- DynamoDB for instance/graph/volume registry
 
 **Infrastructure:**
 
@@ -150,7 +150,6 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - **AI-Focused**: Credits consumed only by AI operations (Anthropic/OpenAI API calls)
 - **Token-Based Billing**: Actual token usage determines credit consumption
-- **Database Operations**: All database ops (queries, imports, backups) are FREE
 
 ## Client Libraries
 

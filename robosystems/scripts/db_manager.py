@@ -4,7 +4,7 @@
 import argparse
 import bcrypt
 
-from robosystems.models.iam import User, APIKey, UserGraph
+from robosystems.models.iam import User, UserAPIKey, UserGraph
 from robosystems.database import session, engine
 from robosystems.logger import logger
 
@@ -23,7 +23,7 @@ def list_users():
       logger.info(f"  - {user.email} ({user.name}) - Active: {user.is_active}")
 
       # Show API keys
-      api_keys = APIKey.get_by_user_id(user.id, session)
+      api_keys = UserAPIKey.get_by_user_id(user.id, session)
       if api_keys:
         logger.info(f"    API Keys: {len(api_keys)}")
         for key in api_keys:
@@ -81,7 +81,7 @@ def create_api_key(email: str, key_name: str, description: str = None):
       return False
 
     # Create API key
-    api_key, plain_key = APIKey.create(
+    api_key, plain_key = UserAPIKey.create(
       user_id=user.id, name=key_name, description=description, session=session
     )
 
@@ -139,7 +139,7 @@ def show_database_info():
 
     # Count records in each table
     user_count = session.query(User).count()
-    api_key_count = session.query(APIKey).count()
+    api_key_count = session.query(UserAPIKey).count()
     user_graph_count = session.query(UserGraph).count()
 
     logger.info(f"   Users: {user_count}")

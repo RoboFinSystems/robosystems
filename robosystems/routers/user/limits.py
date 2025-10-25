@@ -311,7 +311,7 @@ def _get_tier_benefits(plan: str) -> Dict:
     - Remaining quota
     - Reset times
 
-    Note: All queries are FREE - this only shows rate limit status.
+    Note: All queries are included - this only shows rate limit status.
     """,
   response_model=Dict,
 )
@@ -398,7 +398,7 @@ async def get_shared_repository_limits(
       "access": True,
       "plan": repo_access.repository_plan.value,
       "subscription_active": repo_access.is_active,
-      "pricing": "FREE - No credits consumed for queries",
+      "pricing": "Included - No credits consumed for queries",
       "limits": limits,
       "usage": usage_stats.get("usage", {}),
       "remaining": remaining,

@@ -364,10 +364,10 @@ async def get_service_offerings(
         "description": "Credit costs for operations",
         "ai_operations": base_costs,
         "token_pricing": token_pricing,
-        "free_operations": no_credit_ops,
+        "included_operations": no_credit_ops,
         "notes": [
           "Only AI operations (agent calls, MCP AI tools, AI analysis) consume credits",
-          "All database operations are free (queries, imports, backups, etc.)",
+          "All database operations are included (queries, imports, backups, etc.)",
           "Token-based pricing applies for actual AI API usage",
           "1 credit = approximately $0.001 USD",
         ],

@@ -103,9 +103,9 @@ robosystems/
 
 2. **Graph Database System**
 
-   - **Multi-Backend**: Kuzu (Standard tier) and Neo4j (Enterprise/Premium tiers)
+   - **Primary Backend**: Kuzu embedded graph database (all main tiers)
    - **Multi-Tenant**: Separate database per entity
-   - **Tiered Infrastructure**: Standard (Kuzu), Enterprise (Neo4j Community), Premium (Neo4j Enterprise)
+   - **Tiered Infrastructure**: Multi-tenant shared instances to dedicated instances with increasing resources
    - **Shared Repositories**: SEC, industry, economic data
    - **Cluster-Based**: Writer clusters (EC2), reader clusters (ECS Fargate)
 
@@ -113,7 +113,7 @@ robosystems/
 
    - **Billing Plans**: Subscription tiers with credit allocations
    - **Rate Limiting**: Burst protection with 1-minute windows
-   - **Credit System**: AI operation billing (all database ops are FREE)
+   - **Credit System**: AI operation billing (database ops included)
    - **Environment Validation**: Startup configuration checks
 
 4. **Middleware Layers**
@@ -141,30 +141,18 @@ config/
 
 ### Subscription Tiers
 
-```python
-# Standard: $49.99/month, 10K AI credits, 5 graphs
-# Enterprise: $199.99/month, 50K AI credits, 25 graphs
-# Premium: $499.99/month, 200K AI credits, 100 graphs
-```
+Multiple subscription tiers are available, ranging from multi-tenant shared infrastructure to dedicated instances with enhanced resources. Each tier includes monthly AI credit allocations and varying levels of storage, subgraph support, and performance capabilities.
 
 ### Credit System (Simplified - AI Operations Only)
 
 - **AI Operations**: Only Anthropic/OpenAI API calls consume credits (token-based billing)
-- **FREE Operations**: All database operations (queries, imports, backups, etc.)
+- **Included Operations**: All database operations (queries, imports, backups, etc.)
 - **Monthly Allocations**: Based on subscription tier
 - **Storage**: Separate optional billing mechanism (10 credits/GB/day)
 
 ### Rate Limiting
 
-Burst-focused protection with 1-minute windows:
-
-```python
-# Standard tier examples
-GRAPH_READ: 500/min      # 30k/hour possible
-GRAPH_WRITE: 100/min     # 6k/hour possible
-GRAPH_QUERY: 60/min      # 3.6k/hour possible
-AI: 10/min               # 600/hour possible
-```
+Burst-focused protection with 1-minute windows. Rate limits scale with subscription tier, with higher tiers receiving increased multipliers for API operations, queries, and AI calls.
 
 ## Database Systems
 
@@ -183,25 +171,24 @@ just db-list-users                 # List all users
 
 ### Graph Database Infrastructure
 
-**Backend Selection by Tier:**
+**Backend:**
 
-- **Standard**: Kuzu (embedded graph database)
-- **Enterprise**: Neo4j Community (managed graph database)
-- **Premium**: Neo4j Enterprise (managed graph database with clustering)
+- **Primary**: Kuzu embedded graph database (all main subscription tiers)
+- **Optional**: Neo4j (disabled by default, available on request)
 
 **Infrastructure Tiers:**
 
 **Production:**
 
-- **Standard (Kuzu)**: r7g.large, 10 databases/instance, 2GB per database
-- **Enterprise (Neo4j)**: r7g.large, 1 database/instance (isolated), 14GB total
-- **Premium (Neo4j)**: r7g.xlarge, 1 database/instance (max performance), 28GB total
-- **Shared (Kuzu)**: r7g.large, multiple repositories (SEC, etc.), shared memory pool
+- **Multi-tenant**: r7g.large instances, multiple databases per instance, shared resources
+- **Dedicated Small**: r7g.large instances, single database with subgraph support
+- **Dedicated Large**: r7g.xlarge instances, single database with enhanced subgraph support
+- **Shared Repositories**: r7g.large instances for public data (SEC, etc.)
 
 **Staging:**
 
-- **Standard (Kuzu)**: r7g.medium, 10 databases/instance, ~700MB per database
-- **Shared (Kuzu)**: r7g.medium, multiple repositories, shared memory pool
+- **Multi-tenant**: r7g.medium instances, reduced resources for testing
+- **Shared Repositories**: r7g.medium instances for public data testing
 
 ```bash
 # Graph operations (works with both Kuzu and Neo4j backends)

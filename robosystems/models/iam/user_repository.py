@@ -207,10 +207,8 @@ class UserRepository(Model):
       existing.is_active = True
       existing.monthly_price_cents = monthly_price_cents
       existing.monthly_credit_allocation = monthly_credits
+      existing.expires_at = expires_at
       existing.updated_at = now
-
-      if expires_at:
-        existing.expires_at = expires_at
 
       if metadata:
         existing.extra_metadata = json.dumps(metadata)
