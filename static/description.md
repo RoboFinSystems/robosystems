@@ -2,12 +2,12 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 
 ## Core Features
 
-- **Graph Database**: Kuzu-powered knowledge graphs for complex financial relationships and analytics
-- **AI-Powered Analysis**: Anthropic Claude integration for intelligent financial insights and natural language queries
+- **Graph Database**: Build knowledge graphs with Kuzu for modeling financial relationships and multi-dimensional analytics
 - **Multi-Tenant Architecture**: Isolated database instances with tier-based resource allocation
-- **Connect Your Data**: Connect QuickBooks, Plaid banking, and SEC XBRL filings in a unified graph
-- **Shared Repositories**: Access to curated SEC filing data and industry knowledge graphs
-- **Real-time Monitoring**: Server-Sent Events (SSE) for operation tracking and streaming query results
+- **AI Agent Integration**: MCP (Model Context Protocol) support enables AI agents to query and analyze your knowledge graphs
+- **DuckDB Staging**: High-performance data validation and bulk ingestion pipeline with Parquet optimization
+- **Data Integration**: Connect QuickBooks, Plaid banking, and SEC XBRL filings in a unified graph
+- **Shared Repositories**: Access to curated SEC filing data and other shared knowledge graphs
 
 ## API Modules
 
@@ -15,9 +15,10 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 
 - **Create**: Initialize knowledge graphs with customizable schemas and extensions
 - **Query**: Execute Cypher queries with NDJSON streaming for large results
+- **Tables**: DuckDB staging tables for data ingestion with file upload, query, and import workflows
+- **Schema**: View and analyze node types, relationship types, and property definitions
 - **Backup**: Encrypted backups with retention policies and download support
 - **Analytics**: Graph analytics for understanding contents and usage
-- **Subscriptions**: Tiered plans with credit-based AI operations
 
 ### MCP & Agents
 

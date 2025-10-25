@@ -37,7 +37,7 @@ router = APIRouter()
 
 
 @router.post(
-  "/validate",
+  "/schema/validate",
   response_model=SchemaValidationResponse,
   summary="Validate Schema",
   description="""Validate a custom schema definition before deployment.

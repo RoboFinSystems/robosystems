@@ -493,7 +493,7 @@ async def test_get_graph_schema(
   headers = {"Authorization": f"Bearer {token}"}
 
   response = await async_client.get(
-    f"/v1/graphs/{test_user_graph.graph_id}/schema/info", headers=headers
+    f"/v1/graphs/{test_user_graph.graph_id}/schema", headers=headers
   )
 
   assert response.status_code == 200

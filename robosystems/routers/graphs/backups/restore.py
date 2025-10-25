@@ -34,7 +34,7 @@ router = APIRouter()
 
 
 @router.post(
-  "/restore",
+  "/{backup_id}/restore",
   response_model=None,
   status_code=status.HTTP_202_ACCEPTED,
   summary="Restore Encrypted Backup",
@@ -97,6 +97,7 @@ async def restore_backup(
   background_tasks: BackgroundTasks,
   request: BackupRestoreRequest,
   fastapi_request: Request,
+  backup_id: str = Path(..., description="Backup identifier"),
   graph_id: str = Path(..., description="Graph database identifier"),
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_async_db_session),
@@ -133,7 +134,7 @@ async def restore_backup(
     # Verify backup exists and belongs to this graph
     from robosystems.models.iam import GraphBackup
 
-    backup_record = GraphBackup.get_by_id(request.backup_id, db)
+    backup_record = GraphBackup.get_by_id(backup_id, db)
     if not backup_record:
       raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -176,7 +177,7 @@ async def restore_backup(
       args=[],
       kwargs={
         "graph_id": graph_id,
-        "backup_id": request.backup_id,
+        "backup_id": backup_id,
         "user_id": current_user.id,
         "create_system_backup": request.create_system_backup,
         "verify_after_restore": request.verify_after_restore,
@@ -199,7 +200,7 @@ async def restore_backup(
       event_data={
         "user_id": current_user.id,
         "graph_id": graph_id,
-        "backup_id": request.backup_id,
+        "backup_id": backup_id,
         "create_system_backup": request.create_system_backup,
         "verify_after_restore": request.verify_after_restore,
       },
@@ -219,7 +220,7 @@ async def restore_backup(
       details={
         "action": "backup_restore_initiated",
         "graph_id": graph_id,
-        "backup_id": request.backup_id,
+        "backup_id": backup_id,
         "create_system_backup": request.create_system_backup,
       },
       risk_level="high",  # Restore is a high-risk operation

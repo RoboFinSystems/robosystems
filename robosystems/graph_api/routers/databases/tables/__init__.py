@@ -16,12 +16,12 @@ for route in management.router.routes:
     route.tags = ["Tables"]
   router.routes.append(route)
 
-for route in query.router.routes:
+for route in ingest.router.routes:
   if not hasattr(route, "tags") or not route.tags:
     route.tags = ["Tables"]
   router.routes.append(route)
 
-for route in ingest.router.routes:
+for route in query.router.routes:
   if not hasattr(route, "tags") or not route.tags:
     route.tags = ["Tables"]
   router.routes.append(route)

@@ -15,16 +15,12 @@ MAIN_API_TAGS = [
     "description": "🔌 MCP - Model Context Protocol for AI interactions with graph databases",
   },
   {
-    "name": "Tables",
-    "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
-  },
-  {
     "name": "Agent",
     "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph databases",
   },
   {
-    "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Manage subgraph databases for Enterprise/Premium tiers",
+    "name": "Tables",
+    "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
   },
   {
     "name": "Schema",
@@ -37,6 +33,10 @@ MAIN_API_TAGS = [
   {
     "name": "Backup",
     "description": "💾 Database backup - Create, restore, and manage graph database backups",
+  },
+  {
+    "name": "Subgraphs",
+    "description": "🌳 Subgraphs - Manage subgraph databases for version control and memory context",
   },
   {
     "name": "Graph Limits",

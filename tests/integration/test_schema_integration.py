@@ -206,14 +206,50 @@ class TestSchemaManagementIntegration:
       mock_user_graph_query = MagicMock()
       mock_user_graph_query.filter_by.return_value.first.return_value = test_user_graph
 
+      # Mock GraphSchema record
+      mock_schema_record = MagicMock()
+      mock_schema_record.custom_schema_name = "Test Schema"
+      mock_schema_record.schema_version = 1
+      mock_schema_record.schema_type = "extensions"
+      mock_schema_record.schema_json = {
+        "name": "Test Schema",
+        "version": "1",
+        "type": "extensions",
+        "base": "base",
+        "extensions": ["roboledger"],
+      }
+      mock_schema_record.schema_ddl = (
+        "CREATE NODE TABLE Entity(identifier STRING, PRIMARY KEY(identifier));"
+      )
+
+      # Mock GraphSchema query
+      mock_schema_query = MagicMock()
+      mock_schema_query.filter.return_value.order_by.return_value.first.return_value = (
+        mock_schema_record
+      )
+
+      # Mock Graph query
+      mock_graph_query = MagicMock()
+      mock_graph_query.filter.return_value.first.return_value = (
+        test_user_graph.graph if hasattr(test_user_graph, "graph") else None
+      )
+
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import UserGraph
+        from robosystems.models.iam import UserGraph, GraphSchema, Graph
 
         if model == UserGraph or (
           hasattr(model, "__name__") and model.__name__ == "UserGraph"
         ):
           return mock_user_graph_query
+        elif model == GraphSchema or (
+          hasattr(model, "__name__") and model.__name__ == "GraphSchema"
+        ):
+          return mock_schema_query
+        elif model == Graph or (
+          hasattr(model, "__name__") and model.__name__ == "Graph"
+        ):
+          return mock_graph_query
         return MagicMock()
 
       mock_db.query = mock_query
@@ -279,11 +315,48 @@ class TestSchemaManagementIntegration:
     self, client_with_mocked_auth, test_user, test_user_graph
   ):
     """Test checking schema compatibility before creating a graph."""
-    # First, list available extensions
+    # First, list available extensions (using global endpoint)
+    with patch("robosystems.schemas.manager.SchemaManager") as mock_schema_manager:
+      mock_manager = mock_schema_manager.return_value
+      mock_manager.list_available_extensions.return_value = [
+        {
+          "name": "roboledger",
+          "available": True,
+          "description": "Financial reporting",
+        },
+        {
+          "name": "roboinvestor",
+          "available": True,
+          "description": "Investment tracking",
+        },
+      ]
+
+      extensions_response = client_with_mocked_auth.get("/v1/graphs/extensions")
+
+      assert extensions_response.status_code == 200
+      extensions = extensions_response.json()
+      assert len(extensions["extensions"]) == 2
+
+    # Now create a schema that should be compatible with roboledger
+    financial_schema = {
+      "name": "custom_financial",
+      "extends": "base",
+      "nodes": [
+        {
+          "name": "Account",
+          "properties": [
+            {"name": "id", "type": "STRING", "is_primary_key": True},
+            {"name": "balance", "type": "DOUBLE"},
+          ],
+        }
+      ],
+    }
+
+    # Validate with compatibility check
     with (
       patch(
-        "robosystems.routers.graphs.schema.extensions.SchemaManager"
-      ) as mock_schema_manager,
+        "robosystems.routers.graphs.schema.validate.CustomSchemaManager"
+      ) as mock_ud_manager,
     ):
       from main import app
       from robosystems.database import get_db_session
@@ -314,88 +387,36 @@ class TestSchemaManagementIntegration:
       app.dependency_overrides[get_db_session] = override_get_db
 
       try:
-        mock_manager = mock_schema_manager.return_value
-        mock_manager.list_available_extensions.return_value = [
-          {
-            "name": "roboledger",
-            "available": True,
-            "description": "Financial reporting",
-          },
-          {
-            "name": "roboinvestor",
-            "available": True,
-            "description": "Investment tracking",
-          },
-        ]
-        mock_manager.get_optimal_schema_groups.return_value = {
-          "financial": ["roboledger"],
-          "investment": ["roboinvestor"],
-        }
+        mock_ud_instance = mock_ud_manager.return_value
+        mock_schema = MagicMock()
+        mock_schema.nodes = [MagicMock(name="Account")]
+        mock_schema.relationships = []
+        mock_ud_instance.create_from_dict.return_value = mock_schema
 
-        extensions_response = client_with_mocked_auth.get(
-          f"/v1/graphs/{test_user_graph.graph_id}/schema/extensions"
+        # Mock compatibility check
+        mock_compat_result = MagicMock()
+        mock_compat_result.compatible = True
+        mock_compat_result.conflicts = []
+        mock_schema_manager.return_value.check_schema_compatibility.return_value = (
+          mock_compat_result
         )
 
-        assert extensions_response.status_code == 200
+        compat_response = client_with_mocked_auth.post(
+          f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
+          json={
+            "schema_definition": financial_schema,
+            "format": "json",
+            "check_compatibility": ["roboledger"],
+          },
+        )
+
+        assert compat_response.status_code == 200
+        compat_result = compat_response.json()
+        assert compat_result["valid"] is True
+        assert compat_result["compatibility"]["compatible"] is True
       finally:
         # Clean up the dependency override
         app.dependency_overrides.pop(get_db_session, None)
-      extensions = extensions_response.json()
-      assert len(extensions["extensions"]) == 2
-
-      # Now create a schema that should be compatible with roboledger
-      financial_schema = {
-        "name": "custom_financial",
-        "extends": "base",
-        "nodes": [
-          {
-            "name": "Account",
-            "properties": [
-              {"name": "id", "type": "STRING", "is_primary_key": True},
-              {"name": "balance", "type": "DOUBLE"},
-            ],
-          }
-        ],
-      }
-
-      # Validate with compatibility check
-      with (
-        patch(
-          "robosystems.routers.graphs.schema.validate.CustomSchemaManager"
-        ) as mock_ud_manager,
-      ):
-        # Override the database session for the validate call as well
-        app.dependency_overrides[get_db_session] = override_get_db
-
-        try:
-          mock_ud_instance = mock_ud_manager.return_value
-          mock_schema = MagicMock()
-          mock_schema.nodes = [MagicMock(name="Account")]
-          mock_schema.relationships = []
-          mock_ud_instance.create_from_dict.return_value = mock_schema
-
-          # Mock compatibility check
-          mock_compat_result = MagicMock()
-          mock_compat_result.compatible = True
-          mock_compat_result.conflicts = []
-          mock_manager.check_schema_compatibility.return_value = mock_compat_result
-
-          compat_response = client_with_mocked_auth.post(
-            f"/v1/graphs/{test_user_graph.graph_id}/schema/validate",
-            json={
-              "schema_definition": financial_schema,
-              "format": "json",
-              "check_compatibility": ["roboledger"],
-            },
-          )
-
-          assert compat_response.status_code == 200
-          compat_result = compat_response.json()
-          assert compat_result["valid"] is True
-          assert compat_result["compatibility"]["compatible"] is True
-        finally:
-          # Clean up the dependency override
-          app.dependency_overrides.pop(get_db_session, None)
 
   @pytest.mark.asyncio
   async def test_yaml_schema_workflow(
