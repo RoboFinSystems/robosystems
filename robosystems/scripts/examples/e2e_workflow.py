@@ -217,11 +217,15 @@ class RoboSystemsWorkflow:
       )
       s3_response.raise_for_status()
 
+    # Get actual row count from parquet file
+    parquet_table = pq.read_table(file_path)
+    actual_row_count = parquet_table.num_rows
+
     # Step 3: Update file metadata
     response = self.client.patch(
       f"{self.base_url}/v1/graphs/{graph_id}/tables/files/{file_id}",
       headers=self._headers(),
-      json={"file_size_bytes": file_size, "row_count": 50},
+      json={"file_size_bytes": file_size, "row_count": actual_row_count},
     )
     response.raise_for_status()
 

@@ -428,8 +428,28 @@ class TestE2EDataIngestion:
 
         # Wait for async creation if needed
         if "operation_id" in response_data:
-            time.sleep(10)  # Simplified wait for test
-            graph_id = response_data.get("result", {}).get("graph_id", graph_id)
+            operation_id = response_data.get("operation_id")
+            max_wait = 60
+            start_time = time.time()
+
+            while time.time() - start_time < max_wait:
+                status_response = integration_client.get(
+                    f"/v1/operations/{operation_id}/status",
+                    headers=user["headers"],
+                )
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    if status_data.get("status") == "completed":
+                        result = status_data.get("result", {})
+                        graph_id = result.get("graph_id")
+                        if graph_id:
+                            break
+                    elif status_data.get("status") == "failed":
+                        error = status_data.get("error", "Unknown error")
+                        raise Exception(f"Graph creation failed: {error}")
+                time.sleep(2)
+
+            assert graph_id, "Graph creation timed out"
 
         cleanup_graphs.append(graph_id)
 
@@ -527,11 +547,33 @@ class TestE2EDataIngestion:
         assert create_response.status_code in [200, 201, 202]
 
         response_data = create_response.json()
-        graph_id = response_data.get("graph_id") or response_data.get("operation_id")
+        graph_id = response_data.get("graph_id")
 
-        if "operation_id" in response_data:
-            time.sleep(10)
-            graph_id = response_data.get("result", {}).get("graph_id", graph_id)
+        if not graph_id:
+            operation_id = response_data.get("operation_id")
+            assert operation_id, "Expected either graph_id or operation_id"
+
+            max_wait = 60
+            start_time = time.time()
+
+            while time.time() - start_time < max_wait:
+                status_response = integration_client.get(
+                    f"/v1/operations/{operation_id}/status",
+                    headers=user["headers"],
+                )
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    if status_data.get("status") == "completed":
+                        result = status_data.get("result", {})
+                        graph_id = result.get("graph_id")
+                        if graph_id:
+                            break
+                    elif status_data.get("status") == "failed":
+                        error = status_data.get("error", "Unknown error")
+                        raise Exception(f"Graph creation failed: {error}")
+                time.sleep(2)
+
+            assert graph_id, "Graph creation timed out"
 
         cleanup_graphs.append(graph_id)
 
@@ -559,8 +601,43 @@ class TestE2EDataIngestion:
 
         # Upload itself should succeed (schema validation happens at ingestion)
         assert upload_url_response.status_code == 200
+        upload_data = upload_url_response.json()
 
-        # But ingestion should fail with helpful error
+        upload_url = upload_data["upload_url"]
+        file_id = upload_data["file_id"]
+
+        # Fix LocalStack URL for host access
+        if "localstack:4566" in upload_url:
+            upload_url = upload_url.replace("localstack:4566", "localhost:4566")
+
+        # Actually upload the file to S3
+        with open(file_path, "rb") as f:
+            file_content = f.read()
+            file_size = len(file_content)
+
+            import httpx
+            s3_client = httpx.Client(timeout=30.0)
+            s3_response = s3_client.put(
+                upload_url,
+                content=file_content,
+                headers={"Content-Type": "application/x-parquet"},
+            )
+            assert s3_response.status_code in [200, 204]
+
+        # Update file metadata
+        metadata_update = {
+            "file_size_bytes": file_size,
+            "row_count": 3,
+        }
+
+        metadata_response = integration_client.patch(
+            f"/v1/graphs/{graph_id}/tables/files/{file_id}",
+            headers=user["headers"],
+            json=metadata_update,
+        )
+        assert metadata_response.status_code == 200
+
+        # Now ingestion should fail with helpful error due to schema mismatch
         ingest_response = integration_client.post(
             f"/v1/graphs/{graph_id}/tables/ingest",
             headers=user["headers"],
@@ -608,11 +685,33 @@ class TestE2EEdgeCases:
         )
 
         response_data = create_response.json()
-        graph_id = response_data.get("graph_id") or response_data.get("operation_id")
+        graph_id = response_data.get("graph_id")
 
-        if "operation_id" in response_data:
-            time.sleep(10)
-            graph_id = response_data.get("result", {}).get("graph_id", graph_id)
+        if not graph_id:
+            operation_id = response_data.get("operation_id")
+            assert operation_id, "Expected either graph_id or operation_id"
+
+            max_wait = 60
+            start_time = time.time()
+
+            while time.time() - start_time < max_wait:
+                status_response = integration_client.get(
+                    f"/v1/operations/{operation_id}/status",
+                    headers=user["headers"],
+                )
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    if status_data.get("status") == "completed":
+                        result = status_data.get("result", {})
+                        graph_id = result.get("graph_id")
+                        if graph_id:
+                            break
+                    elif status_data.get("status") == "failed":
+                        error = status_data.get("error", "Unknown error")
+                        raise Exception(f"Graph creation failed: {error}")
+                time.sleep(2)
+
+            assert graph_id, "Graph creation timed out"
 
         cleanup_graphs.append(graph_id)
 
@@ -669,15 +768,155 @@ class TestE2EEdgeCases:
         self,
         integration_client,
         test_user_with_api_key,
+        sample_parquet_file,
+        cleanup_graphs,
     ):
         """Test that multiple queries can run concurrently on same graph."""
-        # This would require a pre-populated graph
-        # Simplified version - test structure only
         user = test_user_with_api_key
+        file_path, expected_rows = sample_parquet_file
 
-        # Would create graph, load data, then execute multiple queries in parallel
-        # Using threading or asyncio to send multiple query requests
-        # Verify all return correct results without interference
+        # Create graph and load data
+        graph_data = {
+            "metadata": {
+                "graph_name": f"concurrent_test_{int(time.time())}",
+                "description": "Concurrent query test",
+            }
+        }
 
-        # Placeholder for concurrent test implementation
-        assert user is not None
+        create_response = integration_client.post(
+            "/v1/graphs",
+            headers=user["headers"],
+            json=graph_data,
+        )
+        assert create_response.status_code in [200, 201, 202]
+
+        response_data = create_response.json()
+        graph_id = response_data.get("graph_id")
+
+        if not graph_id:
+            operation_id = response_data.get("operation_id")
+            assert operation_id, "Expected either graph_id or operation_id"
+
+            max_wait = 60
+            start_time = time.time()
+
+            while time.time() - start_time < max_wait:
+                status_response = integration_client.get(
+                    f"/v1/operations/{operation_id}/status",
+                    headers=user["headers"],
+                )
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    if status_data.get("status") == "completed":
+                        result = status_data.get("result", {})
+                        graph_id = result.get("graph_id")
+                        if graph_id:
+                            break
+                    elif status_data.get("status") == "failed":
+                        error = status_data.get("error", "Unknown error")
+                        raise Exception(f"Graph creation failed: {error}")
+                time.sleep(2)
+
+            assert graph_id, "Graph creation timed out"
+
+        cleanup_graphs.append(graph_id)
+
+        # Upload and ingest data
+        upload_request = {
+            "file_name": file_path.name,
+            "content_type": "application/x-parquet",
+        }
+
+        upload_url_response = integration_client.post(
+            f"/v1/graphs/{graph_id}/tables/Entity/files",
+            headers=user["headers"],
+            json=upload_request,
+        )
+        assert upload_url_response.status_code == 200
+        upload_data = upload_url_response.json()
+
+        upload_url = upload_data["upload_url"]
+        file_id = upload_data["file_id"]
+
+        if "localstack:4566" in upload_url:
+            upload_url = upload_url.replace("localstack:4566", "localhost:4566")
+
+        with open(file_path, "rb") as f:
+            file_content = f.read()
+            file_size = len(file_content)
+
+            import httpx
+            s3_client = httpx.Client(timeout=30.0)
+            s3_response = s3_client.put(
+                upload_url,
+                content=file_content,
+                headers={"Content-Type": "application/x-parquet"},
+            )
+            assert s3_response.status_code in [200, 204]
+
+        metadata_update = {
+            "file_size_bytes": file_size,
+            "row_count": expected_rows,
+        }
+
+        metadata_response = integration_client.patch(
+            f"/v1/graphs/{graph_id}/tables/files/{file_id}",
+            headers=user["headers"],
+            json=metadata_update,
+        )
+        assert metadata_response.status_code == 200
+
+        ingest_response = integration_client.post(
+            f"/v1/graphs/{graph_id}/tables/ingest",
+            headers=user["headers"],
+            json={"ignore_errors": False, "rebuild": False},
+        )
+        assert ingest_response.status_code == 200
+
+        # Execute multiple queries concurrently
+        queries = [
+            "MATCH (n:Entity) RETURN count(n) AS total_nodes",
+            "MATCH (n:Entity) RETURN n.identifier, n.name LIMIT 10",
+            "MATCH (n:Entity) WHERE n.ticker IS NOT NULL RETURN n.ticker, n.name ORDER BY n.ticker",
+            "MATCH (n:Entity) RETURN n.category LIMIT 5",
+            "MATCH (n:Entity) WHERE n.industry = 'Technology' RETURN count(n) AS tech_count",
+        ]
+
+        import concurrent.futures
+        import threading
+
+        results = []
+        errors = []
+        lock = threading.Lock()
+
+        def execute_query(query_str):
+            try:
+                query_response = integration_client.post(
+                    f"/v1/graphs/{graph_id}/query?mode=sync",
+                    headers=user["headers"],
+                    json={"query": query_str},
+                )
+                with lock:
+                    results.append({
+                        "query": query_str,
+                        "status_code": query_response.status_code,
+                        "data": query_response.json() if query_response.status_code == 200 else None,
+                    })
+            except Exception as e:
+                with lock:
+                    errors.append({"query": query_str, "error": str(e)})
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(execute_query, q) for q in queries]
+            concurrent.futures.wait(futures)
+
+        assert len(errors) == 0, f"Errors occurred during concurrent execution: {errors}"
+        assert len(results) == len(queries), "Not all queries completed"
+
+        for result in results:
+            assert result["status_code"] == 200, f"Query failed: {result['query']}"
+            assert result["data"]["success"] is True, f"Query unsuccessful: {result['query']}"
+            assert "data" in result["data"], f"No data in response: {result['query']}"
+
+        count_result = next(r for r in results if "total_nodes" in r["data"]["data"][0])
+        assert count_result["data"]["data"][0]["total_nodes"] == expected_rows
