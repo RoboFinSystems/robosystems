@@ -11,6 +11,17 @@ Tests the complete workflow from user creation through data ingestion and queryi
 6. Cypher query execution
 
 This validates the entire platform stack working together in a realistic scenario.
+
+IMPORTANT: These tests are marked with @pytest.mark.e2e and require a FULL running
+API server at localhost:8000 (not just database access). They make real HTTP requests
+via httpx.Client to test the complete end-to-end workflow, exactly like the
+e2e_workflow.py script does.
+
+To run only e2e tests:
+    pytest -m e2e
+
+To skip e2e tests:
+    pytest -m "not e2e"
 """
 
 import pytest
@@ -198,6 +209,7 @@ def cleanup_graphs():
     yield graph_ids
 
 
+@pytest.mark.e2e
 @pytest.mark.integration
 @pytest.mark.slow
 class TestE2EDataIngestion:
@@ -656,6 +668,7 @@ class TestE2EDataIngestion:
             assert ingest_data["failed_tables"] >= 1
 
 
+@pytest.mark.e2e
 @pytest.mark.integration
 class TestE2EEdgeCases:
     """Test edge cases in the E2E workflow."""

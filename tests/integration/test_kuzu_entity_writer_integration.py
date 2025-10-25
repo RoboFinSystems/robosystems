@@ -110,8 +110,8 @@ class TestKuzuEntityWriterIntegration:
     unique_id = str(uuid.uuid4())[:8]
     return {
       "name": f"Test User {unique_id}",
-      "email": f"test.{unique_id}@example.com",
-      "password": "testPassword123!",
+      "email": f"kuzu.{unique_id}@integration.com",
+      "password": "S3cur3P@ssw0rd!",
     }
 
   def register_user(self, client: TestClient, user_data: dict) -> dict:
