@@ -53,15 +53,15 @@ echo ""
 echo "Creating DynamoDB tables for Kuzu allocation management..."
 
 # Delete existing tables if they exist (to ensure clean schema)
-awslocal dynamodb delete-table --table-name robosystems-kuzu-dev-graph-registry 2>/dev/null || true
-awslocal dynamodb delete-table --table-name robosystems-kuzu-dev-instance-registry 2>/dev/null || true
+awslocal dynamodb delete-table --table-name robosystems-graph-dev-graph-registry 2>/dev/null || true
+awslocal dynamodb delete-table --table-name robosystems-graph-dev-instance-registry 2>/dev/null || true
 
 # Wait a moment for deletion
 sleep 2
 
 # Create graph registry table with new multi-region schema
 awslocal dynamodb create-table \
-  --table-name robosystems-kuzu-dev-graph-registry \
+  --table-name robosystems-graph-dev-graph-registry \
   --attribute-definitions \
     AttributeName=graph_id,AttributeType=S \
     AttributeName=entity_id,AttributeType=S \
@@ -118,11 +118,11 @@ awslocal dynamodb create-table \
     ReadCapacityUnits=5,WriteCapacityUnits=5 \
   --stream-specification \
     StreamEnabled=true,StreamViewType=NEW_AND_OLD_IMAGES \
-  --region us-east-1 || echo "Table robosystems-kuzu-dev-graph-registry already exists"
+  --region us-east-1 || echo "Table robosystems-graph-dev-graph-registry already exists"
 
 # Create instance registry table with new multi-region schema
 awslocal dynamodb create-table \
-  --table-name robosystems-kuzu-dev-instance-registry \
+  --table-name robosystems-graph-dev-instance-registry \
   --attribute-definitions \
     AttributeName=instance_id,AttributeType=S \
     AttributeName=region,AttributeType=S \
@@ -164,7 +164,7 @@ awslocal dynamodb create-table \
     ]' \
   --provisioned-throughput \
     ReadCapacityUnits=5,WriteCapacityUnits=5 \
-  --region us-east-1 || echo "Table robosystems-kuzu-dev-instance-registry already exists"
+  --region us-east-1 || echo "Table robosystems-graph-dev-instance-registry already exists"
 
 echo "DynamoDB tables created with multi-region schema!"
 
@@ -177,16 +177,16 @@ echo "Registering local Kuzu instance in DynamoDB..."
 
 # First, delete any existing registration to ensure clean state
 awslocal dynamodb delete-item \
-  --table-name robosystems-kuzu-dev-instance-registry \
+  --table-name robosystems-graph-dev-instance-registry \
   --key '{"instance_id": {"S": "local-kuzu-writer"}}' \
   --region us-east-1 2>/dev/null || true
 
 # Register local Kuzu writer instance with regional fields
 awslocal dynamodb put-item \
-  --table-name robosystems-kuzu-dev-instance-registry \
+  --table-name robosystems-graph-dev-instance-registry \
   --item '{
     "instance_id": {"S": "local-kuzu-writer"},
-    "private_ip": {"S": "kuzu"},
+    "private_ip": {"S": "kuzu-api"},
     "availability_zone": {"S": "docker-local"},
     "status": {"S": "healthy"},
     "database_count": {"N": "0"},
@@ -194,14 +194,14 @@ awslocal dynamodb put-item \
     "created_at": {"S": "'$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"},
     "last_health_check": {"S": "'$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"},
     "node_type": {"S": "writer"},
-    "api_endpoint": {"S": "http://kuzu:8001"},
+    "api_endpoint": {"S": "http://kuzu-api:8001"},
     "region": {"S": "docker-local"},
     "cluster_type": {"S": "writer"},
-    "cluster_tier": {"S": "standard"},
+    "cluster_tier": {"S": "kuzu-standard"},
     "cluster_group": {"S": "docker-local-writers"},
     "available_capacity_pct": {"N": "100"},
-    "private_dns": {"S": "kuzu.local"},
-    "endpoint_url": {"S": "http://kuzu:8001"},
+    "private_dns": {"S": "kuzu-api.local"},
+    "endpoint_url": {"S": "http://kuzu-api:8001"},
     "launch_time": {"S": "'$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"},
     "replication_role": {"S": "none"},
     "total_size_gb": {"N": "0"},

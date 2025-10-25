@@ -33,9 +33,9 @@ async def list_table_files(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
-  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  repository = await get_universal_repository_with_auth(graph_id, current_user, "read", db)
 
-  if not graph:
+  if not repository:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
@@ -100,9 +100,9 @@ async def get_file_info(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
-  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  repository = await get_universal_repository_with_auth(graph_id, current_user, "read", db)
 
-  if not graph:
+  if not repository:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
@@ -158,9 +158,9 @@ async def delete_file(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  repository = await get_universal_repository_with_auth(graph_id, current_user, "read", db)
 
-  if not graph:
+  if not repository:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
@@ -179,7 +179,7 @@ async def delete_file(
 
   try:
     # Delete from S3
-    bucket = env.AWS_S3_BUCKET_NAME
+    bucket = env.AWS_S3_BUCKET
     s3_client.s3_client.delete_object(Bucket=bucket, Key=file.s3_key)
     logger.info(f"Deleted file from S3: {file.s3_key}")
 

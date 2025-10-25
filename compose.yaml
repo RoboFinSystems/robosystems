@@ -40,7 +40,7 @@ services:
       - KUZU_PORT=8001
       - KUZU_DATABASE_PATH=/app/data/kuzu-dbs
       - KUZU_NODE_TYPE=writer
-      - CLUSTER_TIER=standard
+      - CLUSTER_TIER=kuzu-standard
       - KUZU_DATABASES_PER_INSTANCE=${KUZU_DATABASES_PER_INSTANCE:-50}
     env_file:
       - .env

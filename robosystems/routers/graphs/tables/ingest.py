@@ -47,9 +47,9 @@ async def ingest_tables(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  graph, repo = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  repo = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
 
-  if not graph:
+  if not repo:
     raise HTTPException(
       status_code=status.HTTP_404_NOT_FOUND,
       detail=f"Graph {graph_id} not found",
@@ -97,7 +97,7 @@ async def ingest_tables(
       continue
 
     try:
-      s3_pattern = f"s3://{bucket}/user-staging/{current_user.id}/{graph_id}/{table.table_name}/*.parquet"
+      s3_pattern = f"s3://{bucket}/user-staging/{current_user.id}/{graph_id}/{table.table_name}/**/*.parquet"
 
       logger.info(
         f"Creating/updating DuckDB staging table: {table.table_name} with pattern: {s3_pattern}"
