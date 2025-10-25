@@ -1,4 +1,4 @@
-"""Schema info endpoint."""
+"""Schema runtime introspection endpoint."""
 
 from typing import Dict, Any
 import asyncio
@@ -29,8 +29,8 @@ router = APIRouter()
 
 
 @router.get(
-  "/info",
-  summary="Get Runtime Graph Schema Information",
+  "/schema",
+  summary="Get Runtime Graph Schema",
   description="""Get runtime schema information for the specified graph database.
 
 This endpoint inspects the actual graph database structure and returns:
@@ -38,11 +38,11 @@ This endpoint inspects the actual graph database structure and returns:
 - **Relationship Types**: All relationship types currently in the database
 - **Node Properties**: Properties for each node type (limited to first 10 for performance)
 
-This is different from custom schema management - it shows what actually exists in the database,
-useful for understanding the current graph structure before writing queries.
+This shows what actually exists in the database right now - the runtime state.
+For the declared schema definition, use GET /schema/export instead.
 
 This operation is included - no credit consumption required.""",
-  operation_id="getGraphSchemaInfo",
+  operation_id="getGraphSchema",
   responses={
     200: {"description": "Schema information retrieved successfully"},
     403: {"description": "Access denied to graph"},
@@ -50,7 +50,7 @@ This operation is included - no credit consumption required.""",
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/schema/info", business_event_type="schema_info_retrieved"
+  "/v1/graphs/{graph_id}/schema", business_event_type="schema_retrieved"
 )
 async def get_graph_schema_info(
   graph_id: str = Path(..., description="The graph database to get schema for"),
@@ -83,10 +83,10 @@ async def get_graph_schema_info(
     operation_type=OperationType.SCHEMA_OPERATION,
     status=OperationStatus.SUCCESS,  # Will be updated on completion
     duration_ms=0.0,  # Will be updated on completion
-    endpoint="/v1/graphs/{graph_id}/schema/info",
+    endpoint="/v1/graphs/{graph_id}/schema",
     graph_id=graph_id,
     user_id=current_user.id,
-    operation_name="get_schema_info",
+    operation_name="get_schema",
     metadata={},
   )
 
@@ -95,7 +95,7 @@ async def get_graph_schema_info(
 
   try:
     # Check circuit breaker before processing
-    circuit_breaker.check_circuit(graph_id, "schema_info")
+    circuit_breaker.check_circuit(graph_id, "schema")
 
     # Set up timeout coordination for schema operations
     operation_timeout = timeout_coordinator.calculate_timeout(
@@ -109,9 +109,9 @@ async def get_graph_schema_info(
 
     # Log the request with operation logger
     operation_logger.log_external_service_call(
-      endpoint="/v1/graphs/{graph_id}/schema/info",
+      endpoint="/v1/graphs/{graph_id}/schema",
       service_name="graph_repository",
-      operation="get_schema_info",
+      operation="get_schema",
       duration_ms=0.0,  # Will be updated on completion
       status="processing",
       graph_id=graph_id,
@@ -132,9 +132,9 @@ async def get_graph_schema_info(
     # Record business event for successful schema retrieval
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/schema/info",
+      endpoint="/v1/graphs/{graph_id}/schema",
       method="GET",
-      event_type="schema_info_retrieved_successfully",
+      event_type="schema_retrieved_successfully",
       event_data={
         "graph_id": graph_id,
         "node_labels_count": len(schema.get("node_labels", [])),
@@ -146,17 +146,17 @@ async def get_graph_schema_info(
 
     # Record successful operation
     operation_duration_ms = (time.time() - operation_start_time) * 1000
-    circuit_breaker.record_success(graph_id, "schema_info")
+    circuit_breaker.record_success(graph_id, "schema")
 
     # Record success metrics
     record_operation_metric(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.SUCCESS,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/info",
+      endpoint="/v1/graphs/{graph_id}/schema",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_schema_info",
+      operation_name="get_schema",
       metadata={
         "node_labels_count": len(schema.get("node_labels", [])),
         "relationship_types_count": len(schema.get("relationship_types", [])),
@@ -167,7 +167,7 @@ async def get_graph_schema_info(
 
   except asyncio.TimeoutError:
     # Record circuit breaker failure and timeout metrics
-    circuit_breaker.record_failure(graph_id, "schema_info")
+    circuit_breaker.record_failure(graph_id, "schema")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     # Record timeout failure metrics
@@ -175,10 +175,10 @@ async def get_graph_schema_info(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/info",
+      endpoint="/v1/graphs/{graph_id}/schema",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_schema_info",
+      operation_name="get_schema",
       metadata={
         "error_type": "timeout",
         "timeout_seconds": operation_timeout,
@@ -186,16 +186,14 @@ async def get_graph_schema_info(
     )
 
     timeout_str = f" after {operation_timeout}s" if operation_timeout else ""
-    logger.error(
-      f"Schema info operation timeout{timeout_str} for user {current_user.id}"
-    )
+    logger.error(f"Schema operation timeout{timeout_str} for user {current_user.id}")
     raise HTTPException(
       status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-      detail="Schema info operation timed out",
+      detail="Schema operation timed out",
     )
   except HTTPException:
     # Record circuit breaker failure for HTTP exceptions
-    circuit_breaker.record_failure(graph_id, "schema_info")
+    circuit_breaker.record_failure(graph_id, "schema")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     # Record failure metrics
@@ -203,10 +201,10 @@ async def get_graph_schema_info(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/info",
+      endpoint="/v1/graphs/{graph_id}/schema",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_schema_info",
+      operation_name="get_schema",
       metadata={
         "error_type": "http_exception",
       },
@@ -214,7 +212,7 @@ async def get_graph_schema_info(
     raise
   except Exception as e:
     # Record circuit breaker failure for general exceptions
-    circuit_breaker.record_failure(graph_id, "schema_info")
+    circuit_breaker.record_failure(graph_id, "schema")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
     # Record failure metrics
@@ -222,10 +220,10 @@ async def get_graph_schema_info(
       operation_type=OperationType.SCHEMA_OPERATION,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/schema/info",
+      endpoint="/v1/graphs/{graph_id}/schema",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_schema_info",
+      operation_name="get_schema",
       metadata={
         "error_type": type(e).__name__,
         "error_message": str(e),
@@ -235,9 +233,9 @@ async def get_graph_schema_info(
     # Record business event for unexpected errors
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/schema/info",
+      endpoint="/v1/graphs/{graph_id}/schema",
       method="GET",
-      event_type="schema_info_retrieval_unexpected_error",
+      event_type="schema_retrieval_unexpected_error",
       event_data={
         "graph_id": graph_id,
         "error_type": type(e).__name__,
@@ -245,8 +243,8 @@ async def get_graph_schema_info(
       },
       user_id=current_user.id,
     )
-    logger.error(f"Error getting graph schema info: {str(e)}")
+    logger.error(f"Error getting graph schema: {str(e)}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail="Failed to retrieve graph schema information",
+      detail="Failed to retrieve graph schema",
     )
