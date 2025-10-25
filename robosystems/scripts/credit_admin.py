@@ -90,7 +90,11 @@ def add_bonus_credits_to_graph(
 
 
 def add_bonus_credits_to_repository(
-  user_id: str, repository_name: str, amount: float, description: str, dry_run: bool = False
+  user_id: str,
+  repository_name: str,
+  amount: float,
+  description: str,
+  dry_run: bool = False,
 ):
   """Add bonus credits to a user's repository subscription."""
   print(
@@ -117,7 +121,9 @@ def add_bonus_credits_to_repository(
       .first()
     )
     if not credits:
-      print(f"Error: No credit pool found for {user_id}'s {repository_name} subscription")
+      print(
+        f"Error: No credit pool found for {user_id}'s {repository_name} subscription"
+      )
       return
 
     if dry_run:
@@ -149,8 +155,11 @@ def add_bonus_credits_to_repository(
         transaction_type=UserRepositoryCreditTransactionType.BONUS,
         amount=Decimal(str(amount)),
         description=description,
-        metadata={"source": "admin_cli", "admin_action": True},
-        idempotency_key=idempotency_key,
+        metadata={
+          "source": "admin_cli",
+          "admin_action": True,
+          "idempotency_key": idempotency_key,
+        },
         session=db,
       )
 
@@ -175,7 +184,9 @@ def force_allocate_user(user_id: str, confirm: bool = False):
   """
   if not confirm:
     print("ERROR: This is a dangerous operation that could cause double-allocation.")
-    print("Monthly allocation is automated via Celery Beat (1st of month at 3:00 AM UTC).")
+    print(
+      "Monthly allocation is automated via Celery Beat (1st of month at 3:00 AM UTC)."
+    )
     print("Only use this if the automated system has failed.")
     print("\nTo proceed, add --confirm flag")
     return
@@ -203,7 +214,9 @@ def force_allocate_all(confirm: bool = False):
   """
   if not confirm:
     print("ERROR: This is an EXTREMELY dangerous operation.")
-    print("Monthly allocation is automated via Celery Beat (1st of month at 3:00 AM UTC).")
+    print(
+      "Monthly allocation is automated via Celery Beat (1st of month at 3:00 AM UTC)."
+    )
     print("Running this will allocate credits to ALL users and graphs in the system.")
     print("If run on the 1st of the month, this WILL cause double-allocation.")
     print("\nTo proceed, add --confirm flag")

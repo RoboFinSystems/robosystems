@@ -368,7 +368,7 @@ def main():
   )
 
   # Build modes help text dynamically from SharedRepository enum
-  repo_list = ','.join([r.value for r in SharedRepository])
+  repo_list = ",".join([r.value for r in SharedRepository])
   parser.add_argument(
     "--modes",
     help=f"Comma-separated list of modes: json,file,{repo_list} (e.g., 'json,sec,industry' for JSON output with SEC and Industry access)",

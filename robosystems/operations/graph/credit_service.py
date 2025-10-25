@@ -1223,7 +1223,9 @@ SHARED_REPO_CREDIT_COSTS = {
   "sec": {
     "query": Decimal("0.0"),  # Included - SEC data query (rate-limited only)
     "mcp": Decimal("0.0"),  # Included - MCP query (rate-limited only)
-    "entity_lookup": Decimal("0.0"),  # Included - Basic entity lookup (rate-limited only)
+    "entity_lookup": Decimal(
+      "0.0"
+    ),  # Included - Basic entity lookup (rate-limited only)
     "filing_fetch": Decimal("0.0"),  # Included - Fetch filing data (rate-limited only)
     "analytics": Decimal("0.0"),  # Included - Complex analytics (rate-limited only)
     "ai_tokens": None,  # Dynamic - calculated based on actual token usage

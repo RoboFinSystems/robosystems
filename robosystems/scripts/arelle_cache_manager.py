@@ -624,9 +624,7 @@ def main():
 
     # Check if EDGAR already exists
     if not manager.edgar_dir.exists():
-      logger.info(
-        "EDGAR plugin not found in dev environment, fetching from GitHub..."
-      )
+      logger.info("EDGAR plugin not found in dev environment, fetching from GitHub...")
       if manager.fetch_edgar_plugin():
         logger.info("EDGAR plugin fetched successfully")
       else:
