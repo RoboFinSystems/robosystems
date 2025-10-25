@@ -158,27 +158,22 @@ async def export_graph_schema(
         from robosystems.middleware.graph.dependencies import (
           get_universal_repository_with_auth,
         )
-        from robosystems.database import get_async_db_session
 
-        # Get repository for runtime queries
-        async_db = next(get_async_db_session())
-        try:
-          repository = await get_universal_repository_with_auth(
-            graph_id, current_user, "read", async_db
-          )
-          runtime_schema = await get_schema_info(repository)
+        # Use existing session parameter for repository auth
+        repository = await get_universal_repository_with_auth(
+          graph_id, current_user, "read", db
+        )
+        runtime_schema = await get_schema_info(repository)
 
-          data_stats = {
-            "node_labels_count": len(runtime_schema.get("node_labels", [])),
-            "relationship_types_count": len(
-              runtime_schema.get("relationship_types", [])
-            ),
-            "node_properties_count": len(runtime_schema.get("node_properties", {})),
-          }
-        finally:
-          async_db.close()
+        data_stats = {
+          "node_labels_count": len(runtime_schema.get("node_labels", [])),
+          "relationship_types_count": len(runtime_schema.get("relationship_types", [])),
+          "node_properties_count": len(runtime_schema.get("node_properties", {})),
+        }
+      except HTTPException:
+        raise
       except Exception as e:
-        logger.warning(f"Could not retrieve data statistics: {e}")
+        logger.warning(f"Could not retrieve data statistics for {graph_id}: {e}")
         data_stats = {
           "message": "Data statistics unavailable",
         }
