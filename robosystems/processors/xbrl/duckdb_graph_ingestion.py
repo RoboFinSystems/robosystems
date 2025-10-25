@@ -125,8 +125,8 @@ class XBRLDuckDBGraphProcessor:
       total_files = sum(len(files) for files in tables_info.values())
       logger.info(f"Total files: {total_files}")
 
-      # Step 2: Create DuckDB staging tables via Kuzu API
-      logger.info("Step 2: Creating DuckDB staging tables via Kuzu API...")
+      # Step 2: Create DuckDB staging tables via Graph API
+      logger.info("Step 2: Creating DuckDB staging tables via Graph API...")
       await self._create_duckdb_tables(tables_info, client)
 
       # Step 3: Trigger ingestion

@@ -89,14 +89,14 @@ class EnvValidator:
 
     # Only check KUZU_API_URL in dev/local environments
     if env_config.ENVIRONMENT in ["dev", "local"]:
-      feature_vars["KUZU_API_URL"] = "Kuzu API endpoint (local development)"
+      feature_vars["KUZU_API_URL"] = "Graph API endpoint (local development)"
 
     for var_name, feature in feature_vars.items():
       value = getattr(env_config, var_name, None)
       if not value:
         warnings.append(f"{var_name}: Not configured - {feature} will not be available")
 
-    # Special validation for Kuzu API key
+    # Special validation for Graph API key
     if (
       not getattr(env_config, "GRAPH_API_KEY", None)
       and env_config.ENVIRONMENT != "dev"

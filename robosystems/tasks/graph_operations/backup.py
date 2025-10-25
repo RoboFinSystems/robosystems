@@ -117,8 +117,8 @@ def create_graph_backup(
     # Start backup process
     backup_record.start_backup(session)
 
-    # Call Kuzu API to create the backup
-    logger.info(f"Calling Kuzu API to create backup for graph '{graph_id}'")
+    # Call Graph API to create the backup
+    logger.info(f"Calling Graph API to create backup for graph '{graph_id}'")
 
     # Get properly routed Graph client
     client = asyncio.run(
@@ -548,8 +548,8 @@ def restore_graph_backup(
 
       backup_data = decrypt_data(backup_data)
 
-    # Call Kuzu API to restore the backup
-    logger.info(f"Calling Kuzu API to restore database for graph '{graph_id}'")
+    # Call Graph API to restore the backup
+    logger.info(f"Calling Graph API to restore database for graph '{graph_id}'")
 
     # Get properly routed Kuzu client
     client = GraphClientFactory.create_client(graph_id, operation_type="write")
@@ -566,7 +566,7 @@ def restore_graph_backup(
       )
 
       logger.info(
-        f"Kuzu API restore initiated with task ID: {restore_result.get('task_id')}"
+        f"Graph API restore initiated with task ID: {restore_result.get('task_id')}"
       )
 
       # Wait for restore to complete (with timeout)
@@ -577,7 +577,7 @@ def restore_graph_backup(
 
       while time.time() - start_time < max_wait:
         # Check task status
-        # Note: We might need to implement a task status endpoint in Kuzu API
+        # Note: We might need to implement a task status endpoint in Graph API
         # For now, assume it completes quickly
         time.sleep(5)
         break  # Remove this when task status checking is implemented
@@ -1105,7 +1105,7 @@ def restore_graph_backup_sse(
     # Perform the restore
     progress_tracker.emit_progress("Downloading backup from storage...", 40)
 
-    # Use Kuzu API client for restoration
+    # Use Graph API client for restoration
 
     client = asyncio.run(
       GraphClientFactory.create_client(graph_id, operation_type="write")

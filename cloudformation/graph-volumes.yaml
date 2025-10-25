@@ -28,7 +28,7 @@ Parameters:
   # Secrets Configuration
   KuzuSecretArn:
     Type: String
-    Description: ARN of the Kuzu API secret in Secrets Manager
+    Description: ARN of the Graph API secret in Secrets Manager
     Default: ""
 
   # Lambda Configuration
@@ -98,6 +98,8 @@ Mappings:
 Conditions:
   UseProvidedVolumeRegistry: !Not [!Equals [!Ref VolumeRegistryTable, ""]]
   HasKuzuSecret: !Not [!Equals [!Ref KuzuSecretArn, ""]]
+  HasSnapshotCreatorCode: !Not [!Equals [!Ref SnapshotCreatorCodeKey, ""]]
+  HasSnapshotSelectorCode: !Not [!Equals [!Ref SnapshotSelectorCodeKey, ""]]
 
 Resources:
   # ========================================
@@ -297,6 +299,7 @@ Resources:
   # Lambda role for snapshot operations
   SnapshotLambdaRole:
     Type: AWS::IAM::Role
+    Condition: HasSnapshotCreatorCode
     Properties:
       RoleName: !Sub "${AWS::StackName}-snapshot-lambda-role"
       AssumeRolePolicyDocument:
@@ -473,7 +476,7 @@ Resources:
         - Key: Component
           Value: VolumeMonitor
 
-  # Security Group for Volume Monitor Lambda (needs VPC access to reach Kuzu APIs)
+  # Security Group for Volume Monitor Lambda (needs VPC access to reach Graph APIs)
   VolumeMonitorSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -499,6 +502,7 @@ Resources:
   # Lambda function to create snapshots (migrated from shared writers)
   SnapshotCreatorFunction:
     Type: AWS::Lambda::Function
+    Condition: HasSnapshotCreatorCode
     Properties:
       FunctionName: !Sub "${AWS::StackName}-snapshot-creator"
       Runtime: python3.12
@@ -526,6 +530,7 @@ Resources:
   # Lambda role for snapshot selector
   SnapshotSelectorLambdaRole:
     Type: AWS::IAM::Role
+    Condition: HasSnapshotSelectorCode
     Properties:
       RoleName: !Sub "${AWS::StackName}-snapshot-selector-role"
       AssumeRolePolicyDocument:
@@ -564,6 +569,7 @@ Resources:
   # Lambda function to update launch templates with latest snapshot
   SnapshotSelectorFunction:
     Type: AWS::Lambda::Function
+    Condition: HasSnapshotSelectorCode
     Properties:
       FunctionName: !Sub "${AWS::StackName}-snapshot-selector"
       Runtime: python3.12
@@ -937,6 +943,7 @@ Resources:
   # Update Replica Launch Templates after Snapshot Creation
   UpdateReplicaSnapshotsRule:
     Type: AWS::Events::Rule
+    Condition: HasSnapshotSelectorCode
     Properties:
       Name: !Sub "${AWS::StackName}-update-replica-snapshots"
       Description: Update replica launch templates with latest snapshots
@@ -957,6 +964,7 @@ Resources:
 
   UpdateReplicaSnapshotsRulePermission:
     Type: AWS::Lambda::Permission
+    Condition: HasSnapshotSelectorCode
     Properties:
       FunctionName: !Ref SnapshotSelectorFunction
       Action: lambda:InvokeFunction
@@ -1093,12 +1101,14 @@ Outputs:
       Name: !Sub "${AWS::StackName}-role-arn"
 
   SnapshotCreatorFunctionArn:
+    Condition: HasSnapshotCreatorCode
     Description: ARN of the snapshot creator Lambda function
     Value: !GetAtt SnapshotCreatorFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-snapshot-creator-arn"
 
   SnapshotSelectorFunctionArn:
+    Condition: HasSnapshotSelectorCode
     Description: ARN of the snapshot selector Lambda function
     Value: !GetAtt SnapshotSelectorFunction.Arn
     Export:

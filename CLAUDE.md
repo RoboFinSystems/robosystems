@@ -58,7 +58,7 @@ just restart robosystems  # Restarts full stack
 - **Celery Worker** (`worker` container) - Async task processing
 - **PostgreSQL** (`pg` container) - Port 5432
 - **Valkey/Redis** (`valkey` container) - Port 6379
-- **Kuzu API** (`kuzu-api` container) - Port 8001
+- **Graph API** (`graph-api` container) - Port 8001
 
 ### Environment Variables
 
@@ -289,6 +289,10 @@ just cf-validate template          # CloudFormation validation
 - Ruff formatting (88-char, double quotes)
 - Type hints with basedpyright
 - **NO COMMENTS** unless explicitly requested
+- **Emoji Policy**:
+  - Interactive scripts (user-facing CLIs): Emojis allowed for better UX (e.g., `create_test_user.py`)
+  - Background/logging scripts: No emojis in log output (e.g., `arelle_cache_manager.py`)
+  - Rationale: Interactive scripts benefit from visual feedback; logs should be machine-parseable
 
 ## Common Patterns
 

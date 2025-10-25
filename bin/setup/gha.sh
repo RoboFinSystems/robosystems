@@ -327,7 +327,7 @@ function setup_minimum_config() {
     echo "  🗃️ Database Multi-AZ: Disabled (for cost optimization)"
     echo "  📁 CloudTrail: Disabled (enable for SOC 2, ~\$5-15/month)"
     echo "  🔍 VPC Flow Logs: Disabled (enable for SOC 2, ~\$10-15/month)"
-    echo "  🔐 Kuzu API Key Rotation: Every 90 days"
+    echo "  🔐 Graph API Key Rotation: Every 90 days"
     echo "  🔐 PostgreSQL Password Rotation: Every 90 days"
     echo "  🔐 Valkey Encryption: Enabled for both environments"
     echo "  🔐 Valkey Secret Rotation: Every 90 days (both environments)"

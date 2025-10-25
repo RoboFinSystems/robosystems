@@ -127,13 +127,17 @@ def get_database_info(api_url: str, graph_id: str) -> bool:
 
 
 def execute_query(
-  api_url: str, graph_id: str, query: str, format_output: str = "table"
+  api_url: str,
+  graph_id: str,
+  query: str,
+  format_output: str = "table",
+  timeout: int = 300,
 ) -> bool:
   try:
     response = requests.post(
       f"{api_url}/databases/{graph_id}/query",
       json={"cypher": query, "database": graph_id},
-      timeout=300,
+      timeout=timeout,
     )
     response.raise_for_status()
 
@@ -251,6 +255,13 @@ Examples:
     help="Output format (default: table)",
   )
 
+  parser.add_argument(
+    "--timeout",
+    type=int,
+    default=300,
+    help="Query timeout in seconds (default: 300)",
+  )
+
   args = parser.parse_args()
 
   if args.command == "health":
@@ -264,7 +275,9 @@ Examples:
     if not args.graph_id:
       print("Error: --graph-id is required for query execution")
       sys.exit(1)
-    success = execute_query(args.url, args.graph_id, args.query, args.format)
+    success = execute_query(
+      args.url, args.graph_id, args.query, args.format, args.timeout
+    )
   else:
     parser.print_help()
     print("\nError: Must specify either --command or --query")

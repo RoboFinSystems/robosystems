@@ -1,4 +1,4 @@
-"""Tests for Kuzu API client exceptions."""
+"""Tests for Graph API client exceptions."""
 
 import pytest
 

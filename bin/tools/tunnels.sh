@@ -85,7 +85,7 @@ print_usage() {
     echo ""
     echo -e "${YELLOW}Available services:${NC}"
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
-    echo "  kuzu          - Kuzu API tunnel to default instance (localhost:8001)"
+    echo "  kuzu          - Graph API tunnel to default instance (localhost:8001)"
     echo "  kuzu-select   - Select specific Kuzu instance to tunnel"
     echo "  kuzu-forward  - Port forward ALL Kuzu instances (8001, 8002, ...)"
     echo "  kuzu-direct   - Direct SSH access to Kuzu instance filesystem"
@@ -354,10 +354,10 @@ setup_kuzu_tunnel() {
         exit 1
     fi
 
-    echo -e "${GREEN}Setting up Kuzu API tunnel...${NC}"
+    echo -e "${GREEN}Setting up Graph API tunnel...${NC}"
     echo -e "${BLUE}Local: localhost:8001 -> Remote: $KUZU_ENDPOINT:8001${NC}"
     echo ""
-    echo -e "${YELLOW}Access Kuzu API:${NC}"
+    echo -e "${YELLOW}Access Graph API:${NC}"
     echo "  API Docs:    http://localhost:8001/docs"
     echo "  OpenAPI:     http://localhost:8001/openapi.json"
     echo "  Health:      http://localhost:8001/health"

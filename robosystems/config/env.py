@@ -1119,7 +1119,7 @@ class EnvConfig:
 
   @classmethod
   def get_kuzu_cors_origins(cls) -> List[str]:
-    """Get CORS origins for Kuzu API (VPC-internal)."""
+    """Get CORS origins for Graph API (VPC-internal)."""
     if cls.is_production() or cls.is_staging():
       # VPC-internal APIs don't need CORS for browsers
       return []

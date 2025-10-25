@@ -1,5 +1,5 @@
 """
-Request size limiting middleware for Kuzu API.
+Request size limiting middleware for Graph API.
 
 Prevents DoS attacks by limiting request body sizes.
 """

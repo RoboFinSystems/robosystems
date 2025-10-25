@@ -26,6 +26,7 @@ rebuild profile="robosystems" env=_default_env:
 
 # Docker commands
 compose-up profile="robosystems" env=_default_env build="--build" detached="":
+    test -f .env || cp .env.example .env
     test -f {{env}} || cp .env.example {{env}}
     docker compose -f compose.yaml --env-file {{env}} --profile {{profile}} up {{build}} {{detached}}
 

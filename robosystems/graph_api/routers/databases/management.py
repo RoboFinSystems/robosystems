@@ -1,5 +1,5 @@
 """
-Database management endpoints for Kuzu API.
+Database management endpoints for Graph API.
 
 This module provides endpoints for creating, listing, retrieving,
 and deleting Kuzu graph databases.

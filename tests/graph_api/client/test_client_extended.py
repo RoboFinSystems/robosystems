@@ -1,4 +1,4 @@
-"""Extended tests for async Kuzu API client - improving coverage."""
+"""Extended tests for async Graph API client - improving coverage."""
 
 import json
 import time

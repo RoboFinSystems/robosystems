@@ -1,5 +1,5 @@
 """
-Cluster-related Pydantic models for the Kuzu API.
+Cluster-related Pydantic models for the Graph API.
 """
 
 from typing import List, Optional

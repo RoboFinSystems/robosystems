@@ -1,5 +1,5 @@
 """
-Kuzu Database Manager - Multi-database management for Kuzu API
+Kuzu Database Manager - Multi-database management for Graph API
 
 This module provides database management capabilities for Kuzu clusters,
 including creating, deleting, and managing multiple databases on a single node.

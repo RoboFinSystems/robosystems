@@ -96,7 +96,7 @@ MAIN_API_TAGS = [
   },
 ]
 
-# Kuzu API OpenAPI tags
+# Graph API OpenAPI tags
 KUZU_API_TAGS = [
   {
     "name": "Graph Management",

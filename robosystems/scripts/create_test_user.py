@@ -406,6 +406,13 @@ def main():
   # Remove duplicates while preserving order
   repositories_to_grant = list(dict.fromkeys(repositories_to_grant))
 
+  # Validate repository names
+  invalid_repos = [r for r in repositories_to_grant if r not in supported_repos]
+  if invalid_repos:
+    print(f"❌ Invalid repository names: {', '.join(invalid_repos)}")
+    print(f"   Supported: {', '.join(supported_repos)}")
+    sys.exit(1)
+
   # Generate email if not provided
   email = args.email or generate_test_email()
 

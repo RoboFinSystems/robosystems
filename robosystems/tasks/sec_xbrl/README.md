@@ -171,7 +171,7 @@ Track pipeline progress via:
 - Celery Flower dashboard
 - CloudWatch metrics
 - Redis pipeline tracking keys
-- Kuzu API logs
+- Graph API logs
 
 ## Error Recovery
 

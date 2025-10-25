@@ -1,5 +1,5 @@
 """
-Admission control for Kuzu API server.
+Admission control for Graph API server.
 
 Monitors system resources and rejects requests when the server is overloaded,
 preventing OOM kills and maintaining service stability.
@@ -14,7 +14,7 @@ from robosystems.logger import logger
 
 
 class AdmissionDecision(str, Enum):
-  """Admission control decisions for Kuzu API."""
+  """Admission control decisions for Graph API."""
 
   ACCEPT = "accept"
   REJECT_MEMORY = "reject_memory"
@@ -24,7 +24,7 @@ class AdmissionDecision(str, Enum):
 
 class KuzuAdmissionController:
   """
-  Admission controller for Kuzu API server.
+  Admission controller for Graph API server.
 
   Critical - prevents server crashes that would affect
   all databases on the instance.

@@ -1,5 +1,5 @@
 """
-Kuzu API routers organized by domain.
+Graph API routers organized by domain.
 """
 
 from . import databases, health, info, tasks, metrics

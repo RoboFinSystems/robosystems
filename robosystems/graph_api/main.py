@@ -1,5 +1,5 @@
 """
-Main entry point for the Kuzu API server.
+Main entry point for the Graph API server.
 
 This module handles command-line arguments and server initialization.
 """

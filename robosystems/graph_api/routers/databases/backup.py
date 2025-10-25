@@ -1,5 +1,5 @@
 """
-Database backup and restore endpoints for Kuzu API.
+Database backup and restore endpoints for Graph API.
 
 This module provides endpoints for creating backups and restoring
 Kuzu databases.

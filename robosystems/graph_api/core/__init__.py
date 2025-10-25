@@ -1,5 +1,5 @@
 """
-Core business logic for the Kuzu API server.
+Core business logic for the Graph API server.
 """
 
 from .cluster_manager import (

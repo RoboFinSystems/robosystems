@@ -24,7 +24,7 @@ class TestSubgraphOperations:
 
   @pytest.fixture
   async def mock_kuzu_client(self):
-    """Create a mock Kuzu API client."""
+    """Create a mock Graph API client."""
     client = AsyncMock()
 
     # Mock database operations

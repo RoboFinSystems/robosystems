@@ -1,5 +1,5 @@
 """
-Database schema management endpoints for Kuzu API.
+Database schema management endpoints for Graph API.
 
 This module provides endpoints for installing and retrieving
 database schemas.
