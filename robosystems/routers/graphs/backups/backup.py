@@ -44,7 +44,7 @@ router = APIRouter()
   "",
   response_model=BackupListResponse,
   operation_id="listBackups",
-  summary="List Kuzu graph backups",
+  summary="List graph database backups",
   description="List all backups for the specified graph database",
   status_code=status.HTTP_200_OK,
 )

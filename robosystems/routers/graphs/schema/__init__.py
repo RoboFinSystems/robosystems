@@ -19,7 +19,7 @@ router = APIRouter(tags=["Schema"])
 
 # Include all schema sub-routers
 router.include_router(info_router)
-router.include_router(validate_router)
 router.include_router(export_router)
+router.include_router(validate_router)
 
 __all__ = ["router"]

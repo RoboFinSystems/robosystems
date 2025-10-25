@@ -46,12 +46,16 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
         mock_env.CONNECTION_PLAID_ENABLED = False
 
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+        # Mock ConnectionService to prevent database access in case route matching fails
+        with patch(
+          "robosystems.operations.connection_service.ConnectionService.get_connection"
+        ):
+          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_providers"] == 0
-        assert data["providers"] == []
+          assert response.status_code == 200
+          data = response.json()
+          assert data["total_providers"] == 0
+          assert data["providers"] == []
     finally:
       # Clean up the override
       app.dependency_overrides.clear()
@@ -70,14 +74,17 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
         mock_env.CONNECTION_PLAID_ENABLED = False
 
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+        with patch(
+          "robosystems.operations.connection_service.ConnectionService.get_connection"
+        ):
+          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_providers"] == 1
-        assert len(data["providers"]) == 1
-        assert data["providers"][0]["provider"] == "sec"
-        assert data["providers"][0]["display_name"] == "SEC EDGAR"
+          assert response.status_code == 200
+          data = response.json()
+          assert data["total_providers"] == 1
+          assert len(data["providers"]) == 1
+          assert data["providers"][0]["provider"] == "sec"
+          assert data["providers"][0]["display_name"] == "SEC EDGAR"
     finally:
       app.dependency_overrides.clear()
 
@@ -97,14 +104,17 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
         mock_env.CONNECTION_PLAID_ENABLED = False
 
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+        with patch(
+          "robosystems.operations.connection_service.ConnectionService.get_connection"
+        ):
+          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_providers"] == 1
-        assert len(data["providers"]) == 1
-        assert data["providers"][0]["provider"] == "quickbooks"
-        assert data["providers"][0]["display_name"] == "QuickBooks Online"
+          assert response.status_code == 200
+          data = response.json()
+          assert data["total_providers"] == 1
+          assert len(data["providers"]) == 1
+          assert data["providers"][0]["provider"] == "quickbooks"
+          assert data["providers"][0]["display_name"] == "QuickBooks Online"
     finally:
       app.dependency_overrides.clear()
 
@@ -122,14 +132,17 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = False
         mock_env.CONNECTION_PLAID_ENABLED = True
 
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+        with patch(
+          "robosystems.operations.connection_service.ConnectionService.get_connection"
+        ):
+          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_providers"] == 1
-        assert len(data["providers"]) == 1
-        assert data["providers"][0]["provider"] == "plaid"
-        assert data["providers"][0]["display_name"] == "Bank Connections (Plaid)"
+          assert response.status_code == 200
+          data = response.json()
+          assert data["total_providers"] == 1
+          assert len(data["providers"]) == 1
+          assert data["providers"][0]["provider"] == "plaid"
+          assert data["providers"][0]["display_name"] == "Bank Connections (Plaid)"
     finally:
       app.dependency_overrides.clear()
 
@@ -147,18 +160,21 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
         mock_env.CONNECTION_PLAID_ENABLED = True
 
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+        with patch(
+          "robosystems.operations.connection_service.ConnectionService.get_connection"
+        ):
+          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_providers"] == 3
-        assert len(data["providers"]) == 3
+          assert response.status_code == 200
+          data = response.json()
+          assert data["total_providers"] == 3
+          assert len(data["providers"]) == 3
 
-        # Check all providers are present
-        provider_names = [p["provider"] for p in data["providers"]]
-        assert "sec" in provider_names
-        assert "quickbooks" in provider_names
-        assert "plaid" in provider_names
+          # Check all providers are present
+          provider_names = [p["provider"] for p in data["providers"]]
+          assert "sec" in provider_names
+          assert "quickbooks" in provider_names
+          assert "plaid" in provider_names
     finally:
       app.dependency_overrides.clear()
 
@@ -176,17 +192,20 @@ class TestConnectionFeatureFlags:
         mock_env.CONNECTION_QUICKBOOKS_ENABLED = True
         mock_env.CONNECTION_PLAID_ENABLED = False
 
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+        with patch(
+          "robosystems.operations.connection_service.ConnectionService.get_connection"
+        ):
+          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_providers"] == 2
-        assert len(data["providers"]) == 2
+          assert response.status_code == 200
+          data = response.json()
+          assert data["total_providers"] == 2
+          assert len(data["providers"]) == 2
 
-        provider_names = [p["provider"] for p in data["providers"]]
-        assert "sec" in provider_names
-        assert "quickbooks" in provider_names
-        assert "plaid" not in provider_names
+          provider_names = [p["provider"] for p in data["providers"]]
+          assert "sec" in provider_names
+          assert "quickbooks" in provider_names
+          assert "plaid" not in provider_names
     finally:
       app.dependency_overrides.clear()
 

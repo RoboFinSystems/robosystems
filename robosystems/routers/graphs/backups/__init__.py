@@ -6,7 +6,6 @@ restoration, listing, and statistics.
 """
 
 from .backup import router as backup_router
-from .export import router as export_router
 from .restore import router as restore_router
 from .stats import router as stats_router
 from .download import router as download_router
@@ -23,7 +22,6 @@ for route in backup_router.routes:
   router.routes.append(route)
 
 # Include other sub-routers normally (they have prefixes)
-router.include_router(export_router)
 router.include_router(download_router)
 router.include_router(restore_router)
 router.include_router(stats_router)

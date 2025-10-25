@@ -259,7 +259,6 @@ class BackupExportRequest(BaseModel):
 class BackupRestoreRequest(BaseModel):
   """Request model for restoring from a backup."""
 
-  backup_id: str = Field(..., description="ID of backup to restore from")
   create_system_backup: bool = Field(
     True, description="Create a system backup of existing database before restore"
   )
