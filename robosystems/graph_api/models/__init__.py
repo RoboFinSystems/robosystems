@@ -1,5 +1,5 @@
 """
-Kuzu API Pydantic models for request/response validation.
+Graph API Pydantic models for request/response validation.
 """
 
 from .cluster import (

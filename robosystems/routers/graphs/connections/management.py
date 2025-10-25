@@ -63,7 +63,7 @@ This endpoint initiates connections to external data sources:
 - Exchange public token for access
 
 Note:
-This operation is FREE - no credit consumption required.""",
+This operation is included - no credit consumption required.""",
   responses={
     201: {
       "description": "Connection created successfully",
@@ -445,7 +445,7 @@ This operation:
 - Revokes stored credentials
 
 Note:
-This operation is FREE - no credit consumption required.
+This operation is included - no credit consumption required.
 
 Only users with admin role can delete connections.""",
   operation_id="deleteConnection",

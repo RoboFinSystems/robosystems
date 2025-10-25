@@ -44,7 +44,7 @@ on:
       secret_arn:
         required: true
         type: string
-        description: Kuzu API secret ARN from infrastructure deployment
+        description: Graph API secret ARN from infrastructure deployment
       volume_registry_table:
         required: true
         type: string

@@ -164,7 +164,7 @@ automatically aggregated for seamless consumption.
 - Clients should implement exponential backoff on errors
 
 **Note:**
-MCP tool calls are currently FREE and do not consume credits.""",
+MCP tool calls are included and do not consume credits.""",
   operation_id="callMcpTool",
   responses={
     200: {"description": "Tool executed successfully"},

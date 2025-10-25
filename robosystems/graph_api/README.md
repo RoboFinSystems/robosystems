@@ -252,7 +252,7 @@ deploy-kuzu.yml (Orchestrator)
 
 ### EC2 UserData Initialization
 
-The Kuzu API starts automatically on EC2 instances via userdata script:
+The Graph API starts automatically on EC2 instances via userdata script:
 
 ```bash
 # 1. Register instance in DynamoDB

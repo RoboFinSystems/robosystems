@@ -70,6 +70,18 @@ def grant_access(
     # Get repository type
     repository_type = SUPPORTED_REPOSITORIES[repository_name]
 
+    # Determine monthly credits based on repository and plan
+    monthly_credits_map = {
+      (RepositoryType.SEC, RepositoryPlan.STARTER): 5000,
+      (RepositoryType.SEC, RepositoryPlan.ADVANCED): 25000,
+      (RepositoryType.SEC, RepositoryPlan.UNLIMITED): 100000,
+      (RepositoryType.INDUSTRY, RepositoryPlan.STARTER): 3000,
+      (RepositoryType.ECONOMIC, RepositoryPlan.STARTER): 2000,
+    }
+    monthly_credits = monthly_credits_map.get(
+      (repository_type, RepositoryPlan.STARTER), 0
+    )
+
     # Grant access
     UserRepository.create_access(
       user_id=user_id,
@@ -79,6 +91,7 @@ def grant_access(
       repository_plan=RepositoryPlan.STARTER,  # Default plan
       session=session,
       granted_by=None,  # Script-based grants don't have a specific granting user
+      monthly_credits=monthly_credits,
       expires_at=expires_at,
     )
 
@@ -86,6 +99,8 @@ def grant_access(
     print(
       f"✓ {repository_name.upper()} {access_level} access granted to user {user_id}{expire_msg}"
     )
+    if monthly_credits > 0:
+      print(f"  Credit pool created with {monthly_credits:,} monthly credits")
 
   except Exception as e:
     print(f"Error granting repository access: {str(e)}")
@@ -252,11 +267,6 @@ def _print_access_details(access):
   print(
     f"Expires At: {access.expires_at.strftime('%Y-%m-%d %H:%M') if access.expires_at else 'Never'}"
   )
-
-  print("\nKuzu Connection Info:")
-  print(f"  Instance ID: {access.kuzu_instance_id}")
-  print(f"  Cluster Region: {access.kuzu_cluster_region or 'default'}")
-  print(f"  Instance Tier: {access.instance_tier}")
 
   print("\nPermissions:")
   print(f"  Can Read: {'Yes' if access.can_read() else 'No'}")

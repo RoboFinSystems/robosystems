@@ -119,7 +119,6 @@ Mappings:
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
-  IsSharedWriter: !Equals [!Ref WriterTier, "shared"]
 
 Resources:
   # ========================================
@@ -165,7 +164,7 @@ Resources:
           FromPort: 8001
           ToPort: 8001
           CidrIp: !Ref VpcCidr
-          Description: Allow Kuzu API access from VPC
+          Description: Allow Graph API access from VPC
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-writers-sg"

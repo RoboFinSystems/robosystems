@@ -35,7 +35,7 @@ from .ulid import (
   default_credit_ulid,
 )
 
-# Query cost calculation utilities - removed (all queries are FREE now)
+# Query cost calculation utilities - removed (all queries are included now)
 
 # Re-export constants for convenience
 ROBOSYSTEMS_BASE_URI = URIConstants.ROBOSYSTEMS_BASE_URI

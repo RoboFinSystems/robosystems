@@ -87,16 +87,16 @@ class EnvValidator:
       "KUZU_DATABASE_PATH": "Kuzu database storage",
     }
 
-    # Only check KUZU_API_URL in dev/local environments
+    # Only check GRAPH_API_URL in dev/local environments
     if env_config.ENVIRONMENT in ["dev", "local"]:
-      feature_vars["KUZU_API_URL"] = "Kuzu API endpoint (local development)"
+      feature_vars["GRAPH_API_URL"] = "Graph API endpoint (local development)"
 
     for var_name, feature in feature_vars.items():
       value = getattr(env_config, var_name, None)
       if not value:
         warnings.append(f"{var_name}: Not configured - {feature} will not be available")
 
-    # Special validation for Kuzu API key
+    # Special validation for Graph API key
     if (
       not getattr(env_config, "GRAPH_API_KEY", None)
       and env_config.ENVIRONMENT != "dev"
@@ -153,7 +153,7 @@ class EnvValidator:
     url_vars = [
       "DATABASE_URL",
       "VALKEY_URL",  # CELERY_BROKER_URL is now auto-constructed
-      "KUZU_API_URL",
+      "GRAPH_API_URL",
     ]
 
     # Also validate CELERY_BROKER_URL if it's explicitly set
@@ -176,15 +176,15 @@ class EnvValidator:
       ):
         errors.append(f"{var_name}: Invalid URL format - {value}")
 
-      # Special validation for KUZU_API_URL
+      # Special validation for GRAPH_API_URL
       # In production, this should NOT be explicitly set via environment variable
       # The factory handles dynamic endpoint selection based on the database
       # The default value in env.py is fine and will be ignored by the factory
-      if var_name == "KUZU_API_URL" and env_config.ENVIRONMENT == "prod":
+      if var_name == "GRAPH_API_URL" and env_config.ENVIRONMENT == "prod":
         import os
 
         # Only error if explicitly set via environment variable, not if using default
-        if os.getenv("KUZU_API_URL"):
+        if os.getenv("GRAPH_API_URL"):
           errors.append(
             f"{var_name}: Should not be explicitly set in production environment. "
             f"Dynamic endpoint selection is handled by the factory. Remove this environment variable."

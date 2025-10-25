@@ -220,7 +220,7 @@ class KuzuClusterService:
     self._validate_node_configuration()
 
     logger.info(
-      f"Kuzu Cluster Service initialized: {base_path} (max: {max_databases}, read_only: {read_only})"
+      f"Graph API Service initialized: {base_path} (max: {max_databases}, read_only: {read_only})"
     )
     logger.info(f"Node type: {node_type}, Repository type: {repository_type}")
 

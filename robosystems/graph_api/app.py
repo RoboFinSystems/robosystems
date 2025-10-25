@@ -1,5 +1,5 @@
 """
-Kuzu API FastAPI application setup.
+Graph API FastAPI application setup.
 
 This module creates the FastAPI application with all routers and middleware.
 """
@@ -53,7 +53,7 @@ def create_app() -> FastAPI:
   async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
     # Startup
-    logger.info("Kuzu API starting up")
+    logger.info("Graph API starting up")
 
     # Initialize DuckDB connection pool for staging tables
     from robosystems.graph_api.core.duckdb_pool import initialize_duckdb_pool
@@ -72,21 +72,21 @@ def create_app() -> FastAPI:
     yield  # Application runs here
 
     # Shutdown
-    logger.info("Kuzu API shutting down")
+    logger.info("Graph API shutting down")
     duckdb_pool.close_all_connections()
     logger.info("Closed all DuckDB connections")
 
   # Load description from markdown file
   base_dir = Path(__file__).parent.parent.parent  # Go up to project root
-  description_file = base_dir / "static" / "kuzu-api-description.md"
+  description_file = base_dir / "static" / "graph-api-description.md"
   api_description = (
     description_file.read_text()
     if description_file.exists()
-    else "Multi-database Kuzu cluster management API"
+    else "RoboSystems multi-database graph cluster management API"
   )
 
   # Generate title based on node type
-  api_title = "Kuzu Cluster API"
+  api_title = "RoboSystems Graph API"
 
   app = FastAPI(
     title=api_title,
@@ -177,7 +177,7 @@ def create_app() -> FastAPI:
 
   # Setup OpenTelemetry instrumentation (only if enabled)
   if env.OTEL_ENABLED and setup_telemetry is not None:
-    logger.info("OpenTelemetry is ENABLED for Kuzu API")
+    logger.info("OpenTelemetry is ENABLED for Graph API")
     # Suppress noisy OTEL logs
     import logging
 
@@ -187,7 +187,7 @@ def create_app() -> FastAPI:
     logging.getLogger("opentelemetry.instrumentation").setLevel(logging.WARNING)
     setup_telemetry(app)
   else:
-    logger.info("OpenTelemetry is DISABLED for Kuzu API - no metrics collection")
+    logger.info("OpenTelemetry is DISABLED for Graph API - no metrics collection")
 
   # Mount static files from main static directory
   static_dir = base_dir / "static"
@@ -215,7 +215,7 @@ def create_app() -> FastAPI:
     try:
       from robosystems.utils.docs_template import generate_redoc_docs
 
-      return HTMLResponse(content=generate_redoc_docs(title="Kuzu Cluster API"))
+      return HTMLResponse(content=generate_redoc_docs(title="RoboSystems Graph API"))
     except ImportError:
       # Fallback to default ReDoc
       from fastapi.openapi.docs import get_redoc_html

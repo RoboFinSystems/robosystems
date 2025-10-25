@@ -4,7 +4,7 @@ Graph credit system models for tracking AI operation credits.
 This module implements the simplified credit system where:
 - Each graph has its own credit pool for AI operations
 - Only AI operations (Anthropic/OpenAI) consume credits
-- All database operations are FREE
+- All database operations are included
 - Credits are consumed post-operation based on actual token usage
 """
 

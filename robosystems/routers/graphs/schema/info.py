@@ -41,7 +41,7 @@ This endpoint inspects the actual graph database structure and returns:
 This is different from custom schema management - it shows what actually exists in the database,
 useful for understanding the current graph structure before writing queries.
 
-This operation is FREE - no credit consumption required.""",
+This operation is included - no credit consumption required.""",
   operation_id="getGraphSchemaInfo",
   responses={
     200: {"description": "Schema information retrieved successfully"},
@@ -105,7 +105,7 @@ async def get_graph_schema_info(
         "expected_complexity": "medium",
       },
     )
-    # Schema operations are now FREE - no credit consumption
+    # Schema operations are included - no credit consumption
 
     # Log the request with operation logger
     operation_logger.log_external_service_call(

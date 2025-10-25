@@ -38,7 +38,7 @@ Infrastructure maintenance and monitoring:
 - `auth_cleanup.py` - Expired API key and authentication cleanup (hourly)
 - Note: All infrastructure monitoring has been migrated to Lambda functions:
   - Instance monitoring: `bin/lambda/kuzu_instance_monitor.py`
-  - Worker monitoring: `bin/lambda/worker_monitor.py` (queue metrics, task protection, DLQ)
+  - Worker monitoring: `bin/lambda/worker_monitor.py` (queue metrics, task protection)
 
 #### `processing/`
 
@@ -53,10 +53,6 @@ Data processing and transformation:
 #### `schedule.py`
 
 Centralized Celery Beat schedule configuration defining all periodic tasks, their schedules, and priorities.
-
-#### `dlq.py`
-
-Dead Letter Queue processing logic for handling failed tasks.
 
 ## Task Organization Principles
 
@@ -74,7 +70,7 @@ Tasks are assigned priorities (1-10, where 10 is highest):
 
 - **9-10**: Critical infrastructure (queue monitoring for autoscaling)
 - **8**: Billing and credit operations
-- **7**: DLQ monitoring, credit reservation cleanup
+- **7**: Credit reservation cleanup
 - **6**: Regular monitoring and data collection
 - **5**: Health checks
 - **4**: Maintenance and cleanup tasks

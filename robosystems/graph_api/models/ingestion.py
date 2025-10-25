@@ -1,5 +1,5 @@
 """
-Ingestion-related Pydantic models for the Kuzu API.
+Ingestion-related Pydantic models for the Graph API.
 """
 
 from typing import Dict, Any, List, Optional

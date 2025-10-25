@@ -65,7 +65,7 @@ The tool list is customized based on:
 - Backend capabilities (Kuzu, Neo4j, etc.)
 
 Credit consumption:
-- Listing tools is FREE to encourage exploration
+- Listing tools is included to encourage exploration
 - Tool execution costs vary by operation complexity""",
   operation_id="listMcpTools",
   responses={

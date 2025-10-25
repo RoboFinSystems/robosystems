@@ -1,5 +1,5 @@
 """
-Database-specific metrics endpoints for Kuzu API.
+Database-specific metrics endpoints for Graph API.
 
 This module provides endpoints for retrieving metrics for individual databases,
 primarily used for billing and monitoring purposes.

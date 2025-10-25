@@ -1,9 +1,9 @@
 """
-Kuzu API Client - Command-line interface for Kuzu API
+Graph API Client - Command-line interface for Graph API
 
 Usage:
     python -m robosystems.graph_api query "MATCH (c:Entity) RETURN c.name LIMIT 5"
-    python -m robosystems.graph_api health --url $KUZU_API_URL
+    python -m robosystems.graph_api health --url $GRAPH_API_URL
 
 This module provides a CLI interface using the new unified client structure.
 """
@@ -27,11 +27,11 @@ class KuzuAPIClient(KuzuSyncClient):
 
 def main():
   """Main CLI interface."""
-  parser = argparse.ArgumentParser(description="Kuzu API Client")
+  parser = argparse.ArgumentParser(description="Graph API Client")
   parser.add_argument(
     "--url",
     default=env.GRAPH_API_URL or "http://localhost:8001",
-    help="Kuzu API base URL",
+    help="Graph API base URL",
   )
   parser.add_argument(
     "--timeout", type=int, default=30, help="Request timeout in seconds"

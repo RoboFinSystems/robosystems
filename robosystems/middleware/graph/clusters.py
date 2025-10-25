@@ -130,7 +130,7 @@ def load_cluster_configs_from_environment() -> Dict[str, ClusterConfig]:
   Load cluster configurations from environment variables.
 
   Supports:
-  - KUZU_API_URL: Graph API endpoint for all operations
+  - GRAPH_API_URL: Graph API endpoint for all operations
   """
   configs = {}
 

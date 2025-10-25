@@ -1,5 +1,5 @@
 """
-Database-related Pydantic models for the Kuzu API.
+Database-related Pydantic models for the Graph API.
 """
 
 from typing import Dict, Any, List, Optional

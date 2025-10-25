@@ -68,9 +68,9 @@ DATABASE_URL         # PostgreSQL connection
 CELERY_BROKER_URL    # Valkey/Redis connection
 JWT_SECRET_KEY       # JWT signing key
 
-# Kuzu Configuration
+# Graph API Configuration
+GRAPH_API_URL        # Graph API endpoint
 KUZU_DATABASE_PATH   # Database file path
-KUZU_API_URL         # Writer API endpoint
 KUZU_MAX_DATABASES_PER_NODE  # Capacity limit
 
 # AWS Settings

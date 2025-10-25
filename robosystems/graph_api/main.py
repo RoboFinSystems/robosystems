@@ -1,5 +1,5 @@
 """
-Main entry point for the Kuzu API server.
+Main entry point for the Graph API server.
 
 This module handles command-line arguments and server initialization.
 """
@@ -17,7 +17,7 @@ from robosystems.logger import logger
 
 def main():
   """Main entry point for the cluster server."""
-  parser = argparse.ArgumentParser(description="Kuzu Cluster Server")
+  parser = argparse.ArgumentParser(description="Graph API Server")
 
   # Get default base path from environment
   from robosystems.config import env
@@ -123,7 +123,7 @@ def main():
   logging.basicConfig(level=getattr(logging, args.log_level.upper()))
 
   # Display startup info
-  logger.info(f"Starting Kuzu Cluster Server v{app.version}")
+  logger.info(f"Starting Graph API Server v{app.version}")
   logger.info(f"Base path: {base_path}")
   logger.info(
     f"Node type: {node_type.value} ({'read-only' if args.read_only else 'read-write'})"

@@ -314,7 +314,7 @@ class ArelleCacheManager:
 
   def download_schemas(self) -> int:
     """Download all XBRL schemas."""
-    logger.info("📥 Downloading XBRL schemas...")
+    logger.info("Downloading XBRL schemas...")
 
     # Create cache directory
     self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -350,13 +350,13 @@ class ArelleCacheManager:
     metadata_path.write_text(json.dumps(metadata, indent=2))
 
     logger.info(
-      f"✅ Schema download complete: {downloaded} new, {skipped} existing, {failed} failed"
+      f"Schema download complete: {downloaded} new, {skipped} existing, {failed} failed"
     )
     return downloaded + skipped
 
   def fetch_edgar_plugin(self) -> bool:
     """Fetch EDGAR plugin from GitHub."""
-    logger.info("📥 Fetching EDGAR plugin from GitHub...")
+    logger.info("Fetching EDGAR plugin from GitHub...")
 
     # Clean existing EDGAR directory
     if self.edgar_dir.exists():
@@ -394,7 +394,7 @@ class ArelleCacheManager:
       if git_dir.exists():
         shutil.rmtree(git_dir)
 
-      logger.info("✅ EDGAR plugin fetched successfully")
+      logger.info("EDGAR plugin fetched successfully")
       return True
 
     except Exception as e:
@@ -403,7 +403,7 @@ class ArelleCacheManager:
 
   def create_bundles(self) -> Tuple[Optional[Path], Optional[Path]]:
     """Create tar.gz bundles for schemas and EDGAR plugin."""
-    logger.info("📦 Creating cache bundles...")
+    logger.info("Creating cache bundles...")
 
     # Create bundles directory
     self.bundles_dir.mkdir(parents=True, exist_ok=True)
@@ -429,10 +429,10 @@ class ArelleCacheManager:
       latest_link.symlink_to(schema_bundle_path.name)
 
       size_mb = schema_bundle_path.stat().st_size / (1024 * 1024)
-      logger.info(f"  ✅ Schema bundle created: {size_mb:.1f}MB")
+      logger.info(f"  Schema bundle created: {size_mb:.1f}MB")
       schema_bundle = schema_bundle_path
     else:
-      logger.warning("  ⚠️  No schemas found to bundle")
+      logger.warning("  No schemas found to bundle")
 
     # Create EDGAR bundle
     edgar_path = self.edgar_dir / "EDGAR"
@@ -450,13 +450,13 @@ class ArelleCacheManager:
       latest_link.symlink_to(edgar_bundle_path.name)
 
       size_mb = edgar_bundle_path.stat().st_size / (1024 * 1024)
-      logger.info(f"  ✅ EDGAR bundle created: {size_mb:.1f}MB")
+      logger.info(f"  EDGAR bundle created: {size_mb:.1f}MB")
       edgar_bundle = edgar_bundle_path
     else:
-      logger.warning("  ⚠️  No EDGAR plugin found to bundle")
+      logger.warning("  No EDGAR plugin found to bundle")
 
     # Show bundle summary
-    logger.info("\n📊 Bundle Summary:")
+    logger.info("\nBundle Summary:")
     for bundle in self.bundles_dir.glob("*.tar.gz"):
       if not bundle.is_symlink():
         size_mb = bundle.stat().st_size / (1024 * 1024)
@@ -466,7 +466,7 @@ class ArelleCacheManager:
 
   def extract_bundles(self) -> bool:
     """Extract cache bundles for Docker build."""
-    logger.info("📤 Extracting cache bundles...")
+    logger.info("Extracting cache bundles...")
 
     success = True
 
@@ -476,9 +476,9 @@ class ArelleCacheManager:
       logger.info("  Extracting schema bundle...")
       with tarfile.open(schema_bundle, "r:gz") as tar:
         tar.extractall(self.cache_dir.parent)
-      logger.info("  ✅ Schemas extracted")
+      logger.info("  Schemas extracted")
     else:
-      logger.warning("  ⚠️  No schema bundle found")
+      logger.warning("  No schema bundle found")
       success = False
 
     # Extract EDGAR
@@ -490,26 +490,26 @@ class ArelleCacheManager:
       edgar_parent.mkdir(parents=True, exist_ok=True)
       with tarfile.open(edgar_bundle, "r:gz") as tar:
         tar.extractall(edgar_parent)
-      logger.info("  ✅ EDGAR extracted")
+      logger.info("  EDGAR extracted")
     else:
-      logger.warning("  ⚠️  No EDGAR bundle found")
+      logger.warning("  No EDGAR bundle found")
       success = False
 
     return success
 
   def check_update_needed(self) -> bool:
     """Check if cache bundles need updating (>30 days old)."""
-    logger.info("🔍 Checking if cache update is needed...")
+    logger.info("Checking if cache update is needed...")
 
     # Check schema bundle age
     schema_bundle = self.bundles_dir / "arelle-schemas-latest.tar.gz"
     if schema_bundle.exists():
       age = datetime.now() - datetime.fromtimestamp(schema_bundle.stat().st_mtime)
       if age > timedelta(days=30):
-        logger.warning(f"  ⚠️  Schema bundle is {age.days} days old")
+        logger.warning(f"  Schema bundle is {age.days} days old")
         return True
     else:
-      logger.warning("  ⚠️  No schema bundle found")
+      logger.warning("  No schema bundle found")
       return True
 
     # Check EDGAR bundle age
@@ -517,18 +517,18 @@ class ArelleCacheManager:
     if edgar_bundle.exists():
       age = datetime.now() - datetime.fromtimestamp(edgar_bundle.stat().st_mtime)
       if age > timedelta(days=30):
-        logger.warning(f"  ⚠️  EDGAR bundle is {age.days} days old")
+        logger.warning(f"  EDGAR bundle is {age.days} days old")
         return True
     else:
-      logger.warning("  ⚠️  No EDGAR bundle found")
+      logger.warning("  No EDGAR bundle found")
       return True
 
-    logger.info("  ✅ Bundles are up to date")
+    logger.info("  Bundles are up to date")
     return False
 
   def clean(self):
     """Clean all cache directories."""
-    logger.info("🧹 Cleaning cache directories...")
+    logger.info("Cleaning cache directories...")
 
     if self.cache_dir.exists():
       shutil.rmtree(self.cache_dir)
@@ -538,11 +538,11 @@ class ArelleCacheManager:
       shutil.rmtree(self.edgar_dir)
       logger.info(f"  Removed: {self.edgar_dir}")
 
-    logger.info("✅ Cleaned")
+    logger.info("Cleaned")
 
   def update(self):
     """Full update: download schemas, fetch EDGAR, create bundles."""
-    logger.info("🔄 Updating all caches...")
+    logger.info("Updating all caches...")
 
     # Download schemas
     self.download_schemas()
@@ -553,8 +553,8 @@ class ArelleCacheManager:
     # Create bundles
     self.create_bundles()
 
-    logger.info("\n✅ Cache update complete!")
-    logger.info("\n📝 Next steps:")
+    logger.info("\nCache update complete!")
+    logger.info("\nNext steps:")
     logger.info("  1. Commit the bundles: git add robosystems/arelle/bundles/*.tar.gz")
     logger.info("  2. Docker build will use these bundles automatically")
 
@@ -624,18 +624,16 @@ def main():
 
     # Check if EDGAR already exists
     if not manager.edgar_dir.exists():
-      logger.info(
-        "📥 EDGAR plugin not found in dev environment, fetching from GitHub..."
-      )
+      logger.info("EDGAR plugin not found in dev environment, fetching from GitHub...")
       if manager.fetch_edgar_plugin():
-        logger.info("✅ EDGAR plugin fetched successfully")
+        logger.info("EDGAR plugin fetched successfully")
       else:
         logger.warning(
-          "⚠️  Warning: Failed to fetch EDGAR plugin, XBRL processing may fail"
+          "Warning: Failed to fetch EDGAR plugin, XBRL processing may fail"
         )
         sys.exit(1)
     else:
-      logger.info("✅ EDGAR plugin already exists")
+      logger.info("EDGAR plugin already exists")
   elif args.command == "bundle":
     manager.create_bundles()
   elif args.command == "extract":
@@ -643,7 +641,7 @@ def main():
       sys.exit(1)
   elif args.command == "check":
     if manager.check_update_needed():
-      logger.info("\n📝 Run: just cache-arelle-update")
+      logger.info("\nRun: just cache-arelle-update")
       sys.exit(0)
     else:
       sys.exit(1)

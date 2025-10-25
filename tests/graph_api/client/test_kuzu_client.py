@@ -1,4 +1,4 @@
-"""Tests for async Kuzu API client."""
+"""Tests for async Graph API client."""
 
 import time
 from unittest.mock import Mock, patch

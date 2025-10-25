@@ -199,7 +199,7 @@ nodes:
         json={"schema_definition": {"name": "test"}, "format": "json"},
       )
 
-      # Schema operations are now FREE - should work without credit pool
+      # Schema operations are included - should work without credit pool
       # But unauthorized graphs may still fail for other reasons
       assert response.status_code in [
         status.HTTP_403_FORBIDDEN,  # Access denied
@@ -456,7 +456,7 @@ class TestSchemaExtensionsEndpoint:
         "/v1/graphs/unauthorized_graph/schema/extensions"
       )
 
-      # Extensions endpoint is FREE (no credit consumption)
+      # Extensions endpoint is included (no credit consumption)
       # Should return 403 when user doesn't have access
       assert response.status_code == status.HTTP_403_FORBIDDEN
 

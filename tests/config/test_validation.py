@@ -29,7 +29,7 @@ class MockEnvConfig:
     self.PLAID_CLIENT_SECRET = None
     self.ANTHROPIC_API_KEY = None
     self.KUZU_DATABASE_PATH = "/tmp/kuzu"
-    self.KUZU_API_URL = "http://localhost:8001"
+    self.GRAPH_API_URL = "http://localhost:8001"
     self.GRAPH_API_KEY = None
     self.WORKER_AUTOSCALE = 10
     self.CELERY_TASK_TIME_LIMIT = 3600
@@ -81,7 +81,7 @@ class TestEnvValidator:
     env_config.ENVIRONMENT = "prod"
     env_config.GRAPH_API_KEY = "test-api-key"
 
-    with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
+    with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       with patch("robosystems.config.validation.logger") as mock_logger:
         EnvValidator.validate_required_vars(env_config)
 
@@ -93,7 +93,7 @@ class TestEnvValidator:
     env_config.ENVIRONMENT = "prod"
     env_config.DATABASE_URL = None
 
-    with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
+    with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       with pytest.raises(ConfigValidationError) as exc_info:
         EnvValidator.validate_required_vars(env_config)
 
@@ -108,7 +108,7 @@ class TestEnvValidator:
     env_config.ENVIRONMENT = "prod"
     env_config.JWT_SECRET_KEY = "dev-jwt-secret"
 
-    with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
+    with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       with pytest.raises(ConfigValidationError):
         EnvValidator.validate_required_vars(env_config)
 
@@ -118,7 +118,7 @@ class TestEnvValidator:
     env_config.ENVIRONMENT = "prod"
     env_config.JWT_SECRET_KEY = "short"
 
-    with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
+    with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       with pytest.raises(ConfigValidationError):
         EnvValidator.validate_required_vars(env_config)
 
@@ -129,7 +129,7 @@ class TestEnvValidator:
     env_config.AWS_ACCESS_KEY_ID = None
     env_config.AWS_SECRET_ACCESS_KEY = None
 
-    with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
+    with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       # Should not raise - production uses IAM roles, no access keys needed
       EnvValidator.validate_required_vars(env_config)
 
@@ -142,7 +142,7 @@ class TestEnvValidator:
     env_config.AWS_S3_ACCESS_KEY_ID = "s3-key"
     env_config.AWS_S3_SECRET_ACCESS_KEY = "s3-secret"
 
-    with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
+    with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       EnvValidator.validate_required_vars(env_config)
 
   def test_validate_required_vars_kuzu_api_key_warning(self):
@@ -211,29 +211,29 @@ class TestEnvValidator:
     assert "Invalid URL format" in errors[0]
 
   @patch("os.getenv")
-  def test_validate_urls_kuzu_api_url_prod_error(self, mock_getenv):
-    """Test that KUZU_API_URL should not be set in production."""
+  def test_validate_urls_graph_api_url_prod_error(self, mock_getenv):
+    """Test that GRAPH_API_URL should not be set in production."""
     mock_getenv.return_value = "http://explicit-url.com"
 
     env_config = MockEnvConfig()
     env_config.ENVIRONMENT = "prod"
-    env_config.KUZU_API_URL = "http://localhost:8001"
+    env_config.GRAPH_API_URL = "http://localhost:8001"
     errors = []
 
     EnvValidator._validate_urls(env_config, errors)
 
     assert len(errors) == 1
-    assert "KUZU_API_URL" in errors[0]
+    assert "GRAPH_API_URL" in errors[0]
     assert "Should not be explicitly set in production" in errors[0]
 
   @patch("os.getenv")
-  def test_validate_urls_kuzu_api_url_prod_default_ok(self, mock_getenv):
-    """Test that default KUZU_API_URL is fine in production."""
+  def test_validate_urls_graph_api_url_prod_default_ok(self, mock_getenv):
+    """Test that default GRAPH_API_URL is fine in production."""
     mock_getenv.return_value = None  # Not explicitly set
 
     env_config = MockEnvConfig()
     env_config.ENVIRONMENT = "prod"
-    env_config.KUZU_API_URL = "http://default-value"
+    env_config.GRAPH_API_URL = "http://default-value"
     errors = []
 
     EnvValidator._validate_urls(env_config, errors)
@@ -336,7 +336,7 @@ class TestIntegrationScenarios:
     env_config.INTUIT_CLIENT_ID = "intuit-prod"
     env_config.INTUIT_CLIENT_SECRET = "intuit-secret"
 
-    with patch("os.getenv", return_value=None):  # No explicit KUZU_API_URL set
+    with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       with patch("robosystems.config.validation.logger") as mock_logger:
         EnvValidator.validate_required_vars(env_config)
 
@@ -364,16 +364,16 @@ class TestIntegrationScenarios:
       # Check error message mentions number of errors
       assert "errors" in str(exc_info.value)
 
-  def test_kuzu_api_url_handling(self):
-    """Test KUZU_API_URL validation in different environments."""
+  def test_graph_api_url_handling(self):
+    """Test GRAPH_API_URL validation in different environments."""
     # Development - should pass
     env_config = MockEnvConfig()
     env_config.ENVIRONMENT = "dev"
-    env_config.KUZU_API_URL = "http://localhost:8001"
+    env_config.GRAPH_API_URL = "http://localhost:8001"
 
     EnvValidator.validate_required_vars(env_config)
 
-    # Local - should check for KUZU_API_URL
+    # Local - should check for GRAPH_API_URL
     env_config.ENVIRONMENT = "local"
     with patch("robosystems.config.validation.logger") as mock_logger:
       EnvValidator.validate_required_vars(env_config)

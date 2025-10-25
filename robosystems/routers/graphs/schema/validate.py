@@ -61,7 +61,7 @@ Validation helps prevent:
 - Performance problems
 - Naming conflicts
 
-This operation is FREE - no credit consumption required.""",
+This operation is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
   operation_id="validateSchema",
   responses={
@@ -165,7 +165,7 @@ async def validate_schema(
         detail=f"Invalid graph identifier: {graph_id}",
       )
 
-    # Schema operations are now FREE - no credit consumption
+    # Schema operations are included - no credit consumption
 
     # Log the request with operation logger
     operation_logger.log_external_service_call(

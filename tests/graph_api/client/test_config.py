@@ -1,4 +1,4 @@
-"""Tests for Kuzu API client configuration."""
+"""Tests for Graph API client configuration."""
 
 import os
 from unittest.mock import patch

@@ -76,7 +76,7 @@ class BillingConfig:
     Get complete subscription plan information for a tier.
 
     Args:
-        tier: Subscription tier name (standard, enterprise, premium)
+        tier: Subscription tier name (e.g., kuzu-standard, kuzu-large, kuzu-xlarge)
 
     Returns:
         Dict with plan details or None if not found

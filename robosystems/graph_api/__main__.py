@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Kuzu API module entry point.
+Graph API module entry point.
 
-This module enables running the Kuzu API server or client as a module:
+This module enables running the Graph API server or client as a module:
     python -m robosystems.graph_api --help                    # Server help
     python -m robosystems.graph_api --base-path /data ...     # Start server
     python -m robosystems.graph_api cli health                # Client commands

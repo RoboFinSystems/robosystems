@@ -484,7 +484,7 @@ async def stream_sse_with_queue(
 
     try:
       # Calculate query cost
-      credits_required = 0.0  # Queries are FREE
+      credits_required = 0.0  # Queries are included
 
       # Submit to queue
       query_id = await queue_manager.submit_query(

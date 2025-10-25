@@ -1,5 +1,5 @@
 """
-Metrics endpoints for Kuzu API monitoring.
+Metrics endpoints for Graph API monitoring.
 
 This module provides endpoints for retrieving comprehensive metrics
 about the cluster node, including system resources, database statistics,

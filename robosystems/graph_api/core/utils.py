@@ -1,5 +1,5 @@
 """
-Utility functions for the Kuzu API.
+Utility functions for the Graph API.
 """
 
 import re

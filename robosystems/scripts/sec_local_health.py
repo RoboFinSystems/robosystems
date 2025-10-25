@@ -2,7 +2,7 @@
 """
 SEC Local Health Check - Comprehensive validation tool
 
-Tests both direct database access and Kuzu API connectivity to ensure
+Tests both direct database access and Graph API connectivity to ensure
 the SEC database is properly accessible through all interfaces.
 """
 
@@ -119,7 +119,7 @@ class SECHealthChecker:
 
   async def check_api_access(self) -> Dict[str, Any]:
     """
-    Check database health via Kuzu API.
+    Check database health via Graph API.
 
     Returns:
         Dictionary with API access test results

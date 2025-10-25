@@ -163,10 +163,3 @@ Key test environment variables include:
 3. **Kuzu integration tests** create real database files and should be run separately
 4. **Async tests** are automatically handled by pytest-asyncio
 5. **Celery tests** use a test broker configuration
-
-## Recent Updates
-
-- **IAM Module Rename**: All `auth` imports have been renamed to `iam` for better clarity
-- **Billing Integration**: New tests for subscription and pricing services
-- **OpenTelemetry Metrics**: Enhanced observability testing
-- **Kuzu Clustering**: Comprehensive tests for database allocation and routing

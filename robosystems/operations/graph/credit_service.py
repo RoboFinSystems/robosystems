@@ -802,7 +802,7 @@ class CreditService:
     if required_credits is None:
       repo_costs = SHARED_REPO_CREDIT_COSTS.get(repository_name, {})
       required_credits = repo_costs.get(operation_type, Decimal("1.0"))
-      # If operation is free (0.0), no credit check needed
+      # If operation is included (0.0), no credit check needed
       if required_credits == Decimal("0.0"):
         return {
           "has_access": True,
@@ -811,7 +811,7 @@ class CreditService:
           "available_credits": float(shared_credits.current_balance),
           "addon_type": shared_credits.user_repository.repository_type.value,
           "addon_tier": shared_credits.user_repository.repository_plan.value,
-          "operation_free": True,
+          "operation_included": True,
         }
 
     has_sufficient = shared_credits.current_balance >= required_credits  # type: ignore[operator]
@@ -1221,11 +1221,13 @@ def get_operation_cost(operation_type: str) -> Decimal:
 # Shared repository credit costs (usually higher than graph operations)
 SHARED_REPO_CREDIT_COSTS = {
   "sec": {
-    "query": Decimal("0.0"),  # FREE - SEC data query (rate-limited only)
-    "mcp": Decimal("0.0"),  # FREE - MCP query (rate-limited only)
-    "entity_lookup": Decimal("0.0"),  # FREE - Basic entity lookup (rate-limited only)
-    "filing_fetch": Decimal("0.0"),  # FREE - Fetch filing data (rate-limited only)
-    "analytics": Decimal("0.0"),  # FREE - Complex analytics (rate-limited only)
+    "query": Decimal("0.0"),  # Included - SEC data query (rate-limited only)
+    "mcp": Decimal("0.0"),  # Included - MCP query (rate-limited only)
+    "entity_lookup": Decimal(
+      "0.0"
+    ),  # Included - Basic entity lookup (rate-limited only)
+    "filing_fetch": Decimal("0.0"),  # Included - Fetch filing data (rate-limited only)
+    "analytics": Decimal("0.0"),  # Included - Complex analytics (rate-limited only)
     "ai_tokens": None,  # Dynamic - calculated based on actual token usage
     "bulk_export": Decimal("50.0"),  # Bulk data export
   },

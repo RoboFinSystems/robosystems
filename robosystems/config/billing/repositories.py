@@ -38,8 +38,8 @@ class RepositoryBillingConfig:
       "description": "Basic access for individuals and small teams",
       "features": [
         "1,000 AI agent credits per month",
-        "500 queries per hour (FREE)",
-        "200 MCP queries per hour (FREE)",
+        "500 queries per hour (included)",
+        "200 MCP queries per hour (included)",
         "Basic rate limits",
         "CSV export only",
         "2 years historical data",
@@ -53,8 +53,8 @@ class RepositoryBillingConfig:
       "description": "Professional access for analysts and researchers",
       "features": [
         "5,000 AI agent credits per month",
-        "2,000 queries per hour (FREE)",
-        "1,000 MCP queries per hour (FREE)",
+        "2,000 queries per hour (included)",
+        "1,000 MCP queries per hour (included)",
         "Professional rate limits",
         "Priority support",
         "CSV/JSON export",
@@ -69,8 +69,8 @@ class RepositoryBillingConfig:
       "description": "Enterprise access with no limits",
       "features": [
         "50,000 AI agent credits per month",
-        "Unlimited queries (FREE)",
-        "Unlimited MCP queries (FREE)",
+        "Unlimited queries (included)",
+        "Unlimited MCP queries (included)",
         "No daily rate limits",
         "Dedicated support",
         "Custom integrations",

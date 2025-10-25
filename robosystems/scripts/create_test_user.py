@@ -18,6 +18,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from robosystems.config.billing.repositories import SharedRepository
+
 # Default configuration
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_PASSWORD = "RoboSys$2024#Secure&Test!"
@@ -159,28 +161,28 @@ def get_user_profile(session: requests.Session, base_url: str) -> Dict[str, Any]
     return {}
 
 
-def grant_sec_repository_access(
-  session: requests.Session, base_url: str, user_id: str
+def grant_repository_access(
+  session: requests.Session, base_url: str, user_id: str, repository_type: str
 ) -> bool:
-  """Grant SEC repository access to the user with highest tier (admin)."""
+  """Grant shared repository access to the user with highest tier (admin)."""
   url = f"{base_url}/v1/user/subscriptions/shared-repositories/subscribe"
 
   payload = {
-    "repository_type": "sec",
+    "repository_type": repository_type,
     "repository_plan": "unlimited",  # Highest tier plan
   }
 
-  print("🔄 Granting SEC repository access (admin level)")
+  print(f"🔄 Granting {repository_type.upper()} repository access (admin level)")
 
   try:
     response = session.post(url, json=payload)
     response.raise_for_status()
 
-    print("✅ SEC repository access granted successfully")
+    print(f"✅ {repository_type.upper()} repository access granted successfully")
     return True
 
   except requests.exceptions.RequestException as e:
-    print(f"⚠️  Failed to grant SEC repository access: {e}")
+    print(f"⚠️  Failed to grant {repository_type.upper()} repository access: {e}")
     if hasattr(e, "response") and e.response is not None:
       print(f"   Response: {e.response.text}")
     return False
@@ -213,9 +215,10 @@ def output_credentials(
   base_url: str,
   output_format: str = "pretty",
   save_file: bool = False,
-  sec_access_granted: bool = False,
+  granted_repositories: list = None,
 ):
   """Output the credentials in a formatted way."""
+  granted_repositories = granted_repositories or []
 
   print("\n" + "=" * 60)
   print("🎉 TEST USER ACCOUNT CREATED SUCCESSFULLY!")
@@ -246,11 +249,13 @@ def output_credentials(
     print("\n📋 API Key Header:")
     print(f"   X-API-Key: {api_key_value}")
 
-  if sec_access_granted:
-    print("\n🏛️ SEC Repository Access:")
-    print("   ✅ Admin access granted to SEC shared repository")
-    print("   📊 Can query, read, and manage SEC financial data")
-    print(f"   🔗 SEC API endpoints: {base_url}/v1/sec/*")
+  if granted_repositories:
+    print("\n📚 Shared Repository Access:")
+    for repo in granted_repositories:
+      repo_display = repo.upper()
+      print(f"   ✅ Admin access granted to {repo_display} shared repository")
+    print("   📊 Can query, read, and manage repository data")
+    print(f"   🔗 Repository API endpoints: {base_url}/v1/shared-repositories/*")
 
   # Only save to file if explicitly requested
   if save_file:
@@ -263,7 +268,7 @@ def output_credentials(
       "api_key": api_key_value,
       "user_id": user_data.get("user", {}).get("id"),
       "user_name": user_data.get("user", {}).get("name"),
-      "sec_repository_access": sec_access_granted,
+      "granted_repositories": granted_repositories,
       "created_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
     }
 
@@ -274,7 +279,9 @@ def output_credentials(
     local_dir = os.path.join(os.path.dirname(__file__), "..", "..", "local")
     os.makedirs(local_dir, exist_ok=True)
 
-    credentials_file = os.path.join(local_dir, "test_credentials.json")
+    # Use user_id in filename to avoid overwriting previous test users
+    user_id = credentials.get("user_id", "unknown")
+    credentials_file = os.path.join(local_dir, f"{user_id}_credentials.json")
     try:
       with open(credentials_file, "w") as f:
         json.dump(credentials, f, indent=2)
@@ -352,10 +359,59 @@ def main():
   parser.add_argument(
     "--with-sec-access",
     action="store_true",
-    help="Grant admin access to SEC shared repository",
+    help="Grant admin access to SEC shared repository (deprecated: use --modes sec)",
+  )
+  parser.add_argument(
+    "--repositories",
+    nargs="+",
+    help=f"List of repositories to grant access to (e.g., {' '.join([r.value for r in SharedRepository])})",
+  )
+
+  # Build modes help text dynamically from SharedRepository enum
+  repo_list = ",".join([r.value for r in SharedRepository])
+  parser.add_argument(
+    "--modes",
+    help=f"Comma-separated list of modes: json,file,{repo_list} (e.g., 'json,sec,industry' for JSON output with SEC and Industry access)",
   )
 
   args = parser.parse_args()
+
+  # Initialize repository list
+  repositories_to_grant = []
+
+  # Get supported repositories from enum
+  supported_repos = [r.value for r in SharedRepository]
+
+  # Process comma-separated modes if provided
+  if args.modes:
+    modes = [mode.strip().lower() for mode in args.modes.split(",")]
+    if "json" in modes:
+      args.json = True
+    if "file" in modes:
+      args.save_file = True
+
+    # Check for repository types in modes using SharedRepository enum
+    for repo in supported_repos:
+      if repo in modes:
+        repositories_to_grant.append(repo)
+
+  # Handle --repositories flag
+  if args.repositories:
+    repositories_to_grant.extend([repo.lower() for repo in args.repositories])
+
+  # Handle legacy --with-sec-access flag
+  if args.with_sec_access and "sec" not in repositories_to_grant:
+    repositories_to_grant.append("sec")
+
+  # Remove duplicates while preserving order
+  repositories_to_grant = list(dict.fromkeys(repositories_to_grant))
+
+  # Validate repository names
+  invalid_repos = [r for r in repositories_to_grant if r not in supported_repos]
+  if invalid_repos:
+    print(f"❌ Invalid repository names: {', '.join(invalid_repos)}")
+    print(f"   Supported: {', '.join(supported_repos)}")
+    sys.exit(1)
 
   # Generate email if not provided
   email = args.email or generate_test_email()
@@ -389,9 +445,9 @@ def main():
     # Combine user data
     user_data = {**registration_data, **login_data.get("user_data", {}), **user_profile}
 
-    # Grant SEC repository access if requested
-    sec_access_granted = False
-    if args.with_sec_access:
+    # Grant repository access if requested
+    granted_repositories = []
+    if repositories_to_grant:
       # Extract user ID from user data
       user_id = (
         user_data.get("user", {}).get("id")
@@ -400,11 +456,11 @@ def main():
       )
 
       if user_id:
-        sec_access_granted = grant_sec_repository_access(
-          session, args.base_url, user_id
-        )
+        for repo_type in repositories_to_grant:
+          if grant_repository_access(session, args.base_url, user_id, repo_type):
+            granted_repositories.append(repo_type)
       else:
-        print("⚠️  Could not extract user ID for SEC repository access")
+        print("⚠️  Could not extract user ID for repository access")
 
     # Extract the actual API key value
     api_key_value = None
@@ -426,7 +482,7 @@ def main():
         "jwt_token": jwt_token,
         "api_key": api_key_value,
         "user_id": user_data.get("user", {}).get("id"),
-        "sec_repository_access": sec_access_granted,
+        "granted_repositories": granted_repositories,
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "login_url": f"{args.base_url}/login",
         "openapi_spec": f"{args.base_url}/openapi.json",
@@ -468,7 +524,7 @@ def main():
         args.base_url,
         output_format,
         args.save_file,
-        sec_access_granted,
+        granted_repositories,
       )
 
   except KeyboardInterrupt:

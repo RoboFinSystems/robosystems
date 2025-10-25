@@ -186,7 +186,7 @@ def allocate_shared_credits_for_user(user_id: str) -> Dict[str, Any]:
         db.query(UserRepositoryCredits)
         .join(
           UserRepository,
-          UserRepositoryCredits.access_id == UserRepository.id,
+          UserRepositoryCredits.user_repository_id == UserRepository.id,
         )
         .filter(
           UserRepository.user_id == user_id,
@@ -208,8 +208,9 @@ def allocate_shared_credits_for_user(user_id: str) -> Dict[str, Any]:
           allocation_details.append(
             {
               "pool_id": pool.id,
-              "addon_type": pool.access_record.repository_type.value,
-              "addon_tier": pool.access_record.subscription_tier.value,
+              "repository_name": pool.user_repository.repository_name,
+              "repository_type": pool.user_repository.repository_type.value,
+              "repository_plan": pool.user_repository.repository_plan.value,
               "credits_allocated": float(pool.monthly_allocation),
               "new_balance": float(pool.current_balance),
             }
