@@ -270,13 +270,13 @@ class TestConvenienceFunctions:
 
   @patch("robosystems.utils.docs_template.generate_swagger_docs")
   def test_generate_kuzu_docs(self, mock_generate):
-    """Test Kuzu-specific Swagger generation."""
+    """Test RoboSystems Graph API-specific Swagger generation."""
     mock_generate.return_value = "kuzu swagger"
 
     result = generate_kuzu_docs()
 
     assert result == "kuzu swagger"
-    mock_generate.assert_called_once_with(title="Kuzu Cluster API")
+    mock_generate.assert_called_once_with(title="RoboSystems Graph API")
 
   @patch("robosystems.utils.docs_template.generate_redoc_docs")
   def test_generate_robosystems_redoc(self, mock_generate):

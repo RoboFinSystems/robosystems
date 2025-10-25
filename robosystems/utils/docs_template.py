@@ -135,7 +135,7 @@ def generate_swagger_docs(
   Generate a Swagger UI HTML page with configurable parameters.
 
   Args:
-      title: Page title (e.g., "RoboSystems API", "Kuzu Cluster API")
+      title: Page title (e.g., "RoboSystems API", "RoboSystems Graph API")
       openapi_url: URL to OpenAPI JSON spec (default: "/openapi.json")
       doc_expansion: How to expand docs ("list", "full", "none")
       persist_auth: Whether to persist authorization between refreshes
@@ -210,8 +210,8 @@ def generate_robosystems_docs() -> str:
 
 
 def generate_kuzu_docs() -> str:
-  """Generate docs for Kuzu Cluster API."""
-  return generate_swagger_docs(title="Kuzu Cluster API")
+  """Generate docs for RoboSystems Graph API."""
+  return generate_swagger_docs(title="RoboSystems Graph API")
 
 
 def generate_redoc_docs(
@@ -222,7 +222,7 @@ def generate_redoc_docs(
   Generate a ReDoc HTML page with dark theme styling.
 
   Args:
-      title: Page title (e.g., "RoboSystems API", "Kuzu Cluster API")
+      title: Page title (e.g., "RoboSystems API", "RoboSystems Graph API")
       openapi_url: URL to OpenAPI JSON spec (default: "/openapi.json")
 
   Returns:

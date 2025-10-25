@@ -1,10 +1,10 @@
-High-performance REST API for graph database operations. Provides multi-tenant database management, query execution, data ingestion, and backup/restore capabilities with built-in monitoring and health checks.
+High-performance REST API for graph database operations with pluggable backend support. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure (shared, dedicated, and enterprise instances), optional subgraph support for data partitioning, and shared repositories for public datasets (SEC filings, industry, economic data). Built-in health monitoring, streaming query results, and flexible deployment with Kuzu (primary) or optional Neo4j backends.
 
 ## Core Features
 
 - **Multi-Tenant Architecture**: Isolated database instances per graph with API key authentication
 - **Cypher Query Execution**: Run graph queries with streaming results and batching support
-- **Data Ingestion**: Direct Parquet/CSV imports with DuckDB staging for validation
+- **Data Ingestion**: Direct Parquet imports from S3, DuckDB ingestion from queries and tables
 - **Backup & Restore**: Full database backups with encryption and point-in-time recovery
 - **Health & Monitoring**: Real-time health checks, metrics, and task tracking
 - **Pluggable Backends**: Kuzu (primary) with optional Neo4j support
@@ -27,8 +27,9 @@ High-performance REST API for graph database operations. Provides multi-tenant d
 
 ### Data Operations
 
-- **COPY FROM**: Direct Parquet/CSV ingestion from S3 or local files
+- **COPY FROM**: Direct Parquet ingestion from S3
 - **DuckDB Staging**: Validate and transform data before graph import
+- **DuckDB Ingestion**: Direct ingestion from DuckDB queries and tables
 - **Batch Processing**: Chunked operations for large datasets
 - **Schema Validation**: Ensure data conforms to graph schema
 
@@ -67,10 +68,17 @@ Shared data repositories (SEC filings, industry data) are available as read-only
 
 The API supports multiple infrastructure tiers optimized for different workload requirements:
 
-- **kuzu-standard**: Multi-tenant shared instances (r7g.xlarge)
-- **kuzu-large**: Dedicated instances with subgraph support (r7g.large)
-- **kuzu-xlarge**: High-performance dedicated instances (r7g.xlarge)
-- **kuzu-shared**: Dedicated infrastructure for shared repositories
+**Kuzu Tiers** (default, always available):
+
+- **kuzu-standard**: Multi-tenant shared instances (r7g.large, 10 databases per instance)
+- **kuzu-large**: Dedicated instances with subgraph support (r7g.large, 10 subgraphs)
+- **kuzu-xlarge**: High-performance dedicated instances (r7g.xlarge, 25 subgraphs)
+- **kuzu-shared**: Dedicated infrastructure for shared repositories (SEC, industry, economic)
+
+**Neo4j Tiers** (optional, disabled by default):
+
+- **neo4j-community-large**: Neo4j Community Edition on dedicated r7g.large (single database only)
+- **neo4j-enterprise-xlarge**: Neo4j Enterprise Edition on dedicated r7g.xlarge ((25 databases))
 
 Each tier provides different performance characteristics, resource allocations, and feature sets. Configuration details are managed centrally and may vary by environment.
 
@@ -81,21 +89,3 @@ API key authentication required for all database operations (production/staging 
 ```
 X-Graph-API-Key: graph_api_64_character_random_string
 ```
-
-Development environments bypass authentication for ease of testing.
-
-## Performance Features
-
-- **Connection Pooling**: Reusable database connections for reduced latency
-- **Query Batching**: Configurable batch sizes for optimal memory usage
-- **Streaming Results**: NDJSON streaming for large result sets
-- **Async Operations**: Non-blocking task processing with progress tracking
-- **Result Caching**: Automatic caching of frequently accessed data
-
-## Monitoring & Observability
-
-- Health check endpoints for orchestration and load balancing
-- Detailed error messages and stack traces (development mode)
-- Task tracking for long-running operations
-- Metrics export for monitoring systems
-- Audit logging for security and compliance
