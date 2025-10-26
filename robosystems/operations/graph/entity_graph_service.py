@@ -213,6 +213,7 @@ class EntityGraphService:
           "extensions": entity_data.extensions or [],
         },
         session=self.session,
+        commit=False,
       )
       logger.info(f"Persisted schema DDL for graph {graph_id} to PostgreSQL")
 
@@ -777,6 +778,7 @@ class EntityGraphService:
           "created_by": user_id,
           "entity_type": "entity",
         },
+        commit=False,
       )
 
       logger.info(f"Graph metadata created: {graph}")

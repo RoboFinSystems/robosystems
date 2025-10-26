@@ -33,7 +33,9 @@ async def list_table_files(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
-  repository = await get_universal_repository_with_auth(graph_id, current_user, "read", db)
+  repository = await get_universal_repository_with_auth(
+    graph_id, current_user, "read", db
+  )
 
   if not repository:
     raise HTTPException(
@@ -100,7 +102,9 @@ async def get_file_info(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
-  repository = await get_universal_repository_with_auth(graph_id, current_user, "read", db)
+  repository = await get_universal_repository_with_auth(
+    graph_id, current_user, "read", db
+  )
 
   if not repository:
     raise HTTPException(
@@ -158,7 +162,9 @@ async def delete_file(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  repository = await get_universal_repository_with_auth(graph_id, current_user, "read", db)
+  repository = await get_universal_repository_with_auth(
+    graph_id, current_user, "read", db
+  )
 
   if not repository:
     raise HTTPException(

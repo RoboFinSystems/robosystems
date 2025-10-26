@@ -353,6 +353,7 @@ class GenericGraphService:
           else None,
           "access_level": metadata.get("access_level", "private"),
         },
+        commit=False,
       )
 
       logger.info(f"Graph metadata created: {graph}")

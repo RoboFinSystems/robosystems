@@ -89,11 +89,15 @@ update:
 ## Testing ##
 # Run all tests (excludes slow tests)
 test-all:
-    @just test-full
+    @just test
     @just lint-fix
     @just lint
     @just format
     @just typecheck
+
+# Run tests (exclude integration and slow tests)
+test:
+    uv run pytest --ignore=tests/integration -m "not slow"
 
 # Run ALL tests including slow ones
 test-full:
@@ -102,10 +106,6 @@ test-full:
 # Run integration tests
 test-integration:
     uv run pytest tests/integration
-
-# Run tests (exclude integration and slow tests)
-test:
-    uv run pytest --ignore=tests/integration -m "not slow"
 
 # Run tests with coverage
 test-cov:

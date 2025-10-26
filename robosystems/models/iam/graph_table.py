@@ -71,6 +71,7 @@ class GraphTable(Base):
     schema_json: Dict[str, Any],
     session: Session,
     target_node_type: Optional[str] = None,
+    commit: bool = True,
   ) -> "GraphTable":
     table = cls(
       graph_id=graph_id,
@@ -81,8 +82,9 @@ class GraphTable(Base):
     )
 
     session.add(table)
-    session.commit()
-    session.refresh(table)
+    if commit:
+      session.commit()
+      session.refresh(table)
     return table
 
   @classmethod
