@@ -20,8 +20,8 @@ This directory contains tests for the RoboSystems Service application. The tests
 Tests are marked with pytest markers to categorize them:
 
 - **Unit Tests** (`@pytest.mark.unit`): Fast tests that don't rely on external services
-- **Integration Tests** (`@pytest.mark.integration`): Tests that interact with databases or external services
-- **Kuzu Integration Tests** (`@pytest.mark.kuzu_integration`): Tests that create real Kuzu databases (excluded by default)
+- **Integration Tests** (`@pytest.mark.integration`): Tests that interact with databases or external services (may create real Kuzu databases)
+- **E2E Tests** (`@pytest.mark.e2e`): End-to-end tests requiring full Docker stack running (excluded by default)
 - **Celery Tests** (`@pytest.mark.celery`): Tests that involve Celery task functionality
 - **Async Tests** (`@pytest.mark.asyncio`): Tests for asynchronous operations
 - **Slow Tests** (`@pytest.mark.slow`): Long-running tests (XBRL processing, large data sets)
@@ -31,26 +31,29 @@ Tests are marked with pytest markers to categorize them:
 ### Quick Test Commands (using justfile)
 
 ```bash
-# Run standard test suite (excludes kuzu_integration tests)
+# Run standard test suite (unit tests only)
 just test
+
+# Run integration tests
+just test-integration
+
+# Run end-to-end tests (requires Docker)
+just test-e2e
 
 # Run tests with coverage report
 just test-cov
 
 # Run all tests including linting and formatting
 just test-all
-
-# Run Kuzu integration tests
-just test-integration
 ```
 
 ### Running All Tests
 
 ```bash
-# Standard test run (excludes kuzu_integration by default)
+# Standard test run (excludes e2e by default)
 uv run pytest
 
-# Include all tests
+# Include all tests including e2e
 uv run pytest -m ""
 ```
 
@@ -142,7 +145,7 @@ Tests use a separate environment from the production application:
 
 ### pytest.ini Settings
 
-- **Default Exclusions**: `kuzu_integration` tests are excluded by default
+- **Default Exclusions**: `e2e` tests are excluded by default (require Docker stack)
 - **Async Mode**: `asyncio_mode = auto` for automatic async test handling
 - **Console Output**: Progress style with INFO level logging
 - **Warnings**: Deprecation and user warnings are ignored
@@ -159,7 +162,7 @@ Key test environment variables include:
 ## Test Organization Best Practices
 
 1. **Unit tests** should be fast and isolated
-2. **Integration tests** should test real interactions but use test databases
-3. **Kuzu integration tests** create real database files and should be run separately
+2. **Integration tests** should test real interactions but use test databases (may create temporary Kuzu databases)
+3. **E2E tests** require full Docker stack and make real HTTP requests - run separately
 4. **Async tests** are automatically handled by pytest-asyncio
 5. **Celery tests** use a test broker configuration
