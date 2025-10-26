@@ -67,6 +67,7 @@ class GraphSchema(Base):
     custom_schema_name: Optional[str] = None,
     custom_schema_version: Optional[str] = None,
     is_active: bool = True,
+    commit: bool = True,
   ) -> "GraphSchema":
     schema = cls(
       graph_id=graph_id,
@@ -80,8 +81,9 @@ class GraphSchema(Base):
     )
 
     session.add(schema)
-    session.commit()
-    session.refresh(schema)
+    if commit:
+      session.commit()
+      session.refresh(schema)
     return schema
 
   @classmethod

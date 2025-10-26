@@ -52,7 +52,9 @@ async def get_upload_url(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  repository = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
+  repository = await get_universal_repository_with_auth(
+    graph_id, current_user, "write", db
+  )
 
   if not repository:
     raise HTTPException(
@@ -62,7 +64,9 @@ async def get_upload_url(
 
   table = GraphTable.get_by_name(graph_id, table_name, db)
   if not table:
-    logger.info(f"Auto-creating table {table_name} for graph {graph_id} on first file upload")
+    logger.info(
+      f"Auto-creating table {table_name} for graph {graph_id} on first file upload"
+    )
     table = GraphTable.create(
       graph_id=graph_id,
       table_name=table_name,
@@ -186,7 +190,9 @@ async def update_file(
       "Shared repositories provide reference data that cannot be modified.",
     )
 
-  repository = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
+  repository = await get_universal_repository_with_auth(
+    graph_id, current_user, "write", db
+  )
 
   if not repository:
     raise HTTPException(
@@ -220,6 +226,7 @@ async def update_file(
 
   # Validate storage limit
   from robosystems.models.iam import Graph
+
   graph = Graph.get_by_id(graph_id, db)
   if graph:
     storage_limit_gb = get_tier_storage_limit(graph.graph_tier)

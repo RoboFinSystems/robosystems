@@ -229,7 +229,8 @@ async def ingest_table_to_graph(
         if arrow_table.num_rows > 0 and arrow_table.num_columns > 0:
           result_msg = str(arrow_table.column(0)[0].as_py())
           import re
-          match = re.search(r'(\d+)\s+tuples?', result_msg)
+
+          match = re.search(r"(\d+)\s+tuples?", result_msg)
           if match:
             rows_ingested = int(match.group(1))
 

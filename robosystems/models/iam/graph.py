@@ -179,6 +179,7 @@ class Graph(Model):
     subgraph_name: Optional[str] = None,
     is_subgraph: bool = False,
     subgraph_metadata: Optional[Dict[str, Any]] = None,
+    commit: bool = True,
   ) -> "Graph":
     """Create a new graph metadata entry."""
     # Validate graph_type
@@ -220,12 +221,13 @@ class Graph(Model):
     )
 
     session.add(graph)
-    try:
-      session.commit()
-      session.refresh(graph)
-    except SQLAlchemyError:
-      session.rollback()
-      raise
+    if commit:
+      try:
+        session.commit()
+        session.refresh(graph)
+      except SQLAlchemyError:
+        session.rollback()
+        raise
     return graph
 
   @classmethod

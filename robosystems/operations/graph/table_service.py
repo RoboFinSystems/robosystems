@@ -73,6 +73,7 @@ class TableService:
         schema_json=node_type.to_dict(),
         target_node_type=node_type.name,
         session=self.session,
+        commit=False,
       )
 
       logger.info(
