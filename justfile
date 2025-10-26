@@ -95,21 +95,25 @@ test-all:
     @just format
     @just typecheck
 
-# Run tests (exclude integration and slow tests)
+# Run tests (exclude integration, slow, and e2e tests)
 test:
-    uv run pytest --ignore=tests/integration -m "not slow"
+    uv run pytest --ignore=tests/integration -m "not slow and not e2e"
 
-# Run ALL tests including slow ones
+# Run ALL tests including slow ones (excludes e2e)
 test-full:
-    uv run pytest
+    uv run pytest -m "not e2e"
 
 # Run integration tests
 test-integration:
     uv run pytest tests/integration
 
-# Run tests with coverage
+# Run end-to-end tests (requires Docker stack running)
+test-e2e:
+    uv run pytest -m e2e
+
+# Run tests with coverage (excludes integration and e2e)
 test-cov:
-    uv run pytest --cov=robosystems tests/ --ignore=tests/integration
+    uv run pytest --cov=robosystems tests/ --ignore=tests/integration -m "not e2e"
 
 # Run code quality checks
 test-code-quality:
@@ -121,13 +125,13 @@ test-code-quality:
 lint:
     uv run ruff check .
 
-# Format code
-format:
-    uv run ruff format .
-
 # Fix linting errors
 lint-fix:
     uv run ruff check . --fix
+
+# Format code
+format:
+    uv run ruff format .
 
 # Run type checking
 typecheck:
@@ -145,13 +149,13 @@ cf-validate template:
 create-feature type="feature" name="" base="main":
     @bin/tools/create-feature.sh {{type}} {{name}} {{base}}
 
-# Create a release branch from main with deployment option
-create-release version="patch" deploy="staging":
-    @bin/tools/create-release.sh {{version}} {{deploy}}
-
 # Create a pull request
 create-pr target="main" review="true":
     @bin/tools/create-pr.sh {{target}} {{review}}
+
+# Create a release branch from main with deployment option
+create-release version="patch" deploy="staging":
+    @bin/tools/create-release.sh {{version}} {{deploy}}
 
 # Deploy current branch/tag to specified environment
 deploy environment="prod" ref="":
@@ -176,23 +180,14 @@ generate-key:
 
 # Generate multiple secure keys for all secret fields
 generate-keys:
-    @echo "# Add these to your .env file:"
     @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
     @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
-    @echo "KUZU_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
 
 ## SSH ##
 # Bastion tunnel
 bastion-tunnel environment service key:
     @bin/tools/tunnels.sh {{environment}} {{service}} --key ~/.ssh/{{key}}
-
-# SSH EC2 instance
-ssh-ec2 url key:
-    ssh -i ~/.ssh/{{key}} ec2-user@{{url}}
-
-# SSH EC2 port forward
-ssh-ec2-port-forward url port key:
-    ssh -i ~/.ssh/{{key}} -L {{port}}:localhost:{{port}} ec2-user@{{url}}
 
 ## Apps ##
 # Install apps

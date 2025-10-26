@@ -1,6 +1,6 @@
 # pyright: basic
 """
-End-to-End Data Ingestion Integration Tests.
+End-to-End Data Ingestion Tests.
 
 Tests the complete workflow from user creation through data ingestion and querying:
 1. User registration and authentication
@@ -12,205 +12,24 @@ Tests the complete workflow from user creation through data ingestion and queryi
 
 This validates the entire platform stack working together in a realistic scenario.
 
-IMPORTANT: These tests are marked with @pytest.mark.e2e and require a FULL running
-API server at localhost:8000 (not just database access). They make real HTTP requests
-via httpx.Client to test the complete end-to-end workflow, exactly like the
-e2e_workflow.py script does.
+IMPORTANT: These tests require a FULL running API server at localhost:8000
+(not just database access). They make real HTTP requests to test the complete
+end-to-end workflow.
 
-To run only e2e tests:
-    pytest -m e2e
+Prerequisites:
+  - Docker stack running: just start robosystems
+  - All services healthy: API, workers, PostgreSQL, Valkey, S3, Graph API
 
-To skip e2e tests:
-    pytest -m "not e2e"
+To run:
+  just test-e2e
+  OR: uv run pytest -m e2e
 """
 
 import pytest
-import os
 import time
-import secrets
-from unittest.mock import patch
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-
-
-class HTTPClientWrapper:
-  """
-  Wrapper around httpx.Client that provides a TestClient-like interface.
-
-  Makes REAL HTTP requests to the Docker API container (localhost:8000),
-  just like the e2e_workflow_demo.py script does.
-  """
-
-  def __init__(self, base_url: str):
-    import httpx
-
-    self.client = httpx.Client(base_url=base_url, timeout=30.0)
-    self.base_url = base_url
-
-  def post(self, url: str, **kwargs):
-    """Make a POST request."""
-    response = self.client.post(url, **kwargs)
-    # Convert httpx.Response to have TestClient-like interface
-    response.status_code = response.status_code
-    return response
-
-  def get(self, url: str, **kwargs):
-    """Make a GET request."""
-    response = self.client.get(url, **kwargs)
-    response.status_code = response.status_code
-    return response
-
-  def patch(self, url: str, **kwargs):
-    """Make a PATCH request."""
-    response = self.client.patch(url, **kwargs)
-    response.status_code = response.status_code
-    return response
-
-  def delete(self, url: str, **kwargs):
-    """Make a DELETE request."""
-    response = self.client.delete(url, **kwargs)
-    response.status_code = response.status_code
-    return response
-
-  def close(self):
-    """Close the HTTP client."""
-    self.client.close()
-
-
-@pytest.fixture
-def integration_client():
-  """
-  Create an HTTP client for integration tests.
-
-  CRITICAL: This makes REAL HTTP requests to localhost:8000 (the Docker API container),
-  exactly like the e2e_workflow_demo.py script does. This ensures the test uses the same
-  API instance that Celery workers connect to.
-  """
-  client = HTTPClientWrapper("http://localhost:8000")
-  yield client
-  client.close()
-
-
-@pytest.fixture
-def sample_parquet_file(tmp_path):
-  """Create a sample Entity parquet file with proper schema."""
-  num_rows = 50
-
-  df = pd.DataFrame(
-    {
-      "identifier": [f"test_entity_{i:03d}" for i in range(1, num_rows + 1)],
-      "uri": [None] * num_rows,
-      "scheme": [None] * num_rows,
-      "cik": [None] * num_rows,
-      "ticker": [f"TEST{i}" if i % 10 == 0 else None for i in range(1, num_rows + 1)],
-      "exchange": [None] * num_rows,
-      "name": [f"Test Entity {i}" for i in range(1, num_rows + 1)],
-      "legal_name": [None] * num_rows,
-      "industry": ["Technology"] * num_rows,
-      "entity_type": ["corporation"] * num_rows,
-      "sic": [None] * num_rows,
-      "sic_description": [None] * num_rows,
-      "category": [f"Category_{i % 5}" for i in range(1, num_rows + 1)],
-      "state_of_incorporation": [None] * num_rows,
-      "fiscal_year_end": [None] * num_rows,
-      "ein": [None] * num_rows,
-      "tax_id": [None] * num_rows,
-      "lei": [None] * num_rows,
-      "phone": [None] * num_rows,
-      "website": [None] * num_rows,
-      "status": ["active"] * num_rows,
-      "is_parent": pd.Series(
-        [True if i % 5 == 0 else None for i in range(num_rows)], dtype="boolean"
-      ),
-      "parent_entity_id": [None] * num_rows,
-      "created_at": pd.date_range("2025-01-01", periods=num_rows, freq="h").strftime(
-        "%Y-%m-%d %H:%M:%S"
-      ),
-      "updated_at": [None] * num_rows,
-    }
-  )
-
-  file_path = tmp_path / "test_entities.parquet"
-  table = pa.Table.from_pandas(df)
-  pq.write_table(table, file_path)
-
-  return file_path, num_rows
-
-
-@pytest.fixture
-def test_user_with_api_key(integration_client):
-  """
-  Create a test user with API key - ALL via API calls (like production).
-
-  This matches the e2e_workflow_demo.py script which works perfectly.
-  """
-  # Step 1: Register user via API
-  registration_data = {
-    "name": "E2E Test User",
-    "email": f"e2e_{int(time.time())}_{secrets.token_hex(4)}@example.com",
-    "password": "S3cur3P@ssw0rd!E2E",
-  }
-
-  with patch.dict(os.environ, {"ENVIRONMENT": "dev"}):
-    register_response = integration_client.post(
-      "/v1/auth/register", json=registration_data
-    )
-    assert register_response.status_code == 201
-    user_data = register_response.json()["user"]
-    user_id = user_data["id"]
-
-  # Step 2: Login to get JWT token
-  login_response = integration_client.post(
-    "/v1/auth/login",
-    json={
-      "email": registration_data["email"],
-      "password": registration_data["password"],
-    },
-  )
-  assert login_response.status_code == 200
-  jwt_token = login_response.json()["token"]
-
-  # Step 3: Create API key via API (using JWT token)
-  api_key_response = integration_client.post(
-    "/v1/user/api-keys",
-    headers={"Authorization": f"Bearer {jwt_token}"},
-    json={"name": "E2E Test API Key"},
-  )
-  assert api_key_response.status_code == 201
-  api_key = api_key_response.json()["key"]
-
-  user_info = {
-    "user_id": user_id,
-    "email": registration_data["email"],
-    "api_key": api_key,
-    "headers": {"X-API-Key": api_key},
-    "jwt_token": jwt_token,
-  }
-
-  yield user_info
-
-  # Cleanup: Delete API keys via API (using JWT token)
-  try:
-    keys_response = integration_client.get(
-      "/v1/user/api-keys",
-      headers={"Authorization": f"Bearer {jwt_token}"},
-    )
-    if keys_response.status_code == 200:
-      for key in keys_response.json().get("keys", []):
-        integration_client.delete(
-          f"/v1/user/api-keys/{key['id']}",
-          headers={"Authorization": f"Bearer {jwt_token}"},
-        )
-  except Exception:
-    pass
-
-
-@pytest.fixture
-def cleanup_graphs():
-  """Track graph IDs created during test (for manual cleanup if needed)."""
-  graph_ids = []
-  yield graph_ids
 
 
 @pytest.mark.e2e
@@ -234,7 +53,6 @@ class TestE2EDataIngestion:
     user = test_user_with_api_key
     file_path, expected_rows = sample_parquet_file
 
-    # Step 1: Create graph
     graph_data = {
       "metadata": {
         "graph_name": f"e2e_test_graph_{int(time.time())}",
@@ -252,12 +70,10 @@ class TestE2EDataIngestion:
     response_data = create_response.json()
     graph_id = response_data.get("graph_id")
 
-    # Handle async graph creation
     if not graph_id:
       operation_id = response_data.get("operation_id")
       assert operation_id, "Expected either graph_id or operation_id"
 
-      # Poll SSE status endpoint for graph creation
       max_wait = 60
       start_time = time.time()
 
@@ -282,7 +98,6 @@ class TestE2EDataIngestion:
 
     cleanup_graphs.append(graph_id)
 
-    # Step 2: Get presigned upload URL
     upload_request = {
       "file_name": file_path.name,
       "content_type": "application/x-parquet",
@@ -299,11 +114,9 @@ class TestE2EDataIngestion:
     upload_url = upload_data["upload_url"]
     file_id = upload_data["file_id"]
 
-    # Fix LocalStack URL for host access
     if "localstack:4566" in upload_url:
       upload_url = upload_url.replace("localstack:4566", "localhost:4566")
 
-    # Step 3: Upload file to S3
     with open(file_path, "rb") as f:
       file_content = f.read()
       file_size = len(file_content)
@@ -318,7 +131,6 @@ class TestE2EDataIngestion:
       )
       assert s3_response.status_code in [200, 204]
 
-    # Step 4: Update file metadata
     metadata_update = {
       "file_size_bytes": file_size,
       "row_count": expected_rows,
@@ -331,7 +143,6 @@ class TestE2EDataIngestion:
     )
     assert metadata_response.status_code == 200
 
-    # Step 5: Verify staging table
     tables_response = integration_client.get(
       f"/v1/graphs/{graph_id}/tables",
       headers=user["headers"],
@@ -347,7 +158,6 @@ class TestE2EDataIngestion:
     assert entity_table["file_count"] == 1
     assert entity_table["total_size_bytes"] == file_size
 
-    # Step 6: Ingest data into graph
     ingest_response = integration_client.post(
       f"/v1/graphs/{graph_id}/tables/ingest",
       headers=user["headers"],
@@ -360,8 +170,6 @@ class TestE2EDataIngestion:
     assert ingest_data["successful_tables"] >= 1
     assert ingest_data["total_rows_ingested"] == expected_rows
 
-    # Step 7: Query and verify data
-    # Test 1: Count query
     count_query = {"query": "MATCH (n:Entity) RETURN count(n) AS total_nodes"}
     query_response = integration_client.post(
       f"/v1/graphs/{graph_id}/query?mode=sync",
@@ -375,7 +183,6 @@ class TestE2EDataIngestion:
     assert len(count_data["data"]) == 1
     assert count_data["data"][0]["total_nodes"] == expected_rows
 
-    # Test 2: Property query
     property_query = {
       "query": "MATCH (n:Entity) RETURN n.identifier, n.name, n.industry LIMIT 5"
     }
@@ -389,7 +196,6 @@ class TestE2EDataIngestion:
     property_data = query_response.json()
     assert len(property_data["data"]) == 5
 
-    # Verify properties are present
     for record in property_data["data"]:
       assert "n.identifier" in record
       assert record["n.identifier"].startswith("test_entity_")
@@ -397,7 +203,6 @@ class TestE2EDataIngestion:
       assert "n.industry" in record
       assert record["n.industry"] == "Technology"
 
-    # Test 3: Filtered query
     filter_query = {
       "query": "MATCH (n:Entity) WHERE n.ticker IS NOT NULL RETURN n.ticker, n.name ORDER BY n.ticker"
     }
@@ -409,9 +214,8 @@ class TestE2EDataIngestion:
     assert query_response.status_code == 200
 
     filter_data = query_response.json()
-    assert len(filter_data["data"]) == 5  # Every 10th entity has ticker
+    assert len(filter_data["data"]) == 5
 
-    # Verify ticker values
     for record in filter_data["data"]:
       assert record["n.ticker"].startswith("TEST")
 
@@ -425,7 +229,6 @@ class TestE2EDataIngestion:
     """Test uploading multiple parquet files to the same table."""
     user = test_user_with_api_key
 
-    # Create graph
     graph_data = {
       "metadata": {
         "graph_name": f"multi_file_test_{int(time.time())}",
@@ -443,7 +246,6 @@ class TestE2EDataIngestion:
     response_data = create_response.json()
     graph_id = response_data.get("graph_id") or response_data.get("operation_id")
 
-    # Wait for async creation if needed
     if "operation_id" in response_data:
       operation_id = response_data.get("operation_id")
       max_wait = 60
@@ -470,14 +272,12 @@ class TestE2EDataIngestion:
 
     cleanup_graphs.append(graph_id)
 
-    # Upload 3 files with different entity ranges
     file_ranges = [(1, 20), (21, 40), (41, 60)]
     uploaded_files = []
 
     for start, end in file_ranges:
       num_rows = end - start + 1
 
-      # Create file
       df = pd.DataFrame(
         {
           "identifier": [f"entity_{i:03d}" for i in range(start, end + 1)],
@@ -514,7 +314,6 @@ class TestE2EDataIngestion:
       table = pa.Table.from_pandas(df)
       pq.write_table(table, file_path)
 
-      # Upload file (simplified - just get URL and track)
       upload_request = {
         "file_name": file_path.name,
         "content_type": "application/x-parquet",
@@ -529,7 +328,6 @@ class TestE2EDataIngestion:
 
       uploaded_files.append(upload_url_response.json()["file_id"])
 
-    # Verify all files are tracked
     tables_response = integration_client.get(
       f"/v1/graphs/{graph_id}/tables",
       headers=user["headers"],
@@ -541,8 +339,6 @@ class TestE2EDataIngestion:
       (t for t in tables_data["tables"] if t["table_name"] == "Entity"), None
     )
     assert entity_table is not None
-    # Note: file_count might be 0 if S3 upload wasn't completed in simplified test
-    # Full test would complete S3 upload and metadata update
 
   def test_invalid_schema_rejection(
     self,
@@ -554,7 +350,6 @@ class TestE2EDataIngestion:
     """Test that ingestion fails gracefully with schema mismatch."""
     user = test_user_with_api_key
 
-    # Create graph
     graph_data = {
       "metadata": {
         "graph_name": f"invalid_schema_test_{int(time.time())}",
@@ -600,7 +395,6 @@ class TestE2EDataIngestion:
 
     cleanup_graphs.append(graph_id)
 
-    # Create file with WRONG schema (missing required fields)
     df = pd.DataFrame(
       {
         "wrong_field": ["value1", "value2", "value3"],
@@ -612,7 +406,6 @@ class TestE2EDataIngestion:
     table = pa.Table.from_pandas(df)
     pq.write_table(table, file_path)
 
-    # Upload file
     upload_request = {
       "file_name": file_path.name,
       "content_type": "application/x-parquet",
@@ -624,18 +417,15 @@ class TestE2EDataIngestion:
       json=upload_request,
     )
 
-    # Upload itself should succeed (schema validation happens at ingestion)
     assert upload_url_response.status_code == 200
     upload_data = upload_url_response.json()
 
     upload_url = upload_data["upload_url"]
     file_id = upload_data["file_id"]
 
-    # Fix LocalStack URL for host access
     if "localstack:4566" in upload_url:
       upload_url = upload_url.replace("localstack:4566", "localhost:4566")
 
-    # Actually upload the file to S3
     with open(file_path, "rb") as f:
       file_content = f.read()
       file_size = len(file_content)
@@ -650,7 +440,6 @@ class TestE2EDataIngestion:
       )
       assert s3_response.status_code in [200, 204]
 
-    # Update file metadata
     metadata_update = {
       "file_size_bytes": file_size,
       "row_count": 3,
@@ -663,18 +452,14 @@ class TestE2EDataIngestion:
     )
     assert metadata_response.status_code == 200
 
-    # Now ingestion should fail with helpful error due to schema mismatch
     ingest_response = integration_client.post(
       f"/v1/graphs/{graph_id}/tables/ingest",
       headers=user["headers"],
       json={"ignore_errors": False, "rebuild": False},
     )
 
-    # Ingestion will fail or report errors
-    # Depending on implementation, might be 500 or 200 with failed status
     ingest_data = ingest_response.json()
 
-    # Either direct error or failed status in results
     if ingest_response.status_code == 500:
       assert "detail" in ingest_data
     else:
@@ -697,7 +482,6 @@ class TestE2EEdgeCases:
     """Test handling of empty parquet files."""
     user = test_user_with_api_key
 
-    # Create graph
     graph_data = {
       "metadata": {
         "graph_name": f"empty_file_test_{int(time.time())}",
@@ -742,7 +526,6 @@ class TestE2EEdgeCases:
 
     cleanup_graphs.append(graph_id)
 
-    # Create empty dataframe with correct schema
     df = pd.DataFrame(
       {
         "identifier": [],
@@ -777,7 +560,6 @@ class TestE2EEdgeCases:
     table = pa.Table.from_pandas(df)
     pq.write_table(table, file_path)
 
-    # Upload should succeed
     upload_request = {
       "file_name": file_path.name,
       "content_type": "application/x-parquet",
@@ -790,9 +572,6 @@ class TestE2EEdgeCases:
     )
     assert upload_url_response.status_code == 200
 
-    # Table should show 0 rows after metadata update
-    # (Implementation detail - may skip empty files)
-
   def test_concurrent_query_execution(
     self,
     integration_client,
@@ -804,7 +583,6 @@ class TestE2EEdgeCases:
     user = test_user_with_api_key
     file_path, expected_rows = sample_parquet_file
 
-    # Create graph and load data
     graph_data = {
       "metadata": {
         "graph_name": f"concurrent_test_{int(time.time())}",
@@ -850,7 +628,6 @@ class TestE2EEdgeCases:
 
     cleanup_graphs.append(graph_id)
 
-    # Upload and ingest data
     upload_request = {
       "file_name": file_path.name,
       "content_type": "application/x-parquet",
@@ -903,7 +680,6 @@ class TestE2EEdgeCases:
     )
     assert ingest_response.status_code == 200
 
-    # Execute multiple queries concurrently
     queries = [
       "MATCH (n:Entity) RETURN count(n) AS total_nodes",
       "MATCH (n:Entity) RETURN n.identifier, n.name LIMIT 10",
