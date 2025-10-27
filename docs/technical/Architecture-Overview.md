@@ -218,16 +218,14 @@ Business workflow orchestration and service layer:
 
 Data transformation pipeline and business logic:
 
-**XBRL Processing Pipeline** (`/processors/xbrl/`):
-- **`DataFrameManager`**: DataFrame validation, cleaning, and transformation
-- **`XBRLDuckDBGraphProcessor`**: DuckDB staging to graph database ingestion
-- **`ParquetWriter`**: Optimized Parquet file generation for graph ingestion
-- **`TextBlockExternalizer`**: Large text extraction and externalization
-
-**Financial Processing**:
-- **`TrialBalanceProcessor`**: Financial calculations and accounting operations
-- **`ScheduleProcessor`**: Financial schedule generation and formatting
-- **`QBTransactionsProcessor`**: QuickBooks data processing and normalization
+**XBRL Graph Processor** (`/processors/xbrl_graph.py`):
+- Transforms SEC XBRL filings into graph schema-derived DataFrames using Arelle
+- Creates structured nodes for Entity, Report, Fact, Element, Period, Unit, Taxonomy, Structure
+- Processes DTS (Discoverable Taxonomy Set) including presentation/calculation networks
+- Schema-driven DataFrame generation with configurable graph schemas
+- Outputs Parquet files organized by node type and relationship type
+- Handles text block externalization to S3 for large fact values (>10KB threshold)
+- Deterministic UUIDv7 identifiers for deduplication across filings
 
 **See**: [Processors Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/processors/README.md) in codebase
 
