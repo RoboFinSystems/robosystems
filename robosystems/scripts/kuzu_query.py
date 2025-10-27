@@ -70,6 +70,35 @@ def execute_query(db_path: str, query: str, format_output: str = "table"):
     return False
 
 
+def interactive_mode(db_path: str, format_output: str = "table"):
+  """Interactive query mode."""
+  print_info_section("📊 Interactive Kuzu Query Mode")
+  print(f"\nDatabase: {db_path}")
+  print("\nCommands:")
+  print("   quit/exit      - Exit interactive mode")
+  print("\nEnter a Cypher query:")
+
+  while True:
+    try:
+      query_input = input("\n> ").strip()
+
+      if not query_input:
+        continue
+
+      if query_input.lower() in ["quit", "exit", "q"]:
+        print("\nGoodbye!")
+        break
+
+      execute_query(db_path, query_input, format_output)
+
+    except KeyboardInterrupt:
+      print("\n\nGoodbye!")
+      break
+    except EOFError:
+      print("\n\nGoodbye!")
+      break
+
+
 def main():
   parser = argparse.ArgumentParser(
     description="Execute queries against embedded Kuzu databases",
@@ -91,7 +120,7 @@ Examples:
     "--db-path", required=True, help="Path to the Kuzu database directory"
   )
 
-  parser.add_argument("--query", required=True, help="Cypher query to execute")
+  parser.add_argument("--query", help="Cypher query to execute")
 
   parser.add_argument(
     "--format",
@@ -102,11 +131,12 @@ Examples:
 
   args = parser.parse_args()
 
-  # Execute the query
-  success = execute_query(args.db_path, args.query, args.format)
-
-  if not success:
-    sys.exit(1)
+  if args.query:
+    success = execute_query(args.db_path, args.query, args.format)
+    if not success:
+      sys.exit(1)
+  else:
+    interactive_mode(args.db_path, args.format)
 
 
 if __name__ == "__main__":

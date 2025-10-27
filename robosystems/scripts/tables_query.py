@@ -15,6 +15,14 @@ import argparse
 import sys
 import requests
 
+from robosystems.utils.query_output import (
+  print_csv,
+  print_error,
+  print_info_section,
+  print_json,
+  print_table,
+)
+
 
 def execute_query(
   api_url: str, graph_id: str, query: str, format_output: str = "table"
@@ -33,62 +41,31 @@ def execute_query(
     row_count = data.get("row_count", len(rows))
     execution_time_ms = data.get("execution_time_ms", 0)
 
+    results = []
+    for row in rows:
+      row_dict = {}
+      for i, col_name in enumerate(columns):
+        row_dict[col_name] = row[i] if i < len(row) else None
+      results.append(row_dict)
+
     if format_output == "table":
-      print("\n" + "=" * 60)
-      print(f"QUERY RESULTS ({row_count} rows, {execution_time_ms:.2f}ms)")
-      print("=" * 60)
-      print(f"Query: {query}")
-      print("=" * 60)
-
-      if columns and rows:
-        header_row = " | ".join(columns)
-        print(header_row)
-        print("-" * len(header_row))
-
-        for row in rows:
-          row_data = []
-          for value in row:
-            if value is None:
-              row_data.append("NULL")
-            else:
-              row_data.append(str(value))
-
-          print(" | ".join(row_data))
-
-        print("-" * len(header_row))
-
-      print(f"Total rows: {row_count}")
-      print(f"Execution time: {execution_time_ms:.2f}ms")
+      print_info_section(f"QUERY: {query}")
+      print(f"Execution time: {execution_time_ms:.2f}ms\n")
+      print_table(
+        results,
+        title=f"DuckDB Staging Tables Query Results ({row_count} rows)",
+      )
 
     elif format_output == "json":
-      import json
-
-      results = []
-      for row in rows:
-        row_dict = {}
-        for i, col_name in enumerate(columns):
-          row_dict[col_name] = row[i] if i < len(row) else None
-        results.append(row_dict)
-
-      print(json.dumps(results, indent=2, default=str))
+      print_json(results)
 
     elif format_output == "csv":
-      import csv
-      import io
-
-      output = io.StringIO()
-      writer = csv.writer(output)
-
-      writer.writerow(columns)
-      for row in rows:
-        writer.writerow(row)
-
-      print(output.getvalue())
+      print_csv(results)
 
     return True
 
   except requests.exceptions.RequestException as e:
-    print(f"❌ Query execution failed: {e}")
+    print_error(f"Query execution failed: {e}")
     if hasattr(e, "response") and e.response is not None:
       try:
         error_detail = e.response.json()
@@ -97,8 +74,38 @@ def execute_query(
         print(f"Response text: {e.response.text}")
     return False
   except Exception as e:
-    print(f"❌ Error: {e}")
+    print_error(f"Error: {e}")
     return False
+
+
+def interactive_mode(api_url: str, graph_id: str, format_output: str = "table"):
+  """Interactive query mode."""
+  print_info_section("📊 Interactive Tables Query Mode")
+  print(f"\nGraph ID: {graph_id}")
+  print(f"API URL: {api_url}")
+  print("\nCommands:")
+  print("   quit/exit      - Exit interactive mode")
+  print("\nEnter a SQL query:")
+
+  while True:
+    try:
+      query_input = input("\n> ").strip()
+
+      if not query_input:
+        continue
+
+      if query_input.lower() in ["quit", "exit", "q"]:
+        print("\nGoodbye!")
+        break
+
+      execute_query(api_url, graph_id, query_input, format_output)
+
+    except KeyboardInterrupt:
+      print("\n\nGoodbye!")
+      break
+    except EOFError:
+      print("\n\nGoodbye!")
+      break
 
 
 def main():
@@ -134,7 +141,7 @@ Examples:
     "--graph-id", required=True, help="Graph database identifier (e.g., 'sec')"
   )
 
-  parser.add_argument("--query", required=True, help="SQL query to execute")
+  parser.add_argument("--query", help="SQL query to execute")
 
   parser.add_argument(
     "--format",
@@ -145,10 +152,12 @@ Examples:
 
   args = parser.parse_args()
 
-  success = execute_query(args.url, args.graph_id, args.query, args.format)
-
-  if not success:
-    sys.exit(1)
+  if args.query:
+    success = execute_query(args.url, args.graph_id, args.query, args.format)
+    if not success:
+      sys.exit(1)
+  else:
+    interactive_mode(args.url, args.graph_id, args.format)
 
 
 if __name__ == "__main__":
