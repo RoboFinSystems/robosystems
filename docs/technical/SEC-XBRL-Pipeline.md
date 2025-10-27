@@ -265,7 +265,8 @@ print(schema)
 2. Open the application
 3. Connect to your local Kuzu database:
    - **Database Path**: `./data/kuzu-dbs/sec.kuzu` (from RoboSystems root directory)
-4. Run Cypher queries and visualize results interactively
+4. **Enable "Fetch all edges between vertices"** in settings for richer visualizations
+5. Run Cypher queries and visualize results interactively
 
 **What you can do:**
 - Visualize graph relationships interactively

@@ -8,6 +8,7 @@ New to RoboSystems? Start here:
 
 - **Quick Start**: See the [README](https://github.com/RoboFinSystems/robosystems#quick-start) for installation
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
+- **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
 
 
 ## Core Documentation
@@ -19,6 +20,7 @@ New to RoboSystems? Start here:
 ### User Guides
 
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Working with SEC financial data
+- **[Accounting Demo](Accounting-Demo)** - Complete accounting workflow demonstration
 - **QuickBooks Integration** _(Coming soon)_
 - **Custom Data Import** _(Coming soon)_
 
