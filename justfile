@@ -142,7 +142,7 @@ cf-lint template:
     uv run cfn-lint -t cloudformation/{{template}}.yaml
 
 cf-validate template:
-    aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml
+    uv run aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml
 
 ## CI/CD ##
 # Create a feature branch
@@ -202,8 +202,8 @@ api env=_default_env:
     UV_ENV_FILE={{env}} uv run uvicorn main:app --reload
 
 # Start Graph API server with Kuzu backend (configurable node type)
-kuzu-api type="writer" port="8001" env=_default_env:
-    UV_ENV_FILE={{env}} GRAPH_BACKEND_TYPE=kuzu KUZU_NODE_TYPE={{type}} uv run python -m robosystems.graph_api --port {{port}}
+graph-api backend="kuzu" type="writer" port="8001" env=_default_env:
+    UV_ENV_FILE={{env}} GRAPH_BACKEND_TYPE={{backend}} KUZU_NODE_TYPE={{type}} uv run python -m robosystems.graph_api --port {{port}}
 
 # Start worker
 worker env=_default_env num_workers="1" queue="robosystems":
@@ -265,7 +265,7 @@ db-create-key email key_name env=_default_env:
 db-create-test-user mode="" base_url="http://localhost:8000" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode != "" { "--modes " + mode } else { "" } }}
 
-## Graph Database (Works with Kuzu, Neo4j, etc.) ##
+## Graph API ##
 # Graph API - health check
 graph-health url="http://localhost:8001" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --command health
@@ -274,7 +274,7 @@ graph-health url="http://localhost:8001" env=_default_env:
 graph-info graph_id url="http://localhost:8001" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --command info
 
-# Graph API - execute Cypher query (works with any backend)
+# Graph API - execute Cypher query
 graph-query graph_id query format="table" url="http://localhost:8001" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
 

@@ -23,6 +23,17 @@ import argparse
 import sys
 import requests
 
+from robosystems.utils.query_output import (
+  print_csv,
+  print_error,
+  print_info_field,
+  print_info_section,
+  print_json,
+  print_success,
+  print_table,
+  print_warning,
+)
+
 
 def health_check(api_url: str) -> bool:
   try:
@@ -32,32 +43,34 @@ def health_check(api_url: str) -> bool:
     data = response.json()
     status = data.get("status", "unknown")
 
-    print("=" * 60)
-    print("HEALTH CHECK")
-    print("=" * 60)
-    print(f"Status: {status}")
+    print_info_section("HEALTH CHECK")
+    print_info_field("Status", status)
 
     if "uptime_seconds" in data:
       uptime_hours = data["uptime_seconds"] / 3600
-      print(f"Uptime: {uptime_hours:.2f} hours ({data['uptime_seconds']:.0f} seconds)")
+      print_info_field(
+        "Uptime", f"{uptime_hours:.2f} hours ({data['uptime_seconds']:.0f} seconds)"
+      )
 
     if "database_count" in data:
-      print(f"Database count: {data['database_count']}")
+      print_info_field("Database count", data["database_count"])
 
     if "memory_rss_mb" in data:
-      print(f"Memory (RSS): {data['memory_rss_mb']:.1f} MB")
-      print(f"Memory (VMS): {data.get('memory_vms_mb', 0):.1f} MB")
-      print(f"Memory %: {data.get('memory_percent', 0):.2f}%")
+      print_info_field("Memory (RSS)", f"{data['memory_rss_mb']:.1f} MB")
+      print_info_field("Memory (VMS)", f"{data.get('memory_vms_mb', 0):.1f} MB")
+      print_info_field("Memory %", f"{data.get('memory_percent', 0):.2f}%")
 
     if status == "healthy":
-      print("\n✅ Graph API is healthy")
+      print()
+      print_success("Graph API is healthy")
       return True
     else:
-      print(f"\n❌ Graph API is unhealthy: {status}")
+      print()
+      print_error(f"Graph API is unhealthy: {status}")
       return False
 
   except requests.exceptions.RequestException as e:
-    print(f"❌ Health check failed: {e}")
+    print_error(f"Health check failed: {e}")
     return False
 
 
@@ -68,23 +81,21 @@ def get_database_info(api_url: str, graph_id: str) -> bool:
 
     data = response.json()
 
-    print("=" * 60)
-    print(f"DATABASE INFO: {graph_id}")
-    print("=" * 60)
-    print(f"Path: {data.get('database_path', 'N/A')}")
-    print(f"Created: {data.get('created_at', 'N/A')}")
-    print(f"Healthy: {'✅' if data.get('is_healthy') else '❌'}")
-    print(f"Read-only: {'Yes' if data.get('read_only') else 'No'}")
+    print_info_section(f"DATABASE INFO: {graph_id}")
+    print_info_field("Path", data.get("database_path", "N/A"))
+    print_info_field("Created", data.get("created_at", "N/A"))
+    print_info_field("Healthy", "✓" if data.get("is_healthy") else "✗")
+    print_info_field("Read-only", "Yes" if data.get("read_only") else "No")
 
     size_bytes = data.get("size_bytes", 0)
     size_mb = size_bytes / (1024 * 1024)
-    print(f"Size: {size_mb:.2f} MB ({size_bytes:,} bytes)")
+    print_info_field("Size", f"{size_mb:.2f} MB ({size_bytes:,} bytes)")
 
     if data.get("last_accessed"):
-      print(f"Last accessed: {data['last_accessed']}")
+      print_info_field("Last accessed", data["last_accessed"])
 
-    # Query for node and relationship counts
-    print("\nQuerying database for node/relationship counts...")
+    print()
+    print("Querying database for node/relationship counts...")
     try:
       count_query = """
         MATCH (n)
@@ -114,15 +125,15 @@ def get_database_info(api_url: str, graph_id: str) -> bool:
       rel_results = rel_data.get("data", rel_data.get("results", []))
       rel_count = rel_results[0].get("rel_count", 0) if rel_results else 0
 
-      print(f"Node count: {node_count:,}")
-      print(f"Relationship count: {rel_count:,}")
+      print_info_field("Node count", f"{node_count:,}")
+      print_info_field("Relationship count", f"{rel_count:,}")
     except Exception as e:
-      print(f"⚠️  Could not query counts: {e}")
+      print_warning(f"Could not query counts: {e}")
 
     return True
 
   except requests.exceptions.RequestException as e:
-    print(f"❌ Failed to get database info: {e}")
+    print_error(f"Failed to get database info: {e}")
     return False
 
 
@@ -145,60 +156,19 @@ def execute_query(
     results = data.get("data", data.get("results", []))
 
     if format_output == "table":
-      print("\n" + "=" * 60)
-      print(f"QUERY RESULTS ({len(results)} rows)")
-      print("=" * 60)
-      print(f"Query: {query}")
-      print("=" * 60)
-
-      if results:
-        column_names = list(results[0].keys())
-
-        header_row = " | ".join(column_names)
-        print(header_row)
-        print("-" * len(header_row))
-
-        for row in results:
-          row_data = []
-          for col in column_names:
-            value = row.get(col)
-            if value is None:
-              row_data.append("NULL")
-            else:
-              row_data.append(str(value))
-
-          print(" | ".join(row_data))
-
-        print("-" * len(header_row))
-
-      print(f"Total rows: {len(results)}")
+      print_info_section(f"QUERY: {query}")
+      print_table(results, title=f"Query Results ({len(results)} rows)")
 
     elif format_output == "json":
-      import json
-
-      print(json.dumps(results, indent=2, default=str))
+      print_json(results)
 
     elif format_output == "csv":
-      import csv
-      import io
-
-      if not results:
-        print("")
-        return True
-
-      output = io.StringIO()
-      writer = csv.DictWriter(output, fieldnames=results[0].keys())
-
-      writer.writeheader()
-      for row in results:
-        writer.writerow(row)
-
-      print(output.getvalue())
+      print_csv(results)
 
     return True
 
   except requests.exceptions.RequestException as e:
-    print(f"❌ Query execution failed: {e}")
+    print_error(f"Query execution failed: {e}")
     if hasattr(e, "response") and e.response is not None:
       try:
         error_detail = e.response.json()
@@ -207,7 +177,7 @@ def execute_query(
         print(f"Response text: {e.response.text}")
     return False
   except Exception as e:
-    print(f"❌ Error: {e}")
+    print_error(f"Error: {e}")
     return False
 
 
