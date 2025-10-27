@@ -545,6 +545,8 @@ just sec-load NVDA 2025
 
 ## Resources
 
+- **Documentation**: See `/robosystems/tasks/sec_xbrl/README.md` for technical details
+- **Health Check**: `just sec-health v` for diagnostic information
 - **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Kuzu
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
@@ -554,6 +556,7 @@ just sec-load NVDA 2025
 
 ## Support
 
-- GitHub Issues: [robosystems/issues](https://github.com/RoboFinSystems/robosystems/issues)
-- Documentation: See `/robosystems/tasks/sec_xbrl/README.md` for technical details
-- Health Check: `just sec-health v` for diagnostic information
+- [Issues](https://github.com/RoboFinSystems/robosystems/issues)
+- [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
+- [Projects](https://github.com/RoboFinSystems/robosystems/projects)
+- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
