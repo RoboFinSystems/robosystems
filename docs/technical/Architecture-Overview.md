@@ -365,6 +365,7 @@ Data transformation pipeline and business logic:
 - **CloudWatch**: Logs and metrics
 - **Amazon Managed Prometheus**: Metrics collection
 - **Amazon Managed Grafana**: Dashboards and visualization
+- **AWS Cost & Usage Report**: Cost tracking 
 
 ## CI/CD & Deployment
 
@@ -374,7 +375,7 @@ All deployments automated through GitHub Actions with self-hosted runners for in
 
 - **`prod.yml`**: Production deployment orchestrator
 - **`staging.yml`**: Staging environment deployment
-- **`bootstrap.yml`**: One-time infrastructure initialization
+- **`bootstrap.yml`**: Initialize VPC & setup self-hosted runner
 - **`run-migrations.yml`**: Database migrations on RDS instances
 
 **Runner Configuration**:
@@ -508,12 +509,14 @@ just bootstrap     # Bootstrap infrastructure
 
 ## Related Documentation
 
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Financial data loading
-- **Component READMEs**: Detailed docs in codebase at `/robosystems/*/README.md`
-- **API Reference**: http://localhost:8000/docs (local) or https://api.robosystems.ai/docs (production)
+- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
+- **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
+- **Component READMEs**: Detailed technical docs in the codebase
+- **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs) (local) or [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (production)
 
 ## Support
 
-- **GitHub Issues**: [robosystems/issues](https://github.com/RoboFinSystems/robosystems/issues)
-- **Discussions**: [robosystems/discussions](https://github.com/RoboFinSystems/robosystems/discussions)
-- **Wiki**: [robosystems/wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Issues](https://github.com/RoboFinSystems/robosystems/issues)
+- [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
+- [Projects](https://github.com/RoboFinSystems/robosystems/projects)
+- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
