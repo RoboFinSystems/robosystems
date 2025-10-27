@@ -146,6 +146,34 @@ class SECLocalPipeline:
     except Exception as e:
       logger.warning(f"Error clearing consolidated files: {e}")
 
+  def _ensure_database_exists(self) -> bool:
+    """
+    Check if SEC database file exists and create it if it doesn't.
+
+    Returns:
+        True if database exists or was created successfully, False otherwise
+    """
+    from pathlib import Path
+    from robosystems.config import env
+
+    db_path = Path(env.KUZU_DATABASE_PATH) / f"{self.sec_database}.kuzu"
+
+    if db_path.exists():
+      logger.debug(f"SEC database already exists at {db_path}")
+      return True
+
+    logger.info(f"SEC database file not found at {db_path}")
+    logger.info("🔄 Initializing SEC database for first use...")
+    logger.info("This is a one-time setup that creates the database schema and tables.")
+
+    success = self.reset_database(clear_s3=False)
+    if success:
+      logger.info("✅ SEC database initialized successfully")
+      return True
+    else:
+      logger.error("❌ Failed to initialize SEC database")
+      return False
+
   def load_company(
     self, ticker: str, year: int = None, force_reconsolidate: bool = False
   ) -> bool:
@@ -169,6 +197,10 @@ class SECLocalPipeline:
     Returns:
         True if successful, False otherwise
     """
+    if not self._ensure_database_exists():
+      logger.error("Failed to ensure SEC database exists, cannot proceed")
+      return False
+
     if year is None:
       logger.info(
         f"📊 Loading {ticker} data for ALL YEARS using orchestrated pipeline..."
@@ -389,6 +421,10 @@ class SECLocalPipeline:
     Returns:
         True if successful, False otherwise
     """
+    if not self._ensure_database_exists():
+      logger.error("Failed to ensure SEC database exists, cannot proceed")
+      return False
+
     if year is None:
       logger.info(
         f"📊 Loading {ticker} data for ALL YEARS using DuckDB-based ingestion ({self.backend})..."
