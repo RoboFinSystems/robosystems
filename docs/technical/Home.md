@@ -10,7 +10,6 @@ New to RoboSystems? Start here:
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
 - **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
 
-
 ## Core Documentation
 
 ### Architecture & Design
@@ -31,6 +30,7 @@ New to RoboSystems? Start here:
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
-- **Main README**: [robosystems/README.md](https://github.com/RoboFinSystems/robosystems/blob/main/README.md)
+- [Issues](https://github.com/RoboFinSystems/robosystems/issues)
+- [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
+- [Projects](https://github.com/RoboFinSystems/robosystems/projects)
+- [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
