@@ -14,6 +14,14 @@ import sys
 from pathlib import Path
 import duckdb
 
+from robosystems.utils.query_output import (
+  print_csv,
+  print_error,
+  print_info_section,
+  print_json,
+  print_table,
+)
+
 
 def execute_query(db_path: str, query: str, format_output: str = "table") -> bool:
   """Execute a SQL query against the DuckDB database."""
@@ -21,7 +29,7 @@ def execute_query(db_path: str, query: str, format_output: str = "table") -> boo
   try:
     db_path_obj = Path(db_path)
     if not db_path_obj.exists():
-      print(f"Error: Database path does not exist: {db_path}")
+      print_error(f"Database path does not exist: {db_path}")
       return False
 
     print(f"Connecting to database: {db_path}")
@@ -30,67 +38,30 @@ def execute_query(db_path: str, query: str, format_output: str = "table") -> boo
     print(f"Executing query: {query}")
     result = conn.execute(query)
 
+    column_names = [desc[0] for desc in result.description]
+    rows = result.fetchall()
+
+    results = []
+    for row in rows:
+      row_dict = {}
+      for i, value in enumerate(row):
+        row_dict[column_names[i]] = value
+      results.append(row_dict)
+
     if format_output == "table":
-      print("\n" + "=" * 60)
-      print("RESULTS:")
-      print("=" * 60)
-
-      column_names = [desc[0] for desc in result.description]
-      header_row = ""
-
-      if column_names:
-        header_row = " | ".join(column_names)
-        print(header_row)
-        print("-" * len(header_row))
-
-      rows = result.fetchall()
-      for row in rows:
-        row_data = []
-        for value in row:
-          if value is None:
-            row_data.append("NULL")
-          else:
-            row_data.append(str(value))
-        print(" | ".join(row_data))
-
-      print("-" * (len(header_row) if column_names else 60))
-      print(f"Total rows: {len(rows)}")
+      print_info_section(f"QUERY: {query}")
+      print_table(results, title="DuckDB Query Results")
 
     elif format_output == "json":
-      import json
-
-      column_names = [desc[0] for desc in result.description]
-      rows = result.fetchall()
-
-      results = []
-      for row in rows:
-        row_dict = {}
-        for i, value in enumerate(row):
-          row_dict[column_names[i]] = value
-        results.append(row_dict)
-
-      print(json.dumps(results, indent=2, default=str))
+      print_json(results)
 
     elif format_output == "csv":
-      import csv
-      import io
-
-      output = io.StringIO()
-      writer = csv.writer(output)
-
-      column_names = [desc[0] for desc in result.description]
-      writer.writerow(column_names)
-
-      rows = result.fetchall()
-      for row in rows:
-        writer.writerow(row)
-
-      print(output.getvalue())
+      print_csv(results)
 
     return True
 
   except Exception as e:
-    print(f"Error executing query: {e}")
+    print_error(f"Error executing query: {e}")
     return False
   finally:
     if conn is not None:
