@@ -198,40 +198,41 @@ pip install robosystems-client
 - **[Getting Started](https://github.com/RoboFinSystems/robosystems/wiki)** - Quick start and overview
 - **[Architecture Overview](https://github.com/RoboFinSystems/robosystems/wiki/Architecture-Overview)** - System design and components
 - **[SEC XBRL Pipeline](https://github.com/RoboFinSystems/robosystems/wiki/SEC-XBRL-Pipeline)** - Working with SEC financial data
+- **[Accounting Demo](https://github.com/RoboFinSystems/robosystems/wiki/Accounting-Demo)** - Complete guide to graph-based accounting workflows
 
 ### Developer Documentation (Codebase)
 
 **Core Services:**
 
-- `/robosystems/operations/README.md` - Business workflow orchestration
-- `/robosystems/processors/README.md` - Data transformation pipeline
-- `/robosystems/schemas/README.md` - Graph schema definitions
-- `/robosystems/models/iam/README.md` - Database models and migrations
-- `/robosystems/models/api/README.md` - API request/response models
-- `/robosystems/config/README.md` - Configuration management
+- **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration
+- **[Processors](/robosystems/processors/README.md)** - Data transformation pipeline
+- **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions
+- **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
+- **[API Models](/robosystems/models/api/README.md)** - API request/response models
+- **[Configuration](/robosystems/config/README.md)** - Configuration management
 
 **Graph Database System:**
 
-- `/robosystems/graph_api/README.md` - Graph API overview
-- `/robosystems/graph_api/backends/README.md` - Backend abstraction layer
-- `/robosystems/graph_api/client/README.md` - Client factory system
-- `/robosystems/graph_api/core/README.md` - Core services layer
+- **[Graph API](/robosystems/graph_api/README.md)** - Graph API overview
+- **[Backends](/robosystems/graph_api/backends/README.md)** - Backend abstraction layer
+- **[Client Factory](/robosystems/graph_api/client/README.md)** - Client factory system
+- **[Core Services](/robosystems/graph_api/core/README.md)** - Core services layer
 
 **Middleware Components:**
 
-- `/robosystems/middleware/auth/README.md` - Authentication and authorization
-- `/robosystems/middleware/credits/README.md` - AI credit system
-- `/robosystems/middleware/graph/README.md` - Graph routing layer
-- `/robosystems/middleware/mcp/README.md` - MCP tools and pooling
-- `/robosystems/middleware/otel/README.md` - OpenTelemetry observability
-- `/robosystems/middleware/robustness/README.md` - Circuit breakers and retry policies
+- **[Authentication](/robosystems/middleware/auth/README.md)** - Authentication and authorization
+- **[Credits](/robosystems/middleware/credits/README.md)** - AI credit system
+- **[Graph Routing](/robosystems/middleware/graph/README.md)** - Graph routing layer
+- **[MCP](/robosystems/middleware/mcp/README.md)** - MCP tools and pooling
+- **[Observability](/robosystems/middleware/otel/README.md)** - OpenTelemetry observability
+- **[Robustness](/robosystems/middleware/robustness/README.md)** - Circuit breakers and retry policies
 
 **Security & Testing:**
 
-- `/SECURITY.md` - Security features
-- `/COMPLIANCE.md` - SOC 2 compliance
-- `/CLAUDE.md` - Development assistant memory
-- `/tests/README.md` - Testing framework
+- **[Security](/SECURITY.md)** - Security features
+- **[Compliance](/COMPLIANCE.md)** - SOC 2 compliance
+- **[Development Guide](/CLAUDE.md)** - Development assistant memory
+- **[Testing](/tests/README.md)** - Testing framework
 
 ## API Reference
 

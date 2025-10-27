@@ -205,7 +205,7 @@ async def test_download_backup_missing_path_returns_404(monkeypatch):
   with pytest.raises(HTTPException) as exc:
     await restore_module.download_backup(graph_id="graph1", cluster_service=cluster)
 
-  assert exc.value.status_code == 500
+  assert exc.value.status_code == 404
   assert "not found" in exc.value.detail.lower()
 
 
