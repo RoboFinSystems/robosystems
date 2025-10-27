@@ -181,6 +181,8 @@ async def download_backup(
       "format": "full_dump",
     }
 
+  except HTTPException:
+    raise
   except Exception as e:
     logger.error(f"Failed to create backup for database {graph_id}: {str(e)}")
     raise HTTPException(
