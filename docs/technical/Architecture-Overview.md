@@ -342,8 +342,8 @@ Data transformation pipeline and business logic:
 - **Lambda**: Management functions (monitoring, rotation, volume management)
 
 **Database & Cache**:
-- **RDS PostgreSQL**: Primary database (db.t4g.micro, auto-scaling storage)
-- **ElastiCache**: Valkey/Redis (cache.t4g.micro)
+- **RDS PostgreSQL**: Primary database (auto-scaling storage)
+- **ElastiCache**: Valkey/Redis cache and message broker
 - **DynamoDB**: Service registries (on-demand pricing)
 
 **Storage**:
