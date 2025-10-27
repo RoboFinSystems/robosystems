@@ -97,6 +97,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  # Demo scripts
+    "robosystems-client>=0.2.2",
+
     # Testing framework
     "pytest>=8.4.0,<9.0",
     "pytest-asyncio>=1.0.0,<2.0",
@@ -138,6 +141,7 @@ exclude = [
     ".ruff_cache",
     ".venv",
     ".vscode",
+    "examples",
     "robosystems/arelle",
 ]
 line-length = 88
@@ -159,7 +163,7 @@ line-ending = "auto"
 
 [tool.basedpyright]
 include = ["robosystems", "tests", "main.py"]
-exclude = ["**/__pycache__", ".venv", "robosystems/arelle"]
+exclude = ["**/__pycache__", ".venv", "examples", "robosystems/arelle"]
 extraPaths = ["."]
 pythonVersion = "3.12"
 venvPath = "."
