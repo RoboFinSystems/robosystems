@@ -341,6 +341,12 @@ sec-status env=_default_env:
 sec-reset-remote confirm="" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
+## Demo Scripts ##
+# Run accounting demo end-to-end (flags: new-user,new-graph,regenerate-data,skip-queries)
+# Examples: just demo-accounting | just demo-accounting skip-queries | just demo-accounting new-user,regenerate-data https://api.example.com
+demo-accounting flags="" base_url="http://localhost:8000":
+    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
 ## Repository Access Management ##
 # Manage user access to shared repositories (SEC, industry data, etc.)
 
