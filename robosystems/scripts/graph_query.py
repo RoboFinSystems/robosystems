@@ -181,6 +181,48 @@ def execute_query(
     return False
 
 
+def interactive_mode(
+  api_url: str, graph_id: str, format_output: str = "table", timeout: int = 300
+):
+  """Interactive query mode."""
+  print_info_section("📊 Interactive Graph Query Mode")
+  print(f"\nGraph ID: {graph_id}")
+  print(f"API URL: {api_url}")
+  print("\nCommands:")
+  print("   health         - Check Graph API health")
+  print("   info           - Show database information")
+  print("   quit/exit      - Exit interactive mode")
+  print("\nOr enter a custom Cypher query:")
+
+  while True:
+    try:
+      query_input = input("\n> ").strip()
+
+      if not query_input:
+        continue
+
+      if query_input.lower() in ["quit", "exit", "q"]:
+        print("\nGoodbye!")
+        break
+
+      if query_input.lower() == "health":
+        health_check(api_url)
+        continue
+
+      if query_input.lower() == "info":
+        get_database_info(api_url, graph_id)
+        continue
+
+      execute_query(api_url, graph_id, query_input, format_output, timeout)
+
+    except KeyboardInterrupt:
+      print("\n\nGoodbye!")
+      break
+    except EOFError:
+      print("\n\nGoodbye!")
+      break
+
+
 def main():
   parser = argparse.ArgumentParser(
     description="Execute queries against graph databases through Graph API",
@@ -249,9 +291,11 @@ Examples:
       args.url, args.graph_id, args.query, args.format, args.timeout
     )
   else:
-    parser.print_help()
-    print("\nError: Must specify either --command or --query")
-    sys.exit(1)
+    if not args.graph_id:
+      print("Error: --graph-id is required for interactive mode")
+      sys.exit(1)
+    interactive_mode(args.url, args.graph_id, args.format, args.timeout)
+    success = True
 
   if not success:
     sys.exit(1)

@@ -290,6 +290,19 @@ kuzu-query graph_id query format="table" env=_default_env:
 duckdb-query db_name query format="table" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{db_name}}.duckdb --query "{{query}}" --format {{format}}
 
+# Interactive query modes - launch REPL for each database type
+graph-query-i graph_id url="http://localhost:8001" env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}}
+
+tables-query-i graph_id url="http://localhost:8001" env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query --url {{url}} --graph-id {{graph_id}}
+
+kuzu-query-i graph_id env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu
+
+duckdb-query-i db_name env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{db_name}}.duckdb
+
 ## SEC Local Pipeline - Testing and Development ##
 # SEC Local supports two ingestion approaches:
 #   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
