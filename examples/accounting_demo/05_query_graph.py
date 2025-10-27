@@ -17,8 +17,14 @@ import sys
 from pathlib import Path
 
 from robosystems_client.extensions import (
-    RoboSystemsExtensions,
-    RoboSystemsExtensionConfig,
+  RoboSystemsExtensions,
+  RoboSystemsExtensionConfig,
+)
+from robosystems.utils.query_output import (
+  print_error,
+  print_info_section,
+  print_table,
+  print_warning,
 )
 
 
@@ -26,27 +32,27 @@ CREDENTIALS_FILE = Path(__file__).parent / "credentials" / "config.json"
 
 
 PRESET_QUERIES = {
-    "counts": {
-        "description": "Count all nodes by type",
-        "query": """
+  "counts": {
+    "description": "Count all nodes by type",
+    "query": """
 MATCH (n)
 RETURN labels(n)[0] AS type, count(n) AS count
 ORDER BY count DESC
         """,
-    },
-    "chart_of_accounts": {
-        "description": "View chart of accounts",
-        "query": """
+  },
+  "chart_of_accounts": {
+    "description": "View chart of accounts",
+    "query": """
 MATCH (e:Element)
 WHERE e.classification IS NOT NULL
 RETURN e.name AS account, e.classification AS type, e.balance AS normal_balance
 ORDER BY e.name
 LIMIT 20
         """,
-    },
-    "trial_balance": {
-        "description": "Calculate trial balance",
-        "query": """
+  },
+  "trial_balance": {
+    "description": "Calculate trial balance",
+    "query": """
 MATCH (li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WITH
     e.name AS account,
@@ -61,10 +67,10 @@ RETURN
     total_debits - total_credits AS net_balance
 ORDER BY account
         """,
-    },
-    "income_statement": {
-        "description": "Income statement (Revenue & Expenses)",
-        "query": """
+  },
+  "income_statement": {
+    "description": "Income statement (Revenue & Expenses)",
+    "query": """
 MATCH (li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification IN ['revenue', 'expense']
 WITH
@@ -74,10 +80,10 @@ WITH
 RETURN category, account, amount
 ORDER BY category, account
         """,
-    },
-    "cash_flow": {
-        "description": "Cash flow transactions (most recent)",
-        "query": """
+  },
+  "cash_flow": {
+    "description": "Cash flow transactions (most recent)",
+    "query": """
 MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.name = 'Cash'
 RETURN
@@ -88,10 +94,10 @@ RETURN
 ORDER BY t.date DESC
 LIMIT 20
         """,
-    },
-    "revenue_by_month": {
-        "description": "Revenue trends by month",
-        "query": """
+  },
+  "revenue_by_month": {
+    "description": "Revenue trends by month",
+    "query": """
 MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification = 'revenue'
 RETURN
@@ -99,10 +105,10 @@ RETURN
     sum(li.credit_amount) AS total_revenue
 ORDER BY month
         """,
-    },
-    "expense_by_month": {
-        "description": "Expense trends by month",
-        "query": """
+  },
+  "expense_by_month": {
+    "description": "Expense trends by month",
+    "query": """
 MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification = 'expense'
 RETURN
@@ -110,10 +116,10 @@ RETURN
     sum(li.debit_amount) AS total_expenses
 ORDER BY month
         """,
-    },
-    "profitability": {
-        "description": "Profitability by month (Revenue - Expenses)",
-        "query": """
+  },
+  "profitability": {
+    "description": "Profitability by month (Revenue - Expenses)",
+    "query": """
 MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification IN ['revenue', 'expense']
 WITH
@@ -132,10 +138,10 @@ RETURN
     revenue - expenses AS profit
 ORDER BY month
         """,
-    },
-    "top_expenses": {
-        "description": "Top expense categories",
-        "query": """
+  },
+  "top_expenses": {
+    "description": "Top expense categories",
+    "query": """
 MATCH (li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 WHERE e.classification = 'expense'
 WITH
@@ -146,36 +152,36 @@ RETURN expense_account, total_amount, transaction_count
 ORDER BY total_amount DESC
 LIMIT 10
         """,
-    },
-    "recent_transactions": {
-        "description": "Most recent transactions",
-        "query": """
+  },
+  "recent_transactions": {
+    "description": "Most recent transactions",
+    "query": """
 MATCH (t:Transaction)
 RETURN t.date, t.description, t.type
 ORDER BY t.date DESC
 LIMIT 15
         """,
-    },
-    "monthly_reports": {
-        "description": "List all monthly financial reports",
-        "query": """
+  },
+  "monthly_reports": {
+    "description": "List all monthly financial reports",
+    "query": """
 MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)
 RETURN r.name AS report_name, r.form AS form, r.report_date AS date, r.accession_number AS accession
 ORDER BY r.report_date
         """,
-    },
-    "report_summary": {
-        "description": "Summary of facts per monthly report",
-        "query": """
+  },
+  "report_summary": {
+    "description": "Summary of facts per monthly report",
+    "query": """
 MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
 WITH r.name AS report, p.start_date AS period_start, p.end_date AS period_end, count(f) AS total_facts
 RETURN report, period_start, period_end, total_facts
 ORDER BY period_start
         """,
-    },
-    "account_facts": {
-        "description": "Aggregated facts by account (from reports)",
-        "query": """
+  },
+  "account_facts": {
+    "description": "Aggregated facts by account (from reports)",
+    "query": """
 MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
 WHERE r.name CONTAINS 'September'
 WITH e.name AS account, count(f) AS facts, sum(f.numeric_value) AS total_amount
@@ -183,10 +189,10 @@ RETURN account, facts, total_amount
 ORDER BY total_amount DESC
 LIMIT 10
         """,
-    },
-    "report_lineage": {
-        "description": "Data lineage: Transactions to Reports",
-        "query": """
+  },
+  "report_lineage": {
+    "description": "Data lineage: Transactions to Reports",
+    "query": """
 MATCH (t:Transaction)-[:TRANSACTION_HAS_LINE_ITEM]->(li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
 MATCH (r:Report)-[:REPORT_HAS_FACT]->(f:Fact)-[:FACT_HAS_ELEMENT]->(e)
 WHERE substring(t.date, 1, 7) = '2025-09'
@@ -195,10 +201,10 @@ RETURN account, transactions, line_items, facts
 ORDER BY transactions DESC
 LIMIT 10
         """,
-    },
-    "full_reporting_structure": {
-        "description": "Complete reporting hierarchy",
-        "query": """
+  },
+  "full_reporting_structure": {
+    "description": "Complete reporting hierarchy",
+    "query": """
 MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report)-[:REPORT_HAS_FACT]->(f:Fact)
 MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
 MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
@@ -207,162 +213,158 @@ RETURN company, report, period_start, unit, total_facts
 ORDER BY period_start
 LIMIT 10
         """,
-    },
+  },
 }
 
 
 def load_config():
-    """Load credentials and graph_id."""
-    if not CREDENTIALS_FILE.exists():
-        print(f"\n❌ No credentials found at {CREDENTIALS_FILE}")
-        print("   Run: uv run 01_setup_credentials.py first")
-        sys.exit(1)
+  """Load credentials and graph_id."""
+  if not CREDENTIALS_FILE.exists():
+    print_error(f"No credentials found at {CREDENTIALS_FILE}")
+    print("   Run: uv run 01_setup_credentials.py first")
+    sys.exit(1)
 
-    with open(CREDENTIALS_FILE) as f:
-        return json.load(f)
+  with open(CREDENTIALS_FILE) as f:
+    return json.load(f)
 
 
 def run_query(
-    extensions: RoboSystemsExtensions, graph_id: str, query: str, description: str = None
+  extensions: RoboSystemsExtensions, graph_id: str, query: str, description: str = None
 ):
-    """Execute a query and display results."""
-    if description:
-        print(f"\n{'=' * 70}")
-        print(f"📊 {description}")
-        print("=" * 70)
+  """Execute a query and display results."""
+  if description:
+    print_info_section(f"📊 {description}")
 
-    print("\nQuery:")
-    print(query.strip())
+  print("\nQuery:")
+  print(query.strip())
 
-    try:
-        result = extensions.query.query(graph_id, query)
+  try:
+    result = extensions.query.query(graph_id, query)
 
-        if hasattr(result, "data") and result.data:
-            print(f"\n✅ {len(result.data)} records:")
-            for i, record in enumerate(result.data, 1):
-                print(f"   {i}. {record}")
-        else:
-            print("\n⚠️  No results")
+    if hasattr(result, "data") and result.data:
+      print_table(result.data, title=description or "Query Results")
+    else:
+      print_warning("No results")
 
-    except Exception as e:
-        print(f"\n❌ Query failed: {e}")
+  except Exception as e:
+    print_error(f"Query failed: {e}")
 
 
 def interactive_mode(extensions: RoboSystemsExtensions, graph_id: str):
-    """Interactive query mode."""
-    print("\n" + "=" * 70)
-    print("📊 Interactive Query Mode")
-    print("=" * 70)
-    print("\nAvailable preset queries:")
-    for key, preset in PRESET_QUERIES.items():
-        print(f"   {key:20s} - {preset['description']}")
+  """Interactive query mode."""
+  print_info_section("📊 Interactive Query Mode")
+  print("\nAvailable preset queries:")
+  for key, preset in PRESET_QUERIES.items():
+    print(f"   {key:20s} - {preset['description']}")
 
-    print("\nCommands:")
-    print("   <preset_name>   - Run a preset query")
-    print("   all            - Run all preset queries")
-    print("   quit/exit      - Exit interactive mode")
-    print("\nOr enter a custom Cypher query:")
+  print("\nCommands:")
+  print("   <preset_name>   - Run a preset query")
+  print("   all            - Run all preset queries")
+  print("   quit/exit      - Exit interactive mode")
+  print("\nOr enter a custom Cypher query:")
 
-    while True:
-        try:
-            query_input = input("\n> ").strip()
+  while True:
+    try:
+      query_input = input("\n> ").strip()
 
-            if not query_input:
-                continue
+      if not query_input:
+        continue
 
-            if query_input.lower() in ["quit", "exit", "q"]:
-                print("\nGoodbye!")
-                break
+      if query_input.lower() in ["quit", "exit", "q"]:
+        print("\nGoodbye!")
+        break
 
-            if query_input.lower() == "all":
-                for key, preset in PRESET_QUERIES.items():
-                    run_query(extensions, graph_id, preset["query"], preset["description"])
-                continue
+      if query_input.lower() == "all":
+        for key, preset in PRESET_QUERIES.items():
+          run_query(extensions, graph_id, preset["query"], preset["description"])
+        continue
 
-            if query_input in PRESET_QUERIES:
-                preset = PRESET_QUERIES[query_input]
-                run_query(extensions, graph_id, preset["query"], preset["description"])
-            else:
-                run_query(extensions, graph_id, query_input)
+      if query_input in PRESET_QUERIES:
+        preset = PRESET_QUERIES[query_input]
+        run_query(extensions, graph_id, preset["query"], preset["description"])
+      else:
+        run_query(extensions, graph_id, query_input)
 
-        except KeyboardInterrupt:
-            print("\n\nGoodbye!")
-            break
-        except EOFError:
-            print("\n\nGoodbye!")
-            break
+    except KeyboardInterrupt:
+      print("\n\nGoodbye!")
+      break
+    except EOFError:
+      print("\n\nGoodbye!")
+      break
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Query accounting graph")
-    parser.add_argument(
-        "--base-url",
-        default="http://localhost:8000",
-        help="API base URL (default: http://localhost:8000)",
+  parser = argparse.ArgumentParser(description="Query accounting graph")
+  parser.add_argument(
+    "--base-url",
+    default="http://localhost:8000",
+    help="API base URL (default: http://localhost:8000)",
+  )
+  parser.add_argument(
+    "--query",
+    help="Run a custom Cypher query",
+  )
+  parser.add_argument(
+    "--preset",
+    choices=list(PRESET_QUERIES.keys()),
+    help="Run a preset query",
+  )
+  parser.add_argument(
+    "--all",
+    action="store_true",
+    help="Run all preset queries",
+  )
+
+  args = parser.parse_args()
+
+  try:
+    config_data = load_config()
+    api_key = config_data.get("api_key")
+    graph_id = config_data.get("graph_id")
+
+    if not api_key or not graph_id:
+      print_error("Missing API key or graph_id in credentials")
+      print(
+        "   Run: uv run 01_setup_credentials.py and uv run 02_create_graph.py first"
+      )
+      sys.exit(1)
+
+    print_info_section("📊 Accounting Demo - Query Graph")
+    print(f"Graph ID: {graph_id}")
+
+    config = RoboSystemsExtensionConfig(
+      base_url=args.base_url,
+      headers={"X-API-Key": api_key},
     )
-    parser.add_argument(
-        "--query",
-        help="Run a custom Cypher query",
-    )
-    parser.add_argument(
-        "--preset",
-        choices=list(PRESET_QUERIES.keys()),
-        help="Run a preset query",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Run all preset queries",
-    )
+    extensions = RoboSystemsExtensions(config)
 
-    args = parser.parse_args()
+    if args.query:
+      run_query(extensions, graph_id, args.query)
+    elif args.preset:
+      preset = PRESET_QUERIES[args.preset]
+      run_query(extensions, graph_id, preset["query"], preset["description"])
+    elif args.all:
+      for key, preset in PRESET_QUERIES.items():
+        run_query(extensions, graph_id, preset["query"], preset["description"])
 
-    try:
-        config_data = load_config()
-        api_key = config_data.get("api_key")
-        graph_id = config_data.get("graph_id")
+      print("\n" + "=" * 70)
+      print("💡 You can also query using the just command:")
+      print("=" * 70)
+      print(f'\njust graph-query {graph_id} "MATCH (n) RETURN count(n)"')
+      print(
+        f'just graph-query {graph_id} "MATCH (e:Element) RETURN e.name, e.classification ORDER BY e.name"'
+      )
+      print("\n" + "=" * 70 + "\n")
+    else:
+      interactive_mode(extensions, graph_id)
 
-        if not api_key or not graph_id:
-            print("\n❌ Missing API key or graph_id in credentials")
-            print("   Run: uv run 01_setup_credentials.py and uv run 02_create_graph.py first")
-            sys.exit(1)
+  except Exception as e:
+    print_error(f"Error: {e}")
+    import traceback
 
-        print("\n" + "=" * 70)
-        print("📊 Accounting Demo - Query Graph")
-        print("=" * 70)
-        print(f"Graph ID: {graph_id}")
-
-        config = RoboSystemsExtensionConfig(
-            base_url=args.base_url,
-            headers={"X-API-Key": api_key},
-        )
-        extensions = RoboSystemsExtensions(config)
-
-        if args.query:
-            run_query(extensions, graph_id, args.query)
-        elif args.preset:
-            preset = PRESET_QUERIES[args.preset]
-            run_query(extensions, graph_id, preset["query"], preset["description"])
-        elif args.all:
-            for key, preset in PRESET_QUERIES.items():
-                run_query(extensions, graph_id, preset["query"], preset["description"])
-
-            print("\n" + "=" * 70)
-            print("💡 You can also query using the just command:")
-            print("=" * 70)
-            print(f'\njust graph-query {graph_id} "MATCH (n) RETURN count(n)"')
-            print(f'just graph-query {graph_id} "MATCH (e:Element) RETURN e.name, e.classification ORDER BY e.name"')
-            print("\n" + "=" * 70 + "\n")
-        else:
-            interactive_mode(extensions, graph_id)
-
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        import traceback
-
-        traceback.print_exc()
-        sys.exit(1)
+    traceback.print_exc()
+    sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+  main()
