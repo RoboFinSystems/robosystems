@@ -111,6 +111,26 @@ just graph-query sec "MATCH (e:Entity)-[:ENTITY_HAS_REPORT]->(r:Report) WHERE e.
 just graph-query sec "MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element) WHERE el.name = 'NetIncomeLoss' RETURN el.name, f.numeric_value, f.value LIMIT 10"
 ```
 
+**Interactive Query Mode:**
+
+For exploratory analysis, you can launch an interactive REPL for running multiple queries:
+
+```bash
+# Launch interactive mode for graph queries
+just graph-query-i sec
+
+# Or for direct Kuzu database access
+just kuzu-query-i sec
+```
+
+In interactive mode, you can:
+- Enter Cypher queries directly without command-line escaping
+- Run multiple queries in sequence
+- Type `health` or `info` for database status (graph-query-i only)
+- Type `quit` or `exit` to leave
+
+All results are displayed in beautiful Rich-formatted tables.
+
 **Common Cypher Patterns:**
 
 ```cypher
@@ -153,6 +173,26 @@ just tables-query sec "SELECT DISTINCT instant_date FROM Period ORDER BY instant
 # Find revenue facts with full details
 just tables-query sec "SELECT f.value, f.numeric_value, p.instant_date, u.measure FROM Fact f JOIN FACT_HAS_ELEMENT fhe ON f.identifier = fhe.src JOIN Element el ON fhe.dst = el.identifier JOIN FACT_HAS_PERIOD fhp ON f.identifier = fhp.src JOIN Period p ON fhp.dst = p.identifier JOIN FACT_HAS_UNIT fhu ON f.identifier = fhu.src JOIN Unit u ON fhu.dst = u.identifier WHERE el.name = 'Revenues' LIMIT 10"
 ```
+
+**Interactive Query Mode:**
+
+For exploratory SQL queries on staging tables, you can launch an interactive REPL:
+
+```bash
+# Launch interactive mode for staging tables (via Graph API)
+just tables-query-i sec
+
+# Or for direct DuckDB database access
+just duckdb-query-i sec
+```
+
+In interactive mode, you can:
+- Enter SQL queries directly without command-line escaping
+- Run multiple queries in sequence
+- Explore staging tables interactively
+- Type `quit` or `exit` to leave
+
+All results are displayed in beautiful Rich-formatted tables.
 
 **Why Query Staging Tables?**
 - **Pre-ingestion validation**: Check data quality before it enters the graph

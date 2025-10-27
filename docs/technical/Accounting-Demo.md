@@ -176,11 +176,18 @@ uv run examples/accounting_demo/05_query_graph.py --all
 # Run specific preset
 uv run examples/accounting_demo/05_query_graph.py --preset trial_balance
 
-# Interactive mode
+# Interactive query mode - opens interactive prompt for custom queries
 uv run examples/accounting_demo/05_query_graph.py
 ```
 
-**After the demo completes**, see the [Available Financial Reports](#available-financial-reports) section below for more query examples.
+**Interactive Mode Highlights:**
+- Enter custom Cypher queries on the fly
+- Run preset queries by name (e.g., `trial_balance`, `profitability`)
+- Type `all` to run all presets
+- Results display in beautiful Rich tables
+- Perfect for exploring your accounting data interactively
+
+**After the demo completes**, see the [Available Financial Reports](#available-financial-reports) and [Interactive Query Mode](#interactive-query-mode) sections below.
 
 ## Available Financial Reports
 
@@ -348,6 +355,52 @@ The demo includes 15 preset queries:
 13. **account_facts** - Aggregated facts by account
 14. **report_lineage** - Data lineage from transactions to reports
 15. **full_reporting_structure** - Complete reporting hierarchy
+
+## Interactive Query Mode
+
+After running the demo, you can explore your accounting data interactively with a built-in query prompt:
+
+```bash
+uv run examples/accounting_demo/05_query_graph.py
+```
+
+This launches an interactive session where you can:
+
+**Run Preset Queries by Name:**
+```
+> trial_balance
+> profitability
+> cash_flow
+```
+
+**Execute Custom Cypher Queries:**
+```
+> MATCH (t:Transaction) WHERE t.date >= '2025-09-01' RETURN t.date, t.description, t.type ORDER BY t.date DESC LIMIT 10
+```
+
+**Run All Presets at Once:**
+```
+> all
+```
+
+**Exit the Session:**
+```
+> quit
+```
+
+**Features:**
+- **Beautiful Tables**: All results display in Rich-formatted tables
+- **Instant Feedback**: See results immediately after each query
+- **Explore Freely**: Test different queries without rerunning the script
+- **Learning Tool**: Great for learning Cypher query patterns
+- **No API Key Required**: Connects directly to the graph database
+
+This interactive mode is perfect for:
+- **Exploring** your accounting data without writing Python scripts
+- **Testing** new query patterns before using them in production
+- **Learning** Cypher by experimenting with different queries
+- **Debugging** data issues or validating ingestion
+- **Presenting** financial data to stakeholders interactively
 
 ## Understanding the Data Model
 
