@@ -26,9 +26,15 @@ from robosystems_client.extensions import (
   InitialEntityData,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+  sys.path.insert(0, str(PROJECT_ROOT))
 
-CREDENTIALS_DIR = Path(__file__).parent / "credentials"
+from examples.credentials.utils import get_graph_id, save_graph_id
+
+CREDENTIALS_DIR = Path(__file__).resolve().parents[1] / "credentials"
 DEFAULT_CREDENTIALS_FILE = CREDENTIALS_DIR / "config.json"
+DEMO_NAME = "accounting_demo"
 
 
 def load_credentials(credentials_path: Path):
@@ -42,12 +48,10 @@ def load_credentials(credentials_path: Path):
     return json.load(f)
 
 
-def save_graph_id(credentials: dict, graph_id: str, credentials_path: Path):
+def save_graph_data(graph_id: str, credentials_path: Path):
   """Save graph_id to credentials file."""
-  credentials["graph_id"] = graph_id
-  credentials["graph_created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-  with open(credentials_path, "w") as f:
-    json.dump(credentials, f, indent=2)
+  graph_created_at = time.strftime("%Y-%m-%d %H:%M:%S")
+  save_graph_id(credentials_path, DEMO_NAME, graph_id, graph_created_at)
   print(f"\n💾 Graph ID saved to: {credentials_path}")
 
 
@@ -62,11 +66,14 @@ def create_accounting_graph(
 
   credentials = load_credentials(credentials_path)
 
-  if reuse and credentials.get("graph_id"):
+  existing_graph_id = get_graph_id(credentials_path, DEMO_NAME)
+  if reuse and existing_graph_id:
+    credentials_data = load_credentials(credentials_path)
+    demo_graph_data = credentials_data.get("graphs", {}).get(DEMO_NAME, {})
     print("\n✅ Reusing existing graph")
-    print(f"   Graph ID: {credentials['graph_id']}")
-    print(f"   Created: {credentials.get('graph_created_at', 'unknown')}")
-    return credentials["graph_id"]
+    print(f"   Graph ID: {existing_graph_id}")
+    print(f"   Created: {demo_graph_data.get('graph_created_at', 'unknown')}")
+    return existing_graph_id
 
   timestamp = int(time.time())
   graph_name = graph_name or f"accounting_demo_{timestamp}"
@@ -100,6 +107,7 @@ def create_accounting_graph(
     graph_id = extensions.graphs.create_graph_and_wait(
       metadata=metadata,
       initial_entity=initial_entity,
+      create_entity=False,
       timeout=60,
       on_progress=lambda msg: print(f"   {msg}"),
     )
@@ -107,7 +115,7 @@ def create_accounting_graph(
     print(f"\n❌ Graph creation failed: {e}")
     sys.exit(1)
 
-  save_graph_id(credentials, graph_id, credentials_path)
+  save_graph_data(graph_id, credentials_path)
 
   print("\n" + "=" * 70)
   print("✅ Graph Created Successfully!")

@@ -37,11 +37,17 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+  sys.path.insert(0, str(PROJECT_ROOT))
+
+from examples.credentials.utils import get_graph_id
 
 DATA_DIR = Path(__file__).parent / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
-DEFAULT_CREDENTIALS_FILE = Path(__file__).parent / "credentials" / "config.json"
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
+DEMO_NAME = "custom_graph_demo"
 
 # Reasonable defaults for the demo
 DEFAULT_PERSON_COUNT = 60
@@ -101,8 +107,7 @@ class CustomGraphDataGenerator:
     self.relationships_dir.mkdir(parents=True, exist_ok=True)
     self.credentials_path = credentials_path
 
-    credentials = self._load_credentials()
-    self.graph_id = credentials.get("graph_id")
+    self.graph_id = get_graph_id(self.credentials_path, DEMO_NAME)
     if not self.graph_id:
       raise RuntimeError(
         "Graph ID not found. Run 02_create_graph.py before generating data."

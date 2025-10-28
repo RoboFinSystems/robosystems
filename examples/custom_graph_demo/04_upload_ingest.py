@@ -27,12 +27,18 @@ from robosystems_client.extensions import (
   IngestOptions,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+  sys.path.insert(0, str(PROJECT_ROOT))
+
+from examples.credentials.utils import get_graph_id
 
 DEMO_DIR = Path(__file__).parent
-DEFAULT_CREDENTIALS_FILE = DEMO_DIR / "credentials" / "config.json"
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
 DATA_DIR = DEMO_DIR / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
+DEMO_NAME = "custom_graph_demo"
 
 EXPECTED_NODE_TABLES = ["Company", "Project", "Person"]
 EXPECTED_REL_TABLES = [
@@ -174,7 +180,7 @@ def main() -> None:
   try:
     credentials = load_credentials(credentials_path)
     api_key = credentials.get("api_key")
-    graph_id = credentials.get("graph_id")
+    graph_id = get_graph_id(credentials_path, DEMO_NAME)
 
     if not api_key or not graph_id:
       print("\n❌ Missing API key or graph_id in credentials")
