@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphTable, UserGraph
+from robosystems.models.iam import User, GraphTable, UserGraph, GraphFile
 from robosystems.models.api.table import (
   BulkIngestRequest,
   BulkIngestResponse,
@@ -13,7 +13,10 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.middleware.graph.types import GraphTypeRegistry
+from robosystems.middleware.graph.types import (
+  GraphTypeRegistry,
+  SHARED_REPO_WRITE_ERROR_MESSAGE,
+)
 from robosystems.config import env
 import time
 
@@ -23,6 +26,7 @@ router = APIRouter()
 @router.post(
   "/tables/ingest",
   response_model=BulkIngestResponse,
+  operation_id="ingestTables",
   summary="Ingest Tables to Graph",
   description="Load all files from S3 into DuckDB staging tables and ingest into Kuzu graph database. "
   "Use rebuild=true to regenerate the entire graph from scratch (safe operation - S3 is source of truth).",
@@ -43,8 +47,7 @@ async def ingest_tables(
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories are read-only. File uploads and data ingestion are not allowed. "
-      "Shared repositories provide reference data that cannot be modified.",
+      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
   repo = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
@@ -82,15 +85,20 @@ async def ingest_tables(
   for table in tables:
     table_start = time.time()
 
-    if not table.file_count or table.file_count == 0:
-      logger.info(f"Skipping table {table.table_name} - no files")
+    all_table_files = GraphFile.get_all_for_table(table.id, db)
+    uploaded_files = [f for f in all_table_files if f.upload_status == "uploaded"]
+
+    if not uploaded_files:
+      logger.info(
+        f"Skipping table {table.table_name} - no files with 'uploaded' status (found {len(all_table_files)} files total)"
+      )
       results.append(
         TableIngestResult(
           table_name=table.table_name,
           status="skipped",
           rows_ingested=0,
           execution_time_ms=0,
-          error="No files to ingest",
+          error="No files with 'uploaded' status",
         )
       )
       skipped_tables += 1

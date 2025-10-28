@@ -16,6 +16,7 @@ router = APIRouter()
 @router.get(
   "/tables",
   response_model=TableListResponse,
+  operation_id="listTables",
   summary="List Staging Tables",
   description="List all DuckDB staging tables for a graph",
   responses={

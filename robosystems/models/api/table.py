@@ -78,9 +78,11 @@ class FileUploadResponse(BaseModel):
   s3_key: str = Field(..., description="S3 object key")
 
 
-class FileUpdateRequest(BaseModel):
-  file_size_bytes: int = Field(..., description="Actual uploaded file size in bytes")
-  row_count: Optional[int] = Field(None, description="Number of rows in the file")
+class FileStatusUpdate(BaseModel):
+  status: str = Field(
+    ...,
+    description="File status: 'uploaded' (ready for ingest), 'disabled' (exclude from ingest), 'archived' (soft deleted)",
+  )
 
   class Config:
     extra = "forbid"

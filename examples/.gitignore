@@ -1,5 +1,5 @@
-# Credentials
-credentials/
+# Credentials (ignore config, allow utils)
+credentials/config.json
 
 # Data files
 data/

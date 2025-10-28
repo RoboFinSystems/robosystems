@@ -8,7 +8,7 @@ from robosystems.models.iam import User, GraphTable, GraphFile
 from robosystems.models.api.table import (
   FileUploadRequest,
   FileUploadResponse,
-  FileUpdateRequest,
+  FileStatusUpdate,
 )
 from robosystems.models.api.common import ErrorResponse
 from robosystems.middleware.auth.dependencies import get_current_user
@@ -17,10 +17,19 @@ from robosystems.middleware.graph.dependencies import get_universal_repository_w
 from robosystems.database import get_db_session
 from robosystems.adapters.s3 import S3Client
 from robosystems.config import env
-from robosystems.config.constants import MAX_FILE_SIZE_MB
+from robosystems.config.constants import (
+  MAX_FILE_SIZE_MB,
+  PRESIGNED_URL_EXPIRY_SECONDS,
+  FALLBACK_BYTES_PER_ROW_PARQUET,
+  FALLBACK_BYTES_PER_ROW_CSV,
+  FALLBACK_BYTES_PER_ROW_JSON,
+)
 from robosystems.config.tier_config import get_tier_storage_limit
 from robosystems.logger import logger
-from robosystems.middleware.graph.types import GraphTypeRegistry
+from robosystems.middleware.graph.types import (
+  GraphTypeRegistry,
+  SHARED_REPO_WRITE_ERROR_MESSAGE,
+)
 
 router = APIRouter()
 
@@ -28,6 +37,7 @@ router = APIRouter()
 @router.post(
   "/tables/{table_name}/files",
   response_model=FileUploadResponse,
+  operation_id="getUploadUrl",
   summary="Create File Upload",
   description="Create a new file upload for a table and get a presigned S3 URL",
   responses={
@@ -48,8 +58,7 @@ async def get_upload_url(
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories are read-only. File uploads and data ingestion are not allowed. "
-      "Shared repositories provide reference data that cannot be modified.",
+      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
   repository = await get_universal_repository_with_auth(
@@ -64,13 +73,16 @@ async def get_upload_url(
 
   table = GraphTable.get_by_name(graph_id, table_name, db)
   if not table:
+    from robosystems.operations.graph.table_service import infer_table_type
+
+    inferred_type = infer_table_type(table_name)
     logger.info(
-      f"Auto-creating table {table_name} for graph {graph_id} on first file upload"
+      f"Auto-creating table {table_name} ({inferred_type}) for graph {graph_id} on first file upload"
     )
     table = GraphTable.create(
       graph_id=graph_id,
       table_name=table_name,
-      table_type="external",
+      table_type=inferred_type,
       schema_json={"columns": []},
       session=db,
     )
@@ -130,15 +142,22 @@ async def get_upload_url(
         "Key": s3_key,
         "ContentType": request.content_type,
       },
-      ExpiresIn=3600,
+      ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
     )
+
+    file_format_map = {
+      "application/x-parquet": "parquet",
+      "text/csv": "csv",
+      "application/json": "json",
+    }
+    file_format = file_format_map.get(request.content_type, "unknown")
 
     graph_file = GraphFile.create(
       graph_id=graph_id,
       table_id=table.id,
       file_name=request.file_name,
       s3_key=s3_key,
-      file_format=request.content_type.split("/")[-1],
+      file_format=file_format,
       file_size_bytes=0,
       upload_method="presigned_url",
       upload_status="pending",
@@ -150,7 +169,7 @@ async def get_upload_url(
 
     return FileUploadResponse(
       upload_url=upload_url,
-      expires_in=3600,
+      expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
       file_id=graph_file.id,
       s3_key=s3_key,
     )
@@ -166,19 +185,21 @@ async def get_upload_url(
 @router.patch(
   "/tables/files/{file_id}",
   response_model=dict,
-  summary="Update File",
-  description="Update file metadata after upload (size, row count). Marks file as completed.",
+  operation_id="updateFileStatus",
+  summary="Update File Status",
+  description="Update file status. When status is set to 'uploaded', backend validates file exists in S3, calculates actual file size and row count. Only files with 'uploaded' status are eligible for ingestion.",
   responses={
-    200: {"description": "File updated successfully"},
-    400: {"description": "Invalid file size", "model": ErrorResponse},
+    200: {"description": "File status updated successfully"},
+    400: {"description": "Invalid status or file too large", "model": ErrorResponse},
     403: {"description": "Access denied to graph", "model": ErrorResponse},
-    404: {"description": "Graph or file not found", "model": ErrorResponse},
+    404: {"description": "Graph, file, or S3 object not found", "model": ErrorResponse},
+    413: {"description": "Storage limit exceeded", "model": ErrorResponse},
   },
 )
-async def update_file(
+async def update_file_status(
   graph_id: str = Path(..., description="Graph database identifier"),
   file_id: str = Path(..., description="File identifier"),
-  request: FileUpdateRequest = Body(..., description="File update details"),
+  request: FileStatusUpdate = Body(..., description="Status update"),
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
@@ -186,8 +207,7 @@ async def update_file(
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories are read-only. File uploads and data ingestion are not allowed. "
-      "Shared repositories provide reference data that cannot be modified.",
+      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
   repository = await get_universal_repository_with_auth(
@@ -207,55 +227,139 @@ async def update_file(
       detail=f"File {file_id} not found",
     )
 
-  logger.info(f"Updating file metadata for {file_id} in graph {graph_id}")
-
-  # Validate file size
-  if request.file_size_bytes <= 0:
+  VALID_STATUSES = {"uploaded", "disabled", "archived"}
+  if request.status not in VALID_STATUSES:
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
-      detail="File size must be greater than 0",
+      detail=f"Invalid status '{request.status}'. Must be one of: {', '.join(VALID_STATUSES)}",
     )
 
-  # Validate max file size
-  max_file_size_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
-  if request.file_size_bytes > max_file_size_bytes:
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail=f"File size {request.file_size_bytes / (1024 * 1024):.2f} MB exceeds maximum of {MAX_FILE_SIZE_MB} MB",
-    )
+  logger.info(
+    f"Updating file {file_id} status to '{request.status}' in graph {graph_id}"
+  )
 
-  # Validate storage limit
-  from robosystems.models.iam import Graph
+  if request.status == "disabled":
+    graph_file.upload_status = "disabled"
+    db.commit()
+    db.refresh(graph_file)
+    logger.info(f"File {file_id} disabled (excluded from ingestion)")
+    return {
+      "status": "success",
+      "file_id": file_id,
+      "upload_status": "disabled",
+      "message": "File disabled and excluded from ingestion",
+    }
 
-  graph = Graph.get_by_id(graph_id, db)
-  if graph:
-    storage_limit_gb = get_tier_storage_limit(graph.graph_tier)
-    storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
-
-    all_tables = GraphTable.get_all_for_graph(graph_id, db)
-    current_storage_bytes = sum(t.total_size_bytes or 0 for t in all_tables)
-
-    if current_storage_bytes + request.file_size_bytes > storage_limit_bytes:
-      raise HTTPException(
-        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-        detail=f"Storage limit exceeded. Current: {current_storage_bytes / (1024 * 1024 * 1024):.2f} GB, "
-        f"Limit: {storage_limit_gb} GB, "
-        f"Attempted upload: {request.file_size_bytes / (1024 * 1024 * 1024):.2f} GB",
-      )
-
-  # Validate row count if provided
-  if request.row_count is not None and request.row_count < 0:
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Row count cannot be negative",
-    )
+  if request.status == "archived":
+    graph_file.upload_status = "archived"
+    db.commit()
+    db.refresh(graph_file)
+    logger.info(f"File {file_id} archived (soft deleted)")
+    return {
+      "status": "success",
+      "file_id": file_id,
+      "upload_status": "archived",
+      "message": "File archived",
+    }
 
   try:
-    graph_file.file_size_bytes = request.file_size_bytes
-    if request.row_count is not None:
-      graph_file.row_count = request.row_count
+    s3_client = S3Client()
+    bucket = env.AWS_S3_BUCKET
 
-    graph_file.mark_uploaded(db)
+    try:
+      head_response = s3_client.s3_client.head_object(
+        Bucket=bucket, Key=graph_file.s3_key
+      )
+      actual_file_size = head_response["ContentLength"]
+    except Exception as e:
+      logger.error(f"Failed to get file size from S3: {e}")
+      raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"File not found in S3: {graph_file.s3_key}",
+      )
+
+    if actual_file_size <= 0:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="File is empty",
+      )
+
+    max_file_size_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+    if actual_file_size > max_file_size_bytes:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"File size {actual_file_size / (1024 * 1024):.2f} MB exceeds maximum of {MAX_FILE_SIZE_MB} MB",
+      )
+
+    from robosystems.models.iam import Graph
+
+    graph = Graph.get_by_id(graph_id, db)
+    if graph:
+      storage_limit_gb = get_tier_storage_limit(graph.graph_tier)
+      storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
+
+      all_tables = GraphTable.get_all_for_graph(graph_id, db)
+      current_storage_bytes = sum(t.total_size_bytes or 0 for t in all_tables)
+
+      if current_storage_bytes + actual_file_size > storage_limit_bytes:
+        raise HTTPException(
+          status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+          detail=f"Storage limit exceeded. Current: {current_storage_bytes / (1024 * 1024 * 1024):.2f} GB, "
+          f"Limit: {storage_limit_gb} GB, "
+          f"Attempted upload: {actual_file_size / (1024 * 1024 * 1024):.2f} GB",
+        )
+
+    actual_row_count = None
+    try:
+      file_obj = s3_client.s3_client.get_object(Bucket=bucket, Key=graph_file.s3_key)
+      file_content = file_obj["Body"].read()
+
+      if graph_file.file_format == "parquet":
+        import pyarrow.parquet as pq
+        from io import BytesIO
+
+        parquet_file = pq.read_table(BytesIO(file_content))
+        actual_row_count = parquet_file.num_rows
+      elif graph_file.file_format == "csv":
+        import csv
+        from io import StringIO
+
+        csv_content = file_content.decode("utf-8")
+        reader = csv.reader(StringIO(csv_content))
+        actual_row_count = sum(1 for _ in reader) - 1
+      elif graph_file.file_format == "json":
+        import json
+
+        json_data = json.loads(file_content)
+        if isinstance(json_data, list):
+          actual_row_count = len(json_data)
+        else:
+          actual_row_count = 1
+
+      logger.info(
+        f"Calculated row count for {graph_file.file_name}: {actual_row_count}"
+      )
+    except Exception as e:
+      logger.warning(
+        f"Could not calculate row count for {graph_file.file_name}: {e}. Row count will be estimated."
+      )
+      if graph_file.file_format == "parquet":
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_PARQUET
+      elif graph_file.file_format == "csv":
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_CSV
+      elif graph_file.file_format == "json":
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_JSON
+      else:
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_CSV
+      logger.info(
+        f"Estimated row count for {graph_file.file_name} ({graph_file.file_format}): {actual_row_count}"
+      )
+
+    graph_file.file_size_bytes = actual_file_size
+    graph_file.row_count = actual_row_count
+    graph_file.upload_status = "uploaded"
+    db.commit()
+    db.refresh(graph_file)
 
     table = (
       db.query(GraphTable)
@@ -265,15 +369,15 @@ async def update_file(
     )
     if table:
       all_files = GraphFile.get_all_for_table(table.id, db)
-      completed_files = [f for f in all_files if f.upload_status == "completed"]
+      uploaded_files = [f for f in all_files if f.upload_status == "uploaded"]
 
-      new_file_count = len(completed_files)
+      new_file_count = len(uploaded_files)
 
       table.update_stats(
         session=db,
         file_count=new_file_count,
-        total_size_bytes=sum(f.file_size_bytes for f in completed_files),
-        row_count=sum(f.row_count for f in completed_files if f.row_count is not None),
+        total_size_bytes=sum(f.file_size_bytes for f in uploaded_files),
+        row_count=sum(f.row_count for f in uploaded_files if f.row_count is not None),
       )
 
       if new_file_count > 0:
@@ -305,13 +409,16 @@ async def update_file(
           )
 
     logger.info(
-      f"Updated file {file_id}: {graph_file.file_size_bytes} bytes, status=completed"
+      f"File {file_id} marked as uploaded: {graph_file.file_size_bytes or 0:,} bytes, {graph_file.row_count or 0:,} rows"
     )
 
     return {
       "status": "success",
       "file_id": file_id,
-      "upload_status": "completed",
+      "upload_status": "uploaded",
+      "file_size_bytes": graph_file.file_size_bytes,
+      "row_count": graph_file.row_count,
+      "message": "File validated and ready for ingestion",
     }
 
   except Exception as e:

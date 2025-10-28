@@ -14,6 +14,17 @@ import re
 from ...models.iam.graph_credits import GraphTier
 
 
+SHARED_REPO_WRITE_ERROR_MESSAGE = (
+  "Shared repositories are read-only. File uploads and data ingestion are not allowed. "
+  "Shared repositories provide reference data that cannot be modified."
+)
+
+SHARED_REPO_DELETE_ERROR_MESSAGE = (
+  "Shared repositories are read-only. File deletion is not allowed. "
+  "Shared repositories provide reference data that cannot be modified."
+)
+
+
 class GraphCategory(str, Enum):
   """High-level graph categories."""
 

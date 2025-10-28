@@ -30,8 +30,14 @@ from robosystems.utils.query_output import (
   print_warning,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+  sys.path.insert(0, str(PROJECT_ROOT))
 
-DEFAULT_CREDENTIALS_FILE = Path(__file__).parent / "credentials" / "config.json"
+from examples.credentials.utils import get_graph_id
+
+DEFAULT_CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
+DEMO_NAME = "custom_graph_demo"
 
 
 PRESET_QUERIES = {
@@ -283,7 +289,7 @@ def main() -> None:
     sys.exit(1)
 
   api_key = credentials.get("api_key")
-  graph_id = credentials.get("graph_id")
+  graph_id = get_graph_id(DEFAULT_CREDENTIALS_FILE, DEMO_NAME)
 
   if not api_key or not graph_id:
     print_error("Missing API key or graph ID in credentials.")

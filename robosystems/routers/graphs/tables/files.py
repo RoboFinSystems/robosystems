@@ -10,7 +10,10 @@ from robosystems.database import get_db_session
 from robosystems.adapters.s3 import S3Client
 from robosystems.config import env
 from robosystems.logger import logger
-from robosystems.middleware.graph.types import GraphTypeRegistry
+from robosystems.middleware.graph.types import (
+  GraphTypeRegistry,
+  SHARED_REPO_DELETE_ERROR_MESSAGE,
+)
 
 router = APIRouter()
 
@@ -158,8 +161,7 @@ async def delete_file(
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories are read-only. File deletion is not allowed. "
-      "Shared repositories provide reference data that cannot be modified.",
+      detail=SHARED_REPO_DELETE_ERROR_MESSAGE,
     )
 
   repository = await get_universal_repository_with_auth(

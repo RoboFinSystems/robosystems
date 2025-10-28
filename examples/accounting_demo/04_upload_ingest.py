@@ -22,12 +22,17 @@ from robosystems_client.extensions import (
   IngestOptions,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+  sys.path.insert(0, str(PROJECT_ROOT))
 
-CREDENTIALS_FILE = Path(__file__).parent / "credentials" / "config.json"
+from examples.credentials.utils import get_graph_id
+
+CREDENTIALS_FILE = Path(__file__).resolve().parents[1] / "credentials" / "config.json"
 DATA_DIR = Path(__file__).parent / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
-ENTITY_TABLE_NAME = "Entity"
+DEMO_NAME = "accounting_demo"
 
 
 def load_credentials():
@@ -39,11 +44,6 @@ def load_credentials():
 
   with open(CREDENTIALS_FILE) as f:
     return json.load(f)
-
-
-def compute_graph_entity_identifier(graph_id: str) -> str:
-  """Derive the entity identifier that matches graph creation behavior."""
-  return f"entity_{graph_id}"
 
 
 def upload_directory(
@@ -160,7 +160,7 @@ def main():
   try:
     credentials = load_credentials()
     api_key = credentials.get("api_key")
-    graph_id = credentials.get("graph_id")
+    graph_id = get_graph_id(CREDENTIALS_FILE, DEMO_NAME)
 
     if not api_key or not graph_id:
       print("\n❌ Missing API key or graph_id in credentials")
@@ -180,19 +180,11 @@ def main():
     )
     extensions = RoboSystemsExtensions(config)
 
-    graph_entity_id = compute_graph_entity_identifier(graph_id)
-    skip_tables: set[str] = {ENTITY_TABLE_NAME}
-    print(
-      "\nℹ️  Entity node is created during graph provisioning "
-      f"(identifier: {graph_entity_id}); skipping Entity parquet upload"
-    )
-
     nodes_uploaded = upload_directory(
       extensions,
       graph_id,
       NODES_DIR,
       "Phase 1 - Nodes",
-      skip_tables=skip_tables,
     )
     rels_uploaded = upload_directory(
       extensions,

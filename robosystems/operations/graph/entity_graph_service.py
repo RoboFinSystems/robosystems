@@ -258,13 +258,23 @@ class EntityGraphService:
         f"Auto-created {len(created_tables)} DuckDB staging tables for graph {graph_id}"
       )
 
-      # Create entity node in graph
-      if progress_callback:
-        progress_callback("Creating entity node...", 70)
+      # Create entity node in graph (if requested)
+      create_entity = entity_data_dict.get("create_entity", True)
+      if not isinstance(create_entity, bool):
+        raise ValueError(
+          f"create_entity must be a boolean, got {type(create_entity).__name__}"
+        )
+      entity_response = None
 
-      entity_response = await self._create_entity_in_graph_kuzu(
-        kuzu_client, entity_data, graph_id, user_id
-      )
+      if create_entity:
+        if progress_callback:
+          progress_callback("Creating entity node...", 70)
+
+        entity_response = await self._create_entity_in_graph_kuzu(
+          kuzu_client, entity_data, graph_id, user_id
+        )
+      else:
+        logger.info("Skipping entity node creation (create_entity=False)")
 
       # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
       # stored exclusively in PostgreSQL, not in the Kuzu graph database.
@@ -334,11 +344,17 @@ class EntityGraphService:
         # Don't fail the entire graph creation if credit pool fails
         # The graph is already created and can have credits added later
 
-      logger.info(
-        f"Entity creation completed successfully! "
-        f"Graph: {graph_id}, Entity: {entity_response.name}, "
-        f"Instance: {db_location.instance_id}"
-      )
+      if entity_response:
+        logger.info(
+          f"Entity creation completed successfully! "
+          f"Graph: {graph_id}, Entity: {entity_response.name}, "
+          f"Instance: {db_location.instance_id}"
+        )
+      else:
+        logger.info(
+          f"Graph creation completed successfully (without entity)! "
+          f"Graph: {graph_id}, Instance: {db_location.instance_id}"
+        )
 
       # Close KuzuClient connection
       if kuzu_client:
@@ -346,7 +362,7 @@ class EntityGraphService:
 
       return {
         "graph_id": graph_id,
-        "entity": entity_response.model_dump(),
+        "entity": entity_response.model_dump() if entity_response else None,
       }
 
     except Exception as e:

@@ -15,7 +15,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from robosystems_client import Client
 from robosystems_client.api.auth.login_user import sync_detailed as login
@@ -58,7 +58,7 @@ def generate_secure_password(length: int = 16) -> str:
   return "".join(password_list)
 
 
-def load_credentials(path: Path) -> Optional[dict]:
+def load_credentials(path: Path) -> Optional[Dict[str, Any]]:
   """Load credentials if they exist."""
   if path.exists():
     with path.open() as fh:
@@ -66,7 +66,7 @@ def load_credentials(path: Path) -> Optional[dict]:
   return None
 
 
-def save_credentials(path: Path, data: dict) -> None:
+def save_credentials(path: Path, data: Dict[str, Any]) -> None:
   """Persist credential data."""
   path.parent.mkdir(parents=True, exist_ok=True)
   with path.open("w") as fh:
@@ -74,12 +74,39 @@ def save_credentials(path: Path, data: dict) -> None:
   print(f"\n💾 Credentials saved to: {path}")
 
 
+def get_graph_id(path: Path, demo_name: str) -> Optional[str]:
+  """Get graph_id for a specific demo from credentials."""
+  credentials = load_credentials(path)
+  if not credentials:
+    return None
+  graphs = credentials.get("graphs", {})
+  demo_data = graphs.get(demo_name, {})
+  return demo_data.get("graph_id")
+
+
+def save_graph_id(path: Path, demo_name: str, graph_id: str, graph_created_at: str) -> None:
+  """Save graph_id for a specific demo to credentials."""
+  credentials = load_credentials(path)
+  if not credentials:
+    raise ValueError(f"No credentials found at {path}")
+
+  if "graphs" not in credentials:
+    credentials["graphs"] = {}
+
+  credentials["graphs"][demo_name] = {
+    "graph_id": graph_id,
+    "graph_created_at": graph_created_at,
+  }
+
+  save_credentials(path, credentials)
+
+
 def ensure_user_credentials(
   context: CredentialContext,
   name: Optional[str] = None,
   email: Optional[str] = None,
   password: Optional[str] = None,
-) -> dict:
+) -> Dict[str, Any]:
   """
   Create or reuse a demo user and API key.
 
@@ -92,6 +119,16 @@ def ensure_user_credentials(
     print(f"   Email: {existing.get('user', {}).get('email')}")
     print(f"   API Key: {existing.get('api_key', '')[:20]}...")
     return existing
+
+  if existing and context.force:
+    num_graphs = len(existing.get("graphs", {}))
+    if num_graphs > 0:
+      print("\n⚠️  WARNING: Creating a new user will reset ALL demos!")
+      print(f"   This will delete {num_graphs} existing graph(s):")
+      for demo_name, graph_data in existing.get("graphs", {}).items():
+        print(f"     - {demo_name}: {graph_data.get('graph_id', 'unknown')}")
+      print("   The old graphs belong to the old user and won't be accessible with the new API key.")
+      print()
 
   client = Client(base_url=context.base_url)
 
@@ -146,6 +183,7 @@ def ensure_user_credentials(
     "api_key": api_key,
     "base_url": context.base_url,
     "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    "graphs": {},
   }
 
   save_credentials(context.credentials_path, credentials)

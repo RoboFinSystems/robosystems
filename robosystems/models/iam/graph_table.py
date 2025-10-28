@@ -99,7 +99,12 @@ class GraphTable(Base):
 
   @classmethod
   def get_all_for_graph(cls, graph_id: str, session: Session) -> Sequence["GraphTable"]:
-    return session.query(cls).filter(cls.graph_id == graph_id).all()
+    return (
+      session.query(cls)
+      .filter(cls.graph_id == graph_id)
+      .order_by(cls.table_type, cls.table_name)
+      .all()
+    )
 
   @classmethod
   def get_by_id(cls, table_id: str, session: Session) -> Optional["GraphTable"]:

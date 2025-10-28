@@ -87,6 +87,12 @@ class CreateGraphRequest(BaseModel):
     description="Optional initial entity to create in the graph. If provided, creates a entity-focused graph.",
   )
 
+  # Control whether to create entity node and upload initial data
+  create_entity: bool = Field(
+    default=True,
+    description="Whether to create the entity node and upload initial data. Only applies when initial_entity is provided. Set to False to create graph without populating entity data (useful for file-based ingestion workflows).",
+  )
+
   # Additional configuration
   tags: List[str] = Field(
     default_factory=list,
@@ -354,6 +360,7 @@ async def create_graph(
             "graph_name": request.metadata.graph_name,
             "graph_description": request.metadata.description,
             "tags": request.tags or [],
+            "create_entity": request.create_entity,
           },
         }
 
