@@ -157,6 +157,21 @@ class TestAWSConfig:
       mock_env.return_value = "staging"
       assert aws_config.get_stack_name("valkey") == "robosystems-staging-valkey"
 
+  def test_get_stack_name_with_variant_argument(self, aws_config):
+    aws_config._stack_config = {
+      "production": {
+        "service": {
+          "alpha": {"stack_name": "stack-alpha"},
+          "beta": {"stack_name": "stack-beta"},
+        }
+      }
+    }
+
+    with patch("robosystems.config.aws.env.get_environment_key") as mock_env:
+      mock_env.return_value = "production"
+      assert aws_config.get_stack_name("service", variant="alpha") == "stack-alpha"
+      assert aws_config.get_stack_name("service", variant="gamma") is None
+
   def test_get_stack_output_success(self, aws_config, mock_cf_client):
     """Test successful retrieval of stack output."""
     mock_cf_client.describe_stacks.return_value = {
@@ -250,6 +265,11 @@ class TestAWSConfig:
       result = aws_config.get_stack_output("test-stack", "ValkeyUrl", "default")
       assert result == "redis://env-valkey:6379"
 
+    # When mapping missing, default should be returned
+    with patch("robosystems.config.aws.env.VALKEY_URL", None):
+      result = aws_config.get_stack_output("test-stack", "UnknownKey", "fallback")
+      assert result == "fallback"
+
   def test_get_all_stack_outputs(self, aws_config, mock_cf_client):
     """Test getting all stack outputs."""
     mock_cf_client.describe_stacks.return_value = {
@@ -273,6 +293,30 @@ class TestAWSConfig:
 
     outputs = aws_config.get_all_stack_outputs("test-stack")
     assert outputs == {}
+
+  def test_get_all_stack_outputs_cache_hit(self, aws_config, mock_cf_client):
+    """Subsequent calls should use cached outputs."""
+    mock_cf_client.describe_stacks.return_value = {
+      "Stacks": [
+        {
+          "Outputs": [
+            {"OutputKey": "Output1", "OutputValue": "value1"},
+          ]
+        }
+      ]
+    }
+
+    first = aws_config.get_all_stack_outputs("stack")
+    assert first == {"Output1": "value1"}
+    mock_cf_client.describe_stacks.assert_called_once()
+
+    again = aws_config.get_all_stack_outputs("stack")
+    assert again == {"Output1": "value1"}
+    mock_cf_client.describe_stacks.assert_called_once()
+
+  def test_get_all_stack_outputs_without_client(self, aws_config):
+    aws_config._cf_client = None
+    assert aws_config.get_all_stack_outputs("stack") == {}
 
   def test_clear_cache(self, aws_config):
     """Test cache clearing."""
