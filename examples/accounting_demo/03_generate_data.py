@@ -41,9 +41,10 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pandas as pd
+import json
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pandas as pd
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -62,6 +63,23 @@ class AccountingDataGenerator:
     self.relationships_dir = RELATIONSHIPS_DIR
     self.nodes_dir.mkdir(parents=True, exist_ok=True)
     self.relationships_dir.mkdir(parents=True, exist_ok=True)
+    credentials = self._load_credentials()
+    graph_id = credentials.get("graph_id")
+    if not graph_id:
+      raise RuntimeError(
+        "Graph ID not found. Run 02_create_graph.py before generating data."
+      )
+    self.graph_id = graph_id
+    self.entity_identifier = f"entity_{graph_id}"
+
+  def _load_credentials(self) -> dict:
+    if not CREDENTIALS_FILE.exists():
+      raise RuntimeError(
+        f"Credentials not found at {CREDENTIALS_FILE}. "
+        "Run 01_setup_credentials.py and 02_create_graph.py first."
+      )
+    with CREDENTIALS_FILE.open() as f:
+      return json.load(f)
 
   def _create_transaction(
     self, identifier, date, description, transaction_type, amount=None
@@ -103,9 +121,9 @@ class AccountingDataGenerator:
     print("\n📋 Generating Entity data...")
 
     entity_data = {
-      "identifier": ["entity_acme_consulting_001"],
-      "uri": ["https://example.com/entity/acme-consulting"],
-      "scheme": ["https://example.com/"],
+      "identifier": [self.entity_identifier],
+      "uri": [f"https://accounting.example.com/{self.graph_id}"],
+      "scheme": ["https://accounting.example.com/"],
       "cik": [None],
       "ticker": [None],
       "exchange": [None],
@@ -115,14 +133,14 @@ class AccountingDataGenerator:
       "entity_type": ["LLC"],
       "sic": ["8742"],
       "sic_description": ["Management Consulting Services"],
-      "category": ["Private Company"],
-      "state_of_incorporation": ["Delaware"],
-      "fiscal_year_end": ["12-31"],
-      "ein": ["12-3456789"],
+      "category": ["Professional Services"],
+      "state_of_incorporation": [None],
+      "fiscal_year_end": [None],
+      "ein": [None],
       "tax_id": [None],
       "lei": [None],
-      "phone": ["(555) 123-4567"],
-      "website": ["https://acmeconsulting.example.com"],
+      "phone": [None],
+      "website": [f"https://accounting.example.com/{self.graph_id}"],
       "status": ["active"],
       "is_parent": pd.Series([True], dtype="boolean"),
       "parent_entity_id": [None],
@@ -377,6 +395,7 @@ class AccountingDataGenerator:
     print("\n📊 Generating monthly financial reports...")
 
     start_date = datetime.now() - timedelta(days=self.num_months * 30)
+    entity_id = self.entity_identifier
 
     reports = []
     facts = []
@@ -473,7 +492,7 @@ class AccountingDataGenerator:
               "element_id": element_id,
               "period_id": period_id,
               "unit_id": usd_unit_id,
-              "entity_id": "entity_acme_consulting_001",
+              "entity_id": entity_id,
               "fact_name": f"{totals['element_info']['name']}_Debits",
             }
           )
@@ -494,7 +513,7 @@ class AccountingDataGenerator:
               "element_id": element_id,
               "period_id": period_id,
               "unit_id": usd_unit_id,
-              "entity_id": "entity_acme_consulting_001",
+              "entity_id": entity_id,
               "fact_name": f"{totals['element_info']['name']}_Credits",
             }
           )
@@ -515,7 +534,7 @@ class AccountingDataGenerator:
               "element_id": element_id,
               "period_id": period_id,
               "unit_id": usd_unit_id,
-              "entity_id": "entity_acme_consulting_001",
+              "entity_id": entity_id,
               "fact_name": f"{totals['element_info']['name']}_NetBalance",
             }
           )
@@ -548,11 +567,13 @@ class AccountingDataGenerator:
     """Generate relationship parquet files."""
     print("\n🔗 Generating relationship files...")
 
+    entity_id = self.entity_identifier
+
     entity_tx_rels = []
     for _, row in tx_df.iterrows():
       entity_tx_rels.append(
         {
-          "from": "entity_acme_consulting_001",
+          "from": entity_id,
           "to": row["identifier"],
           "transaction_context": "general_ledger",
         }
@@ -592,7 +613,7 @@ class AccountingDataGenerator:
       for _, row in reports_df.iterrows():
         entity_report_rels.append(
           {
-            "from": "entity_acme_consulting_001",
+            "from": entity_id,
             "to": row["identifier"],
             "filing_context": "monthly_reporting",
           }

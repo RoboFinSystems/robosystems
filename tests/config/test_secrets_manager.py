@@ -74,6 +74,38 @@ class TestSecretsManagerTTL:
       manager.get_secret()
       assert mock_client.get_secret_value.call_count == 2
 
+  def test_refresh_specific_secret_clears_only_target(self):
+    """Refreshing a specific secret invalidates only that cache entry."""
+    with patch("boto3.client") as mock_boto:
+      mock_client = MagicMock()
+      mock_boto.return_value = mock_client
+
+      manager = SecretsManager(environment="staging")
+
+      def secret_response(secret_id):
+        payload = {"SecretString": json.dumps({secret_id: secret_id})}
+        response = MagicMock()
+        response.__getitem__.side_effect = payload.__getitem__
+        return payload
+
+      mock_client.get_secret_value.side_effect = [
+        {"SecretString": json.dumps({"base": "value1"})},
+        {"SecretString": json.dumps({"s3": "value2"})},
+        {"SecretString": json.dumps({"s3": "value3"})},
+      ]
+
+      manager.get_secret()  # base
+      manager.get_secret("s3")
+      assert mock_client.get_secret_value.call_count == 2
+
+      manager.refresh("s3")
+      manager.get_secret("s3")
+      assert mock_client.get_secret_value.call_count == 3
+      assert manager._cache[f"{manager.environment}/s3"][0]["s3"] == "value3"
+      # base should still be cached
+      manager.get_secret()
+      assert mock_client.get_secret_value.call_count == 3
+
 
 class TestSecretsManagerErrorHandling:
   """Test improved error handling."""
@@ -127,6 +159,28 @@ class TestSecretsManagerErrorHandling:
       # Should not have called AWS
       mock_client.get_secret_value.assert_not_called()
 
+  def test_unexpected_error_raises_in_prod(self):
+    """Unexpected exceptions are surfaced in production."""
+    with patch("boto3.client") as mock_boto:
+      mock_client = MagicMock()
+      mock_boto.return_value = mock_client
+
+      manager = SecretsManager(environment="prod")
+      mock_client.get_secret_value.side_effect = RuntimeError("boom")
+
+      with pytest.raises(RuntimeError):
+        manager.get_secret("s3")
+
+  def test_unexpected_error_returns_empty_in_dev(self):
+    """Unexpected exceptions do not blow up in dev."""
+    with patch("boto3.client") as mock_boto:
+      mock_client = MagicMock()
+      mock_boto.return_value = mock_client
+      mock_client.get_secret_value.side_effect = RuntimeError("boom")
+
+      manager = SecretsManager(environment="dev")
+      assert manager.get_secret("s3") == {}
+
 
 class TestSecretValueFunction:
   """Test the get_secret_value convenience function."""
@@ -178,6 +232,34 @@ class TestSecretValueFunction:
       result = get_secret_value("JWT_SECRET_KEY", "fallback_value")
       assert result == "fallback_value"
 
+  def test_get_secret_value_default_for_non_prod(self):
+    """Non prod/staging environments should return default when not set."""
+    with patch("os.getenv") as mock_getenv:
+      mock_getenv.side_effect = lambda key, default=None: {"ENVIRONMENT": "dev"}.get(
+        key, default
+      )
+
+      assert get_secret_value("JWT_SECRET_KEY", "local_default") == "local_default"
+
+  def test_get_secret_value_base_secret_lookup(self, monkeypatch):
+    """Keys without explicit mapping use base secret payload."""
+    with patch("os.getenv") as mock_getenv, patch("boto3.client") as mock_boto:
+      mock_getenv.side_effect = lambda key, default=None: {
+        "ENVIRONMENT": "staging"
+      }.get(key, default)
+
+      mock_client = MagicMock()
+      mock_boto.return_value = mock_client
+      mock_client.get_secret_value.return_value = {
+        "SecretString": json.dumps({"CUSTOM_KEY": "from_base"})
+      }
+
+      from robosystems.config import secrets_manager as module
+
+      monkeypatch.setattr(module, "_secrets_manager", None)
+
+      assert get_secret_value("CUSTOM_KEY", "default") == "from_base"
+
 
 class TestSecretMappingsConfiguration:
   """Test the externalized secret mappings."""
@@ -197,6 +279,102 @@ class TestSecretMappingsConfiguration:
 
     for secret in critical_secrets:
       assert secret in SECRET_MAPPINGS, f"Critical secret {secret} not mapped"
+
+
+class TestSecretsManagerHelpers:
+  """Tests covering helper methods and global accessors."""
+
+  def test_get_s3_buckets_dev_defaults(self):
+    manager = SecretsManager(environment="dev")
+    buckets = manager.get_s3_buckets()
+    assert buckets["aws_s3"] == "robosystems-dev"
+    assert buckets["sec_raw"] == "robosystems-sec-raw-dev"
+
+  def test_get_s3_buckets_from_secrets(self):
+    with patch("boto3.client") as mock_boto:
+      mock_client = MagicMock()
+      mock_client.get_secret_value.return_value = {
+        "SecretString": json.dumps({"SEC_RAW_BUCKET": "custom-raw"})
+      }
+      mock_boto.return_value = mock_client
+
+      manager = SecretsManager(environment="staging")
+      buckets = manager.get_s3_buckets()
+
+      assert buckets["sec_raw"] == "custom-raw"
+      # ensure caching reuses response
+      manager.get_s3_buckets()
+      assert mock_client.get_secret_value.call_count == 1
+
+  def test_get_database_url_non_prod(self):
+    manager = SecretsManager(environment="dev")
+    assert manager.get_database_url() == ""
+
+  def test_get_database_url_from_secret(self):
+    with patch("boto3.client") as mock_boto:
+      mock_client = MagicMock()
+      mock_client.get_secret_value.return_value = {
+        "SecretString": json.dumps({"DATABASE_URL": "postgres://example"})
+      }
+      mock_boto.return_value = mock_client
+
+      manager = SecretsManager(environment="prod")
+      assert manager.get_database_url() == "postgres://example"
+
+  def test_get_s3_credentials_default(self):
+    manager = SecretsManager(environment="dev")
+    creds = manager.get_s3_credentials()
+    assert creds == {"access_key_id": "", "secret_access_key": ""}
+
+  def test_get_s3_credentials_from_secret(self):
+    with patch("boto3.client") as mock_boto:
+      mock_client = MagicMock()
+      mock_client.get_secret_value.return_value = {
+        "SecretString": json.dumps(
+          {
+            "AWS_S3_ACCESS_KEY_ID": "key",
+            "AWS_S3_SECRET_ACCESS_KEY": "secret",
+          }
+        )
+      }
+      mock_boto.return_value = mock_client
+
+      manager = SecretsManager(environment="prod")
+      creds = manager.get_s3_credentials()
+      assert creds == {"access_key_id": "key", "secret_access_key": "secret"}
+
+  def test_get_secrets_manager_singleton(self, monkeypatch):
+    from robosystems.config import secrets_manager as module
+
+    with patch("boto3.client") as mock_boto:
+      mock_client = MagicMock()
+      mock_boto.return_value = mock_client
+
+      monkeypatch.setattr(module, "_secrets_manager", None)
+      instance1 = module.get_secrets_manager()
+      instance2 = module.get_secrets_manager()
+
+      assert instance1 is instance2
+
+  def test_get_s3_bucket_name_warns_when_missing(self, monkeypatch):
+    from robosystems.config import secrets_manager as module
+
+    manager = MagicMock()
+    manager.get_s3_buckets.return_value = {"sec_raw": "bucket"}
+    monkeypatch.setattr(module, "get_secrets_manager", lambda: manager)
+
+    with patch.object(module.logger, "warning") as mock_warning:
+      assert module.get_s3_bucket_name("unknown") == ""
+      mock_warning.assert_called_once()
+
+  def test_get_s3_bucket_name_maps_purpose(self, monkeypatch):
+    from robosystems.config import secrets_manager as module
+
+    manager = MagicMock()
+    manager.get_s3_buckets.return_value = {"sec_processed": "bucket-name"}
+    monkeypatch.setattr(module, "get_secrets_manager", lambda: manager)
+
+    assert module.get_s3_bucket_name("sec_processed") == "bucket-name"
 
   def test_mappings_have_valid_structure(self):
     """Verify all mappings have correct structure."""

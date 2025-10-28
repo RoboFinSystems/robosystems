@@ -1,0 +1,12 @@
+# Credentials
+credentials/
+
+# Data files
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python

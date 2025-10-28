@@ -73,6 +73,7 @@ class GraphFile(Base):
     session: Session,
     row_count: Optional[int] = None,
     upload_status: str = "pending",
+    commit: bool = True,
   ) -> "GraphFile":
     file = cls(
       graph_id=graph_id,
@@ -87,7 +88,10 @@ class GraphFile(Base):
     )
 
     session.add(file)
-    session.commit()
+    if commit:
+      session.commit()
+    else:
+      session.flush()
     session.refresh(file)
     return file
 

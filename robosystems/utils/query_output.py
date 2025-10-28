@@ -70,10 +70,14 @@ def print_csv(results: list[dict[str, Any]]) -> None:
   print(output.getvalue())
 
 
-def print_info_section(title: str, width: int = 60) -> None:
+def print_info_section(
+  title: str, subtitle: str | None = None, width: int = 60
+) -> None:
   console = Console()
   console.print(f"\n[bold cyan]{'=' * width}[/bold cyan]")
   console.print(f"[bold cyan]{title}[/bold cyan]")
+  if subtitle:
+    console.print(f"[cyan]{subtitle}[/cyan]")
   console.print(f"[bold cyan]{'=' * width}[/bold cyan]")
 
 

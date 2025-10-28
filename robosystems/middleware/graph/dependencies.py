@@ -187,7 +187,7 @@ async def get_graph_repository_dependency(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error creating repository for graph {graph_id}: {e}")
+    logger.exception(f"Error creating repository for graph {graph_id}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to access graph {graph_id}",
@@ -405,6 +405,8 @@ async def get_graph_repository_with_auth(
     )
     return repository
 
+  except HTTPException as exc:
+    raise exc
   except Exception as e:
     # Log failed graph access attempt
     SecurityAuditLogger.log_authorization_denied(
@@ -413,7 +415,7 @@ async def get_graph_repository_with_auth(
       action=operation_type,
     )
 
-    logger.error(f"Error creating repository for graph {graph_id}: {e}")
+    logger.exception(f"Error creating repository for graph {graph_id}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to access graph {graph_id}",
@@ -539,6 +541,8 @@ async def get_universal_repository_with_auth(
     )
     return universal_repo
 
+  except HTTPException as exc:
+    raise exc
   except Exception as e:
     # Log failed graph access attempt
     SecurityAuditLogger.log_authorization_denied(

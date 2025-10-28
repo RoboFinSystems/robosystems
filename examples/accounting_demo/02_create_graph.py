@@ -28,27 +28,27 @@ from robosystems_client.extensions import (
 
 
 CREDENTIALS_DIR = Path(__file__).parent / "credentials"
-CREDENTIALS_FILE = CREDENTIALS_DIR / "config.json"
+DEFAULT_CREDENTIALS_FILE = CREDENTIALS_DIR / "config.json"
 
 
-def load_credentials():
+def load_credentials(credentials_path: Path):
   """Load saved credentials."""
-  if not CREDENTIALS_FILE.exists():
-    print(f"\n❌ No credentials found at {CREDENTIALS_FILE}")
+  if not credentials_path.exists():
+    print(f"\n❌ No credentials found at {credentials_path}")
     print("   Run: uv run 01_setup_credentials.py first")
     sys.exit(1)
 
-  with open(CREDENTIALS_FILE) as f:
+  with open(credentials_path) as f:
     return json.load(f)
 
 
-def save_graph_id(credentials: dict, graph_id: str):
+def save_graph_id(credentials: dict, graph_id: str, credentials_path: Path):
   """Save graph_id to credentials file."""
   credentials["graph_id"] = graph_id
   credentials["graph_created_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-  with open(CREDENTIALS_FILE, "w") as f:
+  with open(credentials_path, "w") as f:
     json.dump(credentials, f, indent=2)
-  print(f"\n💾 Graph ID saved to: {CREDENTIALS_FILE}")
+  print(f"\n💾 Graph ID saved to: {credentials_path}")
 
 
 def create_accounting_graph(
@@ -56,10 +56,11 @@ def create_accounting_graph(
   api_key: str,
   graph_name: str = None,
   reuse: bool = False,
+  credentials_path: Path = DEFAULT_CREDENTIALS_FILE,
 ):
   """Create a new graph for accounting demo."""
 
-  credentials = load_credentials()
+  credentials = load_credentials(credentials_path)
 
   if reuse and credentials.get("graph_id"):
     print("\n✅ Reusing existing graph")
@@ -106,7 +107,7 @@ def create_accounting_graph(
     print(f"\n❌ Graph creation failed: {e}")
     sys.exit(1)
 
-  save_graph_id(credentials, graph_id)
+  save_graph_id(credentials, graph_id, credentials_path)
 
   print("\n" + "=" * 70)
   print("✅ Graph Created Successfully!")
@@ -138,11 +139,17 @@ def main():
     action="store_true",
     help="Reuse existing graph if available",
   )
+  parser.add_argument(
+    "--credentials-file",
+    default=str(DEFAULT_CREDENTIALS_FILE),
+    help="Path to credentials file (default: credentials/config.json)",
+  )
 
   args = parser.parse_args()
+  credentials_path = Path(args.credentials_file).expanduser()
 
   try:
-    credentials = load_credentials()
+    credentials = load_credentials(credentials_path)
     api_key = credentials.get("api_key")
 
     if not api_key:
@@ -155,6 +162,7 @@ def main():
       api_key=api_key,
       graph_name=args.name,
       reuse=args.reuse,
+      credentials_path=credentials_path,
     )
   except Exception as e:
     print(f"\n❌ Error: {e}")

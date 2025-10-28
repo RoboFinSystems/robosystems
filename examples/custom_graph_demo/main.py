@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Accounting Demo - Main Orchestration Script
+Custom Graph Demo - Main Orchestration Script
 
-This script runs the complete accounting demo workflow:
+This script runs the complete custom graph demo workflow:
 1. Setup credentials (user account and API key)
 2. Create graph database
-3. Generate accounting data (parquet files)
+3. Generate custom graph data (parquet files)
 4. Upload and ingest data
 5. Run verification queries
 
@@ -18,14 +18,13 @@ Usage:
 """
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 
 DEMO_DIR = Path(__file__).parent
-CREDENTIALS_FILE = DEMO_DIR / "credentials" / "config.json"
+DEFAULT_CREDENTIALS_FILE = DEMO_DIR / "credentials" / "config.json"
 
 
 def run_script(script_name: str, args: list[str] | None = None):
@@ -47,20 +46,9 @@ def run_script(script_name: str, args: list[str] | None = None):
     sys.exit(result.returncode)
 
 
-def load_credentials() -> dict:
-  """Load credentials file if it exists."""
-  if not CREDENTIALS_FILE.exists():
-    return {}
-  try:
-    with CREDENTIALS_FILE.open() as f:
-      return json.load(f)
-  except Exception:
-    return {}
-
-
 def main():
   parser = argparse.ArgumentParser(
-    description="Run the complete accounting demo workflow"
+    description="Run the complete custom graph demo workflow"
   )
   parser.add_argument(
     "--base-url",
@@ -87,8 +75,14 @@ def main():
     action="store_true",
     help="Skip running verification queries at the end",
   )
+  parser.add_argument(
+    "--credentials-file",
+    default=str(DEFAULT_CREDENTIALS_FILE),
+    help="Path to credentials file shared across demo scripts",
+  )
 
   args = parser.parse_args()
+  credentials_path = Path(args.credentials_file).expanduser()
 
   if args.flags:
     for flag in args.flags.split(","):
@@ -117,10 +111,11 @@ def main():
     step1_args.append("--force")
     args.new_graph = True
 
+  step1_args.extend(["--credentials-file", str(credentials_path)])
   run_script("01_setup_credentials.py", step1_args)
 
   print("\n" + "=" * 70)
-  print("📊 Accounting Demo - Complete Workflow")
+  print("📊 Custom Graph Demo - Complete Workflow")
   print("=" * 70)
   print(f"Base URL: {args.base_url}")
   print(f"Create new user: {args.new_user}")
@@ -128,24 +123,30 @@ def main():
   print("Regenerate data: True (always)")
   print("=" * 70)
 
-  step2_args = ["--base-url", args.base_url]
+  step2_args = ["--base-url", args.base_url, "--credentials-file", str(credentials_path)]
   if not args.new_graph:
     step2_args.append("--reuse")
   run_script("02_create_graph.py", step2_args)
 
   # Regenerate data every run to align parquet identifiers with the current graph.
-  step3_args = ["--regenerate"]
+  step3_args = ["--regenerate", "--credentials-file", str(credentials_path)]
   run_script("03_generate_data.py", step3_args)
 
-  step4_args = ["--base-url", args.base_url]
+  step4_args = ["--base-url", args.base_url, "--credentials-file", str(credentials_path)]
   run_script("04_upload_ingest.py", step4_args)
 
   if not args.skip_queries:
-    step5_args = ["--all", "--base-url", args.base_url]
+    step5_args = [
+      "--all",
+      "--base-url",
+      args.base_url,
+      "--credentials-file",
+      str(credentials_path),
+    ]
     run_script("05_query_graph.py", step5_args)
 
   print("\n" + "=" * 70)
-  print("✅ Accounting Demo - Complete!")
+  print("✅ Custom Graph Demo - Complete!")
   print("=" * 70)
   print("\n💡 Next steps:")
   print("   - Run custom queries: uv run 05_query_graph.py")
