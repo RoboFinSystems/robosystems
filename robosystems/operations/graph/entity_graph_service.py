@@ -260,6 +260,10 @@ class EntityGraphService:
 
       # Create entity node in graph (if requested)
       create_entity = entity_data_dict.get("create_entity", True)
+      if not isinstance(create_entity, bool):
+        raise ValueError(
+          f"create_entity must be a boolean, got {type(create_entity).__name__}"
+        )
       entity_response = None
 
       if create_entity:

@@ -81,6 +81,12 @@ MAX_BATCH_SIZE = 10000  # Increased for large-scale operations
 # File Processing
 MAX_FILES_PER_TASK = 1000
 MAX_FILE_SIZE_MB = 100
+PRESIGNED_URL_EXPIRY_SECONDS = 3600  # 1 hour
+
+# Row Count Estimation Fallback (bytes per row for different formats)
+FALLBACK_BYTES_PER_ROW_PARQUET = 50  # Compressed format
+FALLBACK_BYTES_PER_ROW_CSV = 200  # Text format with moderate row size
+FALLBACK_BYTES_PER_ROW_JSON = 300  # Text format with more verbose structure
 
 # Queue Sizes
 DEFAULT_QUEUE_SIZE = 1000

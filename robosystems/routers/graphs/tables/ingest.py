@@ -13,7 +13,10 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.middleware.graph.types import GraphTypeRegistry
+from robosystems.middleware.graph.types import (
+  GraphTypeRegistry,
+  SHARED_REPO_WRITE_ERROR_MESSAGE,
+)
 from robosystems.config import env
 import time
 
@@ -44,8 +47,7 @@ async def ingest_tables(
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories are read-only. File uploads and data ingestion are not allowed. "
-      "Shared repositories provide reference data that cannot be modified.",
+      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
   repo = await get_universal_repository_with_auth(graph_id, current_user, "write", db)

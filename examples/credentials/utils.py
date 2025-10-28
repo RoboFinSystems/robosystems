@@ -15,7 +15,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from robosystems_client import Client
 from robosystems_client.api.auth.login_user import sync_detailed as login
@@ -58,7 +58,7 @@ def generate_secure_password(length: int = 16) -> str:
   return "".join(password_list)
 
 
-def load_credentials(path: Path) -> Optional[dict]:
+def load_credentials(path: Path) -> Optional[Dict[str, Any]]:
   """Load credentials if they exist."""
   if path.exists():
     with path.open() as fh:
@@ -66,7 +66,7 @@ def load_credentials(path: Path) -> Optional[dict]:
   return None
 
 
-def save_credentials(path: Path, data: dict) -> None:
+def save_credentials(path: Path, data: Dict[str, Any]) -> None:
   """Persist credential data."""
   path.parent.mkdir(parents=True, exist_ok=True)
   with path.open("w") as fh:
@@ -106,7 +106,7 @@ def ensure_user_credentials(
   name: Optional[str] = None,
   email: Optional[str] = None,
   password: Optional[str] = None,
-) -> dict:
+) -> Dict[str, Any]:
   """
   Create or reuse a demo user and API key.
 

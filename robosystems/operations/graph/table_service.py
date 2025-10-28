@@ -67,7 +67,9 @@ class TableService:
       raise ValueError(f"Invalid schema DDL: {str(e)}") from e
 
     if not node_types and not relationship_types:
-      logger.warning(f"No node or relationship types found in schema for graph {graph_id}")
+      logger.warning(
+        f"No node or relationship types found in schema for graph {graph_id}"
+      )
       return []
 
     logger.info(
@@ -108,9 +110,7 @@ class TableService:
     for rel_type in relationship_types:
       existing_table = GraphTable.get_by_name(graph_id, rel_type, self.session)
       if existing_table:
-        logger.info(
-          f"Table {rel_type} already exists for graph {graph_id}, skipping"
-        )
+        logger.info(f"Table {rel_type} already exists for graph {graph_id}, skipping")
         created_tables.append(existing_table)
         continue
 

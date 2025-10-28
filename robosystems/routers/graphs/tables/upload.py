@@ -17,10 +17,19 @@ from robosystems.middleware.graph.dependencies import get_universal_repository_w
 from robosystems.database import get_db_session
 from robosystems.adapters.s3 import S3Client
 from robosystems.config import env
-from robosystems.config.constants import MAX_FILE_SIZE_MB
+from robosystems.config.constants import (
+  MAX_FILE_SIZE_MB,
+  PRESIGNED_URL_EXPIRY_SECONDS,
+  FALLBACK_BYTES_PER_ROW_PARQUET,
+  FALLBACK_BYTES_PER_ROW_CSV,
+  FALLBACK_BYTES_PER_ROW_JSON,
+)
 from robosystems.config.tier_config import get_tier_storage_limit
 from robosystems.logger import logger
-from robosystems.middleware.graph.types import GraphTypeRegistry
+from robosystems.middleware.graph.types import (
+  GraphTypeRegistry,
+  SHARED_REPO_WRITE_ERROR_MESSAGE,
+)
 
 router = APIRouter()
 
@@ -49,8 +58,7 @@ async def get_upload_url(
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories are read-only. File uploads and data ingestion are not allowed. "
-      "Shared repositories provide reference data that cannot be modified.",
+      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
   repository = await get_universal_repository_with_auth(
@@ -134,7 +142,7 @@ async def get_upload_url(
         "Key": s3_key,
         "ContentType": request.content_type,
       },
-      ExpiresIn=3600,
+      ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
     )
 
     file_format_map = {
@@ -161,7 +169,7 @@ async def get_upload_url(
 
     return FileUploadResponse(
       upload_url=upload_url,
-      expires_in=3600,
+      expires_in=PRESIGNED_URL_EXPIRY_SECONDS,
       file_id=graph_file.id,
       s3_key=s3_key,
     )
@@ -199,8 +207,7 @@ async def update_file_status(
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail="Shared repositories are read-only. File uploads and data ingestion are not allowed. "
-      "Shared repositories provide reference data that cannot be modified.",
+      detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
   repository = await get_universal_repository_with_auth(
@@ -336,7 +343,17 @@ async def update_file_status(
       logger.warning(
         f"Could not calculate row count for {graph_file.file_name}: {e}. Row count will be estimated."
       )
-      actual_row_count = actual_file_size // 100
+      if graph_file.file_format == "parquet":
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_PARQUET
+      elif graph_file.file_format == "csv":
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_CSV
+      elif graph_file.file_format == "json":
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_JSON
+      else:
+        actual_row_count = actual_file_size // FALLBACK_BYTES_PER_ROW_CSV
+      logger.info(
+        f"Estimated row count for {graph_file.file_name} ({graph_file.file_format}): {actual_row_count}"
+      )
 
     graph_file.file_size_bytes = actual_file_size
     graph_file.row_count = actual_row_count
