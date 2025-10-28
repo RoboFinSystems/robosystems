@@ -127,6 +127,8 @@ class GenericGraphService:
     # Step 3: Prepare schema for database creation
     custom_ddl = None
 
+    schema_persistence: Dict[str, Any] | None = None
+
     if custom_schema:
       logger.info("Preparing custom custom schema")
       logger.info(f"Schema name: {custom_schema.get('name', 'custom')}")
@@ -155,6 +157,14 @@ class GenericGraphService:
         )
         logger.debug(f"DDL preview (first 200 chars): {custom_ddl[:200]}...")
 
+        schema_persistence = {
+          "schema_type": "custom",
+          "schema_ddl": custom_ddl,
+          "schema_json": custom_schema,
+          "custom_schema_name": custom_schema.get("name"),
+          "custom_schema_version": custom_schema.get("version"),
+        }
+
       except Exception as e:
         logger.error(f"Failed to parse custom schema: {e}")
         raise ValueError(f"Invalid custom schema: {str(e)}")
@@ -180,41 +190,6 @@ class GenericGraphService:
       logger.info(f"Database {graph_id} created successfully with schema: {result}")
 
       # Persist custom schema DDL to PostgreSQL if provided
-      if custom_schema and custom_ddl:
-        from ...models.iam import GraphSchema
-
-        db_gen = get_db_session()
-        db = next(db_gen)
-        try:
-          GraphSchema.create(
-            graph_id=graph_id,
-            schema_type="custom",
-            schema_ddl=custom_ddl,
-            schema_json=custom_schema,
-            custom_schema_name=custom_schema.get("name"),
-            custom_schema_version=custom_schema.get("version"),
-            session=db,
-          )
-          logger.info(f"Persisted custom schema DDL for graph {graph_id} to PostgreSQL")
-
-          # Auto-create DuckDB staging tables from schema
-          from .table_service import TableService
-
-          table_service = TableService(db)
-          created_tables = table_service.create_tables_from_schema(
-            graph_id=graph_id,
-            user_id=user_id,
-            schema_ddl=custom_ddl,
-          )
-          logger.info(
-            f"Auto-created {len(created_tables)} DuckDB staging tables for custom schema graph {graph_id}"
-          )
-        finally:
-          try:
-            next(db_gen)
-          except StopIteration:
-            pass
-
     finally:
       await kuzu_client.close()
 
@@ -253,42 +228,13 @@ class GenericGraphService:
         )
 
         # Persist extensions schema DDL to PostgreSQL
-        from ...models.iam import GraphSchema
-
-        db_gen = get_db_session()
-        db = next(db_gen)
-        try:
-          GraphSchema.create(
-            graph_id=graph_id,
-            schema_type="extensions",
-            schema_ddl=extensions_ddl,
-            schema_json={
-              "base": "base",
-              "extensions": schema_extensions,
-            },
-            session=db,
-          )
-          logger.info(
-            f"Persisted extensions schema DDL for graph {graph_id} to PostgreSQL"
-          )
-
-          # Auto-create DuckDB staging tables from schema
-          from .table_service import TableService
-
-          table_service = TableService(db)
-          created_tables = table_service.create_tables_from_schema(
-            graph_id=graph_id,
-            user_id=user_id,
-            schema_ddl=extensions_ddl,
-          )
-          logger.info(
-            f"Auto-created {len(created_tables)} DuckDB staging tables for extensions graph {graph_id}"
-          )
-        finally:
-          try:
-            next(db_gen)
-          except StopIteration:
-            pass
+        schema_persistence = {
+          "schema_type": "extensions",
+          "schema_ddl": extensions_ddl,
+          "schema_json": {"base": "base", "extensions": schema_extensions},
+          "custom_schema_name": None,
+          "custom_schema_version": None,
+        }
 
       except Exception as e:
         logger.error(f"Failed to install schema extensions: {e}")
@@ -366,6 +312,40 @@ class GenericGraphService:
         is_selected=True,  # Set as selected graph for the user
       )
       db.add(user_graph)
+
+      # Ensure pending Graph insert is flushed before creating schema records
+      db.flush()
+
+      if schema_persistence:
+        from ...models.iam import GraphSchema
+
+        graph_schema = GraphSchema.create(
+          graph_id=graph_id,
+          schema_type=schema_persistence["schema_type"],
+          schema_ddl=schema_persistence["schema_ddl"],
+          schema_json=schema_persistence["schema_json"],
+          custom_schema_name=schema_persistence["custom_schema_name"],
+          custom_schema_version=schema_persistence["custom_schema_version"],
+          session=db,
+          commit=False,
+        )
+        logger.info(
+          f"Persisted {schema_persistence['schema_type']} schema DDL for graph {graph_id} "
+          f"(schema_id={graph_schema.id})"
+        )
+
+        from .table_service import TableService
+
+        table_service = TableService(db)
+        created_tables = table_service.create_tables_from_schema(
+          graph_id=graph_id,
+          user_id=user_id,
+          schema_ddl=schema_persistence["schema_ddl"],
+        )
+        logger.info(
+          f"Auto-created {len(created_tables)} DuckDB staging tables for graph {graph_id}"
+        )
+
       db.commit()
 
       # Step 7: Create credit pool for the new graph

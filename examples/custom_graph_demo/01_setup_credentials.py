@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup User and API Key for Accounting Demo
+Setup user and API key for the Custom Graph Demo.
 
 This script creates a user account and API key, then saves the credentials
 to a local file for reuse. Run this once to set up authentication.
@@ -33,7 +33,7 @@ DEFAULT_CREDENTIALS_FILE = CREDENTIALS_DIR / "config.json"
 
 def main():
   parser = argparse.ArgumentParser(
-    description="Setup user and API key for Accounting Demo"
+    description="Setup user and API key for the Custom Graph Demo"
   )
   parser.add_argument(
     "--base-url",
@@ -72,10 +72,10 @@ def main():
       base_url=args.base_url,
       credentials_path=credentials_path,
       force=args.force,
-      default_name_prefix="Accounting Demo User",
-      default_email_prefix="accounting_demo",
-      api_key_prefix="Accounting Demo API Key",
-      display_title="Accounting Demo - User Setup",
+      default_name_prefix="Custom Graph Demo User",
+      default_email_prefix="custom_graph_demo",
+      api_key_prefix="Custom Graph Demo API Key",
+      display_title="Custom Graph Demo - User Setup",
     )
     credentials = ensure_user_credentials(
       context=context,
