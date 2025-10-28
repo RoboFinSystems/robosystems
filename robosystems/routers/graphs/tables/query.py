@@ -40,7 +40,7 @@ async def query_tables(
       "Use the graph query endpoint (POST /query) to access shared repository data through the structured graph interface.",
     )
 
-  graph, _ = await get_universal_repository_with_auth(graph_id, current_user.id, db)
+  graph, _ = await get_universal_repository_with_auth(graph_id, current_user, db)
 
   if not graph:
     raise HTTPException(

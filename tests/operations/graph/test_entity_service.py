@@ -40,9 +40,56 @@ class TestEntityGraphService:
     service = EntityGraphService()
     assert service.session is not None
 
+  @pytest.mark.unit
+  def test_generate_entity_data_for_upload(self, mocker):
+    """Test entity data generation for controlled ingestion."""
+    from robosystems.models.api import EntityCreate
+
+    service = EntityGraphService()
+
+    # Create test entity data
+    entity_data = EntityCreate(
+      name="Test Company",
+      cik="0001234567",
+      sic="1234",
+      sic_description="Test SIC",
+      category="Finance",
+      state_of_incorporation="DE",
+      fiscal_year_end="1231",
+      ein="123456789",
+      uri="http://test.com",
+    )
+
+    graph_id = "kg12345678ab"
+
+    # Generate entity data for upload
+    result = service._generate_entity_data_for_upload(entity_data, graph_id)
+
+    # Verify all required fields are present
+    assert result["identifier"] == f"entity_{graph_id}"
+    assert result["name"] == "Test Company"
+    assert result["legal_name"] == "Test Company"
+    assert result["cik"] == "0001234567"
+    assert result["sic"] == "1234"
+    assert result["sic_description"] == "Test SIC"
+    assert result["category"] == "Finance"
+    assert result["state_of_incorporation"] == "DE"
+    assert result["fiscal_year_end"] == "1231"
+    assert result["ein"] == "123456789"
+    assert result["website"] == "http://test.com"
+    assert result["status"] == "active"
+    assert "created_at" in result
+    assert "updated_at" in result
+
+    # Verify timestamps are ISO format
+    import datetime
+
+    datetime.datetime.fromisoformat(result["created_at"])
+    datetime.datetime.fromisoformat(result["updated_at"])
+
   @pytest.mark.asyncio
   async def test_create_entity_with_new_graph_success(self, mocker):
-    """Test successful entity creation with new graph."""
+    """Test successful entity creation with new graph using controlled ingestion."""
     # Mock dependencies
     mock_session = mocker.MagicMock()
     mock_kuzu_client = mocker.AsyncMock()
@@ -70,30 +117,61 @@ class TestEntityGraphService:
       return_value=mock_kuzu_client,
     )
 
-    # Mock query responses
+    # Mock database and schema installation
     mock_404_error = Exception("Database not found")
     mock_404_error.status_code = 404
-    mock_kuzu_client.get_database.side_effect = mock_404_error  # Database doesn't exist
+    mock_kuzu_client.get_database.side_effect = mock_404_error
     mock_kuzu_client.create_database.return_value = {"success": True}
-    mock_kuzu_client.query.return_value = {
-      "data": [
-        {
-          "identifier": "entity-kg12345678ab",
-          "name": "Test Company",
-          "website": "http://test.com",
-          "cik": "0001234567",
-          "sic": "1234",
-          "sic_description": "Test SIC",
-          "category": "Finance",
-          "state_of_incorporation": "DE",
-          "fiscal_year_end": "1231",
-          "ein": "123456789",
-          "status": "active",
-          "created_at": "2023-01-01T00:00:00Z",
-          "updated_at": "2023-01-01T00:00:00Z",
-        }
-      ]
-    }
+
+    # Mock S3 client for file upload (imported locally in the method)
+    mock_s3_client = mocker.MagicMock()
+    mocker.patch(
+      "robosystems.adapters.s3.S3Client",
+      return_value=mock_s3_client,
+    )
+
+    # Mock GraphTable for Entity table (imported locally in the method)
+    mock_entity_table = mocker.MagicMock()
+    mock_entity_table.id = "table-123"
+    mock_entity_table.file_count = 0
+    mocker.patch(
+      "robosystems.models.iam.GraphTable.get_by_name",
+      return_value=mock_entity_table,
+    )
+
+    # Mock GraphFile creation (imported locally in the method)
+    mock_graph_file = mocker.MagicMock()
+    mock_graph_file.id = "file-123"
+    mocker.patch(
+      "robosystems.models.iam.GraphFile.create",
+      return_value=mock_graph_file,
+    )
+
+    # Mock TableService for auto-creating DuckDB tables (imported locally)
+    mock_table_service = mocker.MagicMock()
+    mock_table_service.create_tables_from_schema.return_value = [mock_entity_table]
+    mocker.patch(
+      "robosystems.operations.graph.table_service.TableService",
+      return_value=mock_table_service,
+    )
+
+    # Mock GraphSchema (imported locally)
+    mocker.patch("robosystems.models.iam.GraphSchema.create")
+
+    # Mock CreditService (imported locally)
+    mock_credit_service = mocker.MagicMock()
+    mocker.patch(
+      "robosystems.operations.graph.credit_service.CreditService",
+      return_value=mock_credit_service,
+    )
+
+    # Mock Graph and UserGraph for PostgreSQL metadata
+    mocker.patch("robosystems.models.iam.graph.Graph.create")
+    mocker.patch("robosystems.models.iam.user_graph.UserGraph.create")
+
+    # Mock controlled ingestion responses
+    mock_kuzu_client.create_table.return_value = {"success": True}
+    mock_kuzu_client.ingest_table_to_graph.return_value = {"rows_ingested": 1}
 
     # Create service and run test
     service = EntityGraphService(session=mock_session)
@@ -101,7 +179,11 @@ class TestEntityGraphService:
       "name": "Test Company",
       "cik": "0001234567",
       "sic": "1234",
+      "sic_description": "Test SIC",
       "category": "Finance",
+      "state_of_incorporation": "DE",
+      "fiscal_year_end": "1231",
+      "ein": "123456789",
       "uri": "http://test.com",
     }
 
@@ -112,8 +194,15 @@ class TestEntityGraphService:
     # Verify results
     assert "graph_id" in result
     assert "entity" in result
+    assert result["entity"]["name"] == "Test Company"
+    assert result["entity"]["cik"] == "0001234567"
+
+    # Verify controlled ingestion flow was used
     mock_allocation_manager.allocate_database.assert_called_once()
     mock_kuzu_client.create_database.assert_called_once()
+    mock_s3_client.s3_client.upload_fileobj.assert_called_once()
+    mock_kuzu_client.create_table.assert_called()
+    mock_kuzu_client.ingest_table_to_graph.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_create_entity_allocation_failure(self, mocker):

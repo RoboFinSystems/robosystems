@@ -27,6 +27,7 @@ CREDENTIALS_FILE = Path(__file__).parent / "credentials" / "config.json"
 DATA_DIR = Path(__file__).parent / "data"
 NODES_DIR = DATA_DIR / "nodes"
 RELATIONSHIPS_DIR = DATA_DIR / "relationships"
+ENTITY_TABLE_NAME = "Entity"
 
 
 def load_credentials():
@@ -40,7 +41,18 @@ def load_credentials():
     return json.load(f)
 
 
-def upload_directory(extensions, graph_id, directory, phase_name):
+def compute_graph_entity_identifier(graph_id: str) -> str:
+  """Derive the entity identifier that matches graph creation behavior."""
+  return f"entity_{graph_id}"
+
+
+def upload_directory(
+  extensions,
+  graph_id,
+  directory,
+  phase_name,
+  skip_tables: set[str] | None = None,
+):
   """Upload parquet files from a directory."""
   parquet_files = sorted(directory.glob("*.parquet"))
 
@@ -53,9 +65,17 @@ def upload_directory(extensions, graph_id, directory, phase_name):
   print("=" * 70)
 
   success_count = 0
+  skip_tables = skip_tables or set()
+
   for file_path in parquet_files:
     table_name = file_path.stem
     file_size = file_path.stat().st_size
+
+    if table_name in skip_tables:
+      print(
+        f"\n⏭️  Skipping table: {table_name} (already managed during graph creation)"
+      )
+      continue
 
     print(f"\n📋 Uploading table: {table_name}")
     print(f"   File: {file_path.name}")
@@ -160,11 +180,25 @@ def main():
     )
     extensions = RoboSystemsExtensions(config)
 
+    graph_entity_id = compute_graph_entity_identifier(graph_id)
+    skip_tables: set[str] = {ENTITY_TABLE_NAME}
+    print(
+      "\nℹ️  Entity node is created during graph provisioning "
+      f"(identifier: {graph_entity_id}); skipping Entity parquet upload"
+    )
+
     nodes_uploaded = upload_directory(
-      extensions, graph_id, NODES_DIR, "Phase 1 - Nodes"
+      extensions,
+      graph_id,
+      NODES_DIR,
+      "Phase 1 - Nodes",
+      skip_tables=skip_tables,
     )
     rels_uploaded = upload_directory(
-      extensions, graph_id, RELATIONSHIPS_DIR, "Phase 2 - Relationships"
+      extensions,
+      graph_id,
+      RELATIONSHIPS_DIR,
+      "Phase 2 - Relationships",
     )
 
     total_uploaded = nodes_uploaded + rels_uploaded

@@ -37,8 +37,8 @@ def parse_cypher_schema(ddl: str) -> List[NodeType]:
   node_types = []
 
   # Pattern to match CREATE NODE TABLE statements
-  # Matches: CREATE NODE TABLE NodeName(prop1 TYPE1, prop2 TYPE2, ...)
-  pattern = r"CREATE\s+NODE\s+TABLE\s+(\w+)\s*\((.*?)\);"
+  # Matches: CREATE NODE TABLE [IF NOT EXISTS] NodeName(prop1 TYPE1, prop2 TYPE2, ...)
+  pattern = r"CREATE\s+NODE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\);"
 
   try:
     matches = re.finditer(pattern, ddl, re.IGNORECASE | re.DOTALL)
@@ -125,7 +125,8 @@ def parse_relationship_types(ddl: str) -> List[str]:
   rel_types = []
 
   # Pattern to match CREATE REL TABLE statements
-  pattern = r"CREATE\s+REL\s+TABLE\s+(\w+)\s*\("
+  # Matches: CREATE REL TABLE [IF NOT EXISTS] RelName(FROM ... TO ...)
+  pattern = r"CREATE\s+REL\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\("
 
   matches = re.finditer(pattern, ddl, re.IGNORECASE)
 

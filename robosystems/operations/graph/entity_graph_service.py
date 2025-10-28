@@ -192,6 +192,33 @@ class EntityGraphService:
         else:
           raise
 
+      # Create Graph record FIRST before any dependent records
+      # This must happen before GraphSchema and GraphTable creation
+      from ...models.iam.graph import Graph
+
+      graph_tier_str = entity_data_dict.get("graph_tier", "kuzu-standard")
+      graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
+        graph_tier_str, GraphTier.KUZU_STANDARD
+      )
+      schema_extensions = entity_data.extensions or []
+
+      Graph.create(
+        graph_id=graph_id,
+        graph_name=entity_data.name,
+        graph_type="entity",
+        session=self.session,
+        base_schema="base",
+        schema_extensions=schema_extensions,
+        graph_instance_id=db_location.instance_id,
+        graph_tier=graph_tier,
+        graph_metadata={
+          "created_by": user_id,
+          "entity_type": "entity",
+        },
+        commit=True,
+      )
+      logger.info(f"Graph metadata created for {graph_id}")
+
       # Install entity graph schema with selected extensions
       # Use the KuzuClient directly instead of repository
       if progress_callback:
@@ -226,6 +253,7 @@ class EntityGraphService:
         user_id=user_id,
         schema_ddl=schema_ddl,
       )
+      self.session.commit()
       logger.info(
         f"Auto-created {len(created_tables)} DuckDB staging tables for graph {graph_id}"
       )
@@ -235,28 +263,36 @@ class EntityGraphService:
         progress_callback("Creating entity node...", 70)
 
       entity_response = await self._create_entity_in_graph_kuzu(
-        kuzu_client, entity_data, graph_id
+        kuzu_client, entity_data, graph_id, user_id
       )
 
       # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
       # stored exclusively in PostgreSQL, not in the Kuzu graph database.
       # This keeps the graph focused on business data only.
 
-      # Get graph tier from entity data for consistency
-      graph_tier_str = entity_data_dict.get("graph_tier", "kuzu-standard")
-
       # Create user-graph relationship in PostgreSQL
+      # Graph record was already created earlier, just need UserGraph
       if progress_callback:
         progress_callback("Setting up user access...", 80)
 
-      self._create_user_graph_relationship(
-        user_id,
-        graph_id,
-        entity_data.name,
-        db_location.instance_id,
-        entity_data.extensions,
-        graph_tier_str,
+      from ...models.iam.user_graph import UserGraph
+
+      user_graph = UserGraph(
+        user_id=user_id,
+        graph_id=graph_id,
+        role="admin",
+        is_selected=True,
       )
+
+      # Deselect other graphs for this user
+      self.session.query(UserGraph).filter(
+        UserGraph.user_id == user_id, UserGraph.graph_id != graph_id
+      ).update({"is_selected": False})
+
+      self.session.add(user_graph)
+      self.session.commit()
+
+      logger.info("User-graph relationship created successfully")
 
       # Create credit pool for the new graph
       try:
@@ -589,156 +625,200 @@ class EntityGraphService:
 
     return type_mapping.get(schema_type.upper(), "STRING")
 
-  async def _create_entity_in_graph_kuzu(
-    self, kuzu_client: GraphClient, entity_data: EntityCreate, graph_id: str
-  ) -> EntityResponse:
+  def _generate_entity_data_for_upload(
+    self, entity_data: EntityCreate, graph_id: str
+  ) -> dict:
     """
-    Create entity node in the graph using KuzuClient directly.
+    Generate entity data as a dictionary ready for Parquet conversion.
 
-    This is a direct version that uses KuzuClient instead of repository.
+    Returns a single-row dict matching the Entity table schema.
     """
-    logger.info(f"Creating entity node in graph: {graph_id}")
-
     import datetime
 
-    # Generate entity identifier
     entity_identifier = f"entity_{graph_id}"
     current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-    # Prepare entity properties matching base schema
-    entity_properties = {
+    return {
       "identifier": entity_identifier,
+      "uri": entity_data.uri,
+      "scheme": None,
       "cik": entity_data.cik,
+      "ticker": None,
+      "exchange": None,
       "name": entity_data.name,
-      "legal_name": entity_data.name,  # Use name as legal_name
+      "legal_name": entity_data.name,
+      "industry": None,
+      "entity_type": None,
       "sic": entity_data.sic,
       "sic_description": entity_data.sic_description,
       "category": entity_data.category,
       "state_of_incorporation": entity_data.state_of_incorporation,
       "fiscal_year_end": entity_data.fiscal_year_end,
       "ein": entity_data.ein,
-      "website": entity_data.uri,  # Use uri as website
-      "status": "active",  # Default to active
+      "tax_id": None,
+      "lei": None,
+      "phone": None,
+      "website": entity_data.uri,
+      "status": "active",
+      "is_parent": True,
+      "parent_entity_id": None,
       "created_at": current_time,
       "updated_at": current_time,
     }
 
-    # Create the entity node using Cypher query with base schema properties
-    create_query = """
-    CREATE (c:Entity {
-      identifier: $identifier,
-      cik: $cik,
-      name: $name,
-      legal_name: $legal_name,
-      sic: $sic,
-      sic_description: $sic_description,
-      category: $category,
-      state_of_incorporation: $state_of_incorporation,
-      fiscal_year_end: $fiscal_year_end,
-      ein: $ein,
-      website: $website,
-      status: $status,
-      created_at: $created_at,
-      updated_at: $updated_at
-    })
-    RETURN c.identifier as identifier, c.name as name, c.website as website,
-           c.cik as cik, c.sic as sic, c.sic_description as sic_description,
-           c.category as category, c.state_of_incorporation as state_of_incorporation,
-           c.fiscal_year_end as fiscal_year_end, c.ein as ein, c.status as status,
-           c.created_at as created_at, c.updated_at as updated_at
+  async def _create_entity_in_graph_kuzu(
+    self,
+    kuzu_client: GraphClient,
+    entity_data: EntityCreate,
+    graph_id: str,
+    user_id: str,
+  ) -> EntityResponse:
     """
+    Create entity node using the controlled table → file → ingest pattern.
 
-    # Execute the query
+    This method follows the controlled ingestion workflow:
+    1. Generate entity data
+    2. Convert to Parquet
+    3. Upload to S3
+    4. Create GraphFile record
+    5. Trigger ingestion
+    """
+    logger.info(
+      f"Creating entity node in graph {graph_id} using controlled ingestion pattern"
+    )
+
+    import uuid
+
     try:
-      result = await kuzu_client.query(
-        cypher=create_query, graph_id=graph_id, parameters=entity_properties
+      # Step 1: Generate entity data
+      entity_row = self._generate_entity_data_for_upload(entity_data, graph_id)
+      logger.info(f"Generated entity data for {entity_row['identifier']}")
+
+      # Step 2: Convert to Parquet in-memory
+      import pyarrow as pa
+      import pyarrow.parquet as pq
+      import io
+
+      schema_fields = [
+        ("identifier", pa.string()),
+        ("uri", pa.string()),
+        ("scheme", pa.string()),
+        ("cik", pa.string()),
+        ("ticker", pa.string()),
+        ("exchange", pa.string()),
+        ("name", pa.string()),
+        ("legal_name", pa.string()),
+        ("industry", pa.string()),
+        ("entity_type", pa.string()),
+        ("sic", pa.string()),
+        ("sic_description", pa.string()),
+        ("category", pa.string()),
+        ("state_of_incorporation", pa.string()),
+        ("fiscal_year_end", pa.string()),
+        ("ein", pa.string()),
+        ("tax_id", pa.string()),
+        ("lei", pa.string()),
+        ("phone", pa.string()),
+        ("website", pa.string()),
+        ("status", pa.string()),
+        ("is_parent", pa.bool_()),
+        ("parent_entity_id", pa.string()),
+        ("created_at", pa.string()),
+        ("updated_at", pa.string()),
+      ]
+      schema = pa.schema(pa.field(name, type_) for name, type_ in schema_fields)
+      table_data = {name: [entity_row.get(name)] for name, _ in schema_fields}
+      table = pa.Table.from_pydict(table_data, schema=schema)
+      parquet_buffer = io.BytesIO()
+      pq.write_table(table, parquet_buffer)
+      parquet_bytes = parquet_buffer.getvalue()
+      parquet_buffer.seek(0)
+
+      logger.info(f"Converted entity data to Parquet ({len(parquet_bytes)} bytes)")
+
+      # Step 3: Upload to S3
+      from ...adapters.s3 import S3Client
+      from ...models.iam import GraphFile, GraphTable
+
+      s3_client = S3Client()
+      file_id = str(uuid.uuid4())
+      s3_key = f"user-staging/{user_id}/{graph_id}/Entity/{file_id}/entity.parquet"
+
+      s3_client.s3_client.upload_fileobj(parquet_buffer, env.AWS_S3_BUCKET, s3_key)
+
+      logger.info(f"Uploaded entity Parquet to S3: {s3_key}")
+
+      # Step 4: Create GraphFile record
+      entity_table = GraphTable.get_by_name(graph_id, "Entity", self.session)
+      if not entity_table:
+        raise RuntimeError(
+          f"Entity table not found for graph {graph_id}. "
+          "Ensure create_tables_from_schema was called."
+        )
+
+      graph_file = GraphFile.create(
+        graph_id=graph_id,
+        table_id=entity_table.id,
+        file_name="entity.parquet",
+        s3_key=s3_key,
+        file_format="parquet",
+        file_size_bytes=len(parquet_bytes),
+        upload_method="direct",
+        upload_status="completed",
+        row_count=1,
+        session=self.session,
+        commit=False,
       )
 
-      # Extract the created entity from result
-      # The Graph API returns data in result["data"] not result["rows"]
-      if isinstance(result, dict) and result.get("data") and len(result["data"]) > 0:
-        # The entity data comes directly with field names
-        created_entity = result["data"][0]
+      # Step 5: Update table file count
+      entity_table.file_count = (entity_table.file_count or 0) + 1
+      self.session.commit()
 
-        return EntityResponse(
-          id=created_entity.get("identifier"),  # Use identifier field as id
-          name=created_entity.get("name"),
-          uri=created_entity.get("website"),  # website maps to uri
-          cik=created_entity.get("cik"),
-          database=graph_id,
-          sic=created_entity.get("sic"),
-          sic_description=created_entity.get("sic_description"),
-          category=created_entity.get("category"),
-          state_of_incorporation=created_entity.get("state_of_incorporation"),
-          fiscal_year_end=created_entity.get("fiscal_year_end"),
-          ein=created_entity.get("ein"),
-          created_at=created_entity.get("created_at"),
-          updated_at=created_entity.get("updated_at"),
-        )
-      else:
-        raise RuntimeError("Failed to create entity node - no data returned")
+      logger.info(f"Created GraphFile record {graph_file.id}")
+
+      # Step 6: Trigger ingestion via Graph API
+      s3_pattern = f"s3://{env.AWS_S3_BUCKET}/user-staging/{user_id}/{graph_id}/Entity/**/*.parquet"
+
+      logger.info(f"Creating DuckDB staging table with pattern: {s3_pattern}")
+      await kuzu_client.create_table(
+        graph_id=graph_id, table_name="Entity", s3_pattern=s3_pattern
+      )
+
+      logger.info("Ingesting Entity table to Kuzu graph database")
+      ingest_response = await kuzu_client.ingest_table_to_graph(
+        graph_id=graph_id,
+        table_name="Entity",
+        ignore_errors=False,
+        rebuild=False,
+      )
+
+      rows_ingested = ingest_response.get("rows_ingested", 0)
+      logger.info(f"Entity node created via controlled ingestion: {rows_ingested} rows")
+
+      # Step 7: Return EntityResponse
+      return EntityResponse(
+        id=entity_row["identifier"],
+        name=entity_row["name"],
+        uri=entity_row["website"],
+        cik=entity_row["cik"],
+        database=graph_id,
+        sic=entity_row["sic"],
+        sic_description=entity_row["sic_description"],
+        category=entity_row["category"],
+        state_of_incorporation=entity_row["state_of_incorporation"],
+        fiscal_year_end=entity_row["fiscal_year_end"],
+        ein=entity_row["ein"],
+        created_at=entity_row["created_at"],
+        updated_at=entity_row["updated_at"],
+      )
+
     except Exception as e:
-      logger.error(f"Failed to create entity node: {type(e).__name__}: {str(e)}")
-      response_detail = getattr(e, "response", None)
-      if response_detail:
-        logger.error(f"Response details: {response_detail}")
-      raise RuntimeError(f"Failed to create entity node: {str(e)}")
-
-  async def _create_entity_in_graph(
-    self, repository: GraphClient, entity_data: EntityCreate, graph_id: str
-  ) -> EntityResponse:
-    """Create entity node in the graph."""
-    logger.info(f"Creating entity node in graph: {graph_id}")
-
-    import datetime
-
-    # Generate entity identifier
-    entity_identifier = f"entity_{graph_id}"
-    current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-    # Create entity node using base schema properties with required primary key
-    create_entity_cypher = """
-        CREATE (c:Entity {
-            id: $id,
-            identifier: $identifier,
-            name: $name,
-            website: $website,
-            created_at: $created_at,
-            updated_at: $updated_at
-        })
-        RETURN c.identifier as identifier, c.name as name, c.website as website,
-           c.cik as cik, c.sic as sic, c.sic_description as sic_description,
-           c.category as category, c.state_of_incorporation as state_of_incorporation,
-           c.fiscal_year_end as fiscal_year_end, c.ein as ein, c.status as status,
-           c.created_at as created_at, c.updated_at as updated_at
-        """
-
-    entity_params = {
-      "id": entity_identifier,  # Use entity_identifier as the primary key id
-      "identifier": entity_identifier,
-      "name": entity_data.name,
-      "website": entity_data.uri
-      or "",  # Store URI as website since uri property doesn't exist
-      "created_at": current_time,
-      "updated_at": current_time,
-    }
-
-    # All repositories should have async methods in the new architecture
-    result = await repository.execute_single(create_entity_cypher, entity_params)
-
-    if not result:
-      raise RuntimeError("Failed to create entity node")
-
-    logger.info(f"Entity node created successfully: {entity_identifier}")
-
-    # Return entity response
-    return EntityResponse(
-      id=entity_identifier,
-      name=entity_data.name,
-      uri=entity_data.uri,
-      created_at=current_time,
-      updated_at=current_time,
-    )
+      logger.error(
+        f"Failed to create entity node via controlled ingestion: {type(e).__name__}: {str(e)}"
+      )
+      raise RuntimeError(
+        f"Failed to create entity node via controlled ingestion: {str(e)}"
+      )
 
   def _create_user_graph_relationship(
     self,
