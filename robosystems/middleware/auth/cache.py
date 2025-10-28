@@ -550,8 +550,9 @@ class APIKeyCache:
         is_active: Whether the API key is active
     """
     try:
-      # Validate input data integrity
-      if not self._validate_user_data_integrity(user_data):
+      # Validate input data integrity for positive cache entries
+      # Negative cache entries (is_active=False) may have empty user_data
+      if is_active and not self._validate_user_data_integrity(user_data):
         logger.error("Refusing to cache invalid user data")
         return
 

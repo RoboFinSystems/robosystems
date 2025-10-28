@@ -22,13 +22,7 @@
       "label": "RoboSystems Start",
       "type": "shell",
       "command": "just",
-      "args": [
-        "start",
-        "${input:profileDocker}",
-        "${input:envFile}",
-        "${input:buildDocker}",
-        "${input:detachedDocker}"
-      ],
+      "args": ["start", "${input:profileDocker}"],
       "problemMatcher": []
     },
     {
@@ -42,14 +36,14 @@
       "label": "RoboSystems Restart",
       "type": "shell",
       "command": "just",
-      "args": ["restart", "${input:profileDocker}", "${input:envFile}"],
+      "args": ["restart", "${input:profileDocker}"],
       "problemMatcher": []
     },
     {
       "label": "RoboSystems Rebuild",
       "type": "shell",
       "command": "just",
-      "args": ["rebuild", "${input:profileDocker}", "${input:envFile}"],
+      "args": ["rebuild", "${input:profileDocker}"],
       "problemMatcher": []
     },
     {
@@ -210,14 +204,14 @@
       "label": "Migrate Up",
       "type": "shell",
       "command": "just",
-      "args": ["migrate-up", "${input:envFile}"],
+      "args": ["migrate-up"],
       "problemMatcher": []
     },
     {
       "label": "Migrate Down",
       "type": "shell",
       "command": "just",
-      "args": ["migrate-down", "${input:envFile}"],
+      "args": ["migrate-down"],
       "problemMatcher": []
     },
     {
@@ -236,26 +230,6 @@
     }
   ],
   "inputs": [
-    {
-      "id": "buildDocker",
-      "type": "pickString",
-      "description": "Choose Docker build type:",
-      "default": "",
-      "options": ["", "--build"]
-    },
-    {
-      "id": "detachedDocker",
-      "type": "pickString",
-      "description": "Choose Docker run type:",
-      "default": "--detach",
-      "options": ["", "--detach"]
-    },
-    {
-      "id": "envFile",
-      "type": "promptString",
-      "description": "Choose .env file:",
-      "default": ".env"
-    },
     {
       "id": "environment",
       "type": "pickString",

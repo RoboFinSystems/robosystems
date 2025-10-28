@@ -285,11 +285,34 @@ class XBRLDuckDBGraphProcessor:
         "This approach loads ALL files from S3 and should rebuild the graph."
       )
 
+    if rebuild:
+      logger.info(
+        f"Rebuild requested - regenerating entire Kuzu database for {self.graph_id}"
+      )
+      from robosystems.database import SessionLocal
+      from robosystems.models.iam import GraphSchema
+
+      db = SessionLocal()
+      try:
+        await graph_client.delete_database(self.graph_id)
+        logger.info(f"Deleted Kuzu database: {self.graph_id}")
+
+        schema = GraphSchema.get_active_schema(self.graph_id, db)
+        if not schema:
+          raise ValueError(f"No schema found for graph {self.graph_id}")
+
+        await graph_client.create_database(
+          graph_id=self.graph_id,
+          schema_type=schema.schema_type,
+          custom_schema_ddl=schema.schema_ddl,
+        )
+        logger.info(f"Recreated Kuzu database with schema type: {schema.schema_type}")
+      finally:
+        db.close()
+
     total_rows = 0
     total_time_ms = 0.0
     results = []
-
-    first_table = True
 
     for table_name in table_names:
       logger.info(f"Ingesting table: {table_name}")
@@ -299,7 +322,6 @@ class XBRLDuckDBGraphProcessor:
           graph_id=self.graph_id,
           table_name=table_name,
           ignore_errors=True,
-          rebuild=rebuild and first_table,
         )
 
         total_rows += response.get("rows_ingested", 0)
@@ -318,8 +340,6 @@ class XBRLDuckDBGraphProcessor:
           f"{response.get('rows_ingested', 0)} rows in "
           f"{response.get('execution_time_ms', 0):.2f}ms"
         )
-
-        first_table = False
 
       except Exception as e:
         logger.error(f"Failed to ingest table {table_name}: {e}")

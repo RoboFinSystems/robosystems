@@ -805,7 +805,6 @@ class EntityGraphService:
         graph_id=graph_id,
         table_name="Entity",
         ignore_errors=False,
-        rebuild=False,
       )
 
       rows_ingested = ingest_response.get("rows_ingested", 0)
