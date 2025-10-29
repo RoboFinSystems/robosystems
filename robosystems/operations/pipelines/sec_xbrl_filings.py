@@ -1008,7 +1008,8 @@ class SECXBRLPipeline:
       logger.info(f"Processing raw file: {cik}/{accession_number}")
 
       # Download raw file from S3 to temp location
-      temp_zip_path = tempfile.mktemp(suffix=".zip")
+      with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as temp_file:
+        temp_zip_path = temp_file.name
 
       try:
         self.s3_client.download_file(self.raw_bucket, raw_file_key, temp_zip_path)
