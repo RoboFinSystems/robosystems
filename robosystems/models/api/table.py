@@ -1,5 +1,22 @@
 from typing import List, Any, Optional
+from enum import Enum
 from pydantic import BaseModel, Field
+
+
+class FileUploadStatus(str, Enum):
+  """File upload status enumeration.
+
+  Status lifecycle:
+  - PENDING: Upload URL generated, awaiting file upload
+  - UPLOADED: File successfully uploaded to S3 and validated
+  - DISABLED: File excluded from ingestion (soft exclusion)
+  - ARCHIVED: File soft-deleted (not shown in listings)
+  """
+
+  PENDING = "pending"
+  UPLOADED = "uploaded"
+  DISABLED = "disabled"
+  ARCHIVED = "archived"
 
 
 class TableCreate(BaseModel):
@@ -128,3 +145,51 @@ class BulkIngestResponse(BaseModel):
   results: List[TableIngestResult] = Field(
     ..., description="Per-table ingestion results"
   )
+
+
+class FileInfo(BaseModel):
+  file_id: str = Field(..., description="Unique file identifier")
+  file_name: str = Field(..., description="Original file name")
+  file_format: str = Field(..., description="File format (parquet, csv, etc.)")
+  size_bytes: int = Field(..., description="File size in bytes")
+  row_count: Optional[int] = Field(None, description="Estimated row count")
+  upload_status: str = Field(..., description="Current upload status")
+  upload_method: str = Field(..., description="Upload method used")
+  created_at: Optional[str] = Field(None, description="File creation timestamp")
+  uploaded_at: Optional[str] = Field(
+    None, description="File upload completion timestamp"
+  )
+  s3_key: str = Field(..., description="S3 object key")
+
+
+class ListTableFilesResponse(BaseModel):
+  graph_id: str = Field(..., description="Graph database identifier")
+  table_name: str = Field(..., description="Table name")
+  files: List[FileInfo] = Field(..., description="List of files in the table")
+  total_files: int = Field(..., description="Total number of files")
+  total_size_bytes: int = Field(..., description="Total size of all files in bytes")
+
+
+class GetFileInfoResponse(BaseModel):
+  file_id: str = Field(..., description="Unique file identifier")
+  graph_id: str = Field(..., description="Graph database identifier")
+  table_id: str = Field(..., description="Table identifier")
+  table_name: Optional[str] = Field(None, description="Table name")
+  file_name: str = Field(..., description="Original file name")
+  file_format: str = Field(..., description="File format (parquet, csv, etc.)")
+  size_bytes: int = Field(..., description="File size in bytes")
+  row_count: Optional[int] = Field(None, description="Estimated row count")
+  upload_status: str = Field(..., description="Current upload status")
+  upload_method: str = Field(..., description="Upload method used")
+  created_at: Optional[str] = Field(None, description="File creation timestamp")
+  uploaded_at: Optional[str] = Field(
+    None, description="File upload completion timestamp"
+  )
+  s3_key: str = Field(..., description="S3 object key")
+
+
+class DeleteFileResponse(BaseModel):
+  status: str = Field(..., description="Deletion status")
+  file_id: str = Field(..., description="Deleted file ID")
+  file_name: str = Field(..., description="Deleted file name")
+  message: str = Field(..., description="Operation message")

@@ -247,11 +247,10 @@ class GraphSyncClient:
     graph_id: str,
     table_name: str,
     ignore_errors: bool = True,
-    rebuild: bool = False,
   ) -> Dict[str, Any]:
     """Ingest a DuckDB staging table into the Kuzu graph (sync wrapper)."""
     return self._run_async(
-      self._client.ingest_table_to_graph(graph_id, table_name, ignore_errors, rebuild)
+      self._client.ingest_table_to_graph(graph_id, table_name, ignore_errors)
     )
 
   # Setters for compatibility

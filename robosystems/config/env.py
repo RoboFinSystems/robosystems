@@ -584,6 +584,9 @@ class EnvConfig:
   JWT_CACHE_TTL = get_int_env("JWT_CACHE_TTL", 1800)  # 30 minutes
   API_KEY_CACHE_TTL = get_int_env("API_KEY_CACHE_TTL", 300)  # 5 minutes
 
+  # Distributed lock TTLs
+  INGESTION_LOCK_TTL = get_int_env("INGESTION_LOCK_TTL", 3600)  # 1 hour
+
   # ==========================================================================
   # AWS CONFIGURATION
   # ==========================================================================

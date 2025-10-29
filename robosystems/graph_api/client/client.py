@@ -1166,7 +1166,6 @@ class GraphClient(BaseGraphClient):
     graph_id: str,
     table_name: str,
     ignore_errors: bool = True,
-    rebuild: bool = False,
   ) -> Dict[str, Any]:
     """
     Ingest a DuckDB staging table into the Kuzu graph.
@@ -1175,7 +1174,6 @@ class GraphClient(BaseGraphClient):
         graph_id: Graph database identifier
         table_name: Table name to ingest
         ignore_errors: Continue on row errors
-        rebuild: Rebuild graph database from scratch before ingestion
 
     Returns:
         Ingestion response with rows ingested and timing
@@ -1185,7 +1183,6 @@ class GraphClient(BaseGraphClient):
       f"/databases/{graph_id}/tables/{table_name}/ingest",
       json_data={
         "ignore_errors": ignore_errors,
-        "rebuild": rebuild,
       },
     )
     return response.json()

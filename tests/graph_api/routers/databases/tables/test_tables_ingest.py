@@ -30,30 +30,8 @@ def test_ingest_rejects_read_only(monkeypatch, app_client):
 
   response = client.post(
     "/databases/graph-123/tables/Entity/ingest",
-    json={"ignore_errors": True, "rebuild": False},
+    json={"ignore_errors": True},
   )
 
   assert response.status_code == 403
   assert "not allowed" in response.json()["detail"]
-
-
-def test_ingest_rebuild_missing_graph(monkeypatch, app_client):
-  cluster_service = SimpleNamespace(read_only=False)
-  app_client.dependency_overrides[get_cluster_service] = lambda: cluster_service
-
-  # Simulate Graph lookup returning None during rebuild
-  monkeypatch.setattr(
-    ingest.Graph,
-    "get_by_id",
-    classmethod(lambda cls, graph_id, db: None),
-  )
-
-  client = TestClient(app_client)
-
-  response = client.post(
-    "/databases/graph-123/tables/Entity/ingest",
-    json={"ignore_errors": True, "rebuild": True},
-  )
-
-  assert response.status_code == 500
-  assert "not found" in response.json()["detail"]
