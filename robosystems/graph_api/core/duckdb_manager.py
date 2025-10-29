@@ -466,7 +466,7 @@ class DuckDBTableManager:
         HTTPException: If table doesn't exist
     """
     import time
-    from robosystems.database import SessionLocal
+    from robosystems.database import SessionFactory
     from robosystems.models.iam.graph_table import GraphTable
     from robosystems.models.iam.graph_file import GraphFile
 
@@ -475,7 +475,7 @@ class DuckDBTableManager:
     logger.info(f"Refreshing external table {table_name} for graph {graph_id}")
 
     pool = get_duckdb_pool()
-    db = SessionLocal()
+    db = SessionFactory()
 
     try:
       graph_table = GraphTable.get_by_name(graph_id, table_name, db)
