@@ -170,7 +170,7 @@ def ensure_user_credentials(
       print(f"   Response: {register_response.content}")
     sys.exit(1)
 
-  user_id = register_response.parsed.user.id
+  user_id = register_response.parsed.user["id"]
   print(f"✅ User created: {user_name} ({user_email})")
   print(f"   User ID: {user_id}")
 

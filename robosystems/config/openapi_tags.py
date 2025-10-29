@@ -8,7 +8,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Query",
-    "description": "🔍 Graph queries - Execute Cypher (read/write) queries against graph databases",
+    "description": "🔍 Graph queries - Execute Cypher (read only) queries against graph databases",
   },
   {
     "name": "MCP",

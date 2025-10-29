@@ -45,7 +45,7 @@ uv run 01_setup_credentials.py --force  # Create new credentials
 
 ### Step 2: Create Graph
 
-Creates a new generic graph database for the custom graph demo.
+Creates a new generic graph database using the custom schema defined in `schema.json`.
 
 ```bash
 uv run 02_create_graph.py
@@ -55,7 +55,9 @@ uv run 02_create_graph.py --name "My Custom Graph Demo"
 uv run 02_create_graph.py --reuse  # Reuse existing graph
 ```
 
-**Output**: Graph created, graph_id saved to credentials
+**Output**: Graph created with custom schema, graph_id saved to credentials
+
+**Note**: The graph structure is defined in `schema.json` - you can customize this file to create your own graph schema!
 
 ### Step 3: Generate Data
 
@@ -201,17 +203,44 @@ ORDER BY cross_company_pairs DESC
 
 ### Graph Schema
 
-**Nodes:**
+The graph schema is defined in **`schema.json`** - a standalone JSON file that specifies the structure of your graph database. This file serves as a template you can copy and customize for your own use cases.
+
+**Schema Location:** `examples/custom_graph_demo/schema.json`
+
+**Node Types:**
 
 - `Person`: Individual people with properties like name, age, and interests
 - `Company`: Organizations with properties like industry and location
 - `Project`: Work initiatives with properties like status and budget
 
-**Relationships:**
+**Relationship Types:**
 
 - `PERSON_WORKS_FOR_COMPANY`: Employment relationships between people and companies
 - `PERSON_WORKS_ON_PROJECT`: Project participation relationships
 - `COMPANY_SPONSORS_PROJECT`: Sponsorship relationships between companies and projects
+
+**Customizing the Schema:**
+
+The `schema.json` file is the **official template** for creating custom graph schemas in RoboSystems. To create your own schema:
+
+1. Copy the schema file: `cp schema.json my_schema.json`
+2. Modify the nodes, properties, and relationships for your use case
+3. Update `02_create_graph.py` to load your custom schema file
+4. Generate data matching your schema structure
+
+**Schema Format:**
+
+```json
+{
+  "name": "your_schema_name",
+  "version": "1.0.0",
+  "description": "Your schema description",
+  "extends": "base",
+  "nodes": [...],
+  "relationships": [...],
+  "metadata": {...}
+}
+```
 
 ### Data Format
 
@@ -234,6 +263,42 @@ This demo demonstrates best practices for graph database design:
 - **Query patterns**: Examples for aggregations, path exploration, and team analysis
 
 ## 🔧 Advanced Usage
+
+### Customize the Schema
+
+The `schema.json` file is your starting point for creating custom graph structures. Here's how to customize it:
+
+```bash
+# 1. Copy the example schema
+cp schema.json my_custom_schema.json
+
+# 2. Edit my_custom_schema.json to add your own:
+#    - Node types (e.g., Product, Order, Customer)
+#    - Properties (e.g., price, quantity, status)
+#    - Relationships (e.g., CUSTOMER_PLACED_ORDER)
+
+# 3. Update 02_create_graph.py to load your schema:
+#    Change: schema_file = Path(__file__).parent / "my_custom_schema.json"
+
+# 4. Generate matching data and run the pipeline
+uv run 02_create_graph.py
+uv run 03_generate_data.py
+uv run 04_upload_ingest.py
+```
+
+**Example: Adding a new node type**
+
+```json
+{
+  "name": "Product",
+  "properties": [
+    {"name": "identifier", "type": "STRING", "is_primary_key": true},
+    {"name": "name", "type": "STRING", "is_required": true},
+    {"name": "price", "type": "DOUBLE"},
+    {"name": "category", "type": "STRING"}
+  ]
+}
+```
 
 ### Generate More Data
 
@@ -331,11 +396,13 @@ just install
 
 ## 💡 Tips
 
+- **`schema.json` is your template** - Copy and customize it for your own graph database schemas
 - All scripts can be run independently after their dependencies are met
 - Credentials and data are saved locally and reused across runs
 - Use `--force` or `--regenerate` flags to start fresh
 - The demo uses auto-generated test data - perfect for exploring the API
 - Check the generated Parquet files in `data/` to see the data structure
+- Review `schema.json` to understand the complete graph structure before querying
 
 ## 🎉 Success!
 
