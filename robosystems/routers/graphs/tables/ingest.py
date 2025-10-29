@@ -66,6 +66,7 @@ from robosystems.models.api.table import (
   BulkIngestRequest,
   BulkIngestResponse,
   TableIngestResult,
+  FileUploadStatus,
 )
 from robosystems.models.api.common import ErrorResponse
 from robosystems.middleware.auth.dependencies import get_current_user
@@ -83,6 +84,10 @@ from robosystems.middleware.otel.metrics import (
 )
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.config import env
+from robosystems.config.valkey_registry import (
+  ValkeyDatabase,
+  create_async_redis_client,
+)
 import time
 
 router = APIRouter()
@@ -172,12 +177,18 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/kg123/tables/ingest" \\
 }
 ```
 
+**Concurrency Control:**
+Only one ingestion can run per graph at a time. If another ingestion is in progress,
+you'll receive a 409 Conflict error. The distributed lock automatically expires after
+1 hour to prevent deadlocks from failed ingestions.
+
 **Tips:**
 - Only files with 'uploaded' status are processed
 - Tables with no uploaded files are skipped
 - Use `ignore_errors=false` for strict validation
 - Monitor progress via per-table results
 - Check graph metadata for rebuild status
+- Wait for current ingestion to complete before starting another
 
 **Note:**
 Table ingestion is included - no credit consumption.""",
@@ -213,6 +224,10 @@ Table ingestion is included - no credit consumption.""",
       "model": ErrorResponse,
     },
     404: {"description": "Graph not found", "model": ErrorResponse},
+    409: {
+      "description": "Conflict - another ingestion is already in progress for this graph",
+      "model": ErrorResponse,
+    },
     500: {
       "description": "Ingestion failed - check per-table results for details",
       "model": ErrorResponse,
@@ -253,7 +268,53 @@ async def ingest_tables(
       detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
+  redis_client = create_async_redis_client(ValkeyDatabase.DISTRIBUTED_LOCKS)
+  lock_key = f"ingestion_lock:{graph_id}"
+  lock_ttl = 3600
+  lock_acquired = False
+
   try:
+    lock_acquired = await redis_client.set(
+      lock_key,
+      f"{current_user.id}:{start_time_dt.isoformat()}",
+      nx=True,
+      ex=lock_ttl,
+    )
+
+    if not lock_acquired:
+      lock_info = await redis_client.get(lock_key)
+
+      api_logger.warning(
+        "Ingestion already in progress",
+        extra={
+          "component": "tables_api",
+          "action": "ingestion_blocked",
+          "user_id": str(current_user.id),
+          "graph_id": graph_id,
+          "lock_holder": lock_info,
+          "metadata": {
+            "endpoint": "/v1/graphs/{graph_id}/tables/ingest",
+          },
+        },
+      )
+
+      raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"Another ingestion is already in progress for graph {graph_id}. "
+        f"Please wait for it to complete before starting a new one. "
+        f"If the previous ingestion failed, the lock will automatically expire in up to 1 hour.",
+      )
+
+    api_logger.info(
+      "Ingestion lock acquired",
+      extra={
+        "component": "tables_api",
+        "action": "lock_acquired",
+        "user_id": str(current_user.id),
+        "graph_id": graph_id,
+        "lock_ttl": lock_ttl,
+      },
+    )
     repo = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
 
     if not repo:
@@ -396,11 +457,13 @@ async def ingest_tables(
       table_start = time.time()
 
       all_table_files = GraphFile.get_all_for_table(table.id, db)
-      uploaded_files = [f for f in all_table_files if f.upload_status == "uploaded"]
+      uploaded_files = [
+        f for f in all_table_files if f.upload_status == FileUploadStatus.UPLOADED.value
+      ]
 
       if not uploaded_files:
         logger.info(
-          f"Skipping table {table.table_name} - no files with 'uploaded' status (found {len(all_table_files)} files total)"
+          f"Skipping table {table.table_name} - no files with '{FileUploadStatus.UPLOADED.value}' status (found {len(all_table_files)} files total)"
         )
         results.append(
           TableIngestResult(
@@ -485,21 +548,29 @@ async def ingest_tables(
       f"{total_rows_ingested} total rows in {total_execution_ms:.2f}ms"
     )
 
-    if request.rebuild and overall_status in ["success", "partial"]:
+    if request.rebuild:
       graph = Graph.get_by_id(graph_id, db)
       if graph:
         graph_metadata = {**graph.graph_metadata} if graph.graph_metadata else {}
-        graph_metadata["status"] = "available"
-        graph_metadata["rebuild_completed_at"] = time.time()
-        if "rebuild_started_at" in graph_metadata:
-          rebuild_duration = (
-            graph_metadata["rebuild_completed_at"]
-            - graph_metadata["rebuild_started_at"]
+        if overall_status in ["success", "partial"]:
+          graph_metadata["status"] = "available"
+          graph_metadata["rebuild_completed_at"] = time.time()
+          if "rebuild_started_at" in graph_metadata:
+            rebuild_duration = (
+              graph_metadata["rebuild_completed_at"]
+              - graph_metadata["rebuild_started_at"]
+            )
+            graph_metadata["last_rebuild_duration_seconds"] = rebuild_duration
+          logger.info(f"Graph {graph_id} marked as available after rebuild")
+        elif overall_status == "failed":
+          graph_metadata["status"] = "rebuild_failed"
+          graph_metadata["rebuild_failed_at"] = time.time()
+          graph_metadata["rebuild_failure_reason"] = "All tables failed ingestion"
+          logger.warning(
+            f"Graph {graph_id} marked as rebuild_failed - all tables failed ingestion"
           )
-          graph_metadata["last_rebuild_duration_seconds"] = rebuild_duration
         graph.graph_metadata = graph_metadata
         db.commit()
-        logger.info(f"Graph {graph_id} marked as available after rebuild")
 
     circuit_breaker.record_success(graph_id, "table_ingest")
 
@@ -602,3 +673,35 @@ async def ingest_tables(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to ingest tables: {str(e)}",
     )
+
+  finally:
+    if lock_acquired:
+      try:
+        await redis_client.delete(lock_key)
+        api_logger.info(
+          "Ingestion lock released",
+          extra={
+            "component": "tables_api",
+            "action": "lock_released",
+            "user_id": str(current_user.id),
+            "graph_id": graph_id,
+            "duration_ms": (datetime.now(timezone.utc) - start_time_dt).total_seconds()
+            * 1000,
+          },
+        )
+      except Exception as lock_error:
+        logger.error(
+          f"Failed to release ingestion lock for graph {graph_id}: {lock_error}",
+          extra={
+            "component": "tables_api",
+            "action": "lock_release_failed",
+            "user_id": str(current_user.id),
+            "graph_id": graph_id,
+            "error_type": type(lock_error).__name__,
+          },
+        )
+
+    try:
+      await redis_client.close()
+    except Exception as close_error:
+      logger.warning(f"Failed to close Redis client: {close_error}")

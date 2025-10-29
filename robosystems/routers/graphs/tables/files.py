@@ -46,6 +46,12 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User, GraphTable, GraphFile
 from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.table import (
+  FileUploadStatus,
+  ListTableFilesResponse,
+  GetFileInfoResponse,
+  DeleteFileResponse,
+)
 from robosystems.middleware.auth.dependencies import get_current_user
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
@@ -67,7 +73,8 @@ router = APIRouter()
 
 @router.get(
   "/tables/{table_name}/files",
-  response_model=dict,
+  response_model=ListTableFilesResponse,
+  operation_id="listTableFiles",
   summary="List Files in Staging Table",
   description="""List all files uploaded to a staging table with comprehensive metadata.
 
@@ -190,7 +197,7 @@ async def list_table_files(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
-) -> dict:
+) -> ListTableFilesResponse:
   """
   List all files in a staging table with metadata.
 
@@ -264,10 +271,10 @@ async def list_table_files(
       },
     )
 
-    return {
-      "graph_id": graph_id,
-      "table_name": table_name,
-      "files": [
+    return ListTableFilesResponse(
+      graph_id=graph_id,
+      table_name=table_name,
+      files=[
         {
           "file_id": f.id,
           "file_name": f.file_name,
@@ -282,9 +289,9 @@ async def list_table_files(
         }
         for f in files
       ],
-      "total_files": len(files),
-      "total_size_bytes": total_size,
-    }
+      total_files=len(files),
+      total_size_bytes=total_size,
+    )
 
   except HTTPException:
     raise
@@ -329,6 +336,8 @@ async def list_table_files(
 
 @router.get(
   "/tables/files/{file_id}",
+  response_model=GetFileInfoResponse,
+  operation_id="getFileInfo",
   summary="Get File Information",
   description="""Get detailed information about a specific file.
 
@@ -418,7 +427,7 @@ async def get_file_info(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
-) -> dict:
+) -> GetFileInfoResponse:
   """
   Get detailed information about a specific file.
 
@@ -477,21 +486,21 @@ async def get_file_info(
       },
     )
 
-    return {
-      "file_id": file.id,
-      "graph_id": file.graph_id,
-      "table_id": file.table_id,
-      "table_name": table.table_name if table else None,
-      "file_name": file.file_name,
-      "file_format": file.file_format,
-      "size_bytes": file.file_size_bytes,
-      "row_count": file.row_count,
-      "upload_status": file.upload_status,
-      "upload_method": file.upload_method,
-      "created_at": file.created_at.isoformat() if file.created_at else None,
-      "uploaded_at": file.uploaded_at.isoformat() if file.uploaded_at else None,
-      "s3_key": file.s3_key,
-    }
+    return GetFileInfoResponse(
+      file_id=file.id,
+      graph_id=file.graph_id,
+      table_id=file.table_id,
+      table_name=table.table_name if table else None,
+      file_name=file.file_name,
+      file_format=file.file_format,
+      size_bytes=file.file_size_bytes,
+      row_count=file.row_count,
+      upload_status=file.upload_status,
+      upload_method=file.upload_method,
+      created_at=file.created_at.isoformat() if file.created_at else None,
+      uploaded_at=file.uploaded_at.isoformat() if file.uploaded_at else None,
+      s3_key=file.s3_key,
+    )
 
   except HTTPException:
     raise
@@ -535,6 +544,8 @@ async def get_file_info(
 
 @router.delete(
   "/tables/files/{file_id}",
+  response_model=DeleteFileResponse,
+  operation_id="deleteFile",
   summary="Delete File from Staging",
   description="""Delete a file from S3 storage and database tracking.
 
@@ -625,7 +636,7 @@ async def delete_file(
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
-) -> dict:
+) -> DeleteFileResponse:
   """
   Delete a file from S3 and database tracking.
 
@@ -698,7 +709,9 @@ async def delete_file(
       else:
         all_files = GraphFile.get_all_for_table(table.id, db)
         remaining_files = [
-          f for f in all_files if f.id != file.id and f.upload_status == "completed"
+          f
+          for f in all_files
+          if f.id != file.id and f.upload_status == FileUploadStatus.UPLOADED.value
         ]
         new_row_count = sum(
           f.row_count for f in remaining_files if f.row_count is not None
@@ -751,12 +764,12 @@ async def delete_file(
       f"DuckDB will automatically exclude it from queries"
     )
 
-    return {
-      "status": "deleted",
-      "file_id": file_id,
-      "file_name": file_name,
-      "message": "File deleted successfully. DuckDB will automatically exclude it from queries.",
-    }
+    return DeleteFileResponse(
+      status="deleted",
+      file_id=file_id,
+      file_name=file_name,
+      message="File deleted successfully. DuckDB will automatically exclude it from queries.",
+    )
 
   except HTTPException:
     raise

@@ -70,6 +70,7 @@ from robosystems.models.api.table import (
   FileUploadRequest,
   FileUploadResponse,
   FileStatusUpdate,
+  FileUploadStatus,
 )
 from robosystems.models.api.common import ErrorResponse
 from robosystems.middleware.auth.dependencies import get_current_user
@@ -350,7 +351,7 @@ async def get_upload_url(
       file_format=file_format,
       file_size_bytes=0,
       upload_method="presigned_url",
-      upload_status="pending",
+      upload_status=FileUploadStatus.PENDING.value,
       row_count=None,
       session=db,
     )
@@ -594,11 +595,16 @@ async def update_file_status(
         detail=f"File {file_id} not found",
       )
 
-    VALID_STATUSES = {"uploaded", "disabled", "archived"}
-    if request.status not in VALID_STATUSES:
+    # Validate status using enum (exclude PENDING - users can't set files back to pending)
+    valid_statuses = {
+      FileUploadStatus.UPLOADED.value,
+      FileUploadStatus.DISABLED.value,
+      FileUploadStatus.ARCHIVED.value,
+    }
+    if request.status not in valid_statuses:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Invalid status '{request.status}'. Must be one of: {', '.join(VALID_STATUSES)}",
+        detail=f"Invalid status '{request.status}'. Must be one of: {', '.join(valid_statuses)}",
       )
 
     api_logger.info(
@@ -620,8 +626,8 @@ async def update_file_status(
       f"Updating file {file_id} status to '{request.status}' in graph {graph_id}"
     )
 
-    if request.status == "disabled":
-      graph_file.upload_status = "disabled"
+    if request.status == FileUploadStatus.DISABLED.value:
+      graph_file.upload_status = FileUploadStatus.DISABLED.value
       db.commit()
       db.refresh(graph_file)
 
@@ -648,8 +654,8 @@ async def update_file_status(
         "message": "File disabled and excluded from ingestion",
       }
 
-    if request.status == "archived":
-      graph_file.upload_status = "archived"
+    if request.status == FileUploadStatus.ARCHIVED.value:
+      graph_file.upload_status = FileUploadStatus.ARCHIVED.value
       db.commit()
       db.refresh(graph_file)
 
@@ -770,7 +776,7 @@ async def update_file_status(
 
     graph_file.file_size_bytes = actual_file_size
     graph_file.row_count = actual_row_count
-    graph_file.upload_status = "uploaded"
+    graph_file.upload_status = FileUploadStatus.UPLOADED.value
     db.commit()
     db.refresh(graph_file)
 
@@ -782,7 +788,9 @@ async def update_file_status(
     )
     if table:
       all_files = GraphFile.get_all_for_table(table.id, db)
-      uploaded_files = [f for f in all_files if f.upload_status == "uploaded"]
+      uploaded_files = [
+        f for f in all_files if f.upload_status == FileUploadStatus.UPLOADED.value
+      ]
 
       new_file_count = len(uploaded_files)
 
