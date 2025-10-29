@@ -604,7 +604,8 @@ async def update_file_status(
     if request.status not in valid_statuses:
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Invalid status '{request.status}'. Must be one of: {', '.join(valid_statuses)}",
+        detail=f"Invalid status '{request.status}'. Must be one of: {', '.join(valid_statuses)}. "
+        f"Note: Files cannot be reset to '{FileUploadStatus.PENDING.value}' status after upload.",
       )
 
     api_logger.info(

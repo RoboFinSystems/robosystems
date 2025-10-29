@@ -180,7 +180,7 @@ curl -X POST "https://api.robosystems.ai/v1/graphs/kg123/tables/ingest" \\
 **Concurrency Control:**
 Only one ingestion can run per graph at a time. If another ingestion is in progress,
 you'll receive a 409 Conflict error. The distributed lock automatically expires after
-1 hour to prevent deadlocks from failed ingestions.
+the configured TTL (default: 1 hour) to prevent deadlocks from failed ingestions.
 
 **Tips:**
 - Only files with 'uploaded' status are processed
@@ -270,7 +270,7 @@ async def ingest_tables(
 
   redis_client = create_async_redis_client(ValkeyDatabase.DISTRIBUTED_LOCKS)
   lock_key = f"ingestion_lock:{graph_id}"
-  lock_ttl = 3600
+  lock_ttl = env.INGESTION_LOCK_TTL
   lock_acquired = False
 
   try:
@@ -283,6 +283,12 @@ async def ingest_tables(
 
     if not lock_acquired:
       lock_info = await redis_client.get(lock_key)
+      lock_timestamp = "unknown"
+      if lock_info and ":" in lock_info:
+        try:
+          lock_timestamp = lock_info.split(":", 1)[1]
+        except (IndexError, ValueError):
+          lock_timestamp = "unknown"
 
       api_logger.warning(
         "Ingestion already in progress",
@@ -292,6 +298,7 @@ async def ingest_tables(
           "user_id": str(current_user.id),
           "graph_id": graph_id,
           "lock_holder": lock_info,
+          "lock_timestamp": lock_timestamp,
           "metadata": {
             "endpoint": "/v1/graphs/{graph_id}/tables/ingest",
           },
@@ -301,8 +308,9 @@ async def ingest_tables(
       raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=f"Another ingestion is already in progress for graph {graph_id}. "
+        f"Lock acquired at: {lock_timestamp}. "
         f"Please wait for it to complete before starting a new one. "
-        f"If the previous ingestion failed, the lock will automatically expire in up to 1 hour.",
+        f"The lock will automatically expire after {lock_ttl} seconds if the ingestion fails.",
       )
 
     api_logger.info(
