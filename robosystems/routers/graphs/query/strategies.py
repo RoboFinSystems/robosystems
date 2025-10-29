@@ -81,6 +81,10 @@ class QueryAnalyzer(BaseAnalyzer):
     if limit_value:
       return limit_value
 
+    # Parameterized LIMIT (e.g., LIMIT $limit) - assume medium size
+    if "LIMIT" in query_upper and limit_value is None:
+      return cls.MEDIUM_RESULT
+
     # Single aggregation without GROUP BY
     if "COUNT(" in query_upper and "GROUP BY" not in query_upper:
       return 1

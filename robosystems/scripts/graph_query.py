@@ -7,19 +7,24 @@ Works with any backend (Kuzu, Neo4j, etc.) that implements the Graph API.
 
 Usage:
     # Health check
-    python graph_query.py --url http://localhost:8002 --command health
+    python graph_query.py --url http://localhost:8001 --command health
 
     # Database info
-    python graph_query.py --url http://localhost:8002 --graph-id sec --command info
+    python graph_query.py --url http://localhost:8001 --graph-id sec --command info
 
-    # Execute query
-    python graph_query.py --url http://localhost:8002 --graph-id sec --query "MATCH (c:Entity) RETURN c.name LIMIT 5"
+    # Execute query (single quotes auto-converted to double quotes for Cypher)
+    python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (c:Entity) RETURN c.name LIMIT 5"
+    python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (c:Entity {ticker: 'NVDA'}) RETURN c.name"
+
+    # Parameterized query (best practice for security and flexibility)
+    python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (e:Entity {ticker: $ticker}) RETURN e.name" --params '{"ticker": "NVDA"}'
 
     # JSON output
-    python graph_query.py --url http://localhost:8002 --graph-id sec --query "MATCH (c:Entity) RETURN c.name" --format json
+    python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (c:Entity) RETURN c.name" --format json
 """
 
 import argparse
+import json
 import sys
 import requests
 
@@ -33,6 +38,25 @@ from robosystems.utils.query_output import (
   print_table,
   print_warning,
 )
+
+
+def normalize_cypher_quotes(query: str) -> str:
+  """
+  Convert single quotes to double quotes in Cypher queries.
+
+  This makes it easier to write queries in the shell since single quotes
+  don't need escaping. Cypher requires double quotes for string literals.
+
+  Examples:
+      MATCH (e:Entity {ticker: 'NVDA'}) -> MATCH (e:Entity {ticker: "NVDA"})
+
+  Args:
+      query: Cypher query string
+
+  Returns:
+      Query with single quotes converted to double quotes
+  """
+  return query.replace("'", '"')
 
 
 def health_check(api_url: str) -> bool:
@@ -143,11 +167,20 @@ def execute_query(
   query: str,
   format_output: str = "table",
   timeout: int = 300,
+  parameters: dict = None,
 ) -> bool:
   try:
+    # Normalize single quotes to double quotes for Cypher
+    normalized_query = normalize_cypher_quotes(query)
+
+    # Build request payload
+    payload = {"cypher": normalized_query, "database": graph_id}
+    if parameters:
+      payload["parameters"] = parameters
+
     response = requests.post(
       f"{api_url}/databases/{graph_id}/query",
-      json={"cypher": query, "database": graph_id},
+      json=payload,
       timeout=timeout,
     )
     response.raise_for_status()
@@ -156,7 +189,10 @@ def execute_query(
     results = data.get("data", data.get("results", []))
 
     if format_output == "table":
-      print_info_section(f"QUERY: {query}")
+      query_display = f"{normalized_query}"
+      if parameters:
+        query_display += f"\nParameters: {parameters}"
+      print_info_section(f"QUERY: {query_display}")
       print_table(results, title=f"Query Results ({len(results)} rows)")
 
     elif format_output == "json":
@@ -230,26 +266,29 @@ def main():
     epilog="""
 Examples:
   # Health check
-  python graph_query.py --url http://localhost:8002 --command health
+  python graph_query.py --url http://localhost:8001 --command health
 
   # Database info
-  python graph_query.py --url http://localhost:8002 --graph-id sec --command info
+  python graph_query.py --url http://localhost:8001 --graph-id sec --command info
 
-  # Execute query
-  python graph_query.py --url http://localhost:8002 --graph-id sec --query "MATCH (c:Entity) RETURN c.name LIMIT 5"
+  # Execute query (single quotes auto-converted to double quotes)
+  python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (c:Entity {ticker: 'NVDA'}) RETURN c.name LIMIT 5"
+
+  # Parameterized query (best practice - no escaping needed!)
+  python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (e:Entity {ticker: $ticker}) RETURN e.name, e.ticker LIMIT $limit" --params '{"ticker": "AAPL", "limit": 10}'
 
   # JSON output
-  python graph_query.py --url http://localhost:8002 --graph-id sec --query "MATCH (c:Entity) RETURN c.name" --format json
+  python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (c:Entity) RETURN c.name" --format json
 
   # Query Neo4j (change URL to Neo4j API)
-  python graph_query.py --url http://localhost:8002 --graph-id sec --query "MATCH (n) RETURN labels(n)[0] as label, count(n) as count"
+  python graph_query.py --url http://localhost:8001 --graph-id sec --query "MATCH (n) RETURN labels(n)[0] as label, count(n) as count"
         """,
   )
 
   parser.add_argument(
     "--url",
     default="http://localhost:8001",
-    help="Graph API URL (default: http://localhost:8001 for Kuzu, use http://localhost:8002 for Neo4j)",
+    help="Graph API URL (default: http://localhost:8001 for Kuzu, use http://localhost:8001 for Neo4j)",
   )
 
   parser.add_argument("--graph-id", help="Graph database identifier (e.g., 'sec')")
@@ -259,6 +298,13 @@ Examples:
   )
 
   parser.add_argument("--query", help="Cypher query to execute")
+
+  parser.add_argument(
+    "--params",
+    "--parameters",
+    dest="params",
+    help='Query parameters as JSON (e.g., \'{"ticker": "NVDA", "limit": 10}\')',
+  )
 
   parser.add_argument(
     "--format",
@@ -276,6 +322,15 @@ Examples:
 
   args = parser.parse_args()
 
+  # Parse parameters if provided
+  parameters = None
+  if args.params:
+    try:
+      parameters = json.loads(args.params)
+    except json.JSONDecodeError as e:
+      print_error(f"Invalid JSON in --params: {e}")
+      sys.exit(1)
+
   if args.command == "health":
     success = health_check(args.url)
   elif args.command == "info":
@@ -288,7 +343,7 @@ Examples:
       print("Error: --graph-id is required for query execution")
       sys.exit(1)
     success = execute_query(
-      args.url, args.graph_id, args.query, args.format, args.timeout
+      args.url, args.graph_id, args.query, args.format, args.timeout, parameters
     )
   else:
     if not args.graph_id:
