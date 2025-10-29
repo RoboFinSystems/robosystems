@@ -544,35 +544,29 @@ Resources:
         - !Ref InfraAlertTopic
 
   # ===== CloudWatch Log Groups =====
-  # Log group for standard tier kuzu writers
-  KuzuWriterStandardLogGroup:
+  # Unified log group for ALL Graph API instances (Kuzu and Neo4j backends)
+  # Log streams are partitioned by: {cluster_tier}/{instance_id}/{node_type}
+  # Examples:
+  #   - standard/i-1234567890abcdef0/writer
+  #   - large/i-0987654321fedcba0/writer
+  #   - shared/i-abcdef1234567890/shared_master
+  #   - neo4j-community-large/i-fedcba0987654321/writer
+  GraphUnifiedLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      LogGroupName: !Sub "/robosystems/${Environment}/kuzu-writer-standard"
+      LogGroupName: !Sub "/robosystems/${Environment}/graph-api"
       RetentionInDays: 30
-
-  # Log group for enterprise tier kuzu writers
-  KuzuWriterEnterpriseLogGroup:
-    Type: AWS::Logs::LogGroup
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      LogGroupName: !Sub "/robosystems/${Environment}/kuzu-writer-enterprise"
-      RetentionInDays: 30
-
-  # Log group for premium tier kuzu writers
-  KuzuWriterPremiumLogGroup:
-    Type: AWS::Logs::LogGroup
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      LogGroupName: !Sub "/robosystems/${Environment}/kuzu-writer-premium"
-      RetentionInDays: 30
-
-  # Note: Shared master and replica log groups have been removed
-  # All databases (entity and shared repositories) now use the writer log groups
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: GraphAPI
+        - Key: Description
+          Value: "Unified log group for all Graph API instances"
 
   # ===== Instance Monitor Lambda =====
   InstanceMonitorFunction:
@@ -833,6 +827,13 @@ Resources:
       SourceArn: !GetAtt InstanceLaunchRule.Arn
 
 Outputs:
+  # CloudWatch Log Groups
+  GraphUnifiedLogGroupName:
+    Description: Unified CloudWatch log group for all Graph API instances
+    Value: !Ref GraphUnifiedLogGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-unified-log-group"
+
   # DynamoDB Table Names
   InstanceRegistryTableName:
     Description: DynamoDB table name for instance registry
