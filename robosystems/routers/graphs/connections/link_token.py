@@ -5,7 +5,7 @@ Link token endpoints for embedded authentication.
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 
 from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.operations.connection_service import ConnectionService
@@ -74,7 +74,7 @@ No credits are consumed for creating link tokens.""",
 async def create_link_token(
   graph_id: str = Path(..., description="Graph database identifier"),
   request: LinkTokenRequest = ...,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   """
@@ -300,7 +300,7 @@ async def exchange_link_token(
   graph_id: str = Path(..., description="Graph database identifier"),
   request: ExchangeTokenRequest = ...,
   fastapi_request: Request = ...,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   """

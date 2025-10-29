@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 def get_graph_access(
   graph_id: str = Path(..., description="Graph database identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
 ) -> UserGraph:
   """Get user's access to a graph with proper authorization validation."""
@@ -144,7 +144,7 @@ async def get_credit_summary(
   graph_id: str = Path(
     ..., description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   user_graph: UserGraph = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
@@ -250,7 +250,7 @@ async def get_credit_transactions(
     ge=0,
     description="Number of transactions to skip",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> DetailedTransactionsResponse:
@@ -265,7 +265,6 @@ async def get_credit_transactions(
   from ...models.iam.graph_credits import GraphCreditTransaction
 
   try:
-    # Verify user has access to this graph
     user_graph = (
       db.query(UserGraph)
       .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
@@ -447,7 +446,7 @@ async def check_credit_balance(
   base_cost: Optional[Decimal] = Query(
     None, description="Custom base cost (uses default if not provided)"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   user_graph: UserGraph = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
@@ -551,7 +550,7 @@ async def get_storage_usage(
   days: int = Query(
     30, ge=1, le=365, description="Number of days of history to return"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   user_graph: UserGraph = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
@@ -711,7 +710,7 @@ async def check_storage_limits(
   graph_id: str = Path(
     ..., description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   user_graph: UserGraph = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

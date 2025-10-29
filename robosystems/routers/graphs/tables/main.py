@@ -39,9 +39,9 @@ from sqlalchemy.orm import Session
 from robosystems.models.iam import User, GraphTable
 from robosystems.models.api.table import TableInfo, TableListResponse
 from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.otel.metrics import (
@@ -160,7 +160,7 @@ async def list_tables(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> TableListResponse:
@@ -174,9 +174,7 @@ async def list_tables(
 
   try:
     # Verify graph access
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", db
-    )
+    repository = await get_universal_repository(graph_id, "read")
 
     if not repository:
       raise HTTPException(

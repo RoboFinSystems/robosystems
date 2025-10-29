@@ -25,9 +25,10 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import User
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.models.iam.graph import GraphTier
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -170,7 +171,7 @@ async def execute_cypher_query(
   test_mode: bool = QueryParam(
     default=False, description="Enable test mode for better debugging"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Union[CypherQueryResponse, JSONResponse, StreamingResponse, EventSourceResponse]:
@@ -277,10 +278,19 @@ async def execute_cypher_query(
     )
 
     # Get repository with auth
+    # Convert graph tier string to GraphTier enum
+    tier = GraphTier.KUZU_STANDARD
+    if graph and graph.graph_tier:
+      tier_map = {
+        "kuzu-standard": GraphTier.KUZU_STANDARD,
+        "kuzu-large": GraphTier.KUZU_LARGE,
+        "kuzu-xlarge": GraphTier.KUZU_XLARGE,
+        "kuzu-shared": GraphTier.KUZU_SHARED,
+      }
+      tier = tier_map.get(graph.graph_tier.lower(), GraphTier.KUZU_STANDARD)
+
     try:
-      repository = await get_universal_repository_with_auth(
-        graph_id, current_user, access_type, session
-      )
+      repository = await get_universal_repository(graph_id, access_type, tier)
     except HTTPException:
       # Re-raise HTTP exceptions as-is (already properly formatted)
       raise

@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_async_db_session
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
@@ -54,7 +54,7 @@ This operation is included - no credit consumption required.""",
 )
 async def get_graph_schema_info(
   graph_id: str = Path(..., description="The graph database to get schema for"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Dict[str, Any]:
@@ -120,9 +120,7 @@ async def get_graph_schema_info(
     )
 
     # Get repository with unified authentication and authorization
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", session
-    )
+    repository = await get_universal_repository(graph_id, "read")
 
     # Get schema information with timeout coordination
     schema = await asyncio.wait_for(

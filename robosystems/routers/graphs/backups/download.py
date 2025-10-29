@@ -15,7 +15,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.iam import User
 from robosystems.middleware.otel.metrics import (
@@ -24,7 +24,7 @@ from robosystems.middleware.otel.metrics import (
 )
 from robosystems.logger import logger
 
-from .utils import verify_graph_access, get_backup_manager
+from .utils import get_backup_manager
 
 # Create router
 router = APIRouter()
@@ -54,7 +54,7 @@ async def get_backup_download_url(
   expires_in: int = Query(
     3600, ge=300, le=86400, description="URL expiration time in seconds"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Dict[str, Any]:
@@ -80,8 +80,7 @@ async def get_backup_download_url(
     Dictionary containing the download URL and expiration information
   """
   try:
-    # Verify user has access to this graph
-    verify_graph_access(current_user, graph_id, session)
+    # Access validated by get_current_user_with_graph dependency
 
     # Get backup manager and generate download URL
     backup_manager = get_backup_manager()

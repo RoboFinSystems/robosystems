@@ -33,10 +33,10 @@ class TestConnectionFeatureFlags:
   def test_options_endpoint_all_disabled(self, client: TestClient, mock_user):
     """Test connection options endpoint with all providers disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override the dependency
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
     try:
       # Mock the environment configuration
@@ -63,9 +63,9 @@ class TestConnectionFeatureFlags:
   def test_options_endpoint_sec_only_enabled(self, client: TestClient, mock_user):
     """Test connection options endpoint with only SEC enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
@@ -93,9 +93,9 @@ class TestConnectionFeatureFlags:
   ):
     """Test connection options endpoint with only QuickBooks enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
@@ -121,9 +121,9 @@ class TestConnectionFeatureFlags:
   def test_options_endpoint_plaid_only_enabled(self, client: TestClient, mock_user):
     """Test connection options endpoint with only Plaid enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
@@ -149,9 +149,9 @@ class TestConnectionFeatureFlags:
   def test_options_endpoint_all_enabled(self, client: TestClient, mock_user):
     """Test connection options endpoint with all providers enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
@@ -181,9 +181,9 @@ class TestConnectionFeatureFlags:
   def test_options_endpoint_multiple_enabled(self, client: TestClient, mock_user):
     """Test connection options endpoint with multiple providers enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
     try:
       with patch("robosystems.routers.graphs.connections.options.env") as mock_env:
@@ -506,11 +506,11 @@ class TestGraphOperationFeatureFlags:
   def test_subgraph_creation_disabled(self, client: TestClient, mock_user, mock_db):
     """Test subgraph creation endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_async_db_session] = lambda: mock_db
 
     try:
@@ -540,11 +540,11 @@ class TestGraphOperationFeatureFlags:
   def test_backup_creation_disabled(self, client: TestClient, mock_user, mock_db):
     """Test backup creation endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_async_db_session] = lambda: mock_db
 
     try:
@@ -572,11 +572,11 @@ class TestGraphOperationFeatureFlags:
   def test_subgraph_creation_enabled(self, client: TestClient, mock_user, mock_db):
     """Test subgraph creation endpoint when feature flag is enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_async_db_session] = lambda: mock_db
 
     try:
@@ -638,11 +638,11 @@ class TestGraphOperationFeatureFlags:
   def test_backup_creation_enabled(self, client: TestClient, mock_user, mock_db):
     """Test backup creation endpoint when feature flag is enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_async_db_session] = lambda: mock_db
 
     try:
@@ -723,17 +723,12 @@ class TestAgentPostFeatureFlags:
   def test_agent_auto_disabled(self, client: TestClient, mock_user, mock_db):
     """Test auto agent endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
-    from robosystems.routers.graphs.agent import get_read_only_repository
-
-    # Mock repository
-    mock_repository = MagicMock()
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_db_session] = lambda: mock_db
-    app.dependency_overrides[get_read_only_repository] = lambda: mock_repository
 
     try:
       # Mock the environment configuration to disable agent POST
@@ -759,17 +754,12 @@ class TestAgentPostFeatureFlags:
   def test_agent_specific_disabled(self, client: TestClient, mock_user, mock_db):
     """Test specific agent endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
-    from robosystems.routers.graphs.agent import get_read_only_repository
-
-    # Mock repository
-    mock_repository = MagicMock()
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_db_session] = lambda: mock_db
-    app.dependency_overrides[get_read_only_repository] = lambda: mock_repository
 
     try:
       # Mock the environment configuration to disable agent POST
@@ -797,17 +787,12 @@ class TestAgentPostFeatureFlags:
   def test_agent_batch_disabled(self, client: TestClient, mock_user, mock_db):
     """Test batch agent endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
-    from robosystems.routers.graphs.agent import get_read_only_repository
-
-    # Mock repository
-    mock_repository = MagicMock()
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_db_session] = lambda: mock_db
-    app.dependency_overrides[get_read_only_repository] = lambda: mock_repository
 
     try:
       # Mock the environment configuration to disable agent POST
@@ -854,17 +839,12 @@ class TestAgentPostFeatureFlags:
   def test_agent_recommend_disabled(self, client: TestClient, mock_user, mock_db):
     """Test agent recommendation endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
-    from robosystems.routers.graphs.agent import get_read_only_repository
-
-    # Mock repository
-    mock_repository = MagicMock()
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_db_session] = lambda: mock_db
-    app.dependency_overrides[get_read_only_repository] = lambda: mock_repository
 
     try:
       # Mock the environment configuration to disable agent POST
@@ -887,11 +867,11 @@ class TestAgentPostFeatureFlags:
   def test_agent_get_endpoints_still_work(self, client: TestClient, mock_user, mock_db):
     """Test that GET endpoints still work when POST endpoints are disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
 
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[get_db_session] = lambda: mock_db
 
     try:

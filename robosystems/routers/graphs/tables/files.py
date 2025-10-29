@@ -52,9 +52,9 @@ from robosystems.models.api.table import (
   GetFileInfoResponse,
   DeleteFileResponse,
 )
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
 from robosystems.adapters.s3 import S3Client
 from robosystems.config import env
@@ -194,7 +194,7 @@ async def list_table_files(
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
   table_name: str = Path(..., description="Table name"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> ListTableFilesResponse:
@@ -207,9 +207,7 @@ async def list_table_files(
   start_time = datetime.now(timezone.utc)
 
   try:
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", db
-    )
+    repository = await get_universal_repository(graph_id, "read")
 
     if not repository:
       raise HTTPException(
@@ -424,7 +422,7 @@ async def get_file_info(
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
   file_id: str = Path(..., description="File ID"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> GetFileInfoResponse:
@@ -437,9 +435,7 @@ async def get_file_info(
   start_time = datetime.now(timezone.utc)
 
   try:
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", db
-    )
+    repository = await get_universal_repository(graph_id, "read")
 
     if not repository:
       raise HTTPException(
@@ -633,7 +629,7 @@ async def delete_file(
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
   file_id: str = Path(..., description="File ID"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> DeleteFileResponse:
@@ -656,9 +652,7 @@ async def delete_file(
     )
 
   try:
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "write", db
-    )
+    repository = await get_universal_repository(graph_id, "write")
 
     if not repository:
       raise HTTPException(

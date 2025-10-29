@@ -24,7 +24,7 @@ class TestUploadRouterAutoTableCreation:
     mock_created_table.table_name = "Company"
 
     with patch(
-      "robosystems.routers.graphs.tables.upload.get_universal_repository_with_auth",
+      "robosystems.routers.graphs.tables.upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -82,7 +82,7 @@ class TestUploadRouterAutoTableCreation:
     mock_created_table.id = "table_456"
 
     with patch(
-      "robosystems.routers.graphs.tables.upload.get_universal_repository_with_auth",
+      "robosystems.routers.graphs.tables.upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -140,7 +140,7 @@ class TestUploadRouterAutoTableCreation:
     existing_table.id = "existing_table_123"
 
     with patch(
-      "robosystems.routers.graphs.tables.upload.get_universal_repository_with_auth",
+      "robosystems.routers.graphs.tables.upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()

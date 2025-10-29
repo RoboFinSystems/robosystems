@@ -17,6 +17,7 @@ from robosystems.middleware.auth.dependencies import (
   verify_jwt_token,
   get_optional_user,
   get_current_user,
+  get_current_user_sse,
   get_current_user_with_graph,
   get_current_user_with_repository_access,
   get_repository_user_dependency,
@@ -384,7 +385,11 @@ class TestGetOptionalUser:
     mock_user = Mock(spec=User)
     mock_create_user.return_value = mock_user
 
-    result = await get_optional_user(api_key=None, authorization=f"Bearer {auth_token}")
+    # Create mock request with authorization header
+    mock_request = Mock()
+    mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
+    result = await get_optional_user(request=mock_request, api_key=None)
 
     assert result == mock_user
     mock_verify_jwt.assert_called_once_with(auth_token)
@@ -408,7 +413,11 @@ class TestGetOptionalUser:
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
-    result = await get_optional_user(api_key=None, authorization=f"Bearer {auth_token}")
+    # Create mock request with authorization header
+    mock_request = Mock()
+    mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
+    result = await get_optional_user(request=mock_request, api_key=None)
 
     assert result == mock_user
     mock_user_class.get_by_id.assert_called_once()
@@ -423,14 +432,16 @@ class TestGetOptionalUser:
     auth_token = "invalid.jwt.token"
     api_key = "valid-api-key"
 
+    # Create mock request
+    mock_request = Mock()
+    mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
     mock_verify_jwt.return_value = None  # JWT validation fails
 
     mock_user = Mock(spec=User)
     mock_validate_api_key.return_value = mock_user
 
-    result = await get_optional_user(
-      api_key=api_key, authorization=f"Bearer {auth_token}"
-    )
+    result = await get_optional_user(request=mock_request, api_key=api_key)
 
     assert result == mock_user
     mock_validate_api_key.assert_called_once_with(api_key)
@@ -438,7 +449,11 @@ class TestGetOptionalUser:
   @pytest.mark.asyncio
   async def test_get_optional_user_no_authentication(self):
     """Test optional user authentication returns None when no auth provided."""
-    result = await get_optional_user(api_key=None, authorization=None)
+    # Create mock request with no auth
+    mock_request = Mock()
+    mock_request.headers = {}
+
+    result = await get_optional_user(request=mock_request, api_key=None)
 
     assert result is None
 
@@ -452,12 +467,14 @@ class TestGetOptionalUser:
     auth_token = "invalid.jwt.token"
     api_key = "invalid-api-key"
 
+    # Create mock request
+    mock_request = Mock()
+    mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
     mock_verify_jwt.return_value = None
     mock_validate_api_key.return_value = None
 
-    result = await get_optional_user(
-      api_key=api_key, authorization=f"Bearer {auth_token}"
-    )
+    result = await get_optional_user(request=mock_request, api_key=api_key)
 
     assert result is None
 
@@ -491,9 +508,10 @@ class TestGetCurrentUser:
     mock_user = Mock(spec=User)
     mock_create_user.return_value = mock_user
 
-    result = await get_current_user(
-      self.mock_request, api_key=None, authorization=f"Bearer {auth_token}", token=None
-    )
+    # Set authorization header on request
+    self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
+    result = await get_current_user(self.mock_request, api_key=None)
 
     assert result == mock_user
     mock_audit_logger.log_auth_success.assert_called_once()
@@ -517,9 +535,10 @@ class TestGetCurrentUser:
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
-    result = await get_current_user(
-      self.mock_request, api_key=None, authorization=authorization, token=None
-    )
+    # Set authorization header on request
+    self.mock_request.headers = {"authorization": authorization}
+
+    result = await get_current_user(self.mock_request, api_key=None)
 
     assert result == mock_user
     mock_verify_jwt.assert_called_once_with("valid.jwt.token")
@@ -535,13 +554,11 @@ class TestGetCurrentUser:
     auth_token = "invalid.jwt.token"
     mock_verify_jwt.return_value = None
 
+    # Set authorization header on request
+    self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
     with pytest.raises(HTTPException) as exc_info:
-      await get_current_user(
-        self.mock_request,
-        api_key=None,
-        authorization=f"Bearer {auth_token}",
-        token=None,
-      )
+      await get_current_user(self.mock_request, api_key=None)
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert "Invalid or expired token" in str(exc_info.value.detail)
@@ -560,9 +577,10 @@ class TestGetCurrentUser:
     mock_user.id = "user123"
     mock_validate_api_key.return_value = mock_user
 
-    result = await get_current_user(
-      self.mock_request, api_key=api_key, authorization=None, token=None
-    )
+    # Set authorization header on request
+    self.mock_request.headers = {"authorization": None}
+
+    result = await get_current_user(self.mock_request, api_key=api_key)
 
     assert result == mock_user
     mock_audit_logger.log_auth_success.assert_called_once()
@@ -577,10 +595,11 @@ class TestGetCurrentUser:
     api_key = "invalid-api-key"
     mock_validate_api_key.return_value = None
 
+    # Set empty authorization header on request
+    self.mock_request.headers = {}
+
     with pytest.raises(HTTPException) as exc_info:
-      await get_current_user(
-        self.mock_request, api_key=api_key, authorization=None, token=None
-      )
+      await get_current_user(self.mock_request, api_key=api_key)
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert "Invalid API key" in str(exc_info.value.detail)
@@ -590,10 +609,11 @@ class TestGetCurrentUser:
   @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
   async def test_get_current_user_no_authentication(self, mock_audit_logger):
     """Test current user authentication fails with no authentication provided."""
+    # Set empty authorization header on request
+    self.mock_request.headers = {}
+
     with pytest.raises(HTTPException) as exc_info:
-      await get_current_user(
-        self.mock_request, api_key=None, authorization=None, token=None
-      )
+      await get_current_user(self.mock_request, api_key=None)
 
     assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
     assert "Authentication required" in str(exc_info.value.detail)
@@ -618,7 +638,7 @@ class TestGetCurrentUser:
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
-    result = await get_current_user(
+    result = await get_current_user_sse(
       self.mock_request, api_key=None, authorization=None, token=token_value
     )
 
@@ -662,12 +682,13 @@ class TestGetCurrentUserWithGraph:
     mock_user.is_active = True
     mock_user_class.return_value = mock_user
 
+    # Set authorization header on request
+    self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
     result = await get_current_user_with_graph(
       self.mock_request,
       self.graph_id,
       api_key=None,
-      authorization=f"Bearer {auth_token}",
-      token=None,
     )
 
     assert result == mock_user
@@ -693,6 +714,9 @@ class TestGetCurrentUserWithGraph:
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
+    # Set authorization header on request
+    self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
     # Mock UserGraph access check
     with patch("robosystems.models.iam.UserGraph") as mock_user_graph:
       mock_user_graph.user_has_access.return_value = True
@@ -701,8 +725,6 @@ class TestGetCurrentUserWithGraph:
         self.mock_request,
         self.graph_id,
         api_key=None,
-        authorization=f"Bearer {auth_token}",
-        token=None,
       )
 
       assert result == mock_user
@@ -729,13 +751,14 @@ class TestGetCurrentUserWithGraph:
     mock_user.is_active = True
     mock_user_class.get_by_id.return_value = mock_user
 
+    # Set authorization header on request
+    self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
     with pytest.raises(HTTPException) as exc_info:
       await get_current_user_with_graph(
         self.mock_request,
         self.graph_id,
         api_key=None,
-        authorization=f"Bearer {auth_token}",
-        token=None,
       )
 
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
@@ -755,8 +778,11 @@ class TestGetCurrentUserWithGraph:
     mock_user.id = "user123"
     mock_validate_api_key_with_graph.return_value = mock_user
 
+    # Set empty authorization header on request
+    self.mock_request.headers = {}
+
     result = await get_current_user_with_graph(
-      self.mock_request, self.graph_id, api_key=api_key, authorization=None, token=None
+      self.mock_request, self.graph_id, api_key=api_key
     )
 
     assert result == mock_user
@@ -773,13 +799,14 @@ class TestGetCurrentUserWithGraph:
     api_key = "invalid-api-key"
     mock_validate_api_key_with_graph.return_value = None
 
+    # Set empty authorization header on request
+    self.mock_request.headers = {}
+
     with pytest.raises(HTTPException) as exc_info:
       await get_current_user_with_graph(
         self.mock_request,
         self.graph_id,
         api_key=api_key,
-        authorization=None,
-        token=None,
       )
 
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
@@ -816,7 +843,6 @@ class TestRepositoryAccess:
       repository_id,
       operation_type,
       api_key="test-key",
-      authorization="test-token",
     )
 
     assert result == mock_user
@@ -844,7 +870,6 @@ class TestRepositoryAccess:
         repository_id,
         operation_type,
         api_key="test-key",
-        authorization="test-token",
       )
 
     assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
@@ -882,17 +907,23 @@ class TestSecurityScenarios:
     # Malicious JWT token with injection attempt
     malicious_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiYWRtaW47RFJPUCBUQUJMRSB1c2VyczsifQ.malicious"
 
+    # Create mock request
+    mock_request = Mock()
+    mock_request.headers = {"authorization": f"Bearer {malicious_token}"}
+
     mock_verify_jwt.return_value = None  # Token validation should fail
 
-    result = await get_optional_user(
-      api_key=None, authorization=f"Bearer {malicious_token}"
-    )
+    result = await get_optional_user(request=mock_request, api_key=None)
 
     assert result is None
     # verify_jwt_token should be called with just the token (Bearer prefix is stripped)
 
   def test_cached_user_data_xss_protection(self):
     """Test that cached user data is protected against XSS."""
+    # Create mock request
+    mock_request = Mock()
+    mock_request.headers = {}
+
     # Attempt XSS through name field
     xss_data = {
       "id": 123,
@@ -937,10 +968,13 @@ class TestSecurityScenarios:
     mock_verify_jwt.return_value = None
 
     for token in failed_tokens:
+      # Set authorization header for each attempt
+      mock_request.headers = {
+        "authorization": f"Bearer {token}",
+        "user-agent": "AttackBot/1.0",
+      }
       with pytest.raises(HTTPException):
-        await get_current_user(
-          mock_request, api_key=None, authorization=f"Bearer {token}", token=None
-        )
+        await get_current_user(mock_request, api_key=None)
 
     # Should log security events for each failed attempt
     assert mock_audit_logger.log_security_event.call_count == len(failed_tokens)
@@ -964,10 +998,14 @@ class TestSecurityScenarios:
     """Test handling of concurrent authentication requests."""
     import asyncio
 
+    # Create mock request with no auth
+    mock_request = Mock()
+    mock_request.headers = {}
+
     # Simulate concurrent requests
     tasks = []
     for i in range(10):
-      task = get_optional_user(api_key=None, authorization=None)
+      task = get_optional_user(request=mock_request, api_key=None)
       tasks.append(task)
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1008,6 +1046,10 @@ class TestPerformanceAndCaching:
     auth_token = "cached.jwt.token"
     user_id = "user123"
 
+    # Create mock request
+    mock_request = Mock()
+    mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
     # Setup cache hit
     cached_data = {"user_data": {"id": user_id, "email": "test@example.com"}}
     mock_verify_jwt.return_value = user_id
@@ -1019,9 +1061,7 @@ class TestPerformanceAndCaching:
       mock_user = Mock(spec=User)
       mock_create_user.return_value = mock_user
 
-      result = await get_optional_user(
-        api_key=None, authorization=f"Bearer {auth_token}"
-      )
+      result = await get_optional_user(request=mock_request, api_key=None)
 
       assert result == mock_user
       # Should use cache, not database
@@ -1034,6 +1074,10 @@ class TestPerformanceAndCaching:
     auth_token = "valid.jwt.token"
     api_key = "valid-api-key"
     user_id = "user123"
+
+    # Create mock request
+    mock_request = Mock()
+    mock_request.headers = {"authorization": f"Bearer {auth_token}"}
 
     mock_verify_jwt.return_value = user_id
 
@@ -1048,9 +1092,7 @@ class TestPerformanceAndCaching:
         with patch(
           "robosystems.middleware.auth.dependencies.validate_api_key"
         ) as mock_validate_api_key:
-          result = await get_optional_user(
-            api_key=api_key, authorization=f"Bearer {auth_token}"
-          )
+          result = await get_optional_user(request=mock_request, api_key=api_key)
 
           assert result == mock_user
           # API key validation should not be called

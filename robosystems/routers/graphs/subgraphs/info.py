@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.api.subgraph import SubgraphResponse, SubgraphType
 from robosystems.models.iam.user import User
 from robosystems.models.iam.user_graph import UserGraph
@@ -64,7 +64,7 @@ Real-time statistics queried from Kuzu:
 async def get_subgraph_info(
   graph_id: str = Path(..., description="Parent graph identifier"),
   subgraph_id: str = Path(..., description="Subgraph identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
 ) -> SubgraphResponse:
   """Get detailed information about a specific subgraph.

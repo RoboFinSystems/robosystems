@@ -16,7 +16,7 @@ async def test_list_tables_success(monkeypatch):
 
   monkeypatch.setattr(
     tables_main,
-    "get_universal_repository_with_auth",
+    "get_universal_repository",
     fake_repo,
   )
 
@@ -78,7 +78,7 @@ async def test_list_tables_not_found(monkeypatch):
 
   monkeypatch.setattr(
     tables_main,
-    "get_universal_repository_with_auth",
+    "get_universal_repository",
     fake_repo,
   )
 
@@ -100,7 +100,7 @@ async def test_get_upload_url_rejects_extension(monkeypatch):
 
   monkeypatch.setattr(
     tables_upload,
-    "get_universal_repository_with_auth",
+    "get_universal_repository",
     fake_repo,
   )
 
@@ -137,7 +137,7 @@ async def test_get_upload_url_success(monkeypatch):
 
   monkeypatch.setattr(
     tables_upload,
-    "get_universal_repository_with_auth",
+    "get_universal_repository",
     fake_repo,
   )
 

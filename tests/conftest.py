@@ -123,7 +123,10 @@ def client(test_db):
 def client_with_mocked_auth(test_db):
   """Create a test client with mocked authentication for unit tests."""
   # Import the dependency directly
-  from robosystems.middleware.auth.dependencies import get_current_user
+  from robosystems.middleware.auth.dependencies import (
+    get_current_user,
+    get_current_user_with_graph,
+  )
   from robosystems.middleware.rate_limits import (
     auth_rate_limit_dependency,
     rate_limit_dependency,
@@ -156,6 +159,7 @@ def client_with_mocked_auth(test_db):
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
+  app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
   # Disable rate limiting during tests
   app.dependency_overrides[auth_rate_limit_dependency] = lambda: None
   app.dependency_overrides[rate_limit_dependency] = lambda: None
@@ -190,7 +194,10 @@ def client_with_mocked_auth(test_db):
 async def async_client(test_db, test_user):
   """Create an async test client."""
   # Import the dependency directly
-  from robosystems.middleware.auth.dependencies import get_current_user
+  from robosystems.middleware.auth.dependencies import (
+    get_current_user,
+    get_current_user_with_graph,
+  )
   from robosystems.middleware.rate_limits import (
     auth_rate_limit_dependency,
     rate_limit_dependency,
@@ -218,6 +225,7 @@ async def async_client(test_db, test_user):
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
+  app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
   # Disable ALL rate limiting during tests
   app.dependency_overrides[auth_rate_limit_dependency] = lambda: None

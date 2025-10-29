@@ -27,7 +27,7 @@ from robosystems.models.api.common import (
 )
 from robosystems.middleware.sse import create_operation_response
 from robosystems.models.api import AvailableExtensionsResponse, AvailableExtension
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
   general_api_rate_limit_dependency,
@@ -160,7 +160,7 @@ def _raise_http_exception(
   endpoint_name="/v1/graphs", business_event_type="user_graphs_accessed"
 )
 async def get_graphs(
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserGraphsResponse:
   """
@@ -282,7 +282,7 @@ eventSource.onmessage = (event) => {
 )
 async def create_graph(
   request: CreateGraphRequest,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),  # noqa: ARG001
 ):
   """
@@ -574,7 +574,7 @@ async def get_available_extensions(
 )
 async def select_graph(
   graph_id: str,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ):
   """
@@ -593,7 +593,6 @@ async def select_graph(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    # Verify user has access to this graph
     user_graphs = UserGraph.get_by_user_id(current_user.id, session)
     user_graph_ids = [ug.graph_id for ug in user_graphs]
 

@@ -13,7 +13,7 @@ from robosystems.models.api.graph import (
   SchemaValidationRequest,
   SchemaValidationResponse,
 )
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -80,7 +80,7 @@ async def validate_schema(
   request: SchemaValidationRequest = Body(
     ..., description="Schema definition to validate"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> SchemaValidationResponse:

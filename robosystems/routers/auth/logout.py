@@ -1,11 +1,9 @@
 """User logout endpoint."""
 
-from typing import Optional
-
 from fastapi import (
   APIRouter,
   Depends,
-  Header,
+  Request,
   Response,
   status,
 )
@@ -28,21 +26,19 @@ router = APIRouter()
   operation_id="logoutUser",
 )
 async def logout(
+  request: Request,
   response: Response,
-  authorization: Optional[str] = Header(None),
   _rate_limit: None = Depends(logout_rate_limit_dependency),
 ) -> dict:
   """
   Logout user and invalidate JWT token.
 
-  Args:
-      authorization: Authorization header with Bearer token
-
   Returns:
       Success message
   """
   try:
-    # Extract JWT token from Bearer header
+    # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+    authorization = request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
       jwt_token = authorization[7:]  # Remove "Bearer " prefix

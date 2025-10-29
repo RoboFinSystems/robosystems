@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from robosystems.logger import logger
 from robosystems.models.iam import User
 from robosystems.models.api.graph import SchemaExportResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -36,7 +36,7 @@ async def export_graph_schema(
   include_data_stats: bool = Query(
     False, description="Include statistics about actual data in the graph"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ):
@@ -156,13 +156,11 @@ async def export_graph_schema(
       try:
         from .utils import get_schema_info
         from robosystems.middleware.graph.dependencies import (
-          get_universal_repository_with_auth,
+          get_universal_repository,
         )
 
         # Use existing session parameter for repository auth
-        repository = await get_universal_repository_with_auth(
-          graph_id, current_user, "read", db
-        )
+        repository = await get_universal_repository(graph_id, "read")
         runtime_schema = await get_schema_info(repository)
 
         data_stats = {

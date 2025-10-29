@@ -8,7 +8,7 @@ from typing import DefaultDict
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import User
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -132,7 +132,7 @@ This operation is included - no credit consumption required.""",
 )
 async def get_graph_metrics(
   graph_id: str = Path(..., description="The graph ID to get metrics for"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphMetricsResponse:
@@ -383,7 +383,7 @@ async def get_graph_usage_stats(
   include_details: bool = Query(
     False, description="Include detailed metrics (may be slower)"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphUsageResponse:

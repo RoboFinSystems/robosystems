@@ -52,14 +52,19 @@ class TestGetMe:
     # Mock the FastAPI request
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
 
     # Call endpoint
     result = await get_me(
       fastapi_request=mock_request,
-      authorization="Bearer valid_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -88,14 +93,19 @@ class TestGetMe:
     # Mock the FastAPI request
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
 
     # Call endpoint
     result = await get_me(
       fastapi_request=mock_request,
-      authorization="Bearer valid_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -110,36 +120,6 @@ class TestGetMe:
     assert "user_agent" in args[1]  # Device fingerprint dict
     mock_get_by_id.assert_called_once_with("user_123", mock_session)
 
-  @patch("robosystems.routers.auth.session.verify_jwt_token")
-  @patch("robosystems.routers.auth.session.User.get_by_id")
-  async def test_get_me_cookie_takes_precedence(
-    self, mock_get_by_id, mock_verify_jwt, mock_user
-  ):
-    """Test that cookie token takes precedence over Authorization header."""
-    # Setup mocks
-    mock_verify_jwt.return_value = "user_123"
-    mock_get_by_id.return_value = mock_user
-    mock_session = Mock()
-
-    # Mock the FastAPI request
-    mock_request = Mock()
-    mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
-    mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
-
-    # Call endpoint with both cookie and header
-    await get_me(
-      fastapi_request=mock_request,
-      authorization="Bearer cookie_jwt_token",
-      session=mock_session,
-      _rate_limit=None,
-    )
-
-    # Verify token was used (now includes device fingerprint)
-    args, kwargs = mock_verify_jwt.call_args
-    assert args[0] == "cookie_jwt_token"
-
   async def test_get_me_no_token(self):
     """Test getting current user with no token."""
     mock_session = Mock()
@@ -147,10 +127,9 @@ class TestGetMe:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {"user-agent": "test-agent"}  # No authorization header
       await get_me(
         fastapi_request=mock_request,
-        authorization=None,
         session=mock_session,
         _rate_limit=None,
       )
@@ -165,10 +144,12 @@ class TestGetMe:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "InvalidHeader",
+      }  # Missing "Bearer "
       await get_me(
         fastapi_request=mock_request,
-        authorization="InvalidHeader",  # Missing "Bearer "
         session=mock_session,
         _rate_limit=None,
       )
@@ -185,10 +166,12 @@ class TestGetMe:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await get_me(
         fastapi_request=mock_request,
-        authorization="Bearer invalid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -207,10 +190,12 @@ class TestGetMe:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await get_me(
         fastapi_request=mock_request,
-        authorization="Bearer valid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -231,10 +216,12 @@ class TestGetMe:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await get_me(
         fastapi_request=mock_request,
-        authorization="Bearer valid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -256,10 +243,12 @@ class TestGetMe:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await get_me(
         fastapi_request=mock_request,
-        authorization="Bearer valid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -300,14 +289,14 @@ class TestRefreshSession:
     # Mock the FastAPI request
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
-    mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer old_jwt_token",
+    }
 
     # Call endpoint
     result = await refresh_session(
       fastapi_request=mock_request,
-      authorization="Bearer old_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -343,10 +332,9 @@ class TestRefreshSession:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {"user-agent": "test-agent"}  # No authorization header
       await refresh_session(
         fastapi_request=mock_request,
-        authorization=None,
         session=mock_session,
         _rate_limit=None,
       )
@@ -364,10 +352,12 @@ class TestRefreshSession:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await refresh_session(
         fastapi_request=mock_request,
-        authorization="Bearer invalid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -387,10 +377,12 @@ class TestRefreshSession:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await refresh_session(
         fastapi_request=mock_request,
-        authorization="Bearer valid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -412,10 +404,12 @@ class TestRefreshSession:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await refresh_session(
         fastapi_request=mock_request,
-        authorization="Bearer valid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -451,14 +445,19 @@ class TestRefreshSession:
     # Mock the FastAPI request
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
 
     # Call endpoint
     result = await refresh_session(
       fastapi_request=mock_request,
-      authorization="Bearer old_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -500,10 +499,12 @@ class TestRefreshSession:
     # Call endpoint
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
     await refresh_session(
       fastapi_request=mock_request,
-      authorization="Bearer old_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -529,10 +530,12 @@ class TestRefreshSession:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await refresh_session(
         fastapi_request=mock_request,
-        authorization="Bearer valid_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -569,10 +572,12 @@ class TestRefreshSession:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer valid_jwt_token",
+      }
       await refresh_session(
         fastapi_request=mock_request,
-        authorization="Bearer old_jwt_token",
         session=mock_session,
         _rate_limit=None,
       )
@@ -610,10 +615,12 @@ class TestCookieSettings:
     # Call endpoint
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
     await refresh_session(
       fastapi_request=mock_request,
-      authorization="Bearer old_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -647,10 +654,12 @@ class TestCookieSettings:
     # Call endpoint
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
     await refresh_session(
       fastapi_request=mock_request,
-      authorization="Bearer old_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -672,19 +681,24 @@ class TestIntegrationScenarios:
     # Valid Bearer token
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer valid_jwt_token",
+    }
     result = await get_me(
       fastapi_request=mock_request,
-      authorization="Bearer token123",
       session=mock_session,
       _rate_limit=None,
     )
     assert result["id"] == "user_123"
 
     # Bearer with extra space
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer  token123",
+    }  # Extra space
     result = await get_me(
       fastapi_request=mock_request,
-      authorization="Bearer  token123",
       session=mock_session,
       _rate_limit=None,
     )
@@ -694,10 +708,13 @@ class TestIntegrationScenarios:
     assert args[0] == " token123"
 
     # Lowercase "bearer" should not work
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "bearer lowercase_token",
+    }
     with pytest.raises(HTTPException):
       await get_me(
         fastapi_request=mock_request,
-        authorization="bearer token123",
         session=mock_session,
         _rate_limit=None,
       )
@@ -728,10 +745,12 @@ class TestIntegrationScenarios:
     # Call endpoint
     mock_request = Mock()
     mock_request.client.host = "127.0.0.1"
-    mock_request.headers = {"user-agent": "test-agent"}
+    mock_request.headers = {
+      "user-agent": "test-agent",
+      "authorization": "Bearer old_jwt_token",
+    }
     await refresh_session(
       fastapi_request=mock_request,
-      authorization="Bearer old_jwt_token",
       session=mock_session,
       _rate_limit=None,
     )
@@ -747,10 +766,12 @@ class TestIntegrationScenarios:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "",
+      }  # Empty string
       await get_me(
         fastapi_request=mock_request,
-        authorization="",  # Empty string
         session=mock_session,
         _rate_limit=None,
       )
@@ -765,10 +786,12 @@ class TestIntegrationScenarios:
     with pytest.raises(HTTPException) as exc_info:
       mock_request = Mock()
       mock_request.client.host = "127.0.0.1"
-      mock_request.headers = {"user-agent": "test-agent"}
+      mock_request.headers = {
+        "user-agent": "test-agent",
+        "authorization": "Bearer",
+      }  # No token after Bearer
       await get_me(
         fastapi_request=mock_request,
-        authorization="Bearer",  # No token after Bearer
         session=mock_session,
         _rate_limit=None,
       )

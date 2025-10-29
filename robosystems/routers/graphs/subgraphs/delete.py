@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.api.subgraph import (
   DeleteSubgraphRequest,
   DeleteSubgraphResponse,
@@ -71,7 +71,7 @@ async def delete_subgraph(
   graph_id: str = Path(..., description="Parent graph identifier"),
   subgraph_id: str = Path(..., description="Subgraph identifier to delete"),
   request: DeleteSubgraphRequest = ...,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
 ) -> DeleteSubgraphResponse:
   """Delete a subgraph.
@@ -90,7 +90,6 @@ async def delete_subgraph(
     # Get and verify subgraph using subgraph_id parameter
     subgraph = get_subgraph_by_name(graph_id, subgraph_id, session, current_user)
 
-    # Verify user has admin access to parent graph
     user_graph = (
       session.query(UserGraph)
       .filter(

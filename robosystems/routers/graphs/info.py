@@ -10,12 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import User
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
 from robosystems.models.api.graph import DatabaseInfoResponse
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.graph_api.client import GraphClient
@@ -98,7 +97,7 @@ async def get_database_info(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> DatabaseInfoResponse:
@@ -120,10 +119,7 @@ async def get_database_info(
   circuit_breaker.check_circuit(graph_id, "database_info")
 
   try:
-    # Verify user has read access to this graph
-    _repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", session
-    )
+    # Access validated by get_current_user_with_graph dependency
 
     # Get Graph client and database information
     graph_client = await _get_graph_client(graph_id)

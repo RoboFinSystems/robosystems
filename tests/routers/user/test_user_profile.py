@@ -308,7 +308,10 @@ class TestUserGraphs:
   def client_with_graphs(self, mock_user_with_graphs):
     """Create test client with mocked user that has graphs."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import (
+      get_current_user,
+      get_current_user_with_graph,
+    )
     from robosystems.middleware.rate_limits import (
       auth_rate_limit_dependency,
       rate_limit_dependency,
@@ -325,6 +328,9 @@ class TestUserGraphs:
 
     # Mock the authentication dependency
     app.dependency_overrides[get_current_user] = lambda: mock_user_with_graphs
+    app.dependency_overrides[get_current_user_with_graph] = (
+      lambda: mock_user_with_graphs
+    )
 
     # Disable rate limiting during tests
     app.dependency_overrides[auth_rate_limit_dependency] = lambda: None

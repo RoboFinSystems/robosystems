@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import User
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
@@ -88,7 +88,7 @@ async def get_graph_limits(
     description="Graph database identifier (user graph or shared repository)",
     pattern="^(kg[a-z0-9]{10}|sec|industry|economic|[a-zA-Z][a-zA-Z0-9_]{2,62})$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Dict[str, Any]:
@@ -110,8 +110,7 @@ async def get_graph_limits(
   circuit_breaker.check_circuit(graph_id, "graph_limits")
 
   try:
-    # Verify user has read access to this graph
-    await get_universal_repository_with_auth(graph_id, current_user, "read", session)
+    await get_universal_repository(graph_id, "read")
 
     # Import needed functions
     from robosystems.models.iam.graph import Graph

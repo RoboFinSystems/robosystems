@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.operations.connection_service import ConnectionService
 from robosystems.database import get_db_session
@@ -32,7 +32,7 @@ router = APIRouter()
 async def init_oauth(
   graph_id: str = Path(..., description="Graph database identifier"),
   request: OAuthInitRequest = ...,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> OAuthInitResponse:
@@ -142,7 +142,7 @@ async def oauth_callback(
   provider: str = Path(..., description="OAuth provider name"),
   graph_id: str = Path(..., description="Graph database identifier"),
   request: OAuthCallbackRequest = ...,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):

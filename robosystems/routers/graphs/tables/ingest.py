@@ -69,9 +69,9 @@ from robosystems.models.api.table import (
   FileUploadStatus,
 )
 from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.graph.types import (
@@ -244,7 +244,7 @@ async def ingest_tables(
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
   request: BulkIngestRequest = Body(..., description="Ingestion request"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> BulkIngestResponse:
@@ -323,7 +323,7 @@ async def ingest_tables(
         "lock_ttl": lock_ttl,
       },
     )
-    repo = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
+    repo = await get_universal_repository(graph_id, "write")
 
     if not repo:
       raise HTTPException(

@@ -65,7 +65,6 @@ def verify_parent_graph_access(
       detail=f"Parent graph {graph_id} not found",
     )
 
-  # Verify user has access to parent graph
   user_graph = (
     session.query(UserGraph)
     .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
