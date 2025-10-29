@@ -133,6 +133,9 @@ on:
       AWS_SECRET_ACCESS_KEY:
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}

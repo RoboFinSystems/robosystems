@@ -288,7 +288,7 @@ Resources:
   BeatLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
+    UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: !Sub /robosystems/${Environment}/beat
       RetentionInDays: !Ref LogRetentionDays
