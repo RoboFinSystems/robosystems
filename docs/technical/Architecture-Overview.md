@@ -399,8 +399,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`api.yaml`**: ECS Fargate API service with auto-scaling, load balancing, and health checks
 - **`waf.yaml`**: AWS Web Application Firewall for protecting the API from web exploits
 - **`worker.yaml`**: ECS Fargate Celery workers with priority queues and spot capacity
-- **`worker-monitor.yaml`**: Lambda function for monitoring worker health and queue depths
-- **`beat.yaml`**: Celery beat scheduler for periodic tasks and cron jobs
+- **`worker-infra.yaml`**: Worker infrastructure (Celery beat scheduler + Lambda worker monitor)
 
 #### Graph Database Infrastructure
 
