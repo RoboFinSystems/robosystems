@@ -49,80 +49,17 @@ DEMO_NAME = "custom_graph_demo"
 
 
 def build_custom_schema_definition() -> CustomSchemaDefinition:
-  """Return the custom schema used for the generic custom graph demo."""
-  schema_dict = {
-    "name": "custom_graph_demo",
-    "version": "1.0.0",
-    "description": "People, companies, and projects schema for the custom graph demo",
-    "extends": "base",
-    "nodes": [
-      {
-        "name": "Company",
-        "properties": [
-          {"name": "identifier", "type": "STRING", "is_primary_key": True},
-          {"name": "name", "type": "STRING", "is_required": True},
-          {"name": "industry", "type": "STRING"},
-          {"name": "location", "type": "STRING"},
-          {"name": "founded_year", "type": "INT64"},
-        ],
-      },
-      {
-        "name": "Project",
-        "properties": [
-          {"name": "identifier", "type": "STRING", "is_primary_key": True},
-          {"name": "name", "type": "STRING", "is_required": True},
-          {"name": "status", "type": "STRING"},
-          {"name": "budget", "type": "DOUBLE"},
-          {"name": "start_date", "type": "STRING"},
-          {"name": "end_date", "type": "STRING"},
-          {"name": "sponsor_company", "type": "STRING"},
-        ],
-      },
-      {
-        "name": "Person",
-        "properties": [
-          {"name": "identifier", "type": "STRING", "is_primary_key": True},
-          {"name": "name", "type": "STRING", "is_required": True},
-          {"name": "age", "type": "INT64"},
-          {"name": "title", "type": "STRING"},
-          {"name": "interests", "type": "STRING"},
-          {"name": "location", "type": "STRING"},
-          {"name": "works_for", "type": "STRING"},
-          {"name": "start_date", "type": "STRING"},
-        ],
-      },
-    ],
-    "relationships": [
-      {
-        "name": "PERSON_WORKS_FOR_COMPANY",
-        "from_node": "Person",
-        "to_node": "Company",
-        "properties": [
-          {"name": "role", "type": "STRING"},
-          {"name": "started_on", "type": "STRING"},
-        ],
-      },
-      {
-        "name": "PERSON_WORKS_ON_PROJECT",
-        "from_node": "Person",
-        "to_node": "Project",
-        "properties": [
-          {"name": "hours_per_week", "type": "INT64"},
-          {"name": "contribution", "type": "STRING"},
-        ],
-      },
-      {
-        "name": "COMPANY_SPONSORS_PROJECT",
-        "from_node": "Company",
-        "to_node": "Project",
-        "properties": [
-          {"name": "sponsorship_level", "type": "STRING"},
-          {"name": "budget_committed", "type": "DOUBLE"},
-        ],
-      },
-    ],
-    "metadata": {"domain": "custom_graph_demo"},
-  }
+  """Load and return the custom schema from schema.json file."""
+  schema_file = Path(__file__).parent / "schema.json"
+
+  if not schema_file.exists():
+    raise FileNotFoundError(
+      f"Schema file not found: {schema_file}\n"
+      "The schema.json file should be in the same directory as this script."
+    )
+
+  with open(schema_file) as f:
+    schema_dict = json.load(f)
 
   return CustomSchemaDefinition.from_dict(schema_dict)
 

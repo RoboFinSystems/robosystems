@@ -63,6 +63,23 @@ logs-follow container="worker":
 logs-grep container="worker" pattern="ERROR" lines="100":
     docker logs {{container}} --tail {{lines}} | grep -E "{{pattern}}"
 
+## Demo Scripts ##
+# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-accounting flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
+# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
+# Setup SEC repository demo - loads data, grants access, updates config
+demo-sec ticker="NVDA" year="2025" skip_queries="false":
+    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
+
+# Run SEC demo preset queries
+demo-sec-query:
+    uv run examples/sec_demo/query_examples.py --all
+
 ## Development Environment ##
 # Initialize complete development environment (run after bootstrap)
 init:
@@ -356,31 +373,6 @@ sec-status env=_default_env:
 # SEC Production - Reset database (requires confirmation)
 sec-reset-remote confirm="" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
-
-## Demo Scripts ##
-# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
-# Examples:
-#   just demo-accounting
-#   just demo-accounting skip-queries
-#   just demo-accounting new-user,new-graph https://api.example.com
-demo-accounting flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
-
-# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
-# Examples:
-#   just demo-custom-graph
-#   just demo-custom-graph skip-queries
-#   just demo-custom-graph new-user,new-graph https://api.example.com
-demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
-
-# Setup SEC repository demo - loads data, grants access, updates config
-# Examples:
-#   just demo-sec                  # Load NVDA 2025 data, run example queries
-#   just demo-sec AAPL 2024        # Load specific ticker and year
-#   just demo-sec NVDA 2025 true   # Skip running queries after setup
-demo-sec ticker="NVDA" year="2025" skip_queries="false":
-    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
 
 ## Repository Access Management ##
 # Manage user access to shared repositories (SEC, industry data, etc.)
