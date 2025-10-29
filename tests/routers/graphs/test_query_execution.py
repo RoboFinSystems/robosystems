@@ -345,7 +345,6 @@ class TestQueryQueueIntegration:
 
       request_data = {
         "query": "MATCH (n) RETURN n",
-        "force_queue": True,  # Force queuing
       }
 
       response = await async_client.post(

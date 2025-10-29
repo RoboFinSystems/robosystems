@@ -57,7 +57,6 @@ from sqlalchemy.orm import Session
 from robosystems.models.iam import (
   User,
   GraphTable,
-  UserGraph,
   GraphFile,
   Graph,
   GraphSchema,
@@ -403,13 +402,6 @@ async def ingest_tables(
     successful_tables = 0
     failed_tables = 0
     skipped_tables = 0
-
-    user_graph = UserGraph.get_by_user_and_graph(current_user.id, graph_id, db)
-    if not user_graph:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"User does not have access to graph {graph_id}",
-      )
 
     bucket = env.AWS_S3_BUCKET
 

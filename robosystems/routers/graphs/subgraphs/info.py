@@ -10,7 +10,6 @@ from robosystems.database import get_async_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.api.subgraph import SubgraphResponse, SubgraphType
 from robosystems.models.iam.user import User
-from robosystems.models.iam.user_graph import UserGraph
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.logger import logger, api_logger, log_metric
 
@@ -79,21 +78,6 @@ async def get_subgraph_info(
   try:
     # Get and verify subgraph using subgraph_id parameter
     subgraph = get_subgraph_by_name(graph_id, subgraph_id, session, current_user)
-
-    # Verify user has access
-    access_graph_id = (
-      subgraph.parent_graph_id if subgraph.is_subgraph else subgraph.graph_id
-    )
-    user_graph = (
-      session.query(UserGraph)
-      .filter(
-        UserGraph.user_id == current_user.id, UserGraph.graph_id == access_graph_id
-      )
-      .first()
-    )
-
-    if not user_graph:
-      raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     if not subgraph.is_subgraph:
       raise HTTPException(

@@ -33,7 +33,6 @@ from robosystems.middleware.rate_limits import (
 from robosystems.models.iam import (
   User,
   GraphUsageTracking,
-  UserGraph,
 )
 from robosystems.operations.graph.pricing_service import GraphPricingService
 from robosystems.models.api.common import ErrorResponse
@@ -107,15 +106,6 @@ async def get_current_graph_bill(
   Raises:
       HTTPException: If graph not found or calculation fails
   """
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
-
   try:
     pricing_service = GraphPricingService(db)
     now = datetime.now()
@@ -222,15 +212,6 @@ async def get_graph_usage_details(
     raise HTTPException(status_code=400, detail="Invalid year")
   if month < 1 or month > 12:
     raise HTTPException(status_code=400, detail="Invalid month")
-
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
 
   try:
     # Get usage records for this specific graph
@@ -358,15 +339,6 @@ async def get_graph_billing_history(
   Raises:
       HTTPException: If graph not found
   """
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
-
   now = datetime.now()
   bills = []
   pricing_service = GraphPricingService(db)
@@ -471,15 +443,6 @@ async def get_graph_monthly_bill(
     raise HTTPException(status_code=400, detail="Invalid year")
   if month < 1 or month > 12:
     raise HTTPException(status_code=400, detail="Invalid month")
-
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
 
   try:
     pricing_service = GraphPricingService(db)

@@ -199,15 +199,6 @@ async def get_graph_metrics(
       },
     )
 
-    # Validate user has access to this graph
-    from robosystems.models.iam.user_graph import UserGraph
-
-    if not UserGraph.user_has_access(current_user.id, graph_id, db):
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"You don't have access to graph {graph_id}",
-      )
-
     # Collect metrics for the specific graph with timeout coordination
     import asyncio
 
@@ -451,16 +442,6 @@ async def get_graph_usage_stats(
         "include_details": include_details,
       },
     )
-
-    # Validate user has access to this graph
-    from robosystems.models.iam.user_graph import UserGraph
-
-    user_graph = UserGraph.get_by_user_and_graph(current_user.id, graph_id, db)
-    if not user_graph:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"You don't have access to graph {graph_id}",
-      )
 
     # Get graph usage statistics with timeout coordination
     if include_details:

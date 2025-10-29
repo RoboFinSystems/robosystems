@@ -65,17 +65,12 @@ def verify_parent_graph_access(
       detail=f"Parent graph {graph_id} not found",
     )
 
+  # Get UserGraph for role checking
   user_graph = (
     session.query(UserGraph)
     .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
     .first()
   )
-
-  if not user_graph:
-    raise HTTPException(
-      status_code=status.HTTP_403_FORBIDDEN,
-      detail="You do not have access to the parent graph",
-    )
 
   # Check role requirements
   if required_role == "admin" and user_graph.role != "admin":

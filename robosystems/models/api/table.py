@@ -45,10 +45,20 @@ class TableListResponse(BaseModel):
 class TableQueryRequest(BaseModel):
   sql: str = Field(
     ...,
-    description="SQL query to execute on staging tables",
+    description="SQL query to execute on staging tables. Use ? placeholders or $param_name for dynamic values to prevent SQL injection.",
     examples=[
+      "SELECT * FROM Entity WHERE entity_type = ? LIMIT ?",
+      "SELECT COUNT(*) FROM Transaction WHERE amount > ? AND date >= ?",
       "SELECT * FROM Entity LIMIT 10",
-      "SELECT COUNT(*) FROM Transaction WHERE amount > 1000",
+    ],
+  )
+  parameters: Optional[List[Any]] = Field(
+    default=None,
+    description="Query parameters for safe value substitution. ALWAYS use parameters instead of string concatenation.",
+    examples=[
+      ["Company", 100],
+      [1000, "2024-01-01"],
+      None,
     ],
   )
 
@@ -56,8 +66,18 @@ class TableQueryRequest(BaseModel):
     extra = "forbid"
     json_schema_extra = {
       "examples": [
-        {"sql": "SELECT * FROM Entity LIMIT 10"},
-        {"sql": "SELECT COUNT(*) FROM Transaction WHERE amount > 1000"},
+        {
+          "sql": "SELECT * FROM Entity WHERE entity_type = ? LIMIT ?",
+          "parameters": ["Company", 100],
+        },
+        {
+          "sql": "SELECT COUNT(*) FROM Transaction WHERE amount > ? AND date >= ?",
+          "parameters": [1000, "2024-01-01"],
+        },
+        {
+          "sql": "SELECT * FROM Entity LIMIT 10",
+          "parameters": None,
+        },
       ]
     }
 

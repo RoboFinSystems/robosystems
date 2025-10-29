@@ -131,39 +131,6 @@ async def validate_schema(
         "expected_complexity": "high" if request.check_compatibility else "medium",
       },
     )
-    # Verify user has access to the graph (handle both user graphs and shared repositories)
-    from robosystems.models.iam import UserGraph
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
-    from robosystems.models.iam.user_repository import UserRepository
-
-    # Determine graph type and validate access accordingly
-    identity = MultiTenantUtils.get_graph_identity(graph_id)
-
-    if identity.is_shared_repository:
-      # Check shared repository access
-      if not UserRepository.user_has_access(str(current_user.id), graph_id, db):
-        raise HTTPException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail=f"Access denied to shared repository {graph_id}",
-        )
-    elif identity.is_user_graph:
-      # Check user graph access
-      user_graph = (
-        db.query(UserGraph)
-        .filter_by(user_id=current_user.id, graph_id=graph_id)
-        .first()
-      )
-      if not user_graph:
-        raise HTTPException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail=f"Access denied to user graph {graph_id}",
-        )
-    else:
-      # Unknown graph type
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Invalid graph identifier: {graph_id}",
-      )
 
     # Schema operations are included - no credit consumption
 

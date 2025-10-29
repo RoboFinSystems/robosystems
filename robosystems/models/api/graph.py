@@ -122,24 +122,24 @@ class CypherQueryRequest(BaseModel):
 
   query: str = Field(
     ...,
-    description="The Cypher query to execute",
+    description="The Cypher query to execute. Use parameters ($param_name) for all dynamic values to prevent injection attacks.",
     min_length=1,
     max_length=MAX_QUERY_LENGTH,
     examples=[
-      "MATCH (n) RETURN n LIMIT 10",
-      "MATCH (n:Entity) RETURN n.name, n.identifier",
-      "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) RETURN e.name, r.amount, t.name",
       "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
+      "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
+      "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
+      "MATCH (n) RETURN n LIMIT 10",
     ],
   )
   parameters: Optional[Dict[str, Any]] = Field(
     default=None,
-    description="Optional parameters for the Cypher query",
+    description="Query parameters for safe value substitution. ALWAYS use parameters instead of string interpolation.",
     examples=[
-      None,
-      {"limit": 100},
       {"entity_type": "Company", "limit": 100},
-      {"min_amount": 1000, "entity_name": "Acme Corp"},
+      {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
+      {"identifier": "ENT123456"},
+      None,
     ],
   )
   timeout: Optional[int] = Field(
@@ -155,24 +155,24 @@ class CypherQueryRequest(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "query": "MATCH (n) RETURN n LIMIT 10",
-          "parameters": None,
-          "timeout": 30,
-        },
-        {
-          "query": "MATCH (n:Entity) RETURN n.name, n.identifier ORDER BY n.name",
-          "parameters": None,
-          "timeout": 60,
-        },
-        {
           "query": "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
           "parameters": {"entity_type": "Company", "limit": 100},
           "timeout": 60,
         },
         {
-          "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount RETURN e.name, r.amount, t.name ORDER BY r.amount DESC LIMIT $limit",
-          "parameters": {"min_amount": 1000, "limit": 50},
+          "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
+          "parameters": {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
           "timeout": 120,
+        },
+        {
+          "query": "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
+          "parameters": {"identifier": "ENT123456"},
+          "timeout": 30,
+        },
+        {
+          "query": "MATCH (n) RETURN n LIMIT 10",
+          "parameters": {},
+          "timeout": 30,
         },
       ]
     }

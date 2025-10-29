@@ -96,6 +96,13 @@ To load data into your graph, use the staging pipeline:
 1. Create file upload: `POST /v1/graphs/{graph_id}/tables/{table_name}/files`
 2. Ingest to graph: `POST /v1/graphs/{graph_id}/tables/ingest`
 
+**Security Best Practice - Use Parameterized Queries:**
+ALWAYS use query parameters instead of string interpolation to prevent injection attacks:
+- ✅ SAFE: `MATCH (n:Entity {type: $entity_type}) RETURN n` with `parameters: {"entity_type": "Company"}`
+- ❌ UNSAFE: `MATCH (n:Entity {type: "Company"}) RETURN n` with user input concatenated into query string
+
+Query parameters provide automatic escaping and type safety. All examples in this API use parameterized queries.
+
 This endpoint automatically selects the best execution strategy based on:
 - Query characteristics (size, complexity)
 - Client capabilities (SSE, NDJSON, JSON)

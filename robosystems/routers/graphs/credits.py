@@ -265,17 +265,6 @@ async def get_credit_transactions(
   from ...models.iam.graph_credits import GraphCreditTransaction
 
   try:
-    user_graph = (
-      db.query(UserGraph)
-      .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-      .first()
-    )
-
-    if not user_graph:
-      raise create_error_response(
-        status_code=403, detail="Access denied to this graph", code=ErrorCode.FORBIDDEN
-      )
-
     # Build base query
     query = db.query(GraphCreditTransaction).filter(
       GraphCreditTransaction.graph_id == graph_id
