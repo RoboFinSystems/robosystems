@@ -1,4 +1,4 @@
-Description: RoboSystems Beat Worker Service - ECS Fargate
+Description: RoboSystems Worker Infrastructure - Beat Scheduler and Worker Monitor Lambda
 
 Parameters:
   # Environment
@@ -19,7 +19,7 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Subnet IDs (comma-separated)
 
-  # Container & Application Configuration
+  # Container & Application Configuration (Beat)
   ECRRepositoryUrl:
     Type: String
     Description: Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)
@@ -28,40 +28,46 @@ Parameters:
     Description: ECR image tag
     Default: latest
     ConstraintDescription: Must be a valid Docker image tag
-  LogRetentionDays:
-    Type: Number
-    Default: 30
-    Description: CloudWatch log retention in days
 
-  # ECS & Compute Configuration
-  Cpu:
+  # ECS & Compute Configuration (Beat)
+  BeatCpu:
     Type: String
     Default: "256"
-    Description: CPU units for ECS task
+    Description: CPU units for Beat ECS task
     AllowedValues:
       - "256"
       - "512"
-  Memory:
+  BeatMemory:
     Type: String
     Default: "512"
-    Description: Memory units for ECS task
+    Description: Memory units for Beat ECS task
     AllowedValues:
       - "512"
       - "1024"
-  FargateSpotWeight:
+  BeatFargateSpotWeight:
     Type: Number
     Default: 80
-    Description: Fargate Spot capacity provider weight
+    Description: Fargate Spot capacity provider weight for Beat
     MinValue: 0
     MaxValue: 100
-  FargateWeight:
+  BeatFargateWeight:
     Type: Number
     Default: 20
-    Description: Fargate capacity provider weight
+    Description: Fargate capacity provider weight for Beat
     MinValue: 0
     MaxValue: 100
 
-  # Cache Configuration
+  # Lambda Configuration (Worker Monitor)
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+    ConstraintDescription: Must be a valid S3 bucket name
+  WorkerMonitorCodeKey:
+    Type: String
+    Description: S3 key for Worker Monitor Lambda deployment package
+    ConstraintDescription: Must be a valid S3 object key
+
+  # Cache Configuration (Shared)
   ValkeyUrl:
     Type: String
     Description: Valkey ElastiCache endpoint URL from Valkey stack
@@ -72,6 +78,9 @@ Parameters:
     Description: Security group ID for applications connecting to Valkey
     AllowedPattern: ^sg-[0-9a-f]+$
     ConstraintDescription: Must be a valid security group ID
+  ValkeyCacheClusterId:
+    Type: String
+    Description: ElastiCache Valkey cluster ID for Worker Monitor
 
   # Observability Configuration
   PrometheusStackName:
@@ -80,8 +89,8 @@ Parameters:
     Default: ""
     ConstraintDescription: Must be a valid CloudFormation stack name or empty
 
-  # Kuzu Configuration
-  KuzuReplicaAlbUrl:
+  # Graph Configuration
+  GraphReplicaAlbUrl:
     Type: String
     Default: ""
     Description: ALB endpoint URL for shared repository read replicas
@@ -93,21 +102,39 @@ Parameters:
       - "false"
     Description: Enable routing to shared replica ALB for read operations
 
+  # Logging Configuration
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: CloudWatch log retention in days for Beat
+  MonitorLogRetentionDays:
+    Type: Number
+    Default: 7
+    Description: CloudWatch log retention in days for Worker Monitor
+
   # Tagging Configuration
   ServiceTag:
     Type: String
     Description: Service tag for resource identification and billing
     Default: RoboSystems
-  ComponentTag:
+  BeatComponentTag:
     Type: String
-    Description: Component tag for resource identification and billing
+    Description: Component tag for Beat resources
     Default: Beat
+  MonitorComponentTag:
+    Type: String
+    Description: Component tag for Worker Monitor resources
+    Default: WorkerMonitor
 
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
   IsProduction: !Equals [!Ref Environment, "prod"]
 
 Resources:
+  # ============================================================
+  # BEAT SCHEDULER RESOURCES (ECS Fargate)
+  # ============================================================
+
   # ECS Cluster
   BeatCluster:
     Type: AWS::ECS::Cluster
@@ -121,7 +148,7 @@ Resources:
         - Key: Service
           Value: !Ref ServiceTag
         - Key: Component
-          Value: !Ref ComponentTag
+          Value: !Ref BeatComponentTag
         - Key: CreatedBy
           Value: CloudFormation
 
@@ -150,11 +177,8 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:DescribeSecret
                 Resource:
-                  # Base secret: robosystems/prod or robosystems/staging
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
-                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/kuzu, etc.
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
-              # KMS permissions for decrypting secrets during container startup
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -171,7 +195,7 @@ Resources:
         - Key: Service
           Value: !Ref ServiceTag
         - Key: Component
-          Value: !Ref ComponentTag
+          Value: !Ref BeatComponentTag
         - Key: CreatedBy
           Value: CloudFormation
 
@@ -228,17 +252,13 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry/index/*"
-              # Secrets Manager permissions for runtime secret access
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:DescribeSecret
                 Resource:
-                  # Base secret: robosystems/prod or robosystems/staging
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
-                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/kuzu, etc.
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
-              # KMS permissions for AWS managed keys with service conditions
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -253,7 +273,6 @@ Resources:
                       - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
                       - !Sub "ec2.${AWS::Region}.amazonaws.com"
                       - !Sub "ssm.${AWS::Region}.amazonaws.com"
-              # Amazon Managed Prometheus permissions (only if observability stack is configured)
               - !If
                 - HasObservabilityStack
                 - Effect: Allow
@@ -274,7 +293,7 @@ Resources:
         - Key: Service
           Value: !Ref ServiceTag
         - Key: Component
-          Value: !Ref ComponentTag
+          Value: !Ref BeatComponentTag
         - Key: CreatedBy
           Value: CloudFormation
 
@@ -292,7 +311,7 @@ Resources:
         - Key: Service
           Value: !Ref ServiceTag
         - Key: Component
-          Value: !Ref ComponentTag
+          Value: !Ref BeatComponentTag
         - Key: CreatedBy
           Value: CloudFormation
 
@@ -302,7 +321,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      GroupDescription: Security group for RoboSystems Worker Maintenance ECS tasks
+      GroupDescription: Security group for RoboSystems Beat ECS tasks
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: -1
@@ -315,7 +334,7 @@ Resources:
         - Key: Service
           Value: !Ref ServiceTag
         - Key: Component
-          Value: !Ref ComponentTag
+          Value: !Ref BeatComponentTag
         - Key: CreatedBy
           Value: CloudFormation
 
@@ -326,8 +345,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       Family: !Sub robosystems-beat-${Environment}-task
-      Cpu: !Ref Cpu
-      Memory: !Ref Memory
+      Cpu: !Ref BeatCpu
+      Memory: !Ref BeatMemory
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -340,7 +359,7 @@ Resources:
         - Name: beat-container
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
           Essential: true
-          StopTimeout: 60 # Beat scheduler can shutdown quickly (1 minute)
+          StopTimeout: 60
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -348,29 +367,22 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: beat
           Environment:
-            # Basic Environment Configuration
             - Name: ENVIRONMENT
               Value: !Ref Environment
             - Name: LOG_LEVEL
               Value: INFO
             - Name: DOCKER_PROFILE
               Value: beat
-            # AWS & Container Configuration
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            # Kuzu Routing Configuration (for enhanced client factory)
             - Name: GRAPH_REPLICA_ALB_URL
-              Value: !Ref KuzuReplicaAlbUrl
+              Value: !Ref GraphReplicaAlbUrl
             - Name: SHARED_REPLICA_ALB_ENABLED
               Value: !Ref SharedReplicaAlbEnabled
-            # Cache & Message Queue Configuration
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
-            # Feature flags and runtime configs configured via AWS Secrets Manager
             - Name: SECURITY_AUDIT_ENABLED
               Value: !If [IsProduction, "true", "false"]
-          # Secrets are fetched directly by the application using secrets_manager.py
-          # The container has IAM permissions to access robosystems/{env}/* secrets
 
   # ECS Service
   BeatService:
@@ -383,9 +395,9 @@ Resources:
       DesiredCount: 1
       CapacityProviderStrategy:
         - CapacityProvider: FARGATE_SPOT
-          Weight: !Ref FargateSpotWeight
+          Weight: !Ref BeatFargateSpotWeight
         - CapacityProvider: FARGATE
-          Weight: !Ref FargateWeight
+          Weight: !Ref BeatFargateWeight
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -396,7 +408,7 @@ Resources:
       TaskDefinition: !Ref BeatTaskDefinition
       DeploymentConfiguration:
         MaximumPercent: 200
-        MinimumHealthyPercent: 0 # Beat can have brief downtime during deployment
+        MinimumHealthyPercent: 0
         DeploymentCircuitBreaker:
           Enable: true
           Rollback: true
@@ -408,28 +420,234 @@ Resources:
         - Key: Service
           Value: !Ref ServiceTag
         - Key: Component
-          Value: !Ref ComponentTag
+          Value: !Ref BeatComponentTag
         - Key: CreatedBy
           Value: CloudFormation
 
+  # ============================================================
+  # WORKER MONITOR RESOURCES (Lambda)
+  # ============================================================
+
+  # Lambda Execution Role
+  MonitorLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-worker-monitor-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: WorkerMonitorPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecs:ListTasks
+                  - ecs:ListServices
+                  - ecs:DescribeTasks
+                  - ecs:DescribeServices
+                  - ecs:GetTaskProtection
+                  - ecs:UpdateTaskProtection
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeReplicationGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/valkey-*"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref MonitorComponentTag
+
+  # Lambda Security Group
+  MonitorLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub robosystems-worker-monitor-${Environment}-sg
+      GroupDescription: Security group for Worker Monitor Lambda
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-worker-monitor-${Environment}-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Lambda Function
+  WorkerMonitorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-worker-monitor"
+      Description: Monitor worker queues and manage ECS task protection
+      Runtime: python3.12
+      Handler: index.handler
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref WorkerMonitorCodeKey
+      MemorySize: 512
+      Timeout: 120
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          VALKEY_CLUSTER_ID: !Ref ValkeyCacheClusterId
+          DLQ_CRITICAL_THRESHOLD: "20"
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref MonitorLambdaSecurityGroup
+          - !Ref ValkeyClientSecurityGroupId
+        SubnetIds: !Ref SubnetIds
+      Role: !GetAtt MonitorLambdaExecutionRole.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref MonitorComponentTag
+
+  # CloudWatch Log Group
+  MonitorLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-worker-monitor
+      RetentionInDays: !Ref MonitorLogRetentionDays
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+
+  # EventBridge Rule for scheduled execution
+  MonitorScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub robosystems-worker-monitor-${Environment}-schedule
+      Description: Trigger worker monitor every minute
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt WorkerMonitorLambda.Arn
+          Id: WorkerMonitorTarget
+          Input: |
+            {
+              "action": "all"
+            }
+
+  # Permission for EventBridge to invoke Lambda
+  MonitorLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WorkerMonitorLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MonitorScheduleRule.Arn
+
+  # CloudWatch Alarm for Lambda errors
+  MonitorLambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-monitor-${Environment}-errors
+      AlarmDescription: Alert when worker monitoring Lambda has errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WorkerMonitorLambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+
+  # CloudWatch Alarm for Lambda duration
+  MonitorLambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-worker-monitor-${Environment}-duration
+      AlarmDescription: Alert when worker monitoring Lambda takes too long
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WorkerMonitorLambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 30000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+
 Outputs:
-  ClusterName:
-    Description: Name of the ECS Cluster
+  # Beat Outputs
+  BeatClusterName:
+    Description: Name of the Beat ECS Cluster
     Value: !Ref BeatCluster
     Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-ClusterName
-  ServiceName:
-    Description: Name of the ECS Service
+      Name: !Sub ${AWS::StackName}-BeatClusterName
+  BeatServiceName:
+    Description: Name of the Beat ECS Service
     Value: !Ref BeatService
     Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-ServiceName
-  ECRRepositoryUsed:
-    Description: ECR Repository used for Docker images
-    Value: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-ECRRepositoryUsed
-  TaskDefinitionArn:
-    Description: ARN of the task definition
+      Name: !Sub ${AWS::StackName}-BeatServiceName
+  BeatTaskDefinitionArn:
+    Description: ARN of the Beat task definition
     Value: !Ref BeatTaskDefinition
     Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-TaskDefinitionArn
+      Name: !Sub ${AWS::StackName}-BeatTaskDefinitionArn
+  BeatECRRepositoryUsed:
+    Description: ECR Repository used for Beat Docker images
+    Value: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+    Export:
+      Name: !Sub ${AWS::StackName}-BeatECRRepositoryUsed
+
+  # Worker Monitor Outputs
+  MonitorLambdaFunctionArn:
+    Description: ARN of the Worker Monitor Lambda function
+    Value: !GetAtt WorkerMonitorLambda.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-MonitorLambdaArn
+  MonitorLambdaFunctionName:
+    Description: Name of the Worker Monitor Lambda function
+    Value: !Ref WorkerMonitorLambda
+    Export:
+      Name: !Sub ${AWS::StackName}-MonitorLambdaName
+  MonitorScheduleRuleArn:
+    Description: ARN of the EventBridge schedule rule
+    Value: !GetAtt MonitorScheduleRule.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-MonitorScheduleRuleArn

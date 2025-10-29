@@ -1,0 +1,322 @@
+name: Deploy Worker Infrastructure
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Repository Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod, staging, or dev)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+
+      # Infrastructure & Networking Configuration
+      vpc_id:
+        description: "VPC ID for ECS tasks and Lambda"
+        required: true
+        type: string
+      subnet_ids:
+        description: "Private subnet IDs for ECS tasks and Lambda (comma-separated)"
+        required: true
+        type: string
+
+      # Container & Application Configuration (Beat)
+      ecr_repository_url:
+        description: "Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)"
+        required: true
+        type: string
+      ecr_image_tag:
+        description: "Docker image tag to deploy"
+        required: true
+        type: string
+
+      # ECS & Compute Configuration (Beat)
+      beat_cpu:
+        description: "CPU units for Beat ECS task (256, 512, etc.)"
+        required: false
+        type: string
+        default: "256"
+      beat_memory:
+        description: "Memory in MiB for Beat ECS task (512, 1024, etc.)"
+        required: false
+        type: string
+        default: "512"
+      beat_fargate_spot_weight:
+        description: "Weight for FARGATE_SPOT capacity provider for Beat"
+        required: false
+        type: string
+        default: "80"
+      beat_fargate_weight:
+        description: "Weight for FARGATE capacity provider for Beat"
+        required: false
+        type: string
+        default: "20"
+
+      # Lambda Configuration (Worker Monitor)
+      lambda_code_bucket:
+        description: "S3 bucket containing Lambda deployment packages"
+        required: false
+        type: string
+        default: ""
+
+      # Cache Configuration (Shared)
+      valkey_url:
+        description: "Valkey ElastiCache endpoint URL from Valkey stack"
+        required: true
+        type: string
+      valkey_sg_id:
+        description: "Security group ID for applications connecting to Valkey"
+        required: true
+        type: string
+      valkey_cluster_id:
+        description: "ElastiCache Valkey cluster ID for Worker Monitor"
+        required: true
+        type: string
+
+      # Graph Configuration
+      graph_replica_alb_url:
+        description: "ALB endpoint URL for shared repository read replicas"
+        required: false
+        type: string
+        default: ""
+      shared_replica_alb_enabled:
+        description: "Enable routing to shared replica ALB for read operations"
+        required: false
+        type: string
+        default: "false"
+
+      # Observability Configuration
+      prometheus_stack_name:
+        description: "Name of the Prometheus CloudFormation stack for this environment"
+        required: false
+        type: string
+        default: ""
+
+      # Other Configuration
+      refresh_ecs_service:
+        description: "Whether to refresh the Beat ECS service after deployment"
+        required: false
+        type: string
+        default: "false"
+
+    outputs:
+      # Beat Outputs
+      beat_cluster_name:
+        description: "Name of the Beat ECS Cluster"
+        value: ${{ jobs.action.outputs.beat_cluster_name }}
+      beat_service_name:
+        description: "Name of the Beat ECS Service"
+        value: ${{ jobs.action.outputs.beat_service_name }}
+      beat_task_definition_arn:
+        description: "ARN of the Beat task definition"
+        value: ${{ jobs.action.outputs.beat_task_definition_arn }}
+      # Worker Monitor Outputs
+      monitor_lambda_function_arn:
+        description: "ARN of the Worker Monitor Lambda function"
+        value: ${{ jobs.action.outputs.monitor_lambda_function_arn }}
+      monitor_lambda_function_name:
+        description: "Name of the Worker Monitor Lambda function"
+        value: ${{ jobs.action.outputs.monitor_lambda_function_name }}
+      monitor_schedule_rule_arn:
+        description: "ARN of the EventBridge schedule rule"
+        value: ${{ jobs.action.outputs.monitor_schedule_rule_arn }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  action:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 15
+
+    outputs:
+      beat_cluster_name: ${{ steps.get-outputs.outputs.beat_cluster_name }}
+      beat_service_name: ${{ steps.get-outputs.outputs.beat_service_name }}
+      beat_task_definition_arn: ${{ steps.get-outputs.outputs.beat_task_definition_arn }}
+      monitor_lambda_function_arn: ${{ steps.get-outputs.outputs.monitor_lambda_function_arn }}
+      monitor_lambda_function_name: ${{ steps.get-outputs.outputs.monitor_lambda_function_name }}
+      monitor_schedule_rule_arn: ${{ steps.get-outputs.outputs.monitor_schedule_rule_arn }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Deploy Worker Infrastructure CloudFormation Stack
+        id: deploy-stack
+        run: |
+          # Check if stack exists
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'Stack with id ${{ inputs.stack_name }} does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "Creating new stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "Updating existing stack ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Build base parameters
+          STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+                ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+                ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
+                ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \
+                ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
+                ParameterKey=BeatCpu,ParameterValue=${{ inputs.beat_cpu }} \
+                ParameterKey=BeatMemory,ParameterValue=${{ inputs.beat_memory }} \
+                ParameterKey=BeatFargateSpotWeight,ParameterValue=${{ inputs.beat_fargate_spot_weight }} \
+                ParameterKey=BeatFargateWeight,ParameterValue=${{ inputs.beat_fargate_weight }} \
+                ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
+                ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
+                ParameterKey=ValkeyCacheClusterId,ParameterValue=${{ inputs.valkey_cluster_id }} \
+                ParameterKey=GraphReplicaAlbUrl,ParameterValue=\"${{ inputs.graph_replica_alb_url }}\" \
+                ParameterKey=SharedReplicaAlbEnabled,ParameterValue=${{ inputs.shared_replica_alb_enabled }} \
+                ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\""
+
+          # Add Lambda bucket and fetch S3 key from manifest if provided
+          if [ -n "${{ inputs.lambda_code_bucket }}" ]; then
+            STACK_PARAMS="$STACK_PARAMS \
+                  ParameterKey=LambdaCodeBucket,ParameterValue=${{ inputs.lambda_code_bucket }}"
+
+            # Fetch S3 key from manifest (which includes hash in filename)
+            MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
+
+            WORKER_MONITOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."worker-monitor".s3_key // empty')
+
+            if [ -n "$WORKER_MONITOR_KEY" ]; then
+              STACK_PARAMS="$STACK_PARAMS \
+                    ParameterKey=WorkerMonitorCodeKey,ParameterValue=$WORKER_MONITOR_KEY"
+            fi
+          fi
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            # Create new stack
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/worker-infra.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=WorkerInfra \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            # Update existing stack, handling "No updates" error
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/worker-infra.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=WorkerInfra \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            # Check if the error was "No updates are to be performed"
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "Stack is already up to date - no changes needed"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "Stack update initiated successfully"
+              echo "is_new_stack=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "1800"
+          interval: "10"
+
+      - name: Get Stack Outputs
+        id: get-outputs
+        run: |
+          # Get stack outputs after deployment
+          STACK_OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "${{ inputs.stack_name }}" \
+            --query 'Stacks[0].Outputs' \
+            --output json)
+
+          # Extract Beat outputs
+          BEAT_CLUSTER=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="BeatClusterName") | .OutputValue // empty')
+          BEAT_SERVICE=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="BeatServiceName") | .OutputValue // empty')
+          BEAT_TASK_DEF=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="BeatTaskDefinitionArn") | .OutputValue // empty')
+
+          # Extract Worker Monitor outputs
+          LAMBDA_ARN=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="MonitorLambdaFunctionArn") | .OutputValue // empty')
+          LAMBDA_NAME=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="MonitorLambdaFunctionName") | .OutputValue // empty')
+          SCHEDULE_RULE_ARN=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="MonitorScheduleRuleArn") | .OutputValue // empty')
+
+          # Set outputs
+          echo "beat_cluster_name=${BEAT_CLUSTER}" >> $GITHUB_OUTPUT
+          echo "beat_service_name=${BEAT_SERVICE}" >> $GITHUB_OUTPUT
+          echo "beat_task_definition_arn=${BEAT_TASK_DEF}" >> $GITHUB_OUTPUT
+          echo "monitor_lambda_function_arn=${LAMBDA_ARN}" >> $GITHUB_OUTPUT
+          echo "monitor_lambda_function_name=${LAMBDA_NAME}" >> $GITHUB_OUTPUT
+          echo "monitor_schedule_rule_arn=${SCHEDULE_RULE_ARN}" >> $GITHUB_OUTPUT
+
+          # Display outputs
+          echo "📊 Stack Outputs:"
+          echo "  Beat Cluster: ${BEAT_CLUSTER}"
+          echo "  Beat Service: ${BEAT_SERVICE}"
+          echo "  Lambda Function: ${LAMBDA_NAME}"
+
+      - name: Refresh Beat ECS Service
+        if: ${{ inputs.refresh_ecs_service == 'true' && steps.deploy-stack.outputs.is_new_stack == 'false' }}
+        uses: ./.github/actions/refresh-ecs
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          skip-autoscale-refresh: "false"
+          service-type: "beat"
+          max-wait-time: "600"
+          service-stability-delay: "30"
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          # Output deployment status for the main workflow
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "✅ Worker infrastructure stack created successfully"
+          else
+            echo "✅ Worker infrastructure stack updated successfully"
+          fi

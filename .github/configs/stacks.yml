@@ -47,12 +47,10 @@ production:
       alb_url: ApiAlbUrl
       alb_dns: ApiAlbDnsName
       service_arn: ApiServiceArn
-  
-  beat:
-    stack_name: RoboSystemsBeatProd
-    outputs:
-      service_arn: BeatServiceArn
-  
+
+  worker_infra:
+    stack_name: RoboSystemsWorkerInfraProd
+
   workers:
     default:
       stack_name: RoboSystemsWorkerDefaultProd
@@ -109,11 +107,6 @@ production:
   
   # Monitoring & Observability
   monitoring:
-    worker_monitor:
-      stack_name: RoboSystemsWorkerMonitorProd
-      outputs:
-        lambda_arn: WorkerMonitorFunctionArn
-    
     prometheus:
       stack_name: RoboSystemsPrometheusProduction  # Note: "Production" not "Prod"
       outputs:
@@ -196,12 +189,10 @@ staging:
       alb_url: ApiAlbUrl
       alb_dns: ApiAlbDnsName
       service_arn: ApiServiceArn
-  
-  beat:
-    stack_name: RoboSystemsBeatStaging
-    outputs:
-      service_arn: BeatServiceArn
-  
+
+  worker_infra:
+    stack_name: RoboSystemsWorkerInfraStaging
+
   workers:
     default:
       stack_name: RoboSystemsWorkerDefaultStaging
@@ -232,13 +223,8 @@ staging:
           instance_ids: InstanceIds
       
   
-  # Monitoring & Observability  
+  # Monitoring & Observability
   monitoring:
-    worker_monitor:
-      stack_name: RoboSystemsWorkerMonitorStaging
-      outputs:
-        lambda_arn: WorkerMonitorFunctionArn
-    
     prometheus:
       stack_name: RoboSystemsPrometheusStaging
       outputs:
