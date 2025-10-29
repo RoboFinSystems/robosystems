@@ -97,7 +97,7 @@ MAIN_API_TAGS = [
 ]
 
 # Graph API OpenAPI tags
-KUZU_API_TAGS = [
+GRAPH_API_TAGS = [
   {
     "name": "Graph Management",
     "description": "💾 Graph management - Create, list, delete, and manage graph databases",

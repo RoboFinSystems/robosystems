@@ -171,17 +171,6 @@ Parameters:
     ConstraintDescription: Must be a valid security group ID
 
   # Kuzu Configuration
-  KuzuReplicaAlbUrl:
-    Type: String
-    Default: ""
-    Description: ALB endpoint URL for shared repository read replicas
-  SharedReplicaAlbEnabled:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable routing to shared replica ALB for read operations
   AllowSharedMasterReads:
     Type: String
     Default: "true"
@@ -592,11 +581,7 @@ Resources:
             # AWS & Container Configuration
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            # Kuzu Routing Configuration (for enhanced client factory)
-            - Name: GRAPH_REPLICA_ALB_URL
-              Value: !Ref KuzuReplicaAlbUrl
-            - Name: SHARED_REPLICA_ALB_ENABLED
-              Value: !Ref SharedReplicaAlbEnabled
+            # Kuzu Routing Configuration
             - Name: ALLOW_SHARED_MASTER_READS
               Value: !Ref AllowSharedMasterReads
             # Cache & Message Queue Configuration

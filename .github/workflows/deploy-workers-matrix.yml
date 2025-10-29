@@ -49,18 +49,6 @@ on:
         type: string
         description: Security group ID for Valkey
 
-      # Kuzu Configuration
-      kuzu_replica_alb_url:
-        required: false
-        type: string
-        description: ALB endpoint URL for shared repository read replicas
-        default: ""
-      shared_replica_alb_enabled:
-        required: false
-        type: string
-        description: Enable routing to shared replica ALB
-        default: "false"
-
       # Other Configuration
       beat_enabled:
         required: false
@@ -359,9 +347,6 @@ jobs:
       valkey_cluster_id: robosystems-${{ inputs.environment }}-valkey
       # Lambda Configuration
       lambda_code_bucket: robosystems-${{ inputs.environment }}-deployment
-      # Graph Configuration
-      graph_replica_alb_url: ${{ inputs.kuzu_replica_alb_url }}
-      shared_replica_alb_enabled: ${{ inputs.shared_replica_alb_enabled }}
       # Other Configuration
       refresh_ecs_service: ${{ inputs.refresh_ecs_service }}
     secrets:

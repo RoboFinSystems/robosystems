@@ -76,7 +76,7 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
         f"Graph API key not configured for {self.key_type} in {self.environment} environment!"
       )
       raise ValueError(
-        f"KUZU_API_KEY must be set for {self.key_type} in production/staging"
+        f"GRAPH_API_KEY must be set for {self.key_type} in production/staging"
       )
 
     logger.info(
@@ -119,10 +119,8 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
 
   def _validate_api_key(self, request: Request) -> None:
     """Validate API key from request headers."""
-    # Check for API key in header (support both old and new header names)
-    api_key = request.headers.get("X-Graph-API-Key") or request.headers.get(
-      "X-Kuzu-API-Key"
-    )
+    # Check for API key in header
+    api_key = request.headers.get("X-Graph-API-Key")
     if not api_key:
       # Also check Authorization header
       auth_header = request.headers.get("Authorization", "")
@@ -259,7 +257,7 @@ def create_api_key(prefix: str = "kuzu") -> tuple[str, str]:
   SecurityAuditLogger.log_security_event(
     event_type=SecurityEventType.AUTH_SUCCESS,
     details={
-      "action": "secure_kuzu_api_key_generated",
+      "action": "secure_graph_api_key_generated",
       "prefix": prefix,
       "hash_algorithm": "bcrypt",
     },

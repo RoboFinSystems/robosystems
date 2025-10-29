@@ -89,19 +89,6 @@ Parameters:
     Default: ""
     ConstraintDescription: Must be a valid CloudFormation stack name or empty
 
-  # Graph Configuration
-  GraphReplicaAlbUrl:
-    Type: String
-    Default: ""
-    Description: ALB endpoint URL for shared repository read replicas
-  SharedReplicaAlbEnabled:
-    Type: String
-    Default: "false"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Enable routing to shared replica ALB for read operations
-
   # Logging Configuration
   LogRetentionDays:
     Type: Number
@@ -375,10 +362,6 @@ Resources:
               Value: beat
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: GRAPH_REPLICA_ALB_URL
-              Value: !Ref GraphReplicaAlbUrl
-            - Name: SHARED_REPLICA_ALB_ENABLED
-              Value: !Ref SharedReplicaAlbEnabled
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
             - Name: SECURITY_AUDIT_ENABLED

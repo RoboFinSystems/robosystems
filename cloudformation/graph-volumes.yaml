@@ -454,7 +454,7 @@ Resources:
           EXPANSION_FACTOR: "1.5"
           MIN_EXPANSION_GB: "50"
           MAX_VOLUME_SIZE_GB: "16384"
-          KUZU_API_PORT: "8001"
+          GRAPH_API_PORT: "8001"
           GRAPH_API_KEY: !If
             - HasKuzuSecret
             - !Sub "{{resolve:secretsmanager:${KuzuSecretArn}:SecretString:GRAPH_API_KEY}}"

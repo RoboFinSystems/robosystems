@@ -47,7 +47,7 @@ class KuzuMCPClient:
     Initialize Kuzu MCP client.
 
     Args:
-        api_base_url: Base URL for Graph API (e.g., http://kuzu-api:8001)
+        api_base_url: Base URL for Graph API (e.g., http://graph-api-kuzu:8001)
         timeout: HTTP request timeout in seconds
         query_timeout: Maximum query execution time in seconds
         max_query_length: Maximum allowed query length in characters

@@ -55,7 +55,7 @@ if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
 fi
 
 # For local development - always run migrations and seeds automatically
-if [[ "${ENVIRONMENT:-}" == "dev" && "${DOCKER_PROFILE:-}" == "beat"  && "${RUN_MIGRATIONS:-}" == "true" ]]; then
+if [[ "${ENVIRONMENT:-}" == "dev" && "${DOCKER_PROFILE:-}" == "worker"  && "${RUN_MIGRATIONS:-}" == "true" ]]; then
     run_db_init || echo "Database initialization failed, but continuing..."
 fi
 
@@ -69,7 +69,7 @@ case $DOCKER_PROFILE in
       --proxy-headers
     ;;
   "worker")
-    echo "Starting Celery worker..."
+    echo "Starting Celery worker with embedded Beat scheduler..."
 
     # Run EDGAR init for development environment
     if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
@@ -102,7 +102,7 @@ case $DOCKER_PROFILE in
       echo "Worker listening to queues: ${QUEUES}"
     fi
 
-    exec uv run celery -A robosystems.celery worker \
+    exec uv run celery -A robosystems.celery worker -B \
       --loglevel=info \
       --concurrency=${WORKER_AUTOSCALE:-1} \
       --prefetch-multiplier=${WORKER_PREFETCH_MULTIPLIER:-0} \

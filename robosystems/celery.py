@@ -47,7 +47,6 @@ celery_app = Celery(
     "robosystems.tasks.billing.shared_credit_allocation",
     "robosystems.tasks.billing.storage_billing",
     "robosystems.tasks.billing.usage_collector",
-    # Monitoring - moved to Lambda functions (worker-monitor)
     # Infrastructure
     "robosystems.tasks.infrastructure.auth_cleanup",
   ],

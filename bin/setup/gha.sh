@@ -252,8 +252,8 @@ function setup_minimum_config() {
     gh variable set SHARED_REPLICA_ENABLE_PROD --body "false"
     gh variable set SHARED_REPLICA_ENABLE_STAGING --body "false"
 
-    # Other Kuzu Settings
-    gh variable set KUZU_API_KEY_ROTATION_DAYS --body "90"
+    # Other Graph Settings
+    gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
     gh variable set KUZU_UPDATE_CONTAINERS_PROD --body "true"
     gh variable set KUZU_UPDATE_CONTAINERS_STAGING --body "true"
 
@@ -466,8 +466,8 @@ function setup_full_config() {
     gh variable set SHARED_REPLICA_ENABLE_PROD --body "false"
     gh variable set SHARED_REPLICA_ENABLE_STAGING --body "false"
 
-    # Kuzu Settings
-    gh variable set KUZU_API_KEY_ROTATION_DAYS --body "90"
+    # Graph Settings
+    gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
     gh variable set KUZU_UPDATE_CONTAINERS_PROD --body "true"
     gh variable set KUZU_UPDATE_CONTAINERS_STAGING --body "true"
 

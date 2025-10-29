@@ -10,8 +10,8 @@ Flow:
 3. Trigger graph ingestion via Graph API (rebuilds graph from scratch)
 
 Architecture:
-- Worker communicates with Graph API via graph API client
-- DuckDB connection pool lives on kuzu-api container
+- Worker communicates with Graph API via Graph API client
+- DuckDB connection pool lives on Graph API container
 - Works directly with processed files (many small files) instead of consolidated files
 - Tests performance with high file counts
 
@@ -45,8 +45,8 @@ class XBRLDuckDBGraphProcessor:
   2. Trigger ingestion to graph database
 
   Architecture:
-  - Uses graph API client to communicate with graph API container
-  - DuckDB pool lives on graph API side, not on worker
+  - Uses Graph API client to communicate with Graph API container
+  - DuckDB pool lives on Graph API side, not on worker
   - Works directly with processed files (many small files) instead of
     consolidated files to test performance with high file counts
   """

@@ -85,7 +85,7 @@ if env.ENVIRONMENT != "dev":
       # - DLQ monitoring and health checks
       # These are scheduled via EventBridge (every 60 seconds), not Celery beat.
       # This provides better separation of concerns for infrastructure-level operations.
-      # See worker-monitor Lambda in cloudformation/worker-infra.yaml
+      # See worker-monitor Lambda in cloudformation/worker-infra.yaml1
       # ========== INFRASTRUCTURE TASKS ==========
       # Note: Instance monitoring tasks have been migrated to Lambda functions
       # and are now scheduled via EventBridge rules in kuzu-infra.yaml

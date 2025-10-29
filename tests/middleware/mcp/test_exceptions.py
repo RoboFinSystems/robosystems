@@ -96,7 +96,7 @@ class TestKuzuQueryTimeoutError:
     assert str(error) == "Query took too long"
     assert error.details["timeout_seconds"] == 60
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuQueryTimeoutError()
     assert isinstance(error, KuzuAPIError)
@@ -132,7 +132,7 @@ class TestKuzuQueryComplexityError:
     assert str(error) == "Too complex"
     assert error.details["complexity_score"] == 200
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuQueryComplexityError()
     assert isinstance(error, KuzuAPIError)
@@ -170,7 +170,7 @@ class TestKuzuValidationError:
     assert str(error) == "Validation failed"
     assert error.details["validation_errors"] == errors
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuValidationError()
     assert isinstance(error, KuzuAPIError)
@@ -194,7 +194,7 @@ class TestKuzuAuthenticationError:
     assert str(error) == "Invalid credentials"
     assert error.error_code == "AUTH_FAILED"
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuAuthenticationError()
     assert isinstance(error, KuzuAPIError)
@@ -230,7 +230,7 @@ class TestKuzuAuthorizationError:
     assert str(error) == "Access denied"
     assert error.details["required_permission"] == "user:read"
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuAuthorizationError()
     assert isinstance(error, KuzuAPIError)
@@ -266,7 +266,7 @@ class TestKuzuConnectionError:
     assert str(error) == "Failed to connect"
     assert error.details["endpoint"] == "api.test.com"
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuConnectionError()
     assert isinstance(error, KuzuAPIError)
@@ -318,7 +318,7 @@ class TestKuzuResourceNotFoundError:
     assert error.details["resource_type"] == "graph"
     assert error.details["resource_id"] == "kg789ghi"
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuResourceNotFoundError()
     assert isinstance(error, KuzuAPIError)
@@ -354,7 +354,7 @@ class TestKuzuRateLimitError:
     assert str(error) == "Rate limited"
     assert error.details["retry_after_seconds"] == 300
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuRateLimitError()
     assert isinstance(error, KuzuAPIError)
@@ -390,7 +390,7 @@ class TestKuzuSchemaError:
     assert str(error) == "Node type not found"
     assert error.details["schema_item"] == "Person"
 
-  def test_inheritance_from_kuzu_api_error(self):
+  def test_inheritance_from_graph_api_error(self):
     """Test inheritance from KuzuAPIError."""
     error = KuzuSchemaError()
     assert isinstance(error, KuzuAPIError)
@@ -399,7 +399,7 @@ class TestKuzuSchemaError:
 class TestExceptionHierarchy:
   """Test exception inheritance hierarchy."""
 
-  def test_all_exceptions_inherit_from_kuzu_api_error(self):
+  def test_all_exceptions_inherit_from_graph_api_error(self):
     """Test that all custom exceptions inherit from KuzuAPIError."""
     exception_classes = [
       KuzuQueryTimeoutError,

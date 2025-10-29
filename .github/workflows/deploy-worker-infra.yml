@@ -89,18 +89,6 @@ on:
         required: true
         type: string
 
-      # Graph Configuration
-      graph_replica_alb_url:
-        description: "ALB endpoint URL for shared repository read replicas"
-        required: false
-        type: string
-        default: ""
-      shared_replica_alb_enabled:
-        description: "Enable routing to shared replica ALB for read operations"
-        required: false
-        type: string
-        default: "false"
-
       # Observability Configuration
       prometheus_stack_name:
         description: "Name of the Prometheus CloudFormation stack for this environment"
@@ -200,8 +188,6 @@ jobs:
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=ValkeyCacheClusterId,ParameterValue=${{ inputs.valkey_cluster_id }} \
-                ParameterKey=GraphReplicaAlbUrl,ParameterValue=\"${{ inputs.graph_replica_alb_url }}\" \
-                ParameterKey=SharedReplicaAlbEnabled,ParameterValue=${{ inputs.shared_replica_alb_enabled }} \
                 ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\""
 
           # Add Lambda bucket and fetch S3 key from manifest if provided
