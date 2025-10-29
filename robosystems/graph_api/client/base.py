@@ -53,7 +53,7 @@ class BaseGraphClient:
     if api_key:
       if "headers" not in kwargs:
         kwargs["headers"] = {}
-      kwargs["headers"]["X-Kuzu-API-Key"] = api_key
+      kwargs["headers"]["X-Graph-API-Key"] = api_key
       logger.debug("GraphClient configured with API key")
     else:
       # Only warn about missing API key in production environments

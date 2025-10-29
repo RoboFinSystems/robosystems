@@ -113,11 +113,10 @@ class TestGraphClientFactory:
       mock.GRAPH_READ_TIMEOUT = 30.0
       mock.GRAPH_CIRCUIT_BREAKER_THRESHOLD = 5
       mock.GRAPH_CIRCUIT_BREAKER_TIMEOUT = 60
-      mock.GRAPH_ALB_HEALTH_CACHE_TTL = 300
       mock.GRAPH_INSTANCE_CACHE_TTL = 3600
-      mock.GRAPH_REPLICA_ALB_URL = "http://replica.example.com"
       mock.ENVIRONMENT = "test"
       mock.VALKEY_URL = "redis://localhost:6379"
+      mock.ALLOW_SHARED_MASTER_READS = True
       yield mock
 
   @pytest.mark.asyncio
@@ -158,15 +157,19 @@ class TestGraphClientFactory:
   @pytest.mark.asyncio
   async def test_create_client_for_shared_repository(self, mock_env):
     """Test creating client for shared repository."""
-    # Mock ALB health check
-    with patch.object(GraphClientFactory, "_check_alb_health", return_value=True):
+    # Mock _get_shared_master_url to return a master endpoint
+    with patch.object(
+      GraphClientFactory,
+      "_get_shared_master_url",
+      return_value="http://master.example.com",
+    ):
       # Mock GraphClient creation
       with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
         mock_client = MagicMock()
         mock_client._graph_id = "sec"
         mock_client._database_name = "sec"
         mock_client.config = MagicMock()
-        mock_client.config.base_url = "http://replica.example.com"
+        mock_client.config.base_url = "http://master.example.com"
         MockClient.return_value = mock_client
 
         # SEC is in SHARED_REPOSITORIES by default
@@ -175,8 +178,8 @@ class TestGraphClientFactory:
         assert client is not None
         assert client._graph_id == "sec"
         assert client._database_name == "sec"
-        # Should use replica endpoint for reads
-        assert "replica" in client.config.base_url
+        # Should use master endpoint for reads
+        assert "master" in client.config.base_url
 
   @pytest.mark.asyncio
   async def test_create_client_for_subgraph(self, mock_env):
@@ -221,26 +224,6 @@ class TestGraphClientFactory:
       assert client is not None
       # Should use master endpoint for writes
       assert "master" in client.config.base_url
-
-  @pytest.mark.asyncio
-  async def test_create_client_alb_unhealthy_fallback(self, mock_env):
-    """Test fallback to master when ALB is unhealthy."""
-    # Mock ALB as unhealthy
-    with patch.object(GraphClientFactory, "_check_alb_health", return_value=False):
-      # Mock GraphClient creation
-      with patch("robosystems.graph_api.client.factory.GraphClient") as MockClient:
-        mock_client = MagicMock()
-        mock_client._graph_id = "sec"
-        mock_client._database_name = "sec"
-        mock_client.config = MagicMock()
-        mock_client.config.base_url = "http://master.example.com"
-        MockClient.return_value = mock_client
-
-        client = await GraphClientFactory.create_client("sec", operation_type="read")
-
-        assert client is not None
-        # Should fallback to master endpoint
-        assert "master" in client.config.base_url
 
   @pytest.mark.asyncio
   async def test_create_client_no_allocation(self, mock_env):

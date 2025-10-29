@@ -62,7 +62,6 @@ class RouteTarget(Enum):
 
   USER_GRAPH = "user_graph"
   SHARED_MASTER = "shared_master"
-  SHARED_REPLICA_ALB = "shared_replica_alb"
 
 
 class CircuitBreaker:
@@ -197,7 +196,6 @@ class GraphClientFactory:
   SHARED_REPOSITORIES = list(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
 
   # Cache TTLs from constants
-  _alb_health_cache_ttl = env.GRAPH_ALB_HEALTH_CACHE_TTL
   _instance_cache_ttl = env.GRAPH_INSTANCE_CACHE_TTL
 
   # Timeout configurations from constants
@@ -213,10 +211,6 @@ class GraphClientFactory:
   _redis_client_lock = threading.Lock()
 
   # Circuit breakers for different services
-  _alb_circuit_breaker = CircuitBreaker(
-    failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
-    timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
-  )
   _master_circuit_breaker = CircuitBreaker(
     failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
     timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
@@ -386,7 +380,7 @@ class GraphClientFactory:
 
       # Route to appropriate local instance based on backend
       if backend == "neo4j":
-        api_url = "http://neo4j-api:8002"  # Neo4j instance
+        api_url = "http://graph-api-neo4j:8002"  # Neo4j instance
         logger.info(
           f"Dev environment: Routing {graph_id} {operation_type} to Neo4j at {api_url}"
         )
@@ -434,51 +428,19 @@ class GraphClientFactory:
   @classmethod
   async def _determine_read_target(cls, graph_id: str) -> tuple[RouteTarget, str, str]:
     """
-    Determine the best target for read operations with fallback logic.
+    Determine the best target for read operations.
 
     Returns:
         Tuple of (target, api_url, api_key)
     """
 
-    # Check if replica ALB is enabled
-    if env.SHARED_REPLICA_ALB_ENABLED and env.GRAPH_REPLICA_ALB_URL:
-      # Check ALB health if health checks are enabled
-      alb_is_healthy = True
-      if env.GRAPH_HEALTH_CHECKS_ENABLED:
-        alb_is_healthy = await cls._check_alb_health()
-
-      if alb_is_healthy:
-        logger.info(f"Routing {graph_id} READ to replica ALB")
-        return (
-          RouteTarget.SHARED_REPLICA_ALB,
-          env.GRAPH_REPLICA_ALB_URL,
-          env.GRAPH_API_KEY,
-        )
-      else:
-        logger.warning(f"Replica ALB unhealthy for {graph_id}")
-
-        # Check if fallback to master is allowed
-        if env.ALLOW_SHARED_MASTER_READS:
-          logger.warning(f"Falling back to shared master for {graph_id} READ")
-          return (
-            RouteTarget.SHARED_MASTER,
-            await cls._get_shared_master_url(),
-            env.GRAPH_API_KEY,
-          )
-        else:
-          raise ServiceUnavailableError(
-            f"Replica ALB unavailable and master reads disabled for {graph_id}"
-          )
-
-    # No replica ALB configured, check if master reads allowed
-    elif env.ALLOW_SHARED_MASTER_READS:
-      logger.info(f"Routing {graph_id} READ to shared master (no ALB configured)")
+    if env.ALLOW_SHARED_MASTER_READS:
+      logger.info(f"Routing {graph_id} READ to shared master")
       return (
         RouteTarget.SHARED_MASTER,
         await cls._get_shared_master_url(),
         env.GRAPH_API_KEY,
       )
-
     else:
       raise ServiceUnavailableError(
         f"No read endpoint available for shared repository {graph_id}"
@@ -651,112 +613,6 @@ class GraphClientFactory:
       f"Cannot find shared master in {env.ENVIRONMENT} environment. "
       f"Ensure shared master is running and registered in DynamoDB with node_type='shared_master'"
     )
-
-  @classmethod
-  async def _check_alb_health(cls) -> bool:
-    """
-    Check if the replica ALB is healthy.
-
-    Uses Redis caching to avoid excessive health checks.
-    Implements circuit breaker pattern for fault tolerance.
-    """
-    # Check circuit breaker first if enabled
-    if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
-      if not await cls._alb_circuit_breaker.should_attempt():
-        logger.debug("ALB circuit breaker is open, returning unhealthy")
-        return False
-
-    cache_key = cls._get_cache_key("alb", "health")
-
-    # Try Redis cache first
-    redis_client = await cls._get_redis()
-    if redis_client:
-      try:
-        cached = await redis_client.get(cache_key)
-        if cached:
-          health_data = json.loads(cached)
-          age = time.time() - health_data["timestamp"]
-          if age < cls._alb_health_cache_ttl:
-            is_healthy = health_data["healthy"]
-            if is_healthy and env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
-              await cls._alb_circuit_breaker.record_success()
-            return is_healthy
-      except Exception as e:
-        logger.warning(f"Redis cache read failed: {e}")
-
-    # Perform health check with timeout
-    alb_url = env.GRAPH_REPLICA_ALB_URL
-    try:
-      if not alb_url:
-        return False
-
-      # Get or create connection pool with HTTP/2
-      if alb_url not in cls._connection_pools:
-        cls._connection_pools[alb_url] = httpx.AsyncClient(
-          timeout=httpx.Timeout(connect=cls._connect_timeout, read=cls._read_timeout),
-          http2=True,  # Enable HTTP/2 for better performance
-          limits=httpx.Limits(max_keepalive_connections=10),
-        )
-        cls._pool_stats[alb_url] = {
-          "created_at": time.time(),
-          "requests": 0,
-          "failures": 0,
-        }
-
-      client = cls._connection_pools[alb_url]
-
-      # Track pool statistics
-      cls._pool_stats[alb_url]["requests"] += 1
-
-      response = await client.get(f"{alb_url}/health")
-      healthy = response.status_code == 200
-
-      if healthy:
-        if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
-          await cls._alb_circuit_breaker.record_success()
-        logger.debug(f"ALB health check successful for {alb_url}")
-      else:
-        if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
-          await cls._alb_circuit_breaker.record_failure()
-        cls._pool_stats[alb_url]["failures"] += 1
-        logger.warning(
-          f"ALB health check returned {response.status_code} for {alb_url}"
-        )
-
-      # Cache result
-      health_data = {"healthy": healthy, "timestamp": time.time()}
-
-      # Try Redis first, fall back to memory
-      if redis_client:
-        try:
-          await redis_client.setex(
-            cache_key, cls._alb_health_cache_ttl, json.dumps(health_data)
-          )
-        except Exception as e:
-          logger.warning(f"Redis cache write failed: {e}")
-
-      return healthy
-
-    except Exception as e:
-      if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
-        await cls._alb_circuit_breaker.record_failure()
-      cls._pool_stats.get(alb_url, {}).setdefault("failures", 0)
-      cls._pool_stats.get(alb_url, {})["failures"] += 1
-
-      logger.error(f"ALB health check failed: {e}", extra={"alb_url": alb_url})
-
-      # Cache negative result
-      health_data = {"healthy": False, "timestamp": time.time()}
-
-      if redis_client:
-        try:
-          await redis_client.setex(
-            cache_key, cls._alb_health_cache_ttl, json.dumps(health_data)
-          )
-        except Exception:
-          pass
-
-      return False
 
   @classmethod
   async def _create_user_graph_client(
@@ -935,11 +791,6 @@ class GraphClientFactory:
     stats = {
       "pools": {},
       "circuit_breakers": {
-        "alb": {
-          "is_open": cls._alb_circuit_breaker.is_open,
-          "failure_count": cls._alb_circuit_breaker.failure_count,
-          "last_failure": cls._alb_circuit_breaker.last_failure_time,
-        },
         "master": {
           "is_open": cls._master_circuit_breaker.is_open,
           "failure_count": cls._master_circuit_breaker.failure_count,
@@ -1001,10 +852,6 @@ class GraphClientFactory:
           cls._redis_pool = None
 
     # Reset circuit breakers
-    cls._alb_circuit_breaker = CircuitBreaker(
-      failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
-      timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,
-    )
     cls._master_circuit_breaker = CircuitBreaker(
       failure_threshold=env.GRAPH_CIRCUIT_BREAKER_THRESHOLD,
       timeout=env.GRAPH_CIRCUIT_BREAKER_TIMEOUT,

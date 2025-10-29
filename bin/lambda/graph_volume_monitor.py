@@ -37,8 +37,8 @@ EXPANSION_THRESHOLD = float(os.environ.get("EXPANSION_THRESHOLD", "0.8"))  # 80%
 EXPANSION_FACTOR = float(os.environ.get("EXPANSION_FACTOR", "1.5"))  # 50% increase
 MIN_EXPANSION_GB = int(os.environ.get("MIN_EXPANSION_GB", "50"))
 MAX_VOLUME_SIZE_GB = int(os.environ.get("MAX_VOLUME_SIZE_GB", "16384"))  # EBS limit
-KUZU_API_PORT = os.environ.get("KUZU_API_PORT", "8001")
-KUZU_API_KEY = os.environ.get("KUZU_API_KEY", "")
+GRAPH_API_PORT = os.environ.get("GRAPH_API_PORT", "8001")
+GRAPH_API_KEY = os.environ.get("GRAPH_API_KEY", "")
 
 # HTTP client for API calls
 http = urllib3.PoolManager()
@@ -424,12 +424,12 @@ def get_volume_metrics_from_instance(instance: Dict) -> Optional[Dict]:
 
   try:
     # Use the /metrics endpoint
-    url = f"http://{instance['private_ip']}:{KUZU_API_PORT}/metrics"
+    url = f"http://{instance['private_ip']}:{GRAPH_API_PORT}/metrics"
 
     # Add API key to headers if configured
     headers = {}
-    if KUZU_API_KEY:
-      headers["X-Kuzu-API-Key"] = KUZU_API_KEY
+    if GRAPH_API_KEY:
+      headers["X-Graph-API-Key"] = GRAPH_API_KEY
 
     response = http.request(
       "GET",

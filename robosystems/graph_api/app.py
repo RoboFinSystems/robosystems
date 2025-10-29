@@ -21,7 +21,7 @@ from robosystems.graph_api.routers import (
   metrics,
 )
 from robosystems.config import env
-from robosystems.config.openapi_tags import KUZU_API_TAGS
+from robosystems.config.openapi_tags import GRAPH_API_TAGS
 from robosystems.logger import logger
 
 # OpenTelemetry import - conditional based on OTEL_ENABLED
@@ -47,7 +47,7 @@ def create_app() -> FastAPI:
   # Set appropriate service name based on node type (only if OTEL is enabled)
   node_type = env.KUZU_NODE_TYPE
   if env.OTEL_ENABLED:
-    os.environ["OTEL_SERVICE_NAME"] = f"kuzu-api-{node_type}"
+    os.environ["OTEL_SERVICE_NAME"] = f"graph-api-{node_type}"
 
   @asynccontextmanager
   async def lifespan(app: FastAPI):
@@ -96,7 +96,7 @@ def create_app() -> FastAPI:
     docs_url=None,  # Using custom docs route instead
     redoc_url=None,  # Disable default ReDoc to use custom
     openapi_url="/openapi.json",
-    openapi_tags=KUZU_API_TAGS,
+    openapi_tags=GRAPH_API_TAGS,
   )
 
   # Add API key security scheme to OpenAPI documentation
@@ -120,7 +120,7 @@ def create_app() -> FastAPI:
         "ApiKeyHeader": {
           "type": "apiKey",
           "in": "header",
-          "name": "X-Kuzu-API-Key",
+          "name": "X-Graph-API-Key",
           "description": "API key for authentication. Required in production/staging environments.",
         }
       }
@@ -154,7 +154,7 @@ def create_app() -> FastAPI:
     allow_origins=kuzu_cors_origins,
     allow_credentials=False,  # No credentials needed for server-to-server API
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Kuzu-API-Key"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Graph-API-Key"],
   )
 
   # Add request size limit middleware

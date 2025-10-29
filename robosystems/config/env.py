@@ -75,7 +75,6 @@ from .constants import (
   ARELLE_DOWNLOAD_TIMEOUT,
   XBRL_EXTERNALIZATION_THRESHOLD,
   # Resiliency and circuit breaker
-  KUZU_ALB_HEALTH_CACHE_TTL,
   KUZU_INSTANCE_CACHE_TTL,
   KUZU_CIRCUIT_BREAKER_THRESHOLD,
   KUZU_CIRCUIT_BREAKER_TIMEOUT,
@@ -306,7 +305,6 @@ class EnvConfig:
   GRAPH_REDIS_CACHE_ENABLED = get_bool_env("GRAPH_REDIS_CACHE_ENABLED", True)
   GRAPH_RETRY_LOGIC_ENABLED = get_bool_env("GRAPH_RETRY_LOGIC_ENABLED", True)
   GRAPH_HEALTH_CHECKS_ENABLED = get_bool_env("GRAPH_HEALTH_CHECKS_ENABLED", True)
-  SHARED_REPLICA_ALB_ENABLED = get_bool_env("SHARED_REPLICA_ALB_ENABLED", False)
   ALLOW_SHARED_MASTER_READS = get_bool_env("ALLOW_SHARED_MASTER_READS", True)
 
   # Graph backup encryption and compression are always enabled for security and efficiency
@@ -394,13 +392,7 @@ class EnvConfig:
   GRAPH_CONNECT_TIMEOUT = get_float_env("GRAPH_CONNECT_TIMEOUT", KUZU_CONNECT_TIMEOUT)
   GRAPH_READ_TIMEOUT = get_float_env("GRAPH_READ_TIMEOUT", KUZU_READ_TIMEOUT)
 
-  # Graph Routing and Load Balancing (applies to all backends)
-  GRAPH_REPLICA_ALB_URL = get_str_env("GRAPH_REPLICA_ALB_URL", "")
-
   # Graph Resiliency and Circuit Breaker Configuration (applies to all backends)
-  GRAPH_ALB_HEALTH_CACHE_TTL = get_int_env(
-    "GRAPH_ALB_HEALTH_CACHE_TTL", KUZU_ALB_HEALTH_CACHE_TTL
-  )
   GRAPH_INSTANCE_CACHE_TTL = get_int_env(
     "GRAPH_INSTANCE_CACHE_TTL", KUZU_INSTANCE_CACHE_TTL
   )

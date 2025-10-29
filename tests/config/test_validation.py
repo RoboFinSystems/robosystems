@@ -145,7 +145,7 @@ class TestEnvValidator:
     with patch("os.getenv", return_value=None):  # No explicit GRAPH_API_URL set
       EnvValidator.validate_required_vars(env_config)
 
-  def test_validate_required_vars_kuzu_api_key_warning(self):
+  def test_validate_required_vars_graph_api_key_warning(self):
     """Test warning for missing GRAPH_API_KEY in non-dev environment."""
     env_config = MockEnvConfig()
     env_config.ENVIRONMENT = "staging"

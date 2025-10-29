@@ -176,8 +176,10 @@ class GraphClient(BaseGraphClient):
       logger.debug(f"Making request: {method} {path}")
       if self.client.headers:
         debug_headers = dict(self.client.headers)
-        if "X-Kuzu-API-Key" in debug_headers:
-          debug_headers["X-Kuzu-API-Key"] = debug_headers["X-Kuzu-API-Key"][:8] + "..."
+        if "X-Graph-API-Key" in debug_headers:
+          debug_headers["X-Graph-API-Key"] = (
+            debug_headers["X-Graph-API-Key"][:8] + "..."
+          )
         logger.debug(f"Client headers: {debug_headers}")
 
       response = await self.client.request(**request_kwargs)

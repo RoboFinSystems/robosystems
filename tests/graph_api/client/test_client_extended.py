@@ -617,7 +617,7 @@ class TestKuzuClientExtended:
 
   # Test various exception types
   @pytest.mark.asyncio
-  async def test_kuzu_api_error_handling(self, client):
+  async def test_graph_api_error_handling(self, client):
     """Test GraphAPIError base exception."""
     error = GraphAPIError(
       "API Error", status_code=400, response_data={"detail": "Bad request"}

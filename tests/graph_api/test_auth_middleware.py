@@ -68,7 +68,7 @@ class TestKuzuAuthMiddleware:
       mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="valid-key-123")
-      mock_request.headers = Headers({"X-Kuzu-API-Key": "valid-key-123"})
+      mock_request.headers = Headers({"X-Graph-API-Key": "valid-key-123"})
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
 
       response = await middleware.dispatch(mock_request, call_next)
@@ -114,7 +114,7 @@ class TestKuzuAuthMiddleware:
       mock_env.GRAPH_API_KEY = None
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
-      mock_request.headers = Headers({"X-Kuzu-API-Key": "wrong-key"})
+      mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
       call_next = AsyncMock()
 
       response = await middleware.dispatch(mock_request, call_next)
@@ -132,7 +132,7 @@ class TestKuzuAuthMiddleware:
 
       middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
       middleware.max_failed_attempts = 3  # Lower for testing
-      mock_request.headers = Headers({"X-Kuzu-API-Key": "wrong-key"})
+      mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
       call_next = AsyncMock()
 
       # Make multiple failed attempts
@@ -156,7 +156,7 @@ class TestKuzuAuthMiddleware:
       middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
       middleware.max_failed_attempts = 2
       middleware.lockout_duration = 0.1  # 100ms for testing
-      mock_request.headers = Headers({"X-Kuzu-API-Key": "wrong-key"})
+      mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
       call_next = AsyncMock()
 
       # Make failed attempts to trigger rate limit
@@ -187,12 +187,12 @@ class TestKuzuAuthMiddleware:
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
 
       # Make a failed attempt
-      mock_request.headers = Headers({"X-Kuzu-API-Key": "wrong-key"})
+      mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
       await middleware.dispatch(mock_request, call_next)
       assert "192.168.1.1" in middleware.failed_attempts
 
       # Successful attempt should clear the counter
-      mock_request.headers = Headers({"X-Kuzu-API-Key": "correct-key"})
+      mock_request.headers = Headers({"X-Graph-API-Key": "correct-key"})
       response = await middleware.dispatch(mock_request, call_next)
       assert response.status_code == 200
       assert "192.168.1.1" not in middleware.failed_attempts
@@ -218,7 +218,7 @@ class TestKuzuAuthMiddleware:
       ) as mock_get_key:
         mock_get_key.return_value = None
 
-        with pytest.raises(ValueError, match="KUZU_API_KEY must be set"):
+        with pytest.raises(ValueError, match="GRAPH_API_KEY must be set"):
           KuzuAuthMiddleware(mock_app)
 
   def test_constant_time_compare(self, mock_app):

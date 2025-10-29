@@ -196,7 +196,7 @@ RoboSystems implements security controls at the infrastructure, application, and
 ```bash
 # Authentication
 JWT_ACCESS_TOKEN_EXPIRE_HOURS="24"
-KUZU_API_KEY_ROTATION_DAYS="90"
+GRAPH_API_KEY_ROTATION_DAYS="90"
 
 # Audit logging
 SECURITY_AUDIT_ENABLED="true"

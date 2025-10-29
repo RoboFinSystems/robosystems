@@ -396,7 +396,7 @@ jobs:
       # AWS Configuration
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # Alert Configuration
-      rotation_schedule_days: ${{ vars.KUZU_API_KEY_ROTATION_DAYS || '90' }}
+      rotation_schedule_days: ${{ vars.GRAPH_API_KEY_ROTATION_DAYS || '90' }}
       # Lambda Configuration
       lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
     secrets:

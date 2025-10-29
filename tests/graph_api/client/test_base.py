@@ -56,8 +56,8 @@ class TestBaseGraphClient:
         base_url="http://localhost:8001", api_key="test-api-key-123"
       )
 
-      assert "X-Kuzu-API-Key" in client.config.headers
-      assert client.config.headers["X-Kuzu-API-Key"] == "test-api-key-123"
+      assert "X-Graph-API-Key" in client.config.headers
+      assert client.config.headers["X-Graph-API-Key"] == "test-api-key-123"
 
   def test_initialization_with_env_api_key(self):
     """Test client initialization with API key from environment."""
@@ -67,8 +67,8 @@ class TestBaseGraphClient:
 
       client = BaseGraphClient(base_url="http://localhost:8001")
 
-      assert "X-Kuzu-API-Key" in client.config.headers
-      assert client.config.headers["X-Kuzu-API-Key"] == "env-api-key-456"
+      assert "X-Graph-API-Key" in client.config.headers
+      assert client.config.headers["X-Graph-API-Key"] == "env-api-key-456"
 
   def test_initialization_no_base_url_error(self):
     """Test that initialization fails without base URL."""

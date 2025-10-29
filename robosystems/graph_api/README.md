@@ -267,7 +267,7 @@ docker run -d \
   -v /data/kuzu-dbs:/data/kuzu-dbs \
   -e KUZU_NODE_TYPE=writer \
   -e WRITER_TIER=standard \
-  -e KUZU_API_KEY=${KUZU_API_KEY} \
+  -e GRAPH_API_KEY=${GRAPH_API_KEY} \
   ${ECR_URI}:${ECR_IMAGE_TAG} \
   /app/bin/entrypoint.sh
 
