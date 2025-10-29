@@ -308,13 +308,11 @@ async def get_current_user_with_graph(
 
       if cached_data:
         user_data = cached_data.get("user_data", {})
-        # Create User object from cached data (avoid database query)
-        user = User(
-          id=user_data.get("id"),
-          email=user_data.get("email"),
-          name=user_data.get("name"),
-          is_active=user_data.get("is_active", True),
-        )
+        # Create User object from cached data with validation (avoid database query)
+        user = _create_user_from_cache(user_data)
+        if not user:
+          # Validation failed - fallback to database query
+          user = User.get_by_id(user_id, session())
       else:
         # Fallback to database query
         user = User.get_by_id(user_id, session())
@@ -326,8 +324,20 @@ async def get_current_user_with_graph(
         if has_access is None:
           # Cache miss - check database and cache result
           from ...models.iam import UserGraph
+          from ..graph.multitenant_utils import MultiTenantUtils
 
-          has_access = UserGraph.user_has_access(user_id, graph_id, session())
+          # Check if this is a shared repository or user graph
+          if MultiTenantUtils.is_shared_repository(graph_id):
+            # Use generic repository access validation for shared repositories
+            has_access = MultiTenantUtils.validate_repository_access(
+              graph_id,
+              user_id,
+              "read",
+            )
+          else:
+            # Use UserGraph access validation for personal user graphs
+            has_access = UserGraph.user_has_access(user_id, graph_id, session())
+
           api_key_cache.cache_jwt_graph_access(str(user_id), graph_id, has_access)
 
         if has_access:

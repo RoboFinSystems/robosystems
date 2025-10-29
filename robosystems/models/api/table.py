@@ -43,10 +43,23 @@ class TableListResponse(BaseModel):
 
 
 class TableQueryRequest(BaseModel):
-  sql: str = Field(..., description="SQL query to execute on staging tables")
+  sql: str = Field(
+    ...,
+    description="SQL query to execute on staging tables",
+    examples=[
+      "SELECT * FROM Entity LIMIT 10",
+      "SELECT COUNT(*) FROM Transaction WHERE amount > 1000",
+    ],
+  )
 
   class Config:
     extra = "forbid"
+    json_schema_extra = {
+      "examples": [
+        {"sql": "SELECT * FROM Entity LIMIT 10"},
+        {"sql": "SELECT COUNT(*) FROM Transaction WHERE amount > 1000"},
+      ]
+    }
 
 
 class TableQueryResponse(BaseModel):
@@ -58,16 +71,25 @@ class TableQueryResponse(BaseModel):
 
 class TableIngestRequest(BaseModel):
   ignore_errors: bool = Field(
-    default=True, description="Continue ingestion on row errors"
+    default=True,
+    description="Continue ingestion on row errors",
+    examples=[True, False],
   )
   rebuild: bool = Field(
     default=False,
     description="Rebuild graph database from scratch before ingestion. "
     "Safe operation - staged data is the source of truth, graph can always be regenerated.",
+    examples=[False, True],
   )
 
   class Config:
     extra = "forbid"
+    json_schema_extra = {
+      "examples": [
+        {"ignore_errors": True, "rebuild": False},
+        {"ignore_errors": False, "rebuild": True},
+      ]
+    }
 
 
 class TableIngestResponse(BaseModel):
@@ -79,13 +101,31 @@ class TableIngestResponse(BaseModel):
 
 
 class FileUploadRequest(BaseModel):
-  file_name: str = Field(..., description="File name to upload")
+  file_name: str = Field(
+    ...,
+    description="File name to upload",
+    examples=["entities.parquet", "transactions.csv", "data.json"],
+  )
   content_type: str = Field(
-    default="application/x-parquet", description="File MIME type"
+    default="application/x-parquet",
+    description="File MIME type",
+    examples=["application/x-parquet", "text/csv", "application/json"],
   )
 
   class Config:
     extra = "forbid"
+    json_schema_extra = {
+      "examples": [
+        {
+          "file_name": "entities.parquet",
+          "content_type": "application/x-parquet",
+        },
+        {
+          "file_name": "transactions.csv",
+          "content_type": "text/csv",
+        },
+      ]
+    }
 
 
 class FileUploadResponse(BaseModel):
@@ -99,24 +139,40 @@ class FileStatusUpdate(BaseModel):
   status: str = Field(
     ...,
     description="File status: 'uploaded' (ready for ingest), 'disabled' (exclude from ingest), 'archived' (soft deleted)",
+    examples=["uploaded", "disabled", "archived"],
   )
 
   class Config:
     extra = "forbid"
+    json_schema_extra = {
+      "examples": [
+        {"status": "uploaded"},
+        {"status": "disabled"},
+      ]
+    }
 
 
 class BulkIngestRequest(BaseModel):
   ignore_errors: bool = Field(
-    default=True, description="Continue ingestion on row errors"
+    default=True,
+    description="Continue ingestion on row errors",
+    examples=[True, False],
   )
   rebuild: bool = Field(
     default=False,
     description="Rebuild graph database from scratch before ingestion. "
     "Safe operation - staged data is the source of truth, graph can always be regenerated.",
+    examples=[False, True],
   )
 
   class Config:
     extra = "forbid"
+    json_schema_extra = {
+      "examples": [
+        {"ignore_errors": True, "rebuild": False},
+        {"ignore_errors": False, "rebuild": True},
+      ]
+    }
 
 
 class TableIngestResult(BaseModel):

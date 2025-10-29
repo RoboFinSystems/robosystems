@@ -813,6 +813,53 @@ class TestGetCurrentUserWithGraph:
     assert "Invalid API key or access denied to graph" in str(exc_info.value.detail)
     mock_audit_logger.log_security_event.assert_called_once()
 
+  @pytest.mark.asyncio
+  @patch("robosystems.middleware.auth.dependencies.verify_jwt_token")
+  @patch("robosystems.middleware.auth.dependencies.api_key_cache")
+  @patch("robosystems.middleware.auth.dependencies.User")
+  @patch("robosystems.middleware.auth.dependencies.SecurityAuditLogger")
+  async def test_get_current_user_with_shared_repository_jwt_success(
+    self, mock_audit_logger, mock_user_class, mock_cache, mock_verify_jwt
+  ):
+    """Test JWT user can access shared repositories (e.g., 'sec')."""
+    auth_token = "valid.jwt.token"
+    user_id = "user123"
+    shared_repo_id = "sec"
+
+    mock_verify_jwt.return_value = user_id
+    mock_cache.get_cached_jwt_validation.return_value = None
+    mock_cache.get_cached_jwt_graph_access.return_value = None
+
+    mock_user = Mock(spec=User)
+    mock_user.is_active = True
+    mock_user_class.get_by_id.return_value = mock_user
+
+    self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
+
+    # Mock shared repository detection and access validation
+    with patch(
+      "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository"
+    ) as mock_is_shared:
+      with patch(
+        "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.validate_repository_access"
+      ) as mock_validate_repo:
+        mock_is_shared.return_value = True
+        mock_validate_repo.return_value = True
+
+        result = await get_current_user_with_graph(
+          self.mock_request,
+          shared_repo_id,
+          api_key=None,
+        )
+
+        assert result == mock_user
+        mock_is_shared.assert_called_once_with(shared_repo_id)
+        mock_validate_repo.assert_called_once_with(shared_repo_id, user_id, "read")
+        mock_cache.cache_jwt_graph_access.assert_called_once_with(
+          str(user_id), shared_repo_id, True
+        )
+        mock_audit_logger.log_auth_success.assert_called_once()
+
 
 class TestRepositoryAccess:
   """Test repository access validation functionality."""

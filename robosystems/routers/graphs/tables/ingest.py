@@ -102,7 +102,6 @@ circuit_breaker = CircuitBreakerManager()
   summary="Ingest Tables to Graph",
   description="""Load all files from S3 into DuckDB staging tables and ingest into Kuzu graph database.
 
-**Purpose:**
 Orchestrates the complete data pipeline from S3 staging files into the Kuzu graph database.
 Processes all tables in a single bulk operation with comprehensive error handling and metrics.
 
@@ -143,55 +142,19 @@ Setting `rebuild=true` regenerates the entire graph database from scratch:
 - Scales to thousands of files
 - Optimized for large datasets
 
-**Example Request:**
-```bash
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg123/tables/ingest" \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "ignore_errors": true,
-    "rebuild": false
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "status": "success",
-  "graph_id": "kg123",
-  "total_tables": 5,
-  "successful_tables": 5,
-  "failed_tables": 0,
-  "skipped_tables": 0,
-  "total_rows_ingested": 25000,
-  "total_execution_time_ms": 15420.5,
-  "results": [
-    {
-      "table_name": "Entity",
-      "status": "success",
-      "rows_ingested": 5000,
-      "execution_time_ms": 3200.1,
-      "error": null
-    }
-  ]
-}
-```
-
 **Concurrency Control:**
 Only one ingestion can run per graph at a time. If another ingestion is in progress,
 you'll receive a 409 Conflict error. The distributed lock automatically expires after
 the configured TTL (default: 1 hour) to prevent deadlocks from failed ingestions.
 
-**Tips:**
+**Important Notes:**
 - Only files with 'uploaded' status are processed
 - Tables with no uploaded files are skipped
 - Use `ignore_errors=false` for strict validation
 - Monitor progress via per-table results
 - Check graph metadata for rebuild status
 - Wait for current ingestion to complete before starting another
-
-**Note:**
-Table ingestion is included - no credit consumption.""",
+- Table ingestion is included - no credit consumption""",
   responses={
     200: {
       "description": "Ingestion completed with detailed per-table results",

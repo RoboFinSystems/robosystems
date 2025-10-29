@@ -27,7 +27,10 @@ from robosystems.models.api.common import (
 )
 from robosystems.middleware.sse import create_operation_response
 from robosystems.models.api import AvailableExtensionsResponse, AvailableExtension
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.auth.dependencies import (
+  get_current_user,
+  get_current_user_with_graph,
+)
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
   general_api_rate_limit_dependency,
@@ -104,17 +107,17 @@ class CreateGraphRequest(BaseModel):
     json_schema_extra = {
       "example": {
         "metadata": {
-          "graph_name": "Production System",
-          "description": "Main production graph",
+          "graph_name": "Acme Consulting LLC",
+          "description": "Professional consulting services with full accounting integration",
           "schema_extensions": ["roboledger"],
         },
         "instance_tier": "kuzu-standard",
         "initial_entity": {
-          "name": "Acme Corp",
-          "uri": "https://acme.com",
+          "name": "Acme Consulting LLC",
+          "uri": "https://acmeconsulting.com",
           "cik": "0001234567",
         },
-        "tags": ["production", "finance"],
+        "tags": ["consulting", "professional-services"],
       }
     }
 
@@ -152,15 +155,86 @@ def _raise_http_exception(
   "",
   response_model=UserGraphsResponse,
   summary="Get User Graphs",
-  description="Get all graph databases accessible to the current user.",
+  description="""List all graph databases accessible to the current user with roles and selection status.
+
+Returns a comprehensive list of all graphs the user can access, including their
+role in each graph (admin or member) and which graph is currently selected as
+the active workspace.
+
+**Returned Information:**
+- Graph ID and display name for each accessible graph
+- User's role (admin/member) indicating permission level
+- Selection status (one graph can be marked as "selected")
+- Creation timestamp for each graph
+
+**Graph Roles:**
+- `admin`: Full access - can manage graph settings, invite users, delete graph
+- `member`: Read/write access - can query and modify data, cannot manage settings
+
+**Selected Graph Concept:**
+The "selected" graph is the user's currently active workspace. Many API operations
+default to the selected graph if no graph_id is provided. Users can change their
+selected graph via the `POST /v1/graphs/{graph_id}/select` endpoint.
+
+**Use Cases:**
+- Display graph selector in UI
+- Show user's accessible workspaces
+- Identify which graph is currently active
+- Filter graphs by role for permission-based features
+
+**Empty Response:**
+New users or users without graph access will receive an empty list with
+`selectedGraphId: null`. Users should create a new graph or request access
+to an existing graph.
+
+**Note:**
+Graph listing is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
   operation_id="getGraphs",
+  responses={
+    200: {
+      "description": "Graphs retrieved successfully",
+      "content": {
+        "application/json": {
+          "examples": {
+            "with_graphs": {
+              "summary": "User with multiple graphs",
+              "value": {
+                "graphs": [
+                  {
+                    "graphId": "kg1a2b3c4d5",
+                    "graphName": "Acme Consulting LLC",
+                    "role": "admin",
+                    "isSelected": True,
+                    "createdAt": "2024-01-15T10:00:00Z",
+                  },
+                  {
+                    "graphId": "kg9z8y7x6w5",
+                    "graphName": "TechCorp Enterprises",
+                    "role": "member",
+                    "isSelected": False,
+                    "createdAt": "2024-02-20T14:30:00Z",
+                  },
+                ],
+                "selectedGraphId": "kg1a2b3c4d5",
+              },
+            },
+            "empty": {
+              "summary": "New user without graphs",
+              "value": {"graphs": [], "selectedGraphId": None},
+            },
+          }
+        }
+      },
+    },
+    500: {"description": "Error retrieving graphs"},
+  },
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs", business_event_type="user_graphs_accessed"
 )
 async def get_graphs(
-  current_user: User = Depends(get_current_user_with_graph),
+  current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> UserGraphsResponse:
   """
@@ -282,7 +356,7 @@ eventSource.onmessage = (event) => {
 )
 async def create_graph(
   request: CreateGraphRequest,
-  current_user: User = Depends(get_current_user_with_graph),
+  current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),  # noqa: ARG001
 ):
   """
@@ -440,7 +514,58 @@ async def create_graph(
   response_model=AvailableExtensionsResponse,
   operation_id="getAvailableExtensions",
   summary="Get Available Schema Extensions",
-  description="List all available schema extensions for graph creation",
+  description="""List all available schema extensions for graph creation.
+
+Schema extensions provide pre-built industry-specific data models that extend
+the base graph schema with specialized nodes, relationships, and properties.
+
+**Available Extensions:**
+- **RoboLedger**: Complete accounting system with XBRL reporting, general ledger, and financial statements
+- **RoboInvestor**: Investment portfolio management and tracking
+- **RoboSCM**: Supply chain management and logistics
+- **RoboFO**: Front office operations and CRM
+- **RoboHRM**: Human resources management
+- **RoboEPM**: Enterprise performance management
+- **RoboReport**: Business intelligence and reporting
+
+**Extension Information:**
+Each extension includes:
+- Display name and description
+- Node and relationship counts
+- Context-aware capabilities (e.g., SEC repositories get different features than entity graphs)
+
+**Use Cases:**
+- Browse available extensions before creating a graph
+- Understand extension capabilities and data models
+- Plan graph schema based on business requirements
+- Combine multiple extensions for comprehensive data modeling
+
+**Note:**
+Extension listing is included - no credit consumption required.""",
+  responses={
+    200: {
+      "description": "Extensions retrieved successfully",
+      "content": {
+        "application/json": {
+          "example": {
+            "extensions": [
+              {
+                "name": "roboledger",
+                "description": "Complete accounting system with XBRL reporting and GL transactions",
+                "enabled": False,
+              },
+              {
+                "name": "roboinvestor",
+                "description": "Investment portfolio management and tracking",
+                "enabled": False,
+              },
+            ]
+          }
+        }
+      },
+    },
+    500: {"description": "Failed to retrieve extensions"},
+  },
 )
 async def get_available_extensions(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
@@ -558,11 +683,50 @@ async def get_available_extensions(
   "/{graph_id}/select",
   response_model=SuccessResponse,
   summary="Select Graph",
-  description="Select a specific graph as the active graph for the user.",
+  description="""Select a specific graph as the active workspace for the user.
+
+The selected graph becomes the default context for operations in client applications
+and can be used to maintain user workspace preferences across sessions.
+
+**Functionality:**
+- Sets the specified graph as the user's currently selected graph
+- Deselects any previously selected graph (only one can be selected at a time)
+- Persists selection across sessions until changed
+- Returns confirmation with the selected graph ID
+
+**Requirements:**
+- User must have access to the graph (as admin or member)
+- Graph must exist and not be deleted
+- User can only select graphs they have permission to access
+
+**Use Cases:**
+- Switch between multiple graphs in a multi-graph environment
+- Set default workspace after creating a new graph
+- Restore user's preferred workspace on login
+- Support graph context switching in client applications
+
+**Client Integration:**
+Many client operations can default to the selected graph, simplifying API calls
+by eliminating the need to specify graph_id repeatedly. Check the selected
+graph with `GET /v1/graphs` which returns `selectedGraphId`.
+
+**Note:**
+Graph selection is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
   operation_id="selectGraph",
   responses={
-    200: {"description": "Graph selected successfully", "model": SuccessResponse},
+    200: {
+      "description": "Graph selected successfully",
+      "content": {
+        "application/json": {
+          "example": {
+            "success": True,
+            "message": "Graph selected successfully",
+            "data": {"selectedGraphId": "kg1a2b3c4d5"},
+          }
+        }
+      },
+    },
     403: {"description": "Access denied to graph", "model": ErrorResponse},
     404: {"description": "Graph not found", "model": ErrorResponse},
     500: {"description": "Error selecting graph", "model": ErrorResponse},

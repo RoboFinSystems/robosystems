@@ -141,18 +141,14 @@ class TestGraphAccessControlDependency:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(
-  reason="Requires JWT token fixtures (test_user_token, other_user_token) - unit tests cover same functionality"
-)
 class TestGraphEndpointAccessControl:
   """Integration tests for graph endpoint access control."""
 
   async def test_graph_info_endpoint_denies_unauthorized_user(
-    self, async_client, test_user_token, other_user_token, sample_graph
+    self, auth_integration_client, test_user_token, other_user_token, sample_graph
   ):
     """Test /v1/graphs/{graph_id}/info denies unauthorized users."""
-    # User tries to access graph they don't own
-    response = await async_client.get(
+    response = await auth_integration_client.get(
       f"/v1/graphs/{sample_graph.graph_id}/info",
       headers={"Authorization": f"Bearer {other_user_token}"},
     )
@@ -161,10 +157,10 @@ class TestGraphEndpointAccessControl:
     assert "Access denied" in response.json()["detail"]
 
   async def test_graph_query_endpoint_denies_unauthorized_user(
-    self, async_client, test_user_token, other_user_token, sample_graph
+    self, auth_integration_client, test_user_token, other_user_token, sample_graph
   ):
     """Test /v1/graphs/{graph_id}/query denies unauthorized users."""
-    response = await async_client.post(
+    response = await auth_integration_client.post(
       f"/v1/graphs/{sample_graph.graph_id}/query",
       headers={"Authorization": f"Bearer {other_user_token}"},
       json={"cypher": "MATCH (n) RETURN n LIMIT 1"},
@@ -173,10 +169,10 @@ class TestGraphEndpointAccessControl:
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
   async def test_graph_backups_endpoint_denies_unauthorized_user(
-    self, async_client, test_user_token, other_user_token, sample_graph
+    self, auth_integration_client, test_user_token, other_user_token, sample_graph
   ):
     """Test /v1/graphs/{graph_id}/backups denies unauthorized users."""
-    response = await async_client.post(
+    response = await auth_integration_client.post(
       f"/v1/graphs/{sample_graph.graph_id}/backups",
       headers={"Authorization": f"Bearer {other_user_token}"},
     )
@@ -184,10 +180,10 @@ class TestGraphEndpointAccessControl:
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
   async def test_graph_agent_endpoint_denies_unauthorized_user(
-    self, async_client, test_user_token, other_user_token, sample_graph
+    self, auth_integration_client, test_user_token, other_user_token, sample_graph
   ):
     """Test /v1/graphs/{graph_id}/agent denies unauthorized users."""
-    response = await async_client.post(
+    response = await auth_integration_client.post(
       f"/v1/graphs/{sample_graph.graph_id}/agent",
       headers={"Authorization": f"Bearer {other_user_token}"},
       json={"message": "Test query"},
@@ -196,31 +192,29 @@ class TestGraphEndpointAccessControl:
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
   async def test_shared_repository_access_requires_permission(
-    self, async_client, test_user_token, sec_repository
+    self, auth_integration_client, test_user_token, test_user
   ):
-    """Test shared repository (SEC) requires explicit permission."""
-    # User without SEC access tries to access it
-    response = await async_client.get(
+    """Test shared repository (SEC) requires explicit permission.
+
+    User should be denied access to 'sec' shared repository when they don't
+    have explicit UserRepository access granted.
+    """
+    response = await auth_integration_client.get(
       "/v1/graphs/sec/info",
       headers={"Authorization": f"Bearer {test_user_token}"},
     )
 
-    # Should deny if user doesn't have UserRepository access
-    assert response.status_code in [
-      status.HTTP_403_FORBIDDEN,
-      status.HTTP_404_NOT_FOUND,
-    ]
+    assert response.status_code == status.HTTP_403_FORBIDDEN
 
   async def test_authorized_user_can_access_their_graph(
-    self, async_client, test_user_token, sample_graph
+    self, auth_integration_client, test_user_token, sample_graph
   ):
     """Test that users CAN access graphs they own."""
-    response = await async_client.get(
+    response = await auth_integration_client.get(
       f"/v1/graphs/{sample_graph.graph_id}/info",
       headers={"Authorization": f"Bearer {test_user_token}"},
     )
 
-    # Should succeed
     assert response.status_code == status.HTTP_200_OK
 
 

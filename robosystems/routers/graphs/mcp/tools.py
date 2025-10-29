@@ -64,9 +64,8 @@ The tool list is customized based on:
 - User permissions and subscription tier
 - Backend capabilities (Kuzu, Neo4j, etc.)
 
-Credit consumption:
-- Listing tools is included to encourage exploration
-- Tool execution costs vary by operation complexity""",
+**Note:**
+MCP tool listing is included - no credit consumption required.""",
   operation_id="listMcpTools",
   responses={
     200: {"description": "MCP tools retrieved successfully", "model": MCPToolsResponse},

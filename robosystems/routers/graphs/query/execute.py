@@ -165,8 +165,8 @@ async def execute_cypher_query(
   mode: Optional[ResponseMode] = QueryParam(
     default=None, description="Response mode override"
   ),
-  chunk_size: int = QueryParam(
-    default=1000, ge=10, le=10000, description="Rows per chunk for streaming"
+  chunk_size: Optional[int] = QueryParam(
+    default=None, ge=10, le=10000, description="Rows per chunk for streaming"
   ),
   test_mode: bool = QueryParam(
     default=False, description="Enable test mode for better debugging"
@@ -193,7 +193,7 @@ async def execute_cypher_query(
   graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
 
   # Determine chunk size based on tier (if not explicitly provided)
-  if chunk_size == 1000:  # Default value, so use tier-based configuration
+  if chunk_size is None:
     if graph and graph.graph_tier:
       tier_chunk_sizes = {
         "standard": env.KUZU_STANDARD_CHUNK_SIZE,
@@ -202,6 +202,8 @@ async def execute_cypher_query(
       }
       chunk_size = tier_chunk_sizes.get(graph.graph_tier.lower(), 1000)
       logger.debug(f"Using tier-based chunk size for {graph.graph_tier}: {chunk_size}")
+    else:
+      chunk_size = 1000
 
   # Initialize client_info for exception handling
   client_info = {"is_interactive": False}
@@ -241,14 +243,9 @@ async def execute_cypher_query(
       logger.warning(
         f"User {current_user.id} attempted admin operation through query endpoint: {request.query[:100]}"
       )
-      # For now, block all admin operations - we can add admin flag to User model later
       raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
         detail="Administrative operations (EXPORT, IMPORT DATABASE, INSTALL, ATTACH, etc.) require admin privileges.",
-      )
-      # Even for admins, we might want to restrict these through the query endpoint
-      logger.info(
-        f"Admin user {current_user.id} performing admin operation: {request.query[:100]}"
       )
 
     # Check for schema DDL operations (CREATE/DROP/ALTER TABLE, etc.)
@@ -446,10 +443,8 @@ async def execute_cypher_query(
       ExecutionStrategy.SYNC_TESTING,
     ]:
       # Execute and return JSON
-      timeout = timeouts["execution"]  # Initialize timeout for error handling
+      timeout = timeouts["execution"]
       try:
-        # Use appropriate timeout based on strategy
-        # timeout = timeouts["execution"]  # Already set above
         if strategy == ExecutionStrategy.SYNC_TESTING:
           # Testing mode - provide helpful feedback
           if query_analysis["estimated_rows"] > QueryAnalyzer.LARGE_RESULT:

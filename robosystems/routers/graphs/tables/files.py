@@ -78,7 +78,6 @@ router = APIRouter()
   summary="List Files in Staging Table",
   description="""List all files uploaded to a staging table with comprehensive metadata.
 
-**Purpose:**
 Get a complete inventory of all files in a staging table, including upload status,
 file sizes, row counts, and S3 locations. Essential for monitoring upload progress
 and validating data before ingestion.
@@ -91,59 +90,26 @@ and validating data before ingestion.
 - Identify failed or incomplete uploads
 - Pre-ingestion validation
 
-**What You Get:**
-- File ID and name
-- File format (parquet, csv, etc.)
-- Size in bytes
-- Row count (if available)
+**Returned Metadata:**
+- File ID, name, and format (parquet, csv, json)
+- Size in bytes and row count (if available)
 - Upload status and method
 - Creation and upload timestamps
 - S3 key for reference
 
 **Upload Status Values:**
-- `created`: File record created, not yet uploaded
-- `uploading`: Upload in progress
+- `pending`: Upload URL generated, awaiting upload
 - `uploaded`: Successfully uploaded, ready for ingestion
+- `disabled`: Excluded from ingestion
+- `archived`: Soft deleted
 - `failed`: Upload failed
 
-**Example Response:**
-```json
-{
-  "graph_id": "kg123",
-  "table_name": "Entity",
-  "files": [
-    {
-      "file_id": "f123",
-      "file_name": "entities_batch1.parquet",
-      "file_format": "parquet",
-      "size_bytes": 1048576,
-      "row_count": 5000,
-      "upload_status": "uploaded",
-      "upload_method": "presigned_url",
-      "created_at": "2025-10-28T10:00:00Z",
-      "uploaded_at": "2025-10-28T10:01:30Z",
-      "s3_key": "user-staging/user123/kg123/Entity/entities_batch1.parquet"
-    }
-  ],
-  "total_files": 1,
-  "total_size_bytes": 1048576
-}
-```
-
-**Example Usage:**
-```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" \\
-  https://api.robosystems.ai/v1/graphs/kg123/tables/Entity/files
-```
-
-**Tips:**
+**Important Notes:**
 - Only `uploaded` files are ingested
 - Check `row_count` to estimate data volume
 - Use `total_size_bytes` for storage monitoring
 - Files with `failed` status should be deleted and re-uploaded
-
-**Note:**
-File listing is included - no credit consumption.""",
+- File listing is included - no credit consumption""",
   responses={
     200: {
       "description": "Files retrieved successfully with full metadata",
@@ -339,7 +305,6 @@ async def list_table_files(
   summary="Get File Information",
   description="""Get detailed information about a specific file.
 
-**Purpose:**
 Retrieve comprehensive metadata for a single file, including upload status,
 size, row count, and timestamps. Useful for validating individual files
 before ingestion.
@@ -351,33 +316,8 @@ before ingestion.
 - Verify file format and size
 - Track file lifecycle
 
-**Example Response:**
-```json
-{
-  "file_id": "f123",
-  "graph_id": "kg123",
-  "table_id": "t456",
-  "table_name": "Entity",
-  "file_name": "entities_batch1.parquet",
-  "file_format": "parquet",
-  "size_bytes": 1048576,
-  "row_count": 5000,
-  "upload_status": "uploaded",
-  "upload_method": "presigned_url",
-  "created_at": "2025-10-28T10:00:00Z",
-  "uploaded_at": "2025-10-28T10:01:30Z",
-  "s3_key": "user-staging/user123/kg123/Entity/entities_batch1.parquet"
-}
-```
-
-**Example Usage:**
-```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" \\
-  https://api.robosystems.ai/v1/graphs/kg123/tables/files/f123
-```
-
 **Note:**
-File info retrieval is included - no credit consumption.""",
+File info retrieval is included - no credit consumption""",
   responses={
     200: {
       "description": "File information retrieved successfully",
@@ -545,7 +485,6 @@ async def get_file_info(
   summary="Delete File from Staging",
   description="""Delete a file from S3 storage and database tracking.
 
-**Purpose:**
 Remove unwanted, duplicate, or incorrect files from staging tables before ingestion.
 The file is deleted from both S3 and database tracking, and table statistics
 are automatically recalculated.
@@ -569,30 +508,12 @@ are automatically recalculated.
 - Full audit trail of deletion operations
 - Cannot delete after ingestion to graph
 
-**Example Response:**
-```json
-{
-  "status": "deleted",
-  "file_id": "f123",
-  "file_name": "entities_batch1.parquet",
-  "message": "File deleted successfully. DuckDB will automatically exclude it from queries."
-}
-```
-
-**Example Usage:**
-```bash
-curl -X DELETE -H "Authorization: Bearer YOUR_TOKEN" \\
-  https://api.robosystems.ai/v1/graphs/kg123/tables/files/f123
-```
-
-**Tips:**
+**Important Notes:**
 - Delete files before ingestion for best results
 - Table statistics update automatically
 - No need to refresh DuckDB - exclusion is automatic
 - Consider re-uploading corrected version after deletion
-
-**Note:**
-File deletion is included - no credit consumption.""",
+- File deletion is included - no credit consumption""",
   responses={
     200: {
       "description": "File deleted successfully",

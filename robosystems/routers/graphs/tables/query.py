@@ -55,7 +55,6 @@ circuit_breaker = CircuitBreakerManager()
   summary="Query Staging Tables with SQL",
   description="""Execute SQL queries on DuckDB staging tables for data inspection and validation.
 
-**Purpose:**
 Query raw staging data directly with SQL before ingestion into the graph database.
 Useful for data quality checks, validation, and exploratory analysis.
 
@@ -78,27 +77,11 @@ Useful for data quality checks, validation, and exploratory analysis.
 - Aggregations, window functions, CTEs
 - Multiple table joins across staging area
 
-**Example Queries:**
-```sql
--- Count rows in staging table
-SELECT COUNT(*) FROM Entity;
-
--- Check for nulls
-SELECT * FROM Entity WHERE name IS NULL LIMIT 10;
-
--- Find duplicates
-SELECT identifier, COUNT(*) as cnt
-FROM Entity
-GROUP BY identifier
-HAVING COUNT(*) > 1;
-
--- Join across tables
-SELECT e.name, COUNT(t.id) as transaction_count
-FROM Entity e
-LEFT JOIN Transaction t ON e.identifier = t.entity_id
-GROUP BY e.name
-ORDER BY transaction_count DESC;
-```
+**Common Operations:**
+- Count rows: `SELECT COUNT(*) FROM Entity`
+- Check for nulls: `SELECT * FROM Entity WHERE name IS NULL LIMIT 10`
+- Find duplicates: `SELECT identifier, COUNT(*) as cnt FROM Entity GROUP BY identifier HAVING COUNT(*) > 1`
+- Join tables: `SELECT e.name, COUNT(t.id) FROM Entity e LEFT JOIN Transaction t ON e.identifier = t.entity_id GROUP BY e.name`
 
 **Limits:**
 - Query timeout: 30 seconds
@@ -111,7 +94,7 @@ Shared repositories (SEC, etc.) do not allow direct SQL queries.
 Use the graph query endpoint instead: `POST /v1/graphs/{graph_id}/query`
 
 **Note:**
-Staging table queries are included - no credit consumption.""",
+Staging table queries are included - no credit consumption""",
   responses={
     200: {
       "description": "Query executed successfully",

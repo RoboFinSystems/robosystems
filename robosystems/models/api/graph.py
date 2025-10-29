@@ -125,16 +125,57 @@ class CypherQueryRequest(BaseModel):
     description="The Cypher query to execute",
     min_length=1,
     max_length=MAX_QUERY_LENGTH,
+    examples=[
+      "MATCH (n) RETURN n LIMIT 10",
+      "MATCH (n:Entity) RETURN n.name, n.identifier",
+      "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) RETURN e.name, r.amount, t.name",
+      "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
+    ],
   )
   parameters: Optional[Dict[str, Any]] = Field(
-    default=None, description="Optional parameters for the Cypher query"
+    default=None,
+    description="Optional parameters for the Cypher query",
+    examples=[
+      None,
+      {"limit": 100},
+      {"entity_type": "Company", "limit": 100},
+      {"min_amount": 1000, "entity_name": "Acme Corp"},
+    ],
   )
   timeout: Optional[int] = Field(
     default=DEFAULT_QUERY_TIMEOUT,
     ge=1,
     le=300,
     description="Query timeout in seconds (1-300)",
+    examples=[30, 60, 120, 300],
   )
+
+  class Config:
+    extra = "forbid"
+    json_schema_extra = {
+      "examples": [
+        {
+          "query": "MATCH (n) RETURN n LIMIT 10",
+          "parameters": None,
+          "timeout": 30,
+        },
+        {
+          "query": "MATCH (n:Entity) RETURN n.name, n.identifier ORDER BY n.name",
+          "parameters": None,
+          "timeout": 60,
+        },
+        {
+          "query": "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
+          "parameters": {"entity_type": "Company", "limit": 100},
+          "timeout": 60,
+        },
+        {
+          "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount RETURN e.name, r.amount, t.name ORDER BY r.amount DESC LIMIT $limit",
+          "parameters": {"min_amount": 1000, "limit": 50},
+          "timeout": 120,
+        },
+      ]
+    }
 
   @field_validator("query")
   def validate_query_length(cls, v):
@@ -271,12 +312,12 @@ class GraphMetadata(BaseModel):
   """Metadata for graph creation."""
 
   graph_name: str = Field(
-    ..., description="Display name for the graph", examples=["Production Inventory"]
+    ..., description="Display name for the graph", examples=["Acme Consulting LLC"]
   )
   description: Optional[str] = Field(
     None,
     description="Optional description",
-    examples=["Main inventory tracking system for production environment"],
+    examples=["Professional consulting services with full accounting integration"],
   )
   schema_extensions: List[str] = Field(
     default_factory=list,
@@ -286,7 +327,7 @@ class GraphMetadata(BaseModel):
   tags: List[str] = Field(
     default_factory=list,
     description="Tags for organizing graphs",
-    examples=[["production", "inventory", "retail"]],
+    examples=[["consulting", "professional-services"]],
   )
 
 
