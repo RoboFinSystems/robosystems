@@ -24,7 +24,6 @@ LOGS_MOUNT_SOURCE="${LOGS_MOUNT_SOURCE:-/mnt/${DATABASE_TYPE}-data/logs}"
 LOGS_MOUNT_TARGET="${LOGS_MOUNT_TARGET:-/app/logs}"
 STAGING_MOUNT_SOURCE="${STAGING_MOUNT_SOURCE:-}"
 STAGING_MOUNT_TARGET="${STAGING_MOUNT_TARGET:-}"
-LOG_GROUP_NAME="${LOG_GROUP_NAME:?"LOG_GROUP_NAME must be set"}"
 DOCKER_PROFILE="${DOCKER_PROFILE:-${DATABASE_TYPE}-writer}"
 
 # Determine container name based on database type and node type
@@ -63,9 +62,10 @@ echo "Stopping existing container if present..."
 docker stop ${CONTAINER_NAME} 2>/dev/null || true
 docker rm ${CONTAINER_NAME} 2>/dev/null || true
 
-# Create CloudWatch log group if it doesn't exist
-echo "Creating CloudWatch log group: ${LOG_GROUP_NAME}"
-aws logs create-log-group --log-group-name "${LOG_GROUP_NAME}" --region ${AWS_REGION} 2>/dev/null || true
+# Use unified log group for all Graph API instances
+# The unified log group should be created by graph-infra CloudFormation stack
+UNIFIED_LOG_GROUP="/robosystems/${ENVIRONMENT}/graph-api"
+echo "Using unified log group: ${UNIFIED_LOG_GROUP}"
 
 # Calculate memory limits dynamically based on available memory
 # Leave 2GB for OS on instances with >8GB, 1GB for smaller instances
@@ -146,8 +146,8 @@ docker run -d \
   ${MEMORY_FLAGS} \
   --log-driver awslogs \
   --log-opt awslogs-region=${AWS_REGION} \
-  --log-opt awslogs-group="${LOG_GROUP_NAME}" \
-  --log-opt awslogs-stream="${INSTANCE_ID}/${PRIVATE_IP}/${NODE_TYPE}" \
+  --log-opt awslogs-group="${UNIFIED_LOG_GROUP}" \
+  --log-opt awslogs-stream="${CLUSTER_TIER}/${INSTANCE_ID}/${NODE_TYPE}" \
   --log-opt awslogs-create-group=false \
   -p ${CONTAINER_PORT}:${CONTAINER_PORT} \
   ${VOLUME_MOUNTS} \
@@ -163,6 +163,8 @@ docker run -d \
   -e OTEL_SERVICE_NAME=${DATABASE_TYPE}-writer-${NODE_TYPE} \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://172.17.0.1:4318 \
   -e DOCKER_PROFILE=${DOCKER_PROFILE} \
+  -e GRAPH_BACKEND_TYPE=${DATABASE_TYPE} \
+  -e DUCKDB_STAGING_PATH=${STAGING_MOUNT_TARGET:-/app/data/staging} \
   ${EXTRA_ENV_VARS} \
   ${ECR_IMAGE} \
   ${ENTRYPOINT_OVERRIDE:-/app/bin/entrypoint.sh} || {

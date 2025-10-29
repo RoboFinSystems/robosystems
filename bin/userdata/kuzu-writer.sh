@@ -272,23 +272,11 @@ chmod +x /usr/local/bin/graph-lifecycle.sh
 # ==================================================================================
 # CLOUDWATCH SETUP (Using Shared Script)
 # ==================================================================================
-# Determine log group name based on node type and tier
-if [ "${KUZU_NODE_TYPE}" = "writer" ] && [ -n "${WRITER_TIER}" ]; then
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/kuzu-writer-${WRITER_TIER}"
-elif [ "${KUZU_NODE_TYPE}" = "shared_master" ]; then
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/kuzu-shared-master"
-elif [ "${KUZU_NODE_TYPE}" = "shared_replica" ]; then
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/kuzu-shared-replica"
-else
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/kuzu-${KUZU_NODE_TYPE//_/-}"
-fi
-
 # Export variables for shared script
 export DATABASE_TYPE="kuzu"
 export NODE_TYPE="${KUZU_NODE_TYPE}"
 export ENVIRONMENT="${ENVIRONMENT}"
 export CLOUDWATCH_NAMESPACE="${CLOUDWATCH_NAMESPACE}"
-export LOG_GROUP_NAME="${CW_LOG_GROUP_NAME}"
 export DATA_DIR="/mnt/kuzu-data"
 
 # Run shared CloudWatch setup
@@ -370,7 +358,6 @@ export AVAILABILITY_ZONE="${AVAILABILITY_ZONE}"
 export INSTANCE_TYPE="${INSTANCE_TYPE}"
 export AWS_REGION="${REGION}"
 export CLUSTER_TIER="${CLUSTER_TIER}"
-export LOG_GROUP_NAME="${CW_LOG_GROUP_NAME}"
 export DATA_MOUNT_SOURCE="/mnt/kuzu-data/databases"
 export DATA_MOUNT_TARGET="/app/data/kuzu-dbs"
 export LOGS_MOUNT_SOURCE="/mnt/kuzu-data/logs"

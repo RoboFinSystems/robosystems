@@ -274,23 +274,11 @@ chmod +x /usr/local/bin/graph-lifecycle.sh
 # ==================================================================================
 # CLOUDWATCH SETUP (Using Shared Script)
 # ==================================================================================
-# Determine log group name based on node type and tier
-if [ "${NEO4J_NODE_TYPE}" = "writer" ] && [ -n "${WRITER_TIER}" ]; then
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/neo4j-writer-${WRITER_TIER}"
-elif [ "${NEO4J_NODE_TYPE}" = "shared_master" ]; then
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/neo4j-shared-master"
-elif [ "${NEO4J_NODE_TYPE}" = "shared_replica" ]; then
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/neo4j-shared-replica"
-else
-  CW_LOG_GROUP_NAME="/robosystems/${ENVIRONMENT}/neo4j-${NEO4J_NODE_TYPE//_/-}"
-fi
-
 # Export variables for shared script
 export DATABASE_TYPE="neo4j"
 export NODE_TYPE="${NEO4J_NODE_TYPE}"
 export ENVIRONMENT="${ENVIRONMENT}"
 export CLOUDWATCH_NAMESPACE="${CLOUDWATCH_NAMESPACE}"
-export LOG_GROUP_NAME="${CW_LOG_GROUP_NAME}"
 export DATA_DIR="/mnt/neo4j-data"
 
 # Run shared CloudWatch setup
@@ -373,7 +361,6 @@ export AVAILABILITY_ZONE="${AVAILABILITY_ZONE}"
 export INSTANCE_TYPE="${INSTANCE_TYPE}"
 export AWS_REGION="${REGION}"
 export CLUSTER_TIER="${CLUSTER_TIER}"
-export LOG_GROUP_NAME="${CW_LOG_GROUP_NAME}"
 export DATA_MOUNT_SOURCE="/mnt/neo4j-data/data"
 export DATA_MOUNT_TARGET="/data"
 export LOGS_MOUNT_SOURCE="/mnt/neo4j-data/logs"
