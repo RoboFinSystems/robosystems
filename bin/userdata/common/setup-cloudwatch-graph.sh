@@ -9,12 +9,14 @@ set -e
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${ENVIRONMENT:?"ENVIRONMENT must be set"}
 : ${CLOUDWATCH_NAMESPACE:?"CLOUDWATCH_NAMESPACE must be set"}
-: ${LOG_GROUP_NAME:?"LOG_GROUP_NAME must be set"}
 : ${DATA_DIR:?"DATA_DIR must be set"}
+
+# Use unified log group from CloudFormation
+UNIFIED_LOG_GROUP="/robosystems/${ENVIRONMENT}/graph-api"
 
 echo "=== Configuring CloudWatch Agent for ${DATABASE_TYPE} ==="
 echo "Namespace: ${CLOUDWATCH_NAMESPACE}"
-echo "Log group: ${LOG_GROUP_NAME}"
+echo "Log group: ${UNIFIED_LOG_GROUP}"
 echo "Data directory: ${DATA_DIR}"
 
 # Verify CloudWatch agent installation
@@ -110,13 +112,13 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
         "collect_list": [
           {
             "file_path": "${DATA_DIR}/logs/*.log",
-            "log_group_name": "${LOG_GROUP_NAME}",
+            "log_group_name": "${UNIFIED_LOG_GROUP}",
             "log_stream_name": "{instance_id}/application",
             "retention_in_days": 30
           },
           {
             "file_path": "/var/log/${DATABASE_TYPE}-writer-setup.log",
-            "log_group_name": "${LOG_GROUP_NAME}",
+            "log_group_name": "${UNIFIED_LOG_GROUP}",
             "log_stream_name": "{instance_id}/setup",
             "retention_in_days": 30
           }
