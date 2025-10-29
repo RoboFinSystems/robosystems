@@ -122,6 +122,18 @@ The `just demo-sec` command automatically creates user credentials for you. Your
 
 **Important:** The API key (starting with `rfs`) is your authentication credential, not to be confused with the JWT Token and Authorization Header.
 
+**Grant Access to Existing User: (Optional):**
+
+If you need to grant SEC repository access to an existing user:
+
+```bash
+# Grant read access to SEC repository
+just repo-grant-access <user_id> sec
+
+# Check current access
+just repo-check-access <user_id>
+```
+
 **Manual User Creation (Optional):**
 
 If you need to create additional users or manage access manually:
