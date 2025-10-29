@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from fastapi import (
   APIRouter,
+  Body,
   Depends,
   HTTPException,
   Path,
@@ -185,12 +186,54 @@ which happens at the AI agent layer, not the MCP tool layer.""",
   "/v1/graphs/{graph_id}/mcp/call-tool", business_event_type="mcp_tool_called"
 )
 async def call_mcp_tool(
-  tool_call: MCPToolCall,
   full_request: Request,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+  ),
+  tool_call: MCPToolCall = Body(
+    ...,
+    openapi_examples={
+      "cypher_query": {
+        "summary": "Execute Cypher Query",
+        "description": "Query companies by ticker symbol with parameters",
+        "value": {
+          "name": "read-graph-cypher",
+          "arguments": {
+            "query": "MATCH (c:Company {ticker: $ticker})-[:FILED]->(f:Filing) RETURN c.name, f.form_type, f.filing_date LIMIT 10",
+            "parameters": {"ticker": "AAPL"},
+          },
+        },
+      },
+      "get_schema": {
+        "summary": "Get Graph Schema",
+        "description": "Retrieve the complete schema of the graph database",
+        "value": {
+          "name": "get-graph-schema",
+          "arguments": {},
+        },
+      },
+      "get_info": {
+        "summary": "Get Graph Info",
+        "description": "Get statistics and metadata about the graph",
+        "value": {
+          "name": "get-graph-info",
+          "arguments": {},
+        },
+      },
+      "discover_facts": {
+        "summary": "Discover Facts",
+        "description": "Discover common facts and patterns in the graph",
+        "value": {
+          "name": "discover-facts",
+          "arguments": {
+            "entity_type": "Company",
+            "limit": 20,
+          },
+        },
+      },
+    },
   ),
   format: Optional[str] = QueryParam(
     default=None,

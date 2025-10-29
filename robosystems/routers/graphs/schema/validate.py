@@ -4,7 +4,7 @@ import yaml
 import json
 import asyncio
 import time
-from fastapi import APIRouter, Depends, HTTPException, status, Path, Body
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Path
 from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
@@ -78,7 +78,142 @@ This operation is included - no credit consumption required.""",
 async def validate_schema(
   graph_id: str = Path(..., description="Graph database identifier"),
   request: SchemaValidationRequest = Body(
-    ..., description="Schema definition to validate"
+    ...,
+    description="Schema definition to validate",
+    openapi_examples={
+      "valid_schema": {
+        "summary": "Valid Schema with Relationships",
+        "description": "A complete valid schema with nodes and relationships",
+        "value": {
+          "schema_definition": {
+            "name": "financial_analysis",
+            "version": "1.0.0",
+            "description": "Schema for SEC financial data",
+            "nodes": [
+              {
+                "name": "Company",
+                "properties": [
+                  {"name": "cik", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "ticker", "type": "STRING"},
+                ],
+              },
+              {
+                "name": "Filing",
+                "properties": [
+                  {
+                    "name": "accession_number",
+                    "type": "STRING",
+                    "is_primary_key": True,
+                  },
+                  {"name": "form_type", "type": "STRING"},
+                ],
+              },
+            ],
+            "relationships": [
+              {
+                "name": "FILED",
+                "from_node": "Company",
+                "to_node": "Filing",
+              }
+            ],
+          },
+          "format": "json",
+        },
+      },
+      "schema_with_warnings": {
+        "summary": "Schema with Warnings",
+        "description": "Valid schema but with isolated nodes",
+        "value": {
+          "schema_definition": {
+            "name": "warehouse_schema",
+            "version": "1.0.0",
+            "nodes": [
+              {
+                "name": "Product",
+                "properties": [
+                  {"name": "sku", "type": "STRING", "is_primary_key": True}
+                ],
+              },
+              {
+                "name": "Location",
+                "properties": [
+                  {"name": "id", "type": "STRING", "is_primary_key": True}
+                ],
+              },
+            ],
+            "relationships": [],
+          },
+          "format": "json",
+        },
+      },
+      "invalid_schema": {
+        "summary": "Invalid Schema",
+        "description": "Schema with validation errors (invalid type, missing node)",
+        "value": {
+          "schema_definition": {
+            "name": "invalid_example",
+            "version": "1.0.0",
+            "nodes": [
+              {
+                "name": "Company",
+                "properties": [{"name": "name", "type": "INVALID_TYPE"}],
+              }
+            ],
+            "relationships": [
+              {
+                "name": "RELATES_TO",
+                "from_node": "Company",
+                "to_node": "NonExistentNode",
+              }
+            ],
+          },
+          "format": "json",
+        },
+      },
+      "yaml_format": {
+        "summary": "YAML Format Schema",
+        "description": "Schema validation using YAML format",
+        "value": {
+          "schema_definition": """name: inventory_schema
+version: '1.0.0'
+nodes:
+  - name: Product
+    properties:
+      - name: sku
+        type: STRING
+        is_primary_key: true
+      - name: name
+        type: STRING
+relationships:
+  - name: IN_CATEGORY
+    from_node: Product
+    to_node: Category""",
+          "format": "yaml",
+        },
+      },
+      "compatibility_check": {
+        "summary": "Compatibility Check",
+        "description": "Validate schema and check compatibility with existing extensions",
+        "value": {
+          "schema_definition": {
+            "name": "custom_extension",
+            "version": "1.0.0",
+            "nodes": [
+              {
+                "name": "Transaction",
+                "properties": [
+                  {"name": "id", "type": "STRING", "is_primary_key": True},
+                  {"name": "amount", "type": "DOUBLE"},
+                ],
+              }
+            ],
+          },
+          "format": "json",
+          "check_compatibility": ["roboledger"],
+        },
+      },
+    },
   ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

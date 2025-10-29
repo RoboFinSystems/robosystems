@@ -21,20 +21,109 @@ router = APIRouter()
   "/schema/export",
   response_model=SchemaExportResponse,
   operation_id="exportGraphSchema",
-  summary="Export Graph Schema",
-  description="Export the schema of an existing graph in JSON, YAML, or Cypher format",
+  summary="Export Declared Graph Schema",
+  description="""Export the declared schema definition of an existing graph.
+
+## What This Returns
+
+This endpoint returns the **original schema definition** that was used to create the graph:
+- The schema as it was **declared** during graph creation
+- Complete node and relationship definitions
+- Property types and constraints
+- Schema metadata (name, version, type)
+
+## Runtime vs Declared Schema
+
+**Use this endpoint** (`/schema/export`) when you need:
+- The original schema definition used to create the graph
+- Schema in a specific format (JSON, YAML, Cypher DDL)
+- Schema for documentation or version control
+- Schema to replicate in another graph
+
+**Use `/schema` instead** when you need:
+- What data is ACTUALLY in the database right now
+- What properties exist on real nodes (discovered from data)
+- Current runtime database structure for querying
+
+## Export Formats
+
+### JSON Format (`format=json`)
+Returns structured JSON with nodes, relationships, and properties.
+Best for programmatic access and API integration.
+
+### YAML Format (`format=yaml`)
+Returns human-readable YAML with comments.
+Best for documentation and configuration management.
+
+### Cypher DDL Format (`format=cypher`)
+Returns Cypher CREATE statements for recreating the schema.
+Best for database migration and replication.
+
+## Data Statistics
+
+Set `include_data_stats=true` to include:
+- Node counts by label
+- Relationship counts by type
+- Total nodes and relationships
+
+This combines declared schema with runtime statistics.
+
+This operation is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
+  responses={
+    200: {
+      "description": "Schema exported successfully",
+      "model": SchemaExportResponse,
+    },
+    403: {"description": "Access denied to graph"},
+    404: {"description": "Schema not found for graph"},
+    500: {"description": "Failed to export schema"},
+  },
 )
 async def export_graph_schema(
   request: Request,
-  graph_id: str = Path(..., description="The graph ID to export schema from"),
+  graph_id: str = Path(
+    ...,
+    description="The graph ID to export schema from",
+    examples=["sec", "kg1a2b3c4d5"],
+  ),
   format: str = Query(
     "json",
     description="Export format: json, yaml, or cypher",
     regex="^(json|yaml|cypher)$",
+    openapi_examples={
+      "json": {
+        "summary": "JSON Format",
+        "description": "Structured JSON format for programmatic access",
+        "value": "json",
+      },
+      "yaml": {
+        "summary": "YAML Format",
+        "description": "Human-readable YAML format for documentation",
+        "value": "yaml",
+      },
+      "cypher": {
+        "summary": "Cypher DDL",
+        "description": "Cypher CREATE statements for database migration",
+        "value": "cypher",
+      },
+    },
   ),
   include_data_stats: bool = Query(
-    False, description="Include statistics about actual data in the graph"
+    False,
+    description="Include statistics about actual data in the graph (node counts, relationship counts)",
+    openapi_examples={
+      "without_stats": {
+        "summary": "Schema Only",
+        "description": "Export schema definition without data statistics",
+        "value": False,
+      },
+      "with_stats": {
+        "summary": "Schema + Statistics",
+        "description": "Export schema with node and relationship counts",
+        "value": True,
+      },
+    },
   ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
