@@ -122,19 +122,60 @@ class CypherQueryRequest(BaseModel):
 
   query: str = Field(
     ...,
-    description="The Cypher query to execute",
+    description="The Cypher query to execute. Use parameters ($param_name) for all dynamic values to prevent injection attacks.",
     min_length=1,
     max_length=MAX_QUERY_LENGTH,
+    examples=[
+      "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
+      "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
+      "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
+      "MATCH (n) RETURN n LIMIT 10",
+    ],
   )
   parameters: Optional[Dict[str, Any]] = Field(
-    default=None, description="Optional parameters for the Cypher query"
+    default=None,
+    description="Query parameters for safe value substitution. ALWAYS use parameters instead of string interpolation.",
+    examples=[
+      {"entity_type": "Company", "limit": 100},
+      {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
+      {"identifier": "ENT123456"},
+      None,
+    ],
   )
   timeout: Optional[int] = Field(
     default=DEFAULT_QUERY_TIMEOUT,
     ge=1,
     le=300,
     description="Query timeout in seconds (1-300)",
+    examples=[30, 60, 120, 300],
   )
+
+  class Config:
+    extra = "forbid"
+    json_schema_extra = {
+      "examples": [
+        {
+          "query": "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
+          "parameters": {"entity_type": "Company", "limit": 100},
+          "timeout": 60,
+        },
+        {
+          "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
+          "parameters": {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
+          "timeout": 120,
+        },
+        {
+          "query": "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
+          "parameters": {"identifier": "ENT123456"},
+          "timeout": 30,
+        },
+        {
+          "query": "MATCH (n) RETURN n LIMIT 10",
+          "parameters": {},
+          "timeout": 30,
+        },
+      ]
+    }
 
   @field_validator("query")
   def validate_query_length(cls, v):
@@ -271,12 +312,12 @@ class GraphMetadata(BaseModel):
   """Metadata for graph creation."""
 
   graph_name: str = Field(
-    ..., description="Display name for the graph", examples=["Production Inventory"]
+    ..., description="Display name for the graph", examples=["Acme Consulting LLC"]
   )
   description: Optional[str] = Field(
     None,
     description="Optional description",
-    examples=["Main inventory tracking system for production environment"],
+    examples=["Professional consulting services with full accounting integration"],
   )
   schema_extensions: List[str] = Field(
     default_factory=list,
@@ -286,7 +327,7 @@ class GraphMetadata(BaseModel):
   tags: List[str] = Field(
     default_factory=list,
     description="Tags for organizing graphs",
-    examples=[["production", "inventory", "retail"]],
+    examples=[["consulting", "professional-services"]],
   )
 
 
@@ -381,62 +422,161 @@ class SchemaValidationRequest(BaseModel):
     description="Schema definition as JSON dict or JSON/YAML string",
     examples=[
       {
-        "name": "inventory_management",
+        "name": "financial_analysis",
         "version": "1.0.0",
-        "extends": "base",
+        "description": "Schema for financial data with companies and filings",
         "nodes": [
           {
-            "name": "Product",
+            "name": "Company",
             "properties": [
-              {"name": "sku", "type": "STRING", "is_primary_key": True},
+              {"name": "cik", "type": "STRING", "is_primary_key": True},
               {"name": "name", "type": "STRING", "is_required": True},
+              {"name": "ticker", "type": "STRING"},
+              {"name": "market_cap", "type": "INT64"},
+            ],
+          },
+          {
+            "name": "Filing",
+            "properties": [
+              {"name": "accession_number", "type": "STRING", "is_primary_key": True},
+              {"name": "form_type", "type": "STRING", "is_required": True},
+              {"name": "filing_date", "type": "DATE"},
+            ],
+          },
+        ],
+        "relationships": [
+          {
+            "name": "FILED",
+            "from_node": "Company",
+            "to_node": "Filing",
+            "properties": [{"name": "filing_count", "type": "INT32"}],
+          }
+        ],
+      },
+      """name: inventory_management
+version: '1.0.0'
+description: Inventory tracking schema
+nodes:
+  - name: Product
+    properties:
+      - name: sku
+        type: STRING
+        is_primary_key: true
+      - name: name
+        type: STRING
+        is_required: true
+      - name: quantity
+        type: INT32
+  - name: Warehouse
+    properties:
+      - name: location_id
+        type: STRING
+        is_primary_key: true
+      - name: name
+        type: STRING
+relationships:
+  - name: STORED_IN
+    from_node: Product
+    to_node: Warehouse""",
+      {
+        "name": "invalid_schema_example",
+        "version": "1.0.0",
+        "nodes": [
+          {
+            "name": "Company",
+            "properties": [
+              {"name": "name", "type": "INVALID_TYPE"},
             ],
           }
         ],
-      }
+        "relationships": [
+          {
+            "name": "RELATED_TO",
+            "from_node": "Company",
+            "to_node": "NonExistentNode",
+          }
+        ],
+      },
     ],
   )
   format: str = Field(
     "json",
     description="Schema format: json, yaml, or dict",
-    examples=["json"],
+    examples=["json", "yaml", "dict"],
   )
   check_compatibility: Optional[List[str]] = Field(
     None,
     description="List of existing schema extensions to check compatibility with",
-    examples=[["roboledger"]],
+    examples=[None, ["roboledger"], ["sec_base", "industry"]],
   )
 
 
 class SchemaValidationResponse(BaseModel):
   """Response model for schema validation."""
 
-  valid: bool = Field(..., description="Whether the schema is valid", examples=[True])
+  valid: bool = Field(
+    ...,
+    description="Whether the schema is valid",
+    examples=[True, False, True],
+  )
   message: str = Field(
     ...,
     description="Validation message",
-    examples=["Schema is valid with 1 warning(s)"],
+    examples=[
+      "Schema is valid",
+      "Schema validation failed",
+      "Schema is valid with 2 warning(s)",
+    ],
   )
   errors: Optional[List[str]] = Field(
-    None, description="List of validation errors", examples=[None]
+    None,
+    description="List of validation errors (only present when valid=false)",
+    examples=[
+      None,
+      [
+        "Invalid data type 'INVALID_TYPE' for property 'name' in node 'Company'",
+        "Relationship 'RELATED_TO' references non-existent node 'NonExistentNode'",
+        "Node 'Company' has no primary key defined",
+      ],
+    ],
   )
   warnings: Optional[List[str]] = Field(
     None,
-    description="List of warnings",
-    examples=[["Schema has no relationships defined"]],
+    description="List of validation warnings (schema is still valid but has potential issues)",
+    examples=[
+      None,
+      [
+        "Isolated nodes with no relationships: ['Warehouse', 'Location']",
+        "Schema has no relationships defined",
+        "Property 'deprecated_field' uses deprecated type DECIMAL",
+      ],
+    ],
   )
   stats: Optional[Dict[str, int]] = Field(
     None,
-    description="Schema statistics (nodes, relationships, properties)",
+    description="Schema statistics (only present when valid=true)",
     examples=[
-      {"nodes": 2, "relationships": 1, "total_properties": 6, "primary_keys": 2}
+      {"nodes": 2, "relationships": 1, "total_properties": 7, "primary_keys": 2},
+      {"nodes": 5, "relationships": 8, "total_properties": 32, "primary_keys": 5},
     ],
   )
   compatibility: Optional[Dict[str, Any]] = Field(
     None,
-    description="Compatibility check results if requested",
+    description="Compatibility check results (only when check_compatibility specified)",
     examples=[
-      {"compatible": True, "conflicts": [], "checked_extensions": ["roboledger"]}
+      {
+        "compatible": True,
+        "conflicts": [],
+        "checked_extensions": ["roboledger"],
+      },
+      {
+        "compatible": False,
+        "conflicts": [
+          "Node 'Transaction' conflicts with existing definition in 'roboledger'",
+          "Property 'amount' type mismatch: INT64 vs DOUBLE",
+        ],
+        "checked_extensions": ["roboledger", "sec_base"],
+      },
     ],
   )
 
@@ -454,27 +594,162 @@ class SchemaExportRequest(BaseModel):
 class SchemaExportResponse(BaseModel):
   """Response model for schema export."""
 
-  graph_id: str = Field(..., description="Graph ID", examples=["kg1a2b3c4d5"])
+  graph_id: str = Field(..., description="Graph ID", examples=["sec", "kg1a2b3c4d5"])
   schema_definition: Union[Dict[str, Any], str] = Field(
     ...,
-    description="Exported schema definition",
+    description="Exported schema definition (format depends on 'format' parameter)",
     examples=[
       {
-        "name": "kg1a2b3c4d5_schema",
+        "name": "financial_analysis_schema",
         "version": "1.0.0",
-        "nodes": [{"name": "Entity", "properties": []}],
-        "relationships": [],
-      }
+        "type": "custom",
+        "description": "Schema for SEC financial data analysis",
+        "nodes": [
+          {
+            "name": "Company",
+            "properties": [
+              {"name": "cik", "type": "STRING", "is_primary_key": True},
+              {"name": "name", "type": "STRING", "is_required": True},
+              {"name": "ticker", "type": "STRING"},
+              {"name": "market_cap", "type": "INT64"},
+              {"name": "sector", "type": "STRING"},
+            ],
+          },
+          {
+            "name": "Filing",
+            "properties": [
+              {"name": "accession_number", "type": "STRING", "is_primary_key": True},
+              {"name": "form_type", "type": "STRING", "is_required": True},
+              {"name": "filing_date", "type": "DATE"},
+              {"name": "fiscal_year", "type": "INT32"},
+            ],
+          },
+        ],
+        "relationships": [
+          {
+            "name": "FILED",
+            "from_node": "Company",
+            "to_node": "Filing",
+            "properties": [{"name": "filing_count", "type": "INT32"}],
+          }
+        ],
+      },
+      """name: financial_analysis_schema
+version: '1.0.0'
+type: custom
+description: Schema for SEC financial data analysis
+nodes:
+  - name: Company
+    properties:
+      - name: cik
+        type: STRING
+        is_primary_key: true
+      - name: name
+        type: STRING
+        is_required: true
+      - name: ticker
+        type: STRING
+      - name: market_cap
+        type: INT64
+relationships:
+  - name: FILED
+    from_node: Company
+    to_node: Filing""",
+      """CREATE NODE TABLE Company (
+  cik STRING PRIMARY KEY,
+  name STRING NOT NULL,
+  ticker STRING,
+  market_cap INT64,
+  sector STRING
+);
+
+CREATE NODE TABLE Filing (
+  accession_number STRING PRIMARY KEY,
+  form_type STRING NOT NULL,
+  filing_date DATE,
+  fiscal_year INT32
+);
+
+CREATE REL TABLE FILED (
+  FROM Company TO Filing,
+  filing_count INT32
+);""",
     ],
   )
-  format: str = Field(..., description="Export format used", examples=["json"])
+  format: str = Field(
+    ...,
+    description="Export format used",
+    examples=["json", "yaml", "cypher"],
+  )
   exported_at: str = Field(
-    ..., description="Export timestamp", examples=["2024-01-15T10:30:00Z"]
+    ..., description="Export timestamp", examples=["2025-10-29T10:30:00Z"]
   )
   data_stats: Optional[Dict[str, Any]] = Field(
     None,
-    description="Data statistics if requested",
-    examples=[{"node_counts": {"Entity": 1, "Report": 25}, "total_nodes": 26}],
+    description="Data statistics if requested (only when include_data_stats=true)",
+    examples=[
+      {
+        "node_labels_count": 4,
+        "relationship_types_count": 3,
+        "node_properties_count": 12,
+        "node_counts": {"Company": 8500, "Filing": 125000, "Industry": 1200},
+        "total_nodes": 134700,
+      }
+    ],
+  )
+
+
+class SchemaInfoResponse(BaseModel):
+  """Response model for runtime schema introspection.
+
+  This model represents the actual current state of the graph database,
+  showing what node labels, relationship types, and properties exist right now.
+  """
+
+  model_config = {"populate_by_name": True}
+
+  graph_id: str = Field(
+    ...,
+    description="Graph database identifier",
+    examples=["sec", "kg1a2b3c4d5"],
+  )
+  schema_data: Dict[str, Any] = Field(
+    ...,
+    description="Runtime schema information showing actual database structure",
+    alias="schema",
+    examples=[
+      {
+        "node_labels": ["Company", "Filing", "Industry", "Executive"],
+        "relationship_types": ["FILED", "PART_OF", "EMPLOYED_BY", "COMPETES_WITH"],
+        "node_properties": {
+          "Company": {
+            "cik": "STRING",
+            "name": "STRING",
+            "ticker": "STRING",
+            "market_cap": "INT64",
+            "founded_year": "INT32",
+            "sector": "STRING",
+          },
+          "Filing": {
+            "accession_number": "STRING",
+            "form_type": "STRING",
+            "filing_date": "DATE",
+            "fiscal_year": "INT32",
+            "period_of_report": "DATE",
+          },
+          "Industry": {
+            "sic_code": "STRING",
+            "name": "STRING",
+            "division": "STRING",
+          },
+          "Executive": {
+            "name": "STRING",
+            "title": "STRING",
+            "compensation": "DOUBLE",
+          },
+        },
+      }
+    ],
   )
 
 

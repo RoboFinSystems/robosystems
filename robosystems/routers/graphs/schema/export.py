@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from robosystems.logger import logger
 from robosystems.models.iam import User
 from robosystems.models.api.graph import SchemaExportResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -21,22 +21,111 @@ router = APIRouter()
   "/schema/export",
   response_model=SchemaExportResponse,
   operation_id="exportGraphSchema",
-  summary="Export Graph Schema",
-  description="Export the schema of an existing graph in JSON, YAML, or Cypher format",
+  summary="Export Declared Graph Schema",
+  description="""Export the declared schema definition of an existing graph.
+
+## What This Returns
+
+This endpoint returns the **original schema definition** that was used to create the graph:
+- The schema as it was **declared** during graph creation
+- Complete node and relationship definitions
+- Property types and constraints
+- Schema metadata (name, version, type)
+
+## Runtime vs Declared Schema
+
+**Use this endpoint** (`/schema/export`) when you need:
+- The original schema definition used to create the graph
+- Schema in a specific format (JSON, YAML, Cypher DDL)
+- Schema for documentation or version control
+- Schema to replicate in another graph
+
+**Use `/schema` instead** when you need:
+- What data is ACTUALLY in the database right now
+- What properties exist on real nodes (discovered from data)
+- Current runtime database structure for querying
+
+## Export Formats
+
+### JSON Format (`format=json`)
+Returns structured JSON with nodes, relationships, and properties.
+Best for programmatic access and API integration.
+
+### YAML Format (`format=yaml`)
+Returns human-readable YAML with comments.
+Best for documentation and configuration management.
+
+### Cypher DDL Format (`format=cypher`)
+Returns Cypher CREATE statements for recreating the schema.
+Best for database migration and replication.
+
+## Data Statistics
+
+Set `include_data_stats=true` to include:
+- Node counts by label
+- Relationship counts by type
+- Total nodes and relationships
+
+This combines declared schema with runtime statistics.
+
+This operation is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
+  responses={
+    200: {
+      "description": "Schema exported successfully",
+      "model": SchemaExportResponse,
+    },
+    403: {"description": "Access denied to graph"},
+    404: {"description": "Schema not found for graph"},
+    500: {"description": "Failed to export schema"},
+  },
 )
 async def export_graph_schema(
   request: Request,
-  graph_id: str = Path(..., description="The graph ID to export schema from"),
+  graph_id: str = Path(
+    ...,
+    description="The graph ID to export schema from",
+    examples=["sec", "kg1a2b3c4d5"],
+  ),
   format: str = Query(
     "json",
     description="Export format: json, yaml, or cypher",
     regex="^(json|yaml|cypher)$",
+    openapi_examples={
+      "json": {
+        "summary": "JSON Format",
+        "description": "Structured JSON format for programmatic access",
+        "value": "json",
+      },
+      "yaml": {
+        "summary": "YAML Format",
+        "description": "Human-readable YAML format for documentation",
+        "value": "yaml",
+      },
+      "cypher": {
+        "summary": "Cypher DDL",
+        "description": "Cypher CREATE statements for database migration",
+        "value": "cypher",
+      },
+    },
   ),
   include_data_stats: bool = Query(
-    False, description="Include statistics about actual data in the graph"
+    False,
+    description="Include statistics about actual data in the graph (node counts, relationship counts)",
+    openapi_examples={
+      "without_stats": {
+        "summary": "Schema Only",
+        "description": "Export schema definition without data statistics",
+        "value": False,
+      },
+      "with_stats": {
+        "summary": "Schema + Statistics",
+        "description": "Export schema with node and relationship counts",
+        "value": True,
+      },
+    },
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ):
@@ -47,47 +136,6 @@ async def export_graph_schema(
   in the requested format (JSON, YAML, or Cypher DDL).
   """
   try:
-    # Verify user has access to the graph (handle both user graphs and shared repositories)
-    from robosystems.models.iam import UserGraph
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
-    from robosystems.models.iam.user_repository import UserRepository
-
-    # Determine graph type and validate access accordingly
-    identity = MultiTenantUtils.get_graph_identity(graph_id)
-
-    if identity.is_shared_repository:
-      # Check shared repository access
-      if not UserRepository.user_has_access(str(current_user.id), graph_id, db):
-        raise HTTPException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail=f"Access denied to shared repository {graph_id}",
-        )
-      # Create synthetic UserGraph for access control
-      user_graph = UserGraph()
-      user_graph.user_id = str(current_user.id)
-      user_graph.graph_id = graph_id
-      user_graph.role = "reader"
-
-    elif identity.is_user_graph:
-      # Check user graph access
-      user_graph = (
-        db.query(UserGraph)
-        .filter_by(user_id=current_user.id, graph_id=graph_id)
-        .first()
-      )
-      if not user_graph:
-        raise HTTPException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail=f"Access denied to user graph {graph_id}",
-        )
-
-    else:
-      # Unknown graph type
-      raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Invalid graph identifier: {graph_id}",
-      )
-
     # Get declared schema from PostgreSQL GraphSchema table
     from robosystems.models.iam import Graph, GraphSchema
 
@@ -156,13 +204,11 @@ async def export_graph_schema(
       try:
         from .utils import get_schema_info
         from robosystems.middleware.graph.dependencies import (
-          get_universal_repository_with_auth,
+          get_universal_repository,
         )
 
         # Use existing session parameter for repository auth
-        repository = await get_universal_repository_with_auth(
-          graph_id, current_user, "read", db
-        )
+        repository = await get_universal_repository(graph_id, "read")
         runtime_schema = await get_schema_info(repository)
 
         data_stats = {

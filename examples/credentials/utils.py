@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from robosystems_client import Client
+from robosystems_client import Client, AuthenticatedClient
 from robosystems_client.api.auth.login_user import sync_detailed as login
 from robosystems_client.api.auth.register_user import sync_detailed as register
 from robosystems_client.api.user.create_user_api_key import (
@@ -74,6 +74,14 @@ def save_credentials(path: Path, data: Dict[str, Any]) -> None:
   print(f"\n💾 Credentials saved to: {path}")
 
 
+def get_user_id(path: Path) -> Optional[str]:
+  """Get user_id from credentials."""
+  credentials = load_credentials(path)
+  if not credentials:
+    return None
+  return credentials.get("user_id") or credentials.get("user", {}).get("id")
+
+
 def get_graph_id(path: Path, demo_name: str) -> Optional[str]:
   """Get graph_id for a specific demo from credentials."""
   credentials = load_credentials(path)
@@ -84,7 +92,9 @@ def get_graph_id(path: Path, demo_name: str) -> Optional[str]:
   return demo_data.get("graph_id")
 
 
-def save_graph_id(path: Path, demo_name: str, graph_id: str, graph_created_at: str) -> None:
+def save_graph_id(
+  path: Path, demo_name: str, graph_id: str, graph_created_at: str
+) -> None:
   """Save graph_id for a specific demo to credentials."""
   credentials = load_credentials(path)
   if not credentials:
@@ -115,6 +125,9 @@ def ensure_user_credentials(
   existing = load_credentials(context.credentials_path)
   if existing and not context.force:
     print("\n⚠️  Reusing existing credentials")
+    user_id = existing.get('user_id') or existing.get('user', {}).get('id')
+    if user_id:
+      print(f"   User ID: {user_id}")
     print(f"   User:  {existing.get('user', {}).get('name')}")
     print(f"   Email: {existing.get('user', {}).get('email')}")
     print(f"   API Key: {existing.get('api_key', '')[:20]}...")
@@ -127,7 +140,9 @@ def ensure_user_credentials(
       print(f"   This will delete {num_graphs} existing graph(s):")
       for demo_name, graph_data in existing.get("graphs", {}).items():
         print(f"     - {demo_name}: {graph_data.get('graph_id', 'unknown')}")
-      print("   The old graphs belong to the old user and won't be accessible with the new API key.")
+      print(
+        "   The old graphs belong to the old user and won't be accessible with the new API key."
+      )
       print()
 
   client = Client(base_url=context.base_url)
@@ -145,7 +160,9 @@ def ensure_user_credentials(
   print(f"   Email: {user_email}")
   print(f"   Password: {user_password}")
 
-  register_request = RegisterRequest(name=user_name, email=user_email, password=user_password)
+  register_request = RegisterRequest(
+    name=user_name, email=user_email, password=user_password
+  )
   register_response = register(client=client, body=register_request)
   if not register_response.parsed:
     print(f"\n❌ Failed to create user: {register_response.status_code}")
@@ -153,7 +170,9 @@ def ensure_user_credentials(
       print(f"   Response: {register_response.content}")
     sys.exit(1)
 
+  user_id = register_response.parsed.user.id
   print(f"✅ User created: {user_name} ({user_email})")
+  print(f"   User ID: {user_id}")
 
   print("\n🔑 Logging in...")
   login_request = LoginRequest(email=user_email, password=user_password)
@@ -167,8 +186,12 @@ def ensure_user_credentials(
 
   api_key_name = f"{context.api_key_prefix} - {user_name}"
   print("\n🔑 Creating API key...")
+
+  # Create authenticated client with JWT token
+  auth_client = AuthenticatedClient(base_url=context.base_url, token=token)
+
   api_key_request = CreateAPIKeyRequest(name=api_key_name)
-  api_key_response = create_api_key(client=client, token=token, body=api_key_request)
+  api_key_response = create_api_key(client=auth_client, body=api_key_request)
   if not api_key_response.parsed:
     print(f"\n❌ Failed to create API key: {api_key_response.status_code}")
     sys.exit(1)
@@ -177,7 +200,8 @@ def ensure_user_credentials(
   print(f"✅ API key created: {api_key[:20]}...")
 
   credentials = {
-    "user": {"name": user_name, "email": user_email},
+    "user": {"id": user_id, "name": user_name, "email": user_email},
+    "user_id": user_id,
     "email": user_email,
     "password": user_password,
     "api_key": api_key,
@@ -191,7 +215,8 @@ def ensure_user_credentials(
   print("\n" + "=" * 70)
   print("✅ Setup Complete!")
   print("=" * 70)
-  print(f"\nName: {user_name}")
+  print(f"\nUser ID: {user_id}")
+  print(f"Name: {user_name}")
   print(f"Email: {user_email}")
   print(f"API Key: {api_key}")
   print("=" * 70 + "\n")

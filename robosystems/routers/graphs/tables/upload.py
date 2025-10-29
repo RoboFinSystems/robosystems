@@ -73,9 +73,9 @@ from robosystems.models.api.table import (
   FileUploadStatus,
 )
 from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
 from robosystems.adapters.s3 import S3Client
 from robosystems.config import env
@@ -107,14 +107,13 @@ router = APIRouter()
   summary="Get File Upload URL",
   description="""Generate a presigned S3 URL for secure file upload.
 
-**Purpose:**
-Initiate file upload to a staging table by generating a secure, time-limited
+Initiates file upload to a staging table by generating a secure, time-limited
 presigned S3 URL. Files are uploaded directly to S3, bypassing the API for
 optimal performance.
 
 **Upload Workflow:**
 1. Call this endpoint to get presigned URL
-2. PUT file directly to S3 URL (using curl, axios, etc.)
+2. PUT file directly to S3 URL
 3. Call PATCH /tables/files/{file_id} with status='uploaded'
 4. Backend validates file and calculates metrics
 5. File ready for ingestion
@@ -131,52 +130,14 @@ optimal performance.
 - Auto-creates table if it doesn't exist
 
 **Auto-Table Creation:**
-If the table doesn't exist, it's automatically created with:
-- Type inferred from name (e.g., "Transaction" → relationship)
-- Empty schema (populated on ingestion)
-- Ready for file uploads
+Tables are automatically created on first file upload with type inferred from name
+(e.g., "Transaction" → relationship) and empty schema populated during ingestion.
 
-**Example Response:**
-```json
-{
-  "upload_url": "https://bucket.s3.amazonaws.com/path?X-Amz-Algorithm=...",
-  "expires_in": 3600,
-  "file_id": "f123-456-789",
-  "s3_key": "user-staging/user123/kg456/Entity/f123.../data.parquet"
-}
-```
-
-**Example Usage:**
-```bash
-# Step 1: Get upload URL
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg123/tables/Entity/files" \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "file_name": "entities.parquet",
-    "content_type": "application/x-parquet"
-  }'
-
-# Step 2: Upload file directly to S3
-curl -X PUT "$UPLOAD_URL" \\
-  -H "Content-Type: application/x-parquet" \\
-  --data-binary "@entities.parquet"
-
-# Step 3: Mark as uploaded
-curl -X PATCH "https://api.robosystems.ai/v1/graphs/kg123/tables/files/$FILE_ID" \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{"status": "uploaded"}'
-```
-
-**Tips:**
+**Important Notes:**
 - Presigned URLs expire (default: 1 hour)
 - Use appropriate Content-Type header when uploading to S3
 - File extension must match content type
-- Large files benefit from direct S3 upload
-
-**Note:**
-Upload URL generation is included - no credit consumption.""",
+- Upload URL generation is included - no credit consumption""",
   responses={
     200: {
       "description": "Upload URL generated successfully",
@@ -218,7 +179,7 @@ async def get_upload_url(
   ),
   table_name: str = Path(..., description="Table name"),
   request: FileUploadRequest = Body(..., description="Upload request"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> FileUploadResponse:
@@ -240,9 +201,7 @@ async def get_upload_url(
     )
 
   try:
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "write", db
-    )
+    repository = await get_universal_repository(graph_id, "write")
 
     if not repository:
       raise HTTPException(
@@ -449,8 +408,7 @@ async def get_upload_url(
   summary="Update File Upload Status",
   description="""Update file status after upload completes.
 
-**Purpose:**
-Mark files as uploaded after successful S3 upload. The backend validates
+Marks files as uploaded after successful S3 upload. The backend validates
 the file, calculates size and row count, enforces storage limits, and
 registers the DuckDB table for queries.
 
@@ -475,40 +433,15 @@ registers the DuckDB table for queries.
 - **Fallback**: Estimate from file size if reading fails
 
 **Storage Limits:**
-Enforced per subscription tier:
-- Prevents uploads exceeding tier limit
-- Returns HTTP 413 if limit exceeded
-- Check current usage before large uploads
+Enforced per subscription tier. Returns HTTP 413 if limit exceeded.
+Check current usage before large uploads.
 
-**Example Response:**
-```json
-{
-  "status": "success",
-  "file_id": "f123",
-  "upload_status": "uploaded",
-  "file_size_bytes": 1048576,
-  "row_count": 5000,
-  "message": "File validated and ready for ingestion"
-}
-```
-
-**Example Usage:**
-```bash
-# After uploading file to S3 presigned URL
-curl -X PATCH "https://api.robosystems.ai/v1/graphs/kg123/tables/files/f123" \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{"status": "uploaded"}'
-```
-
-**Tips:**
+**Important Notes:**
 - Always call this after S3 upload completes
 - Check response for actual row count
 - Storage limit errors (413) mean tier upgrade needed
 - DuckDB registration failures are non-fatal (retried later)
-
-**Note:**
-Status updates are included - no credit consumption.""",
+- Status updates are included - no credit consumption""",
   responses={
     200: {
       "description": "File status updated successfully",
@@ -556,7 +489,7 @@ async def update_file_status(
   ),
   file_id: str = Path(..., description="File identifier"),
   request: FileStatusUpdate = Body(..., description="Status update"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
@@ -578,9 +511,7 @@ async def update_file_status(
     )
 
   try:
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "write", db
-    )
+    repository = await get_universal_repository(graph_id, "write")
 
     if not repository:
       raise HTTPException(

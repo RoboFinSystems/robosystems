@@ -14,7 +14,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.iam import User
 from robosystems.models.api.graph import BackupRestoreRequest
@@ -99,7 +99,7 @@ async def restore_backup(
   fastapi_request: Request,
   backup_id: str = Path(..., description="Backup identifier"),
   graph_id: str = Path(..., description="Graph database identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
@@ -117,7 +117,6 @@ async def restore_backup(
   - System backup ensures rollback capability
   """
   try:
-    # Verify user has admin access to this graph
     verify_admin_access(current_user, graph_id, db)
 
     # Block restore operations for shared repositories

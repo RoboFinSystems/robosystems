@@ -274,7 +274,10 @@ graph-health url="http://localhost:8001" env=_default_env:
 graph-info graph_id url="http://localhost:8001" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --command info
 
-# Graph API - execute Cypher query
+# Graph API - execute Cypher query (single quotes auto-converted to double quotes for Cypher)
+# Examples:
+#   just graph-query sec "MATCH (e:Entity {ticker: 'AAPL'}) RETURN e.name"
+#   just graph-query sec "MATCH (e:Entity) WHERE e.ticker IN ['AAPL', 'MSFT'] RETURN e.name"
 graph-query graph_id query format="table" url="http://localhost:8001" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
 
@@ -371,6 +374,14 @@ demo-accounting flags="new-graph" base_url="http://localhost:8000":
 demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
     uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
 
+# Setup SEC repository demo - loads data, grants access, updates config
+# Examples:
+#   just demo-sec                  # Load NVDA 2025 data, run example queries
+#   just demo-sec AAPL 2024        # Load specific ticker and year
+#   just demo-sec NVDA 2025 true   # Skip running queries after setup
+demo-sec ticker="NVDA" year="2025" skip_queries="false":
+    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
+
 ## Repository Access Management ##
 # Manage user access to shared repositories (SEC, industry data, etc.)
 
@@ -390,20 +401,20 @@ repo-revoke-access user_id repository env=_default_env:
 repo-list-access env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list
 
-# List repository access
-repo-list-access-repo repository env=_default_env:
+# List users with access to a specific repository
+repo-list-users repository env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list --repository {{repository}}
 
-# List all repositories
-repo-list-all-repositories env=_default_env:
+# List all available repositories
+repo-list-repositories env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager repositories
 
-# Check user access
+# Check user access to all repositories
 repo-check-access user_id env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}}
 
-# Check repository access
-repo-check-access-repo user_id repository env=_default_env:
+# Check user access to a specific repository
+repo-check-repo user_id repository env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
 
 ## Credit Admin Tools ##

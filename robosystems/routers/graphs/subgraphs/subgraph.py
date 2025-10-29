@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.api.subgraph import (
   CreateSubgraphRequest,
   SubgraphResponse,
@@ -67,7 +67,7 @@ async def list_subgraphs(
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
     pattern="^(kg[a-f0-9]{10}|sec)$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
 ) -> ListSubgraphsResponse:
   """List all subgraphs for a parent graph."""
@@ -213,7 +213,7 @@ async def create_subgraph(
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
     pattern="^(kg[a-f0-9]{10}|sec)$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
 ) -> SubgraphResponse:
   """Create a new subgraph within a parent graph."""

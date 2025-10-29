@@ -5,7 +5,7 @@ Connection options endpoint.
 from fastapi import APIRouter, Depends, Path
 
 from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.connection import (
   ConnectionProviderInfo,
@@ -53,7 +53,7 @@ No credits are consumed for viewing connection options.""",
 )
 async def get_connection_options(
   graph_id: str = Path(..., description="Graph database identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionOptionsResponse:
   """

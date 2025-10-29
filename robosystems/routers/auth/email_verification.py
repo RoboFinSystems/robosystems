@@ -1,8 +1,6 @@
 """Email verification endpoints."""
 
-from typing import Optional
-
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from ...adapters import sns_service
@@ -24,7 +22,6 @@ router = APIRouter()
 
 async def get_current_user_for_email_verification(
   request: Request,
-  authorization: Optional[str] = Header(None),
   session: Session = Depends(get_async_db_session),
 ) -> User:
   """
@@ -34,7 +31,6 @@ async def get_current_user_for_email_verification(
 
   Args:
       request: FastAPI request object
-      authorization: Authorization header with Bearer token
       session: Database session
 
   Returns:
@@ -43,6 +39,9 @@ async def get_current_user_for_email_verification(
   Raises:
       HTTPException: If authentication fails
   """
+  # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+  authorization = request.headers.get("authorization")
+
   if not authorization or not authorization.startswith("Bearer "):
     raise HTTPException(
       status_code=status.HTTP_401_UNAUTHORIZED,

@@ -25,9 +25,10 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import User
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.models.iam.graph import GraphTier
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -94,6 +95,13 @@ router = APIRouter()
 To load data into your graph, use the staging pipeline:
 1. Create file upload: `POST /v1/graphs/{graph_id}/tables/{table_name}/files`
 2. Ingest to graph: `POST /v1/graphs/{graph_id}/tables/ingest`
+
+**Security Best Practice - Use Parameterized Queries:**
+ALWAYS use query parameters instead of string interpolation to prevent injection attacks:
+- ✅ SAFE: `MATCH (n:Entity {type: $entity_type}) RETURN n` with `parameters: {"entity_type": "Company"}`
+- ❌ UNSAFE: `MATCH (n:Entity {type: "Company"}) RETURN n` with user input concatenated into query string
+
+Query parameters provide automatic escaping and type safety. All examples in this API use parameterized queries.
 
 This endpoint automatically selects the best execution strategy based on:
 - Query characteristics (size, complexity)
@@ -164,13 +172,13 @@ async def execute_cypher_query(
   mode: Optional[ResponseMode] = QueryParam(
     default=None, description="Response mode override"
   ),
-  chunk_size: int = QueryParam(
-    default=1000, ge=10, le=10000, description="Rows per chunk for streaming"
+  chunk_size: Optional[int] = QueryParam(
+    default=None, ge=10, le=10000, description="Rows per chunk for streaming"
   ),
   test_mode: bool = QueryParam(
     default=False, description="Enable test mode for better debugging"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Union[CypherQueryResponse, JSONResponse, StreamingResponse, EventSourceResponse]:
@@ -192,7 +200,7 @@ async def execute_cypher_query(
   graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
 
   # Determine chunk size based on tier (if not explicitly provided)
-  if chunk_size == 1000:  # Default value, so use tier-based configuration
+  if chunk_size is None:
     if graph and graph.graph_tier:
       tier_chunk_sizes = {
         "standard": env.KUZU_STANDARD_CHUNK_SIZE,
@@ -201,6 +209,8 @@ async def execute_cypher_query(
       }
       chunk_size = tier_chunk_sizes.get(graph.graph_tier.lower(), 1000)
       logger.debug(f"Using tier-based chunk size for {graph.graph_tier}: {chunk_size}")
+    else:
+      chunk_size = 1000
 
   # Initialize client_info for exception handling
   client_info = {"is_interactive": False}
@@ -240,14 +250,9 @@ async def execute_cypher_query(
       logger.warning(
         f"User {current_user.id} attempted admin operation through query endpoint: {request.query[:100]}"
       )
-      # For now, block all admin operations - we can add admin flag to User model later
       raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
         detail="Administrative operations (EXPORT, IMPORT DATABASE, INSTALL, ATTACH, etc.) require admin privileges.",
-      )
-      # Even for admins, we might want to restrict these through the query endpoint
-      logger.info(
-        f"Admin user {current_user.id} performing admin operation: {request.query[:100]}"
       )
 
     # Check for schema DDL operations (CREATE/DROP/ALTER TABLE, etc.)
@@ -277,10 +282,19 @@ async def execute_cypher_query(
     )
 
     # Get repository with auth
+    # Convert graph tier string to GraphTier enum
+    tier = GraphTier.KUZU_STANDARD
+    if graph and graph.graph_tier:
+      tier_map = {
+        "kuzu-standard": GraphTier.KUZU_STANDARD,
+        "kuzu-large": GraphTier.KUZU_LARGE,
+        "kuzu-xlarge": GraphTier.KUZU_XLARGE,
+        "kuzu-shared": GraphTier.KUZU_SHARED,
+      }
+      tier = tier_map.get(graph.graph_tier.lower(), GraphTier.KUZU_STANDARD)
+
     try:
-      repository = await get_universal_repository_with_auth(
-        graph_id, current_user, access_type, session
-      )
+      repository = await get_universal_repository(graph_id, access_type, tier)
     except HTTPException:
       # Re-raise HTTP exceptions as-is (already properly formatted)
       raise
@@ -436,10 +450,8 @@ async def execute_cypher_query(
       ExecutionStrategy.SYNC_TESTING,
     ]:
       # Execute and return JSON
-      timeout = timeouts["execution"]  # Initialize timeout for error handling
+      timeout = timeouts["execution"]
       try:
-        # Use appropriate timeout based on strategy
-        # timeout = timeouts["execution"]  # Already set above
         if strategy == ExecutionStrategy.SYNC_TESTING:
           # Testing mode - provide helpful feedback
           if query_analysis["estimated_rows"] > QueryAnalyzer.LARGE_RESULT:

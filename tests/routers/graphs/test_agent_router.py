@@ -110,13 +110,12 @@ class TestAgentEndpoints:
   def client(self, mock_dependencies, mock_orchestrator, mock_registry):
     """Create test client with mocked dependencies."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.middleware.rate_limits import (
       subscription_aware_rate_limit_dependency,
       graph_scoped_rate_limit_dependency,
     )
     from robosystems.database import get_db_session
-    from robosystems.routers.graphs.agent import get_read_only_repository
 
     # Create a mock user
     mock_user = Mock()
@@ -125,21 +124,11 @@ class TestAgentEndpoints:
     mock_user.email = "test@example.com"
     mock_user.accounts = []
 
-    # Create a mock graph repository
-    mock_graph_repo = Mock()
-    mock_graph_repo.graph_id = "test_graph"
-
     # Override dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
     app.dependency_overrides[subscription_aware_rate_limit_dependency] = lambda: None
     app.dependency_overrides[graph_scoped_rate_limit_dependency] = lambda: None
     app.dependency_overrides[get_db_session] = lambda: Mock()
-
-    # Create a regular function that returns the mock - need to handle async
-    async def get_mock_read_only_repo(graph_id):
-      return mock_graph_repo
-
-    app.dependency_overrides[get_read_only_repository] = get_mock_read_only_repo
 
     client = TestClient(app)
 

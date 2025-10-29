@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Path
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -64,9 +64,8 @@ The tool list is customized based on:
 - User permissions and subscription tier
 - Backend capabilities (Kuzu, Neo4j, etc.)
 
-Credit consumption:
-- Listing tools is included to encourage exploration
-- Tool execution costs vary by operation complexity""",
+**Note:**
+MCP tool listing is included - no credit consumption required.""",
   operation_id="listMcpTools",
   responses={
     200: {"description": "MCP tools retrieved successfully", "model": MCPToolsResponse},
@@ -83,7 +82,7 @@ async def list_mcp_tools(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> MCPToolsResponse:

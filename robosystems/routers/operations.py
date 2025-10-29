@@ -10,7 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi import status as http_status
 from sse_starlette.sse import EventSourceResponse
 
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import (
+  get_current_user,
+  get_current_user_sse,
+)
 from robosystems.models.iam import User
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -108,7 +111,7 @@ async def stream_operation_events(
     description="Start streaming from this sequence number (0 = from beginning)",
     ge=0,
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_sse),
   request: Request = None,
   _rate_limit: None = Depends(sse_connection_rate_limit_dependency),
 ) -> EventSourceResponse:

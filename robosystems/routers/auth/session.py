@@ -1,13 +1,10 @@
 """Session management endpoints (me, refresh)."""
 
-from typing import Optional
-
 from sqlalchemy.orm import Session
 from fastapi import (
   APIRouter,
   Depends,
   HTTPException,
-  Header,
   Request,
   status,
 )
@@ -46,15 +43,11 @@ router = APIRouter()
 )
 async def get_me(
   fastapi_request: Request,
-  authorization: Optional[str] = Header(None),
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_status_rate_limit_dependency),
 ) -> dict:
   """
   Get current authenticated user from JWT token.
-
-  Args:
-      authorization: Authorization header with Bearer token
 
   Returns:
       User information
@@ -63,7 +56,8 @@ async def get_me(
       HTTPException: If not authenticated
   """
   try:
-    # Extract JWT token from Authorization header
+    # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+    authorization = fastapi_request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
       jwt_token = authorization[7:]  # Remove "Bearer " prefix
@@ -130,15 +124,11 @@ async def get_me(
 )
 async def refresh_session(
   fastapi_request: Request,
-  authorization: Optional[str] = Header(None),
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(jwt_refresh_rate_limit_dependency),
 ) -> AuthResponse:
   """
   Refresh user session and extend authentication token.
-
-  Args:
-      authorization: Authorization header with Bearer token
 
   Returns:
       AuthResponse: Success response with updated user data
@@ -155,7 +145,8 @@ async def refresh_session(
   payload = None
 
   try:
-    # Extract JWT token from Authorization header
+    # Extract JWT token from Authorization header (doesn't show in OpenAPI params)
+    authorization = fastapi_request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
       jwt_token = authorization[7:]  # Remove "Bearer " prefix

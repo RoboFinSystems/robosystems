@@ -1127,21 +1127,28 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", f"/databases/{graph_id}/tables")
     return response.json()
 
-  async def query_table(self, graph_id: str, sql: str) -> Dict[str, Any]:
+  async def query_table(
+    self, graph_id: str, sql: str, parameters: Optional[List[Any]] = None
+  ) -> Dict[str, Any]:
     """
     Execute SQL query on DuckDB staging tables.
 
     Args:
         graph_id: Graph database identifier
         sql: SQL query to execute
+        parameters: Optional query parameters for safe value substitution
 
     Returns:
         Query results with columns and rows
     """
+    json_data = {"graph_id": graph_id, "sql": sql}
+    if parameters is not None:
+      json_data["parameters"] = parameters
+
     response = await self._request(
       "POST",
       f"/databases/{graph_id}/tables/query",
-      json_data={"graph_id": graph_id, "sql": sql},
+      json_data=json_data,
     )
     return response.json()
 

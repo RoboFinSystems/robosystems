@@ -10,11 +10,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.middleware.graph import get_graph_repository
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.database import get_db_session
 from robosystems.models.iam import User
@@ -44,11 +43,6 @@ from robosystems.config import env
 
 
 router = APIRouter(tags=["Agent"])
-
-
-async def get_read_only_repository(graph_id: str = Path(...)):
-  """Get read-only repository for agent operations."""
-  return await get_graph_repository(graph_id, "read")
 
 
 def _check_agent_post_enabled():
@@ -108,8 +102,7 @@ async def auto_agent(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
-  repository=Depends(get_read_only_repository),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentResponse:
@@ -207,8 +200,7 @@ async def specific_agent(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
-  repository=Depends(get_read_only_repository),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentResponse:
@@ -289,8 +281,7 @@ async def batch_agent(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
-  repository=Depends(get_read_only_repository),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BatchAgentResponse:
@@ -423,7 +414,7 @@ async def list_agents(
     None,
     description="Filter by capability (e.g., 'financial_analysis', 'rag_search')",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentListResponse:
   """List all available agents."""
@@ -473,9 +464,9 @@ async def get_agent_metadata(
   agent_type: str = Path(
     ...,
     description="Agent type identifier (e.g., 'financial', 'research', 'rag')",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{0,31}$",
+    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,32}$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentMetadataResponse:
   """Get metadata for a specific agent."""
@@ -522,7 +513,7 @@ async def recommend_agent(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> AgentRecommendationResponse:

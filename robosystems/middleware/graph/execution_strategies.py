@@ -184,6 +184,10 @@ class BaseAnalyzer(ABC):
       else:
         return "large"
 
+    # No limit value but LIMIT clause present (parameterized limit like $limit)
+    if "LIMIT" in query_upper and limit_value is None:
+      return "medium"  # Assume reasonable size for parameterized limits
+
     # No limit - check for patterns
     if "COUNT(" in query_upper and "GROUP BY" not in query_upper:
       return "small"  # Single count result

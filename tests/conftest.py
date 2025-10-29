@@ -123,7 +123,10 @@ def client(test_db):
 def client_with_mocked_auth(test_db):
   """Create a test client with mocked authentication for unit tests."""
   # Import the dependency directly
-  from robosystems.middleware.auth.dependencies import get_current_user
+  from robosystems.middleware.auth.dependencies import (
+    get_current_user,
+    get_current_user_with_graph,
+  )
   from robosystems.middleware.rate_limits import (
     auth_rate_limit_dependency,
     rate_limit_dependency,
@@ -156,6 +159,7 @@ def client_with_mocked_auth(test_db):
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
+  app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
   # Disable rate limiting during tests
   app.dependency_overrides[auth_rate_limit_dependency] = lambda: None
   app.dependency_overrides[rate_limit_dependency] = lambda: None
@@ -190,7 +194,10 @@ def client_with_mocked_auth(test_db):
 async def async_client(test_db, test_user):
   """Create an async test client."""
   # Import the dependency directly
-  from robosystems.middleware.auth.dependencies import get_current_user
+  from robosystems.middleware.auth.dependencies import (
+    get_current_user,
+    get_current_user_with_graph,
+  )
   from robosystems.middleware.rate_limits import (
     auth_rate_limit_dependency,
     rate_limit_dependency,
@@ -218,6 +225,7 @@ async def async_client(test_db, test_user):
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
+  app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
 
   # Disable ALL rate limiting during tests
   app.dependency_overrides[auth_rate_limit_dependency] = lambda: None
@@ -249,6 +257,90 @@ async def async_client(test_db, test_user):
     # Store mock_user in client for access in tests
     ac.mock_user = mock_user
     yield ac
+
+  # Reset the dependency overrides
+  app.dependency_overrides = {}
+
+
+@pytest.fixture
+async def auth_integration_client(test_db):
+  """
+  Create an async test client for authentication integration tests.
+
+  Unlike async_client, this fixture does NOT override authentication dependencies,
+  allowing real JWT/API key validation to occur. It DOES mock:
+  - Rate limiting (disabled)
+  - Database session (uses test_db)
+  - GraphClient/GraphClientFactory (to avoid Kuzu access)
+  """
+  from robosystems.middleware.rate_limits import (
+    auth_rate_limit_dependency,
+    rate_limit_dependency,
+    user_management_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
+    analytics_rate_limit_dependency,
+    backup_operations_rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    general_api_rate_limit_dependency,
+    subscription_aware_rate_limit_dependency,
+    auth_status_rate_limit_dependency,
+    sso_rate_limit_dependency,
+    graph_scoped_rate_limit_dependency,
+    sse_connection_rate_limit_dependency,
+  )
+  from robosystems.database import get_db_session, get_async_db_session
+  from unittest.mock import AsyncMock, patch
+
+  # Disable ALL rate limiting during tests
+  app.dependency_overrides[auth_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[rate_limit_dependency] = lambda: None
+  app.dependency_overrides[user_management_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[sync_operations_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[connection_management_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[analytics_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[backup_operations_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[sensitive_auth_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[tasks_management_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[general_api_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[subscription_aware_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[auth_status_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[sso_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[graph_scoped_rate_limit_dependency] = lambda: None
+  app.dependency_overrides[sse_connection_rate_limit_dependency] = lambda: None
+
+  # Override database session dependencies to use test_db
+  def override_get_db():
+    yield test_db
+
+  async def override_get_async_db():
+    yield test_db
+
+  app.dependency_overrides[get_db_session] = override_get_db
+  app.dependency_overrides[get_async_db_session] = override_get_async_db
+
+  # Mock GraphClientFactory to avoid Kuzu database access
+  with patch(
+    "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
+  ) as mock_factory:
+    mock_client = AsyncMock()
+    mock_client.get_database_info = AsyncMock(
+      return_value={
+        "database_name": "test_graph",
+        "database_size_bytes": 1024,
+        "node_count": 0,
+        "relationship_count": 0,
+        "node_labels": [],
+        "relationship_types": [],
+      }
+    )
+    mock_client.close = AsyncMock()
+    mock_factory.return_value = mock_client
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+      yield ac
 
   # Reset the dependency overrides
   app.dependency_overrides = {}
@@ -703,3 +795,62 @@ def kuzu_helpers():
     "create_node": create_kuzu_node,
     "create_relationship": create_kuzu_relationship,
   }
+
+
+@pytest.fixture
+def other_user(test_db):
+  """Create another test user without access to sample_graph."""
+  from robosystems.models.iam import User
+  import uuid
+  import bcrypt
+
+  unique_id = str(uuid.uuid4())[:8]
+  password = "0th3rP@ssw0rd!"
+  salt = bcrypt.gensalt()
+  password_hash = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
+  user = User(
+    id=f"other-user-{unique_id}",
+    email=f"other+{unique_id}@example.com",
+    name="Other Test User",
+    password_hash=password_hash,
+  )
+  test_db.add(user)
+  test_db.commit()
+  return user
+
+
+@pytest.fixture
+def test_user_token(test_user, sample_graph, test_db):
+  """Create a JWT token for test_user with access to sample_graph."""
+  from robosystems.middleware.auth.jwt import create_jwt_token
+  from robosystems.models.iam import UserGraph
+
+  # Ensure test_user has access to sample_graph
+  existing_access = (
+    test_db.query(UserGraph)
+    .filter(
+      UserGraph.user_id == test_user.id, UserGraph.graph_id == sample_graph.graph_id
+    )
+    .first()
+  )
+
+  if not existing_access:
+    UserGraph.create(
+      user_id=test_user.id,
+      graph_id=sample_graph.graph_id,
+      role="admin",
+      session=test_db,
+    )
+
+  # Generate JWT token for test_user
+  return create_jwt_token(test_user.id)
+
+
+@pytest.fixture
+def other_user_token(other_user):
+  """Create a JWT token for other_user without access to sample_graph."""
+  from robosystems.middleware.auth.jwt import create_jwt_token
+
+  # Generate JWT token for other_user (no graph access)
+  return create_jwt_token(other_user.id)

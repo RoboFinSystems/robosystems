@@ -57,7 +57,6 @@ from sqlalchemy.orm import Session
 from robosystems.models.iam import (
   User,
   GraphTable,
-  UserGraph,
   GraphFile,
   Graph,
   GraphSchema,
@@ -69,9 +68,9 @@ from robosystems.models.api.table import (
   FileUploadStatus,
 )
 from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.graph.types import (
@@ -102,7 +101,6 @@ circuit_breaker = CircuitBreakerManager()
   summary="Ingest Tables to Graph",
   description="""Load all files from S3 into DuckDB staging tables and ingest into Kuzu graph database.
 
-**Purpose:**
 Orchestrates the complete data pipeline from S3 staging files into the Kuzu graph database.
 Processes all tables in a single bulk operation with comprehensive error handling and metrics.
 
@@ -143,55 +141,19 @@ Setting `rebuild=true` regenerates the entire graph database from scratch:
 - Scales to thousands of files
 - Optimized for large datasets
 
-**Example Request:**
-```bash
-curl -X POST "https://api.robosystems.ai/v1/graphs/kg123/tables/ingest" \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "ignore_errors": true,
-    "rebuild": false
-  }'
-```
-
-**Example Response:**
-```json
-{
-  "status": "success",
-  "graph_id": "kg123",
-  "total_tables": 5,
-  "successful_tables": 5,
-  "failed_tables": 0,
-  "skipped_tables": 0,
-  "total_rows_ingested": 25000,
-  "total_execution_time_ms": 15420.5,
-  "results": [
-    {
-      "table_name": "Entity",
-      "status": "success",
-      "rows_ingested": 5000,
-      "execution_time_ms": 3200.1,
-      "error": null
-    }
-  ]
-}
-```
-
 **Concurrency Control:**
 Only one ingestion can run per graph at a time. If another ingestion is in progress,
 you'll receive a 409 Conflict error. The distributed lock automatically expires after
 the configured TTL (default: 1 hour) to prevent deadlocks from failed ingestions.
 
-**Tips:**
+**Important Notes:**
 - Only files with 'uploaded' status are processed
 - Tables with no uploaded files are skipped
 - Use `ignore_errors=false` for strict validation
 - Monitor progress via per-table results
 - Check graph metadata for rebuild status
 - Wait for current ingestion to complete before starting another
-
-**Note:**
-Table ingestion is included - no credit consumption.""",
+- Table ingestion is included - no credit consumption""",
   responses={
     200: {
       "description": "Ingestion completed with detailed per-table results",
@@ -244,7 +206,7 @@ async def ingest_tables(
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
   request: BulkIngestRequest = Body(..., description="Ingestion request"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> BulkIngestResponse:
@@ -323,7 +285,7 @@ async def ingest_tables(
         "lock_ttl": lock_ttl,
       },
     )
-    repo = await get_universal_repository_with_auth(graph_id, current_user, "write", db)
+    repo = await get_universal_repository(graph_id, "write")
 
     if not repo:
       raise HTTPException(
@@ -440,13 +402,6 @@ async def ingest_tables(
     successful_tables = 0
     failed_tables = 0
     skipped_tables = 0
-
-    user_graph = UserGraph.get_by_user_and_graph(current_user.id, graph_id, db)
-    if not user_graph:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"User does not have access to graph {graph_id}",
-      )
 
     bucket = env.AWS_S3_BUCKET
 

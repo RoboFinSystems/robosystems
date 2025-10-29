@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from fastapi import (
   APIRouter,
+  Body,
   Depends,
   HTTPException,
   Path,
@@ -25,7 +26,7 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -163,8 +164,11 @@ automatically aggregated for seamless consumption.
 - `408 Request Timeout`: Tool execution exceeded timeout
 - Clients should implement exponential backoff on errors
 
-**Note:**
-MCP tool calls are included and do not consume credits.""",
+**Credit Model:**
+MCP tool execution is included - no credit consumption required. Database
+operations (queries, schema inspection, analytics) are completely free.
+Only AI operations that invoke Claude or other LLM APIs consume credits,
+which happens at the AI agent layer, not the MCP tool layer.""",
   operation_id="callMcpTool",
   responses={
     200: {"description": "Tool executed successfully"},
@@ -182,12 +186,54 @@ MCP tool calls are included and do not consume credits.""",
   "/v1/graphs/{graph_id}/mcp/call-tool", business_event_type="mcp_tool_called"
 )
 async def call_mcp_tool(
-  tool_call: MCPToolCall,
   full_request: Request,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+  ),
+  tool_call: MCPToolCall = Body(
+    ...,
+    openapi_examples={
+      "cypher_query": {
+        "summary": "Execute Cypher Query",
+        "description": "Query companies by ticker symbol with parameters",
+        "value": {
+          "name": "read-graph-cypher",
+          "arguments": {
+            "query": "MATCH (c:Company {ticker: $ticker})-[:FILED]->(f:Filing) RETURN c.name, f.form_type, f.filing_date LIMIT 10",
+            "parameters": {"ticker": "AAPL"},
+          },
+        },
+      },
+      "get_schema": {
+        "summary": "Get Graph Schema",
+        "description": "Retrieve the complete schema of the graph database",
+        "value": {
+          "name": "get-graph-schema",
+          "arguments": {},
+        },
+      },
+      "get_info": {
+        "summary": "Get Graph Info",
+        "description": "Get statistics and metadata about the graph",
+        "value": {
+          "name": "get-graph-info",
+          "arguments": {},
+        },
+      },
+      "discover_facts": {
+        "summary": "Discover Facts",
+        "description": "Discover common facts and patterns in the graph",
+        "value": {
+          "name": "discover-facts",
+          "arguments": {
+            "entity_type": "Company",
+            "limit": 20,
+          },
+        },
+      },
+    },
   ),
   format: Optional[str] = QueryParam(
     default=None,
@@ -197,7 +243,7 @@ async def call_mcp_tool(
     default=False,
     description="Enable test mode for debugging",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> Union[MCPToolResult, JSONResponse, StreamingResponse, EventSourceResponse]:

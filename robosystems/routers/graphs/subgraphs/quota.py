@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.api.subgraph import SubgraphQuotaResponse
 from robosystems.models.iam.graph import Graph
 from robosystems.models.iam.user import User
@@ -60,7 +60,7 @@ Individual subgraph sizes shown in list endpoint.""",
 )
 async def get_subgraph_quota(
   graph_id: str = Path(..., description="Parent graph identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
 ) -> SubgraphQuotaResponse:
   """Get subgraph quota information for a parent graph.

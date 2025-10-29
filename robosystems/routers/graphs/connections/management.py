@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request, Path, sta
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.operations.connection_service import ConnectionService
 from robosystems.database import get_db_session
@@ -78,7 +78,7 @@ This operation is included - no credit consumption required.""",
 async def create_connection(
   graph_id: str = Path(..., description="Graph database identifier"),
   request: CreateConnectionRequest = ...,
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
@@ -306,7 +306,7 @@ async def list_connections(
   graph_id: str = Path(..., description="Graph database identifier"),
   entity_id: Optional[str] = Query(None, description="Filter by entity ID"),
   provider: Optional[ProviderType] = Query(None, description="Filter by provider type"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> List[ConnectionResponse]:
@@ -379,7 +379,7 @@ No credits are consumed for viewing connection details.""",
 async def get_connection(
   graph_id: str = Path(..., description="Graph database identifier"),
   connection_id: str = Path(..., description="Unique connection identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionResponse:
@@ -460,7 +460,7 @@ async def delete_connection(
   request: Request,
   graph_id: str = Path(..., description="Graph database identifier"),
   connection_id: str = Path(..., description="Connection identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):

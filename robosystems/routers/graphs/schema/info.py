@@ -1,6 +1,5 @@
 """Schema runtime introspection endpoint."""
 
-from typing import Dict, Any
 import asyncio
 import time
 from fastapi import APIRouter, Depends, HTTPException, status, Path
@@ -8,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.models.api.graph import SchemaInfoResponse
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_async_db_session
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
@@ -30,23 +30,53 @@ router = APIRouter()
 
 @router.get(
   "/schema",
+  response_model=SchemaInfoResponse,
   summary="Get Runtime Graph Schema",
   description="""Get runtime schema information for the specified graph database.
 
-This endpoint inspects the actual graph database structure and returns:
+## What This Returns
+
+This endpoint inspects the **actual current state** of the graph database and returns:
 - **Node Labels**: All node types currently in the database
 - **Relationship Types**: All relationship types currently in the database
-- **Node Properties**: Properties for each node type (limited to first 10 for performance)
+- **Node Properties**: Properties discovered from actual data (up to 10 properties per node type)
 
-This shows what actually exists in the database right now - the runtime state.
-For the declared schema definition, use GET /schema/export instead.
+## Runtime vs Declared Schema
+
+**Use this endpoint** (`/schema`) when you need to know:
+- What data is ACTUALLY in the database right now
+- What properties exist on real nodes
+- What relationships have been created
+- Current database structure for querying
+
+**Use `/schema/export` instead** when you need:
+- The original schema definition used to create the graph
+- Schema in a specific format (JSON, YAML, Cypher DDL)
+- Schema for documentation or version control
+- Schema to replicate in another graph
+
+## Example Use Cases
+
+- **Building queries**: See what node labels and properties exist to write accurate Cypher
+- **Data exploration**: Discover what's in an unfamiliar graph
+- **Schema drift detection**: Compare runtime vs declared schema
+- **API integration**: Dynamically adapt to current graph structure
+
+## Performance Note
+
+Property discovery is limited to 10 properties per node type for performance.
+For complete schema definitions, use `/schema/export`.
 
 This operation is included - no credit consumption required.""",
   operation_id="getGraphSchema",
   responses={
-    200: {"description": "Schema information retrieved successfully"},
+    200: {
+      "description": "Schema information retrieved successfully",
+      "model": SchemaInfoResponse,
+    },
     403: {"description": "Access denied to graph"},
     500: {"description": "Failed to retrieve schema"},
+    504: {"description": "Schema operation timed out"},
   },
 )
 @endpoint_metrics_decorator(
@@ -54,10 +84,10 @@ This operation is included - no credit consumption required.""",
 )
 async def get_graph_schema_info(
   graph_id: str = Path(..., description="The graph database to get schema for"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Dict[str, Any]:
+) -> SchemaInfoResponse:
   """
   Get runtime schema information for the specified graph.
 
@@ -120,9 +150,7 @@ async def get_graph_schema_info(
     )
 
     # Get repository with unified authentication and authorization
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", session
-    )
+    repository = await get_universal_repository(graph_id, "read")
 
     # Get schema information with timeout coordination
     schema = await asyncio.wait_for(
@@ -163,7 +191,7 @@ async def get_graph_schema_info(
       },
     )
 
-    return {"graph_id": graph_id, "schema": schema}
+    return SchemaInfoResponse(graph_id=graph_id, schema=schema)
 
   except asyncio.TimeoutError:
     # Record circuit breaker failure and timeout metrics

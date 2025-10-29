@@ -20,8 +20,6 @@ async def test_agent_router_basic(
 ):
   """Test basic agent endpoint."""
   with (
-    patch("robosystems.routers.graphs.agent.get_graph_repository") as mock_repo,
-    patch("robosystems.models.iam.user_graph.UserGraph.user_has_access") as mock_access,
     patch(
       "robosystems.routers.graphs.agent.AgentOrchestrator"
     ) as mock_orchestrator_class,
@@ -29,9 +27,6 @@ async def test_agent_router_basic(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
-    mock_repo.return_value = AsyncMock()
-    mock_access.return_value = True  # Allow graph access
-
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
@@ -76,8 +71,6 @@ async def test_agent_endpoint_with_history(
   ]
 
   with (
-    patch("robosystems.routers.graphs.agent.get_graph_repository") as mock_repo,
-    patch("robosystems.models.iam.user_graph.UserGraph.user_has_access") as mock_access,
     patch(
       "robosystems.routers.graphs.agent.AgentOrchestrator"
     ) as mock_orchestrator_class,
@@ -85,9 +78,6 @@ async def test_agent_endpoint_with_history(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
-    mock_repo.return_value = AsyncMock()
-    mock_access.return_value = True
-
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
@@ -132,8 +122,6 @@ async def test_agent_endpoint_with_context(
 ):
   """Test the agent endpoint with additional context."""
   with (
-    patch("robosystems.routers.graphs.agent.get_graph_repository") as mock_repo,
-    patch("robosystems.models.iam.user_graph.UserGraph.user_has_access") as mock_access,
     patch(
       "robosystems.routers.graphs.agent.AgentOrchestrator"
     ) as mock_orchestrator_class,
@@ -141,9 +129,6 @@ async def test_agent_endpoint_with_context(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
-    mock_repo.return_value = AsyncMock()
-    mock_access.return_value = True
-
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
@@ -188,8 +173,6 @@ async def test_agent_error_handling(
 ):
   """Test agent error handling."""
   with (
-    patch("robosystems.routers.graphs.agent.get_graph_repository") as mock_repo,
-    patch("robosystems.models.iam.user_graph.UserGraph.user_has_access") as mock_access,
     patch(
       "robosystems.routers.graphs.agent.AgentOrchestrator"
     ) as mock_orchestrator_class,
@@ -197,9 +180,6 @@ async def test_agent_error_handling(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
     ) as mock_get_credits,
   ):
-    mock_repo.return_value = AsyncMock()
-    mock_access.return_value = True
-
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
@@ -277,10 +257,6 @@ class TestGraphIdValidation:
   def test_graph_id_validation_through_path(self, client_with_mocked_auth: TestClient):
     """Test that path parameter validation works."""
     with (
-      patch("robosystems.routers.graphs.agent.get_graph_repository") as mock_repo,
-      patch(
-        "robosystems.models.iam.user_graph.UserGraph.user_has_access"
-      ) as mock_access,
       patch(
         "robosystems.routers.graphs.agent.AgentOrchestrator"
       ) as mock_orchestrator_class,
@@ -288,9 +264,6 @@ class TestGraphIdValidation:
         "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
       ) as mock_get_credits,
     ):
-      mock_repo.return_value = AsyncMock()
-      mock_access.return_value = True
-
       # Mock GraphCredits to return a credit pool
       mock_credits = MagicMock()
       mock_credits.graph_id = "test_graph"

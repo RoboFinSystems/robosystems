@@ -74,20 +74,83 @@ class UpdatePasswordRequest(BaseModel):
 class GraphInfo(BaseModel):
   """Graph information for user."""
 
-  graphId: str = Field(..., description="Graph database identifier")
-  graphName: str = Field(..., description="Display name for the graph")
-  role: str = Field(..., description="User's role in this graph")
-  isSelected: bool = Field(
-    ..., description="Whether this is the currently selected graph"
+  graphId: str = Field(
+    ..., description="Graph database identifier", examples=["kg1a2b3c4d5"]
   )
-  createdAt: str = Field(..., description="Creation timestamp")
+  graphName: str = Field(
+    ..., description="Display name for the graph", examples=["Acme Consulting LLC"]
+  )
+  role: str = Field(
+    ..., description="User's role in this graph", examples=["admin", "member"]
+  )
+  isSelected: bool = Field(
+    ...,
+    description="Whether this is the currently selected graph",
+    examples=[True, False],
+  )
+  createdAt: str = Field(
+    ..., description="Creation timestamp", examples=["2024-01-15T10:00:00Z"]
+  )
+
+  class Config:
+    json_schema_extra = {
+      "examples": [
+        {
+          "graphId": "kg1a2b3c4d5",
+          "graphName": "Acme Consulting LLC",
+          "role": "admin",
+          "isSelected": True,
+          "createdAt": "2024-01-15T10:00:00Z",
+        },
+        {
+          "graphId": "kg9z8y7x6w5",
+          "graphName": "TechCorp Enterprises",
+          "role": "member",
+          "isSelected": False,
+          "createdAt": "2024-02-20T14:30:00Z",
+        },
+      ]
+    }
 
 
 class UserGraphsResponse(BaseModel):
   """User graphs response model."""
 
   graphs: list[GraphInfo] = Field(..., description="List of accessible graphs")
-  selectedGraphId: str | None = Field(None, description="Currently selected graph ID")
+  selectedGraphId: str | None = Field(
+    None,
+    description="Currently selected graph ID",
+    examples=["kg1a2b3c4d5", None],
+  )
+
+  class Config:
+    json_schema_extra = {
+      "examples": [
+        {
+          "graphs": [
+            {
+              "graphId": "kg1a2b3c4d5",
+              "graphName": "Acme Consulting LLC",
+              "role": "admin",
+              "isSelected": True,
+              "createdAt": "2024-01-15T10:00:00Z",
+            },
+            {
+              "graphId": "kg9z8y7x6w5",
+              "graphName": "TechCorp Enterprises",
+              "role": "member",
+              "isSelected": False,
+              "createdAt": "2024-02-20T14:30:00Z",
+            },
+          ],
+          "selectedGraphId": "kg1a2b3c4d5",
+        },
+        {
+          "graphs": [],
+          "selectedGraphId": None,
+        },
+      ]
+    }
 
 
 class CreateAPIKeyRequest(BaseModel):

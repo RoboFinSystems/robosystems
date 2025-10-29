@@ -128,7 +128,7 @@ async def test_cypher_query_with_parameters(
 
 @pytest.mark.asyncio
 @patch("robosystems.routers.graphs.query.execute.get_query_queue")
-@patch("robosystems.routers.graphs.query.execute.get_universal_repository_with_auth")
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
 async def test_cypher_query_write_operations_blocked(
   mock_get_repo,
   mock_get_queue,
@@ -170,7 +170,7 @@ async def test_cypher_query_write_operations_blocked(
 
 @pytest.mark.asyncio
 @patch("robosystems.routers.graphs.query.execute.get_query_queue")
-@patch("robosystems.routers.graphs.query.execute.get_universal_repository_with_auth")
+@patch("robosystems.routers.graphs.query.execute.get_universal_repository")
 async def test_cypher_query_timeout(
   mock_get_repo,
   mock_get_queue,
@@ -286,6 +286,7 @@ async def test_cypher_query_forbidden_graph(
         "No credit pool found" in response.text
         or "Internal Server Error" in response.text
         or "Failed to access graph" in response.text
+        or "Failed to access repository" in response.text
       )
     else:
       data = response.json()

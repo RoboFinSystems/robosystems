@@ -39,9 +39,9 @@ from sqlalchemy.orm import Session
 from robosystems.models.iam import User, GraphTable
 from robosystems.models.api.table import TableInfo, TableListResponse
 from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.otel.metrics import (
@@ -59,12 +59,11 @@ router = APIRouter()
   summary="List Staging Tables",
   description="""List all DuckDB staging tables with comprehensive metrics and status.
 
-**Purpose:**
 Get a complete inventory of all staging tables for a graph, including
 file counts, storage sizes, and row estimates. Essential for monitoring
 the data pipeline and determining which tables are ready for ingestion.
 
-**What You Get:**
+**Returned Metrics:**
 - Table name and type (node/relationship)
 - File count per table
 - Total storage size in bytes
@@ -86,43 +85,12 @@ the data pipeline and determining which tables are ready for ingestion.
 4. Check file counts and sizes
 5. Ingest when ready
 
-**Example Response:**
-```json
-{
-  "tables": [
-    {
-      "table_name": "Entity",
-      "row_count": 5000,
-      "file_count": 3,
-      "total_size_bytes": 2457600,
-      "s3_location": "s3://bucket/user-staging/user123/graph456/Entity/**/*.parquet"
-    },
-    {
-      "table_name": "Transaction",
-      "row_count": 15000,
-      "file_count": 5,
-      "total_size_bytes": 8192000,
-      "s3_location": "s3://bucket/user-staging/user123/graph456/Transaction/**/*.parquet"
-    }
-  ],
-  "total_count": 2
-}
-```
-
-**Example Usage:**
-```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" \\
-  https://api.robosystems.ai/v1/graphs/kg123/tables
-```
-
-**Tips:**
+**Important Notes:**
 - Tables with `file_count > 0` have data ready
 - Check `total_size_bytes` for storage monitoring
 - Use `s3_location` to verify upload paths
 - Empty tables (file_count=0) are skipped during ingestion
-
-**Note:**
-Table queries are included - no credit consumption.""",
+- Table queries are included - no credit consumption""",
   responses={
     200: {
       "description": "Tables retrieved successfully with full metrics",
@@ -160,7 +128,7 @@ async def list_tables(
     description="Graph database identifier",
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> TableListResponse:
@@ -174,9 +142,7 @@ async def list_tables(
 
   try:
     # Verify graph access
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", db
-    )
+    repository = await get_universal_repository(graph_id, "read")
 
     if not repository:
       raise HTTPException(

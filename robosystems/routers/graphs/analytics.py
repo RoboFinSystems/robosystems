@@ -8,7 +8,7 @@ from typing import DefaultDict
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import User
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
@@ -132,7 +132,7 @@ This operation is included - no credit consumption required.""",
 )
 async def get_graph_metrics(
   graph_id: str = Path(..., description="The graph ID to get metrics for"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphMetricsResponse:
@@ -198,15 +198,6 @@ async def get_graph_metrics(
         "analytics_type": "comprehensive_metrics",
       },
     )
-
-    # Validate user has access to this graph
-    from robosystems.models.iam.user_graph import UserGraph
-
-    if not UserGraph.user_has_access(current_user.id, graph_id, db):
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"You don't have access to graph {graph_id}",
-      )
 
     # Collect metrics for the specific graph with timeout coordination
     import asyncio
@@ -383,7 +374,7 @@ async def get_graph_usage_stats(
   include_details: bool = Query(
     False, description="Include detailed metrics (may be slower)"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphUsageResponse:
@@ -451,16 +442,6 @@ async def get_graph_usage_stats(
         "include_details": include_details,
       },
     )
-
-    # Validate user has access to this graph
-    from robosystems.models.iam.user_graph import UserGraph
-
-    user_graph = UserGraph.get_by_user_and_graph(current_user.id, graph_id, db)
-    if not user_graph:
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"You don't have access to graph {graph_id}",
-      )
 
     # Get graph usage statistics with timeout coordination
     if include_details:

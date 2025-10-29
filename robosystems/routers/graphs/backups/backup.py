@@ -16,7 +16,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.graph import (
   BackupListResponse,
@@ -34,7 +34,7 @@ from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.config import env
 
-from .utils import verify_graph_access, verify_admin_access
+from .utils import verify_admin_access
 
 # Create router
 router = APIRouter()
@@ -59,7 +59,7 @@ async def list_backups(
     50, ge=1, le=100, description="Maximum number of backups to return"
   ),
   offset: int = Query(0, ge=0, description="Number of backups to skip"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> BackupListResponse:
@@ -74,8 +74,7 @@ async def list_backups(
       f"Starting list_backups for graph_id: {graph_id}, user: {current_user.id}"
     )
 
-    # Verify user has access to this graph
-    verify_graph_access(current_user, graph_id, db)
+    # Access validated by get_current_user_with_graph dependency
 
     # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")
@@ -247,7 +246,7 @@ async def create_backup(
   request: BackupCreateRequest,
   fastapi_request: Request,
   graph_id: str = Path(..., description="Graph database identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict:
@@ -258,7 +257,6 @@ async def create_backup(
   Use the returned operation_id to monitor progress via SSE.
   """
   try:
-    # Verify user has admin access to this graph
     verify_admin_access(current_user, graph_id, db)
 
     # Check if backup creation is enabled

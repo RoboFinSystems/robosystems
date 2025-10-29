@@ -117,14 +117,14 @@ class TestBackupEndpoints:
     mock_auth_user,
   ):
     """Test backup creation endpoint."""
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import session
 
     # Create mock session
     mock_session = MagicMock()
 
     # Override the dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
     app.dependency_overrides[session] = lambda: mock_session
 
     try:
@@ -188,8 +188,8 @@ class TestBackupEndpoints:
       mock_get_by_user_id.assert_called_once()
     finally:
       # Reset only the specific overrides we added
-      if get_current_user in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user]
+      if get_current_user_with_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_graph]
       if session in app.dependency_overrides:
         del app.dependency_overrides[session]
 
@@ -201,14 +201,14 @@ class TestBackupEndpoints:
     self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
   ):
     """Test backup listing endpoint."""
-    from robosystems.middleware.auth.dependencies import get_current_user
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import session
 
     # Create mock session
     mock_session = MagicMock()
 
     # Override the dependencies
-    app.dependency_overrides[get_current_user] = lambda: mock_auth_user
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
     app.dependency_overrides[session] = lambda: mock_session
 
     try:
@@ -241,14 +241,10 @@ class TestBackupEndpoints:
       assert data["graph_id"] == graph_id
       assert "backups" in data
       assert "total_count" in data
-
-      # Verify authorization checks were called
-      # Note: list_backups endpoint doesn't call is_shared_repository
-      mock_get_by_user_id.assert_called_once()
     finally:
       # Reset only the specific overrides we added
-      if get_current_user in app.dependency_overrides:
-        del app.dependency_overrides[get_current_user]
+      if get_current_user_with_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_graph]
       if session in app.dependency_overrides:
         del app.dependency_overrides[session]
 

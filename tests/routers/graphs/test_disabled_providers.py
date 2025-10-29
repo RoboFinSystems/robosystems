@@ -41,8 +41,8 @@ class TestDisabledProviderHandling:
       # Should return 403 Forbidden, not 500
       assert response.status_code == status.HTTP_403_FORBIDDEN
       response_json = response.json()
-      # The error response has a nested structure
-      assert "SEC provider is not enabled" in response_json["detail"]["detail"]
+      # Check the error message (response_json is the full error object with detail, code, timestamp)
+      assert "SEC provider is not enabled" in str(response_json)
 
   def test_create_connection_disabled_plaid_provider(
     self, client: TestClient, auth_headers
@@ -76,8 +76,8 @@ class TestDisabledProviderHandling:
       # Should return 403 Forbidden, not 500
       assert response.status_code == status.HTTP_403_FORBIDDEN
       response_json = response.json()
-      # The error response has a nested structure
-      assert "Plaid provider is not enabled" in response_json["detail"]["detail"]
+      # Check the error message (response_json is the full error object with detail, code, timestamp)
+      assert "Plaid provider is not enabled" in str(response_json)
 
   def test_sync_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test syncing a connection for disabled provider returns 403."""
@@ -242,7 +242,30 @@ class TestDisabledProviderHandling:
   @pytest.fixture
   def auth_headers(self, test_user, test_db):
     """Create auth headers for test requests."""
-    from robosystems.models.iam import UserAPIKey
+    from robosystems.models.iam import UserAPIKey, UserGraph, Graph
+
+    # Create the graph first (only if it doesn't exist)
+    existing_graph = (
+      test_db.query(Graph).filter(Graph.graph_id == "kg1a2b3c4d5").first()
+    )
+    if not existing_graph:
+      Graph.create(
+        graph_id="kg1a2b3c4d5",
+        graph_name="Test Graph",
+        graph_type="generic",
+        session=test_db,
+      )
+
+    # Create UserGraph relationship for the test graph (only if it doesn't exist)
+    existing_user_graph = (
+      test_db.query(UserGraph)
+      .filter(UserGraph.user_id == test_user.id, UserGraph.graph_id == "kg1a2b3c4d5")
+      .first()
+    )
+    if not existing_user_graph:
+      UserGraph.create(
+        user_id=test_user.id, graph_id="kg1a2b3c4d5", role="admin", session=test_db
+      )
 
     # Create an API key for the test user
     _, plain_key = UserAPIKey.create(

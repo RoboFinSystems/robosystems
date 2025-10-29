@@ -31,9 +31,9 @@ from sqlalchemy.orm import Session
 from robosystems.models.iam import User
 from robosystems.models.api.table import TableQueryRequest, TableQueryResponse
 from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph.dependencies import get_universal_repository_with_auth
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.graph.types import GraphTypeRegistry
@@ -55,9 +55,15 @@ circuit_breaker = CircuitBreakerManager()
   summary="Query Staging Tables with SQL",
   description="""Execute SQL queries on DuckDB staging tables for data inspection and validation.
 
-**Purpose:**
 Query raw staging data directly with SQL before ingestion into the graph database.
 Useful for data quality checks, validation, and exploratory analysis.
+
+**Security Best Practice - Use Parameterized Queries:**
+ALWAYS use query parameters instead of string concatenation to prevent SQL injection:
+- ✅ SAFE: `SELECT * FROM Entity WHERE type = ? LIMIT ?` with `parameters: ["Company", 100]`
+- ❌ UNSAFE: `SELECT * FROM Entity WHERE type = 'Company' LIMIT 100` with user input concatenated into SQL string
+
+Query parameters provide automatic escaping and type safety. Use `?` placeholders with parameters array.
 
 **Use Cases:**
 - Validate data quality before graph ingestion
@@ -78,27 +84,12 @@ Useful for data quality checks, validation, and exploratory analysis.
 - Aggregations, window functions, CTEs
 - Multiple table joins across staging area
 
-**Example Queries:**
-```sql
--- Count rows in staging table
-SELECT COUNT(*) FROM Entity;
-
--- Check for nulls
-SELECT * FROM Entity WHERE name IS NULL LIMIT 10;
-
--- Find duplicates
-SELECT identifier, COUNT(*) as cnt
-FROM Entity
-GROUP BY identifier
-HAVING COUNT(*) > 1;
-
--- Join across tables
-SELECT e.name, COUNT(t.id) as transaction_count
-FROM Entity e
-LEFT JOIN Transaction t ON e.identifier = t.entity_id
-GROUP BY e.name
-ORDER BY transaction_count DESC;
-```
+**Common Operations:**
+- Count rows: `SELECT COUNT(*) FROM Entity`
+- Filter by type: `SELECT * FROM Entity WHERE entity_type = ? LIMIT ?` with `parameters: ["Company", 100]`
+- Check for nulls: `SELECT * FROM Entity WHERE name IS NULL LIMIT 10`
+- Find duplicates: `SELECT identifier, COUNT(*) as cnt FROM Entity GROUP BY identifier HAVING COUNT(*) > 1`
+- Filter amounts: `SELECT * FROM Transaction WHERE amount > ? AND date >= ?` with `parameters: [1000, "2024-01-01"]`
 
 **Limits:**
 - Query timeout: 30 seconds
@@ -111,7 +102,7 @@ Shared repositories (SEC, etc.) do not allow direct SQL queries.
 Use the graph query endpoint instead: `POST /v1/graphs/{graph_id}/query`
 
 **Note:**
-Staging table queries are included - no credit consumption.""",
+Staging table queries are included - no credit consumption""",
   responses={
     200: {
       "description": "Query executed successfully",
@@ -153,7 +144,7 @@ async def query_tables(
     pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
   ),
   request: TableQueryRequest = Body(..., description="SQL query request"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> TableQueryResponse:
@@ -181,9 +172,7 @@ async def query_tables(
 
   try:
     # Verify graph access
-    repository = await get_universal_repository_with_auth(
-      graph_id, current_user, "read", db
-    )
+    repository = await get_universal_repository(graph_id, "read")
 
     if not repository:
       raise HTTPException(
@@ -211,7 +200,9 @@ async def query_tables(
 
     client = await get_graph_client(graph_id=graph_id, operation_type="read")
 
-    response = await client.query_table(graph_id=graph_id, sql=request.sql)
+    response = await client.query_table(
+      graph_id=graph_id, sql=request.sql, parameters=request.parameters
+    )
 
     # Calculate execution time
     execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000

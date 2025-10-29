@@ -26,14 +26,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.models.iam import (
   User,
   GraphUsageTracking,
-  UserGraph,
 )
 from robosystems.operations.graph.pricing_service import GraphPricingService
 from robosystems.models.api.common import ErrorResponse
@@ -42,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
   tags=["Graph Billing"],
-  dependencies=[Depends(get_current_user)],
+  dependencies=[Depends(get_current_user_with_graph)],
 )
 
 
@@ -87,7 +86,7 @@ Billing calculations are updated hourly. Storage is measured in GB-months.
 )
 async def get_current_graph_bill(
   graph_id: str = Path(..., description="Graph database identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict:
@@ -107,16 +106,6 @@ async def get_current_graph_bill(
   Raises:
       HTTPException: If graph not found or calculation fails
   """
-  # Verify user has access to this graph
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
-
   try:
     pricing_service = GraphPricingService(db)
     now = datetime.now()
@@ -190,7 +179,7 @@ async def get_graph_usage_details(
   month: Optional[int] = Query(
     None, description="Month (defaults to current)", ge=1, le=12
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict:
@@ -223,16 +212,6 @@ async def get_graph_usage_details(
     raise HTTPException(status_code=400, detail="Invalid year")
   if month < 1 or month > 12:
     raise HTTPException(status_code=400, detail="Invalid month")
-
-  # Verify user has access to this graph
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
 
   try:
     # Get usage records for this specific graph
@@ -339,7 +318,7 @@ async def get_graph_billing_history(
   months: int = Query(
     6, ge=1, le=24, description="Number of months to retrieve (1-24)"
   ),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict:
@@ -360,16 +339,6 @@ async def get_graph_billing_history(
   Raises:
       HTTPException: If graph not found
   """
-  # Verify user has access to this graph
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
-
   now = datetime.now()
   bills = []
   pricing_service = GraphPricingService(db)
@@ -447,7 +416,7 @@ async def get_graph_monthly_bill(
   year: int = Path(..., description="Year (2024-2030)", ge=2024, le=2030),
   month: int = Path(..., description="Month (1-12)", ge=1, le=12),
   graph_id: str = Path(..., description="Graph database identifier"),
-  current_user: User = Depends(get_current_user),
+  current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict:
@@ -474,16 +443,6 @@ async def get_graph_monthly_bill(
     raise HTTPException(status_code=400, detail="Invalid year")
   if month < 1 or month > 12:
     raise HTTPException(status_code=400, detail="Invalid month")
-
-  # Verify user has access to this graph
-  user_graph = (
-    db.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
-    .first()
-  )
-
-  if not user_graph:
-    raise HTTPException(status_code=404, detail="Graph database not found")
 
   try:
     pricing_service = GraphPricingService(db)

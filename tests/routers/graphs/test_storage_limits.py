@@ -21,7 +21,10 @@ from robosystems.models.iam.graph_usage_tracking import (
 def client_with_test_user(test_db, test_user):
   """Create a test client with the actual test user."""
   from main import app
-  from robosystems.middleware.auth.dependencies import get_current_user
+  from robosystems.middleware.auth.dependencies import (
+    get_current_user,
+    get_current_user_with_graph,
+  )
   from robosystems.middleware.rate_limits import (
     subscription_aware_rate_limit_dependency,
   )
@@ -36,6 +39,7 @@ def client_with_test_user(test_db, test_user):
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
+  app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
   app.dependency_overrides[subscription_aware_rate_limit_dependency] = lambda: None
 
   # Override the database session dependency

@@ -56,9 +56,13 @@ class TestGenerateSSOToken:
 
     mock_session = Mock()
 
+    # Create mock request with authorization header
+    mock_request = Mock()
+    mock_request.headers = {"authorization": "Bearer valid_jwt_token"}
+
     # Call endpoint with Bearer token
     result = await generate_sso_token(
-      authorization="Bearer valid_jwt_token",
+      request=mock_request,
       auth_token=None,
       session=mock_session,
       _rate_limit=None,
@@ -105,9 +109,13 @@ class TestGenerateSSOToken:
 
     mock_session = Mock()
 
+    # Create mock request without authorization header
+    mock_request = Mock()
+    mock_request.headers = {}
+
     # Call endpoint with cookie token (no Bearer)
     result = await generate_sso_token(
-      authorization=None,
+      request=mock_request,
       auth_token="cookie_jwt_token",
       session=mock_session,
       _rate_limit=None,
@@ -123,9 +131,13 @@ class TestGenerateSSOToken:
     """Test SSO token generation with no authentication."""
     mock_session = Mock()
 
+    # Create mock request without authorization header
+    mock_request = Mock()
+    mock_request.headers = {}
+
     with pytest.raises(HTTPException) as exc_info:
       await generate_sso_token(
-        authorization=None,
+        request=mock_request,
         auth_token=None,
         session=mock_session,
         _rate_limit=None,
@@ -139,9 +151,13 @@ class TestGenerateSSOToken:
     """Test SSO token generation with malformed Bearer token."""
     mock_session = Mock()
 
+    # Create mock request with malformed authorization header
+    mock_request = Mock()
+    mock_request.headers = {"authorization": "InvalidHeader"}
+
     with pytest.raises(HTTPException) as exc_info:
       await generate_sso_token(
-        authorization="InvalidHeader",  # Missing "Bearer "
+        request=mock_request,
         auth_token=None,
         session=mock_session,
         _rate_limit=None,
@@ -156,9 +172,13 @@ class TestGenerateSSOToken:
     mock_verify_jwt.return_value = None  # Invalid token
     mock_session = Mock()
 
+    # Create mock request with invalid token
+    mock_request = Mock()
+    mock_request.headers = {"authorization": "Bearer invalid_token"}
+
     with pytest.raises(HTTPException) as exc_info:
       await generate_sso_token(
-        authorization="Bearer invalid_token",
+        request=mock_request,
         auth_token=None,
         session=mock_session,
         _rate_limit=None,
@@ -177,9 +197,13 @@ class TestGenerateSSOToken:
     mock_get_by_id.return_value = None  # User not found
     mock_session = Mock()
 
+    # Create mock request with valid token
+    mock_request = Mock()
+    mock_request.headers = {"authorization": "Bearer valid_token"}
+
     with pytest.raises(HTTPException) as exc_info:
       await generate_sso_token(
-        authorization="Bearer valid_token",
+        request=mock_request,
         auth_token=None,
         session=mock_session,
         _rate_limit=None,
@@ -204,9 +228,13 @@ class TestGenerateSSOToken:
 
     mock_session = Mock()
 
+    # Create mock request with valid token
+    mock_request = Mock()
+    mock_request.headers = {"authorization": "Bearer valid_token"}
+
     with pytest.raises(HTTPException) as exc_info:
       await generate_sso_token(
-        authorization="Bearer valid_token",
+        request=mock_request,
         auth_token=None,
         session=mock_session,
         _rate_limit=None,
@@ -246,9 +274,13 @@ class TestGenerateSSOToken:
 
     mock_session = Mock()
 
+    # Create mock request with Bearer token
+    mock_request = Mock()
+    mock_request.headers = {"authorization": "Bearer bearer_jwt_token"}
+
     # Call endpoint with both Bearer and cookie
     result = await generate_sso_token(
-      authorization="Bearer bearer_jwt_token",
+      request=mock_request,
       auth_token="cookie_jwt_token",
       session=mock_session,
       _rate_limit=None,

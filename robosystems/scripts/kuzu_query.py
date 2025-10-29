@@ -6,7 +6,9 @@ Kuzu Database Query Tool
 Simple command-line tool to execute queries against embedded Kuzu databases.
 
 Usage:
+    # Single quotes are auto-converted to double quotes for easier shell usage
     python kuzu_query.py --db-path ./data/kuzu-dbs/sec --query "MATCH (c:Entity) RETURN c.name LIMIT 5"
+    python kuzu_query.py --db-path ./data/kuzu-dbs/sec --query "MATCH (c:Entity {ticker: 'NVDA'}) RETURN c.name"
     python kuzu_query.py --db-path ./data/kuzu-dbs/sec --query "MATCH (n) RETURN labels(n)[0] as type, count(*) as count"
 """
 
@@ -24,6 +26,25 @@ from robosystems.utils.query_output import (
 )
 
 
+def normalize_cypher_quotes(query: str) -> str:
+  """
+  Convert single quotes to double quotes in Cypher queries.
+
+  This makes it easier to write queries in the shell since single quotes
+  don't need escaping. Cypher requires double quotes for string literals.
+
+  Examples:
+      MATCH (e:Entity {ticker: 'NVDA'}) -> MATCH (e:Entity {ticker: "NVDA"})
+
+  Args:
+      query: Cypher query string
+
+  Returns:
+      Query with single quotes converted to double quotes
+  """
+  return query.replace("'", '"')
+
+
 def execute_query(db_path: str, query: str, format_output: str = "table"):
   """Execute a query against the Kuzu database."""
   try:
@@ -36,8 +57,9 @@ def execute_query(db_path: str, query: str, format_output: str = "table"):
     db = kuzu.Database(db_path)
     conn = kuzu.Connection(db)
 
-    print(f"Executing query: {query}")
-    result = conn.execute(query)
+    normalized_query = normalize_cypher_quotes(query)
+    print(f"Executing query: {normalized_query}")
+    result = conn.execute(normalized_query)
 
     column_names = result.get_column_names()
 
@@ -53,7 +75,7 @@ def execute_query(db_path: str, query: str, format_output: str = "table"):
       results.append(row_dict)
 
     if format_output == "table":
-      print_info_section(f"QUERY: {query}")
+      print_info_section(f"QUERY: {normalized_query}")
       print_table(results, title="Kuzu Query Results")
 
     elif format_output == "json":
@@ -107,6 +129,9 @@ def main():
 Examples:
   # Basic query
   python kuzu_query.py --db-path ./data/kuzu-dbs/sec --query "MATCH (c:Entity) RETURN c.name LIMIT 5"
+
+  # Single quotes auto-converted to double quotes for easier shell usage
+  python kuzu_query.py --db-path ./data/kuzu-dbs/sec --query "MATCH (c:Entity {ticker: 'NVDA'}) RETURN c.name"
 
   # Count nodes by type
   python kuzu_query.py --db-path ./data/kuzu-dbs/sec --query "MATCH (n) RETURN labels(n)[0] as type, count(*) as count"

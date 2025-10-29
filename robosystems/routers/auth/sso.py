@@ -13,8 +13,8 @@ from fastapi import (
   APIRouter,
   Cookie,
   Depends,
-  Header,
   HTTPException,
+  Request,
   Response,
   status,
 )
@@ -65,7 +65,7 @@ router = APIRouter()
   },
 )
 async def generate_sso_token(
-  authorization: Optional[str] = Header(None),
+  request: Request,
   auth_token: Optional[str] = Cookie(
     None, alias="auth-token"
   ),  # Backward compatibility
@@ -76,7 +76,6 @@ async def generate_sso_token(
   Generate a temporary SSO token for cross-app authentication.
 
   Args:
-      authorization: Authorization header with Bearer token
       auth_token: JWT auth token from HTTP-only cookie (deprecated, for backward compatibility)
 
   Returns:
@@ -86,7 +85,8 @@ async def generate_sso_token(
       HTTPException: If not authenticated or token is invalid
   """
   try:
-    # Extract JWT token from Authorization header or fall back to cookie
+    # Extract JWT token from Authorization header (doesn't show in OpenAPI params) or fall back to cookie
+    authorization = request.headers.get("authorization")
     jwt_token = None
     if authorization and authorization.startswith("Bearer "):
       jwt_token = authorization[7:]  # Remove "Bearer " prefix

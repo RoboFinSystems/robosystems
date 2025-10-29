@@ -109,6 +109,9 @@ class TableCreateResponse(BaseModel):
 class TableQueryRequest(BaseModel):
   graph_id: str = Field(..., description="Graph database identifier")
   sql: str = Field(..., description="SQL query to execute")
+  parameters: Optional[List[Any]] = Field(
+    default=None, description="Query parameters for safe value substitution"
+  )
 
   class Config:
     extra = "forbid"
@@ -295,7 +298,10 @@ class DuckDBTableManager:
 
     try:
       with pool.get_connection(request.graph_id) as conn:
-        result = conn.execute(request.sql).fetchall()
+        if request.parameters:
+          result = conn.execute(request.sql, request.parameters).fetchall()
+        else:
+          result = conn.execute(request.sql).fetchall()
         description = conn.description
 
         columns = [desc[0] for desc in description] if description else []
@@ -346,7 +352,10 @@ class DuckDBTableManager:
     try:
       with pool.get_connection(request.graph_id) as conn:
         # Execute query and get cursor (does NOT fetch all results)
-        cursor = conn.execute(request.sql)
+        if request.parameters:
+          cursor = conn.execute(request.sql, request.parameters)
+        else:
+          cursor = conn.execute(request.sql)
         description = cursor.description
 
         columns = [desc[0] for desc in description] if description else []
