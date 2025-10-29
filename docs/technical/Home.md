@@ -6,9 +6,7 @@ RoboSystems is an enterprise-grade financial knowledge graph platform that trans
 
 New to RoboSystems? Start here:
 
-- **Quick Start**: See the [README](https://github.com/RoboFinSystems/robosystems#quick-start) for installation
-- **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
-- **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
+**Quick Start** - See the [README](https://github.com/RoboFinSystems/robosystems#quick-start) for installation
 
 ## Core Documentation
 
@@ -20,8 +18,8 @@ New to RoboSystems? Start here:
 
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Working with SEC financial data
 - **[Accounting Demo](Accounting-Demo)** - Complete accounting workflow demonstration
+- **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
 - **QuickBooks Integration** _(Coming soon)_
-- **Custom Data Import** _(Coming soon)_
 
 ### Reference
 

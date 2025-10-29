@@ -511,6 +511,7 @@ just bootstrap     # Bootstrap infrastructure
 
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
 - **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
+- **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases with schema.json template
 - **Component READMEs**: Detailed technical docs in the codebase
 - **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs) (local) or [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (production)
 

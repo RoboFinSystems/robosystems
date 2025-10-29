@@ -2,6 +2,8 @@
 
 This guide shows you how to load SEC financial data locally and query it using the RoboSystems platform.
 
+**Quick Start:** Run `just demo-sec` to automatically set up everything and see your data in action within minutes!
+
 ## Overview
 
 The SEC local pipeline allows you to:
@@ -19,58 +21,50 @@ Before starting, ensure you have:
 - RoboSystems development environment set up
 - Services started with `just start`
 
-## Authentication Setup
-
-For accessing the SEC data via API or MCP client, you'll need an API key.
-
-### Create a Test User with SEC Access
-
-```bash
-# Create test user with SEC repository access
-just db-create-test-user sec
-```
-
-**Important:** The API key (starting with `rfs`) is your authentication credential, not to be confused with the JWT Token and Authorization Header.
-
 ## Quick Start
 
-### 1. Load Company Data
+### One-Command Setup
 
-Load SEC filings for a company using their ticker symbol:
+The fastest way to get started is with the `demo-sec` command, which handles everything automatically:
 
 ```bash
-# Load all available years (2019-present) for NVIDIA
-just sec-load NVDA
+# Load NVIDIA 2025 data with automatic setup and example queries
+just demo-sec
 
-# Load specific year for Apple
-just sec-load AAPL 2025
+# Load specific company and year
+just demo-sec AAPL 2024
 
-# Load Tesla data for 2023
-just sec-load TSLA 2023
+# Skip running example queries after setup
+just demo-sec TSLA 2023 true
 ```
 
-**Note:** All query examples throughout this guide use NVIDIA (NVDA) data. You can substitute any other company ticker symbol in the queries.
+**What happens automatically:**
 
-**What happens during loading:**
+1. **User Setup** - Creates demo user with credentials (or reuses existing)
+2. **Download** - Fetches XBRL files from SEC EDGAR
+3. **Process** - XBRL processors transform data to structured format
+4. **Generate** - Creates Parquet files optimized for graph ingestion
+5. **Stage** - Uploads to S3 and creates DuckDB staging tables
+6. **Validate** - Automatic data quality checks and deduplication
+7. **Ingest** - Direct DuckDB → Kuzu via database extension
+8. **Access Grant** - Grants SEC repository access to your user
+9. **Config Update** - Updates credentials with SEC graph info
+10. **Example Queries** - Runs preset queries showing your data (unless skipped)
 
-1. **Download** - Fetches XBRL files from SEC EDGAR
-2. **Process** - XBRL processors transform data to structured format
-3. **Generate** - Creates Parquet files optimized for graph ingestion
-4. **Stage** - Uploads to S3 and creates DuckDB staging tables
-5. **Validate** - Automatic data quality checks and deduplication
-6. **Ingest** - Direct DuckDB → Kuzu via database extension
+**Note:** Setup and loading takes 1-5 minutes depending on the number of years of data.
 
-**Note:** Loading can take 1-5 minutes depending on the number of years.
+**Your credentials are saved** to `examples/credentials/config.json` with your API key and user information.
 
-**Behind the Scenes:**
-The SEC pipeline uses a staging-first architecture. Data goes through DuckDB staging tables before reaching the graph database. This enables validation, transformation, and quality checks before final ingestion.
+### Advanced: Manual Loading
 
-### 2. Verify Data Loading
-
-Check database health and see what data is available:
+For more control over the loading process, you can use individual commands:
 
 ```bash
-# Basic health check
+# Load additional companies after initial setup
+just sec-load AMD 2025
+just sec-load INTC 2024
+
+# Check database health
 just sec-health
 
 # Detailed health check with statistics
@@ -84,6 +78,58 @@ The health check shows:
 - Number of reports (filings) available
 - Number of facts (financial metrics)
 - Data coverage by year
+
+### Behind the Scenes
+
+The SEC pipeline uses a staging-first architecture. Data goes through DuckDB staging tables before reaching the graph database. This enables validation, transformation, and quality checks before final ingestion.
+
+### Explore Preset Queries
+
+The demo command automatically runs 15 preset queries showing your data. To explore the data interactively or re-run all queries:
+
+```bash
+# Interactive mode (enter queries directly, list presets, run specific ones)
+just demo-sec-query
+```
+
+In interactive mode, you can:
+- Type `presets` to list all available queries
+- Type `preset <name>` to run a specific query (e.g., `preset entities`)
+- Enter custom Cypher queries directly
+- Type `help` for available commands
+- Type `quit` to exit
+
+**Available Presets:**
+- `summary` - Node and relationship counts
+- `entities` - Public companies with basic info
+- `recent_reports` - Most recent SEC filings
+- `report_types` - Report form type counts
+- `financial_facts` - Sample financial facts
+- `fact_dimensions` - Dimensional qualifiers on facts
+- `fact_periods` - Facts by time periods
+- `elements` - Most commonly used XBRL elements
+- `report_structure` - Fact counts per report
+- `entity_overview` - Entities with report counts
+- `fact_aspects` - Facts with all aspects (Element, Period, Unit)
+- `fact_with_dimensions` - Facts with dimensional context
+- `taxonomy_structures` - Report taxonomy structures
+- `element_hierarchy` - Element parent-child relationships
+- `report_taxonomy_detail` - Complete report taxonomy structure
+
+## Authentication Setup
+
+The `just demo-sec` command automatically creates user credentials for you. Your API key is saved in `examples/credentials/config.json`.
+
+**Important:** The API key (starting with `rfs`) is your authentication credential, not to be confused with the JWT Token and Authorization Header.
+
+**Manual User Creation (Optional):**
+
+If you need to create additional users or manage access manually:
+
+```bash
+# Create test user with SEC repository access
+just db-create-test-user sec
+```
 
 ## Accessing the Data
 
@@ -215,9 +261,14 @@ Access data through Claude Desktop or other AI agents using the MCP client.
 
 **Setup MCP Client:**
 
-1. First, create a test user and get your API key (see Authentication Setup above)
+1. Run `just demo-sec` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
 
-2. Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+2. Get your API key from the credentials file:
+```bash
+cat examples/credentials/config.json | grep api_key
+```
+
+3. Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
 {
@@ -264,11 +315,18 @@ Access via the RoboSystems Python client:
 
 ```python
 from robosystems_client import RoboSystemsClient
+import json
+from pathlib import Path
+
+# Load API key from credentials file (created by just demo-sec)
+credentials_path = Path("examples/credentials/config.json")
+with open(credentials_path) as f:
+    credentials = json.load(f)
 
 # Initialize client with API key
 client = RoboSystemsClient(
     api_url="http://localhost:8000",
-    api_key="rfs_abc123xyz...",  # From test user creation
+    api_key=credentials["api_key"],  # From demo-sec command
     graph_id="sec"
 )
 
@@ -457,8 +515,10 @@ just sec-reset && just sec-load NVDA 2025
 ### Load Multiple Companies
 
 ```bash
-# Load several companies for analysis
-just sec-load NVDA 2025
+# First company with automatic setup
+just demo-sec NVDA 2025
+
+# Load additional companies (user already created)
 just sec-load AMD 2025
 just sec-load INTC 2025
 
@@ -536,12 +596,13 @@ just sec-load NVDA 2025
 
 ## Next Steps
 
+- **Explore Preset Queries**: Run `just demo-sec-query` to see 15 curated query examples
 - **Visualize with G.V()**: Use our favorite tool [G.V()](https://gdotv.com/) to explore graph relationships interactively
 - **Learn Cypher**: Explore graph query patterns with [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **Validate Staging**: Use DuckDB CLI or SQL IDEs to inspect staging tables before ingestion
-- **Build Analysis**: Use MCP client in Claude for financial analysis
+- **Build Analysis**: Use MCP client in Claude for financial analysis with your auto-generated API key
 - **Create Reports**: Build automated reporting with Python client
-- **Add More Data**: Load additional companies and years
+- **Add More Data**: Load additional companies with `just sec-load TICKER YEAR`
 
 ## Resources
 
