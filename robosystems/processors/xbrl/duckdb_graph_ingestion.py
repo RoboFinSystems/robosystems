@@ -125,14 +125,46 @@ class XBRLDuckDBGraphProcessor:
       total_files = sum(len(files) for files in tables_info.values())
       logger.info(f"Total files: {total_files}")
 
-      # Step 2: Create DuckDB staging tables via Graph API
-      logger.info("Step 2: Creating DuckDB staging tables via Graph API...")
+      # Step 2: Handle Kuzu database rebuild BEFORE creating DuckDB tables
+      if rebuild:
+        logger.info("Step 2: Rebuilding Kuzu database...")
+        logger.info(
+          f"Rebuild requested - regenerating entire Kuzu database for {self.graph_id}"
+        )
+        from robosystems.database import SessionFactory
+        from robosystems.models.iam import GraphSchema
+
+        db = SessionFactory()
+        try:
+          await client.delete_database(self.graph_id)
+          logger.info(f"Deleted Kuzu database: {self.graph_id}")
+
+          schema = GraphSchema.get_active_schema(self.graph_id, db)
+          if not schema:
+            raise ValueError(f"No schema found for graph {self.graph_id}")
+
+          create_db_kwargs = {
+            "graph_id": self.graph_id,
+            "schema_type": schema.schema_type,
+            "custom_schema_ddl": schema.schema_ddl,
+          }
+
+          if schema.schema_type == "shared":
+            create_db_kwargs["repository_name"] = self.graph_id
+
+          await client.create_database(**create_db_kwargs)
+          logger.info(f"Recreated Kuzu database with schema type: {schema.schema_type}")
+        finally:
+          db.close()
+
+      # Step 3: Create DuckDB staging tables via Graph API
+      logger.info("Step 3: Creating DuckDB staging tables via Graph API...")
       await self._create_duckdb_tables(tables_info, client)
 
-      # Step 3: Trigger ingestion
-      logger.info("Step 3: Triggering graph ingestion...")
+      # Step 4: Trigger ingestion
+      logger.info("Step 4: Triggering graph ingestion...")
       ingestion_results = await self._trigger_ingestion(
-        list(tables_info.keys()), client, rebuild=rebuild
+        list(tables_info.keys()), client, rebuild=False
       )
 
       duration = time.time() - start_time
@@ -265,7 +297,7 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_names: List[str],
     graph_client,
-    rebuild: bool = True,
+    rebuild: bool = False,
   ) -> Dict[str, Any]:
     """
     Trigger ingestion for all tables into Kuzu graph via Graph API.
@@ -273,43 +305,11 @@ class XBRLDuckDBGraphProcessor:
     Args:
         table_names: List of table names to ingest
         graph_client: Graph API client instance
-        rebuild: Whether to rebuild graph database first (default: True).
-                 Should be True since DuckDB tables contain all files.
+        rebuild: Ignored - rebuild is now handled in process_files before table creation
 
     Returns:
         Ingestion results with statistics
     """
-    if not rebuild:
-      logger.warning(
-        "⚠️  DuckDB-based ingestion with rebuild=False may cause duplicate key errors! "
-        "This approach loads ALL files from S3 and should rebuild the graph."
-      )
-
-    if rebuild:
-      logger.info(
-        f"Rebuild requested - regenerating entire Kuzu database for {self.graph_id}"
-      )
-      from robosystems.database import SessionLocal
-      from robosystems.models.iam import GraphSchema
-
-      db = SessionLocal()
-      try:
-        await graph_client.delete_database(self.graph_id)
-        logger.info(f"Deleted Kuzu database: {self.graph_id}")
-
-        schema = GraphSchema.get_active_schema(self.graph_id, db)
-        if not schema:
-          raise ValueError(f"No schema found for graph {self.graph_id}")
-
-        await graph_client.create_database(
-          graph_id=self.graph_id,
-          schema_type=schema.schema_type,
-          custom_schema_ddl=schema.schema_ddl,
-        )
-        logger.info(f"Recreated Kuzu database with schema type: {schema.schema_type}")
-      finally:
-        db.close()
-
     total_rows = 0
     total_time_ms = 0.0
     results = []
