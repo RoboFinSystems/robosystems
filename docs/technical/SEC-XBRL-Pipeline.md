@@ -599,7 +599,7 @@ If loading fails:
 ```bash
 # Check logs
 just logs worker
-just logs kuzu-api
+just logs graph-api-kuzu
 
 # Reset and try again
 just sec-reset
