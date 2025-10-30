@@ -368,6 +368,12 @@ export DOCKER_PROFILE="kuzu-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE:-shared}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"
 
+# Persist ECR variables to /etc/environment for health check restarts
+echo "ECR_URI=${ECR_URI}" >> /etc/environment
+echo "ECR_IMAGE_TAG=${ECR_IMAGE_TAG}" >> /etc/environment
+echo "AVAILABILITY_ZONE=${AVAILABILITY_ZONE}" >> /etc/environment
+echo "INSTANCE_TYPE=${INSTANCE_TYPE}" >> /etc/environment
+
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
 
@@ -407,6 +413,24 @@ export REGISTRY_TABLE="robosystems-graph-${ENVIRONMENT}-instance-registry"
 export AWS_REGION="${AWS_REGION}"
 export VALKEY_URL="${VALKEY_URL:-}"
 
+# Source /etc/environment for persisted variables
+if [ -f /etc/environment ]; then
+  set -a
+  source /etc/environment
+  set +a
+fi
+
+# Get EC2 metadata for dynamic variables
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+export INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+export AVAILABILITY_ZONE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+export INSTANCE_TYPE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type)
+
+# Construct ECR_IMAGE from components
+export ECR_URI="${ECR_URI}"
+export ECR_IMAGE_TAG="${ECR_IMAGE_TAG}"
+export ECR_IMAGE="${ECR_URI}:${ECR_IMAGE_TAG}"
+
 /usr/local/bin/graph-health-check.sh
 EOF
 
@@ -416,6 +440,8 @@ sed -i "s/\${KUZU_PORT}/${KUZU_PORT}/g" /usr/local/bin/kuzu-health-check-wrapper
 sed -i "s/\${ENVIRONMENT}/${ENVIRONMENT}/g" /usr/local/bin/kuzu-health-check-wrapper.sh
 sed -i "s/\${AWS_REGION}/${REGION}/g" /usr/local/bin/kuzu-health-check-wrapper.sh
 sed -i "s|\${VALKEY_URL}|${VALKEY_URL:-}|g" /usr/local/bin/kuzu-health-check-wrapper.sh
+sed -i "s|\${ECR_URI}|${ECR_URI}|g" /usr/local/bin/kuzu-health-check-wrapper.sh
+sed -i "s|\${ECR_IMAGE_TAG}|${ECR_IMAGE_TAG}|g" /usr/local/bin/kuzu-health-check-wrapper.sh
 
 chmod +x /usr/local/bin/kuzu-health-check-wrapper.sh
 

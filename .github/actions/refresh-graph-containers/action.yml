@@ -46,7 +46,7 @@ runs:
         # Get ECR URI
         ECR_URI="${{ inputs.aws-account-id }}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com/robosystems"
 
-        # Determine container name and startup script based on backend
+        # Determine container name based on backend
         if [ "${{ inputs.backend }}" == "kuzu" ]; then
           if [ "${{ inputs.node-type }}" == "writer" ]; then
             CONTAINER_NAME="kuzu-writer"
@@ -55,7 +55,6 @@ runs:
           else
             CONTAINER_NAME="kuzu-shared-writer"
           fi
-          STARTUP_SCRIPT="/usr/local/bin/run-kuzu-writer.sh"
         elif [ "${{ inputs.backend }}" == "neo4j" ]; then
           if [ "${{ inputs.node-type }}" == "writer" ]; then
             CONTAINER_NAME="neo4j-writer"
@@ -64,12 +63,14 @@ runs:
           else
             CONTAINER_NAME="neo4j-writer"
           fi
-          STARTUP_SCRIPT="/usr/local/bin/run-neo4j-writer.sh"
         else
           echo "❌ Unknown backend: ${{ inputs.backend }}"
           echo "status=failed" >> $GITHUB_OUTPUT
           exit 1
         fi
+
+        # Use universal startup script
+        STARTUP_SCRIPT="/usr/local/bin/run-graph-container.sh"
 
         echo "📦 Pulling and updating container: $CONTAINER_NAME (backend: ${{ inputs.backend }})"
 
@@ -81,9 +82,12 @@ runs:
             \"#!/bin/bash\",
             \"set -e\",
             \"echo \\\"🔄 Starting container refresh for $CONTAINER_NAME\\\"\",
+            \"echo \\\"Loading environment variables...\\\"\",
+            \"if [ -f /etc/environment ]; then set -a; source /etc/environment; set +a; fi\",
             \"echo \\\"Pulling latest image...\\\"\",
             \"aws ecr get-login-password --region ${{ inputs.aws-region }} | docker login --username AWS --password-stdin ${ECR_URI%/*}\",
-            \"docker pull ${ECR_URI}:latest\",
+            \"docker pull ${ECR_URI}:${{ inputs.environment }}\",
+            \"export ECR_IMAGE=\\\"${ECR_URI}:${{ inputs.environment }}\\\"\",
             \"echo \\\"Stopping existing container...\\\"\",
             \"docker stop $CONTAINER_NAME || true\",
             \"docker rm $CONTAINER_NAME || true\",
