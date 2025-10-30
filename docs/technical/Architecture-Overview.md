@@ -375,11 +375,10 @@ All deployments automated through GitHub Actions with self-hosted runners for in
 
 - **`prod.yml`**: Production deployment orchestrator
 - **`staging.yml`**: Staging environment deployment
-- **`bootstrap.yml`**: Initialize VPC & setup self-hosted runner
-- **`run-migrations.yml`**: Database migrations on RDS instances
+- **`gha-runner.yml`**: Deploy self-hosted GitHub Actions runner
 
 **Runner Configuration**:
-- Self-hosted runner available if deployed with `bootstrap.yml`
+- Self-hosted runner available if deployed with `gha-runner.yml`
 - GitHub-hosted for Docker builds and as a fallback if self-hosted is not available
 
 ### CloudFormation Templates
@@ -438,7 +437,7 @@ Environment variables are managed through:
 ```bash
 just setup-gha     # Interactive GitHub secrets/variables setup
 just setup-aws     # Interactive AWS secrets manager setup
-just bootstrap     # Bootstrap infrastructure
+just bootstrap     # Deploy GitHub Actions runner infrastructure
 ```
 
 ## External Integrations
