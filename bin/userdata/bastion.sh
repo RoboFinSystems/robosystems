@@ -295,14 +295,21 @@ if [ "\$ENVIRONMENT" = "prod" ]; then
   RDS_ENDPOINT=\$(aws cloudformation describe-stacks \
     --stack-name RoboSystemsPostgresIAMProd \
     --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue" \
-    --output text)
+    --output text 2>/dev/null)
   SECRET_ID="robosystems/prod/postgres"
 else
   RDS_ENDPOINT=\$(aws cloudformation describe-stacks \
     --stack-name RoboSystemsPostgresIAMStaging \
     --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue" \
-    --output text)
+    --output text 2>/dev/null)
   SECRET_ID="robosystems/staging/postgres"
+fi
+
+# Validate RDS endpoint was retrieved
+if [[ -z "\$RDS_ENDPOINT" || "\$RDS_ENDPOINT" == "None" ]]; then
+  print_error "Failed to retrieve RDS endpoint from CloudFormation"
+  print_error "Stack: RoboSystemsPostgresIAM\${ENVIRONMENT^}"
+  exit 1
 fi
 
 # Get database credentials from Secrets Manager
@@ -800,15 +807,16 @@ echo 'alias radmin="cd /home/ec2-user/robosystems-service && git pull && sudo /u
 mkdir -p /var/log/robosystems
 chown ec2-user:ec2-user /var/log/robosystems
 
-# Add CloudWatch log monitoring for admin operations
-cat >> /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF_LOGS'
-          ,{
-            "file_path": "/var/log/robosystems/admin-operations.log",
-            "log_group_name": "/robosystems/${Environment}/bastion-host",
-            "log_stream_name": "${INSTANCE_ID}/admin-operations",
-            "timezone": "UTC"
-          }
-EOF_LOGS
+# Add CloudWatch log monitoring for admin operations using jq to properly merge JSON
+jq --arg env "$Environment" --arg instance "$INSTANCE_ID" \
+  '.logs.logs_collected.files.collect_list += [{
+    "file_path": "/var/log/robosystems/admin-operations.log",
+    "log_group_name": ("/robosystems/" + $env + "/bastion-host"),
+    "log_stream_name": ($instance + "/admin-operations"),
+    "timezone": "UTC"
+  }]' /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /tmp/cw-config.json
+
+mv /tmp/cw-config.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
 
 # Restart CloudWatch agent to pick up new log configuration
 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
@@ -819,14 +827,3 @@ EOF_LOGS
 
 # Script completed successfully
 echo "Bastion host initialization completed successfully"
-
-# Auto-stop: Bastion is stopped by default after initialization
-# This ensures the bastion only runs when manually started by an admin
-echo "Auto-stopping bastion instance after initialization..."
-INSTANCE_ID=$(ec2-metadata --instance-id | cut -d' ' -f2)
-echo "Instance ID: $INSTANCE_ID"
-
-# Stop this instance
-aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "${AWS_REGION}"
-
-echo "Bastion instance will stop shortly"

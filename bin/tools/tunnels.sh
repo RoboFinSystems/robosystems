@@ -258,8 +258,14 @@ check_ssh_key() {
         exit 1
     fi
 
-    # Check permissions
-    local perms=$(stat -f "%OLp" "$key_path" 2>/dev/null || stat -c "%a" "$key_path" 2>/dev/null)
+    # Check permissions (detect OS for correct stat command)
+    local perms
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        perms=$(stat -f "%OLp" "$key_path")
+    else
+        perms=$(stat -c "%a" "$key_path")
+    fi
+
     if [[ "$perms" != "600" ]]; then
         echo -e "${YELLOW}Warning: SSH key has wrong permissions ($perms). Setting to 600...${NC}"
         chmod 600 "$key_path"
@@ -1085,10 +1091,10 @@ setup_all_tunnels() {
         echo "1) Kuzu instance (file system access via AWS SSM)"
         echo "2) Just use tunnels (default)"
         echo ""
-        echo -e -n "${BLUE}Choose option (1-2, default=2): ${NC}"
+        echo -e -n "${BLUE}Choose option (1-2, default=2, timeout 30s): ${NC}"
 
-        # Read from terminal directly
-        read -r direct_choice < /dev/tty
+        # Read from terminal directly with timeout
+        read -r -t 30 direct_choice < /dev/tty || direct_choice="2"
         echo ""
 
         case $direct_choice in

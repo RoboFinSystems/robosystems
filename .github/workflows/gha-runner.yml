@@ -7,6 +7,9 @@ concurrency:
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   bootstrap-runner:
     runs-on: ubuntu-latest
@@ -88,15 +91,23 @@ jobs:
               exit 1
             fi
 
-            # Check for VPC peering
-            PEERING=$(aws ec2 describe-vpc-peering-connections \
+            # Check for VPC peering in both directions
+            # Check default-vpc → app-vpc
+            PEERING1=$(aws ec2 describe-vpc-peering-connections \
               --filters "Name=requester-vpc-info.vpc-id,Values=${{ steps.default-vpc.outputs.vpc_id }}" \
                         "Name=accepter-vpc-info.vpc-id,Values=$APP_VPC_ID" \
               --query "VpcPeeringConnections[*].VpcPeeringConnectionId" \
               --output text 2>/dev/null || echo "")
 
-            if [ -n "$PEERING" ]; then
-              echo "❌ ERROR: VPC peering detected"
+            # Check app-vpc → default-vpc
+            PEERING2=$(aws ec2 describe-vpc-peering-connections \
+              --filters "Name=requester-vpc-info.vpc-id,Values=$APP_VPC_ID" \
+                        "Name=accepter-vpc-info.vpc-id,Values=${{ steps.default-vpc.outputs.vpc_id }}" \
+              --query "VpcPeeringConnections[*].VpcPeeringConnectionId" \
+              --output text 2>/dev/null || echo "")
+
+            if [ -n "$PEERING1" ] || [ -n "$PEERING2" ]; then
+              echo "❌ ERROR: VPC peering detected between default VPC and application VPC"
               exit 1
             fi
           fi
@@ -212,6 +223,9 @@ jobs:
         run: |
           echo "🔄 Waiting for runners to register..."
 
+          # Get deployment start time (5 minutes ago to account for any delays)
+          DEPLOYMENT_START=$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-5M '+%Y-%m-%dT%H:%M:%SZ')
+
           MAX_ATTEMPTS=20
           ATTEMPT=1
 
@@ -220,16 +234,25 @@ jobs:
               "https://api.github.com/orgs/${{ secrets.RUNNER_GITHUB_ORG }}/actions/runners")
 
             if echo "$RUNNERS_RESPONSE" | jq . >/dev/null 2>&1; then
-              ONLINE_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | select(.status == "online") | .name' | wc -l)
+              # Count runners that:
+              # 1. Are online
+              # 2. Have labels matching our deployment (AL2023, ci)
+              # 3. Were registered recently (after deployment start)
+              NEW_ONLINE_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r --arg start "$DEPLOYMENT_START" \
+                '.runners[] |
+                select(.status == "online") |
+                select(.labels[]?.name | contains("AL2023") or contains("ci")) |
+                select(.created_at >= $start) |
+                .name' | wc -l)
 
-              if [ "$ONLINE_RUNNERS" -ge 1 ]; then
-                echo "✅ $ONLINE_RUNNERS runner(s) online and ready"
+              if [ "$NEW_ONLINE_RUNNERS" -ge 1 ]; then
+                echo "✅ $NEW_ONLINE_RUNNERS newly deployed runner(s) online and ready"
                 break
               fi
             fi
 
             if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-              echo "❌ Timeout: Runners not available after 10 minutes"
+              echo "❌ Timeout: No newly deployed runners became available after 10 minutes"
               exit 1
             fi
 
