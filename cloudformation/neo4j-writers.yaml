@@ -53,12 +53,12 @@ Parameters:
   # Neo4j Configuration
   WriterTier:
     Type: String
-    Default: enterprise
+    Default: neo4j-enterprise-xlarge
     AllowedValues:
-      - enterprise
-      - premium
-    Description: Writer tier determines capacity allocation per instance (Neo4j used for Enterprise/Premium only)
-    ConstraintDescription: Must be enterprise or premium
+      - neo4j-community-large
+      - neo4j-enterprise-xlarge
+    Description: Writer tier determines capacity allocation per instance
+    ConstraintDescription: Must be neo4j-community-large or neo4j-enterprise-xlarge
   Neo4jVersion:
     Type: String
     Default: "5.15.0"
@@ -115,7 +115,7 @@ Mappings:
 
 Conditions:
   HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
-  IsPremiumTier: !Equals [!Ref WriterTier, premium]
+  IsPremiumTier: !Equals [!Ref WriterTier, neo4j-enterprise-xlarge]
   HasLicenseKey: !And
     - !Condition IsPremiumTier
     - !Not [!Equals [!Ref Neo4jLicenseKey, ""]]
@@ -569,7 +569,7 @@ Resources:
               export GRAPH_NODE_TYPE="writer"
 
               # Determine Neo4j edition based on tier
-              if [ "${WriterTier}" = "premium" ]; then
+              if [ "${WriterTier}" = "neo4j-enterprise-xlarge" ]; then
                 NEO4J_EDITION="enterprise"
               else
                 NEO4J_EDITION="community"
@@ -619,9 +619,9 @@ Resources:
                 exit 1
               fi
 
-              # Retrieve Neo4j Enterprise license key for Premium tier
-              if [ "${WriterTier}" = "premium" ]; then
-                echo "Retrieving Neo4j Enterprise license key for Premium tier..."
+              # Retrieve Neo4j Enterprise license key for Enterprise XLarge tier
+              if [ "${WriterTier}" = "neo4j-enterprise-xlarge" ]; then
+                echo "Retrieving Neo4j Enterprise license key for Enterprise XLarge tier..."
                 NEO4J_LICENSE_KEY=$(aws secretsmanager get-secret-value \
                   --secret-id "robosystems/${Environment}/neo4j/${WriterTier}/license" \
                   --query SecretString \
@@ -644,7 +644,7 @@ Resources:
               export NEO4J_AUTH="neo4j/$NEO4J_PASSWORD"
               export WRITER_TIER="${WriterTier}"
               # Determine Neo4j edition for CloudWatch namespace
-              if [ "${WriterTier}" = "premium" ]; then
+              if [ "${WriterTier}" = "neo4j-enterprise-xlarge" ]; then
                 export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Neo4jEnterprise"
               else
                 export CloudWatchNamespace="RoboSystemsGraph/${EnvironmentCapitalized}/Neo4jCommunity"

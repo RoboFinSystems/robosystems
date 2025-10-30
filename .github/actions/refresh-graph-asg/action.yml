@@ -152,7 +152,7 @@ runs:
         )
 
         # Add backend filter for Neo4j
-        if [ "${{ inputs.backend }}" == "neo4j" ]; then
+        if [[ "$TIER" == neo4j-* ]]; then
           FILTER_ARGS+=("Name=tag:GraphBackend,Values=neo4j")
         fi
 
@@ -394,7 +394,7 @@ runs:
               HEALTH_COMMAND=$(aws ssm send-command \
                 --instance-ids "${NEW_INSTANCE}" \
                 --document-name "AWS-RunShellScript" \
-                --parameters 'commands=["curl -f -s http://localhost:8001/status || echo UNHEALTHY"]' \
+                --parameters 'commands=["curl -f -s http://localhost:8001/health || echo UNHEALTHY"]' \
                 --query "Command.CommandId" \
                 --output text \
                 --region "${{ inputs.aws-region }}")

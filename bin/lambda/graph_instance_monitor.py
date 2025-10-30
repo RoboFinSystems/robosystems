@@ -35,15 +35,16 @@ CLOUDWATCH_NAMESPACE = f"RoboSystemsGraph/{ENVIRONMENT.title()}"
 STALE_GRAPH_DAYS = 7  # Days before deleted graphs are removed
 STALE_VOLUME_DAYS = 30  # Days before unattached volumes are removed
 
-# Tier capacity mapping based on .github/configs/kuzu.yml
-# IMPORTANT: These values must match the kuzu.yml configuration file
+# Tier capacity mapping based on .github/configs/graph.yml
+# IMPORTANT: These values must match the graph.yml configuration file
 # Update both locations if changing capacity values
 TIER_CAPACITY_MAP = {
-  "standard": 10,  # 10 databases per instance
-  "enterprise": 1,  # 1 database per instance (isolated)
-  "premium": 1,  # 1 database per instance (max performance)
-  "shared": 10,  # 10 shared repositories per instance
-  "shared_repository": 10,  # Alias for shared
+  "kuzu-standard": 10,  # 10 databases per instance (multi-tenant)
+  "kuzu-large": 1,  # 1 database per instance (dedicated r7g.large)
+  "kuzu-xlarge": 1,  # 1 database per instance (dedicated r7g.xlarge)
+  "kuzu-shared": 10,  # 10 shared repositories per instance
+  "neo4j-community-large": 1,  # 1 database per instance (Neo4j Community)
+  "neo4j-enterprise-xlarge": 1,  # 1 database per instance (Neo4j Enterprise)
 }
 
 # EC2 instance ID pattern (i-xxxxxxxxxxxxxxxxx or i-xxxxxxxxx)
@@ -65,12 +66,12 @@ def validate_tier_capacity(tier: str) -> int:
   """
   if not tier:
     logger.warning("No tier specified, using 'standard' as default")
-    return TIER_CAPACITY_MAP["standard"]
+    return TIER_CAPACITY_MAP["kuzu-standard"]
 
   if tier not in TIER_CAPACITY_MAP:
     logger.error(f"Unknown tier: {tier}. Valid tiers: {list(TIER_CAPACITY_MAP.keys())}")
     # Fall back to standard tier for safety
-    return TIER_CAPACITY_MAP["standard"]
+    return TIER_CAPACITY_MAP["kuzu-standard"]
 
   return TIER_CAPACITY_MAP[tier]
 
@@ -251,7 +252,7 @@ def check_instance_health() -> Dict[str, Any]:
           results["healthy"] += 1
 
           # Get tier to determine capacity with validation
-          tier = item.get("tier") or item.get("cluster_tier", "standard")
+          tier = item.get("tier") or item.get("cluster_tier", "kuzu-standard")
           tier_capacity = validate_tier_capacity(tier)
 
           # Update health check timestamp while preserving critical fields using if_not_exists
@@ -333,7 +334,7 @@ def check_instance_health() -> Dict[str, Any]:
           results["unhealthy"] += 1
 
           # Get tier to determine capacity with validation
-          tier = item.get("tier") or item.get("cluster_tier", "standard")
+          tier = item.get("tier") or item.get("cluster_tier", "kuzu-standard")
           tier_capacity = validate_tier_capacity(tier)
 
           # Update status but keep in registry, preserving all fields using if_not_exists
@@ -506,16 +507,23 @@ def collect_kuzu_metrics() -> Dict[str, int]:
     total_available = 0
     instance_age_buckets = {"new": 0, "stabilizing": 0, "stable": 0}
     utilization_buckets = {}
-    tier_counts = {"standard": 0, "enterprise": 0, "premium": 0, "shared_repository": 0}
+    tier_counts = {
+      "kuzu-standard": 0,
+      "kuzu-large": 0,
+      "kuzu-xlarge": 0,
+      "kuzu-shared": 0,
+      "neo4j-community-large": 0,
+      "neo4j-enterprise-xlarge": 0,
+    }
     metrics = []
 
     # Default max databases if not specified
-    default_max_dbs = 50  # Standard tier default
+    default_max_dbs = 50  # Conservative default
 
     for instance in instances:
       instance_id = instance.get("instance_id")
       # Use 'tier' field, fallback to 'cluster_tier' for compatibility
-      tier = instance.get("tier") or instance.get("cluster_tier", "standard")
+      tier = instance.get("tier") or instance.get("cluster_tier", "kuzu-standard")
       # Use 'total_capacity' field, fallback to 'max_databases' for compatibility
       max_dbs = int(
         instance.get("total_capacity") or instance.get("max_databases", default_max_dbs)

@@ -96,7 +96,7 @@ def handle_instance_launch(event: Dict[str, Any]) -> Dict[str, Any]:
 
   instance_id = event["instance_id"]
   node_type = event["node_type"]  # writer, shared_master, shared_replica
-  tier = event.get("tier", "standard")
+  tier = event.get("tier", "kuzu-standard")
   databases = event.get("databases", [])  # List of databases this instance should have
 
   # Always fetch the actual AZ from the instance - don't trust what's provided
@@ -126,7 +126,7 @@ def handle_instance_launch(event: Dict[str, Any]) -> Dict[str, Any]:
 
   # For shared repositories, always look for existing SEC volume first
   # Even if databases list is empty on instance launch, we want to reattach SEC data
-  if node_type == "shared_master" or (node_type == "writer" and tier == "shared"):
+  if node_type == "shared_master" or (node_type == "writer" and tier == "kuzu-shared"):
     # Look for existing SEC volume
     existing_volume = find_volume_with_database("sec", az, tier)
     if existing_volume:
@@ -327,12 +327,14 @@ def create_and_attach_volume(
   instance_id: str, tier: str, az: str, databases: List[str], node_type: str
 ) -> Dict[str, Any]:
   """Create a new volume and attach it to the instance"""
-  # Tier configurations
+  # Tier configurations (updated to match .github/configs/graph.yml)
   tier_config = {
-    "standard": {"size": 50, "iops": 3000},
-    "enterprise": {"size": 50, "iops": 3000},
-    "premium": {"size": 50, "iops": 3000},
-    "shared": {"size": 50, "iops": 3000},
+    "kuzu-standard": {"size": 50, "iops": 3000},
+    "kuzu-large": {"size": 50, "iops": 3000},
+    "kuzu-xlarge": {"size": 50, "iops": 3000},
+    "kuzu-shared": {"size": 50, "iops": 3000},
+    "neo4j-community-large": {"size": 50, "iops": 3000},
+    "neo4j-enterprise-xlarge": {"size": 50, "iops": 3000},
   }
 
   config = tier_config.get(tier, {"size": DEFAULT_SIZE, "iops": DEFAULT_IOPS})
@@ -741,7 +743,7 @@ def restore_from_snapshot(event: Dict[str, Any]) -> Dict[str, Any]:
       "volume_id": volume_id,
       "instance_id": "unattached",
       "availability_zone": az,
-      "tier": "standard",  # Default tier
+      "tier": "kuzu-standard",  # Default tier
       "status": "available",
       "databases": databases,
       "created_at": datetime.now(timezone.utc).isoformat(),
@@ -756,7 +758,7 @@ def register_volume(event: Dict[str, Any]) -> Dict[str, Any]:
   """Register an existing volume in the registry"""
   volume_id = event["volume_id"]
   databases = event.get("databases", [])
-  tier = event.get("tier", "standard")
+  tier = event.get("tier", "kuzu-standard")
 
   # Get volume info from EC2
   response = ec2.describe_volumes(VolumeIds=[volume_id])
@@ -882,7 +884,7 @@ def sync_registry_with_ec2(event: Dict[str, Any]) -> Dict[str, Any]:
       # Extract info from tags
       tags = {tag["Key"]: tag["Value"] for tag in volume.get("Tags", [])}
       databases = json.loads(tags.get("Databases", "[]"))
-      tier = tags.get("Tier", "standard")
+      tier = tags.get("Tier", "kuzu-standard")
       node_type = tags.get("NodeType", "writer")
 
       table.put_item(

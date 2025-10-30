@@ -122,7 +122,7 @@ class UserRepository(Model):
   # Graph database scaling support
   graph_instance_id = Column(String, nullable=False, default="default")
   graph_cluster_region = Column(String, nullable=True)
-  instance_tier = Column(String, nullable=False, default="shared")
+  instance_tier = Column(String, nullable=False, default="kuzu-shared")
   read_preference = Column(String, nullable=False, default="primary")
 
   # Configuration

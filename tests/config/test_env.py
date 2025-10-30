@@ -139,7 +139,7 @@ def test_is_using_secrets_manager_false_when_unavailable(monkeypatch):
 
 def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
   def fake_get_instance_config(cls, tier, environment=None):
-    assert tier == "shared"
+    assert tier == "kuzu-shared"
     return {
       "max_memory_mb": 4096,
       "memory_per_db_mb": 512,
@@ -185,7 +185,7 @@ def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
   assert config["connection_pool_size"] == 12
   assert config["databases_per_instance"] == 15
   assert config["max_databases"] == 15
-  assert config["tier"] == "shared"
+  assert config["tier"] == "kuzu-shared"
   assert config["storage_limit_gb"] == 750
   assert config["monthly_credits"] == 2500
   assert config["rate_limit_multiplier"] == 1.8
@@ -233,7 +233,7 @@ def test_get_kuzu_tier_config_falls_back_on_errors(monkeypatch):
   assert config["connection_pool_size"] == 17
   assert config["databases_per_instance"] == 13
   assert config["max_databases"] == 25
-  assert config["tier"] == "standard"
+  assert config["tier"] == "kuzu-standard"
   assert config["storage_limit_gb"] == 500
   assert config["monthly_credits"] == 10000
   assert config["rate_limit_multiplier"] == 1.0

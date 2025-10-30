@@ -401,10 +401,6 @@ async def create_graph(
         "kuzu-standard": GraphTier.KUZU_STANDARD,
         "kuzu-large": GraphTier.KUZU_LARGE,
         "kuzu-xlarge": GraphTier.KUZU_XLARGE,
-        "standard": GraphTier.KUZU_STANDARD,
-        "professional": GraphTier.KUZU_LARGE,
-        "enterprise": GraphTier.KUZU_XLARGE,
-        "premium": GraphTier.KUZU_XLARGE,
       }
       graph_tier = tier_map.get(request.instance_tier.lower(), GraphTier.KUZU_STANDARD)
 

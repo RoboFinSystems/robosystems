@@ -313,7 +313,7 @@ No credits are consumed for viewing summaries.""",
                 "current_balance": 950.0,
                 "monthly_allocation": 1000.0,
                 "consumed_this_month": 50.0,
-                "graph_tier": "standard",
+                "graph_tier": "kuzu-standard",
               }
             ],
           }
