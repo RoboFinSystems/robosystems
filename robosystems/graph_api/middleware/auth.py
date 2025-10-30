@@ -201,7 +201,7 @@ def get_api_key_from_secrets_manager(
       API key or None if not found
   """
   if not secret_name:
-    secret_name = f"robosystems/{env.ENVIRONMENT}/kuzu"
+    secret_name = f"robosystems/{env.ENVIRONMENT}/graph-api"
 
   try:
     client = boto3.client("secretsmanager", region_name=region)
