@@ -275,7 +275,7 @@ class TestSecretsManagerIntegration:
       api_key = get_api_key_from_secrets_manager(key_type="writer")
       assert api_key == "secret-key-123"
       mock_client.get_secret_value.assert_called_once_with(
-        SecretId="robosystems/prod/kuzu"
+        SecretId="robosystems/prod/graph-api"
       )
 
   @patch("robosystems.graph_api.middleware.auth.boto3.client")
