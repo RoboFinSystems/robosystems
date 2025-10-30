@@ -22,7 +22,6 @@
   ],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
-  "python.analysis.extraPaths": ["."],
   "python.autoComplete.extraPaths": ["."],
   "files.exclude": {
     ".venv/**": true,
@@ -42,9 +41,5 @@
     ".venv/**": true,
     "node_modules/**": true
   },
-  "python.linting.ignorePatterns": [
-    "robosystems/arelle/EDGAR/**",
-    "robosystems/arelle/**"
-  ],
   "ruff.exclude": ["robosystems/arelle/EDGAR/**", "robosystems/arelle/**"]
 }

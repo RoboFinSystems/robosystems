@@ -464,19 +464,26 @@ jobs:
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
       volume_manager_function_arn: ${{ needs.deploy-graph-volumes.outputs.volume_manager_function_arn }}
       volume_detachment_topic_arn: ${{ needs.deploy-graph-volumes.outputs.volume_detachment_topic_arn }}
-      # Kuzu Enable/Disable Configuration
-      enterprise_enabled: ${{ vars.ENTERPRISE_ENABLED_STAGING || 'false' }}
-      premium_enabled: ${{ vars.PREMIUM_ENABLED_STAGING || 'false' }}
+      # Kuzu Tier Configuration
+      kuzu_large_enabled: ${{ vars.KUZU_LARGE_ENABLED_STAGING || 'false' }}
+      kuzu_xlarge_enabled: ${{ vars.KUZU_XLARGE_ENABLED_STAGING || 'false' }}
+      # Kuzu Scaling Configuration
+      kuzu_standard_min_instances: ${{ vars.KUZU_STANDARD_MIN_INSTANCES_STAGING }}
+      kuzu_standard_max_instances: ${{ vars.KUZU_STANDARD_MAX_INSTANCES_STAGING }}
+      kuzu_large_min_instances: ${{ vars.KUZU_LARGE_MIN_INSTANCES_STAGING }}
+      kuzu_large_max_instances: ${{ vars.KUZU_LARGE_MAX_INSTANCES_STAGING }}
+      kuzu_shared_min_instances: ${{ vars.KUZU_SHARED_MIN_INSTANCES_STAGING }}
+      kuzu_shared_max_instances: ${{ vars.KUZU_SHARED_MAX_INSTANCES_STAGING }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
-  kuzu-container-refresh:
+  graph-container-refresh:
     needs: [runner, create-deployment, build, deploy-graph]
-    if: ${{ vars.KUZU_UPDATE_CONTAINERS_STAGING == 'true' }}
-    uses: ./.github/workflows/kuzu-container-refresh.yml
+    if: ${{ vars.GRAPH_UPDATE_CONTAINERS_STAGING == 'true' }}
+    uses: ./.github/workflows/graph-container-refresh.yml
     with:
       environment: ${{ vars.ENVIRONMENT_STAGING || 'staging' }}
       runner_config: ${{ needs.runner.outputs.runner_config }}
@@ -615,7 +622,7 @@ jobs:
         deploy-bastion,
         deploy-api,
         deploy-workers-matrix,
-        kuzu-container-refresh,
+        graph-container-refresh,
       ]
     if: |
       always() &&
@@ -630,7 +637,7 @@ jobs:
       needs.deploy-bastion.result == 'success' &&
       (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped') &&
       (needs.deploy-workers-matrix.result == 'success' || needs.deploy-workers-matrix.result == 'skipped') &&
-      (needs.kuzu-container-refresh.result == 'success' || needs.kuzu-container-refresh.result == 'skipped')
+      (needs.graph-container-refresh.result == 'success' || needs.graph-container-refresh.result == 'skipped')
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
     outputs:
       deployment_id: ${{ needs.create-deployment.outputs.deployment_id }}
@@ -665,7 +672,7 @@ jobs:
         deploy-bastion,
         deploy-api,
         deploy-workers-matrix,
-        kuzu-container-refresh,
+        graph-container-refresh,
       ]
     if: always() && contains(needs.*.result, 'failure')
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}

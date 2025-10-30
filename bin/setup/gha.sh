@@ -172,9 +172,21 @@ function setup_minimum_config() {
     gh variable set REPOSITORY_NAME --body "$REPOSITORY_NAME"
     gh variable set ECR_REPOSITORY --body "$ECR_REPOSITORY"
 
+    # AWS Configuration (typically org-level, set at repo level for forks)
+    gh variable set AWS_ACCOUNT_ID --body "$AWS_ACCOUNT_ID"
+    gh variable set AWS_REGION --body "us-east-1"
+    gh variable set ENVIRONMENT_PROD --body "prod"
+    gh variable set ENVIRONMENT_STAGING --body "staging"
+
     # Domain Configuration
     gh variable set API_DOMAIN_NAME_PROD --body "api.$ROOT_DOMAIN"
     gh variable set API_DOMAIN_NAME_STAGING --body "staging.api.$ROOT_DOMAIN"
+
+    # Application URLs (typically org-level, set at repo level for forks)
+    gh variable set ROBOSYSTEMS_API_URL_PROD --body "https://api.$ROOT_DOMAIN"
+    gh variable set ROBOSYSTEMS_API_URL_STAGING --body "https://staging.api.$ROOT_DOMAIN"
+    gh variable set ROBOSYSTEMS_APP_URL_PROD --body "https://$ROOT_DOMAIN"
+    gh variable set ROBOSYSTEMS_APP_URL_STAGING --body "https://staging.$ROOT_DOMAIN"
 
     # API Scaling Configuration
     gh variable set API_MIN_CAPACITY_PROD --body "1"
@@ -225,37 +237,46 @@ function setup_minimum_config() {
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_PROD --body "7"
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
 
-    # Kuzu Writer Configuration
-    gh variable set STANDARD_MIN_INSTANCES --body "1"
-    gh variable set STANDARD_MAX_INSTANCES --body "10"
-    gh variable set STANDARD_MIN_INSTANCES_STAGING --body "1"
-    gh variable set STANDARD_MAX_INSTANCES_STAGING --body "2"
+    # Kuzu Writer Configuration - Standard Tier
+    gh variable set KUZU_STANDARD_ENABLED_PROD --body "true"
+    gh variable set KUZU_STANDARD_ENABLED_STAGING --body "true"
+    gh variable set KUZU_STANDARD_MIN_INSTANCES_PROD --body "1"
+    gh variable set KUZU_STANDARD_MAX_INSTANCES_PROD --body "10"
+    gh variable set KUZU_STANDARD_MIN_INSTANCES_STAGING --body "1"
+    gh variable set KUZU_STANDARD_MAX_INSTANCES_STAGING --body "5"
 
-    gh variable set ENTERPRISE_MIN_INSTANCES --body "0"
-    gh variable set ENTERPRISE_MAX_INSTANCES --body "5"
-    gh variable set ENTERPRISE_ENABLE_PROD --body "false"
+    # Kuzu Writer Configuration - Large Tier
+    gh variable set KUZU_LARGE_ENABLED_PROD --body "false"
+    gh variable set KUZU_LARGE_ENABLED_STAGING --body "false"
+    gh variable set KUZU_LARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set KUZU_LARGE_MAX_INSTANCES_PROD --body "20"
+    gh variable set KUZU_LARGE_MIN_INSTANCES_STAGING --body "0"
+    gh variable set KUZU_LARGE_MAX_INSTANCES_STAGING --body "5"
 
-    gh variable set PREMIUM_MIN_INSTANCES --body "0"
-    gh variable set PREMIUM_MAX_INSTANCES --body "3"
-    gh variable set PREMIUM_ENABLE_PROD --body "false"
+    # Kuzu Writer Configuration - XLarge Tier
+    gh variable set KUZU_XLARGE_ENABLED_PROD --body "false"
+    gh variable set KUZU_XLARGE_ENABLED_STAGING --body "false"
+    gh variable set KUZU_XLARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set KUZU_XLARGE_MAX_INSTANCES_PROD --body "10"
 
-    # Shared Repository Configuration
-    gh variable set SHARED_MASTER_INSTANCES_STAGING --body "0"
-    gh variable set SHARED_REPLICA_INSTANCE_TYPE_PROD --body "r6g.large"
-    gh variable set SHARED_REPLICA_INSTANCE_TYPE_STAGING --body "r6g.medium"
-    gh variable set SHARED_REPLICA_MIN_INSTANCES_PROD --body "0"
-    gh variable set SHARED_REPLICA_MAX_INSTANCES_PROD --body "2"
-    gh variable set SHARED_REPLICA_DESIRED_INSTANCES_PROD --body "0"
-    gh variable set SHARED_REPLICA_MIN_INSTANCES_STAGING --body "0"
-    gh variable set SHARED_REPLICA_MAX_INSTANCES_STAGING --body "2"
-    gh variable set SHARED_REPLICA_DESIRED_INSTANCES_STAGING --body "0"
-    gh variable set SHARED_REPLICA_ENABLE_PROD --body "false"
-    gh variable set SHARED_REPLICA_ENABLE_STAGING --body "false"
+    # Kuzu Writer Configuration - Shared Repository
+    gh variable set KUZU_SHARED_ENABLED_PROD --body "false"
+    gh variable set KUZU_SHARED_ENABLED_STAGING --body "false"
+    gh variable set KUZU_SHARED_MIN_INSTANCES_PROD --body "1"
+    gh variable set KUZU_SHARED_MAX_INSTANCES_PROD --body "3"
+    gh variable set KUZU_SHARED_MIN_INSTANCES_STAGING --body "1"
+    gh variable set KUZU_SHARED_MAX_INSTANCES_STAGING --body "2"
+
+    # Neo4j Writer Configuration (optional backend)
+    gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_PROD --body "false"
+    gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_STAGING --body "false"
+    gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD --body "false"
+    gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING --body "false"
 
     # Other Graph Settings
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
-    gh variable set KUZU_UPDATE_CONTAINERS_PROD --body "true"
-    gh variable set KUZU_UPDATE_CONTAINERS_STAGING --body "true"
+    gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
+    gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
 
     # GHA Runner Configuration
     gh variable set RUNNER_STORAGE_SIZE --body "20"
@@ -263,9 +284,6 @@ function setup_minimum_config() {
     gh variable set RUNNER_MAX_INSTANCES --body "6"
     gh variable set RUNNER_DESIRED_INSTANCES --body "1"
     gh variable set RUNNER_ENVIRONMENT --body "ci"
-
-    # AWS Configuration
-    gh variable set AWS_ACCOUNT_ID --body "$AWS_ACCOUNT_ID"
 
     # Sensitive secrets
     gh secret set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
@@ -291,28 +309,26 @@ function setup_minimum_config() {
     gh variable set WAF_ENABLED_PROD --body "true"
     gh variable set WAF_ENABLED_STAGING --body "true"
     gh variable set WAF_RATE_LIMIT_PER_IP --body "10000"
-    gh variable set WAF_ENABLE_GEO_BLOCKING --body "false"
-    gh variable set WAF_ENABLE_AWS_MANAGED_RULES --body "true"
+    gh variable set WAF_GEO_BLOCKING_ENABLED --body "false"
+    gh variable set WAF_AWS_MANAGED_RULES_ENABLED --body "true"
     gh secret set WAF_ALLOWED_IPS --body "0.0.0.0/32"
 
     # Worker Configuration
-    gh variable set WORKER_CRITICAL_ENABLE_PROD --body "true"
-    gh variable set WORKER_CRITICAL_ENABLE_STAGING --body "true"
-    gh variable set WORKER_EXTRACTION_ENABLE_PROD --body "true"
-    gh variable set WORKER_EXTRACTION_ENABLE_STAGING --body "true"
-    gh variable set WORKER_INGESTION_ENABLE_PROD --body "true"
-    gh variable set WORKER_INGESTION_ENABLE_STAGING --body "true"
-    gh variable set WORKER_MAINTENANCE_ENABLE_PROD --body "true"
-    gh variable set WORKER_MAINTENANCE_ENABLE_STAGING --body "true"
-    gh variable set WORKER_SHARED_ENABLE_PROD --body "true"
-    gh variable set WORKER_SHARED_ENABLE_STAGING --body "true"
+    gh variable set WORKER_CRITICAL_ENABLED_PROD --body "false"
+    gh variable set WORKER_CRITICAL_ENABLED_STAGING --body "false"
+    gh variable set WORKER_EXTRACTION_ENABLED_PROD --body "true"
+    gh variable set WORKER_EXTRACTION_ENABLED_STAGING --body "false"
+    gh variable set WORKER_INGESTION_ENABLED_PROD --body "true"
+    gh variable set WORKER_INGESTION_ENABLED_STAGING --body "false"
+    gh variable set WORKER_SHARED_ENABLED_PROD --body "true"
+    gh variable set WORKER_SHARED_ENABLED_STAGING --body "false"
 
     # Infrastructure Configuration
     gh variable set MAX_AVAILABILITY_ZONES --body "5"
 
-    # Public Domain Configuration (optional for frontend apps)
-    gh variable set PUBLIC_DOMAIN_NAME_PROD --body "public.robosystems.ai"
-    gh variable set PUBLIC_DOMAIN_NAME_STAGING --body "public-staging.robosystems.ai"
+    # Public Domain Configuration (optional for externalizing XBRL data)
+    gh variable set PUBLIC_DOMAIN_NAME_PROD --body "public.$ROOT_DOMAIN"
+    gh variable set PUBLIC_DOMAIN_NAME_STAGING --body "public-staging.$ROOT_DOMAIN"
 
     echo ""
     echo "✅ Minimal configuration completed!"
@@ -380,8 +396,17 @@ function setup_full_config() {
     gh variable set REPOSITORY_NAME --body "$REPOSITORY_NAME"
     gh variable set ECR_REPOSITORY --body "$ECR_REPOSITORY"
 
-    # AWS Configuration
+    # AWS Configuration (typically org-level, set at repo level for forks)
     gh variable set AWS_ACCOUNT_ID --body "$AWS_ACCOUNT_ID"
+    gh variable set AWS_REGION --body "us-east-1"
+    gh variable set ENVIRONMENT_PROD --body "prod"
+    gh variable set ENVIRONMENT_STAGING --body "staging"
+
+    # Application URLs (typically org-level, set at repo level for forks)
+    gh variable set ROBOSYSTEMS_API_URL_PROD --body "https://api.$ROOT_DOMAIN"
+    gh variable set ROBOSYSTEMS_API_URL_STAGING --body "https://staging.api.$ROOT_DOMAIN"
+    gh variable set ROBOSYSTEMS_APP_URL_PROD --body "https://$ROOT_DOMAIN"
+    gh variable set ROBOSYSTEMS_APP_URL_STAGING --body "https://staging.$ROOT_DOMAIN"
 
     # Sensitive infrastructure secrets
     gh secret set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
@@ -437,39 +462,46 @@ function setup_full_config() {
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_PROD --body "7"
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
 
-    # Kuzu Standard Writer Configuration
-    gh variable set STANDARD_MIN_INSTANCES --body "1"
-    gh variable set STANDARD_MAX_INSTANCES --body "10"
-    gh variable set STANDARD_MIN_INSTANCES_STAGING --body "1"
-    gh variable set STANDARD_MAX_INSTANCES_STAGING --body "2"
+    # Kuzu Writer Configuration - Standard Tier
+    gh variable set KUZU_STANDARD_ENABLED_PROD --body "true"
+    gh variable set KUZU_STANDARD_ENABLED_STAGING --body "true"
+    gh variable set KUZU_STANDARD_MIN_INSTANCES_PROD --body "1"
+    gh variable set KUZU_STANDARD_MAX_INSTANCES_PROD --body "10"
+    gh variable set KUZU_STANDARD_MIN_INSTANCES_STAGING --body "1"
+    gh variable set KUZU_STANDARD_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Enterprise Writer Configuration
-    gh variable set ENTERPRISE_MIN_INSTANCES --body "0"
-    gh variable set ENTERPRISE_MAX_INSTANCES --body "5"
-    gh variable set ENTERPRISE_ENABLE_PROD --body "false"
+    # Kuzu Writer Configuration - Large Tier
+    gh variable set KUZU_LARGE_ENABLED_PROD --body "false"
+    gh variable set KUZU_LARGE_ENABLED_STAGING --body "false"
+    gh variable set KUZU_LARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set KUZU_LARGE_MAX_INSTANCES_PROD --body "20"
+    gh variable set KUZU_LARGE_MIN_INSTANCES_STAGING --body "0"
+    gh variable set KUZU_LARGE_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Premium Writer Configuration
-    gh variable set PREMIUM_MIN_INSTANCES --body "0"
-    gh variable set PREMIUM_MAX_INSTANCES --body "3"
-    gh variable set PREMIUM_ENABLE_PROD --body "false"
+    # Kuzu Writer Configuration - XLarge Tier
+    gh variable set KUZU_XLARGE_ENABLED_PROD --body "false"
+    gh variable set KUZU_XLARGE_ENABLED_STAGING --body "false"
+    gh variable set KUZU_XLARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set KUZU_XLARGE_MAX_INSTANCES_PROD --body "10"
 
-    # Shared Repository Configuration
-    gh variable set SHARED_MASTER_INSTANCES_STAGING --body "0"
-    gh variable set SHARED_REPLICA_INSTANCE_TYPE_PROD --body "r6g.large"
-    gh variable set SHARED_REPLICA_INSTANCE_TYPE_STAGING --body "r6g.medium"
-    gh variable set SHARED_REPLICA_MIN_INSTANCES_PROD --body "0"
-    gh variable set SHARED_REPLICA_MAX_INSTANCES_PROD --body "2"
-    gh variable set SHARED_REPLICA_DESIRED_INSTANCES_PROD --body "0"
-    gh variable set SHARED_REPLICA_MIN_INSTANCES_STAGING --body "0"
-    gh variable set SHARED_REPLICA_MAX_INSTANCES_STAGING --body "2"
-    gh variable set SHARED_REPLICA_DESIRED_INSTANCES_STAGING --body "0"
-    gh variable set SHARED_REPLICA_ENABLE_PROD --body "false"
-    gh variable set SHARED_REPLICA_ENABLE_STAGING --body "false"
+    # Kuzu Writer Configuration - Shared Repository
+    gh variable set KUZU_SHARED_ENABLED_PROD --body "true"
+    gh variable set KUZU_SHARED_ENABLED_STAGING --body "true"
+    gh variable set KUZU_SHARED_MIN_INSTANCES_PROD --body "1"
+    gh variable set KUZU_SHARED_MAX_INSTANCES_PROD --body "3"
+    gh variable set KUZU_SHARED_MIN_INSTANCES_STAGING --body "1"
+    gh variable set KUZU_SHARED_MAX_INSTANCES_STAGING --body "2"
+
+    # Neo4j Writer Configuration (optional backend)
+    gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_PROD --body "false"
+    gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_STAGING --body "false"
+    gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD --body "false"
+    gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING --body "false"
 
     # Graph Settings
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
-    gh variable set KUZU_UPDATE_CONTAINERS_PROD --body "true"
-    gh variable set KUZU_UPDATE_CONTAINERS_STAGING --body "true"
+    gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
+    gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
 
     # GHA Runner Configuration
     gh variable set RUNNER_STORAGE_SIZE --body "20"
@@ -486,28 +518,44 @@ function setup_full_config() {
     gh variable set WAF_ENABLED_PROD --body "true"
     gh variable set WAF_ENABLED_STAGING --body "true"
     gh variable set WAF_RATE_LIMIT_PER_IP --body "10000"
-    gh variable set WAF_ENABLE_GEO_BLOCKING --body "false"
-    gh variable set WAF_ENABLE_AWS_MANAGED_RULES --body "true"
+    gh variable set WAF_GEO_BLOCKING_ENABLED --body "false"
+    gh variable set WAF_AWS_MANAGED_RULES_ENABLED --body "true"
     gh secret set WAF_ALLOWED_IPS --body "0.0.0.0/32"
 
     # Worker Configuration
-    gh variable set WORKER_CRITICAL_ENABLE_PROD --body "true"
-    gh variable set WORKER_CRITICAL_ENABLE_STAGING --body "true"
-    gh variable set WORKER_EXTRACTION_ENABLE_PROD --body "true"
-    gh variable set WORKER_EXTRACTION_ENABLE_STAGING --body "true"
-    gh variable set WORKER_INGESTION_ENABLE_PROD --body "true"
-    gh variable set WORKER_INGESTION_ENABLE_STAGING --body "true"
-    gh variable set WORKER_MAINTENANCE_ENABLE_PROD --body "true"
-    gh variable set WORKER_MAINTENANCE_ENABLE_STAGING --body "true"
-    gh variable set WORKER_SHARED_ENABLE_PROD --body "true"
-    gh variable set WORKER_SHARED_ENABLE_STAGING --body "true"
+    gh variable set WORKER_CRITICAL_ENABLED_PROD --body "false"
+    gh variable set WORKER_CRITICAL_ENABLED_STAGING --body "false"
+    gh variable set WORKER_EXTRACTION_ENABLED_PROD --body "true"
+    gh variable set WORKER_EXTRACTION_ENABLED_STAGING --body "false"
+    gh variable set WORKER_INGESTION_ENABLED_PROD --body "true"
+    gh variable set WORKER_INGESTION_ENABLED_STAGING --body "false"
+    gh variable set WORKER_SHARED_ENABLED_PROD --body "true"
+    gh variable set WORKER_SHARED_ENABLED_STAGING --body "false"
 
     # Infrastructure Configuration
     gh variable set MAX_AVAILABILITY_ZONES --body "5"
 
     # Public Domain Configuration (optional for frontend apps)
-    gh variable set PUBLIC_DOMAIN_NAME_PROD --body "public.robosystems.ai"
-    gh variable set PUBLIC_DOMAIN_NAME_STAGING --body "public-staging.robosystems.ai"
+    gh variable set PUBLIC_DOMAIN_NAME_PROD --body "public.$ROOT_DOMAIN"
+    gh variable set PUBLIC_DOMAIN_NAME_STAGING --body "public-staging.$ROOT_DOMAIN"
+
+    # Additional Application URLs (optional, for multi-app ecosystems)
+    echo ""
+    read -p "Configure RoboLedger app URLs? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        read -p "RoboLedger domain (e.g., roboledger.ai): " ROBOLEDGER_DOMAIN
+        gh variable set ROBOLEDGER_APP_URL_PROD --body "https://$ROBOLEDGER_DOMAIN"
+        gh variable set ROBOLEDGER_APP_URL_STAGING --body "https://staging.$ROBOLEDGER_DOMAIN"
+    fi
+
+    read -p "Configure RoboInvestor app URLs? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        read -p "RoboInvestor domain (e.g., roboinvestor.ai): " ROBOINVESTOR_DOMAIN
+        gh variable set ROBOINVESTOR_APP_URL_PROD --body "https://$ROBOINVESTOR_DOMAIN"
+        gh variable set ROBOINVESTOR_APP_URL_STAGING --body "https://staging.$ROBOINVESTOR_DOMAIN"
+    fi
 
     # Bastion SSH Keys
     echo ""
@@ -524,13 +572,14 @@ function setup_full_config() {
     done
 
     if [[ -n "$BASTION_SSH_KEYS" ]]; then
-        gh variable set BASTION_ADDITIONAL_SSH_KEYS --body "$BASTION_SSH_KEYS"
+        gh secret set BASTION_ADDITIONAL_SSH_KEYS --body "$BASTION_SSH_KEYS"
+        echo "✅ SSH keys configured"
     else
-        gh variable set BASTION_ADDITIONAL_SSH_KEYS --body "# No SSH keys configured"
+        gh secret set BASTION_ADDITIONAL_SSH_KEYS --body "# No additional SSH keys configured"
     fi
 
-    # Bastion Access Configuration (uses placeholder IP by default)
-    gh variable set BASTION_ALLOWED_CIDR_BLOCK --body "0.0.0.0/32"
+    # Bastion Access Configuration (uses placeholder IP by default - as secret)
+    gh secret set BASTION_ALLOWED_CIDR_BLOCK --body "0.0.0.0/32"
 
     echo ""
     echo "✅ Full configuration completed!"

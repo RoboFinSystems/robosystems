@@ -1,5 +1,5 @@
-name: Refresh Kuzu Container
-description: Refreshes a single Kuzu container in-place without replacing the instance
+name: Refresh Graph Container
+description: Refreshes a single graph database container in-place without replacing the instance (supports Kuzu and Neo4j)
 
 inputs:
   environment:
@@ -9,7 +9,10 @@ inputs:
     description: 'EC2 Instance ID to update'
     required: true
   node-type:
-    description: 'Node type (writer, master, replica)'
+    description: 'Node type (writer, shared-writer)'
+    required: true
+  backend:
+    description: 'Graph backend (kuzu, neo4j)'
     required: true
   aws-region:
     description: 'AWS region'
@@ -38,24 +41,38 @@ runs:
       id: update
       shell: bash
       run: |
-        echo "🔄 Updating Kuzu container on instance ${{ inputs.instance-id }} - ${{ inputs.node-type }}"
-        
+        echo "🔄 Updating ${{ inputs.backend }} container on instance ${{ inputs.instance-id }} - ${{ inputs.node-type }}"
+
         # Get ECR URI
         ECR_URI="${{ inputs.aws-account-id }}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com/robosystems"
-        
-        # Determine container name based on node type
-        if [ "${{ inputs.node-type }}" == "writer" ]; then
-          CONTAINER_NAME="kuzu-writer"
-        elif [ "${{ inputs.node-type }}" == "shared-writer" ]; then
-          # Shared writer uses the master container (hosts SEC database)
-          CONTAINER_NAME="kuzu-shared-master"
+
+        # Determine container name and startup script based on backend
+        if [ "${{ inputs.backend }}" == "kuzu" ]; then
+          if [ "${{ inputs.node-type }}" == "writer" ]; then
+            CONTAINER_NAME="kuzu-writer"
+          elif [ "${{ inputs.node-type }}" == "shared-writer" ]; then
+            CONTAINER_NAME="kuzu-shared-master"
+          else
+            CONTAINER_NAME="kuzu-shared-writer"
+          fi
+          STARTUP_SCRIPT="/usr/local/bin/run-kuzu-writer.sh"
+        elif [ "${{ inputs.backend }}" == "neo4j" ]; then
+          if [ "${{ inputs.node-type }}" == "writer" ]; then
+            CONTAINER_NAME="neo4j-writer"
+          elif [ "${{ inputs.node-type }}" == "shared-writer" ]; then
+            CONTAINER_NAME="neo4j-shared-writer"
+          else
+            CONTAINER_NAME="neo4j-writer"
+          fi
+          STARTUP_SCRIPT="/usr/local/bin/run-neo4j-writer.sh"
         else
-          # Fallback for any other node types (master, replica)
-          CONTAINER_NAME="kuzu-shared-writer"
+          echo "❌ Unknown backend: ${{ inputs.backend }}"
+          echo "status=failed" >> $GITHUB_OUTPUT
+          exit 1
         fi
-        
-        echo "📦 Pulling and updating container: $CONTAINER_NAME"
-        
+
+        echo "📦 Pulling and updating container: $CONTAINER_NAME (backend: ${{ inputs.backend }})"
+
         # Send update command
         COMMAND_ID=$(aws ssm send-command \
           --instance-ids "${{ inputs.instance-id }}" \
@@ -71,23 +88,23 @@ runs:
             \"docker stop $CONTAINER_NAME || true\",
             \"docker rm $CONTAINER_NAME || true\",
             \"echo \\\"Starting new container...\\\"\",
-            \"/usr/local/bin/run-kuzu-writer.sh\",
+            \"$STARTUP_SCRIPT\",
             \"echo \\\"✅ Container updated successfully\\\"\"
           ]" \
           --query "Command.CommandId" \
           --output text \
           --region "${{ inputs.aws-region }}")
-        
+
         echo "⏳ Waiting for update to complete (Command: ${COMMAND_ID})..."
-        
+
         # Wait for command execution
         if aws ssm wait command-executed \
           --command-id "${COMMAND_ID}" \
           --instance-id "${{ inputs.instance-id }}" \
           --region "${{ inputs.aws-region }}"; then
-          
+
           echo "✅ Container update completed successfully"
-          
+
           # Get the output for logging
           OUTPUT=$(aws ssm get-command-invocation \
             --command-id "${COMMAND_ID}" \
@@ -95,15 +112,15 @@ runs:
             --query "StandardOutputContent" \
             --output text \
             --region "${{ inputs.aws-region }}" 2>/dev/null || echo "")
-          
+
           if [ -n "$OUTPUT" ]; then
             echo "📝 Update output:"
             echo "$OUTPUT" | head -20
           fi
-          
+
         else
           echo "❌ Container update failed"
-          
+
           # Get error details
           ERROR_OUTPUT=$(aws ssm get-command-invocation \
             --command-id "${COMMAND_ID}" \
@@ -111,18 +128,18 @@ runs:
             --query "StandardErrorContent" \
             --output text \
             --region "${{ inputs.aws-region }}" 2>/dev/null || echo "No error details available")
-          
+
           echo "Error details:"
           echo "$ERROR_OUTPUT"
-          
+
           echo "status=failed" >> $GITHUB_OUTPUT
           exit 1
         fi
-        
+
         # Health check
         echo "🏥 Waiting ${{ inputs.health-check-timeout }} seconds for container to stabilize..."
         sleep ${{ inputs.health-check-timeout }}
-        
+
         echo "🏥 Performing health check..."
         HEALTH_COMMAND=$(aws ssm send-command \
           --instance-ids "${{ inputs.instance-id }}" \
@@ -131,16 +148,16 @@ runs:
           --query "Command.CommandId" \
           --output text \
           --region "${{ inputs.aws-region }}")
-        
+
         sleep 5
-        
+
         HEALTH_STATUS=$(aws ssm get-command-invocation \
           --command-id "${HEALTH_COMMAND}" \
           --instance-id "${{ inputs.instance-id }}" \
           --query "StandardOutputContent" \
           --output text \
           --region "${{ inputs.aws-region }}" 2>/dev/null || echo "UNHEALTHY")
-        
+
         if [[ "$HEALTH_STATUS" == *"UNHEALTHY"* ]]; then
           echo "❌ Health check failed for instance ${{ inputs.instance-id }}"
           echo "status=failed" >> $GITHUB_OUTPUT
