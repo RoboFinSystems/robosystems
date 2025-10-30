@@ -185,6 +185,7 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
       del self.failed_attempts[ip]
 
 
+# TODO: Move this to the secrets manager module
 @lru_cache(maxsize=4)  # Cache for writer, shared_writer, shared_master, shared_replica
 def get_api_key_from_secrets_manager(
   key_type: str = "writer", secret_name: Optional[str] = None, region: str = "us-east-1"
@@ -201,7 +202,7 @@ def get_api_key_from_secrets_manager(
       API key or None if not found
   """
   if not secret_name:
-    secret_name = f"robosystems/{env.ENVIRONMENT}/kuzu"
+    secret_name = f"robosystems/{env.ENVIRONMENT}/graph-api"
 
   try:
     client = boto3.client("secretsmanager", region_name=region)
