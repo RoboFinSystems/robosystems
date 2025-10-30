@@ -83,7 +83,22 @@ print_usage() {
     echo "  staging  - Staging environment"
     echo "  dev      - Development environment"
     echo ""
-    echo -e "${YELLOW}Available services:${NC}"
+    echo -e "${GREEN}======================================================================"
+    echo "Admin Operations - Run commands against infrastructure"
+    echo "======================================================================${NC}"
+    echo "  <operation> [args...]"
+    echo ""
+    echo -e "${YELLOW}Common examples:${NC}"
+    echo "  $0 prod sec-load --ticker NVDA --year 2024"
+    echo "  $0 prod sec-health"
+    echo "  $0 prod graph-query --graph-id kg123 --query 'MATCH (e) RETURN e LIMIT 5'"
+    echo "  $0 prod credit-health"
+    echo "  $0 prod dlq-stats"
+    echo "  $0 prod help                # Show all available commands"
+    echo ""
+    echo -e "${GREEN}======================================================================"
+    echo "INFRASTRUCTURE: Port Forwarding & Direct Access"
+    echo "======================================================================${NC}"
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
     echo "  kuzu          - Graph API tunnel to default instance (localhost:8001)"
     echo "  kuzu-select   - Select specific Kuzu instance to tunnel"
@@ -94,23 +109,14 @@ print_usage() {
     echo "  kuzu-replica  - Tunnel to shared replica (port 8002)"
     echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
     echo "  migrate       - Run database migrations via bastion"
-    echo "  admin         - Run admin operations via bastion"
-    echo "  admin-help    - Show available admin operations"
+    echo "  help          - Show admin command examples"
     echo "  all           - All services (default)"
+    echo ""
+    echo "  <operation>   - Run admin operation (sec-load, credit-health, etc.)"
     echo ""
     echo -e "${YELLOW}SSH Key Options:${NC}"
     echo "  --key, -k <path>  - Path to SSH private key"
     echo "                      Default: ~/.ssh/id_rsa"
-    echo ""
-    echo -e "${YELLOW}Examples:${NC}"
-    echo "  $0 prod postgres"
-    echo "  $0 staging all --key ~/.ssh/my-key.pem"
-    echo "  $0 prod kuzu-list        # List all Kuzu instances"
-    echo "  $0 prod kuzu-select      # Tunnel to specific instance"
-    echo "  $0 prod kuzu-forward     # Forward ALL instances (8001, 8002, ...)"
-    echo "  $0 prod kuzu-direct      # SSH to Kuzu filesystem"
-    echo "  $0 prod migrate          # Run database migrations"
-    echo "  $0 staging migrate       # Run migrations on staging"
     echo ""
 }
 
@@ -252,8 +258,14 @@ check_ssh_key() {
         exit 1
     fi
 
-    # Check permissions
-    local perms=$(stat -f "%OLp" "$key_path" 2>/dev/null || stat -c "%a" "$key_path" 2>/dev/null)
+    # Check permissions (detect OS for correct stat command)
+    local perms
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        perms=$(stat -f "%OLp" "$key_path")
+    else
+        perms=$(stat -c "%a" "$key_path")
+    fi
+
     if [[ "$perms" != "600" ]]; then
         echo -e "${YELLOW}Warning: SSH key has wrong permissions ($perms). Setting to 600...${NC}"
         chmod 600 "$key_path"
@@ -941,47 +953,47 @@ run_admin_operation() {
 }
 
 show_admin_help() {
-    echo -e "${BLUE}Available Admin Operations:${NC}"
-    echo ""
-    echo -e "${YELLOW}Credit Management:${NC}"
-    echo "  credit-allocate-user USER_ID [--dry-run]"
-    echo "  credit-allocate-graph GRAPH_ID [--dry-run]"
-    echo "  credit-allocate-all [--dry-run]"
-    echo "  credit-bonus GRAPH_ID --amount AMOUNT --description TEXT [--dry-run]"
-    echo "  credit-health"
-    echo ""
-    echo -e "${YELLOW}Repository Access:${NC}"
-    echo "  repo-grant USER_ID REPOSITORY ACCESS_LEVEL [--expires-days N]"
-    echo "  repo-revoke USER_ID REPOSITORY"
-    echo "  repo-list [--repository REPO]"
-    echo "  repo-check USER_ID [--repository REPO]"
-    echo ""
-    echo -e "${YELLOW}Dead Letter Queue:${NC}"
-    echo "  dlq-stats"
-    echo "  dlq-health"
-    echo "  dlq-list [--limit N]"
-    echo "  dlq-reprocess TASK_ID"
-    echo "  dlq-purge"
-    echo ""
-    echo -e "${YELLOW}SEC Pipeline:${NC}"
-    echo "  sec-reset [--soft]"
-    echo "  sec-load --year YEAR --companies N --filings N [--refresh] [--parallel]"
-    echo "  sec-collect --year YEAR --companies N --filings N"
-    echo "  sec-process --year YEAR [--refresh]"
-    echo "  sec-ingest --year YEAR"
-    echo ""
-    echo -e "${GREEN}Examples:${NC}"
-    echo "  # Allocate credits for a user"
-    echo "  ./bin/tools/tunnels.sh prod admin credit-allocate-user user_123"
-    echo ""
-    echo "  # Grant SEC access"
-    echo "  ./bin/tools/tunnels.sh prod admin repo-grant user_123 sec admin"
-    echo ""
-    echo "  # Load SEC data"
-    echo "  ./bin/tools/tunnels.sh prod admin sec-load --year 2024 --companies 10 --filings 5"
-    echo ""
-    echo "  # Check DLQ health"
-    echo "  ./bin/tools/tunnels.sh staging admin dlq-health"
+    cat << 'HELP_EOF'
+
+======================================================================
+RoboSystems Admin Operations - Run Commands on Infrastructure
+======================================================================
+
+Usage:
+  ./bin/tools/tunnels.sh [environment] <operation> [args...]
+
+Quick Examples:
+
+  SEC Operations:
+    ./bin/tools/tunnels.sh prod sec-load --ticker NVDA --year 2024
+    ./bin/tools/tunnels.sh prod sec-health --verbose
+    ./bin/tools/tunnels.sh prod sec-status
+
+  Graph Operations:
+    ./bin/tools/tunnels.sh prod graph-query --graph-id kg123 --query 'MATCH (e:Entity) RETURN e'
+    ./bin/tools/tunnels.sh prod graph-health
+
+  Credit Management:
+    ./bin/tools/tunnels.sh prod credit-health
+    ./bin/tools/tunnels.sh prod credit-bonus-graph kg123 --amount 1000 --description "Bonus"
+
+  Repository Access:
+    ./bin/tools/tunnels.sh prod repo-grant-access user_xyz sec admin
+    ./bin/tools/tunnels.sh prod repo-check-access user_xyz
+
+  Database Operations:
+    ./bin/tools/tunnels.sh prod db-info
+    ./bin/tools/tunnels.sh prod db-list-users
+
+  User Management:
+    ./bin/tools/tunnels.sh prod create-user --email test@example.com --with-sec-access
+
+Show All Commands:
+  ./bin/tools/tunnels.sh prod help
+
+======================================================================
+
+HELP_EOF
 }
 
 setup_all_tunnels() {
@@ -1054,6 +1066,9 @@ setup_all_tunnels() {
 
     if [[ "$VALKEY_ENDPOINT" != "NOT_FOUND" ]]; then
         echo "Valkey:     redis-cli -h localhost -p 6379"
+        echo "            Note: Valkey uses AUTH. Get token with:"
+        echo "            aws secretsmanager get-secret-value --secret-id robosystems/$environment/valkey --query 'SecretString' | jq -r '.VALKEY_AUTH_TOKEN'"
+        echo "            Then connect: redis-cli -h localhost -p 6379 -a <AUTH_TOKEN> --tls"
     fi
 
 
@@ -1076,10 +1091,10 @@ setup_all_tunnels() {
         echo "1) Kuzu instance (file system access via AWS SSM)"
         echo "2) Just use tunnels (default)"
         echo ""
-        echo -e -n "${BLUE}Choose option (1-2, default=2): ${NC}"
+        echo -e -n "${BLUE}Choose option (1-2, default=2, timeout 30s): ${NC}"
 
-        # Read from terminal directly
-        read -r direct_choice < /dev/tty
+        # Read from terminal directly with timeout
+        read -r -t 30 direct_choice < /dev/tty || direct_choice="2"
         echo ""
 
         case $direct_choice in
@@ -1138,6 +1153,7 @@ main() {
     local environment=""
     local service=""
     local custom_ssh_key=""
+    local -a additional_args=()
 
     # Parse arguments with support for SSH key parameter
     while [[ $# -gt 0 ]]; do
@@ -1160,7 +1176,7 @@ main() {
                 fi
                 shift
                 ;;
-            postgres|kuzu|kuzu-select|kuzu-forward|kuzu-direct|kuzu-list|kuzu-master|kuzu-replica|valkey|migrate|all)
+            postgres|kuzu|kuzu-select|kuzu-forward|kuzu-direct|kuzu-list|kuzu-master|kuzu-replica|valkey|migrate|help|all)
                 if [[ -z "$service" ]]; then
                     service="$1"
                 else
@@ -1170,10 +1186,18 @@ main() {
                 fi
                 shift
                 ;;
+            # Admin operations - catch all other commands
             *)
-                echo -e "${RED}Error: Unknown argument '$1'${NC}"
-                print_usage
-                exit 1
+                if [[ -z "$service" && "$1" != -* ]]; then
+                    service="admin"
+                    # Capture all arguments for admin operation
+                    additional_args=("$@")
+                    break
+                else
+                    echo -e "${RED}Error: Unknown argument '$1'${NC}"
+                    print_usage
+                    exit 1
+                fi
                 ;;
         esac
     done
@@ -1248,6 +1272,13 @@ main() {
             ;;
         migrate)
             run_database_migration "$environment"
+            ;;
+        admin)
+            # Run admin operation with all captured arguments
+            run_admin_operation "$environment" "${additional_args[@]}"
+            ;;
+        help)
+            show_admin_help
             ;;
         all|"")
             setup_all_tunnels "$environment"

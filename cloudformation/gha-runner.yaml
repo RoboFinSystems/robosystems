@@ -10,16 +10,15 @@ Parameters:
   # Infrastructure & Networking Configuration
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC ID where GHA Runner will be deployed
-  PrivateSubnetIds:
+    Description: MUST be default VPC (172.31.0.0/16) - isolated from application VPC for security
+  PublicSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Private subnet IDs for GHA Runner (multi-AZ deployment for better spot availability)
+    Description: Default VPC public subnet IDs (multi-AZ deployment for better spot availability)
 
   # Instance Configuration
   AmiId:
     Type: AWS::EC2::Image::Id
-    Description: Amazon Linux 2023 x86_64 AMI ID
-    Default: ami-08a6efd148b1f7504
+    Description: Amazon Linux 2023 x86_64 AMI ID (automatically discovered from SSM Parameter Store)
   RunnerCount:
     Type: Number
     Description: Number of concurrent GHA Runners to configure on the instance (now 1 per instance with ASG)
@@ -89,30 +88,15 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      GroupDescription: Security group for GitHub Actions runner - HTTPS outbound only
+      GroupDescription: Security group for GitHub Actions runner - HTTPS only, no VPC access
       VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 10.0.0.0/8
-          Description: SSH access from bastion host in VPC
+      SecurityGroupIngress: []
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: HTTPS outbound for GitHub API and package downloads
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: HTTP outbound for package downloads
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: 10.0.0.0/8
-          Description: SSH to other instances in VPC
+          Description: HTTPS for GitHub API, AWS APIs, SSM, and package downloads
       Tags:
         - Key: Name
           Value: sg-gha-runner-ci
@@ -233,10 +217,14 @@ Resources:
       LaunchTemplateName: !Sub "${AWS::StackName}-gha-runner-lt"
       LaunchTemplateData:
         ImageId: !Ref AmiId
-        SecurityGroupIds:
-          - !Ref GHARunnerSecurityGroup
         IamInstanceProfile:
           Arn: !GetAtt GHARunnerEC2InstanceProfile.Arn
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups:
+              - !Ref GHARunnerSecurityGroup
+            DeleteOnTermination: true
         BlockDeviceMappings:
           - Ebs:
               VolumeType: gp3
@@ -354,7 +342,7 @@ Resources:
           OnDemandBaseCapacity: 1
           OnDemandPercentageAboveBaseCapacity: 0
           SpotAllocationStrategy: price-capacity-optimized
-      VPCZoneIdentifier: !Ref PrivateSubnetIds
+      VPCZoneIdentifier: !Ref PublicSubnetIds
       MinSize: !Ref MinInstances
       MaxSize: !Ref MaxInstances
       DesiredCapacity: !Ref DesiredInstances

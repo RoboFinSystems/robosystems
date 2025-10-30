@@ -26,7 +26,7 @@ Parameters:
   # Instance Configuration
   AmiId:
     Type: AWS::EC2::Image::Id
-    Description: Amazon Linux 2023 ARM64 AMI ID
+    Description: Amazon Linux 2023 ARM64 AMI ID (automatically discovered from SSM Parameter Store)
   InstanceType:
     Type: String
     Description: EC2 instance type for bastion host (ARM64/Graviton)
@@ -137,14 +137,23 @@ Resources:
                 Resource: "*"
               - Effect: Allow
                 Action:
+                  - ec2:StopInstances
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    "ec2:ResourceTag/Component": "Bastion"
+              - Effect: Allow
+                Action:
                   - secretsmanager:GetSecretValue
                 Resource:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/valkey*"
               - Effect: Allow
                 Action:
                   - secretsmanager:DescribeSecret
                 Resource:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/postgres*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/*/valkey*"
               # KMS permissions for AWS managed keys with service conditions
               - Effect: Allow
                 Action:
@@ -329,6 +338,17 @@ Resources:
           /opt/aws/bin/cfn-signal --exit-code $? --stack $AWS_STACK_NAME --resource BastionHostEC2Instance --region $AWS_REGION
 
           echo "UserData script execution completed at $(date)"
+
+          # Auto-stop: Bastion is stopped by default after initialization
+          # This ensures the bastion only runs when manually started by an admin
+          echo "Auto-stopping bastion instance in 60 seconds..."
+          sleep 60
+
+          # Stop this instance (instance can stop itself without additional IAM permissions)
+          INSTANCE_ID=$(ec2-metadata --instance-id | cut -d' ' -f2)
+          aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region $AWS_REGION
+
+          echo "Bastion instance will stop shortly"
 
     CreationPolicy:
       ResourceSignal:
