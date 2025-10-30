@@ -57,16 +57,57 @@ on:
         required: true
         type: string
         description: Volume detachment SNS topic ARN from infrastructure deployment
-      # Kuzu Enable/Disable Configuration
-      enterprise_enabled:
+      # Kuzu Tier Configuration
+      kuzu_large_enabled:
         required: false
         type: string
-        description: Enable enterprise tier writers
+        description: Enable Kuzu large tier writers
         default: ""
-      premium_enabled:
+      kuzu_xlarge_enabled:
         required: false
         type: string
-        description: Enable premium tier writers
+        description: Enable Kuzu xlarge tier writers
+        default: ""
+      # Kuzu Scaling Configuration (passed from parent workflow)
+      kuzu_standard_min_instances:
+        required: false
+        type: string
+        description: Standard tier minimum instances
+        default: ""
+      kuzu_standard_max_instances:
+        required: false
+        type: string
+        description: Standard tier maximum instances
+        default: ""
+      kuzu_large_min_instances:
+        required: false
+        type: string
+        description: Large tier minimum instances
+        default: ""
+      kuzu_large_max_instances:
+        required: false
+        type: string
+        description: Large tier maximum instances
+        default: ""
+      kuzu_xlarge_min_instances:
+        required: false
+        type: string
+        description: XLarge tier minimum instances
+        default: ""
+      kuzu_xlarge_max_instances:
+        required: false
+        type: string
+        description: XLarge tier maximum instances
+        default: ""
+      kuzu_shared_min_instances:
+        required: false
+        type: string
+        description: Shared tier minimum instances
+        default: ""
+      kuzu_shared_max_instances:
+        required: false
+        type: string
+        description: Shared tier maximum instances
         default: ""
     secrets:
       ACTIONS_TOKEN:
@@ -109,15 +150,31 @@ jobs:
             ENV_SUFFIX="PROD"
             # Set environment variables for production
             export STANDARD_ENABLED_PROD="true"  # Always enabled
-            export ENTERPRISE_ENABLED_PROD="${{ inputs.enterprise_enabled }}"
-            export PREMIUM_ENABLED_PROD="${{ inputs.premium_enabled }}"
+            export KUZU_LARGE_ENABLED_PROD="${{ inputs.kuzu_large_enabled }}"
+            export KUZU_XLARGE_ENABLED_PROD="${{ inputs.kuzu_xlarge_enabled }}"
+            # Export scaling variables for production (passed from parent workflow)
+            export KUZU_STANDARD_MIN_INSTANCES_PROD="${{ inputs.kuzu_standard_min_instances }}"
+            export KUZU_STANDARD_MAX_INSTANCES_PROD="${{ inputs.kuzu_standard_max_instances }}"
+            export KUZU_LARGE_MIN_INSTANCES_PROD="${{ inputs.kuzu_large_min_instances }}"
+            export KUZU_LARGE_MAX_INSTANCES_PROD="${{ inputs.kuzu_large_max_instances }}"
+            export KUZU_XLARGE_MIN_INSTANCES_PROD="${{ inputs.kuzu_xlarge_min_instances }}"
+            export KUZU_XLARGE_MAX_INSTANCES_PROD="${{ inputs.kuzu_xlarge_max_instances }}"
+            export KUZU_SHARED_MIN_INSTANCES_PROD="${{ inputs.kuzu_shared_min_instances }}"
+            export KUZU_SHARED_MAX_INSTANCES_PROD="${{ inputs.kuzu_shared_max_instances }}"
           else
             ENV_KEY="staging"
             ENV_SUFFIX="STAGING"
             # Set environment variables for staging
             export STANDARD_ENABLED_STAGING="true"  # Always enabled
-            export ENTERPRISE_ENABLED_STAGING="${{ inputs.enterprise_enabled }}"
-            export PREMIUM_ENABLED_STAGING="${{ inputs.premium_enabled }}"
+            export KUZU_LARGE_ENABLED_STAGING="${{ inputs.kuzu_large_enabled }}"
+            export KUZU_XLARGE_ENABLED_STAGING="${{ inputs.kuzu_xlarge_enabled }}"
+            # Export scaling variables for staging (passed from parent workflow)
+            export KUZU_STANDARD_MIN_INSTANCES_STAGING="${{ inputs.kuzu_standard_min_instances }}"
+            export KUZU_STANDARD_MAX_INSTANCES_STAGING="${{ inputs.kuzu_standard_max_instances }}"
+            export KUZU_LARGE_MIN_INSTANCES_STAGING="${{ inputs.kuzu_large_min_instances }}"
+            export KUZU_LARGE_MAX_INSTANCES_STAGING="${{ inputs.kuzu_large_max_instances }}"
+            export KUZU_SHARED_MIN_INSTANCES_STAGING="${{ inputs.kuzu_shared_min_instances }}"
+            export KUZU_SHARED_MAX_INSTANCES_STAGING="${{ inputs.kuzu_shared_max_instances }}"
           fi
 
           echo "Loading Graph database writer configuration for: $ENV_KEY"
@@ -166,15 +223,35 @@ jobs:
             fi
 
             if [ "$SHOULD_DEPLOY" = "true" ]; then
+              # Get tier name for variable lookup (e.g., "kuzu-standard" → "KUZU_STANDARD")
+              TIER_NAME=$(echo "$writer" | jq -r '.tier | ascii_upcase | gsub("-"; "_")')
+
+              # Get default values from config
+              CONFIG_MIN=$(echo "$writer" | jq -r '.scaling.min')
+              CONFIG_MAX=$(echo "$writer" | jq -r '.scaling.max')
+
+              # Build GitHub variable names based on environment
+              MIN_VAR_NAME="${TIER_NAME}_MIN_INSTANCES_${ENV_SUFFIX}"
+              MAX_VAR_NAME="${TIER_NAME}_MAX_INSTANCES_${ENV_SUFFIX}"
+
+              # Get GitHub variable values (with fallback to config)
+              MIN_INSTANCES="${!MIN_VAR_NAME:-$CONFIG_MIN}"
+              MAX_INSTANCES="${!MAX_VAR_NAME:-$CONFIG_MAX}"
+
+              echo "  📊 Scaling for ${WRITER_NAME}: min=$MIN_INSTANCES, max=$MAX_INSTANCES"
+              echo "     (MIN_VAR: $MIN_VAR_NAME=${!MIN_VAR_NAME:-[using config: $CONFIG_MIN]})"
+              echo "     (MAX_VAR: $MAX_VAR_NAME=${!MAX_VAR_NAME:-[using config: $CONFIG_MAX]})"
+
               # Build the matrix entry from writer config with nested instance specs
               # Include backend field for routing to correct workflow (kuzu vs neo4j)
-              MATRIX_ENTRY=$(echo "$writer" | jq '{
+              # Override scaling with GitHub variables if present
+              MATRIX_ENTRY=$(echo "$writer" | jq --arg min "$MIN_INSTANCES" --arg max "$MAX_INSTANCES" '{
                 name: .name,
                 backend: .backend,
                 stack_suffix: .stack_suffix,
                 tier: .tier,
-                min_instances: .scaling.min,
-                max_instances: .scaling.max,
+                min_instances: ($min | tonumber),
+                max_instances: ($max | tonumber),
                 shared_repositories: .shared_repositories,
                 instance_type: .instance.type,
                 databases_per_instance: .instance.databases_per_instance,
@@ -236,7 +313,7 @@ jobs:
     uses: ./.github/workflows/deploy-kuzu-writers.yml
     with:
       # Stack & Repository Configuration
-      stack_name: RoboSystemsGraphWriters${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
+      stack_name: RoboSystemsGraph${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
       environment: ${{ inputs.environment }}
       # GHA Runner Configuration
       runner_config: ${{ inputs.runner_config }}
@@ -276,7 +353,7 @@ jobs:
     uses: ./.github/workflows/deploy-neo4j-writers.yml
     with:
       # Stack & Repository Configuration
-      stack_name: RoboSystemsNeo4jWriters${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
+      stack_name: RoboSystemsGraph${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
       environment: ${{ inputs.environment }}
       # GHA Runner Configuration
       runner_config: ${{ inputs.runner_config }}

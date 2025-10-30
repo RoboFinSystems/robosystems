@@ -930,19 +930,22 @@ class EnvConfig:
       from robosystems.config.tier_config import TierConfig
 
       # Determine tier from environment
+      # CLUSTER_TIER is set by CloudFormation to the actual tier (e.g., "kuzu-standard")
+      # KUZU_NODE_TYPE is the node role ("writer", "shared_master") - only used as fallback
       tier = cls.CLUSTER_TIER or cls.KUZU_NODE_TYPE
 
-      # Map node types to tiers
-      tier_mapping = {
-        "shared_master": "shared",
-        "shared_replica": "shared",
-        "shared_repository": "shared",
-        "standard": "standard",
-        "enterprise": "enterprise",
-        "premium": "premium",
+      # Map NODE TYPES to tiers (when CLUSTER_TIER is not set)
+      # This is for cases where only KUZU_NODE_TYPE is available
+      node_type_to_tier = {
+        "shared_master": "kuzu-shared",
+        "shared_replica": "kuzu-shared",
+        "shared_repository": "kuzu-shared",
+        "writer": "kuzu-standard",  # Default writer tier
       }
 
-      tier = tier_mapping.get(tier, tier)
+      # If we got a node type instead of a tier, map it
+      if tier in node_type_to_tier:
+        tier = node_type_to_tier[tier]
 
       if tier:
         # Get instance config from kuzu.yml
@@ -1011,7 +1014,7 @@ class EnvConfig:
       "databases_per_instance": get_int_env("KUZU_DATABASES_PER_INSTANCE", 10),
       "max_databases": cls.KUZU_MAX_DATABASES_PER_NODE,
       # Default tier settings
-      "tier": "standard",
+      "tier": "kuzu-standard",
       "storage_limit_gb": 500,
       "monthly_credits": 10000,
       "rate_limit_multiplier": 1.0,

@@ -2,9 +2,9 @@
 Lambda function to create daily snapshots of Graph shared master volumes.
 
 This function:
-1. Finds the shared master writer instance (WriterTier=shared)
+1. Finds the shared master writer instance (WriterTier=kuzu-shared)
 2. Creates a snapshot of its data volume
-3. Tags it with WriterTier=shared and AllRepositories=true
+3. Tags it with WriterTier=kuzu-shared and AllRepositories=true
 4. Cleans up old snapshots (keeps last 7 days)
 """
 
@@ -31,7 +31,7 @@ def lambda_handler(event, context):
     filters = [
       {"Name": "instance-state-name", "Values": ["running"]},
       {"Name": "tag:aws:cloudformation:stack-name", "Values": [STACK_NAME]},
-      {"Name": "tag:WriterTier", "Values": ["shared"]},
+      {"Name": "tag:WriterTier", "Values": ["kuzu-shared"]},
     ]
 
     response = ec2.describe_instances(Filters=filters)
@@ -70,7 +70,7 @@ def lambda_handler(event, context):
             {"Key": "VolumeType", "Value": "data"},
             {"Key": "SourceInstance", "Value": instance_id},
             {"Key": "SnapshotType", "Value": "scheduled"},
-            {"Key": "WriterTier", "Value": "shared"},
+            {"Key": "WriterTier", "Value": "kuzu-shared"},
             {
               "Key": "AllRepositories",
               "Value": "true",

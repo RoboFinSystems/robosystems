@@ -61,7 +61,7 @@ class TierConfig:
     """Get configuration for a specific tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared, neo4j-community-large, neo4j-enterprise-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -88,7 +88,7 @@ class TierConfig:
     """Get maximum subgraphs allowed for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -102,7 +102,7 @@ class TierConfig:
     """Get query timeout for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -117,7 +117,7 @@ class TierConfig:
     """Get memory allocation per database for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -132,7 +132,7 @@ class TierConfig:
     """Get total memory allocation for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium, shared)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -147,7 +147,7 @@ class TierConfig:
     """Get chunk size for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium, shared)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -164,7 +164,7 @@ class TierConfig:
     """Get complete instance configuration for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium, shared)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -178,7 +178,7 @@ class TierConfig:
     """Get storage limit for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -192,7 +192,7 @@ class TierConfig:
     """Get monthly credit allocation for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -208,7 +208,7 @@ class TierConfig:
     """Get rate limit multiplier for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -224,7 +224,7 @@ class TierConfig:
     """Get copy operation limits for a tier.
 
     Args:
-        tier: The tier name (standard, enterprise, premium)
+        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:

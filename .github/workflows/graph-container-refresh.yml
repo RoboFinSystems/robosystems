@@ -1,4 +1,4 @@
-name: Kuzu Container Refresh
+name: Graph Container Refresh
 
 on:
   workflow_dispatch:
@@ -116,59 +116,38 @@ jobs:
       - name: Collect instances to update
         id: collect
         run: |
-          echo "🔍 Collecting Kuzu instances for environment: ${{ inputs.environment }}"
+          echo "🔍 Collecting graph database instances for environment: ${{ inputs.environment }}"
 
           NODE_TYPES="${{ inputs.node_types }}"
           INSTANCES_JSON="[]"
 
-          # Function to add instances to JSON array
-          add_instances() {
-            local role="$1"
-            local tier="$2"
-            local filter_type="$3"
-
-            if [ "$filter_type" == "tier" ]; then
-              FILTER="Name=tag:WriterTier,Values=$tier"
-            else
-              FILTER="Name=tag:KuzuRole,Values=$role"
-            fi
-
-            INSTANCE_IDS=$(aws ec2 describe-instances \
-              --filters \
-                "Name=tag:Environment,Values=${{ inputs.environment }}" \
-                "$FILTER" \
-                "Name=instance-state-name,Values=running" \
-              --query "Reservations[].Instances[].InstanceId" \
-              --output text \
-              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}")
-
-            if [ -n "$INSTANCE_IDS" ]; then
-              for ID in $INSTANCE_IDS; do
-                INSTANCE_OBJ="{\"instance_id\":\"$ID\",\"node_type\":\"$role\"}"
-                if [ "$INSTANCES_JSON" == "[]" ]; then
-                  INSTANCES_JSON="[$INSTANCE_OBJ]"
-                else
-                  INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
-                fi
-              done
-            fi
-          }
-
           # Check what to update based on node_types input
           if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "shared" ]; then
             echo "📦 Collecting writer instances..."
-            # Get all writers
-            ALL_WRITERS=$(aws ec2 describe-instances \
+
+            # Get all Kuzu writers (using KuzuRole tag)
+            KUZU_WRITERS=$(aws ec2 describe-instances \
               --filters \
                 "Name=tag:Environment,Values=${{ inputs.environment }}" \
                 "Name=tag:KuzuRole,Values=writer" \
                 "Name=instance-state-name,Values=running" \
               --query "Reservations[].Instances[].InstanceId" \
               --output text \
-              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}")
+              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
 
-            # Process writers based on what was requested
-            for INSTANCE in $ALL_WRITERS; do
+            # Get all Neo4j writers (using GraphRole tag)
+            NEO4J_WRITERS=$(aws ec2 describe-instances \
+              --filters \
+                "Name=tag:Environment,Values=${{ inputs.environment }}" \
+                "Name=tag:GraphRole,Values=writer" \
+                "Name=tag:GraphBackend,Values=neo4j" \
+                "Name=instance-state-name,Values=running" \
+              --query "Reservations[].Instances[].InstanceId" \
+              --output text \
+              --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
+
+            # Process Kuzu writers
+            for INSTANCE in $KUZU_WRITERS; do
               TIER=$(aws ec2 describe-tags \
                 --filters \
                   "Name=resource-id,Values=$INSTANCE" \
@@ -179,25 +158,59 @@ jobs:
 
               # Filter instances based on node_types parameter
               if [ "$NODE_TYPES" == "shared" ]; then
-                # Only include shared writers
                 if [ "$TIER" != "shared" ]; then
-                  continue  # Skip non-shared writers
+                  continue
                 fi
               elif [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "all" ]; then
-                # Include all writers (both standard and shared)
-                true  # Process this instance
+                true
               fi
 
               # Determine node type based on tier
               if [ "$TIER" == "shared" ]; then
                 NODE_TYPE="shared-writer"
-                echo "  Found shared writer: $INSTANCE"
+                echo "  Found Kuzu shared writer: $INSTANCE"
               else
                 NODE_TYPE="writer"
-                echo "  Found writer: $INSTANCE (tier: ${TIER:-standard})"
+                echo "  Found Kuzu writer: $INSTANCE (tier: ${TIER:-standard})"
               fi
-              
-              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\"}"
+
+              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\",\"backend\":\"kuzu\"}"
+              if [ "$INSTANCES_JSON" == "[]" ]; then
+                INSTANCES_JSON="[$INSTANCE_OBJ]"
+              else
+                INSTANCES_JSON="${INSTANCES_JSON%]},${INSTANCE_OBJ}]"
+              fi
+            done
+
+            # Process Neo4j writers
+            for INSTANCE in $NEO4J_WRITERS; do
+              TIER=$(aws ec2 describe-tags \
+                --filters \
+                  "Name=resource-id,Values=$INSTANCE" \
+                  "Name=key,Values=WriterTier" \
+                --query "Tags[0].Value" \
+                --output text \
+                --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
+
+              # Filter instances based on node_types parameter
+              if [ "$NODE_TYPES" == "shared" ]; then
+                if [ "$TIER" != "shared" ]; then
+                  continue
+                fi
+              elif [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "all" ]; then
+                true
+              fi
+
+              # Determine node type
+              if [ "$TIER" == "shared" ]; then
+                NODE_TYPE="shared-writer"
+                echo "  Found Neo4j shared writer: $INSTANCE"
+              else
+                NODE_TYPE="writer"
+                echo "  Found Neo4j writer: $INSTANCE (tier: ${TIER:-standard})"
+              fi
+
+              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\",\"backend\":\"neo4j\"}"
               if [ "$INSTANCES_JSON" == "[]" ]; then
                 INSTANCES_JSON="[$INSTANCE_OBJ]"
               else
@@ -205,8 +218,6 @@ jobs:
               fi
             done
           fi
-
-          # Skip master and replica as requested (removing shared replicas)
 
           echo "instances_json=$INSTANCES_JSON"
 
@@ -221,13 +232,13 @@ jobs:
 
             # Display what will be updated
             echo "📋 Instances to update:"
-            echo "$INSTANCES_JSON" | jq -r '.[] | "  - \(.instance_id) (\(.node_type))"'
+            echo "$INSTANCES_JSON" | jq -r '.[] | "  - \(.instance_id) (\(.backend)/\(.node_type))"'
           fi
 
   update-containers:
     needs: [check-runner-availability, collect-instances]
     if: |
-      always() && 
+      always() &&
       needs.collect-instances.outputs.has_instances == 'true' &&
       (needs.check-runner-availability.result == 'success' || needs.check-runner-availability.result == 'skipped')
     runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJSON(needs.check-runner-availability.outputs.runner_config) || fromJSON(inputs.runner_config) }}
@@ -259,11 +270,12 @@ jobs:
           echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
 
       - name: Update Container
-        uses: ./.github/actions/refresh-kuzu-containers
+        uses: ./.github/actions/refresh-graph-containers
         with:
           environment: ${{ inputs.environment }}
           instance-id: ${{ matrix.instance_id }}
           node-type: ${{ matrix.node_type }}
+          backend: ${{ matrix.backend }}
           aws-region: ${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}
           aws-account-id: ${{ github.event_name == 'workflow_dispatch' && steps.aws-account.outputs.account_id || inputs.aws_account_id }}
           health-check-timeout: ${{ inputs.health_check_timeout }}
@@ -279,26 +291,24 @@ jobs:
         id: count
         run: |
           if [ "${{ needs.collect-instances.outputs.has_instances }}" == "true" ]; then
-            # Count instances from the matrix
             TOTAL=$(echo '${{ needs.collect-instances.outputs.matrix }}' | jq '.include | length')
             echo "total=${TOTAL}" >> $GITHUB_OUTPUT
           else
             echo "total=0" >> $GITHUB_OUTPUT
           fi
-      
+
       - name: Generate Summary
         run: |
-          echo "### 🎯 Kuzu Container Refresh Summary"
+          echo "### 🎯 Graph Container Refresh Summary"
           echo ""
 
           if [ "${{ needs.collect-instances.outputs.has_instances }}" != "true" ]; then
             echo "ℹ️ No instances found to update"
           else
-            echo "| Instance | Status |"
-            echo "|----------|--------|"
+            echo "| Instance | Backend | Status |"
+            echo "|----------|---------|--------|"
 
-            # Parse the matrix to show results
-            echo '${{ needs.collect-instances.outputs.matrix }}' | jq -r '.include[] | "| \(.instance_id) (\(.node_type)) | ⏳ |"'
+            echo '${{ needs.collect-instances.outputs.matrix }}' | jq -r '.include[] | "| \(.instance_id) (\(.node_type)) | \(.backend) | ⏳ |"'
           fi
 
           echo ""

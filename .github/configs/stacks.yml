@@ -56,16 +56,20 @@ production:
       stack_name: RoboSystemsWorkerDefaultProd
       outputs:
         service_arn: WorkerServiceArn
+    critical:
+      stack_name: RoboSystemsWorkerCriticalProd
+      outputs:
+        service_arn: WorkerServiceArn
     shared:
-      stack_name: RoboSystemsWorkerSharedProd  # For shared-processing queue
+      stack_name: RoboSystemsWorkerSharedProd
       outputs:
         service_arn: WorkerServiceArn
     extraction:
-      stack_name: RoboSystemsWorkerExtractionProd  # For shared-extraction queue
+      stack_name: RoboSystemsWorkerExtractionProd
       outputs:
         service_arn: WorkerServiceArn
     ingestion:
-      stack_name: RoboSystemsWorkerIngestionProd  # For shared-ingestion queue
+      stack_name: RoboSystemsWorkerIngestionProd
       outputs:
         service_arn: WorkerServiceArn
   
@@ -85,22 +89,40 @@ production:
         detachment_topic: VolumeDetachmentTopicArn
     
     writers:
-      standard:
-        stack_name: RoboSystemsKuzuWritersStandardProd
+      kuzu_standard:
+        stack_name: RoboSystemsGraphKuzuStandardProd
         outputs:
-          asg_name: AutoScalingGroupName
+          asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
-      
-      enterprise:
-        stack_name: RoboSystemsKuzuWritersEnterpriseProd
+
+      kuzu_large:
+        stack_name: RoboSystemsGraphKuzuLargeProd
         outputs:
-          asg_name: AutoScalingGroupName
+          asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
-      
-      premium:
-        stack_name: RoboSystemsKuzuWritersPremiumProd
+
+      kuzu_xlarge:
+        stack_name: RoboSystemsGraphKuzuXlargeProd
         outputs:
-          asg_name: AutoScalingGroupName
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      kuzu_shared:
+        stack_name: RoboSystemsGraphKuzuSharedProd
+        outputs:
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      neo4j_community_large:
+        stack_name: RoboSystemsGraphNeo4jCommunityLargeProd
+        outputs:
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      neo4j_enterprise_xlarge:
+        stack_name: RoboSystemsGraphNeo4jEnterpriseXlargeProd
+        outputs:
+          asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
       
     
@@ -198,7 +220,22 @@ staging:
       stack_name: RoboSystemsWorkerDefaultStaging
       outputs:
         service_arn: WorkerServiceArn
-    # Note: No shared, extraction, or ingestion workers in staging (cost savings)
+    critical:
+      stack_name: RoboSystemsWorkerCriticalStaging
+      outputs:
+        service_arn: WorkerServiceArn
+    shared:
+      stack_name: RoboSystemsWorkerSharedStaging
+      outputs:
+        service_arn: WorkerServiceArn
+    extraction:
+      stack_name: RoboSystemsWorkerExtractionStaging
+      outputs:
+        service_arn: WorkerServiceArn
+    ingestion:
+      stack_name: RoboSystemsWorkerIngestionStaging
+      outputs:
+        service_arn: WorkerServiceArn
   
   # Graph Infrastructure (Multi-Backend: Kuzu and Neo4j)
   graph:
@@ -216,10 +253,34 @@ staging:
         detachment_topic: VolumeDetachmentTopicArn
     
     writers:
-      standard:
-        stack_name: RoboSystemsKuzuWritersStandardStaging
+      kuzu_standard:
+        stack_name: RoboSystemsGraphKuzuStandardStaging
         outputs:
-          asg_name: AutoScalingGroupName
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      kuzu_large:
+        stack_name: RoboSystemsGraphKuzuLargeStaging
+        outputs:
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      kuzu_shared:
+        stack_name: RoboSystemsGraphKuzuSharedStaging
+        outputs:
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      neo4j_community_large:
+        stack_name: RoboSystemsGraphNeo4jCommunityLargeStaging
+        outputs:
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      neo4j_enterprise_xlarge:
+        stack_name: RoboSystemsGraphNeo4jEnterpriseXlargeStaging
+        outputs:
+          asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
       
   
@@ -275,12 +336,9 @@ patterns:
   # Pattern for worker stacks: RoboSystemsWorker{Name}{Environment}
   worker: "RoboSystemsWorker{name}{environment}"
 
-  # Pattern for Kuzu writer stacks: RoboSystemsKuzuWriters{Tier}{Environment}
-  # Note: Writer stacks keep "Kuzu" prefix as they are backend-specific
-  kuzu_writer: "RoboSystemsKuzuWriters{tier}{environment}"
-
-  # Pattern for Neo4j writer stacks: RoboSystemsNeo4jWriters{Tier}{Environment}
-  neo4j_writer: "RoboSystemsNeo4jWriters{tier}{environment}"
+  # Pattern for graph database writer stacks: RoboSystemsGraph{Backend}{Tier}{Environment}
+  # Both Kuzu and Neo4j use unified Graph prefix
+  graph_writer: "RoboSystemsGraph{backend}{tier}{environment}"
 
   # Pattern for general stacks: RoboSystems{Component}{Environment}
   general: "RoboSystems{component}{environment}"

@@ -57,12 +57,12 @@ on:
 
       # Kuzu Configuration
       writer_tier:
-        description: "Writer tier (standard, enterprise, premium, shared)"
+        description: "Writer tier (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared)"
         required: false
         type: string
-        default: "standard"
+        default: "kuzu-standard"
       shared_repositories:
-        description: "Comma-separated list of shared repositories (required when writer_tier is 'shared')"
+        description: "Comma-separated list of shared repositories (required when writer_tier is 'kuzu-shared')"
         required: false
         type: string
         default: ""

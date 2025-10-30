@@ -1,4 +1,4 @@
-name: Kuzu ASG Refresh
+name: Graph ASG Refresh
 
 on:
   workflow_dispatch:
@@ -10,13 +10,17 @@ on:
         options:
           - staging
           - prod
-      node_type:
-        description: "Node type to refresh"
+      tier:
+        description: "Graph tier to refresh"
         required: true
         type: choice
         options:
-          - writer
-          - shared
+          - kuzu-standard
+          - kuzu-large
+          - kuzu-xlarge
+          - kuzu-shared
+          - neo4j-community-large
+          - neo4j-enterprise-xlarge
       dry_run:
         description: "Dry run - only show what would be refreshed"
         required: false
@@ -44,7 +48,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: kuzu-asg-refresh-${{ inputs.environment }}
+  group: graph-asg-refresh-${{ inputs.tier }}-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
@@ -94,12 +98,12 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
 
-      - name: Kuzu ASG Refresh
+      - name: Graph ASG Refresh
         id: refresh
-        uses: ./.github/actions/refresh-kuzu-asg
+        uses: ./.github/actions/refresh-graph-asg
         with:
           environment: ${{ inputs.environment }}
-          node-type: ${{ inputs.node_type }}
+          tier: ${{ inputs.tier }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           aws-account-id: ${{ steps.aws-account.outputs.account_id }}
           dry-run: ${{ inputs.dry_run && 'true' || 'false' }}
@@ -111,12 +115,12 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "### 🔄 Kuzu Instance Refresh Summary"
+          echo "### 🔄 Graph Database Instance Refresh Summary"
           echo ""
           echo "| Parameter | Value |"
           echo "|-----------|--------|"
+          echo "| Tier | ${{ inputs.tier }} |"
           echo "| Environment | ${{ inputs.environment }} |"
-          echo "| Node Type | ${{ inputs.node_type }} |"
           echo "| Dry Run | ${{ inputs.dry_run }} |"
           echo "| Force Refresh | ${{ inputs.force_refresh }} |"
           echo "| Total Instances | ${{ steps.refresh.outputs.instance-count || '0' }} |"
@@ -136,7 +140,7 @@ jobs:
     steps:
       - name: Notify failure
         run: |
-          echo "❌ Kuzu instance refresh failed"
+          echo "❌ Graph database instance refresh failed"
+          echo "Tier: ${{ inputs.tier }}"
           echo "Environment: ${{ inputs.environment }}"
-          echo "Node Type: ${{ inputs.node_type }}"
           echo "Please check the workflow logs for details."

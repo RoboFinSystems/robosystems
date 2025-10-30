@@ -47,7 +47,7 @@ def graph_usage_collector(self):
       for graph_info in user_graphs:
         graph_id = graph_info["graph_id"]
         user_id = graph_info["user_id"]
-        graph_tier = graph_info.get("graph_tier", "standard")
+        graph_tier = graph_info.get("graph_tier", "kuzu-standard")
 
         logger.debug(f"Collecting metrics for graph {graph_id} (user: {user_id})")
 

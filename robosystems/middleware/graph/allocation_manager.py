@@ -487,7 +487,7 @@ class KuzuAllocationManager:
 
       logger.info(
         f"Allocated {graph_id} to instance {instance.instance_id} ({instance.private_ip}) "
-        f"- tier: {instance_tier.value if instance_tier else 'standard'}, "
+        f"- tier: {instance_tier.value if instance_tier else 'kuzu-standard'}, "
         f"entity: {entity_id}"
       )
 

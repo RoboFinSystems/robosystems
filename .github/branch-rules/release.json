@@ -1,6 +1,7 @@
 {
   "name": "Release Branches",
   "target": "branch",
+  "source_type": "Repository",
   "enforcement": "active",
   "conditions": {
     "ref_name": {

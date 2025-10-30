@@ -50,6 +50,22 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 just init
 ```
 
+## Examples & Demos
+
+See RoboSystems in action with runnable demos that create graphs, load data, and execute queries with the `robosystems-client`:
+
+```bash
+just demo-sec NVDA          # Loads and queries NVIDIA's SEC XBRL financial data
+just demo-accounting        # Creates chart of accounts with 6 months of transactions
+just demo-custom-graph      # Builds custom graph schema with relationship networks
+```
+
+- **[SEC Demo](/examples/sec_demo)** - Real public company financials from SEC XBRL filings
+- **[Accounting Demo](/examples/accounting_demo)** - Double-entry bookkeeping with trial balance and financial statements
+- **[Custom Graph Demo](/examples/custom_graph_demo)** - Generic graph with custom schema and relationship patterns
+
+Each demo has a corresponding [Wiki article](https://github.com/RoboFinSystems/robosystems/wiki) with detailed guides.
+
 ## Development Commands
 
 ### Testing
@@ -60,16 +76,6 @@ just test-cov               # Tests with coverage
 just test-all               # Tests with code quality
 ```
 
-### Code Quality
-
-```bash
-just lint                   # Lint and format code
-just format                 # Code formatting only
-just typecheck              # Type checking codebase
-just cf-lint api            # CloudFormation linting
-just cf-validate worker     # CloudFormation AWS validation
-```
-
 ### Log Monitoring
 
 ```bash
@@ -77,6 +83,8 @@ just logs worker 200                 # View worker logs
 just logs-grep api "pipeline" 500    # Search API logs
 just logs-follow worker              # Tail worker logs
 ```
+
+**See [justfile](justfile) for 50+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
 
 ### Prerequisites
 
@@ -221,18 +229,16 @@ pip install robosystems-client
 **Middleware Components:**
 
 - **[Authentication](/robosystems/middleware/auth/README.md)** - Authentication and authorization
-- **[Credits](/robosystems/middleware/credits/README.md)** - AI credit system
 - **[Graph Routing](/robosystems/middleware/graph/README.md)** - Graph routing layer
 - **[MCP](/robosystems/middleware/mcp/README.md)** - MCP tools and pooling
+- **[Credits](/robosystems/middleware/credits/README.md)** - AI credit system
 - **[Observability](/robosystems/middleware/otel/README.md)** - OpenTelemetry observability
 - **[Robustness](/robosystems/middleware/robustness/README.md)** - Circuit breakers and retry policies
 
-**Security & Testing:**
+**Security & Compliance:**
 
-- **[Security](/SECURITY.md)** - Security features
-- **[Compliance](/COMPLIANCE.md)** - SOC 2 compliance
-- **[Development Guide](/CLAUDE.md)** - Development assistant memory
-- **[Testing](/tests/README.md)** - Testing framework
+- **[SECURITY.md](/SECURITY.md)** - Security features
+- **[COMPLIANCE.md](/COMPLIANCE.md)** - SOC 2 compliance
 
 ## API Reference
 

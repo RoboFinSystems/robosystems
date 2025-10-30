@@ -57,10 +57,10 @@ on:
 
       # Neo4j Configuration
       writer_tier:
-        description: "Writer tier (enterprise, premium)"
+        description: "Writer tier (neo4j-community-large, neo4j-enterprise-xlarge)"
         required: false
         type: string
-        default: "enterprise"
+        default: "neo4j-enterprise-xlarge"
       neo4j_version:
         description: "Neo4j Community Edition version"
         required: false

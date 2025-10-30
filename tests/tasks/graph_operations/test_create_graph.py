@@ -200,6 +200,6 @@ class TestCreateGraphTask:
     assert call_args["graph_id"] is None  # No specific ID requested
     assert call_args["schema_extensions"] == []  # Default empty list
     assert call_args["metadata"] == {}  # Default empty dict
-    assert call_args["tier"] == "standard"  # Default tier
+    assert call_args["tier"] == "kuzu-standard"  # Default tier
     assert call_args["initial_data"] is None
     assert call_args["custom_schema"] is None

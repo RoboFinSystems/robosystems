@@ -53,18 +53,18 @@ Parameters:
   # Kuzu Configuration
   WriterTier:
     Type: String
-    Default: standard
+    Default: kuzu-standard
     AllowedValues:
-      - standard
-      - enterprise
-      - premium
-      - shared
+      - kuzu-standard
+      - kuzu-large
+      - kuzu-xlarge
+      - kuzu-shared
     Description: Writer tier determines capacity allocation per instance
-    ConstraintDescription: Must be standard, enterprise, premium, or shared
+    ConstraintDescription: Must be kuzu-standard, kuzu-large, kuzu-xlarge, or kuzu-shared
   SharedRepositories:
     Type: String
     Default: ""
-    Description: Comma-separated list of shared repositories to host (e.g., sec,industry,economic). Only used when WriterTier is shared
+    Description: Comma-separated list of shared repositories to host (e.g., sec,industry,economic). Only used when WriterTier is kuzu-shared
     AllowedPattern: "^$|^[a-z]+(,[a-z]+)*$"
     ConstraintDescription: Must be a comma-separated list of repository names (sec, industry, economic, regulatory, market, esg)
 
@@ -390,7 +390,7 @@ Resources:
               AWS_STACK_NAME=${AWS::StackName}
               INSTANCE_ID=$INSTANCE_ID
               PRIVATE_IP=$PRIVATE_IP
-              $([ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ] && echo "SHARED_REPOSITORIES=${SharedRepositories}")
+              $([ "${WriterTier}" = "kuzu-shared" ] && [ -n "${SharedRepositories}" ] && echo "SHARED_REPOSITORIES=${SharedRepositories}")
               EOF
 
               # Ensure cfn-signal will run even if setup has issues
@@ -403,7 +403,7 @@ Resources:
               export INSTANCE_REGISTRY_TABLE="robosystems-graph-${Environment}-instance-registry"
               export ALLOCATION_TABLE="robosystems-graph-${Environment}-graph-registry"
               export CLUSTER_TIER="${WriterTier}"
-              export KUZU_NODE_TYPE="$(if [ "${WriterTier}" = "shared" ]; then echo "shared_master"; else echo "writer"; fi)"
+              export KUZU_NODE_TYPE="$(if [ "${WriterTier}" = "kuzu-shared" ]; then echo "shared_master"; else echo "writer"; fi)"
 
               # Secrets will be fetched directly by the container from AWS Secrets Manager
 
@@ -411,7 +411,7 @@ Resources:
               echo "Registering instance in DynamoDB..."
 
               # Build the base item JSON
-              if [ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ]; then
+              if [ "${WriterTier}" = "kuzu-shared" ] && [ -n "${SharedRepositories}" ]; then
                 # Include repository_types for shared repositories (multiple)
                 aws dynamodb put-item \
                   --table-name "$INSTANCE_REGISTRY_TABLE" \
@@ -454,7 +454,7 @@ Resources:
               fi
 
               # Register shared repositories in graph registry if applicable
-              if [ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ]; then
+              if [ "${WriterTier}" = "kuzu-shared" ] && [ -n "${SharedRepositories}" ]; then
                 echo "Registering shared repositories in graph registry..."
                 # Convert comma-separated list to space-separated for iteration
                 REPOS_LIST=$(echo "${SharedRepositories}" | tr ',' ' ')
@@ -487,7 +487,7 @@ Resources:
               # Export required environment variables for the setup script
               export ENVIRONMENT="${Environment}"
               # Export SHARED_REPOSITORIES for shared repository deployments
-              [ "${WriterTier}" = "shared" ] && [ -n "${SharedRepositories}" ] && export SHARED_REPOSITORIES="${SharedRepositories}"
+              [ "${WriterTier}" = "kuzu-shared" ] && [ -n "${SharedRepositories}" ] && export SHARED_REPOSITORIES="${SharedRepositories}"
               export INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type)
               export KUZU_PORT="8001"
               export WRITER_TIER="${WriterTier}"
@@ -502,7 +502,7 @@ Resources:
               export AWS_DEFAULT_REGION="${AWS::Region}"
 
               # Set KUZU_NODE_TYPE based on WriterTier
-              if [ "${WriterTier}" = "shared" ]; then
+              if [ "${WriterTier}" = "kuzu-shared" ]; then
                 export KUZU_NODE_TYPE="shared_master"
               else
                 export KUZU_NODE_TYPE="writer"

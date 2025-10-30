@@ -1,16 +1,16 @@
-name: Refresh Kuzu ASG Refresh
+name: Refresh Graph ASG
 description: |
-  Performs a controlled instance refresh for Kuzu writer EC2 instances using Auto Scaling Groups.
+  Performs a controlled instance refresh for graph database writer EC2 instances using Auto Scaling Groups.
   Handles volume attachment and database allocation carefully to ensure data persistence.
+  Supports both Kuzu and Neo4j backends.
 
 inputs:
   environment:
     description: "Environment (staging, prod)"
     required: true
-  node-type:
-    description: "Node type to refresh ('writer' or 'shared')"
+  tier:
+    description: "Graph tier to refresh (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared, neo4j-community-large, neo4j-enterprise-xlarge)"
     required: true
-    default: "writer"
   aws-region:
     description: "AWS region"
     required: false
@@ -69,9 +69,10 @@ runs:
     - name: Validate Inputs
       shell: bash
       run: |
-        if [[ "${{ inputs.node-type }}" != "writer" && "${{ inputs.node-type }}" != "shared" ]]; then
-          echo "❌ Invalid node-type: ${{ inputs.node-type }}"
-          echo "This action supports writer and shared instances"
+        VALID_TIERS="kuzu-standard|kuzu-large|kuzu-xlarge|kuzu-shared|neo4j-community-large|neo4j-enterprise-xlarge"
+        if [[ ! "${{ inputs.tier }}" =~ ^($VALID_TIERS)$ ]]; then
+          echo "❌ Invalid tier: ${{ inputs.tier }}"
+          echo "Must be one of: kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared, neo4j-community-large, neo4j-enterprise-xlarge"
           exit 1
         fi
 
@@ -85,41 +86,53 @@ runs:
       id: refresh
       shell: bash
       run: |
-        echo "🔄 Starting Kuzu instance refresh..."
+        echo "🔄 Starting graph database instance refresh..."
+        echo "Tier: ${{ inputs.tier }}"
         echo "Environment: ${{ inputs.environment }}"
-        echo "Node Type: ${{ inputs.node-type }}"
         echo "Force Refresh: ${{ inputs.force-refresh }}"
         echo "Dry Run: ${{ inputs.dry-run }}"
         echo ""
 
-        # Get the appropriate stack name based on node type
-        if [ "${{ inputs.node-type }}" == "shared" ]; then
-          if [ "${{ inputs.environment }}" == "staging" ]; then
-            STACK_PREFIX="RoboSystemsKuzuWritersSharedMasterStaging"
-          else
-            STACK_PREFIX="RoboSystemsKuzuWritersSharedMasterProd"
-          fi
-          TAG_NAME="WriterTier"
-          TAG_VALUE="shared"
+        # Convert tier to stack suffix (kuzu-standard → KuzuStandard)
+        TIER="${{ inputs.tier }}"
+        STACK_SUFFIX=$(echo "$TIER" | awk -F'-' '{
+          for(i=1; i<=NF; i++) {
+            printf "%s%s", toupper(substr($i,1,1)), substr($i,2)
+          }
+        }')
+
+        # Build stack name
+        if [ "${{ inputs.environment }}" == "staging" ]; then
+          STACK_NAME="RoboSystemsGraph${STACK_SUFFIX}Staging"
         else
-          if [ "${{ inputs.environment }}" == "staging" ]; then
-            STACK_PREFIX="RoboSystemsKuzuWritersStandardStaging"
-          else
-            STACK_PREFIX="RoboSystemsKuzuWritersStandardProd"
-          fi
+          STACK_NAME="RoboSystemsGraph${STACK_SUFFIX}Prod"
+        fi
+
+        echo "Stack Name: ${STACK_NAME}"
+
+        # Determine tag filtering based on tier
+        if [[ "$TIER" == kuzu-* ]]; then
+          # Kuzu uses KuzuRole tag
           TAG_NAME="KuzuRole"
           TAG_VALUE="writer"
+          echo "Using Kuzu tags: ${TAG_NAME}=${TAG_VALUE}"
+        elif [[ "$TIER" == neo4j-* ]]; then
+          # Neo4j uses GraphRole + GraphBackend tags
+          TAG_NAME="GraphRole"
+          TAG_VALUE="writer"
+          BACKEND_TAG_FILTER="Name=tag:GraphBackend,Values=neo4j"
+          echo "Using Neo4j tags: ${TAG_NAME}=${TAG_VALUE}, GraphBackend=neo4j"
         fi
 
         # Get ASG name from CloudFormation stack
         ASG_NAME=$(aws cloudformation describe-stacks \
-          --stack-name "${STACK_PREFIX}" \
+          --stack-name "${STACK_NAME}" \
           --query "Stacks[0].Outputs[?OutputKey=='WriterAutoScalingGroupName'].OutputValue" \
           --output text \
           --region "${{ inputs.aws-region }}" 2>/dev/null || echo "")
 
         if [ -z "$ASG_NAME" ]; then
-          echo "❌ Could not find ASG for stack: ${STACK_PREFIX}"
+          echo "❌ Could not find ASG for stack: ${STACK_NAME}"
           echo "status=failed" >> $GITHUB_OUTPUT
           echo "count=0" >> $GITHUB_OUTPUT
           exit 1
@@ -130,12 +143,22 @@ runs:
         # Validation phase - check instances and their status
         echo "📊 Validating instance refresh request..."
 
+        # Build filter args for ec2 describe-instances
+        FILTER_ARGS=(
+          --filters
+          "Name=tag:Environment,Values=${{ inputs.environment }}"
+          "Name=tag:${TAG_NAME},Values=${TAG_VALUE}"
+          "Name=instance-state-name,Values=running"
+        )
+
+        # Add backend filter for Neo4j
+        if [[ "$TIER" == neo4j-* ]]; then
+          FILTER_ARGS+=("Name=tag:GraphBackend,Values=neo4j")
+        fi
+
         # Get instances by tag for validation
         INSTANCES=$(aws ec2 describe-instances \
-          --filters \
-            "Name=tag:Environment,Values=${{ inputs.environment }}" \
-            "Name=tag:${TAG_NAME},Values=${TAG_VALUE}" \
-            "Name=instance-state-name,Values=running" \
+          "${FILTER_ARGS[@]}" \
           --query "Reservations[].Instances[].InstanceId" \
           --output text \
           --region "${{ inputs.aws-region }}")
@@ -154,11 +177,11 @@ runs:
         INSTANCE_COUNT=$(echo "$INSTANCES" | wc -w)
         echo "Found $INSTANCE_COUNT instances"
 
-        # For writer instances, check protection and allocation
+        # For non-shared tiers, check protection and allocation
         PROTECTED_COUNT=0
         ALLOCATED_COUNT=0
 
-        if [ "${{ inputs.node-type }}" == "writer" ]; then
+        if [[ "$TIER" != *"shared"* ]]; then
           for INSTANCE_ID in $INSTANCES; do
             # Check protection status
             PROTECTION=$(aws autoscaling describe-auto-scaling-instances \
@@ -368,10 +391,10 @@ runs:
 
               # Verify health
               echo "🏥 Performing health check..."
-              HEALTH_CHECK=$(aws ssm send-command \
+              HEALTH_COMMAND=$(aws ssm send-command \
                 --instance-ids "${NEW_INSTANCE}" \
                 --document-name "AWS-RunShellScript" \
-                --parameters 'commands=["curl -f -s http://localhost:8001/status || echo UNHEALTHY"]' \
+                --parameters 'commands=["curl -f -s http://localhost:8001/health || echo UNHEALTHY"]' \
                 --query "Command.CommandId" \
                 --output text \
                 --region "${{ inputs.aws-region }}")
@@ -379,7 +402,7 @@ runs:
               sleep 10
 
               HEALTH_STATUS=$(aws ssm get-command-invocation \
-                --command-id "${HEALTH_CHECK}" \
+                --command-id "${HEALTH_COMMAND}" \
                 --instance-id "${NEW_INSTANCE}" \
                 --query "StandardOutputContent" \
                 --output text \
