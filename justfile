@@ -188,7 +188,7 @@ setup-gha:
 
 # Bootstrap infrastructure
 bootstrap branch="main":
-    gh workflow run bootstrap.yml --ref {{branch}}
+    gh workflow run gha-runner.yml --ref {{branch}}
 
 # Generate secure random key for JWT_SECRET_KEY and other secrets
 generate-key:

@@ -34,13 +34,6 @@ on:
         required: true
         type: string
 
-      # Instance Configuration
-      ami_id:
-        description: "Amazon Linux 2023 ARM64 AMI ID for bastion host"
-        required: false
-        default: "ami-05ec8931dc5ae74ec"
-        type: string
-
       # Security Groups
       valkey_sg_id:
         description: "Valkey client security group ID for accessing ElastiCache"
@@ -60,16 +53,6 @@ on:
         type: string
         default: "userdata/bastion.sh"
 
-    outputs:
-      bastion_host_id:
-        description: "Bastion Host Instance ID"
-        value: ${{ jobs.action.outputs.bastion_host_id }}
-      bastion_public_ip:
-        description: "Bastion Host Public IP"
-        value: ${{ jobs.action.outputs.bastion_public_ip }}
-      bastion_security_group_id:
-        description: "Bastion Host Security Group ID"
-        value: ${{ jobs.action.outputs.bastion_security_group_id }}
 
     secrets:
       ACTIONS_TOKEN:
@@ -89,10 +72,6 @@ jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
     timeout-minutes: 20
-    outputs:
-      bastion_host_id: ${{ steps.stack-outputs.outputs.bastion_host_id }}
-      bastion_public_ip: ${{ steps.stack-outputs.outputs.bastion_public_ip }}
-      bastion_security_group_id: ${{ steps.stack-outputs.outputs.bastion_security_group_id }}
 
     steps:
       - name: Checkout
@@ -108,6 +87,12 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.aws_region }}
+
+      - name: Get Latest Amazon Linux 2023 ARM64 AMI
+        id: ami
+        uses: ./.github/actions/get-latest-ami
+        with:
+          architecture: arm64
 
       - name: Deploy Bastion CloudFormation Stack
         id: deploy-stack
@@ -130,7 +115,7 @@ jobs:
           BASTION_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=PublicSubnetId,ParameterValue=$PUBLIC_SUBNET_ID \
-                ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
+                ParameterKey=AmiId,ParameterValue=${{ steps.ami.outputs.ami-id }} \
                 ParameterKey=KeyPairName,ParameterValue=${{ secrets.AWS_EC2_KEY_NAME }} \
                 ParameterKey=AllowedCidrBlock,ParameterValue=${{ secrets.BASTION_ALLOWED_CIDR_BLOCK }}"
 
@@ -161,6 +146,7 @@ jobs:
           echo "Environment: ${{ inputs.environment }}"
           echo "VPC configured"
           echo "Public Subnets: ${{ inputs.public_subnet_ids }}"
+          echo "AMI: ${{ steps.ami.outputs.ami-id }} (latest Amazon Linux 2023 ARM64)"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then
@@ -176,6 +162,8 @@ jobs:
                 Key=Component,Value=Bastion \
                 Key=Repository,Value=${{ github.repository }} \
                 Key=CreatedBy,Value=GitHubActions
+
+            echo "stack_changed=true" >> $GITHUB_OUTPUT
           else
             # Update existing stack, handling "No updates" error
             UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
@@ -194,65 +182,21 @@ jobs:
             if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
               echo "Stack is already up to date - no changes needed"
               echo "is_new_stack=false" >> $GITHUB_OUTPUT
+              echo "stack_changed=false" >> $GITHUB_OUTPUT
             elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
               echo "Error updating stack: $UPDATE_OUTPUT"
               exit 1
             else
               echo "Stack update initiated successfully"
               echo "is_new_stack=false" >> $GITHUB_OUTPUT
+              echo "stack_changed=true" >> $GITHUB_OUTPUT
             fi
           fi
 
       - name: Monitor Stack Deployment
+        if: steps.deploy-stack.outputs.stack_changed == 'true'
         uses: ./.github/actions/monitor-stack-deployment
         with:
           stack-name: ${{ inputs.stack_name }}
           timeout: "1800"
           interval: "10"
-
-      - name: Get Stack Outputs
-        id: stack-outputs
-        run: |
-          echo "Retrieving stack outputs..."
-
-          # Get Bastion Host Instance ID
-          BASTION_HOST_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack_name }} \
-            --query "Stacks[0].Outputs[?OutputKey=='BastionHostId'].OutputValue" \
-            --output text)
-
-          if [ -n "$BASTION_HOST_ID" ]; then
-            echo "bastion_host_id=$BASTION_HOST_ID" >> $GITHUB_OUTPUT
-            echo "Bastion Host configured successfully"
-          else
-            echo "Error: Could not retrieve Bastion Host ID"
-            exit 1
-          fi
-
-          # Get Bastion Public IP
-          BASTION_PUBLIC_IP=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack_name }} \
-            --query "Stacks[0].Outputs[?OutputKey=='BastionPublicIP'].OutputValue" \
-            --output text)
-
-          if [ -n "$BASTION_PUBLIC_IP" ]; then
-            echo "bastion_public_ip=$BASTION_PUBLIC_IP" >> $GITHUB_OUTPUT
-            echo "Bastion Public IP configured successfully"
-          else
-            echo "Error: Could not retrieve Bastion Public IP"
-            exit 1
-          fi
-
-          # Get Bastion Security Group ID
-          BASTION_SG_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack_name }} \
-            --query "Stacks[0].Outputs[?OutputKey=='BastionSecurityGroupId'].OutputValue" \
-            --output text)
-
-          if [ -n "$BASTION_SG_ID" ]; then
-            echo "bastion_security_group_id=$BASTION_SG_ID" >> $GITHUB_OUTPUT
-            echo "Bastion Security Group configured successfully"
-          else
-            echo "Error: Could not retrieve Bastion Security Group ID"
-            exit 1
-          fi

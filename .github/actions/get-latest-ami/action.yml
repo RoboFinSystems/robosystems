@@ -1,0 +1,99 @@
+name: "Get Latest AMI"
+description: "Looks up the latest AMI from AWS SSM Parameter Store"
+
+inputs:
+  architecture:
+    description: "CPU architecture (x86_64 or arm64)"
+    required: true
+    type: string
+  os-type:
+    description: "Operating system type (amazon-linux-2023)"
+    required: false
+    default: "amazon-linux-2023"
+    type: string
+
+outputs:
+  ami-id:
+    description: "Latest AMI ID"
+    value: ${{ steps.lookup.outputs.ami_id }}
+  ami-name:
+    description: "AMI Name (if available)"
+    value: ${{ steps.lookup.outputs.ami_name }}
+  ami-description:
+    description: "AMI Description (if available)"
+    value: ${{ steps.lookup.outputs.ami_description }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Lookup Latest AMI
+      id: lookup
+      shell: bash
+      run: |
+        echo "🔍 Looking up latest ${{ inputs.os-type }} ${{ inputs.architecture }} AMI..."
+
+        # Determine SSM parameter path based on OS type and architecture
+        case "${{ inputs.os-type }}" in
+          "amazon-linux-2023")
+            case "${{ inputs.architecture }}" in
+              "x86_64")
+                SSM_PATH="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+                ;;
+              "arm64")
+                SSM_PATH="/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
+                ;;
+              *)
+                echo "❌ ERROR: Unsupported architecture: ${{ inputs.architecture }}"
+                echo "Supported architectures: x86_64, arm64"
+                exit 1
+                ;;
+            esac
+            ;;
+          *)
+            echo "❌ ERROR: Unsupported OS type: ${{ inputs.os-type }}"
+            echo "Supported OS types: amazon-linux-2023"
+            exit 1
+            ;;
+        esac
+
+        echo "Using SSM Parameter: $SSM_PATH"
+
+        # Look up AMI ID from SSM Parameter Store
+        AMI_ID=$(aws ssm get-parameter \
+          --name "$SSM_PATH" \
+          --query "Parameter.Value" \
+          --output text 2>/dev/null)
+
+        if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
+          echo "❌ ERROR: Could not retrieve AMI ID from SSM Parameter Store"
+          echo "SSM Path: $SSM_PATH"
+          exit 1
+        fi
+
+        echo "✅ Latest AMI ID: $AMI_ID"
+        echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+
+        # Get additional AMI details
+        echo "Fetching AMI details..."
+        AMI_DETAILS=$(aws ec2 describe-images \
+          --image-ids "$AMI_ID" \
+          --query "Images[0].[Name,Description]" \
+          --output text 2>/dev/null || echo "")
+
+        if [ -n "$AMI_DETAILS" ]; then
+          AMI_NAME=$(echo "$AMI_DETAILS" | cut -f1)
+          AMI_DESC=$(echo "$AMI_DETAILS" | cut -f2)
+
+          echo "   Name: $AMI_NAME"
+          echo "   Description: $AMI_DESC"
+
+          echo "ami_name=$AMI_NAME" >> $GITHUB_OUTPUT
+          echo "ami_description=$AMI_DESC" >> $GITHUB_OUTPUT
+        else
+          echo "   (Could not fetch additional details)"
+          echo "ami_name=" >> $GITHUB_OUTPUT
+          echo "ami_description=" >> $GITHUB_OUTPUT
+        fi
+
+        echo ""
+        echo "✅ AMI lookup completed successfully"

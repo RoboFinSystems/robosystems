@@ -12,7 +12,7 @@ echo "Account ID: ${AWS_ACCOUNT_ID}"
 
 # Update and install packages
 dnf update -y
-dnf install -y amazon-ssm-agent amazon-cloudwatch-agent htop tmux postgresql15 docker git
+dnf install -y amazon-ssm-agent amazon-cloudwatch-agent htop tmux postgresql15 docker git jq
 
 # Ensure SSM agent is running
 systemctl enable amazon-ssm-agent
@@ -443,49 +443,31 @@ load_environment() {
 
     print_info "Loading environment configuration..."
 
-    # Get database connection details dynamically
+    # Get infrastructure endpoints from CloudFormation
+    # The Python code will fetch credentials from Secrets Manager directly
     if [ "$ENVIRONMENT" = "prod" ]; then
-        RDS_ENDPOINT=$(aws cloudformation describe-stacks \
-            --stack-name RoboSystemsPostgresIAMProd \
-            --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue" \
-            --output text 2>/dev/null)
-        SECRET_ID="robosystems/prod/postgres"
         VALKEY_ENDPOINT=$(aws cloudformation describe-stacks \
             --stack-name RoboSystemsValkey \
             --query "Stacks[0].Outputs[?OutputKey=='ValkeyPrimaryEndpoint'].OutputValue" \
             --output text 2>/dev/null)
     else
-        RDS_ENDPOINT=$(aws cloudformation describe-stacks \
-            --stack-name RoboSystemsPostgresIAMStaging \
-            --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue" \
-            --output text 2>/dev/null)
-        SECRET_ID="robosystems/staging/postgres"
         VALKEY_ENDPOINT=$(aws cloudformation describe-stacks \
             --stack-name RoboSystemsValkeyStaging \
             --query "Stacks[0].Outputs[?OutputKey=='ValkeyPrimaryEndpoint'].OutputValue" \
             --output text 2>/dev/null)
     fi
 
-    # Get database credentials from Secrets Manager
-    DB_SECRET=$(aws secretsmanager get-secret-value \
-        --secret-id "$SECRET_ID" \
-        --query SecretString \
-        --output text 2>/dev/null)
-
-    if [ -n "$DB_SECRET" ]; then
-        DB_PASSWORD=$(echo "$DB_SECRET" | jq -r '.POSTGRES_PASSWORD // .password')
-        DB_NAME=$(echo "$DB_SECRET" | jq -r '.POSTGRES_DB // .database // "robosystems"')
-        DB_USER=$(echo "$DB_SECRET" | jq -r '.POSTGRES_USER // .username // "postgres"')
-
-        export DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@${RDS_ENDPOINT}:5432/${DB_NAME}?sslmode=require"
-    fi
-
+    # Export only basic connection URLs - Python code will add authentication via Secrets Manager
+    # This matches how production ECS tasks work
     if [ -n "$VALKEY_ENDPOINT" ]; then
-        export CELERY_BROKER_URL="redis://${VALKEY_ENDPOINT}:6379/0"
-        export CELERY_RESULT_BACKEND="redis://${VALKEY_ENDPOINT}:6379/1"
+        # Note: Python code in robosystems.config.env will use secrets_manager.py to fetch
+        # the VALKEY_AUTH_TOKEN and build the authenticated URL
+        export VALKEY_URL="redis://${VALKEY_ENDPOINT}:6379"
+        print_info "Valkey endpoint configured (auth will be retrieved by Python code)"
     fi
 
     print_success "Environment loaded successfully"
+    print_info "Container will use IAM role to fetch secrets from Secrets Manager"
 }
 
 # Function to refresh Docker image
@@ -519,19 +501,19 @@ refresh_docker_image() {
     print_success "Successfully pulled latest image"
 }
 
-# Function to run command in Docker container
+# Function to run command in Docker container (proven pattern from run-migrations.sh)
 run_in_docker() {
     local command="$1"
 
+    # The Python code will fetch remaining secrets (Valkey AUTH, etc.) from Secrets Manager automatically
+    # We only need to pass VALKEY_URL endpoint and ENVIRONMENT
     docker run --rm --entrypoint /usr/bin/env \
-        -e DATABASE_URL="$DATABASE_URL" \
-        -e CELERY_BROKER_URL="$CELERY_BROKER_URL" \
-        -e CELERY_RESULT_BACKEND="$CELERY_RESULT_BACKEND" \
         -e ENVIRONMENT="$ENVIRONMENT" \
         -e AWS_REGION="$AWS_REGION" \
         -e AWS_ACCOUNT_ID="$AWS_ACCOUNT_ID" \
+        -e VALKEY_URL="$VALKEY_URL" \
         "$DOCKER_IMAGE" \
-        bash -c "$command"
+        $command
 }
 
 # Main execution
@@ -560,150 +542,223 @@ main() {
 
     # Execute the operation
     case "$operation" in
-        # Credit operations
-        credit-allocate-user)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin allocate-user $parameters"
+        ## SEC Operations ##
+        sec-load)
+            run_in_docker "uv run python -m robosystems.scripts.sec_local load $parameters"
             ;;
-
-        credit-allocate-graph)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin allocate-graph $parameters"
+        sec-health)
+            run_in_docker "uv run python -m robosystems.scripts.sec_local_health $parameters"
             ;;
-
-        credit-allocate-all)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin allocate-all $parameters"
-            ;;
-
-        credit-bonus)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin bonus $parameters"
-            ;;
-
-        credit-health)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin health"
-            ;;
-
-        # Repository access operations
-        repo-grant)
-            run_in_docker "uv run python robosystems/scripts/repository_access_manager.py grant $parameters"
-            ;;
-
-        repo-revoke)
-            run_in_docker "uv run python robosystems/scripts/repository_access_manager.py revoke $parameters"
-            ;;
-
-        repo-list)
-            run_in_docker "uv run python robosystems/scripts/repository_access_manager.py list $parameters"
-            ;;
-
-        repo-check)
-            run_in_docker "uv run python robosystems/scripts/repository_access_manager.py check $parameters"
-            ;;
-
-        # DLQ operations
-        dlq-stats)
-            run_in_docker "uv run python -m robosystems.scripts.manage_dlq stats"
-            ;;
-
-        dlq-health)
-            run_in_docker "uv run python -m robosystems.scripts.manage_dlq health"
-            ;;
-
-        dlq-list)
-            run_in_docker "uv run python -m robosystems.scripts.manage_dlq list $parameters"
-            ;;
-
-        dlq-reprocess)
-            run_in_docker "uv run python -m robosystems.scripts.manage_dlq reprocess $parameters"
-            ;;
-
-        dlq-purge)
-            print_warning "WARNING: This will purge all DLQ messages!"
-            read -p "Type 'CONFIRM' to proceed: " confirmation
-            if [ "$confirmation" == "CONFIRM" ]; then
-                run_in_docker "uv run python -m robosystems.scripts.manage_dlq purge --confirm"
-            else
-                print_error "Operation cancelled"
-                log_operation "$operation" "$parameters" "CANCELLED"
-                exit 1
-            fi
-            ;;
-
-        # SEC pipeline operations
         sec-reset)
             print_warning "WARNING: This will reset the SEC database!"
             read -p "Type 'CONFIRM' to proceed: " confirmation
             if [ "$confirmation" == "CONFIRM" ]; then
-                run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator reset --confirm $parameters"
+                run_in_docker "uv run python -m robosystems.scripts.sec_local reset --confirm"
             else
                 print_error "Operation cancelled"
-                log_operation "$operation" "$parameters" "CANCELLED"
+                exit 1
+            fi
+            ;;
+        sec-plan)
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator plan $parameters"
+            ;;
+        sec-phase)
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase $parameters"
+            ;;
+        sec-status)
+            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator status"
+            ;;
+
+        ## Graph Operations ##
+        graph-query)
+            run_in_docker "uv run python -m robosystems.scripts.graph_query $parameters"
+            ;;
+        graph-health)
+            run_in_docker "uv run python -m robosystems.scripts.graph_query --command health $parameters"
+            ;;
+        graph-info)
+            run_in_docker "uv run python -m robosystems.scripts.graph_query --command info $parameters"
+            ;;
+        tables-query)
+            run_in_docker "uv run python -m robosystems.scripts.tables_query $parameters"
+            ;;
+
+        ## Repository Access Management ##
+        repo-grant-access)
+            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager grant $parameters"
+            ;;
+        repo-revoke-access)
+            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager revoke $parameters"
+            ;;
+        repo-list-access)
+            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager list"
+            ;;
+        repo-list-users)
+            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager list $parameters"
+            ;;
+        repo-list-repositories)
+            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager repositories"
+            ;;
+        repo-check-access)
+            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager check $parameters"
+            ;;
+
+        ## Credit Management ##
+        credit-health)
+            run_in_docker "uv run python -m robosystems.scripts.credit_admin health"
+            ;;
+        credit-bonus-graph)
+            run_in_docker "uv run python -m robosystems.scripts.credit_admin bonus-graph $parameters"
+            ;;
+        credit-bonus-repository)
+            run_in_docker "uv run python -m robosystems.scripts.credit_admin bonus-repository $parameters"
+            ;;
+        credit-force-allocate-user)
+            print_warning "WARNING: Manual credit allocation (bypasses normal schedule)"
+            read -p "Type 'CONFIRM' to proceed: " confirmation
+            if [ "$confirmation" == "CONFIRM" ]; then
+                run_in_docker "uv run python -m robosystems.scripts.credit_admin force-allocate-user $parameters --confirm"
+            else
+                print_error "Operation cancelled"
+                exit 1
+            fi
+            ;;
+        credit-force-allocate-all)
+            print_warning "WARNING: Manual credit allocation for ALL users!"
+            read -p "Type 'CONFIRM' to proceed: " confirmation
+            if [ "$confirmation" == "CONFIRM" ]; then
+                run_in_docker "uv run python -m robosystems.scripts.credit_admin force-allocate-all --confirm"
+            else
+                print_error "Operation cancelled"
                 exit 1
             fi
             ;;
 
-        sec-plan)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator plan $parameters"
+        ## Valkey/Queue Management ##
+        valkey-clear-queue)
+            print_warning "WARNING: This will clear Valkey queue!"
+            read -p "Type 'CONFIRM' to proceed: " confirmation
+            if [ "$confirmation" == "CONFIRM" ]; then
+                run_in_docker "uv run python -m robosystems.scripts.clear_valkey_queues $parameters"
+            else
+                print_error "Operation cancelled"
+                exit 1
+            fi
+            ;;
+        valkey-list-queue)
+            run_in_docker "uv run python -m robosystems.scripts.clear_valkey_queues --list-only $parameters"
             ;;
 
-        sec-download)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase download $parameters"
+        ## Database Operations ##
+        db-info)
+            run_in_docker "uv run python -m robosystems.scripts.db_manager info"
+            ;;
+        db-list-users)
+            run_in_docker "uv run python -m robosystems.scripts.db_manager list-users"
+            ;;
+        db-create-user)
+            run_in_docker "uv run python -m robosystems.scripts.db_manager create-user $parameters"
+            ;;
+        db-create-key)
+            run_in_docker "uv run python -m robosystems.scripts.db_manager create-key $parameters"
             ;;
 
-        sec-process)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase process $parameters"
+        ## User Management ##
+        create-user)
+            run_in_docker "uv run python -m robosystems.scripts.create_test_user $parameters"
             ;;
 
-        sec-consolidate)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase consolidate $parameters"
-            ;;
-
-        sec-ingest)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase ingest $parameters"
-            ;;
-
-        sec-status)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator status $parameters"
+        ## Generic Script Runner ##
+        run)
+            if [ -z "$parameters" ]; then
+                print_error "Usage: run <uv-command> [args...]"
+                print_info "Examples:"
+                print_info "  run python -m robosystems.scripts.some_script --help"
+                print_info "  run python robosystems/scripts/custom_script.py"
+                exit 1
+            fi
+            run_in_docker "uv run $parameters"
             ;;
 
         # Help
         help|--help|-h|"")
-            echo "Available operations:"
-            echo ""
-            echo "Credit Management:"
-            echo "  credit-allocate-user USER_ID [--dry-run]"
-            echo "  credit-allocate-graph GRAPH_ID [--dry-run]"
-            echo "  credit-allocate-all [--dry-run]"
-            echo "  credit-bonus GRAPH_ID --amount AMOUNT --description TEXT [--dry-run]"
-            echo "  credit-health"
-            echo ""
-            echo "Repository Access:"
-            echo "  repo-grant USER_ID REPOSITORY ACCESS_LEVEL [--expires-days N]"
-            echo "  repo-revoke USER_ID REPOSITORY"
-            echo "  repo-list [--repository REPO]"
-            echo "  repo-check USER_ID [--repository REPO]"
-            echo ""
-            echo "Dead Letter Queue:"
-            echo "  dlq-stats"
-            echo "  dlq-health"
-            echo "  dlq-list [--limit N]"
-            echo "  dlq-reprocess TASK_ID"
-            echo "  dlq-purge"
-            echo ""
-            echo "SEC Pipeline:"
-            echo "  sec-reset"
-            echo "  sec-plan --start-year YEAR --end-year YEAR [--max-companies N]"
-            echo "  sec-download [--resume] [--retry-failed]"
-            echo "  sec-process [--resume] [--retry-failed]"
-            echo "  sec-consolidate [--resume] [--retry-failed]"
-            echo "  sec-ingest [--resume] [--retry-failed]"
-            echo "  sec-status"
-            echo ""
-            echo "Examples:"
-            echo "  admin credit-allocate-user user_123"
-            echo "  admin repo-grant user_123 sec admin"
-            echo "  admin sec-plan --start-year 2024 --end-year 2025 --max-companies 10"
-            echo "  admin sec-download"
-            echo "  admin sec-process"
-            echo "  admin sec-status"
+            cat << 'HELP_EOF'
+
+======================================================================
+RoboSystems Admin Operations - Production/Staging Infrastructure
+======================================================================
+
+SEC Operations:
+  sec-load --ticker TICKER [--year YEAR] [--backend kuzu]
+  sec-health [--verbose] [--json]
+  sec-reset
+  sec-plan --start-year YEAR --end-year YEAR [--max-companies N]
+  sec-phase --phase [download|process|consolidate|ingest] [--resume] [--retry-failed]
+  sec-status
+
+Graph Operations:
+  graph-query --graph-id ID --query 'CYPHER' [--format table|json]
+  graph-health [--url URL]
+  graph-info --graph-id ID [--url URL]
+  tables-query --graph-id ID --query 'SQL' [--format table|json]
+
+Repository Access Management:
+  repo-grant-access USER_ID REPOSITORY ACCESS_LEVEL
+  repo-revoke-access USER_ID REPOSITORY
+  repo-list-access
+  repo-list-users --repository REPO
+  repo-list-repositories
+  repo-check-access USER_ID [--repository REPO]
+
+Credit Management:
+  credit-health
+  credit-bonus-graph GRAPH_ID --amount N --description "TEXT"
+  credit-bonus-repository USER_ID REPO --amount N --description "TEXT"
+  credit-force-allocate-user USER_ID (requires CONFIRM)
+  credit-force-allocate-all (requires CONFIRM)
+
+Valkey/Queue Management:
+  valkey-clear-queue QUEUE_NAME (requires CONFIRM)
+  valkey-list-queue QUEUE_NAME
+
+Database Operations:
+  db-info
+  db-list-users
+  db-create-user EMAIL NAME PASSWORD
+  db-create-key EMAIL KEY_NAME
+
+User Management:
+  create-user [--email EMAIL] [--with-sec-access] [--json]
+
+Generic Runner (for any other script):
+  run <uv-command> [args...]
+
+======================================================================
+Examples:
+======================================================================
+
+# Load SEC data for NVIDIA 2024
+admin sec-load --ticker NVDA --year 2024
+
+# Check SEC database health
+admin sec-health --verbose
+
+# Query a graph
+admin graph-query --graph-id kg123abc --query 'MATCH (e:Entity {ticker: "NVDA"}) RETURN e'
+
+# Grant repository access
+admin repo-grant-access user_xyz sec admin
+
+# Check credit system health
+admin credit-health
+
+# Create test user with SEC access
+admin create-user --email test@example.com --with-sec-access --json
+
+# Run custom script
+admin run python -m robosystems.scripts.custom_script --help
+
+HELP_EOF
             ;;
 
         *)
@@ -764,3 +819,14 @@ EOF_LOGS
 
 # Script completed successfully
 echo "Bastion host initialization completed successfully"
+
+# Auto-stop: Bastion is stopped by default after initialization
+# This ensures the bastion only runs when manually started by an admin
+echo "Auto-stopping bastion instance after initialization..."
+INSTANCE_ID=$(ec2-metadata --instance-id | cut -d' ' -f2)
+echo "Instance ID: $INSTANCE_ID"
+
+# Stop this instance
+aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "${AWS_REGION}"
+
+echo "Bastion instance will stop shortly"
