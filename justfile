@@ -16,11 +16,11 @@
 
 _default_env := ".env.local"
 
-## Default ##
 default:
     @just --list
 
 ## Docker ##
+
 # Start service
 start profile="robosystems" env=_default_env build="--build" detached="--detach":
     @just compose-up {{profile}} {{env}} {{build}} {{detached}}
@@ -63,24 +63,8 @@ logs-follow container="worker":
 logs-grep container="worker" pattern="ERROR" lines="100":
     docker logs {{container}} --tail {{lines}} | grep -E "{{pattern}}"
 
-## Demo Scripts ##
-# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-accounting flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
-
-# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
-
-# Setup SEC repository demo - loads data, grants access, updates config
-demo-sec ticker="NVDA" year="2025" skip_queries="false":
-    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
-
-# Run SEC demo preset queries
-demo-sec-query:
-    uv run examples/sec_demo/query_examples.py --all
-
 ## Development Environment ##
+
 # Initialize complete development environment (run after bootstrap)
 init:
     uv python install $(cat .python-version)
@@ -103,7 +87,26 @@ update:
     uv lock --upgrade
     uv sync --all-extras --dev
 
+## Demo Scripts ##
+
+# Setup SEC repository demo - loads data, grants access, updates config
+demo-sec ticker="NVDA" year="2025" skip_queries="false":
+    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
+
+# Run SEC demo preset queries
+demo-sec-query all="false":
+    uv run examples/sec_demo/query_examples.py {{ if all == "true" { "--all" } else { "" } }}
+
+# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-accounting flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
+# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
 ## Testing ##
+
 # Run all tests (excludes slow tests)
 test-all:
     @just test
@@ -162,6 +165,7 @@ cf-validate template:
     uv run aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml
 
 ## CI/CD ##
+
 # Create a feature branch
 create-feature type="feature" name="" base="main":
     @bin/tools/create-feature.sh {{type}} {{name}} {{base}}
@@ -178,35 +182,35 @@ create-release version="patch" deploy="staging":
 deploy environment="prod" ref="":
     @bin/tools/deploy.sh {{environment}} {{ref}}
 
-# Initial Setup - AWS Secrets Manager
+# Bastion tunnel
+bastion-tunnel environment service key:
+    @bin/tools/tunnels.sh {{environment}} {{service}} --key ~/.ssh/{{key}}
+
+# AWS Secrets Manager - Initial Setup
 setup-aws:
     @bin/setup/aws.sh
 
-# Initial Setup - GitHub Repository
+# GitHub Repository - Initial Setup
 setup-gha:
     @bin/setup/gha.sh
 
-# Bootstrap infrastructure
+# GitHub Actions Runner - Bootstrap infrastructure
 bootstrap branch="main":
     gh workflow run gha-runner.yml --ref {{branch}}
 
-# Generate secure random key for JWT_SECRET_KEY and other secrets
+# Generate secure random key for secrets
 generate-key:
     @echo "Generated secure 32-byte base64 key:"
     @openssl rand -base64 32
 
-# Generate multiple secure keys for all secret fields
+# Generate multiple secure keys for all secrets
 generate-keys:
     @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
     @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
     @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
 
-## SSH ##
-# Bastion tunnel
-bastion-tunnel environment service key:
-    @bin/tools/tunnels.sh {{environment}} {{service}} --key ~/.ssh/{{key}}
-
 ## Apps ##
+
 # Install apps
 install-apps:
     test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
@@ -214,6 +218,7 @@ install-apps:
     test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
 
 ## Development Server ##
+
 # Start development server
 api env=_default_env:
     UV_ENV_FILE={{env}} uv run uvicorn main:app --reload
@@ -235,6 +240,7 @@ flower env=_default_env:
     UV_ENV_FILE={{env}} uv run celery -A robosystems flower --port=5555
 
 ## Database Operations ##
+
 # Create new migration
 migrate-create message env=_default_env:
     UV_ENV_FILE={{env}} uv run alembic revision --autogenerate -m "{{message}}"
@@ -259,7 +265,6 @@ migrate-current env=_default_env:
 migrate-remote environment key:
     @just bastion-tunnel {{environment}} migrate {{key}}
 
-# Initialize database with sample data
 # Reset database (drop and recreate all auth tables)
 db-reset env=_default_env:
     UV_ENV_FILE={{env}} uv run alembic downgrade base
@@ -283,6 +288,7 @@ db-create-test-user mode="" base_url="http://localhost:8000" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode != "" { "--modes " + mode } else { "" } }}
 
 ## Graph API ##
+
 # Graph API - health check
 graph-health url="http://localhost:8001" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --command health
@@ -307,8 +313,8 @@ kuzu-query graph_id query format="table" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
 
 # DuckDB staging database direct query (bypasses API)
-duckdb-query db_name query format="table" env=_default_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{db_name}}.duckdb --query "{{query}}" --format {{format}}
+duckdb-query graph_id query format="table" env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb --query "{{query}}" --format {{format}}
 
 # Interactive query modes - launch REPL for each database type
 graph-query-i graph_id url="http://localhost:8001" env=_default_env:
@@ -320,8 +326,8 @@ tables-query-i graph_id url="http://localhost:8001" env=_default_env:
 kuzu-query-i graph_id env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu
 
-duckdb-query-i db_name env=_default_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{db_name}}.duckdb
+duckdb-query-i graph_id env=_default_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb
 
 ## SEC Local Pipeline - Testing and Development ##
 # SEC Local supports two ingestion approaches:
@@ -433,6 +439,7 @@ credit-force-allocate-all confirm="" env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-all {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 ## Valkey/Redis ##
+
 # Clear Valkey/Redis queues
 valkey-clear-queue queue env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues {{queue}}
@@ -446,6 +453,7 @@ valkey-list-queue queue env=_default_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
 
 ## Misc ##
+
 # Clean up development artifacts
 clean:
     rm -rf .pytest_cache
@@ -455,7 +463,7 @@ clean:
     find . -type d -name "__pycache__" -exec rm -rf {} +
     find . -type f -name "*.pyc" -delete
 
-# Clean up development data (more aggressive cleanup)
+# Clean up development data (reset all local data)
 clean-data:
     @just clean
     rm -rf ./data/kuzu-dbs
