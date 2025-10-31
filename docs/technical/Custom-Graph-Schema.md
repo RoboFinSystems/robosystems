@@ -11,6 +11,7 @@ The Custom Graph Schema demo demonstrates how to create graph databases with cus
 - **Reusable Templates**: `schema.json` as a copy-and-customize starting point
 - **Type-Safe Schemas**: Validated property types and required fields
 - **Graph-Native Queries**: Leverage Cypher for powerful data analysis
+- **AI-Powered Analysis**: Query demo graph data using natural language through any MCP-compatible AI tool
 
 **Example Domain - People, Companies, and Projects:**
 
@@ -410,6 +411,67 @@ This launches an interactive session where you can:
 - **Instant Feedback**: See results immediately after each query
 - **Explore Freely**: Test different queries without rerunning the script
 - **Learning Tool**: Great for learning Cypher query patterns
+
+## Accessing with MCP Client (For AI Agents)
+
+You can access the demo custom graph through any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, etc.) using the MCP protocol.
+
+**Setup MCP Client:**
+
+1. Run `just demo-custom-graph` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
+
+2. Get your API key and graph ID from the credentials file:
+```bash
+cat examples/credentials/config.json | grep -E "api_key|graph_id"
+```
+
+3. Add to your MCP tool config. For Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "robosystems": {
+      "command": "npx",
+      "args": ["-y", "@robosystems/mcp"],
+      "env": {
+        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
+        "ROBOSYSTEMS_API_KEY": "rfsabc123xyz...",
+        "ROBOSYSTEMS_GRAPH_ID": "your-graph-id"
+      }
+    }
+  }
+}
+```
+
+**Important:** Replace `rfsabc123xyz...` with your actual API key and `your-graph-id` with your actual graph ID from the credentials file.
+
+4. Restart your MCP-compatible AI tool
+
+5. The MCP server provides these tools:
+   - `get-graph-schema` - View available node and relationship types
+   - `read-graph-cypher` - Run Cypher queries
+   - `discover-properties` - Explore node properties
+   - `get-example-queries` - Get sample queries
+
+**Example MCP Usage:**
+
+```
+You: Show me all people who work on multiple projects in the demo
+
+The AI will use:
+1. get-graph-schema to understand Person and Project relationships
+2. discover-properties to find relevant Person and Project properties
+3. read-graph-cypher to query for multi-project contributors
+```
+
+```
+You: Which companies collaborate on the same projects in the demo?
+
+The AI will use:
+1. get-graph-schema to understand the COMPANY_SPONSORS_PROJECT relationships
+2. read-graph-cypher to find shared projects between companies
+3. Present collaboration patterns with company names and project details
+```
 
 ## Creating Your Own Custom Schema
 

@@ -11,6 +11,7 @@ The Accounting Demo demonstrates RoboSystems' capabilities for accounting and fi
 - **Flexible Analysis**: Run ad-hoc queries without predefined reports
 - **Audit Trail**: Complete transaction history with relationship tracking
 - **Graph-native Accounting**: Leverage graph relationships for multi-dimensional analysis
+- **AI-Powered Financial Analysis**: Query demo accounting data using natural language through any MCP-compatible AI tool
 
 **What gets created:**
 
@@ -470,6 +471,67 @@ Transaction (Invoice #1234, 2025-05-15)
 ```
 
 This represents: *Invoiced $5,000 for consulting services, increasing Accounts Receivable (debit) and Consulting Revenue (credit).*
+
+## Accessing with MCP Client (For AI Agents)
+
+You can access the demo accounting graph through any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, etc.) using the MCP protocol.
+
+**Setup MCP Client:**
+
+1. Run `just demo-accounting` to create credentials automatically (your API key is saved to `examples/accounting_demo/credentials/config.json`)
+
+2. Get your API key and graph ID from the credentials file:
+```bash
+cat examples/accounting_demo/credentials/config.json | grep -E "api_key|graph_id"
+```
+
+3. Add to your MCP tool config. For Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "robosystems": {
+      "command": "npx",
+      "args": ["-y", "@robosystems/mcp"],
+      "env": {
+        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
+        "ROBOSYSTEMS_API_KEY": "rfsabc123xyz...",
+        "ROBOSYSTEMS_GRAPH_ID": "your-graph-id"
+      }
+    }
+  }
+}
+```
+
+**Important:** Replace `rfsabc123xyz...` with your actual API key and `your-graph-id` with your actual graph ID from the credentials file.
+
+4. Restart your MCP-compatible AI tool
+
+5. The MCP server provides these tools:
+   - `get-graph-schema` - View available node and relationship types
+   - `read-graph-cypher` - Run Cypher queries
+   - `discover-properties` - Explore node properties
+   - `get-example-queries` - Get sample queries
+
+**Example MCP Usage:**
+
+```
+You: Show me the trial balance for the accounting demo
+
+The AI will use:
+1. get-graph-schema to understand the accounting structure
+2. discover-properties to find Element and LineItem properties
+3. read-graph-cypher to calculate trial balance from debits and credits
+```
+
+```
+You: What were the expenses last month in the demo?
+
+The AI will use:
+1. get-graph-schema to understand Transaction relationships
+2. read-graph-cypher to query expense transactions by date
+3. Present results aggregated by expense category
+```
 
 ## Querying with just Commands
 

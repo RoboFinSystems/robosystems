@@ -12,6 +12,7 @@ The SEC local pipeline allows you to:
 - Store XBRL data in a local Kuzu graph database
 - Query financial data using Cypher or the MCP client
 - Inspect staged data in DuckDB before ingestion
+- Query SEC filings using natural language through any MCP-compatible AI tool
 
 ## Prerequisites
 
@@ -147,14 +148,68 @@ just db-create-test-user sec
 
 You have multiple options for accessing and querying the loaded SEC data:
 
-1. **[Direct Cypher Queries](#option-1-direct-cypher-queries-for-development)** - Command-line Cypher queries via `just graph-query` 
-2. **[Query Staging Tables](#option-2-query-staging-tables-for-data-validation)** - SQL queries on DuckDB staging via `just tables-query`
-3. **[MCP Client](#option-3-mcp-client-for-ai-agents)** - AI agent integration through Claude Desktop
+1. **[MCP Client](#option-1-mcp-client-for-ai-agents)** - AI agent integration through Claude Desktop
+2. **[Direct Cypher Queries](#option-2-direct-cypher-queries-for-development)** - Command-line Cypher queries via `just graph-query`
+3. **[Query Staging Tables](#option-3-query-staging-tables-for-data-validation)** - SQL queries on DuckDB staging via `just tables-query`
 4. **[Python API](#option-4-python-api-for-applications)** - Programmatic access via RoboSystems Python client
 5. **[G.V() Visual Explorer](#option-5-gv-visual-graph-explorer-for-interactive-exploration)** - Interactive graph visualization (recommended tool)
 6. **[SQL IDE Tools](#option-6-sql-ide-tools-for-staging-data-validation)** - Direct database access with DuckDB-compatible IDEs
 
-### Option 1: Direct Cypher Queries (For Development)
+### Option 1: MCP Client (For AI Agents)
+
+Access data through any MCP-compatible AI tool (Claude Desktop, Claude Code, Cursor, Cline, etc.) using the MCP protocol.
+
+**Setup MCP Client:**
+
+1. Run `just demo-sec` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
+
+2. Get your API key from the credentials file:
+```bash
+cat examples/credentials/config.json | grep api_key
+```
+
+3. Add to your MCP tool config. For Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "robosystems": {
+      "command": "npx",
+      "args": ["-y", "@robosystems/mcp"],
+      "env": {
+        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
+        "ROBOSYSTEMS_API_KEY": "rfsabc123xyz...",
+        "ROBOSYSTEMS_GRAPH_ID": "sec"
+      }
+    }
+  }
+}
+```
+
+**Important:** Replace `rfsabc123xyz...` with your actual API key from the test user creation step.
+
+3. Restart your MCP-compatible AI tool
+
+4. The MCP server provides these tools:
+   - `get-graph-schema` - View available node and relationship types
+   - `read-graph-cypher` - Run Cypher queries
+   - `discover-properties` - Explore node properties
+   - `discover-common-elements` - Find financial metrics (us-gaap tags)
+   - `discover-facts` - Explore fact patterns and dimensions
+   - `get-example-queries` - Get sample queries
+
+**Example MCP Usage:**
+
+```
+You: What revenue did NVIDIA report in 2024?
+
+The AI will use:
+1. get-graph-schema to understand structure
+2. discover-common-elements to find "us-gaap:Revenues"
+3. read-graph-cypher to query for NVIDIA's revenue facts
+```
+
+### Option 2: Direct Cypher Queries (For Development)
 
 Query the database directly using Cypher (no authentication required for local queries):
 
@@ -208,7 +263,7 @@ WHERE p.instant_date = '2024-01-28'
 RETURN f
 ```
 
-### Option 2: Query Staging Tables (For Data Validation)
+### Option 3: Query Staging Tables (For Data Validation)
 
 Query the DuckDB staging tables to inspect data before it reaches the graph:
 
@@ -266,60 +321,6 @@ All results are displayed in beautiful Rich-formatted tables.
 - `Period` - Date/duration contexts
 - `Unit` - Measurement units (USD, shares, etc.)
 - `FactDimension` - Segments and breakdowns
-
-### Option 3: MCP Client (For AI Agents)
-
-Access data through Claude Desktop or other AI agents using the MCP client.
-
-**Setup MCP Client:**
-
-1. Run `just demo-sec` to create credentials automatically (your API key is saved to `examples/credentials/config.json`)
-
-2. Get your API key from the credentials file:
-```bash
-cat examples/credentials/config.json | grep api_key
-```
-
-3. Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "robosystems": {
-      "command": "npx",
-      "args": ["-y", "@robosystems/mcp"],
-      "env": {
-        "ROBOSYSTEMS_API_URL": "http://localhost:8000",
-        "ROBOSYSTEMS_API_KEY": "rfsabc123xyz...",
-        "ROBOSYSTEMS_GRAPH_ID": "sec"
-      }
-    }
-  }
-}
-```
-
-**Important:** Replace `rfsabc123xyz...` with your actual API key from the test user creation step.
-
-3. Restart Claude Desktop
-
-4. The MCP client provides these tools:
-   - `get-graph-schema` - View available node and relationship types
-   - `read-graph-cypher` - Run Cypher queries
-   - `discover-properties` - Explore node properties
-   - `discover-common-elements` - Find financial metrics (us-gaap tags)
-   - `discover-facts` - Explore fact patterns and dimensions
-   - `get-example-queries` - Get sample queries
-
-**Example MCP Usage in Claude:**
-
-```
-You: What revenue did NVIDIA report in 2024?
-
-Claude will use:
-1. get-graph-schema to understand structure
-2. discover-common-elements to find "us-gaap:Revenues"
-3. read-graph-cypher to query for NVIDIA's revenue facts
-```
 
 ### Option 4: Python API (For Applications)
 

@@ -19,12 +19,11 @@ New to RoboSystems? Start here:
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Working with SEC financial data
 - **[Accounting Demo](Accounting-Demo)** - Complete accounting workflow demonstration
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
-- **QuickBooks Integration** _(Coming soon)_
 
 ### Reference
 
-- **Component READMEs**: Detailed technical docs in the codebase
-- **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs) (local) or [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (production)
+- **[Component READMEs](https://github.com/RoboFinSystems/robosystems?tab=readme-ov-file#documentation)** - Detailed technical docs in the codebase 
+- **[API Documentation](https://api.robosystems.ai/docs)** - API reference with machine-readable OpenAPI spec 
 
 ## Support
 
