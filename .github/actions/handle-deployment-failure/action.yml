@@ -49,15 +49,15 @@ runs:
         FAILED_STEPS=""
         for job in $(echo "$JOBS" | jq -r '.jobs[] | select(.status == "completed" and .conclusion == "failure") | .id'); do
           JOB_NAME=$(echo "$JOBS" | jq -r ".jobs[] | select(.id == $job) | .name")
-          
-          # Get failed steps for this job
-          STEPS=$(gh api \
+
+          # Get failed steps from the job details (steps are included in the main job response)
+          JOB_DETAILS=$(gh api \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            /repos/${{ github.repository }}/actions/jobs/$job/steps)
-          
-          FAILED_STEP_NAMES=$(echo "$STEPS" | jq -r '.steps[] | select(.conclusion == "failure") | .name')
-          
+            /repos/${{ github.repository }}/actions/jobs/$job)
+
+          FAILED_STEP_NAMES=$(echo "$JOB_DETAILS" | jq -r '.steps[]? | select(.conclusion == "failure") | .name')
+
           if [ -n "$FAILED_STEP_NAMES" ]; then
             FAILED_STEPS="${FAILED_STEPS}Job '$JOB_NAME' failed at: $(echo $FAILED_STEP_NAMES | tr '\n' ', ')\n"
           fi
