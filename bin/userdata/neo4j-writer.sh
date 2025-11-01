@@ -373,6 +373,24 @@ export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"
 export NEO4J_AUTH="${NEO4J_AUTH}"
 export NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT}"
 
+# Persist all required variables to /etc/environment for container restarts and refreshes
+echo "DATABASE_TYPE=neo4j" >> /etc/environment
+echo "NODE_TYPE=${NEO4J_NODE_TYPE}" >> /etc/environment
+echo "CONTAINER_PORT=${NEO4J_HTTP_PORT}" >> /etc/environment
+echo "ECR_URI=${ECR_URI}" >> /etc/environment
+echo "ECR_IMAGE_TAG=${ECR_IMAGE_TAG}" >> /etc/environment
+echo "ENVIRONMENT=${ENVIRONMENT}" >> /etc/environment
+echo "INSTANCE_ID=${INSTANCE_ID}" >> /etc/environment
+echo "PRIVATE_IP=${PRIVATE_IP}" >> /etc/environment
+echo "AVAILABILITY_ZONE=${AVAILABILITY_ZONE}" >> /etc/environment
+echo "INSTANCE_TYPE=${INSTANCE_TYPE}" >> /etc/environment
+echo "AWS_REGION=${REGION}" >> /etc/environment
+echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
+echo "REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared}" >> /etc/environment
+echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-}" >> /etc/environment
+echo "NEO4J_AUTH=${NEO4J_AUTH}" >> /etc/environment
+echo "NEO4J_BOLT_PORT=${NEO4J_BOLT_PORT}" >> /etc/environment
+
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
 

@@ -37,6 +37,30 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Validate Inputs
+      shell: bash
+      run: |
+        VALID_BACKENDS="kuzu|neo4j"
+        if [[ ! "${{ inputs.backend }}" =~ ^($VALID_BACKENDS)$ ]]; then
+          echo "❌ Invalid backend: ${{ inputs.backend }}"
+          echo "Must be one of: kuzu, neo4j"
+          exit 1
+        fi
+
+        VALID_NODE_TYPES="writer|shared-writer"
+        if [[ ! "${{ inputs.node-type }}" =~ ^($VALID_NODE_TYPES)$ ]]; then
+          echo "❌ Invalid node-type: ${{ inputs.node-type }}"
+          echo "Must be one of: writer, shared-writer"
+          exit 1
+        fi
+
+        VALID_ENVIRONMENTS="staging|prod"
+        if [[ ! "${{ inputs.environment }}" =~ ^($VALID_ENVIRONMENTS)$ ]]; then
+          echo "❌ Invalid environment: ${{ inputs.environment }}"
+          echo "Must be one of: staging, prod"
+          exit 1
+        fi
+
     - name: Update Container on ${{ inputs.instance-id }}
       id: update
       shell: bash
@@ -46,33 +70,26 @@ runs:
         # Get ECR URI
         ECR_URI="${{ inputs.aws-account-id }}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com/robosystems"
 
-        # Determine container name based on backend
-        if [ "${{ inputs.backend }}" == "kuzu" ]; then
-          if [ "${{ inputs.node-type }}" == "writer" ]; then
-            CONTAINER_NAME="kuzu-writer"
-          elif [ "${{ inputs.node-type }}" == "shared-writer" ]; then
-            CONTAINER_NAME="kuzu-shared-master"
-          else
-            CONTAINER_NAME="kuzu-shared-writer"
-          fi
-        elif [ "${{ inputs.backend }}" == "neo4j" ]; then
-          if [ "${{ inputs.node-type }}" == "writer" ]; then
-            CONTAINER_NAME="neo4j-writer"
-          elif [ "${{ inputs.node-type }}" == "shared-writer" ]; then
-            CONTAINER_NAME="neo4j-shared-writer"
-          else
-            CONTAINER_NAME="neo4j-writer"
-          fi
+        # Backend-agnostic container naming
+        # Container name represents the service (graph-api), not the backend implementation
+        # Backend is tracked via inputs.backend for metadata/logging only
+        if [ "${{ inputs.node-type }}" == "shared-writer" ]; then
+          CONTAINER_NAME="graph-api-shared"
         else
-          echo "❌ Unknown backend: ${{ inputs.backend }}"
-          echo "status=failed" >> $GITHUB_OUTPUT
-          exit 1
+          CONTAINER_NAME="graph-api"
+        fi
+
+        # Determine health check port based on backend
+        if [ "${{ inputs.backend }}" == "neo4j" ]; then
+          HEALTH_PORT="7474"
+        else
+          HEALTH_PORT="8001"
         fi
 
         # Use universal startup script
         STARTUP_SCRIPT="/usr/local/bin/run-graph-container.sh"
 
-        echo "📦 Pulling and updating container: $CONTAINER_NAME (backend: ${{ inputs.backend }})"
+        echo "📦 Pulling and updating container: $CONTAINER_NAME (backend: ${{ inputs.backend }}, health port: $HEALTH_PORT)"
 
         # Send update command
         COMMAND_ID=$(aws ssm send-command \
@@ -148,7 +165,7 @@ runs:
         HEALTH_COMMAND=$(aws ssm send-command \
           --instance-ids "${{ inputs.instance-id }}" \
           --document-name "AWS-RunShellScript" \
-          --parameters 'commands=["curl -f -s http://localhost:8001/health || echo UNHEALTHY"]' \
+          --parameters "commands=[\"curl -f -s http://localhost:${HEALTH_PORT}/health || echo UNHEALTHY\"]" \
           --query "Command.CommandId" \
           --output text \
           --region "${{ inputs.aws-region }}")

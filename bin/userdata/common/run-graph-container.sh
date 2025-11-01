@@ -26,28 +26,15 @@ STAGING_MOUNT_SOURCE="${STAGING_MOUNT_SOURCE:-}"
 STAGING_MOUNT_TARGET="${STAGING_MOUNT_TARGET:-}"
 DOCKER_PROFILE="${DOCKER_PROFILE:-${DATABASE_TYPE}-writer}"
 
-# Determine container name based on database type and node type
+# Determine container name - backend-agnostic
+# Container name represents the service (graph-api), not the implementation (kuzu/neo4j)
+# Backend type is determined by DOCKER_PROFILE and environment variables
 determine_container_name() {
-    case "${DATABASE_TYPE}" in
-        kuzu)
-            if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-                echo "kuzu-shared-writer"
-            else
-                echo "kuzu-writer"
-            fi
-            ;;
-        neo4j)
-            if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-                echo "neo4j-shared-writer"
-            else
-                echo "neo4j-writer"
-            fi
-            ;;
-        *)
-            echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
-            exit 1
-            ;;
-    esac
+    if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
+        echo "graph-api-shared"
+    else
+        echo "graph-api"
+    fi
 }
 
 CONTAINER_NAME=$(determine_container_name)

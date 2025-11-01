@@ -441,6 +441,7 @@ jobs:
         deploy-postgres-iam,
         deploy-valkey,
         deploy-s3,
+        package-lambda-functions,
         deploy-graph-infra,
         deploy-graph-volumes,
       ]
