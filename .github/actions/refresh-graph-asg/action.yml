@@ -124,6 +124,14 @@ runs:
           echo "Using Neo4j tags: ${TAG_NAME}=${TAG_VALUE}, GraphBackend=neo4j"
         fi
 
+        # Determine health check port based on tier
+        if [[ "$TIER" == neo4j-* ]]; then
+          HEALTH_PORT="7474"
+        else
+          HEALTH_PORT="8001"
+        fi
+        echo "Health check port: ${HEALTH_PORT}"
+
         # Get ASG name from CloudFormation stack
         ASG_NAME=$(aws cloudformation describe-stacks \
           --stack-name "${STACK_NAME}" \
@@ -394,28 +402,45 @@ runs:
               HEALTH_COMMAND=$(aws ssm send-command \
                 --instance-ids "${NEW_INSTANCE}" \
                 --document-name "AWS-RunShellScript" \
-                --parameters 'commands=["curl -f -s http://localhost:8001/health || echo UNHEALTHY"]' \
+                --parameters "commands=[\"curl -f -s http://localhost:${HEALTH_PORT}/health || echo UNHEALTHY\"]" \
                 --query "Command.CommandId" \
                 --output text \
                 --region "${{ inputs.aws-region }}")
 
-              sleep 10
-
-              HEALTH_STATUS=$(aws ssm get-command-invocation \
+              # Wait for health check command to complete (up to 120 seconds default)
+              if aws ssm wait command-executed \
                 --command-id "${HEALTH_COMMAND}" \
                 --instance-id "${NEW_INSTANCE}" \
-                --query "StandardOutputContent" \
-                --output text \
-                --region "${{ inputs.aws-region }}" 2>/dev/null || echo "UNHEALTHY")
+                --region "${{ inputs.aws-region }}"; then
 
-              if [[ "$HEALTH_STATUS" == *"UNHEALTHY"* ]]; then
-                echo "❌ New instance failed health check"
+                HEALTH_STATUS=$(aws ssm get-command-invocation \
+                  --command-id "${HEALTH_COMMAND}" \
+                  --instance-id "${NEW_INSTANCE}" \
+                  --query "StandardOutputContent" \
+                  --output text \
+                  --region "${{ inputs.aws-region }}")
+
+                if [[ "$HEALTH_STATUS" == *"UNHEALTHY"* ]]; then
+                  echo "❌ New instance failed health check"
+                  echo "status=failed" >> $GITHUB_OUTPUT
+                  echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
+                  exit 1
+                fi
+
+                echo "✅ New instance is healthy"
+              else
+                echo "❌ Health check command failed"
+                ERROR_OUTPUT=$(aws ssm get-command-invocation \
+                  --command-id "${HEALTH_COMMAND}" \
+                  --instance-id "${NEW_INSTANCE}" \
+                  --query "StandardErrorContent" \
+                  --output text \
+                  --region "${{ inputs.aws-region }}" 2>/dev/null || echo "No error details available")
+                echo "Error details: ${ERROR_OUTPUT}"
                 echo "status=failed" >> $GITHUB_OUTPUT
                 echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
                 exit 1
               fi
-
-              echo "✅ New instance is healthy"
 
               # Update instance status to healthy
               aws dynamodb update-item \

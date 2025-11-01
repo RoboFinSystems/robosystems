@@ -517,7 +517,7 @@ Resources:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value: !Sub "robosystems-neo4j-writer-${WriterTier}-${Environment}"
+                Value: !Sub "robosystems-${WriterTier}-${Environment}"
               - Key: Environment
                 Value: !Ref Environment
               - Key: GraphBackend
@@ -695,7 +695,7 @@ Resources:
         Version: !GetAtt WriterLaunchTemplate.LatestVersionNumber
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-neo4j-writer-${WriterTier}-${Environment}"
+          Value: !Sub "robosystems-${WriterTier}-${Environment}"
           PropagateAtLaunch: true
         - Key: Environment
           Value: !Ref Environment

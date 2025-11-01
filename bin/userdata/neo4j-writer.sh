@@ -42,9 +42,9 @@ NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-7474}"
 NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-7687}"
 SHARED_INSTANCE_NAME="${SHARED_INSTANCE_NAME:-shared-writer}"
 
-# Set CloudWatch namespace with environment suffix
+# Set CloudWatch namespace with environment suffix (unified for all graph backends)
 ENV_CAPITALIZED=$(echo "${ENVIRONMENT}" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
-CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystemsNeo4j/${ENV_CAPITALIZED}}"
+CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystemsGraph/${ENV_CAPITALIZED}/Neo4j}"
 
 # ==================================================================================
 # SYSTEM SETUP
@@ -124,11 +124,16 @@ PAYLOAD="{
 ENCODED_PAYLOAD=$(echo -n "$PAYLOAD" | base64)
 
 # Invoke Volume Manager Lambda to attach volume
-aws lambda invoke \
+if ! aws lambda invoke \
   --function-name "RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager" \
   --payload "$ENCODED_PAYLOAD" \
   --region ${REGION} \
-  /tmp/volume-response.json || echo "Failed to invoke Volume Manager"
+  /tmp/volume-response.json 2>&1 | tee /tmp/volume-manager-error.log; then
+  echo "Failed to invoke Volume Manager Lambda"
+  echo "Error details: $(cat /tmp/volume-manager-error.log 2>/dev/null || echo 'No error log available')"
+  echo "Function: RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager"
+  echo "Region: ${REGION}"
+fi
 
 # Check if volume attachment was successful
 if [ -f /tmp/volume-response.json ]; then
@@ -372,6 +377,24 @@ export REPOSITORY_TYPE="${REPOSITORY_TYPE:-shared}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"
 export NEO4J_AUTH="${NEO4J_AUTH}"
 export NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT}"
+
+# Persist all required variables to /etc/environment for container restarts and refreshes
+echo "DATABASE_TYPE=neo4j" >> /etc/environment
+echo "NODE_TYPE=${NEO4J_NODE_TYPE}" >> /etc/environment
+echo "CONTAINER_PORT=${NEO4J_HTTP_PORT}" >> /etc/environment
+echo "ECR_URI=${ECR_URI}" >> /etc/environment
+echo "ECR_IMAGE_TAG=${ECR_IMAGE_TAG}" >> /etc/environment
+echo "ENVIRONMENT=${ENVIRONMENT}" >> /etc/environment
+echo "INSTANCE_ID=${INSTANCE_ID}" >> /etc/environment
+echo "PRIVATE_IP=${PRIVATE_IP}" >> /etc/environment
+echo "AVAILABILITY_ZONE=${AVAILABILITY_ZONE}" >> /etc/environment
+echo "INSTANCE_TYPE=${INSTANCE_TYPE}" >> /etc/environment
+echo "AWS_REGION=${REGION}" >> /etc/environment
+echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
+echo "REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared}" >> /etc/environment
+echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-}" >> /etc/environment
+echo "NEO4J_AUTH=${NEO4J_AUTH}" >> /etc/environment
+echo "NEO4J_BOLT_PORT=${NEO4J_BOLT_PORT}" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh

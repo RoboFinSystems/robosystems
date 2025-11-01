@@ -18,7 +18,7 @@ Secrets are organized in AWS Secrets Manager with the following structure:
 - Extension secrets: `robosystems/{environment}/{type}`
   - `/postgres`: DATABASE_URL and other PostgreSQL configuration
   - `/s3`: AWS_S3_ACCESS_KEY_ID, AWS_S3_SECRET_ACCESS_KEY, bucket names
-  - `/kuzu`: GRAPH_API_KEY and other Kuzu-specific secrets
+  - `/graph-api`: GRAPH_API_KEY and other graph database secrets (unified for Kuzu/Neo4j)
 
 ## Usage
 
@@ -316,8 +316,8 @@ SECRET_MAPPINGS = {
   "SEC_PROCESSED_BUCKET": ("s3", "SEC_PROCESSED_BUCKET"),
   "PUBLIC_DATA_BUCKET": ("s3", "PUBLIC_DATA_BUCKET"),
   "PUBLIC_DATA_CDN_URL": ("s3", "PUBLIC_DATA_CDN_URL"),
-  # Kuzu secrets
-  "GRAPH_API_KEY": ("kuzu", "GRAPH_API_KEY"),
+  # Graph API secrets (unified for all backends: Kuzu, Neo4j)
+  "GRAPH_API_KEY": ("graph-api", "GRAPH_API_KEY"),
   # Valkey secrets
   "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
   # Base secrets (robosystems/{env})

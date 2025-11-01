@@ -26,28 +26,15 @@ STAGING_MOUNT_SOURCE="${STAGING_MOUNT_SOURCE:-}"
 STAGING_MOUNT_TARGET="${STAGING_MOUNT_TARGET:-}"
 DOCKER_PROFILE="${DOCKER_PROFILE:-${DATABASE_TYPE}-writer}"
 
-# Determine container name based on database type and node type
+# Determine container name - backend-agnostic
+# Container name represents the service (graph-api), not the implementation (kuzu/neo4j)
+# Backend type is determined by DOCKER_PROFILE and environment variables
 determine_container_name() {
-    case "${DATABASE_TYPE}" in
-        kuzu)
-            if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-                echo "kuzu-shared-writer"
-            else
-                echo "kuzu-writer"
-            fi
-            ;;
-        neo4j)
-            if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-                echo "neo4j-shared-writer"
-            else
-                echo "neo4j-writer"
-            fi
-            ;;
-        *)
-            echo "ERROR: Unsupported DATABASE_TYPE: ${DATABASE_TYPE}"
-            exit 1
-            ;;
-    esac
+    if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
+        echo "graph-api-shared"
+    else
+        echo "graph-api"
+    fi
 }
 
 CONTAINER_NAME=$(determine_container_name)
@@ -186,24 +173,27 @@ else
 fi
 
 HEALTH_CHECK_PASSED=false
-for i in {1..12}; do  # 12 * 5 = 60 seconds
+HEALTH_CHECK_ATTEMPTS=12
+HEALTH_CHECK_INTERVAL=5
+for i in $(seq 1 $HEALTH_CHECK_ATTEMPTS); do
   if curl -f http://localhost:${CONTAINER_PORT}/health >/dev/null 2>&1; then
     echo "${DATABASE_TYPE} container is healthy on port ${CONTAINER_PORT}"
     HEALTH_CHECK_PASSED=true
     break
   fi
-  echo "Waiting for ${DATABASE_TYPE} container to start on port ${CONTAINER_PORT}... ($i/12)"
+  echo "Waiting for ${DATABASE_TYPE} container to start on port ${CONTAINER_PORT}... ($i/$HEALTH_CHECK_ATTEMPTS)"
   # Check if container is still running
   if ! docker ps | grep -q ${CONTAINER_NAME}; then
     echo "ERROR: Container ${CONTAINER_NAME} is not running"
     docker logs ${CONTAINER_NAME} || true
     break
   fi
-  sleep 5
+  sleep $HEALTH_CHECK_INTERVAL
 done
 
+TOTAL_WAIT_TIME=$((HEALTH_CHECK_ATTEMPTS * HEALTH_CHECK_INTERVAL))
 if [ "${HEALTH_CHECK_PASSED}" != "true" ]; then
-  echo "ERROR: ${DATABASE_TYPE} container failed to become healthy after 60 seconds"
+  echo "ERROR: ${DATABASE_TYPE} container failed to become healthy after ${TOTAL_WAIT_TIME} seconds"
   echo "Container logs:"
   docker logs ${CONTAINER_NAME} || true
   exit 1

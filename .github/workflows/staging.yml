@@ -441,6 +441,7 @@ jobs:
         deploy-postgres-iam,
         deploy-valkey,
         deploy-s3,
+        package-lambda-functions,
         deploy-graph-infra,
         deploy-graph-volumes,
       ]
@@ -458,7 +459,7 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       # Container Configuration
-      ecr_image_tag: latest
+      ecr_image_tag: staging
       # Infrastructure inputs from kuzu infrastructure jobs
       secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
@@ -527,7 +528,7 @@ jobs:
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       # Container & Application Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: ${{ vars.ENVIRONMENT_STAGING || 'staging' }}
+      ecr_image_tag: staging
       # ECS & Compute Configuration
       desired_count: ${{ vars.API_MIN_CAPACITY_STAGING || '1' }}
       cpu: "512"
@@ -590,7 +591,7 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Container Configuration
       ecr_repository_url: ${{ needs.build.outputs.ecr_repository_url }}
-      ecr_image_tag: ${{ vars.ENVIRONMENT_STAGING || 'staging' }}
+      ecr_image_tag: staging
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}

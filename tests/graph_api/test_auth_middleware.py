@@ -257,90 +257,46 @@ class TestKuzuAuthMiddleware:
 class TestSecretsManagerIntegration:
   """Test cases for Secrets Manager integration."""
 
-  @patch("robosystems.graph_api.middleware.auth.boto3.client")
-  def test_get_api_key_from_secrets_manager_success(self, mock_boto_client):
+  @patch("robosystems.config.secrets_manager.get_secret_value")
+  def test_get_api_key_from_secrets_manager_success(self, mock_get_secret):
     """Test successful API key retrieval from Secrets Manager."""
-    # Clear cache first
     clear_api_key_cache()
 
-    mock_client = MagicMock()
-    mock_boto_client.return_value = mock_client
-    mock_client.get_secret_value.return_value = {
-      "SecretString": json.dumps({"GRAPH_API_KEY": "secret-key-123"})
-    }
+    mock_get_secret.return_value = "secret-key-123"
 
-    with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
-      mock_env.ENVIRONMENT = "prod"
+    api_key = get_api_key_from_secrets_manager(key_type="writer")
+    assert api_key == "secret-key-123"
+    mock_get_secret.assert_called_once_with("GRAPH_API_KEY", "")
 
-      api_key = get_api_key_from_secrets_manager(key_type="writer")
-      assert api_key == "secret-key-123"
-      mock_client.get_secret_value.assert_called_once_with(
-        SecretId="robosystems/prod/kuzu"
-      )
-
-  @patch("robosystems.graph_api.middleware.auth.boto3.client")
-  def test_get_api_key_from_secrets_manager_not_found(self, mock_boto_client):
+  @patch("robosystems.config.secrets_manager.get_secret_value")
+  def test_get_api_key_from_secrets_manager_not_found(self, mock_get_secret):
     """Test handling of missing secret in Secrets Manager."""
-    # Clear cache first
     clear_api_key_cache()
 
-    from botocore.exceptions import ClientError
+    mock_get_secret.return_value = ""
 
-    mock_client = MagicMock()
-    mock_boto_client.return_value = mock_client
-    mock_client.get_secret_value.side_effect = ClientError(
-      {"Error": {"Code": "ResourceNotFoundException"}}, "GetSecretValue"
-    )
+    api_key = get_api_key_from_secrets_manager()
+    assert api_key is None
 
-    with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
-      mock_env.ENVIRONMENT = "staging"
-
-      api_key = get_api_key_from_secrets_manager()
-      assert api_key is None
-
-  @patch("robosystems.graph_api.middleware.auth.boto3.client")
-  def test_get_api_key_from_secrets_manager_no_key_in_secret(self, mock_boto_client):
-    """Test handling when secret exists but doesn't contain API key."""
-    # Clear cache first
+  @patch("robosystems.config.secrets_manager.get_secret_value")
+  def test_get_api_key_from_secrets_manager_exception(self, mock_get_secret):
+    """Test handling when centralized secrets manager raises exception."""
     clear_api_key_cache()
 
-    mock_client = MagicMock()
-    mock_boto_client.return_value = mock_client
-    mock_client.get_secret_value.return_value = {
-      "SecretString": json.dumps({"OTHER_KEY": "value"})
-    }
+    mock_get_secret.side_effect = Exception("Connection error")
 
-    with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
-      mock_env.ENVIRONMENT = "prod"
+    api_key = get_api_key_from_secrets_manager()
+    assert api_key is None
 
-      api_key = get_api_key_from_secrets_manager()
-      assert api_key is None
+  @patch("robosystems.config.secrets_manager.get_secrets_manager")
+  def test_clear_api_key_cache(self, mock_get_manager):
+    """Test that cache clearing calls centralized secrets manager refresh."""
+    mock_manager = MagicMock()
+    mock_get_manager.return_value = mock_manager
 
-  @patch("robosystems.graph_api.middleware.auth.boto3.client")
-  def test_get_api_key_caching(self, mock_boto_client):
-    """Test that API key is cached after first retrieval."""
-    # Clear cache first
     clear_api_key_cache()
 
-    mock_client = MagicMock()
-    mock_boto_client.return_value = mock_client
-    mock_client.get_secret_value.return_value = {
-      "SecretString": json.dumps({"GRAPH_API_KEY": "cached-key"})
-    }
-
-    with patch("robosystems.graph_api.middleware.auth.env") as mock_env:
-      mock_env.ENVIRONMENT = "prod"
-
-      # First call
-      api_key1 = get_api_key_from_secrets_manager(key_type="writer")
-      assert api_key1 == "cached-key"
-
-      # Second call should use cache
-      api_key2 = get_api_key_from_secrets_manager(key_type="writer")
-      assert api_key2 == "cached-key"
-
-      # Should only have called Secrets Manager once
-      assert mock_client.get_secret_value.call_count == 1
+    mock_manager.refresh.assert_called_once_with("graph-api")
 
 
 class TestAPIKeyGeneration:

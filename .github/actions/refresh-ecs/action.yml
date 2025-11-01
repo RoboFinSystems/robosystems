@@ -44,7 +44,7 @@ runs:
           echo "Could not find ClusterName in stack outputs, checking for other common output names..."
 
           # Try alternative output keys
-          for OUTPUT_KEY in "WorkerClusterName" "ECSCluster" "ClusterArn" "Cluster"; do
+          for OUTPUT_KEY in "BeatClusterName" "WorkerClusterName" "ECSCluster" "ClusterArn" "Cluster"; do
             CLUSTER_NAME=$(aws cloudformation describe-stacks \
               --stack-name ${{ inputs.stack-name }} \
               --query "Stacks[0].Outputs[?OutputKey=='${OUTPUT_KEY}'].OutputValue" \
@@ -84,6 +84,8 @@ runs:
               elif [ "$COMPONENT" == "workeringestion" ]; then
                 CLUSTER_NAME="robosystems-worker-ingestion-${ENVIRONMENT}-cluster"
               elif [ "$COMPONENT" == "beat" ]; then
+                CLUSTER_NAME="robosystems-beat-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "workerinfra" ]; then
                 CLUSTER_NAME="robosystems-beat-${ENVIRONMENT}-cluster"
               else
                 # Fallback for any other worker types

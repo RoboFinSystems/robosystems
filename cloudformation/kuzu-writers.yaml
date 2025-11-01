@@ -356,7 +356,7 @@ Resources:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value: !Sub "robosystems-kuzu-writer-${WriterTier}-${Environment}"
+                Value: !Sub "robosystems-${WriterTier}-${Environment}"
               - Key: Environment
                 Value: !Ref Environment
               - Key: KuzuRole
@@ -398,6 +398,7 @@ Resources:
 
               # Export critical environment variables for the setup script
               export AWS_ACCOUNT_ID="${AWS::AccountId}"
+              export AWS_STACK_NAME="${AWS::StackName}"
               export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
               export ECR_IMAGE_TAG="${ECRImageTag}"
               export INSTANCE_REGISTRY_TABLE="robosystems-graph-${Environment}-instance-registry"
@@ -492,6 +493,7 @@ Resources:
               export KUZU_PORT="8001"
               export WRITER_TIER="${WriterTier}"
               export AWS_ACCOUNT_ID="${AWS::AccountId}"
+              export AWS_STACK_NAME="${AWS::StackName}"
               export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
               export ECR_IMAGE_TAG="${ECRImageTag}"
               # Set CloudWatch namespace with environment suffix
@@ -557,7 +559,7 @@ Resources:
         Version: !GetAtt WriterLaunchTemplate.LatestVersionNumber
       Tags:
         - Key: Name
-          Value: !Sub "robosystems-kuzu-writer-${WriterTier}-${Environment}"
+          Value: !Sub "robosystems-${WriterTier}-${Environment}"
           PropagateAtLaunch: true
         - Key: Environment
           Value: !Ref Environment

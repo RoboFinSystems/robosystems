@@ -40,9 +40,9 @@ INSTANCE_TYPE="${INSTANCE_TYPE:-c6g.medium}"
 KUZU_PORT="${KUZU_PORT:-8001}"
 SHARED_INSTANCE_NAME="${SHARED_INSTANCE_NAME:-shared-writer}"
 
-# Set CloudWatch namespace with environment suffix
+# Set CloudWatch namespace with environment suffix (unified for all graph backends)
 ENV_CAPITALIZED=$(echo "${ENVIRONMENT}" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
-CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystemsKuzu/${ENV_CAPITALIZED}}"
+CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystemsGraph/${ENV_CAPITALIZED}/Kuzu}"
 
 # ==================================================================================
 # SYSTEM SETUP
@@ -122,11 +122,16 @@ PAYLOAD="{
 ENCODED_PAYLOAD=$(echo -n "$PAYLOAD" | base64)
 
 # Invoke Volume Manager Lambda to attach volume
-aws lambda invoke \
+if ! aws lambda invoke \
   --function-name "RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager" \
   --payload "$ENCODED_PAYLOAD" \
   --region ${REGION} \
-  /tmp/volume-response.json || echo "Failed to invoke Volume Manager"
+  /tmp/volume-response.json 2>&1 | tee /tmp/volume-manager-error.log; then
+  echo "Failed to invoke Volume Manager Lambda"
+  echo "Error details: $(cat /tmp/volume-manager-error.log 2>/dev/null || echo 'No error log available')"
+  echo "Function: RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager"
+  echo "Region: ${REGION}"
+fi
 
 # Check if volume attachment was successful
 if [ -f /tmp/volume-response.json ]; then
@@ -368,6 +373,22 @@ export DOCKER_PROFILE="kuzu-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE:-shared}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"
 
+# Persist all required variables to /etc/environment for container restarts and refreshes
+echo "DATABASE_TYPE=kuzu" >> /etc/environment
+echo "NODE_TYPE=${KUZU_NODE_TYPE}" >> /etc/environment
+echo "CONTAINER_PORT=${KUZU_PORT}" >> /etc/environment
+echo "ECR_URI=${ECR_URI}" >> /etc/environment
+echo "ECR_IMAGE_TAG=${ECR_IMAGE_TAG}" >> /etc/environment
+echo "ENVIRONMENT=${ENVIRONMENT}" >> /etc/environment
+echo "INSTANCE_ID=${INSTANCE_ID}" >> /etc/environment
+echo "PRIVATE_IP=${PRIVATE_IP}" >> /etc/environment
+echo "AVAILABILITY_ZONE=${AVAILABILITY_ZONE}" >> /etc/environment
+echo "INSTANCE_TYPE=${INSTANCE_TYPE}" >> /etc/environment
+echo "AWS_REGION=${REGION}" >> /etc/environment
+echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
+echo "REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared}" >> /etc/environment
+echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-}" >> /etc/environment
+
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
 
@@ -407,6 +428,24 @@ export REGISTRY_TABLE="robosystems-graph-${ENVIRONMENT}-instance-registry"
 export AWS_REGION="${AWS_REGION}"
 export VALKEY_URL="${VALKEY_URL:-}"
 
+# Source /etc/environment for persisted variables
+if [ -f /etc/environment ]; then
+  set -a
+  source /etc/environment
+  set +a
+fi
+
+# Get EC2 metadata for dynamic variables
+TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+export INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+export AVAILABILITY_ZONE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)
+export INSTANCE_TYPE=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-type)
+
+# Construct ECR_IMAGE from components
+export ECR_URI="${ECR_URI}"
+export ECR_IMAGE_TAG="${ECR_IMAGE_TAG}"
+export ECR_IMAGE="${ECR_URI}:${ECR_IMAGE_TAG}"
+
 /usr/local/bin/graph-health-check.sh
 EOF
 
@@ -416,6 +455,8 @@ sed -i "s/\${KUZU_PORT}/${KUZU_PORT}/g" /usr/local/bin/kuzu-health-check-wrapper
 sed -i "s/\${ENVIRONMENT}/${ENVIRONMENT}/g" /usr/local/bin/kuzu-health-check-wrapper.sh
 sed -i "s/\${AWS_REGION}/${REGION}/g" /usr/local/bin/kuzu-health-check-wrapper.sh
 sed -i "s|\${VALKEY_URL}|${VALKEY_URL:-}|g" /usr/local/bin/kuzu-health-check-wrapper.sh
+sed -i "s|\${ECR_URI}|${ECR_URI}|g" /usr/local/bin/kuzu-health-check-wrapper.sh
+sed -i "s|\${ECR_IMAGE_TAG}|${ECR_IMAGE_TAG}|g" /usr/local/bin/kuzu-health-check-wrapper.sh
 
 chmod +x /usr/local/bin/kuzu-health-check-wrapper.sh
 

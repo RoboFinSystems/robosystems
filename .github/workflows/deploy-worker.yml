@@ -320,7 +320,7 @@ jobs:
                 ParameterKey=FargateWeight,ParameterValue=${{ inputs.fargate_weight }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
-                ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\" \
+                ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\""
 
 
           # Deploy or update the stack
