@@ -44,7 +44,7 @@ runs:
           echo "Could not find ClusterName in stack outputs, checking for other common output names..."
 
           # Try alternative output keys
-          for OUTPUT_KEY in "WorkerClusterName" "ECSCluster" "ClusterArn" "Cluster"; do
+          for OUTPUT_KEY in "BeatClusterName" "WorkerClusterName" "ECSCluster" "ClusterArn" "Cluster"; do
             CLUSTER_NAME=$(aws cloudformation describe-stacks \
               --stack-name ${{ inputs.stack-name }} \
               --query "Stacks[0].Outputs[?OutputKey=='${OUTPUT_KEY}'].OutputValue" \
@@ -85,6 +85,8 @@ runs:
                 CLUSTER_NAME="robosystems-worker-ingestion-${ENVIRONMENT}-cluster"
               elif [ "$COMPONENT" == "beat" ]; then
                 CLUSTER_NAME="robosystems-beat-${ENVIRONMENT}-cluster"
+              elif [ "$COMPONENT" == "workerinfra" ]; then
+                CLUSTER_NAME="robosystems-beat-${ENVIRONMENT}-cluster"
               else
                 # Fallback for any other worker types
                 WORKER_TYPE=$(echo "$COMPONENT" | sed 's/^worker//')
@@ -112,14 +114,14 @@ runs:
           if [[ "${{ inputs.stack-name }}" =~ API ]]; then
             SERVICE_TYPE="api"
           elif [[ "${{ inputs.stack-name }}" =~ Worker ]]; then
-            SERVICE_TYPE="worker"  
+            SERVICE_TYPE="worker"
           elif [[ "${{ inputs.stack-name }}" =~ Beat ]]; then
             SERVICE_TYPE="beat"
           else
             SERVICE_TYPE="worker"  # Default to worker timeouts
           fi
         fi
-        
+
         # Set optimized timeouts based on service type
         case "$SERVICE_TYPE" in
           "api")
@@ -131,7 +133,7 @@ runs:
           "worker")
             # Worker services need more time for task completion
             OPTIMIZED_MAX_WAIT=600        # 10 minutes (current default)
-            OPTIMIZED_STABILITY_DELAY=30   # 30 seconds (current default)  
+            OPTIMIZED_STABILITY_DELAY=30   # 30 seconds (current default)
             echo "Using worker-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
             ;;
           "beat")

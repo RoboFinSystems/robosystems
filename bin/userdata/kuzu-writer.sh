@@ -368,11 +368,21 @@ export DOCKER_PROFILE="kuzu-writer"
 export REPOSITORY_TYPE="${REPOSITORY_TYPE:-shared}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"
 
-# Persist ECR variables to /etc/environment for health check restarts
+# Persist all required variables to /etc/environment for container restarts and refreshes
+echo "DATABASE_TYPE=kuzu" >> /etc/environment
+echo "NODE_TYPE=${KUZU_NODE_TYPE}" >> /etc/environment
+echo "CONTAINER_PORT=${KUZU_PORT}" >> /etc/environment
 echo "ECR_URI=${ECR_URI}" >> /etc/environment
 echo "ECR_IMAGE_TAG=${ECR_IMAGE_TAG}" >> /etc/environment
+echo "ENVIRONMENT=${ENVIRONMENT}" >> /etc/environment
+echo "INSTANCE_ID=${INSTANCE_ID}" >> /etc/environment
+echo "PRIVATE_IP=${PRIVATE_IP}" >> /etc/environment
 echo "AVAILABILITY_ZONE=${AVAILABILITY_ZONE}" >> /etc/environment
 echo "INSTANCE_TYPE=${INSTANCE_TYPE}" >> /etc/environment
+echo "AWS_REGION=${REGION}" >> /etc/environment
+echo "CLUSTER_TIER=${CLUSTER_TIER}" >> /etc/environment
+echo "REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared}" >> /etc/environment
+echo "SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-}" >> /etc/environment
 
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
