@@ -40,9 +40,9 @@ INSTANCE_TYPE="${INSTANCE_TYPE:-c6g.medium}"
 KUZU_PORT="${KUZU_PORT:-8001}"
 SHARED_INSTANCE_NAME="${SHARED_INSTANCE_NAME:-shared-writer}"
 
-# Set CloudWatch namespace with environment suffix
+# Set CloudWatch namespace with environment suffix (unified for all graph backends)
 ENV_CAPITALIZED=$(echo "${ENVIRONMENT}" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
-CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystemsKuzu/${ENV_CAPITALIZED}}"
+CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystemsGraph/${ENV_CAPITALIZED}/Kuzu}"
 
 # ==================================================================================
 # SYSTEM SETUP
@@ -122,11 +122,16 @@ PAYLOAD="{
 ENCODED_PAYLOAD=$(echo -n "$PAYLOAD" | base64)
 
 # Invoke Volume Manager Lambda to attach volume
-aws lambda invoke \
+if ! aws lambda invoke \
   --function-name "RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager" \
   --payload "$ENCODED_PAYLOAD" \
   --region ${REGION} \
-  /tmp/volume-response.json || echo "Failed to invoke Volume Manager"
+  /tmp/volume-response.json 2>&1 | tee /tmp/volume-manager-error.log; then
+  echo "Failed to invoke Volume Manager Lambda"
+  echo "Error details: $(cat /tmp/volume-manager-error.log 2>/dev/null || echo 'No error log available')"
+  echo "Function: RoboSystemsGraphVolumes${ENVIRONMENT^}-volume-manager"
+  echo "Region: ${REGION}"
+fi
 
 # Check if volume attachment was successful
 if [ -f /tmp/volume-response.json ]; then

@@ -6,14 +6,10 @@ allowing unrestricted access in development and from bastion hosts.
 Supports both Kuzu and Neo4j backends.
 """
 
-import json
 import time
-from functools import lru_cache
 from typing import Optional
 
 import bcrypt
-import boto3
-from botocore.exceptions import ClientError
 from fastapi import HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -185,56 +181,51 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
       del self.failed_attempts[ip]
 
 
-# TODO: Move this to the secrets manager module
-@lru_cache(maxsize=4)  # Cache for writer, shared_writer, shared_master, shared_replica
 def get_api_key_from_secrets_manager(
   key_type: str = "writer", secret_name: Optional[str] = None, region: str = "us-east-1"
 ) -> Optional[str]:
   """
-  Retrieve API key from AWS Secrets Manager with caching.
+  Retrieve API key from AWS Secrets Manager using centralized secrets manager.
+
+  Secret Naming: robosystems/{env}/graph-api (unified for all graph backends)
 
   Args:
       key_type: Type of key to retrieve ("writer", "shared_writer", "shared_master", "shared_replica")
-      secret_name: Name of the secret (default: robosystems/{env}/kuzu)
-      region: AWS region
+      secret_name: Name of the secret (not used, kept for backwards compatibility)
+      region: AWS region (not used, kept for backwards compatibility)
 
   Returns:
       API key or None if not found
   """
-  if not secret_name:
-    secret_name = f"robosystems/{env.ENVIRONMENT}/graph-api"
-
   try:
-    client = boto3.client("secretsmanager", region_name=region)
-    response = client.get_secret_value(SecretId=secret_name)
+    from robosystems.config.secrets_manager import get_secret_value
 
-    # Parse the secret
-    secret_data = json.loads(response["SecretString"])
-
-    # All node types use the same unified API key
-    api_key = secret_data.get("GRAPH_API_KEY")
+    # Use centralized secrets manager (includes caching and proper error handling)
+    api_key = get_secret_value("GRAPH_API_KEY", "")
 
     if api_key:
       logger.info("Successfully retrieved Graph API key from Secrets Manager")
       return api_key
     else:
-      logger.error(f"No GRAPH_API_KEY found in secret: {secret_name[:50]}")
+      logger.warning("No GRAPH_API_KEY found in secrets")
       return None
 
-  except ClientError as e:
-    if e.response["Error"]["Code"] == "ResourceNotFoundException":
-      logger.warning(f"Secret not found: {secret_name[:50]}")
-    else:
-      logger.error(f"Error retrieving secret: {e}")
-    return None
   except Exception as e:
-    logger.error(f"Unexpected error retrieving secret: {e}")
+    logger.error(f"Error retrieving Graph API key: {e}")
     return None
 
 
 def clear_api_key_cache():
   """Clear the cached API key (useful for rotation)."""
-  get_api_key_from_secrets_manager.cache_clear()
+  try:
+    from robosystems.config.secrets_manager import get_secrets_manager
+
+    # Refresh the centralized secrets manager cache for graph-api secrets
+    manager = get_secrets_manager()
+    manager.refresh("graph-api")
+    logger.info("Graph API key cache cleared successfully")
+  except Exception as e:
+    logger.warning(f"Failed to clear API key cache: {e}")
 
 
 def create_api_key(prefix: str = "kuzu") -> tuple[str, str]:
