@@ -428,6 +428,17 @@ class KuzuMCPClient:
           )
 
         elif table_type.upper() == "REL":
+          # Get count for relationships
+          count = 0
+          try:
+            count_query = f"MATCH ()-[r:{table_name}]->() RETURN count(r) as count"
+            count_result = await self.execute_query(count_query)
+            if count_result and len(count_result) > 0:
+              count = count_result[0].get("count", 0)
+          except Exception as e:
+            logger.debug(f"Could not count {table_name}: {e}")
+            pass
+
           # Infer relationship details without querying table structure
           from_node, to_node = self._infer_relationship_nodes(table_name)
 
@@ -436,6 +447,7 @@ class KuzuMCPClient:
               "label": table_name,
               "type": "relationship",
               "comment": table_comment,
+              "count": count,
               "from_node": from_node,
               "to_node": to_node,
               "description": self._get_relationship_description(table_name),
