@@ -14,7 +14,8 @@
 #
 # =============================================================================
 
-_default_env := ".env.local"
+_env := ".env"
+_local_env := ".env.local"
 
 default:
     @just --list
@@ -22,30 +23,29 @@ default:
 ## Docker ##
 
 # Start service
-start profile="robosystems" env=_default_env build="--build" detached="--detach":
-    @just compose-up {{profile}} {{env}} {{build}} {{detached}}
+start profile="robosystems" build="--build" detached="--detach":
+    @just compose-up {{profile}} {{build}} {{detached}}
 
 # Stop service
 stop profile="robosystems":
     @just compose-down {{profile}}
 
 # Quick restart containers to pick up code changes via volume mounts (no rebuild)
-restart profile="robosystems" env=_default_env:
-    docker compose -f compose.yaml --env-file {{env}} --profile {{profile}} restart
+restart profile="robosystems":
+    docker compose -f compose.yaml --profile {{profile}} restart
 
 # Restart specific service(s) without stopping everything
-restart-service service env=_default_env:
-    docker compose -f compose.yaml --env-file {{env}} restart {{service}}
+restart-service service:
+    docker compose -f compose.yaml restart {{service}}
 
 # Rebuild containers (full rebuild with new images)
-rebuild profile="robosystems" env=_default_env:
+rebuild profile="robosystems":
     @just compose-down {{profile}}
-    @just compose-up {{profile}} {{env}} --build --detach
+    @just compose-up {{profile}} --build --detach
 
 # Docker commands
-compose-up profile="robosystems" env=_default_env build="--build" detached="":
-    test -f .env || cp .env.example .env
-    test -f {{env}} || cp .env.local.example {{env}}
+compose-up profile="robosystems" build="--build" detached="--detach" env=_env:
+    @test -f {{env}} || cp .env.example {{env}}
     docker compose -f compose.yaml --env-file {{env}} --profile {{profile}} up {{build}} {{detached}}
 
 compose-down profile="robosystems":
@@ -68,12 +68,12 @@ logs-grep container="worker" pattern="ERROR" lines="100":
 # Initialize complete development environment (run after bootstrap)
 init:
     uv python install $(cat .python-version)
+    @test -f {{_env}} || cp .env.example {{_env}}
+    @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
     @just venv
 
 # Create virtual environment (assumes uv is installed)
 venv:
-    test -f .env || cp .env.example .env
-    test -f .env.local || cp .env.local.example .env.local
     uv venv
     source .venv/bin/activate
     @just install
@@ -213,52 +213,52 @@ generate-keys:
 
 # Install apps
 install-apps:
-    test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
-    test -d '../roboinvestor-app' || git clone https://github.com/RoboFinSystem/roboinvestor-app.git '../roboinvestor-app'
-    test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
+    @test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
+    @test -d '../roboinvestor-app' || git clone https://github.com/RoboFinSystem/roboinvestor-app.git '../roboinvestor-app'
+    @test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
 
 ## Development Server ##
 
 # Start development server
-api env=_default_env:
+api env=_local_env:
     UV_ENV_FILE={{env}} uv run uvicorn main:app --reload
 
 # Start Graph API server with Kuzu backend (configurable node type)
-graph-api backend="kuzu" type="writer" port="8001" env=_default_env:
+graph-api backend="kuzu" type="writer" port="8001" env=_local_env:
     UV_ENV_FILE={{env}} GRAPH_BACKEND_TYPE={{backend}} KUZU_NODE_TYPE={{type}} uv run python -m robosystems.graph_api --port {{port}}
 
 # Start worker
-worker env=_default_env num_workers="1" queue="robosystems":
+worker num_workers="1" queue="robosystems" env=_local_env:
     UV_ENV_FILE={{env}} uv run celery -A robosystems worker -B -n rsworkerbeat --concurrency={{num_workers}} -Q {{queue}} -l info -Ofair --prefetch-multiplier=0
 
 # Start beat worker (Celery scheduler)
-beat env=_default_env:
+beat env=_local_env:
     UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
 
 # Start Flower (Celery monitoring web UI)
-flower env=_default_env:
+flower env=_local_env:
     UV_ENV_FILE={{env}} uv run celery -A robosystems flower --port=5555
 
 ## Database Operations ##
 
 # Create new migration
-migrate-create message env=_default_env:
+migrate-create message env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic revision --autogenerate -m "{{message}}"
 
 # Run migrations
-migrate-up env=_default_env:
+migrate-up env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic upgrade head
 
 # Rollback migration
-migrate-down env=_default_env:
+migrate-down env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic downgrade -1
 
 # Show migration history
-migrate-history env=_default_env:
+migrate-history env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic history
 
 # Show current migration
-migrate-current env=_default_env:
+migrate-current env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic current
 
 # Run migrations on remote environment via bastion
@@ -266,67 +266,67 @@ migrate-remote environment key:
     @just bastion-tunnel {{environment}} migrate {{key}}
 
 # Reset database (drop and recreate all auth tables)
-db-reset env=_default_env:
+db-reset env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic downgrade base
     UV_ENV_FILE={{env}} uv run alembic upgrade head
 
 # Database management commands
-db-info env=_default_env:
+db-info env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager info
 
-db-list-users env=_default_env:
+db-list-users env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager list-users
 
-db-create-user email name password env=_default_env:
+db-create-user email name password env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-user {{email}} "{{name}}" {{password}}
 
-db-create-key email key_name env=_default_env:
+db-create-key email key_name env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-key {{email}} "{{key_name}}"
 
 # Create test user (comma-separated modes: json,file,sec,industry,economic - e.g., 'json,sec,industry' for JSON output with multiple repository access)
-db-create-test-user mode="" base_url="http://localhost:8000" env=_default_env:
+db-create-test-user mode="" base_url="http://localhost:8000" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode != "" { "--modes " + mode } else { "" } }}
 
 ## Graph API ##
 
 # Graph API - health check
-graph-health url="http://localhost:8001" env=_default_env:
+graph-health url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --command health
 
 # Graph API - get database info
-graph-info graph_id url="http://localhost:8001" env=_default_env:
+graph-info graph_id url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --command info
 
 # Graph API - execute Cypher query (single quotes auto-converted to double quotes for Cypher)
 # Examples:
 #   just graph-query sec "MATCH (e:Entity {ticker: 'AAPL'}) RETURN e.name"
 #   just graph-query sec "MATCH (e:Entity) WHERE e.ticker IN ['AAPL', 'MSFT'] RETURN e.name"
-graph-query graph_id query format="table" url="http://localhost:8001" env=_default_env:
+graph-query graph_id query format="table" url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
 
 # Graph API - execute SQL query on staging tables (DuckDB-based)
-tables-query graph_id query format="table" url="http://localhost:8001" env=_default_env:
+tables-query graph_id query format="table" url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
 
 # Kuzu embedded database direct query (bypasses API)
-kuzu-query graph_id query format="table" env=_default_env:
+kuzu-query graph_id query format="table" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
 
 # DuckDB staging database direct query (bypasses API)
-duckdb-query graph_id query format="table" env=_default_env:
+duckdb-query graph_id query format="table" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb --query "{{query}}" --format {{format}}
 
 # Interactive query modes - launch REPL for each database type
-graph-query-i graph_id url="http://localhost:8001" env=_default_env:
+graph-query-i graph_id url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_query --url {{url}} --graph-id {{graph_id}}
 
-tables-query-i graph_id url="http://localhost:8001" env=_default_env:
+tables-query-i graph_id url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query --url {{url}} --graph-id {{graph_id}}
 
-kuzu-query-i graph_id env=_default_env:
+kuzu-query-i graph_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu
 
-duckdb-query-i graph_id env=_default_env:
+duckdb-query-i graph_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb
 
 ## SEC Local Pipeline - Testing and Development ##
@@ -338,15 +338,15 @@ duckdb-query-i graph_id env=_default_env:
 #   just sec-load NVDA 2025 [duckdb|copy] [kuzu|neo4j]   # Specify ingestion method and/or backend
 
 # SEC Local - Load single company by ticker and year(s)
-sec-load ticker year="" ingest_method="duckdb" backend="kuzu" env=_default_env:
+sec-load ticker year="" ingest_method="duckdb" backend="kuzu" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} {{ if ingest_method == "copy" { "--use-copy-pipeline" } else { "" } }}
 
 # SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
-sec-health verbose="" env=_default_env:
+sec-health verbose="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local_health {{ if verbose == "v" { "--verbose" } else { "" } }}
 
 # SEC Local - Reset database with proper schema
-sec-reset backend="kuzu" env=_default_env:
+sec-reset backend="kuzu" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
 
 ## SEC Production Pipeline - Large-scale orchestrated processing ##
@@ -357,99 +357,99 @@ sec-reset backend="kuzu" env=_default_env:
 #   just sec-phase [download|process|consolidate|ingest]        # Start a specific phase
 
 # SEC Production - Plan processing with optional company limit for testing
-sec-plan start_year="2020" end_year="2025" max_companies="" env=_default_env:
+sec-plan start_year="2020" end_year="2025" max_companies="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {{start_year}} --end-year {{end_year}} --max-companies {{max_companies}}
 
 # SEC Production - Start a specific phase: download, process, consolidate, ingest
-sec-phase phase env=_default_env:
+sec-phase phase env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}}
 
 # SEC Production - Resume a phase from last checkpoint
-sec-phase-resume phase env=_default_env:
+sec-phase-resume phase env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --resume
 
 # SEC Production - Retry failed companies in a phase
-sec-phase-retry phase env=_default_env:
+sec-phase-retry phase env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --retry-failed
 
 # SEC Production - Get status of all phases
-sec-status env=_default_env:
+sec-status env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator status
 
 # SEC Production - Reset database (requires confirmation)
-sec-reset-remote confirm="" env=_default_env:
+sec-reset-remote confirm="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 ## Repository Access Management ##
 # Manage user access to shared repositories (SEC, industry data, etc.)
 
 # Grant repository access
-repo-grant-access user_id repository access_level="read" env=_default_env:
+repo-grant-access user_id repository access_level="read" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}}
 
 # Grant repository access with expiration
-repo-grant-access-expire user_id repository access_level expires_days env=_default_env:
+repo-grant-access-expire user_id repository access_level expires_days env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}} --expires-days {{expires_days}}
 
 # Revoke repository access
-repo-revoke-access user_id repository env=_default_env:
+repo-revoke-access user_id repository env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager revoke {{user_id}} {{repository}}
 
 # List all repository access
-repo-list-access env=_default_env:
+repo-list-access env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list
 
 # List users with access to a specific repository
-repo-list-users repository env=_default_env:
+repo-list-users repository env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list --repository {{repository}}
 
 # List all available repositories
-repo-list-repositories env=_default_env:
+repo-list-repositories env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager repositories
 
 # Check user access to all repositories
-repo-check-access user_id env=_default_env:
+repo-check-access user_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}}
 
 # Check user access to a specific repository
-repo-check-repo user_id repository env=_default_env:
+repo-check-repo user_id repository env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
 
 ## Credit Admin Tools ##
 # Monthly credit allocation is automated via Celery Beat - these commands are for manual operations only
 
 # Credit admin - add bonus credits to a user graph
-credit-bonus-graph graph_id amount description env=_default_env:
+credit-bonus-graph graph_id amount description env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin bonus-graph {{graph_id}} --amount {{amount}} --description "{{description}}"
 
 # Credit admin - add bonus credits to a user's repository subscription
-credit-bonus-repository user_id repository_name amount description env=_default_env:
+credit-bonus-repository user_id repository_name amount description env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin bonus-repository {{user_id}} {{repository_name}} --amount {{amount}} --description "{{description}}"
 
 # Credit admin - check credit system health
-credit-health env=_default_env:
+credit-health env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin health
 
 # Credit admin - manual allocation for specific user (DANGEROUS - requires confirm="yes")
-credit-force-allocate-user user_id confirm="" env=_default_env:
+credit-force-allocate-user user_id confirm="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-user {{user_id}} {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 # Credit admin - manual allocation for ALL users (DANGEROUS - requires confirm="yes")
-credit-force-allocate-all confirm="" env=_default_env:
+credit-force-allocate-all confirm="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-all {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 ## Valkey/Redis ##
 
 # Clear Valkey/Redis queues
-valkey-clear-queue queue env=_default_env:
+valkey-clear-queue queue env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues {{queue}}
 
 # Clear Valkey/Redis queues including unacknowledged messages
-valkey-clear-queue-all queue env=_default_env:
+valkey-clear-queue-all queue env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --clear-unacked {{queue}}
 
 # List Valkey/Redis queue contents without clearing
-valkey-list-queue queue env=_default_env:
+valkey-list-queue queue env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
 
 ## Misc ##
