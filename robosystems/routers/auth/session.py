@@ -253,18 +253,8 @@ async def refresh_session(
     # Also invalidate old token cache
     api_key_cache.invalidate_jwt_token(jwt_token)
 
-    # Create new JWT token with fresh expiry, device binding, and additional entropy
-    # Add timestamp nonce for additional security against replay attacks
-    import time
-
-    device_fingerprint_with_entropy = {
-      **device_fingerprint,
-      "refresh_timestamp": int(time.time()),
-      "refresh_nonce": payload.get("jti", "")[:8]
-      if payload
-      else "",  # Use part of old JTI as nonce
-    }
-    new_jwt_token = create_jwt_token(user.id, device_fingerprint_with_entropy)
+    # Create new JWT token with fresh expiry and device binding
+    new_jwt_token = create_jwt_token(user.id, device_fingerprint)
 
     # Log successful refresh for security monitoring
     from ...security import SecurityAuditLogger, SecurityEventType
