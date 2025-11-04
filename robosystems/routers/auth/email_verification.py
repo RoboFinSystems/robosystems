@@ -255,6 +255,9 @@ async def verify_email(
 
   logger.info(f"Email verified for user {user.email}")
 
+  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
+  refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
+
   return AuthResponse(
     user={
       "id": user.id,
@@ -263,4 +266,6 @@ async def verify_email(
     },
     message="Email verified successfully. Welcome to RoboSystems!",
     token=jwt_token,
+    expires_in=expires_in,
+    refresh_threshold=refresh_threshold,
   )

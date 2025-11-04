@@ -253,18 +253,8 @@ async def refresh_session(
     # Also invalidate old token cache
     api_key_cache.invalidate_jwt_token(jwt_token)
 
-    # Create new JWT token with fresh expiry, device binding, and additional entropy
-    # Add timestamp nonce for additional security against replay attacks
-    import time
-
-    device_fingerprint_with_entropy = {
-      **device_fingerprint,
-      "refresh_timestamp": int(time.time()),
-      "refresh_nonce": payload.get("jti", "")[:8]
-      if payload
-      else "",  # Use part of old JTI as nonce
-    }
-    new_jwt_token = create_jwt_token(user.id, device_fingerprint_with_entropy)
+    # Create new JWT token with fresh expiry and device binding
+    new_jwt_token = create_jwt_token(user.id, device_fingerprint)
 
     # Log successful refresh for security monitoring
     from ...security import SecurityAuditLogger, SecurityEventType
@@ -281,6 +271,12 @@ async def refresh_session(
       },
     )
 
+    # Calculate token expiry and refresh threshold
+    expires_in = int(env.JWT_EXPIRY_HOURS * 3600)  # Convert hours to seconds
+    refresh_threshold = (
+      env.TOKEN_GRACE_PERIOD_MINUTES * 60
+    )  # Convert minutes to seconds
+
     # Return new token for Bearer authentication
     return AuthResponse(
       user={
@@ -290,6 +286,8 @@ async def refresh_session(
       },
       message="Session refreshed successfully",
       token=new_jwt_token,  # Return new JWT for Bearer authentication
+      expires_in=expires_in,  # Token expires in 30 minutes (1800 seconds)
+      refresh_threshold=refresh_threshold,  # Refresh 5 minutes before expiry (300 seconds)
     )
 
   except HTTPException:
