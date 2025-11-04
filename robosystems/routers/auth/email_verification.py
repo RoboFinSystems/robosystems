@@ -263,4 +263,6 @@ async def verify_email(
     },
     message="Email verified successfully. Welcome to RoboSystems!",
     token=jwt_token,
+    expires_in=1800,  # 30 minutes in seconds
+    refresh_threshold=300,  # 5 minutes in seconds
   )

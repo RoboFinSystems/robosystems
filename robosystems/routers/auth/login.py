@@ -207,6 +207,12 @@ async def login(
       ip_address=client_ip, success=True, email=sanitized_email, user_agent=user_agent
     )
 
+  # Calculate token expiry and refresh threshold
+  from ...config import env
+
+  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)  # Convert hours to seconds
+  refresh_threshold = env.TOKEN_GRACE_PERIOD_MINUTES * 60  # Convert minutes to seconds
+
   return AuthResponse(
     user={
       "id": user.id,
@@ -215,4 +221,6 @@ async def login(
     },
     message="Login successful",
     token=jwt_token,  # Return JWT for Bearer authentication
+    expires_in=expires_in,  # Token expires in 30 minutes (1800 seconds)
+    refresh_threshold=refresh_threshold,  # Refresh 5 minutes before expiry (300 seconds)
   )

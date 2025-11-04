@@ -342,4 +342,6 @@ async def register(
     },
     message=message,
     token=jwt_token,
+    expires_in=1800,  # 30 minutes in seconds
+    refresh_threshold=300,  # 5 minutes in seconds
   )

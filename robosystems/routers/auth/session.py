@@ -281,6 +281,12 @@ async def refresh_session(
       },
     )
 
+    # Calculate token expiry and refresh threshold
+    expires_in = int(env.JWT_EXPIRY_HOURS * 3600)  # Convert hours to seconds
+    refresh_threshold = (
+      env.TOKEN_GRACE_PERIOD_MINUTES * 60
+    )  # Convert minutes to seconds
+
     # Return new token for Bearer authentication
     return AuthResponse(
       user={
@@ -290,6 +296,8 @@ async def refresh_session(
       },
       message="Session refreshed successfully",
       token=new_jwt_token,  # Return new JWT for Bearer authentication
+      expires_in=expires_in,  # Token expires in 30 minutes (1800 seconds)
+      refresh_threshold=refresh_threshold,  # Refresh 5 minutes before expiry (300 seconds)
     )
 
   except HTTPException:

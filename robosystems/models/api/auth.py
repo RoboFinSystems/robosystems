@@ -53,6 +53,12 @@ class AuthResponse(BaseModel):
   token: str | None = Field(
     None, description="JWT authentication token (optional for cookie-based auth)"
   )
+  expires_in: int | None = Field(
+    None, description="Token expiry time in seconds from now"
+  )
+  refresh_threshold: int | None = Field(
+    None, description="Recommended refresh threshold in seconds before expiry"
+  )
 
 
 class SSOTokenResponse(BaseModel):
