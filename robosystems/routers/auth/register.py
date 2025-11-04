@@ -334,6 +334,9 @@ async def register(
   if env.EMAIL_VERIFICATION_ENABLED and not user.email_verified:
     message += ". Please check your email to verify your account."
 
+  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
+  refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
+
   return AuthResponse(
     user={
       "id": user.id,
@@ -342,6 +345,6 @@ async def register(
     },
     message=message,
     token=jwt_token,
-    expires_in=1800,  # 30 minutes in seconds
-    refresh_threshold=300,  # 5 minutes in seconds
+    expires_in=expires_in,
+    refresh_threshold=refresh_threshold,
   )

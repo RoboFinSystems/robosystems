@@ -286,6 +286,9 @@ async def reset_password(
 
   logger.info(f"Password reset completed for user {user.email}")
 
+  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
+  refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
+
   return AuthResponse(
     user={
       "id": user.id,
@@ -294,6 +297,6 @@ async def reset_password(
     },
     message="Password reset successfully. You are now logged in.",
     token=jwt_token,
-    expires_in=1800,  # 30 minutes in seconds
-    refresh_threshold=300,  # 5 minutes in seconds
+    expires_in=expires_in,
+    refresh_threshold=refresh_threshold,
   )

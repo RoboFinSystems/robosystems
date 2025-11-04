@@ -630,6 +630,9 @@ async def sso_complete(
     # No longer setting auth cookies - using Bearer token authentication
     # Token is returned in the response body for the frontend to store
 
+    expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
+    refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
+
     return AuthResponse(
       user={
         "id": user.id,
@@ -638,8 +641,8 @@ async def sso_complete(
       },
       message="SSO authentication completed successfully",
       token=jwt_token,  # Return JWT for Bearer authentication
-      expires_in=1800,  # 30 minutes in seconds
-      refresh_threshold=300,  # 5 minutes in seconds
+      expires_in=expires_in,
+      refresh_threshold=refresh_threshold,
     )
 
   except HTTPException:

@@ -210,8 +210,8 @@ async def login(
   # Calculate token expiry and refresh threshold
   from ...config import env
 
-  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)  # Convert hours to seconds
-  refresh_threshold = env.TOKEN_GRACE_PERIOD_MINUTES * 60  # Convert minutes to seconds
+  expires_in = int(env.JWT_EXPIRY_HOURS * 3600)
+  refresh_threshold = int(env.TOKEN_GRACE_PERIOD_MINUTES * 60)
 
   return AuthResponse(
     user={
