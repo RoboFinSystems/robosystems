@@ -29,7 +29,7 @@ from robosystems.graph_api.core.utils import (
   validate_query_parameters,
 )
 from robosystems.middleware.graph.clusters import NodeType, RepositoryType
-from robosystems.models.api.graph import translate_neo4j_to_kuzu
+from robosystems.models.api.graphs.query import translate_neo4j_to_kuzu
 from robosystems.logger import logger
 from robosystems.exceptions import (
   ConfigurationError,

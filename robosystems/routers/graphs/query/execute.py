@@ -32,7 +32,7 @@ from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.models.api.graph import (
+from robosystems.models.api.graphs.query import (
   CypherQueryRequest,
   CypherQueryResponse,
   DEFAULT_QUERY_TIMEOUT,

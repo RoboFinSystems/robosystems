@@ -12,7 +12,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.operations.connection_service import ConnectionService
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.models.api.connection import (
+from robosystems.models.api.graphs.connections import (
   ProviderType,
   CreateConnectionRequest,
   ConnectionResponse,

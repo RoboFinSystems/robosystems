@@ -66,7 +66,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User, GraphTable, GraphFile
-from robosystems.models.api.table import (
+from robosystems.models.api.graphs.tables import (
   FileUploadRequest,
   FileUploadResponse,
   FileStatusUpdate,

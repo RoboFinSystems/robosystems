@@ -11,7 +11,7 @@ from robosystems.middleware.graph import get_graph_repository
 from robosystems.operations.connection_service import ConnectionService
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.models.api.connection import (
+from robosystems.models.api.graphs.connections import (
   LinkTokenRequest,
   ExchangeTokenRequest,
 )

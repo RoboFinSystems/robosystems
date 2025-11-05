@@ -17,7 +17,10 @@ from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.models.api.graph import GraphMetricsResponse, GraphUsageResponse
+from robosystems.models.api.graphs.metrics import (
+  GraphMetricsResponse,
+  GraphUsageResponse,
+)
 from robosystems.operations.graph.metrics_service import GraphMetricsService
 from robosystems.database import get_db_session
 from sqlalchemy.orm import Session

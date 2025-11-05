@@ -15,7 +15,7 @@ from .quickbooks_provider import (
   sync_quickbooks_connection,
   cleanup_quickbooks_connection,
 )
-from ...models.api.connection import (
+from ...models.api.graphs.connections import (
   SECConnectionConfig,
   PlaidConnectionConfig,
   QuickBooksConnectionConfig,

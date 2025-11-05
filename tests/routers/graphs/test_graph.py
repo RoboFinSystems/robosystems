@@ -21,10 +21,12 @@ from robosystems.routers.graphs.main import (
   _create_error_response,
   _raise_http_exception,
 )
-from robosystems.models.api.graph import (
+from robosystems.models.api.graphs.core import (
   GraphMetadata,
-  CustomSchemaDefinition,
   InitialEntityData,
+)
+from robosystems.models.api.graphs.schema import (
+  CustomSchemaDefinition,
 )
 
 

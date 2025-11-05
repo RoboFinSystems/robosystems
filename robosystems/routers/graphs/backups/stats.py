@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from robosystems.database import get_async_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.graph import BackupStatsResponse
+from robosystems.models.api.graphs.backups import BackupStatsResponse
 from robosystems.models.iam import User
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.logger import logger

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.iam import User
-from robosystems.models.api.graph import (
+from robosystems.models.api.graphs.schema import (
   SchemaValidationRequest,
   SchemaValidationResponse,
 )

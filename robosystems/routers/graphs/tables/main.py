@@ -37,7 +37,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User, GraphTable
-from robosystems.models.api.table import TableInfo, TableListResponse
+from robosystems.models.api.graphs.tables import TableInfo, TableListResponse
 from robosystems.models.api.common import ErrorResponse
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency

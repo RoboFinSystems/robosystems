@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.database import get_async_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.api.subgraph import (
+from robosystems.models.api.graphs.subgraphs import (
   DeleteSubgraphRequest,
   DeleteSubgraphResponse,
 )

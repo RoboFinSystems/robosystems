@@ -4,7 +4,7 @@ This module contains Pydantic models for service offering responses including
 graph subscriptions, repository subscriptions, and operation costs.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class GraphSubscriptionTier(BaseModel):
@@ -54,7 +54,7 @@ class GraphSubscriptions(BaseModel):
   notes: list[str] = Field(..., description="Important notes")
 
 
-class RepositoryPlan(BaseModel):
+class OfferingRepositoryPlan(BaseModel):
   """Information about a repository plan."""
 
   plan: str = Field(..., description="Plan identifier")
@@ -76,11 +76,13 @@ class RepositoryInfo(BaseModel):
   description: str = Field(..., description="Repository description")
   enabled: bool = Field(..., description="Whether repository is enabled")
   coming_soon: bool = Field(..., description="Whether repository is coming soon")
-  plans: list[RepositoryPlan] = Field(..., description="Available plans")
+  plans: list[OfferingRepositoryPlan] = Field(..., description="Available plans")
 
 
 class RepositorySubscriptions(BaseModel):
   """Repository subscription offerings."""
+
+  model_config = ConfigDict(json_schema_mode_override="serialization")
 
   description: str = Field(..., description="Description of repository subscriptions")
   repositories: list[RepositoryInfo] = Field(..., description="Available repositories")

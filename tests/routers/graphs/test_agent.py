@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
-from robosystems.models.api.agent import AgentMessage
+from robosystems.models.api.graphs.agent import AgentMessage
 
 
 @pytest.fixture

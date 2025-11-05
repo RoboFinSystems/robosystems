@@ -15,7 +15,7 @@ from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
 from robosystems.middleware.graph import get_universal_repository
-from robosystems.models.api.graph import DatabaseHealthResponse
+from robosystems.models.api.graphs.health import DatabaseHealthResponse
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger

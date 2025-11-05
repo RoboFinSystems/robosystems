@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from robosystems.models.api.table import FileStatusUpdate
+from robosystems.models.api.graphs.tables import FileStatusUpdate
 
 
 class TestFileStatusUpdate:
