@@ -168,7 +168,7 @@ Multiple subscription tiers are available, ranging from multi-tenant shared infr
 
 ### Rate Limiting
 
-Burst-focused protection with 1-minute windows. Rate limits scale with subscription tier, with higher tiers receiving increased multipliers for API operations, queries, and AI calls.
+Burst-focused protection with 1-minute windows. Rate limits scale with subscription tier, with higher tiers receiving increased `api_rate_multiplier` values (e.g., 1.0x for standard, 2.5x for large, 5.0x for xlarge). These multipliers apply only to API request rates, not to credit costs.
 
 ## Database Systems
 

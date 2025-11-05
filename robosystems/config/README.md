@@ -102,21 +102,21 @@ SUBSCRIPTION_PLANS = {
         "credits_per_month": 100_000,
         "base_price_cents": 4999,  # $49.99
         "max_graphs": 5,
-        "rate_limit_multiplier": 2.0,
+        "api_rate_multiplier": 2.0,
     },
     "enterprise": {
         "display_name": "Enterprise",
         "credits_per_month": 1_000_000,
         "base_price_cents": 19999,  # $199.99
         "max_graphs": 25,
-        "rate_limit_multiplier": 5.0,
+        "api_rate_multiplier": 5.0,
     },
     "premium": {
         "display_name": "Premium",
         "credits_per_month": 3_000_000,
         "base_price_cents": 49999,  # $499.99
         "max_graphs": 100,
-        "rate_limit_multiplier": 10.0,
+        "api_rate_multiplier": 10.0,
     }
 }
 ```

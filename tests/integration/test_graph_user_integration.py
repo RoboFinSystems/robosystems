@@ -281,7 +281,6 @@ class TestGraphUserIntegration:
       billing_admin_id=test_user.id,
       current_balance=Decimal("1000.0"),
       monthly_allocation=Decimal("1000.0"),
-      credit_multiplier=Decimal(str(standard_graph.get_credit_multiplier())),
       last_allocation_date=datetime.now(timezone.utc),
     )
 
@@ -292,17 +291,16 @@ class TestGraphUserIntegration:
       billing_admin_id=test_user.id,
       current_balance=Decimal("1000.0"),
       monthly_allocation=Decimal("1000.0"),
-      credit_multiplier=Decimal(str(premium_graph.get_credit_multiplier())),
       last_allocation_date=datetime.now(timezone.utc),
     )
 
     test_db.add_all([standard_credits, premium_credits])
     test_db.commit()
 
-    # Verify credit multipliers are consistent (simplified credit system)
-    # All tiers use 1.0 multiplier since credits are only for AI operations
-    assert standard_credits.credit_multiplier == 1.0
-    assert premium_credits.credit_multiplier == 1.0
+    # Verify both credits were created successfully
+    # Credits are used only for AI operations with per-token pricing
+    assert standard_credits.current_balance == Decimal("1000.0")
+    assert premium_credits.current_balance == Decimal("1000.0")
 
   def test_graph_metadata_access_through_user_graph(self, test_db, test_user):
     """Test accessing graph metadata through UserGraph relationship."""

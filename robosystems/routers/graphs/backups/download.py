@@ -3,7 +3,6 @@ Backup download URL generation endpoint.
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Any
 from fastapi import (
   APIRouter,
   Depends,
@@ -18,6 +17,7 @@ from robosystems.database import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.iam import User
+from robosystems.models.api.graph import BackupDownloadUrlResponse
 from robosystems.middleware.otel.metrics import (
   get_endpoint_metrics,
   endpoint_metrics_decorator,
@@ -32,7 +32,7 @@ router = APIRouter()
 
 @router.get(
   "/{backup_id}/download",
-  response_model=Dict[str, Any],
+  response_model=BackupDownloadUrlResponse,
   operation_id="getBackupDownloadUrl",
   summary="Get temporary download URL for backup",
   description="Generate a temporary download URL for a backup (unencrypted, compressed .kuzu files only)",
@@ -57,7 +57,7 @@ async def get_backup_download_url(
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Dict[str, Any]:
+) -> BackupDownloadUrlResponse:
   """
   Generate a temporary download URL for a backup.
 
@@ -110,13 +110,13 @@ async def get_backup_download_url(
       user_id=current_user.id,
     )
 
-    return {
-      "download_url": download_url,
-      "expires_in": expires_in,
-      "expires_at": (datetime.now(timezone.utc).timestamp() + expires_in),
-      "backup_id": backup_id,
-      "graph_id": graph_id,
-    }
+    return BackupDownloadUrlResponse(
+      download_url=download_url,
+      expires_in=expires_in,
+      expires_at=(datetime.now(timezone.utc).timestamp() + expires_in),
+      backup_id=backup_id,
+      graph_id=graph_id,
+    )
 
   except ValueError as e:
     if "encrypted" in str(e).lower():

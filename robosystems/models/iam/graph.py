@@ -152,15 +152,6 @@ class Graph(Model):
     extensions = self.schema_extensions or []
     return extension in extensions
 
-  def get_credit_multiplier(self) -> float:
-    """
-    Get the credit multiplier for this graph's tier.
-
-    In the simplified credit system, all tiers use 1.0x multiplier.
-    Credits are consumed based on actual token usage post-operation.
-    """
-    return 1.0
-
   @classmethod
   def create(
     cls,

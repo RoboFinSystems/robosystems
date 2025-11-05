@@ -52,6 +52,28 @@ Restores a complete graph database from an encrypted backup:
 - **Data Integrity**: Verification ensures successful restore
 - **Security**: Only encrypted backups to prevent data tampering
 
+**Operation State Machine:**
+```
+pending → backing_up_current → downloading → restoring → verifying → completed
+                                                                   ↘ failed
+```
+- **pending**: Restore queued, waiting to start
+- **backing_up_current**: Creating safety backup of existing database
+- **downloading**: Downloading backup from storage
+- **restoring**: Replacing database with backup contents
+- **verifying**: Verifying database integrity (if enabled)
+- **completed**: Restore successful, database operational
+- **failed**: Restore failed (rollback may be available)
+
+**Expected Durations:**
+Operation times vary by database size (includes backup + restore):
+- **Small** (<1GB): 1-3 minutes
+- **Medium** (1-10GB): 5-15 minutes
+- **Large** (10-100GB): 20-45 minutes
+- **Very Large** (>100GB): 45+ minutes
+
+Note: Restore operations take longer than backups due to safety backup step.
+
 **Progress Monitoring:**
 Use the returned operation_id to connect to the SSE stream:
 ```javascript
@@ -59,6 +81,7 @@ const eventSource = new EventSource('/v1/operations/{operation_id}/stream');
 eventSource.addEventListener('operation_progress', (event) => {
   const data = JSON.parse(event.data);
   console.log('Restore progress:', data.message);
+  console.log('Status:', data.status); // Shows current state
 });
 ```
 

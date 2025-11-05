@@ -140,7 +140,6 @@ class TestGraphUsageTracking:
       operation_type="agent_call",
       credits_consumed=Decimal("150.50"),
       base_credit_cost=Decimal("100.00"),
-      credit_multiplier=Decimal("1.5"),
       session=self.session,
       duration_ms=2500,
       cached_operation=False,
@@ -153,7 +152,6 @@ class TestGraphUsageTracking:
     assert usage.operation_type == "agent_call"
     assert usage.credits_consumed == Decimal("150.50")
     assert usage.base_credit_cost == Decimal("100.00")
-    assert usage.credit_multiplier == Decimal("1.5")
     assert usage.duration_ms == 2500
     assert usage.cached_operation is False
     assert usage.status_code == 200
@@ -168,7 +166,6 @@ class TestGraphUsageTracking:
       operation_type="mcp_call",
       credits_consumed=Decimal("50"),
       base_credit_cost=Decimal("50"),
-      credit_multiplier=Decimal("1.0"),
       session=self.session,
     )
 
@@ -297,13 +294,13 @@ class TestGraphUsageTracking:
     """Test getting monthly credit summary."""
     # Create credit consumption records
     operations = [
-      ("agent_call", Decimal("100"), Decimal("80"), Decimal("1.25"), 1000),
-      ("agent_call", Decimal("150"), Decimal("120"), Decimal("1.25"), 1500),
-      ("mcp_call", Decimal("50"), Decimal("50"), Decimal("1.0"), 500),
-      ("query", Decimal("10"), Decimal("10"), Decimal("1.0"), 100),
+      ("agent_call", Decimal("100"), Decimal("80"), 1000),
+      ("agent_call", Decimal("150"), Decimal("120"), 1500),
+      ("mcp_call", Decimal("50"), Decimal("50"), 500),
+      ("query", Decimal("10"), Decimal("10"), 100),
     ]
 
-    for op_type, credits, base_cost, multiplier, duration in operations:
+    for op_type, credits, base_cost, duration in operations:
       usage = GraphUsageTracking(
         user_id=self.test_user_id,
         graph_id=self.test_graph_id,
@@ -312,7 +309,6 @@ class TestGraphUsageTracking:
         graph_tier="premium",
         credits_consumed=credits,
         base_credit_cost=base_cost,
-        credit_multiplier=multiplier,
         duration_ms=duration,
         cached_operation=(op_type == "query"),
         billing_year=2024,
@@ -634,7 +630,6 @@ class TestGraphUsageTracking:
       storage_gb=5.5,
       credits_consumed=Decimal("100.50"),
       base_credit_cost=Decimal("80.00"),
-      credit_multiplier=Decimal("1.25"),
       duration_ms=1500,
       cached_operation=False,
       status_code=200,
@@ -660,9 +655,6 @@ class TestGraphUsageTracking:
     assert result["storage_gb"] == 5.5
     assert result["credits_consumed"] == 100.50
     assert result["base_credit_cost"] == 80.00
-    # Note: credit_multiplier may be adjusted based on graph_tier constraints
-    # For premium tier, the system may apply its own multiplier logic
-    assert abs(result["credit_multiplier"] - 1.25) < 0.1  # Allow for small variance
     assert result["duration_ms"] == 1500
     assert result["cached_operation"] is False
     assert result["status_code"] == 200
@@ -780,7 +772,6 @@ class TestGraphUsageTracking:
       operation_type="cached_query",
       credits_consumed=Decimal("0"),
       base_credit_cost=Decimal("0"),
-      credit_multiplier=Decimal("1.0"),
       session=self.session,
       cached_operation=True,
     )

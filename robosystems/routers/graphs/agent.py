@@ -75,13 +75,46 @@ def _convert_agent_mode(mode: Optional[AgentMode]) -> BaseAgentMode:
   summary="Auto-select agent for query",
   description="""Automatically select the best agent for your query.
 
-The orchestrator will:
-1. Enrich context with RAG if enabled
-2. Evaluate all available agents
-3. Select the best match based on confidence scores
-4. Execute the query with the selected agent
+**Agent Selection Process:**
 
-Use this endpoint when you want the system to intelligently route your query.""",
+The orchestrator intelligently routes your query by:
+1. Analyzing query intent and complexity
+2. Enriching context with RAG if enabled
+3. Evaluating all available agents against selection criteria
+4. Selecting the best match based on confidence scores
+5. Executing the query with the selected agent
+
+**Available Agent Types:**
+- `financial`: Financial analysis, SEC filings, company metrics
+- `research`: General research, data exploration, trend analysis
+- `rag`: Knowledge base search using RAG enrichment
+
+**Execution Modes:**
+- `quick`: Fast responses (~2-5s), suitable for simple queries
+- `standard`: Balanced approach (~5-15s), default mode
+- `extended`: Comprehensive analysis (~15-60s), deep research
+- `streaming`: Real-time response streaming
+
+**Confidence Score Interpretation:**
+- `0.9-1.0`: High confidence, agent is ideal match
+- `0.7-0.9`: Good confidence, agent is suitable
+- `0.5-0.7`: Moderate confidence, agent can handle but may not be optimal
+- `0.3-0.5`: Low confidence, fallback agent used
+- `<0.3`: Very low confidence, consider using specific agent endpoint
+
+**Credit Costs:**
+- Quick mode: 5-10 credits per query
+- Standard mode: 15-25 credits per query
+- Extended mode: 30-75 credits per query
+- RAG enrichment: +5-15 credits (if enabled)
+
+**Use Cases:**
+- Ask questions without specifying agent type
+- Get intelligent routing for complex multi-domain queries
+- Leverage conversation history for contextual understanding
+- Enable RAG for knowledge base enrichment
+
+See request/response examples in the "Examples" dropdown below.""",
   operation_id="autoSelectAgent",
   status_code=200,
   responses={

@@ -69,7 +69,7 @@ class CreditCache:
     return f"{self.OPERATION_COST_PREFIX}{operation_type}"
 
   def cache_graph_credit_balance(
-    self, graph_id: str, balance: Decimal, multiplier: Decimal, graph_tier: str
+    self, graph_id: str, balance: Decimal, graph_tier: str
   ) -> None:
     """
     Cache graph credit balance with metadata.
@@ -77,14 +77,12 @@ class CreditCache:
     Args:
         graph_id: Graph identifier
         balance: Current credit balance
-        multiplier: Credit multiplier for tier
         graph_tier: Graph tier (standard/enterprise/premium)
     """
     try:
       cache_key = self._get_graph_credit_key(graph_id)
       cache_data = {
         "balance": str(balance),
-        "multiplier": str(multiplier),
         "graph_tier": graph_tier,
         "cached_at": datetime.now(timezone.utc).isoformat(),
       }
@@ -97,12 +95,12 @@ class CreditCache:
 
   def get_cached_graph_credit_balance(
     self, graph_id: str
-  ) -> Optional[Tuple[Decimal, Decimal, str]]:
+  ) -> Optional[Tuple[Decimal, str]]:
     """
     Get cached graph credit balance.
 
     Returns:
-        Tuple of (balance, multiplier, graph_tier) or None if not cached
+        Tuple of (balance, graph_tier) or None if not cached
     """
     try:
       cache_key = self._get_graph_credit_key(graph_id)
@@ -111,10 +109,9 @@ class CreditCache:
       if cached_data:
         data = json.loads(str(cached_data))
         balance = Decimal(data["balance"])
-        multiplier = Decimal(data["multiplier"])
         graph_tier = data["graph_tier"]
         logger.debug(f"Credit balance cache hit for graph {graph_id}")
-        return balance, multiplier, graph_tier
+        return balance, graph_tier
 
       logger.debug(f"Credit balance cache miss for graph {graph_id}")
       return None
@@ -166,7 +163,6 @@ class CreditCache:
         "current_balance",
         "monthly_allocation",
         "consumed_this_month",
-        "credit_multiplier",
       ]:
         if key in summary_copy:
           summary_copy[key] = str(summary_copy[key])
@@ -190,7 +186,6 @@ class CreditCache:
           "current_balance",
           "monthly_allocation",
           "consumed_this_month",
-          "credit_multiplier",
         ]:
           if key in summary:
             summary[key] = float(summary[key])

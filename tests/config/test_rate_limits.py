@@ -25,7 +25,7 @@ def test_unknown_tier_falls_back_to_free_limits():
 
 def test_rate_limit_with_multiplier_adjusts_value(monkeypatch):
   monkeypatch.setattr(
-    "robosystems.config.rate_limits.get_tier_rate_limit_multiplier",
+    "robosystems.config.rate_limits.get_tier_api_rate_multiplier",
     lambda tier: 2.5,
   )
 
@@ -42,7 +42,7 @@ def test_rate_limit_with_multiplier_adjusts_value(monkeypatch):
 
 def test_multiplier_can_be_skipped(monkeypatch):
   monkeypatch.setattr(
-    "robosystems.config.rate_limits.get_tier_rate_limit_multiplier",
+    "robosystems.config.rate_limits.get_tier_api_rate_multiplier",
     lambda tier: 99,
   )
 

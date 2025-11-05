@@ -16,10 +16,27 @@ just test-all
 
 # Run integration tests
 just test-integration
-
-# Run end-to-end tests (requires Docker stack)
-just test-e2e
 ```
+
+## End-to-End Validation
+
+For complete end-to-end workflow validation, use the **examples** directory instead of traditional e2e tests:
+
+```bash
+# Run complete accounting workflow
+cd examples/accounting_demo
+uv run main.py
+
+# Run custom graph workflow
+cd examples/custom_graph_demo
+uv run main.py
+
+# Run SEC data workflow
+cd examples/sec_demo
+uv run main.py
+```
+
+These examples validate the entire stack (authentication, graph creation, data upload, ingestion, queries) in a production-like environment while also serving as user documentation.
 
 ## Test Structure
 
@@ -78,7 +95,6 @@ The test suite is organized by component, mirroring the application structure:
 
 ### Test Types
 - **`integration/`** - Cross-component integration tests
-- **`e2e/`** - End-to-end API tests (require full Docker stack)
 - **`unit/`** - Isolated unit tests for specific components
 
 ## Test Categories
@@ -89,7 +105,6 @@ Tests are marked with pytest markers to categorize them. Use these markers to ru
 
 - **`@pytest.mark.unit`** - Fast, isolated unit tests (no external dependencies)
 - **`@pytest.mark.integration`** - Integration tests (may use databases, create Kuzu instances)
-- **`@pytest.mark.e2e`** - End-to-end tests (require full Docker stack on localhost:8000)
 - **`@pytest.mark.celery`** - Celery task tests
 - **`@pytest.mark.slow`** - Long-running tests (XBRL processing, large datasets)
 - **`@pytest.mark.security`** - Security-focused tests
@@ -116,11 +131,8 @@ uv run pytest -m "not slow"
 # Run unit AND celery tests
 uv run pytest -m "unit and celery"
 
-# Run integration OR e2e tests
-uv run pytest -m "integration or e2e"
-
-# Everything except e2e (default)
-uv run pytest -m "not e2e"
+# Exclude slow tests (default)
+uv run pytest -m "not slow"
 ```
 
 ## Running Tests
@@ -176,7 +188,7 @@ uv run pytest -k "storage and billing"
 uv run pytest -k "test_auth or test_login"
 
 # Exclude specific patterns
-uv run pytest -k "not slow and not e2e"
+uv run pytest -k "not slow"
 
 # Verbose output with test names
 uv run pytest -v

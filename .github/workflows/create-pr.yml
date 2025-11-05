@@ -1,4 +1,4 @@
-name: Create Claude PR
+name: Claude - Create Pull Request
 
 on:
   workflow_dispatch:

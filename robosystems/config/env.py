@@ -992,7 +992,7 @@ class EnvConfig:
             "tier": tier,
             "storage_limit_gb": full_tier_config.get("storage_limit_gb", 500),
             "monthly_credits": full_tier_config.get("monthly_credits", 10000),
-            "rate_limit_multiplier": full_tier_config.get("rate_limit_multiplier", 1.0),
+            "api_rate_multiplier": full_tier_config.get("api_rate_multiplier", 1.0),
             "max_subgraphs": full_tier_config.get("max_subgraphs", 0),
           }
     except ImportError:
@@ -1017,7 +1017,7 @@ class EnvConfig:
       "tier": "kuzu-standard",
       "storage_limit_gb": 500,
       "monthly_credits": 10000,
-      "rate_limit_multiplier": 1.0,
+      "api_rate_multiplier": 1.0,
       "max_subgraphs": 0,
     }
 

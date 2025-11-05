@@ -173,7 +173,6 @@ class TestEntityManagementWorkflow:
       billing_admin_id=user_id,
       current_balance=Decimal("1000.0"),
       monthly_allocation=Decimal("1000.0"),
-      credit_multiplier=Decimal("1.0"),
       last_allocation_date=datetime.now(timezone.utc),
     )
     test_db.add(graph_credits)

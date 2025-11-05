@@ -1,7 +1,7 @@
 """Graph management API models."""
 
 from typing import Optional, Dict, Any, List, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 import re
 
 # Import secure write operation detection
@@ -155,24 +155,45 @@ class CypherQueryRequest(BaseModel):
     json_schema_extra = {
       "examples": [
         {
-          "query": "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
-          "parameters": {"entity_type": "Company", "limit": 100},
-          "timeout": 60,
+          "summary": "Simple entity lookup",
+          "description": "Find entities by type with parameterized values",
+          "value": {
+            "query": "MATCH (n:Entity {type: $entity_type}) RETURN n LIMIT $limit",
+            "parameters": {"entity_type": "Company", "limit": 100},
+            "timeout": 60,
+          },
         },
         {
-          "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
-          "parameters": {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
-          "timeout": 120,
+          "summary": "Relationship traversal query",
+          "description": "Find transactions between entities with amount filtering",
+          "value": {
+            "query": "MATCH (e:Entity)-[r:TRANSACTION]->(t:Entity) WHERE r.amount >= $min_amount AND e.name = $entity_name RETURN e, r, t LIMIT $limit",
+            "parameters": {"min_amount": 1000, "entity_name": "Acme Corp", "limit": 50},
+            "timeout": 120,
+          },
         },
         {
-          "query": "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
-          "parameters": {"identifier": "ENT123456"},
-          "timeout": 30,
+          "summary": "Lookup by identifier",
+          "description": "Find specific entity using unique identifier",
+          "value": {
+            "query": "MATCH (n:Entity) WHERE n.identifier = $identifier RETURN n",
+            "parameters": {"identifier": "ENT123456"},
+            "timeout": 30,
+          },
         },
         {
-          "query": "MATCH (n) RETURN n LIMIT 10",
-          "parameters": {},
-          "timeout": 30,
+          "summary": "Company financial query",
+          "description": "Aggregation query for financial metrics",
+          "value": {
+            "query": "MATCH (c:Company)-[:FILED]->(f:Filing) WHERE f.form_type = $form RETURN c.ticker, c.name, COUNT(f) as filing_count ORDER BY filing_count DESC LIMIT $limit",
+            "parameters": {"form": "10-K", "limit": 20},
+            "timeout": 60,
+          },
+        },
+        {
+          "summary": "Explore all nodes",
+          "description": "Simple query without parameters to explore graph structure",
+          "value": {"query": "MATCH (n) RETURN n LIMIT 10", "timeout": 30},
         },
       ]
     }
@@ -204,6 +225,86 @@ class CypherQueryResponse(BaseModel):
   error: Optional[str] = Field(
     default=None, description="Error message if query failed"
   )
+
+  class Config:
+    json_schema_extra = {
+      "examples": [
+        {
+          "summary": "Successful entity query",
+          "description": "Query returned multiple entity nodes",
+          "value": {
+            "success": True,
+            "data": [
+              {
+                "n": {
+                  "type": "Company",
+                  "name": "Apple Inc.",
+                  "ticker": "AAPL",
+                  "identifier": "ENT123456",
+                }
+              },
+              {
+                "n": {
+                  "type": "Company",
+                  "name": "Microsoft Corporation",
+                  "ticker": "MSFT",
+                  "identifier": "ENT789012",
+                }
+              },
+            ],
+            "columns": ["n"],
+            "row_count": 2,
+            "execution_time_ms": 45.3,
+            "graph_id": "kg1a2b3c4d5",
+            "timestamp": "2024-01-15T10:30:45Z",
+          },
+        },
+        {
+          "summary": "Aggregation query result",
+          "description": "Financial metrics aggregation with multiple columns",
+          "value": {
+            "success": True,
+            "data": [
+              {"ticker": "AAPL", "name": "Apple Inc.", "filing_count": 42},
+              {"ticker": "MSFT", "name": "Microsoft Corporation", "filing_count": 38},
+              {"ticker": "GOOGL", "name": "Alphabet Inc.", "filing_count": 35},
+            ],
+            "columns": ["ticker", "name", "filing_count"],
+            "row_count": 3,
+            "execution_time_ms": 128.7,
+            "graph_id": "kg1a2b3c4d5",
+            "timestamp": "2024-01-15T10:35:22Z",
+          },
+        },
+        {
+          "summary": "Empty result set",
+          "description": "Query executed successfully but returned no results",
+          "value": {
+            "success": True,
+            "data": [],
+            "columns": ["n"],
+            "row_count": 0,
+            "execution_time_ms": 12.5,
+            "graph_id": "kg1a2b3c4d5",
+            "timestamp": "2024-01-15T10:40:15Z",
+          },
+        },
+        {
+          "summary": "Query error",
+          "description": "Query failed due to syntax error",
+          "value": {
+            "success": False,
+            "data": None,
+            "columns": None,
+            "row_count": 0,
+            "execution_time_ms": 5.2,
+            "graph_id": "kg1a2b3c4d5",
+            "timestamp": "2024-01-15T10:45:30Z",
+            "error": "Syntax error: Expected MATCH, CREATE, or RETURN at line 1",
+          },
+        },
+      ]
+    }
 
 
 class BackupCreateRequest(BaseModel):
@@ -332,77 +433,438 @@ class GraphMetadata(BaseModel):
 
 
 class CustomSchemaDefinition(BaseModel):
-  """Custom schema definition for custom graphs."""
+  """Custom schema definition for generic graphs.
 
-  name: str = Field(..., description="Schema name", examples=["inventory_management"])
-  version: str = Field("1.0.0", description="Schema version", examples=["1.0.0"])
-  description: Optional[str] = Field(
-    None,
-    description="Schema description",
-    examples=["Inventory management system schema"],
+  This model allows you to define custom node types, relationship types, and properties
+  for graphs that don't fit the standard entity-based schema. Perfect for domain-specific
+  applications like inventory systems, org charts, project management, etc.
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "People, companies, and projects schema",
+          "description": "Custom schema from custom_graph_demo showing organizational structure",
+          "value": {
+            "name": "custom_graph_demo",
+            "version": "1.0.0",
+            "description": "People, companies, and projects schema for the custom graph demo",
+            "extends": "base",
+            "nodes": [
+              {
+                "name": "Company",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "industry", "type": "STRING"},
+                  {"name": "location", "type": "STRING"},
+                  {"name": "founded_year", "type": "INT64"},
+                ],
+              },
+              {
+                "name": "Project",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "status", "type": "STRING"},
+                  {"name": "budget", "type": "DOUBLE"},
+                  {"name": "start_date", "type": "STRING"},
+                  {"name": "end_date", "type": "STRING"},
+                ],
+              },
+              {
+                "name": "Person",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "age", "type": "INT64"},
+                  {"name": "title", "type": "STRING"},
+                  {"name": "interests", "type": "STRING"},
+                ],
+              },
+            ],
+            "relationships": [
+              {
+                "name": "PERSON_WORKS_FOR_COMPANY",
+                "from_node": "Person",
+                "to_node": "Company",
+                "properties": [
+                  {"name": "role", "type": "STRING"},
+                  {"name": "started_on", "type": "STRING"},
+                ],
+              },
+              {
+                "name": "PERSON_WORKS_ON_PROJECT",
+                "from_node": "Person",
+                "to_node": "Project",
+                "properties": [
+                  {"name": "hours_per_week", "type": "INT64"},
+                  {"name": "contribution", "type": "STRING"},
+                ],
+              },
+              {
+                "name": "COMPANY_SPONSORS_PROJECT",
+                "from_node": "Company",
+                "to_node": "Project",
+                "properties": [
+                  {"name": "sponsorship_level", "type": "STRING"},
+                  {"name": "budget_committed", "type": "DOUBLE"},
+                ],
+              },
+            ],
+            "metadata": {"domain": "custom_graph_demo"},
+          },
+        },
+        {
+          "summary": "Inventory management schema",
+          "description": "Simple schema for tracking products and warehouses",
+          "value": {
+            "name": "inventory_management",
+            "version": "1.0.0",
+            "description": "Inventory tracking system with products, warehouses, and suppliers",
+            "nodes": [
+              {
+                "name": "Product",
+                "properties": [
+                  {"name": "sku", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "price", "type": "DOUBLE"},
+                  {"name": "quantity", "type": "INT64"},
+                  {"name": "category", "type": "STRING"},
+                ],
+              },
+              {
+                "name": "Warehouse",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "location", "type": "STRING", "is_required": True},
+                  {"name": "capacity", "type": "INT64"},
+                ],
+              },
+              {
+                "name": "Supplier",
+                "properties": [
+                  {"name": "id", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                  {"name": "contact", "type": "STRING"},
+                ],
+              },
+            ],
+            "relationships": [
+              {
+                "name": "STORED_IN",
+                "from_node": "Product",
+                "to_node": "Warehouse",
+                "properties": [
+                  {"name": "since", "type": "DATE"},
+                  {"name": "quantity", "type": "INT64"},
+                ],
+              },
+              {
+                "name": "SUPPLIED_BY",
+                "from_node": "Product",
+                "to_node": "Supplier",
+                "properties": [{"name": "cost", "type": "DOUBLE"}],
+              },
+            ],
+            "metadata": {"created_by": "inventory_team", "industry": "retail"},
+          },
+        },
+        {
+          "summary": "Minimal schema",
+          "description": "Simplest custom schema with just two node types",
+          "value": {
+            "name": "simple_graph",
+            "version": "1.0.0",
+            "description": "Basic graph with just two node types",
+            "nodes": [
+              {
+                "name": "Item",
+                "properties": [
+                  {"name": "id", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                ],
+              },
+              {
+                "name": "Category",
+                "properties": [
+                  {"name": "id", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "is_required": True},
+                ],
+              },
+            ],
+            "relationships": [
+              {
+                "name": "BELONGS_TO",
+                "from_node": "Item",
+                "to_node": "Category",
+                "properties": [],
+              }
+            ],
+            "metadata": {},
+          },
+        },
+      ]
+    }
   )
+
+  name: str = Field(..., description="Schema name")
+  version: str = Field("1.0.0", description="Schema version")
+  description: Optional[str] = Field(None, description="Schema description")
   extends: Optional[str] = Field(
-    None,
-    description="Base schema to extend (e.g., 'base')",
-    examples=["base"],
+    None, description="Base schema to extend (e.g., 'base' for common utilities)"
   )
   nodes: List[Dict[str, Any]] = Field(
-    default_factory=list,
-    description="List of node definitions with properties",
-    examples=[
-      [
-        {
-          "name": "Product",
-          "properties": [
-            {"name": "sku", "type": "STRING", "is_primary_key": True},
-            {"name": "name", "type": "STRING", "is_required": True},
-            {"name": "price", "type": "DOUBLE"},
-            {"name": "quantity", "type": "INT64"},
-          ],
-        },
-        {
-          "name": "Warehouse",
-          "properties": [
-            {"name": "identifier", "type": "STRING", "is_primary_key": True},
-            {"name": "location", "type": "STRING"},
-          ],
-        },
-      ]
-    ],
+    default_factory=list, description="List of node definitions with properties"
   )
   relationships: List[Dict[str, Any]] = Field(
-    default_factory=list,
-    description="List of relationship definitions",
-    examples=[
-      [
-        {
-          "name": "STORED_IN",
-          "from_node": "Product",
-          "to_node": "Warehouse",
-          "properties": [{"name": "since", "type": "DATE"}],
-        }
-      ]
-    ],
+    default_factory=list, description="List of relationship definitions"
   )
   metadata: Dict[str, Any] = Field(
-    default_factory=dict,
-    description="Additional schema metadata",
-    examples=[{"created_by": "inventory_team", "industry": "retail"}],
+    default_factory=dict, description="Additional schema metadata"
   )
+
+
+class InitialEntityData(BaseModel):
+  """Initial entity data for entity-focused graph creation.
+
+  When creating an entity graph with an initial entity node, this model defines
+  the entity's identifying information and metadata.
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Public company entity",
+          "description": "Initial entity data for a publicly-traded company with SEC information",
+          "value": {
+            "name": "Apple Inc.",
+            "uri": "https://www.apple.com",
+            "cik": "0000320193",
+            "ein": "94-2404110",
+            "sic": "3571",
+            "sic_description": "Electronic Computers",
+            "state_of_incorporation": "California",
+            "fiscal_year_end": "0930",
+          },
+        },
+        {
+          "summary": "Private company entity",
+          "description": "Initial entity data for a private company with minimal information",
+          "value": {
+            "name": "Acme Consulting LLC",
+            "uri": "https://acmeconsulting.com",
+            "ein": "12-3456789",
+            "state_of_incorporation": "Delaware",
+            "category": "Professional Services",
+          },
+        },
+        {
+          "summary": "Minimal entity",
+          "description": "Simplest entity with just required fields",
+          "value": {
+            "name": "Startup Inc",
+            "uri": "https://startup.io",
+          },
+        },
+      ]
+    }
+  )
+
+  name: str = Field(..., min_length=1, max_length=255, description="Entity name")
+  uri: str = Field(..., min_length=1, description="Entity website or URI")
+  cik: Optional[str] = Field(None, description="CIK number for SEC filings")
+  sic: Optional[str] = Field(None, description="SIC code")
+  sic_description: Optional[str] = Field(None, description="SIC description")
+  category: Optional[str] = Field(None, description="Business category")
+  state_of_incorporation: Optional[str] = Field(
+    None, description="State of incorporation"
+  )
+  fiscal_year_end: Optional[str] = Field(None, description="Fiscal year end (MMDD)")
+  ein: Optional[str] = Field(None, description="Employer Identification Number")
 
 
 class CreateGraphRequest(BaseModel):
-  """Request model for creating a new graph."""
+  """Request model for creating a new graph.
 
-  metadata: GraphMetadata = Field(..., description="Graph metadata")
+  Use this to create either:
+  - **Entity graphs**: Standard graphs with entity schema and optional extensions
+  - **Custom graphs**: Generic graphs with fully custom schema definitions
+  """
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Entity graph with initial entity",
+          "description": "Create a graph with initial entity data for a specific company/organization",
+          "value": {
+            "metadata": {
+              "graph_name": "Acme Consulting LLC",
+              "description": "Professional consulting services with full accounting integration",
+              "schema_extensions": ["roboledger"],
+            },
+            "instance_tier": "kuzu-standard",
+            "initial_entity": {
+              "name": "Acme Consulting LLC",
+              "uri": "https://acmeconsulting.com",
+              "ein": "12-3456789",
+              "cik": "0001234567",
+              "state_of_incorporation": "Delaware",
+            },
+            "create_entity": True,
+            "tags": ["consulting", "professional-services", "production"],
+          },
+        },
+        {
+          "summary": "Entity graph without initial entity",
+          "description": "Create an entity graph structure without populating initial data (useful for bulk data imports)",
+          "value": {
+            "metadata": {
+              "graph_name": "Investment Portfolio Graph",
+              "description": "Knowledge graph for tracking investment portfolios and holdings",
+              "schema_extensions": ["roboinvestor"],
+            },
+            "instance_tier": "kuzu-standard",
+            "initial_entity": None,
+            "create_entity": False,
+            "tags": ["investments", "portfolio-management"],
+          },
+        },
+        {
+          "summary": "Custom graph with people and companies",
+          "description": "Create a generic graph with custom schema from custom_graph_demo",
+          "value": {
+            "metadata": {
+              "graph_name": "custom_graph_demo_1234",
+              "description": "Custom graph demo with people, companies, and projects",
+              "schema_extensions": [],
+            },
+            "instance_tier": "kuzu-standard",
+            "custom_schema": {
+              "name": "custom_graph_demo",
+              "version": "1.0.0",
+              "description": "People, companies, and projects schema",
+              "extends": "base",
+              "nodes": [
+                {
+                  "name": "Person",
+                  "properties": [
+                    {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                    {"name": "name", "type": "STRING", "is_required": True},
+                    {"name": "title", "type": "STRING"},
+                  ],
+                },
+                {
+                  "name": "Company",
+                  "properties": [
+                    {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                    {"name": "name", "type": "STRING", "is_required": True},
+                    {"name": "industry", "type": "STRING"},
+                  ],
+                },
+              ],
+              "relationships": [
+                {
+                  "name": "PERSON_WORKS_FOR_COMPANY",
+                  "from_node": "Person",
+                  "to_node": "Company",
+                  "properties": [{"name": "role", "type": "STRING"}],
+                }
+              ],
+              "metadata": {"domain": "custom_graph_demo"},
+            },
+            "tags": ["custom", "demo", "generic"],
+          },
+        },
+        {
+          "summary": "Inventory management custom graph",
+          "description": "Create a custom graph for inventory tracking",
+          "value": {
+            "metadata": {
+              "graph_name": "warehouse_inventory",
+              "description": "Inventory management system",
+              "schema_extensions": [],
+            },
+            "instance_tier": "kuzu-standard",
+            "custom_schema": {
+              "name": "inventory_management",
+              "version": "1.0.0",
+              "description": "Inventory tracking with products and warehouses",
+              "nodes": [
+                {
+                  "name": "Product",
+                  "properties": [
+                    {"name": "sku", "type": "STRING", "is_primary_key": True},
+                    {"name": "name", "type": "STRING", "is_required": True},
+                    {"name": "price", "type": "DOUBLE"},
+                    {"name": "quantity", "type": "INT64"},
+                  ],
+                },
+                {
+                  "name": "Warehouse",
+                  "properties": [
+                    {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                    {"name": "location", "type": "STRING", "is_required": True},
+                  ],
+                },
+              ],
+              "relationships": [
+                {
+                  "name": "STORED_IN",
+                  "from_node": "Product",
+                  "to_node": "Warehouse",
+                  "properties": [{"name": "quantity", "type": "INT64"}],
+                }
+              ],
+              "metadata": {"industry": "retail"},
+            },
+            "tags": ["inventory", "retail"],
+          },
+        },
+        {
+          "summary": "Generic empty graph",
+          "description": "Create an empty graph for general-purpose use without custom schema",
+          "value": {
+            "metadata": {
+              "graph_name": "Customer Analytics Graph",
+              "description": "Graph database for customer relationship and behavior analysis",
+              "schema_extensions": [],
+            },
+            "instance_tier": "kuzu-standard",
+            "tags": ["analytics", "customers", "marketing"],
+          },
+        },
+      ]
+    }
+  )
+
+  metadata: GraphMetadata = Field(
+    ..., description="Graph metadata including name, description, and schema extensions"
+  )
   instance_tier: str = Field(
     "kuzu-standard",
-    description="Instance tier: kuzu-standard, kuzu-large, or kuzu-xlarge",
-    examples=["kuzu-standard"],
+    description="Instance tier: kuzu-standard, kuzu-large, kuzu-xlarge, neo4j-community-large, neo4j-enterprise-xlarge",
+    pattern="^(kuzu-standard|kuzu-large|kuzu-xlarge|neo4j-community-large|neo4j-enterprise-xlarge)$",
   )
   custom_schema: Optional[CustomSchemaDefinition] = Field(
     None,
-    description="Optional custom schema definition. If provided, overrides schema_extensions",
+    description="Custom schema definition to apply. If provided, creates a generic custom graph. If omitted, creates an entity graph using schema_extensions.",
+  )
+  initial_entity: Optional[InitialEntityData] = Field(
+    None,
+    description="Optional initial entity to create in the graph. If provided with entity graph, populates the first entity node.",
+  )
+  create_entity: bool = Field(
+    default=True,
+    description="Whether to create the entity node and upload initial data. Only applies when initial_entity is provided. Set to False to create graph without populating entity data (useful for file-based ingestion workflows).",
+  )
+  tags: List[str] = Field(
+    default_factory=list,
+    description="Optional tags for organization",
+    max_length=10,
   )
 
 
@@ -706,50 +1168,169 @@ class SchemaInfoResponse(BaseModel):
   showing what node labels, relationship types, and properties exist right now.
   """
 
-  model_config = {"populate_by_name": True}
+  model_config = {
+    "populate_by_name": True,
+    "json_schema_extra": {
+      "examples": [
+        {
+          "summary": "SEC shared repository schema",
+          "description": "Runtime schema from SEC shared repository showing XBRL structures",
+          "value": {
+            "graph_id": "sec",
+            "schema": {
+              "node_labels": [
+                "Entity",
+                "Report",
+                "Fact",
+                "Element",
+                "Period",
+                "Unit",
+                "FactDimension",
+                "Taxonomy",
+                "Structure",
+                "Association",
+              ],
+              "relationship_types": [
+                "ENTITY_HAS_REPORT",
+                "REPORT_HAS_FACT",
+                "FACT_HAS_ELEMENT",
+                "FACT_HAS_PERIOD",
+                "FACT_HAS_UNIT",
+                "FACT_HAS_DIMENSION",
+                "REPORT_USES_TAXONOMY",
+                "STRUCTURE_HAS_TAXONOMY",
+                "STRUCTURE_HAS_ASSOCIATION",
+                "ASSOCIATION_HAS_FROM_ELEMENT",
+                "ASSOCIATION_HAS_TO_ELEMENT",
+              ],
+              "node_properties": {
+                "Entity": {
+                  "cik": "STRING",
+                  "name": "STRING",
+                  "ticker": "STRING",
+                  "entity_type": "STRING",
+                  "industry": "STRING",
+                  "state_of_incorporation": "STRING",
+                  "fiscal_year_end": "STRING",
+                },
+                "Report": {
+                  "form": "STRING",
+                  "report_date": "STRING",
+                  "filing_date": "STRING",
+                  "accession_number": "STRING",
+                  "name": "STRING",
+                },
+                "Fact": {
+                  "numeric_value": "DOUBLE",
+                  "decimals": "INT64",
+                  "fact_type": "STRING",
+                },
+              },
+            },
+          },
+        },
+        {
+          "summary": "Accounting graph schema",
+          "description": "Runtime schema from accounting demo showing double-entry bookkeeping structure",
+          "value": {
+            "graph_id": "kg1a2b3c4d5",
+            "schema": {
+              "node_labels": [
+                "Transaction",
+                "LineItem",
+                "Element",
+                "Report",
+                "Entity",
+                "Fact",
+                "Period",
+                "Unit",
+              ],
+              "relationship_types": [
+                "TRANSACTION_HAS_LINE_ITEM",
+                "LINE_ITEM_RELATES_TO_ELEMENT",
+                "ENTITY_HAS_REPORT",
+                "REPORT_HAS_FACT",
+                "FACT_HAS_ELEMENT",
+                "FACT_HAS_PERIOD",
+                "FACT_HAS_UNIT",
+              ],
+              "node_properties": {
+                "Transaction": {
+                  "date": "STRING",
+                  "description": "STRING",
+                  "type": "STRING",
+                },
+                "LineItem": {
+                  "debit_amount": "DOUBLE",
+                  "credit_amount": "DOUBLE",
+                },
+                "Element": {
+                  "name": "STRING",
+                  "classification": "STRING",
+                  "balance": "STRING",
+                },
+              },
+            },
+          },
+        },
+        {
+          "summary": "Custom graph schema",
+          "description": "Runtime schema from custom graph showing people, companies, and projects",
+          "value": {
+            "graph_id": "kg9f8e7d6c5",
+            "schema": {
+              "node_labels": ["Person", "Company", "Project"],
+              "relationship_types": [
+                "PERSON_WORKS_FOR_COMPANY",
+                "PERSON_WORKS_ON_PROJECT",
+                "COMPANY_SPONSORS_PROJECT",
+              ],
+              "node_properties": {
+                "Person": {
+                  "identifier": "STRING",
+                  "name": "STRING",
+                  "title": "STRING",
+                  "interests": "STRING",
+                },
+                "Company": {
+                  "identifier": "STRING",
+                  "name": "STRING",
+                  "industry": "STRING",
+                  "location": "STRING",
+                },
+                "Project": {
+                  "name": "STRING",
+                  "status": "STRING",
+                  "budget": "DOUBLE",
+                },
+              },
+            },
+          },
+        },
+        {
+          "summary": "Empty graph schema",
+          "description": "Runtime schema from a newly created graph with no data yet",
+          "value": {
+            "graph_id": "kg2x3y4z5a6",
+            "schema": {
+              "node_labels": [],
+              "relationship_types": [],
+              "node_properties": {},
+            },
+          },
+        },
+      ]
+    },
+  }
 
   graph_id: str = Field(
     ...,
     description="Graph database identifier",
-    examples=["sec", "kg1a2b3c4d5"],
   )
   schema_data: Dict[str, Any] = Field(
     ...,
     description="Runtime schema information showing actual database structure",
     alias="schema",
-    examples=[
-      {
-        "node_labels": ["Company", "Filing", "Industry", "Executive"],
-        "relationship_types": ["FILED", "PART_OF", "EMPLOYED_BY", "COMPETES_WITH"],
-        "node_properties": {
-          "Company": {
-            "cik": "STRING",
-            "name": "STRING",
-            "ticker": "STRING",
-            "market_cap": "INT64",
-            "founded_year": "INT32",
-            "sector": "STRING",
-          },
-          "Filing": {
-            "accession_number": "STRING",
-            "form_type": "STRING",
-            "filing_date": "DATE",
-            "fiscal_year": "INT32",
-            "period_of_report": "DATE",
-          },
-          "Industry": {
-            "sic_code": "STRING",
-            "name": "STRING",
-            "division": "STRING",
-          },
-          "Executive": {
-            "name": "STRING",
-            "title": "STRING",
-            "compensation": "DOUBLE",
-          },
-        },
-      }
-    ],
   )
 
 
@@ -839,4 +1420,290 @@ class DatabaseInfoResponse(BaseModel):
   )
   last_backup_date: Optional[str] = Field(
     None, description="Date of last backup", examples=["2024-01-15T09:00:00Z"]
+  )
+
+
+class StorageLimits(BaseModel):
+  """Storage limits information."""
+
+  current_usage_gb: Optional[float] = Field(
+    None, description="Current storage usage in GB"
+  )
+  max_storage_gb: float = Field(..., description="Maximum storage limit in GB")
+  approaching_limit: bool = Field(
+    ..., description="Whether approaching storage limit (>80%)"
+  )
+
+
+class QueryLimits(BaseModel):
+  """Query operation limits."""
+
+  max_timeout_seconds: int = Field(..., description="Maximum query timeout in seconds")
+  chunk_size: int = Field(..., description="Maximum chunk size for result streaming")
+  max_rows_per_query: int = Field(..., description="Maximum rows returned per query")
+  concurrent_queries: int = Field(..., description="Maximum concurrent queries allowed")
+
+
+class CopyOperationLimits(BaseModel):
+  """Copy/ingestion operation limits."""
+
+  max_file_size_gb: float = Field(..., description="Maximum file size in GB")
+  timeout_seconds: int = Field(..., description="Operation timeout in seconds")
+  concurrent_operations: int = Field(..., description="Maximum concurrent operations")
+  max_files_per_operation: int = Field(..., description="Maximum files per operation")
+  daily_copy_operations: int = Field(..., description="Daily operation limit")
+  supported_formats: List[str] = Field(..., description="Supported file formats")
+
+
+class BackupLimits(BaseModel):
+  """Backup operation limits."""
+
+  max_backup_size_gb: float = Field(..., description="Maximum backup size in GB")
+  backup_retention_days: int = Field(..., description="Backup retention period in days")
+  max_backups_per_day: int = Field(..., description="Maximum backups per day")
+
+
+class RateLimits(BaseModel):
+  """API rate limits."""
+
+  requests_per_minute: int = Field(..., description="Requests per minute limit")
+  requests_per_hour: int = Field(..., description="Requests per hour limit")
+  burst_capacity: int = Field(..., description="Burst capacity for short spikes")
+
+
+class CreditLimits(BaseModel):
+  """AI credit limits (optional)."""
+
+  monthly_ai_credits: int = Field(..., description="Monthly AI credits allocation")
+  current_balance: int = Field(..., description="Current credit balance")
+  storage_billing_enabled: bool = Field(
+    ..., description="Whether storage billing is enabled"
+  )
+  storage_rate_per_gb_per_day: int = Field(
+    ..., description="Storage billing rate per GB per day"
+  )
+
+
+class GraphLimitsResponse(BaseModel):
+  """Response model for comprehensive graph operational limits."""
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Standard tier user graph limits",
+          "description": "Operational limits for a kuzu-standard tier user graph with full details",
+          "value": {
+            "graph_id": "kg1a2b3c4d5",
+            "subscription_tier": "standard",
+            "graph_tier": "kuzu-standard",
+            "is_shared_repository": False,
+            "storage": {
+              "current_usage_gb": 2.45,
+              "max_storage_gb": 500,
+              "approaching_limit": False,
+            },
+            "queries": {
+              "max_timeout_seconds": 60,
+              "chunk_size": 1000,
+              "max_rows_per_query": 10000,
+              "concurrent_queries": 1,
+            },
+            "copy_operations": {
+              "max_file_size_gb": 1.0,
+              "timeout_seconds": 300,
+              "concurrent_operations": 1,
+              "max_files_per_operation": 100,
+              "daily_copy_operations": 10,
+              "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
+            },
+            "backups": {
+              "max_backup_size_gb": 10,
+              "backup_retention_days": 7,
+              "max_backups_per_day": 2,
+            },
+            "rate_limits": {
+              "requests_per_minute": 60,
+              "requests_per_hour": 1000,
+              "burst_capacity": 10,
+            },
+            "credits": {
+              "monthly_ai_credits": 10000,
+              "current_balance": 7500,
+              "storage_billing_enabled": True,
+              "storage_rate_per_gb_per_day": 10,
+            },
+          },
+        },
+        {
+          "summary": "Shared repository limits (SEC)",
+          "description": "Operational limits for SEC shared repository (read-only, no credits)",
+          "value": {
+            "graph_id": "sec",
+            "subscription_tier": "standard",
+            "graph_tier": "kuzu-shared",
+            "is_shared_repository": True,
+            "storage": {
+              "current_usage_gb": 125.3,
+              "max_storage_gb": 1000,
+              "approaching_limit": False,
+            },
+            "queries": {
+              "max_timeout_seconds": 120,
+              "chunk_size": 2000,
+              "max_rows_per_query": 10000,
+              "concurrent_queries": 1,
+            },
+            "copy_operations": {
+              "max_file_size_gb": 5.0,
+              "timeout_seconds": 600,
+              "concurrent_operations": 2,
+              "max_files_per_operation": 200,
+              "daily_copy_operations": 50,
+              "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
+            },
+            "backups": {
+              "max_backup_size_gb": 50,
+              "backup_retention_days": 30,
+              "max_backups_per_day": 4,
+            },
+            "rate_limits": {
+              "requests_per_minute": 120,
+              "requests_per_hour": 2000,
+              "burst_capacity": 20,
+            },
+          },
+        },
+        {
+          "summary": "Enterprise tier limits",
+          "description": "Operational limits for kuzu-large tier with enhanced capabilities",
+          "value": {
+            "graph_id": "kg9f8e7d6c5",
+            "subscription_tier": "enterprise",
+            "graph_tier": "kuzu-large",
+            "is_shared_repository": False,
+            "storage": {
+              "current_usage_gb": 450.8,
+              "max_storage_gb": 2000,
+              "approaching_limit": False,
+            },
+            "queries": {
+              "max_timeout_seconds": 300,
+              "chunk_size": 5000,
+              "max_rows_per_query": 10000,
+              "concurrent_queries": 1,
+            },
+            "copy_operations": {
+              "max_file_size_gb": 10.0,
+              "timeout_seconds": 900,
+              "concurrent_operations": 5,
+              "max_files_per_operation": 500,
+              "daily_copy_operations": 100,
+              "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
+            },
+            "backups": {
+              "max_backup_size_gb": 100,
+              "backup_retention_days": 90,
+              "max_backups_per_day": 10,
+            },
+            "rate_limits": {
+              "requests_per_minute": 300,
+              "requests_per_hour": 5000,
+              "burst_capacity": 50,
+            },
+            "credits": {
+              "monthly_ai_credits": 50000,
+              "current_balance": 42300,
+              "storage_billing_enabled": True,
+              "storage_rate_per_gb_per_day": 10,
+            },
+          },
+        },
+      ]
+    }
+  )
+
+  graph_id: str = Field(..., description="Graph database identifier")
+  subscription_tier: str = Field(..., description="User's subscription tier")
+  graph_tier: str = Field(..., description="Graph's database tier")
+  is_shared_repository: bool = Field(
+    ..., description="Whether this is a shared repository"
+  )
+  storage: StorageLimits = Field(..., description="Storage limits and usage")
+  queries: QueryLimits = Field(..., description="Query operation limits")
+  copy_operations: CopyOperationLimits = Field(
+    ..., description="Copy/ingestion operation limits"
+  )
+  backups: BackupLimits = Field(..., description="Backup operation limits")
+  rate_limits: RateLimits = Field(..., description="API rate limits")
+  credits: Optional[CreditLimits] = Field(
+    None, description="AI credit limits (if applicable)"
+  )
+
+
+class BackupDownloadUrlResponse(BaseModel):
+  """Response model for backup download URL generation."""
+
+  model_config = ConfigDict(
+    json_schema_extra={
+      "examples": [
+        {
+          "summary": "Download URL for recent backup",
+          "description": "Generated pre-signed URL for downloading a backup with 1 hour expiration",
+          "value": {
+            "download_url": "https://s3.amazonaws.com/robosystems-backups/kg1a2b3c4d5/backup_20240115_100000.kuzu.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+            "expires_in": 3600,
+            "expires_at": 1705315200.0,
+            "backup_id": "bk1a2b3c4d5",
+            "graph_id": "kg1a2b3c4d5",
+          },
+        },
+        {
+          "summary": "Extended expiration download URL",
+          "description": "Download URL with 24-hour expiration for large backup files",
+          "value": {
+            "download_url": "https://s3.amazonaws.com/robosystems-backups/kg9f8e7d6c5/backup_20240114_183000.kuzu.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+            "expires_in": 86400,
+            "expires_at": 1705401600.0,
+            "backup_id": "bk9f8e7d6c5",
+            "graph_id": "kg9f8e7d6c5",
+          },
+        },
+        {
+          "summary": "Short-lived download URL",
+          "description": "Download URL with minimum 5-minute expiration for immediate download",
+          "value": {
+            "download_url": "https://s3.amazonaws.com/robosystems-backups/sec/backup_20240115_120000.kuzu.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=...",
+            "expires_in": 300,
+            "expires_at": 1705314900.0,
+            "backup_id": "bksec123456",
+            "graph_id": "sec",
+          },
+        },
+      ]
+    }
+  )
+
+  download_url: str = Field(
+    ...,
+    description="Pre-signed S3 URL for downloading the backup file",
+    examples=[
+      "https://s3.amazonaws.com/robosystems-backups/kg1a2b3c4d5/backup.kuzu.tar.gz?X-Amz-Credential=..."
+    ],
+  )
+  expires_in: int = Field(
+    ...,
+    description="URL expiration time in seconds from now",
+    examples=[3600],
+    ge=300,
+    le=86400,
+  )
+  expires_at: float = Field(
+    ...,
+    description="Unix timestamp when the URL expires",
+    examples=[1705315200.0],
+  )
+  backup_id: str = Field(..., description="Backup identifier", examples=["bk1a2b3c4d5"])
+  graph_id: str = Field(
+    ..., description="Graph database identifier", examples=["kg1a2b3c4d5"]
   )

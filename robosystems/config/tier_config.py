@@ -7,7 +7,7 @@ configuration values from the graph.yml configuration file.
 import os
 import yaml
 import warnings
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from functools import lru_cache
 
 from robosystems.config import env
@@ -202,7 +202,7 @@ class TierConfig:
     return tier_config.get("monthly_credits", 10000)
 
   @classmethod
-  def get_rate_limit_multiplier(
+  def get_api_rate_multiplier(
     cls, tier: str, environment: Optional[str] = None
   ) -> float:
     """Get rate limit multiplier for a tier.
@@ -215,7 +215,7 @@ class TierConfig:
         Rate limit multiplier (1.0 = base limits)
     """
     tier_config = cls.get_tier_config(tier, environment)
-    return tier_config.get("rate_limit_multiplier", 1.0)
+    return tier_config.get("api_rate_multiplier", 1.0)
 
   @classmethod
   def get_copy_operation_limits(
@@ -260,6 +260,157 @@ class TierConfig:
       "max_backups_per_day": 2,
     }
     return tier_config.get("backup_limits", default_limits)
+
+  @classmethod
+  def _generate_tier_features(cls, tier_config: Dict[str, Any]) -> List[str]:
+    """Generate human-readable features list for a tier.
+
+    Args:
+        tier_config: Tier configuration dictionary
+
+    Returns:
+        List of feature strings
+    """
+    features = []
+
+    # Add credit allocation
+    monthly_credits = tier_config.get("monthly_credits")
+    if monthly_credits is not None and monthly_credits > 0:
+      features.append(f"{monthly_credits:,} AI credits per month")
+
+    # Add storage limit
+    storage_gb = tier_config.get("storage_limit_gb")
+    if storage_gb is not None and storage_gb > 0:
+      if storage_gb >= 1000:
+        features.append(f"{storage_gb / 1000:.0f}TB storage limit")
+      else:
+        features.append(f"{storage_gb}GB storage limit")
+
+    # Add subgraph support
+    max_subgraphs = tier_config.get("max_subgraphs")
+    if max_subgraphs is None:
+      features.append("No subgraph support")
+    elif max_subgraphs == 0:
+      features.append("Single database only")
+    elif max_subgraphs >= 25:
+      features.append("Unlimited subgraphs")
+    elif max_subgraphs > 0:
+      features.append(f"Up to {max_subgraphs} subgraphs")
+
+    # Add instance type info
+    instance = tier_config.get("instance", {})
+    instance_type = instance.get("type", "").upper()
+    if "LARGE" in instance_type:
+      features.append("Dedicated large instance")
+    elif "XLARGE" in instance_type:
+      features.append("Dedicated extra-large instance")
+    elif "MEDIUM" in instance_type:
+      features.append("Dedicated medium instance")
+
+    # Add memory info
+    max_memory_mb = instance.get("max_memory_mb", 0)
+    if max_memory_mb and max_memory_mb > 0:
+      features.append(f"{max_memory_mb / 1024:.0f}GB RAM")
+
+    # Add rate limit multiplier if not standard
+    rate_multiplier = tier_config.get("api_rate_multiplier", 1.0)
+    if rate_multiplier is not None and rate_multiplier > 1:
+      features.append(f"{rate_multiplier}x API rate limits")
+
+    # Add backup retention
+    backup_limits = tier_config.get("backup_limits", {})
+    retention_days = backup_limits.get("backup_retention_days")
+    if retention_days is not None and retention_days > 0:
+      features.append(f"{retention_days}-day backup retention")
+
+    return features
+
+  @classmethod
+  def get_available_tiers(
+    cls, environment: Optional[str] = None, include_disabled: bool = False
+  ) -> List[Dict[str, Any]]:
+    """Get all available tiers for the environment.
+
+    Args:
+        environment: Environment (defaults to current env)
+        include_disabled: Whether to include disabled tiers (default: False)
+
+    Returns:
+        List of tier configuration dictionaries with formatted information
+    """
+    if environment is None:
+      environment = "production" if env.ENVIRONMENT == "prod" else "staging"
+
+    config = cls._load_config()
+    env_config = config.get(environment, {})
+    writers = env_config.get("writers", [])
+
+    available_tiers = []
+    for writer in writers:
+      # Check if tier is enabled
+      deployment = writer.get("deployment", {})
+      is_enabled = deployment.get("always_enabled", False) or deployment.get(
+        "enabled_default", False
+      )
+
+      # Skip disabled tiers unless requested
+      if not is_enabled and not include_disabled:
+        continue
+
+      # Skip optional tiers that are disabled
+      if deployment.get("optional", False) and not deployment.get(
+        "enabled_default", False
+      ):
+        if not include_disabled:
+          continue
+
+      # Format tier information for API response
+      tier_info = {
+        "tier": writer.get("tier"),
+        "name": writer.get("name"),
+        "description": writer.get("description"),
+        "backend": writer.get("backend"),
+        "enabled": is_enabled,
+        "max_subgraphs": writer.get("max_subgraphs"),
+        "storage_limit_gb": writer.get("storage_limit_gb"),
+        "monthly_credits": writer.get("monthly_credits"),
+        "api_rate_multiplier": writer.get("api_rate_multiplier", 1.0),
+        "features": cls._generate_tier_features(writer),
+        "instance": {
+          "type": writer.get("instance", {}).get("type"),
+          "memory_mb": writer.get("instance", {}).get("max_memory_mb"),
+          "databases_per_instance": writer.get("instance", {}).get(
+            "databases_per_instance"
+          ),
+        },
+        "limits": {
+          "storage_gb": writer.get("storage_limit_gb"),
+          "monthly_credits": writer.get("monthly_credits"),
+          "max_subgraphs": writer.get("max_subgraphs"),
+          "copy_operations": writer.get("copy_operations", {}),
+          "backup": writer.get("backup_limits", {}),
+        },
+      }
+
+      # Add display name based on tier
+      display_names = {
+        "kuzu-standard": "Kuzu Standard",
+        "kuzu-large": "Kuzu Professional",
+        "kuzu-xlarge": "Kuzu Enterprise",
+        "kuzu-shared": "Shared Repository",
+        "neo4j-community-large": "Neo4j Community",
+        "neo4j-enterprise-xlarge": "Neo4j Enterprise",
+      }
+      tier_info["display_name"] = display_names.get(
+        writer.get("tier"), writer.get("name")
+      )
+
+      # Add pricing placeholder (to be filled from billing config if needed)
+      tier_info["monthly_price"] = None  # This should come from billing config
+
+      available_tiers.append(tier_info)
+
+    return available_tiers
 
   @classmethod
   def clear_cache(cls) -> None:
@@ -312,9 +463,7 @@ def get_tier_monthly_credits(tier: str, environment: Optional[str] = None) -> in
 
 
 @lru_cache(maxsize=32)
-def get_tier_rate_limit_multiplier(
-  tier: str, environment: Optional[str] = None
-) -> float:
+def get_tier_api_rate_multiplier(tier: str, environment: Optional[str] = None) -> float:
   """Cached function to get rate limit multiplier for a tier.
 
   Args:
@@ -324,7 +473,7 @@ def get_tier_rate_limit_multiplier(
   Returns:
       Rate limit multiplier (1.0 = base limits)
   """
-  return TierConfig.get_rate_limit_multiplier(tier, environment)
+  return TierConfig.get_api_rate_multiplier(tier, environment)
 
 
 @lru_cache(maxsize=32)

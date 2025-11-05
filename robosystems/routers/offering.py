@@ -177,8 +177,26 @@ async def get_service_offerings(
 ):
   """Get comprehensive information about all subscription offerings."""
   try:
-    # Get graph subscription information
+    # Get graph subscription information from billing config
     graph_pricing = BillingConfig.get_all_pricing_info()
+
+    # Get tier configurations from graph.yml for technical specs
+    from ..config.tier_config import TierConfig
+
+    tier_configs = TierConfig.get_available_tiers(include_disabled=False)
+
+    # Filter out internal-only and not-yet-available tiers
+    excluded_tiers = ["kuzu-shared", "neo4j-community-large", "neo4j-enterprise-xlarge"]
+    tier_configs = [
+      tier for tier in tier_configs if tier.get("tier") not in excluded_tiers
+    ]
+
+    # Create a mapping from old tier names to new tier names
+    tier_name_mapping = {
+      "standard": "kuzu-standard",
+      "enterprise": "kuzu-large",
+      "premium": "kuzu-xlarge",
+    }
 
     # Convert graph subscription tiers
     graph_tiers = []
@@ -186,11 +204,19 @@ async def get_service_offerings(
       if not plan_data:
         continue
 
-      # Graph tier restrictions
+      # Map old tier name to new tier name
+      new_tier_name = tier_name_mapping.get(tier_name, tier_name)
+
+      # Find the corresponding tier config
+      tier_config = next(
+        (t for t in tier_configs if t.get("tier") == new_tier_name), None
+      )
+
+      # Graph tier restrictions (using new tier names)
       allowed_graph_tiers = {
-        "standard": ["standard"],
-        "enterprise": ["standard", "enterprise"],
-        "premium": ["standard", "enterprise", "premium"],
+        "standard": ["kuzu-standard"],
+        "enterprise": ["kuzu-standard", "kuzu-large"],
+        "premium": ["kuzu-standard", "kuzu-large", "kuzu-xlarge"],
       }
 
       # Get storage information for this tier
@@ -205,16 +231,23 @@ async def get_service_offerings(
         .get(tier_name, 1.0)
       )
 
-      tier_info = {
-        "name": tier_name,
-        "display_name": plan_data.get("display_name", tier_name.title()),
-        "description": plan_data.get("description", ""),
-        "monthly_price": plan_data.get("base_price_cents", 0) / 100.0,
-        "monthly_credits": plan_data.get("monthly_credit_allocation", 0),
-        "storage_included_gb": storage_included,
-        "storage_overage_per_gb": storage_overage,
-        "allowed_graph_tiers": allowed_graph_tiers.get(tier_name, ["standard"]),
-        "features": [
+      # Build features list - merge tier config features with billing features if available
+      if tier_config:
+        # Use features from tier config as the primary source
+        features = tier_config.get("features", [])
+        # Add pricing and support info from billing config
+        features.extend(
+          [
+            f"${plan_data.get('base_price_cents', 0) / 100:.2f}/month",
+            f"${storage_overage}/GB storage overage",
+            "Priority support"
+            if plan_data.get("priority_support", False)
+            else "Standard support",
+          ]
+        )
+      else:
+        # Fallback to original features if no tier config
+        features = [
           f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per month",
           f"${plan_data.get('base_price_cents', 0) / 100:.2f}/month",
           f"{storage_included:,} GB storage included",
@@ -223,10 +256,42 @@ async def get_service_offerings(
           "Priority support"
           if plan_data.get("priority_support", False)
           else "Standard support",
-        ],
+        ]
+
+      tier_info = {
+        "name": tier_name,
+        "display_name": tier_config.get(
+          "display_name", plan_data.get("display_name", tier_name.title())
+        )
+        if tier_config
+        else plan_data.get("display_name", tier_name.title()),
+        "description": tier_config.get("description", plan_data.get("description", ""))
+        if tier_config
+        else plan_data.get("description", ""),
+        "monthly_price": plan_data.get("base_price_cents", 0) / 100.0,
+        "monthly_credits": tier_config.get(
+          "monthly_credits", plan_data.get("monthly_credit_allocation", 0)
+        )
+        if tier_config
+        else plan_data.get("monthly_credit_allocation", 0),
+        "storage_included_gb": tier_config.get("storage_limit_gb", storage_included)
+        if tier_config
+        else storage_included,
+        "storage_overage_per_gb": storage_overage,
+        "allowed_graph_tiers": allowed_graph_tiers.get(tier_name, ["kuzu-standard"]),
+        "features": features,
         "backup_retention_days": plan_data.get("backup_retention_days", 0),
         "priority_support": plan_data.get("priority_support", False),
         "max_queries_per_hour": plan_data.get("max_queries_per_hour"),
+        # Add technical specs from tier config if available
+        "max_subgraphs": tier_config.get("max_subgraphs") if tier_config else None,
+        "api_rate_multiplier": tier_config.get("api_rate_multiplier")
+        if tier_config
+        else 1.0,
+        "backend": tier_config.get("backend") if tier_config else "kuzu",
+        "instance_type": tier_config.get("instance", {}).get("type")
+        if tier_config
+        else None,
       }
       graph_tiers.append(tier_info)
 

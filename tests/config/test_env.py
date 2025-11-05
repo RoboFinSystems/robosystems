@@ -154,7 +154,7 @@ def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
     return {
       "storage_limit_gb": 750,
       "monthly_credits": 2500,
-      "rate_limit_multiplier": 1.8,
+      "api_rate_multiplier": 1.8,
       "max_subgraphs": 6,
     }
 
@@ -188,7 +188,7 @@ def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
   assert config["tier"] == "kuzu-shared"
   assert config["storage_limit_gb"] == 750
   assert config["monthly_credits"] == 2500
-  assert config["rate_limit_multiplier"] == 1.8
+  assert config["api_rate_multiplier"] == 1.8
   assert config["max_subgraphs"] == 6
 
 
@@ -236,7 +236,7 @@ def test_get_kuzu_tier_config_falls_back_on_errors(monkeypatch):
   assert config["tier"] == "kuzu-standard"
   assert config["storage_limit_gb"] == 500
   assert config["monthly_credits"] == 10000
-  assert config["rate_limit_multiplier"] == 1.0
+  assert config["api_rate_multiplier"] == 1.0
   assert config["max_subgraphs"] == 0
 
 

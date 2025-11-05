@@ -115,25 +115,21 @@ test-all:
     @just format
     @just typecheck
 
-# Run tests (exclude integration, slow, and e2e tests)
+# Run tests (exclude integration and slow tests)
 test:
-    uv run pytest --ignore=tests/integration -m "not slow and not e2e"
+    uv run pytest --ignore=tests/integration -m "not slow"
 
-# Run ALL tests including slow ones (excludes e2e)
+# Run ALL tests including slow ones
 test-full:
-    uv run pytest -m "not e2e"
+    uv run pytest
 
 # Run integration tests
 test-integration:
     uv run pytest tests/integration
 
-# Run end-to-end tests (requires Docker stack running)
-test-e2e:
-    uv run pytest -m e2e
-
-# Run tests with coverage (excludes integration and e2e)
+# Run tests with coverage (excludes integration)
 test-cov:
-    uv run pytest --cov=robosystems tests/ --ignore=tests/integration -m "not e2e"
+    uv run pytest --cov=robosystems tests/ --ignore=tests/integration
 
 # Run code quality checks
 test-code-quality:

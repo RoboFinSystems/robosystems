@@ -222,8 +222,8 @@ jobs:
       - name: Run tests
         timeout-minutes: 5
         run: |
-          # Run tests (exclude integration, slow, and e2e tests)
-          timeout 300 uv run pytest -v --tb=short --ignore=tests/integration -m "not slow and not e2e" || {
+          # Run tests (exclude integration and slow tests)
+          timeout 300 uv run pytest -v --tb=short --ignore=tests/integration -m "not slow" || {
             echo "::error::Tests timed out after 5 minutes"
             exit 1
           }
