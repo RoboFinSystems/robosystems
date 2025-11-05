@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Path
 from robosystems.models.iam import User
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.api.connection import (
+from robosystems.models.api.graphs.connections import (
   ConnectionProviderInfo,
   ConnectionOptionsResponse,
 )

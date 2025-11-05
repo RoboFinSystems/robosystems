@@ -9,7 +9,7 @@ from ...logger import logger
 from ...middleware.graph import get_graph_repository
 from ...operations.connection_service import ConnectionService
 from ...middleware.graph.multitenant_utils import MultiTenantUtils
-from ...models.api.connection import SECConnectionConfig
+from ...models.api.graphs.connections import SECConnectionConfig
 from ...config import env
 
 

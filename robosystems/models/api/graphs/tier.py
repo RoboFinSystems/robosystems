@@ -3,7 +3,7 @@
 This module contains Pydantic models for graph tier configuration responses.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class GraphTierCopyOperations(BaseModel):
@@ -49,6 +49,8 @@ class GraphTierInstance(BaseModel):
 class GraphTierInfo(BaseModel):
   """Complete information about a graph database tier."""
 
+  model_config = ConfigDict(json_schema_mode_override="serialization")
+
   tier: str = Field(..., description="Tier identifier")
   name: str = Field(..., description="Tier name")
   display_name: str = Field(..., description="Display name for UI")
@@ -58,18 +60,11 @@ class GraphTierInfo(BaseModel):
   max_subgraphs: int | None = Field(..., description="Maximum subgraphs allowed")
   storage_limit_gb: int = Field(..., description="Storage limit in GB")
   monthly_credits: int = Field(..., description="Monthly AI credits")
-  rate_limit_multiplier: float = Field(
-    ..., alias="api_rate_multiplier", description="API rate limit multiplier"
-  )
-  monthly_price: float | None = Field(None, description="Monthly price in USD")
+  api_rate_multiplier: float = Field(..., description="API rate limit multiplier")
+  monthly_price: float | None = Field(default=None, description="Monthly price in USD")
   features: list[str] = Field(..., description="List of tier features")
   instance: GraphTierInstance = Field(..., description="Instance specifications")
   limits: GraphTierLimits = Field(..., description="Resource limits")
-
-  class Config:
-    populate_by_name = (
-      True  # Allow using both 'rate_limit_multiplier' and 'api_rate_multiplier'
-    )
 
 
 class AvailableGraphTiersResponse(BaseModel):

@@ -61,7 +61,7 @@ from robosystems.models.iam import (
   Graph,
   GraphSchema,
 )
-from robosystems.models.api.table import (
+from robosystems.models.api.graphs.tables import (
   BulkIngestRequest,
   BulkIngestResponse,
   TableIngestResult,

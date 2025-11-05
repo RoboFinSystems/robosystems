@@ -9,7 +9,7 @@ from ...logger import logger
 from ...operations.connection_service import ConnectionService
 from ...tasks.data_sync.plaid import sync_plaid_data
 from ...celery import QUEUE_DEFAULT
-from ...models.api.connection import PlaidConnectionConfig
+from ...models.api.graphs.connections import PlaidConnectionConfig
 from ...config import env
 
 

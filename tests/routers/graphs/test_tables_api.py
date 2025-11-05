@@ -6,7 +6,7 @@ import pytest
 
 from robosystems.routers.graphs.tables import main as tables_main
 from robosystems.routers.graphs.tables import upload as tables_upload
-from robosystems.models.api.table import FileUploadRequest
+from robosystems.models.api.graphs.tables import FileUploadRequest
 
 
 @pytest.mark.asyncio

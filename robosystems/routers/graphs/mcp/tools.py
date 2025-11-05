@@ -14,7 +14,7 @@ from robosystems.middleware.rate_limits import (
 )
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.models.iam import User
-from robosystems.models.api.mcp import MCPToolsResponse
+from robosystems.models.api.graphs.mcp import MCPToolsResponse
 from robosystems.models.api.common import ErrorResponse
 from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (

@@ -18,7 +18,7 @@ from robosystems.operations.providers.sec_provider import (
   sync_sec_connection,
   cleanup_sec_connection,
 )
-from robosystems.models.api.connection import SECConnectionConfig
+from robosystems.models.api.graphs.connections import SECConnectionConfig
 
 
 class TestValidateCIKWithSECAPI:

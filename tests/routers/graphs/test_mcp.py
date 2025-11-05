@@ -10,7 +10,7 @@ from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User
-from robosystems.models.api.mcp import MCPToolCall
+from robosystems.models.api.graphs.mcp import MCPToolCall
 from robosystems.middleware.auth.jwt import create_jwt_token
 from robosystems.middleware.mcp.client import KuzuMCPClient
 from robosystems.routers.graphs.mcp.strategies import (

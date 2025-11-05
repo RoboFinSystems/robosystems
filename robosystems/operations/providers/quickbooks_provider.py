@@ -7,7 +7,7 @@ import httpx
 from ...logger import logger
 from ...operations.connection_service import ConnectionService
 from ...celery import QUEUE_DEFAULT
-from ...models.api.connection import QuickBooksConnectionConfig
+from ...models.api.graphs.connections import QuickBooksConnectionConfig
 from ...config import env
 from .oauth_handler import OAuthHandler
 

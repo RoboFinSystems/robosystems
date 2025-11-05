@@ -31,7 +31,7 @@ from robosystems.models.api.common import (
   ErrorCode,
   create_error_response,
 )
-from robosystems.models.api.credits import (
+from robosystems.models.api.billing.credits import (
   CreditSummaryResponse,
   StorageLimitResponse,
   EnhancedCreditTransactionResponse,

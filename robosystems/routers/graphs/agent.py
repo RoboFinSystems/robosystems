@@ -17,7 +17,7 @@ from robosystems.middleware.rate_limits import (
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.database import get_db_session
 from robosystems.models.iam import User
-from robosystems.models.api.agent import (
+from robosystems.models.api.graphs.agent import (
   AgentRequest,
   AgentResponse,
   AgentListResponse,

@@ -46,7 +46,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User, GraphTable, GraphFile
 from robosystems.models.api.common import ErrorResponse
-from robosystems.models.api.table import (
+from robosystems.models.api.graphs.tables import (
   FileUploadStatus,
   ListTableFilesResponse,
   GetFileInfoResponse,

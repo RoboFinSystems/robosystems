@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.logger import logger
 from robosystems.models.iam import User
-from robosystems.models.api.graph import SchemaExportResponse
+from robosystems.models.api.graphs.schema import SchemaExportResponse
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,

@@ -32,7 +32,7 @@ from robosystems.middleware.rate_limits import (
 )
 from robosystems.middleware.graph import get_graph_repository
 from robosystems.models.iam import User
-from robosystems.models.api.mcp import MCPToolCall, MCPToolResult
+from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
 from robosystems.models.api.common import ErrorResponse
 from robosystems.security.cypher_analyzer import (
   is_write_operation,

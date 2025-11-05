@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch
 
 from robosystems.routers.graphs.tables.upload import get_upload_url
-from robosystems.models.api.table import FileUploadRequest
+from robosystems.models.api.graphs.tables import FileUploadRequest
 
 
 @pytest.mark.unit

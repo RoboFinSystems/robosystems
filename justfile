@@ -119,6 +119,10 @@ test-all:
 test:
     uv run pytest --ignore=tests/integration -m "not slow"
 
+# Run tests (exclude integration and slow tests)
+test-module module:
+    uv run pytest tests/{{module}}
+
 # Run ALL tests including slow ones
 test-full:
     uv run pytest

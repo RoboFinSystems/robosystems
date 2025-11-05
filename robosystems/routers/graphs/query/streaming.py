@@ -15,7 +15,10 @@ from datetime import datetime, timezone
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
-from robosystems.models.api.graph import CypherQueryRequest, DEFAULT_QUERY_TIMEOUT
+from robosystems.models.api.graphs.query import (
+  CypherQueryRequest,
+  DEFAULT_QUERY_TIMEOUT,
+)
 from robosystems.middleware.graph.query_queue import get_query_queue, QueryStatus
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.logger import logger, api_logger

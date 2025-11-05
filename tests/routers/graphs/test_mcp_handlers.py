@@ -8,7 +8,7 @@ import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 from fastapi import HTTPException
 
-from robosystems.models.api.mcp import MCPToolCall
+from robosystems.models.api.graphs.mcp import MCPToolCall
 from robosystems.routers.graphs.mcp.handlers import MCPHandler, validate_mcp_access
 
 

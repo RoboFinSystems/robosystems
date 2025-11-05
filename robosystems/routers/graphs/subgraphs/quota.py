@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.database import get_async_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.api.subgraph import SubgraphQuotaResponse
+from robosystems.models.api.graphs.subgraphs import SubgraphQuotaResponse
 from robosystems.models.iam.graph import Graph
 from robosystems.models.iam.user import User
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator

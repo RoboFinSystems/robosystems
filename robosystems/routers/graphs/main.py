@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from robosystems.logger import logger
 from robosystems.models.iam import User, UserLimits, UserGraph
-from robosystems.models.api.graph import CreateGraphRequest
+from robosystems.models.api.graphs.core import CreateGraphRequest
 from robosystems.models.api.user import (
   GraphInfo,
   UserGraphsResponse,

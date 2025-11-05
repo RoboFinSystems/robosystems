@@ -26,7 +26,7 @@ from ...models.iam.user_repository import (
   RepositoryAccessLevel,
 )
 from ...models.iam.user_repository_credits import UserRepositoryCredits
-from ...models.api.subscription import (
+from ...models.api.billing.subscription import (
   UserSubscriptionsResponse,
   SubscriptionRequest,
   SubscriptionResponse,

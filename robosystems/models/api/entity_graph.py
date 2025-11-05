@@ -1,4 +1,4 @@
-"""Pydantic schemas for entity-related operations."""
+"""Pydantic schemas for entity-graph creation operations."""
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -104,11 +104,3 @@ class AvailableExtension(BaseModel):
 
 class AvailableExtensionsResponse(BaseModel):
   extensions: list[AvailableExtension]
-
-
-# Backward compatibility aliases
-EntityCreate = EntityCreate
-EntityUpdate = EntityUpdate
-EntityResponse = EntityResponse
-EntityListResponse = EntityListResponse
-EntityWithGraphResponse = EntityWithGraphResponse

@@ -6,7 +6,6 @@ that are shared across multiple router modules.
 """
 
 # Import all API models for easy access
-from .agent import AgentMessage, AgentRequest, AgentResponse
 from .auth import (
   LoginRequest,
   RegisterRequest,
@@ -15,6 +14,22 @@ from .auth import (
   SSOExchangeRequest,
   SSOExchangeResponse,
   SSOCompleteRequest,
+  PasswordCheckRequest,
+  PasswordCheckResponse,
+  PasswordPolicyResponse,
+  EmailVerificationRequest,
+  EmailResendRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  ResetPasswordValidateResponse,
+)
+from .oauth import (
+  OAuthProvider,
+  OAuthInitRequest,
+  OAuthInitResponse,
+  OAuthCallbackRequest,
+  OAuthTokens,
+  OAuthConnectionUpdate,
 )
 from .common import (
   ErrorResponse,
@@ -26,21 +41,7 @@ from .common import (
   create_error_response,
   create_pagination_info,
 )
-from .connection import (
-  ProviderType,
-  ConnectionBase,
-  SECConnectionConfig,
-  QuickBooksConnectionConfig,
-  PlaidConnectionConfig,
-  CreateConnectionRequest,
-  ConnectionResponse,
-  SyncConnectionRequest,
-  LinkTokenRequest,
-  ExchangeTokenRequest,
-  ConnectionProviderInfo,
-  ConnectionOptionsResponse,
-)
-from .graph import (
+from .graphs import (
   MAX_QUERY_LENGTH,
   DEFAULT_QUERY_TIMEOUT,
   GraphMetricsResponse,
@@ -55,22 +56,33 @@ from .graph import (
   GraphMetadata,
   CreateGraphRequest,
   CreateGraphResponse,
-)
-from .mcp import (
   MCPToolCall,
   MCPQueryRequest,
   MCPToolsResponse,
   MCPToolResult,
   MCPSchemaResponse,
   MCPQueryResponse,
-)
-from .oauth import (
-  OAuthProvider,
-  OAuthInitRequest,
-  OAuthInitResponse,
-  OAuthCallbackRequest,
-  OAuthTokens,
-  OAuthConnectionUpdate,
+  ProviderType,
+  ConnectionBase,
+  SECConnectionConfig,
+  QuickBooksConnectionConfig,
+  PlaidConnectionConfig,
+  CreateConnectionRequest,
+  ConnectionResponse,
+  SyncConnectionRequest,
+  LinkTokenRequest,
+  ExchangeTokenRequest,
+  ConnectionProviderInfo,
+  ConnectionOptionsResponse,
+  AgentMessage,
+  AgentRequest,
+  AgentResponse,
+  GraphTierCopyOperations,
+  GraphTierBackup,
+  GraphTierLimits,
+  GraphTierInstance,
+  GraphTierInfo,
+  AvailableGraphTiersResponse,
 )
 from .user import (
   AccountInfo,
@@ -90,7 +102,7 @@ from .user import (
   UserUsageSummaryResponse,
   UserAnalyticsResponse,
 )
-from .credits import (
+from .billing import (
   CreditSummaryResponse,
   CreditTransactionResponse,
   CreditCheckRequest,
@@ -98,8 +110,6 @@ from .credits import (
   EnhancedCreditTransactionResponse,
   TransactionSummaryResponse,
   DetailedTransactionsResponse,
-)
-from .subscription import (
   RepositoryPlanInfo,
   AvailableRepository,
   AvailableRepositoriesResponse,
@@ -115,23 +125,11 @@ from .subscription import (
   AllocationResult,
   AllocationResponse,
   CancellationResponse,
-)
-from .billing import (
   UpgradeSubscriptionRequest,
-)
-from .tier import (
-  GraphTierCopyOperations,
-  GraphTierBackup,
-  GraphTierLimits,
-  GraphTierInstance,
-  GraphTierInfo,
-  AvailableGraphTiersResponse,
-)
-from .offering import (
   GraphSubscriptionTier,
   StorageInfo,
   GraphSubscriptions,
-  RepositoryPlan as OfferingRepositoryPlan,
+  OfferingRepositoryPlan,
   RepositoryInfo,
   RepositorySubscriptions,
   TokenPricing,
@@ -139,10 +137,9 @@ from .offering import (
   ServiceOfferingSummary,
   ServiceOfferingsResponse,
 )
-from .entity import (
+from .entity_graph import (
   AvailableExtension,
   AvailableExtensionsResponse,
-  # Backward compatibility aliases
   EntityCreate,
   EntityUpdate,
   EntityResponse,
@@ -164,6 +161,14 @@ __all__ = [
   "SSOExchangeRequest",
   "SSOExchangeResponse",
   "SSOCompleteRequest",
+  "PasswordCheckRequest",
+  "PasswordCheckResponse",
+  "PasswordPolicyResponse",
+  "EmailVerificationRequest",
+  "EmailResendRequest",
+  "ForgotPasswordRequest",
+  "ResetPasswordRequest",
+  "ResetPasswordValidateResponse",
   # Common models
   "ErrorResponse",
   "SuccessResponse",

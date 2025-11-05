@@ -7,7 +7,7 @@ repository subscriptions, credit allocation, tier management, and user subscript
 from pydantic import BaseModel, Field
 
 # Import enums from the IAM models
-from ...models.iam.user_repository import RepositoryType, RepositoryPlan
+from ...iam.user_repository import RepositoryType, RepositoryPlan
 
 
 class RepositoryPlanInfo(BaseModel):
