@@ -511,6 +511,7 @@ Extension listing is included - no credit consumption required.""",
   },
 )
 async def get_available_extensions(
+  current_user: User = Depends(get_current_user),  # noqa: ARG001
   _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
 ):
   """
@@ -711,6 +712,7 @@ Tier listing is included - no credit consumption required.""",
   },
 )
 async def get_available_graph_tiers(
+  current_user: User = Depends(get_current_user),  # noqa: ARG001
   _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
   include_disabled: bool = False,
 ):
