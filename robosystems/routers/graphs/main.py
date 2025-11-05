@@ -22,7 +22,11 @@ from robosystems.models.api.common import (
   create_error_response,
 )
 from robosystems.middleware.sse import create_operation_response
-from robosystems.models.api import AvailableExtensionsResponse, AvailableExtension
+from robosystems.models.api import (
+  AvailableExtensionsResponse,
+  AvailableExtension,
+  AvailableGraphTiersResponse,
+)
 from robosystems.middleware.auth.dependencies import (
   get_current_user,
   get_current_user_with_graph,
@@ -625,6 +629,7 @@ async def get_available_extensions(
 
 @router.get(
   "/tiers",
+  response_model=AvailableGraphTiersResponse,
   summary="Get Available Graph Tiers",
   description="""List all available graph database tier configurations.
 
@@ -715,7 +720,7 @@ async def get_available_graph_tiers(
   current_user: User = Depends(get_current_user),  # noqa: ARG001
   _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
   include_disabled: bool = False,
-):
+) -> AvailableGraphTiersResponse:
   """
   Get available graph database tiers with technical specifications.
 
@@ -769,7 +774,7 @@ async def get_available_graph_tiers(
       logger.warning(f"Could not load pricing information: {pricing_error}")
       # Pricing remains None if we can't load it
 
-    return {"tiers": tiers}
+    return AvailableGraphTiersResponse(tiers=tiers)
 
   except Exception as e:
     logger.error(f"Failed to load tier configurations: {e}")

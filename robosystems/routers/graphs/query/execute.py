@@ -150,7 +150,37 @@ Query operations are included - no credit consumption required.
 Queue position is based on subscription tier for priority.""",
   operation_id="executeCypherQuery",
   responses={
-    200: {"description": "Query executed successfully"},
+    200: {
+      "description": "Query executed successfully",
+      "content": {
+        "application/json": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "success": {"type": "boolean"},
+              "data": {"type": "array", "items": {"type": "object"}},
+              "columns": {"type": "array", "items": {"type": "string"}},
+              "row_count": {"type": "integer"},
+              "execution_time_ms": {"type": "number"},
+              "graph_id": {"type": "string"},
+              "timestamp": {"type": "string"},
+            },
+          }
+        },
+        "application/x-ndjson": {
+          "schema": {
+            "type": "string",
+            "description": "Newline-delimited JSON chunks with streaming results",
+          }
+        },
+        "text/event-stream": {
+          "schema": {
+            "type": "string",
+            "description": "Server-Sent Events stream with real-time progress updates",
+          }
+        },
+      },
+    },
     202: {"description": "Query queued for execution"},
     400: {"description": "Invalid query or parameters"},
     403: {"description": "Access denied"},

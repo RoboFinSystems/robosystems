@@ -119,6 +119,26 @@ from .subscription import (
 from .billing import (
   UpgradeSubscriptionRequest,
 )
+from .tier import (
+  GraphTierCopyOperations,
+  GraphTierBackup,
+  GraphTierLimits,
+  GraphTierInstance,
+  GraphTierInfo,
+  AvailableGraphTiersResponse,
+)
+from .offering import (
+  GraphSubscriptionTier,
+  StorageInfo,
+  GraphSubscriptions,
+  RepositoryPlan as OfferingRepositoryPlan,
+  RepositoryInfo,
+  RepositorySubscriptions,
+  TokenPricing,
+  OperationCosts,
+  ServiceOfferingSummary,
+  ServiceOfferingsResponse,
+)
 from .entity import (
   AvailableExtension,
   AvailableExtensionsResponse,
@@ -250,6 +270,24 @@ __all__ = [
   "AllocationResult",
   "AllocationResponse",
   "CancellationResponse",
+  # Tier models
+  "GraphTierCopyOperations",
+  "GraphTierBackup",
+  "GraphTierLimits",
+  "GraphTierInstance",
+  "GraphTierInfo",
+  "AvailableGraphTiersResponse",
+  # Offering models
+  "GraphSubscriptionTier",
+  "StorageInfo",
+  "GraphSubscriptions",
+  "OfferingRepositoryPlan",
+  "RepositoryInfo",
+  "RepositorySubscriptions",
+  "TokenPricing",
+  "OperationCosts",
+  "ServiceOfferingSummary",
+  "ServiceOfferingsResponse",
   # Billing models
   "UpgradeSubscriptionRequest",
 ]

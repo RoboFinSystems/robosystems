@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 
 from ..middleware.rate_limits import public_api_rate_limit_dependency
 from ..models.api.common import ErrorResponse, ErrorCode, create_error_response
+from ..models.api import ServiceOfferingsResponse
 from ..config import BillingConfig
 from ..config.billing import RepositoryBillingConfig
 from ..models.iam.user_repository import UserRepository
@@ -108,6 +109,7 @@ offering_router = APIRouter(
 
 @offering_router.get(
   "",
+  response_model=ServiceOfferingsResponse,
   summary="Get Service Offerings",
   description="""Get comprehensive information about all subscription offerings.
 
@@ -174,7 +176,7 @@ No authentication required - this is public service information.""",
 )
 async def get_service_offerings(
   _rate_limit: None = Depends(public_api_rate_limit_dependency),
-):
+) -> ServiceOfferingsResponse:
   """Get comprehensive information about all subscription offerings."""
   try:
     # Get graph subscription information from billing config
@@ -396,8 +398,8 @@ async def get_service_offerings(
       },
     }
 
-    return {
-      "graph_subscriptions": {
+    return ServiceOfferingsResponse(
+      graph_subscriptions={
         "description": "Entity-specific graph database subscriptions",
         "tiers": graph_tiers,
         "storage": {
@@ -415,7 +417,7 @@ async def get_service_offerings(
           "Additional storage billed per GB per month",
         ],
       },
-      "repository_subscriptions": {
+      repository_subscriptions={
         "description": "Shared data repository access subscriptions",
         "repositories": repositories,
         "notes": [
@@ -425,7 +427,7 @@ async def get_service_offerings(
           "Rate limits apply based on subscription plan",
         ],
       },
-      "operation_costs": {
+      operation_costs={
         "description": "Credit costs for operations",
         "ai_operations": base_costs,
         "token_pricing": token_pricing,
@@ -437,7 +439,7 @@ async def get_service_offerings(
           "1 credit = approximately $0.001 USD",
         ],
       },
-      "summary": {
+      summary={
         "total_graph_tiers": len(graph_tiers),
         "total_repositories": len(repositories),
         "enabled_repositories": len([r for r in repositories if r["enabled"]]),
@@ -445,7 +447,7 @@ async def get_service_offerings(
           [r for r in repositories if r.get("coming_soon", False)]
         ),
       },
-    }
+    )
 
   except Exception as e:
     logger.error(f"Failed to get service offerings: {e}")
