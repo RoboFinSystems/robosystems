@@ -167,44 +167,6 @@ class TestGraphModel:
     graph.schema_extensions = None
     assert graph.has_specific_extension("roboledger") is False
 
-  def test_get_credit_multiplier(self):
-    """Test get_credit_multiplier for different tiers."""
-    # Standard tier
-    standard_graph = Graph(
-      graph_id="kg1",
-      graph_name="Standard",
-      graph_type="entity",
-      graph_tier=GraphTier.KUZU_STANDARD.value,
-    )
-    assert standard_graph.get_credit_multiplier() == 1.0
-
-    # Large tier (simplified credit system - all tiers use 1.0)
-    large_graph = Graph(
-      graph_id="kg2",
-      graph_name="Large",
-      graph_type="entity",
-      graph_tier=GraphTier.KUZU_LARGE.value,
-    )
-    assert large_graph.get_credit_multiplier() == 1.0
-
-    # XLarge tier (simplified credit system - all tiers use 1.0)
-    xlarge_graph = Graph(
-      graph_id="kg3",
-      graph_name="XLarge",
-      graph_type="entity",
-      graph_tier=GraphTier.KUZU_XLARGE.value,
-    )
-    assert xlarge_graph.get_credit_multiplier() == 1.0
-
-    # Unknown tier defaults to 1.0
-    unknown_graph = Graph(
-      graph_id="kg4",
-      graph_name="Unknown",
-      graph_type="entity",
-      graph_tier="unknown_tier",
-    )
-    assert unknown_graph.get_credit_multiplier() == 1.0
-
   def test_create_entity_graph(self, db_session):
     """Test creating an entity graph."""
     graph = Graph.create(

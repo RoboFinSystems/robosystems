@@ -7,7 +7,7 @@ and endpoint categories.
 
 from enum import Enum
 from typing import Dict, Tuple, Optional
-from .tier_config import get_tier_rate_limit_multiplier
+from .tier_config import get_tier_api_rate_multiplier
 
 
 class RateLimitPeriod(str, Enum):
@@ -280,7 +280,7 @@ class RateLimitConfig:
 
     # Apply tier config multiplier if enabled
     if use_tier_config:
-      multiplier = get_tier_rate_limit_multiplier(tier)
+      multiplier = get_tier_api_rate_multiplier(tier)
       adjusted_limit = int(base_limit * multiplier)
       return adjusted_limit, window_seconds
 

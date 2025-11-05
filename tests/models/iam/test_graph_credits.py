@@ -79,7 +79,6 @@ class TestGraphCredits:
       billing_admin_id=self.billing_admin.id,
       current_balance=Decimal("1000"),
       monthly_allocation=Decimal("1000"),
-      credit_multiplier=Decimal("1.0"),
       storage_limit_gb=Decimal("500"),
     )
 
@@ -143,7 +142,6 @@ class TestGraphCredits:
     assert credits.graph_id == graph2.graph_id
     assert credits.monthly_allocation == Decimal("5000")
     assert credits.current_balance == Decimal("5000")
-    assert credits.credit_multiplier == Decimal("1.0")  # Always 1.0 in simplified model
     assert credits.storage_limit_gb == Decimal("500")
     assert credits.last_allocation_date is not None
 

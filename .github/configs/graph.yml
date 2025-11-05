@@ -30,7 +30,7 @@ production:
       # Resource limits
       storage_limit_gb: 500 # 500 GB storage limit per database
       monthly_credits: 10000 # 10K AI credits per month
-      rate_limit_multiplier: 1.0 # Base rate limits (1x)
+      api_rate_multiplier: 1.0 # Base rate limits (1x)
 
       # Copy operation limits
       copy_operations:
@@ -88,7 +88,7 @@ production:
       # Resource limits
       storage_limit_gb: 2000 # 2 TB total storage across all databases (parent + subgraphs)
       monthly_credits: 50000 # 50K AI credits per month (5x standard)
-      rate_limit_multiplier: 2.5 # 2.5x rate limits for team usage
+      api_rate_multiplier: 2.5 # 2.5x rate limits for team usage
 
       # Copy operation limits
       copy_operations:
@@ -147,7 +147,7 @@ production:
       # Resource limits
       storage_limit_gb: 10000 # 10 TB total storage across all databases
       monthly_credits: 200000 # 200K AI credits per month (20x standard)
-      rate_limit_multiplier: 5.0 # 5x rate limits for enterprise usage
+      api_rate_multiplier: 5.0 # 5x rate limits for enterprise usage
 
       # Copy operation limits
       copy_operations:
@@ -206,7 +206,7 @@ production:
       # Resource limits
       storage_limit_gb: 5000 # 5 TB total for all shared repositories (SEC alone may be 2-3TB)
       monthly_credits: null # No credit limits - platform managed
-      rate_limit_multiplier: null # Separate rate limiting for public access
+      api_rate_multiplier: null # Separate rate limiting for public access
 
       # Copy operation limits (for platform data loading)
       copy_operations:
@@ -264,7 +264,7 @@ production:
       # Resource limits
       storage_limit_gb: 2000 # 2 TB storage limit
       monthly_credits: 75000 # 75K AI credits per month
-      rate_limit_multiplier: 3.0 # 3x rate limits
+      api_rate_multiplier: 3.0 # 3x rate limits
 
       # Instance configuration
       instance:
@@ -307,7 +307,7 @@ production:
       # Resource limits
       storage_limit_gb: 10000 # 10 TB storage limit
       monthly_credits: 250000 # 250K AI credits per month
-      rate_limit_multiplier: 6.0 # 6x rate limits
+      api_rate_multiplier: 6.0 # 6x rate limits
 
       # Instance configuration
       instance:
@@ -353,7 +353,7 @@ staging:
       max_subgraphs: 0
       storage_limit_gb: 100 # Reduced for staging
       monthly_credits: 5000 # Reduced for staging
-      rate_limit_multiplier: 1.0
+      api_rate_multiplier: 1.0
 
       instance:
         type: r7g.medium # 8GB RAM - smaller for staging
@@ -387,7 +387,7 @@ staging:
       max_subgraphs: 10
       storage_limit_gb: 500 # Reduced for staging
       monthly_credits: 10000 # Reduced for staging
-      rate_limit_multiplier: 2.5
+      api_rate_multiplier: 2.5
 
       instance:
         type: r7g.medium # Smaller for staging
@@ -421,7 +421,7 @@ staging:
       max_subgraphs: null
       storage_limit_gb: 1000 # Smaller dataset in staging
       monthly_credits: null
-      rate_limit_multiplier: null
+      api_rate_multiplier: null
 
       instance:
         type: r7g.medium # Smaller for staging
@@ -454,7 +454,7 @@ staging:
       max_subgraphs: 0 # Neo4j Community restricted to 1 database
       storage_limit_gb: 500 # Reduced for staging
       monthly_credits: 15000 # Reduced for staging
-      rate_limit_multiplier: 3.0
+      api_rate_multiplier: 3.0
 
       instance:
         type: r7g.medium # Smaller for staging
@@ -489,7 +489,7 @@ staging:
       max_subgraphs: 25
       storage_limit_gb: 1000 # Reduced for staging
       monthly_credits: 25000 # Reduced for staging
-      rate_limit_multiplier: 6.0
+      api_rate_multiplier: 6.0
 
       instance:
         type: r7g.large # Medium-large for staging testing

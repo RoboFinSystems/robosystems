@@ -27,11 +27,10 @@ class TestCreditCache:
     """Test caching and retrieving graph credit balance."""
     graph_id = "graph123"
     balance = Decimal("1000.0")
-    multiplier = Decimal("2.0")
     tier = "enterprise"
 
     # Cache the balance
-    cache_instance.cache_graph_credit_balance(graph_id, balance, multiplier, tier)
+    cache_instance.cache_graph_credit_balance(graph_id, balance, tier)
 
     # Verify Redis setex was called correctly
     mock_redis.setex.assert_called_once()
@@ -42,7 +41,6 @@ class TestCreditCache:
     # Parse the cached data
     cached_data = json.loads(call_args[0][2])
     assert cached_data["balance"] == "1000.0"
-    assert cached_data["multiplier"] == "2.0"
     assert cached_data["graph_tier"] == "enterprise"
 
     # Test retrieval
@@ -50,9 +48,8 @@ class TestCreditCache:
     result = cache_instance.get_cached_graph_credit_balance(graph_id)
 
     assert result is not None
-    retrieved_balance, retrieved_multiplier, retrieved_tier = result
+    retrieved_balance, retrieved_tier = result
     assert retrieved_balance == balance
-    assert retrieved_multiplier == multiplier
     assert retrieved_tier == tier
 
   def test_get_cached_balance_cache_miss(self, cache_instance, mock_redis):
@@ -236,9 +233,7 @@ class TestCreditCache:
     mock_redis.setex.side_effect = Exception("Redis write error")
 
     # Should not raise exception
-    cache_instance.cache_graph_credit_balance(
-      "graph123", Decimal("100.0"), Decimal("1.0"), "standard"
-    )
+    cache_instance.cache_graph_credit_balance("graph123", Decimal("100.0"), "standard")
 
 
 class TestCreditCacheSingleton:

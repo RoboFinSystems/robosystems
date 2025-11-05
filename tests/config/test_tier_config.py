@@ -9,7 +9,7 @@ from robosystems.config.tier_config import (
   get_tier_copy_operation_limits,
   get_tier_max_subgraphs,
   get_tier_monthly_credits,
-  get_tier_rate_limit_multiplier,
+  get_tier_api_rate_multiplier,
   get_tier_storage_limit,
 )
 
@@ -21,7 +21,7 @@ production:
       max_subgraphs: 5
       storage_limit_gb: 250
       monthly_credits: 1500
-      rate_limit_multiplier: 1.5
+      api_rate_multiplier: 1.5
       copy_operations:
         max_file_size_gb: 3
         timeout_seconds: 600
@@ -56,7 +56,7 @@ def reset_tier_config_caches():
   get_tier_max_subgraphs.cache_clear()
   get_tier_storage_limit.cache_clear()
   get_tier_monthly_credits.cache_clear()
-  get_tier_rate_limit_multiplier.cache_clear()
+  get_tier_api_rate_multiplier.cache_clear()
   get_tier_copy_operation_limits.cache_clear()
   get_tier_backup_limits.cache_clear()
   yield
@@ -64,7 +64,7 @@ def reset_tier_config_caches():
   get_tier_max_subgraphs.cache_clear()
   get_tier_storage_limit.cache_clear()
   get_tier_monthly_credits.cache_clear()
-  get_tier_rate_limit_multiplier.cache_clear()
+  get_tier_api_rate_multiplier.cache_clear()
   get_tier_copy_operation_limits.cache_clear()
   get_tier_backup_limits.cache_clear()
 
@@ -121,7 +121,7 @@ def test_accessors_return_configured_values(mock_graph_config):
   assert get_tier_max_subgraphs("kuzu-standard") == 5
   assert get_tier_storage_limit("kuzu-standard") == 250
   assert get_tier_monthly_credits("kuzu-standard") == 1500
-  assert get_tier_rate_limit_multiplier("kuzu-standard") == 1.5
+  assert get_tier_api_rate_multiplier("kuzu-standard") == 1.5
 
   copy_limits = get_tier_copy_operation_limits("kuzu-standard")
   assert copy_limits["max_file_size_gb"] == 3
@@ -143,7 +143,7 @@ def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
   # kuzu-large is missing storage limit/multiplier/copy settings so defaults apply
   assert TierConfig.get_tier_config("unknown-tier") == {}
   assert get_tier_storage_limit("kuzu-large") == 500
-  assert get_tier_rate_limit_multiplier("kuzu-large") == 1.0
+  assert get_tier_api_rate_multiplier("kuzu-large") == 1.0
 
   default_copy = get_tier_copy_operation_limits("kuzu-large")
   assert default_copy["max_file_size_gb"] == 1.0

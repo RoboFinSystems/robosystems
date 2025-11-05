@@ -85,9 +85,6 @@ class GraphCredits(Base):
   # Monthly allocation based on subscription tier
   monthly_allocation = Column(Numeric(10, 2), nullable=False, default=0)
 
-  # Credit multiplier (deprecated - always 1.0 in simplified model)
-  credit_multiplier = Column(Numeric(3, 1), nullable=False, default=1.0)
-
   # Storage limits and management
   storage_limit_gb = Column(
     Numeric(10, 2), nullable=False, default=500
@@ -178,7 +175,6 @@ class GraphCredits(Base):
       graph_id=graph_id,
       user_id=user_id,
       billing_admin_id=billing_admin_id,
-      credit_multiplier=Decimal("1.0"),  # Always 1.0 in simplified model
       storage_limit_gb=Decimal(str(storage_limit_gb)),
       monthly_allocation=monthly_allocation,
       current_balance=monthly_allocation,  # Start with full allocation

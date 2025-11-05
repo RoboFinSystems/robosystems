@@ -162,16 +162,15 @@ class CreditService:
 
     if cached_data:
       # Use cached balance for quick check
-      balance, multiplier, graph_tier = cached_data
-      actual_cost = base_cost * multiplier
+      balance, graph_tier = cached_data
 
       # Quick insufficient check from cache
-      if balance < actual_cost:
+      if balance < base_cost:
         return {
           "success": False,
           "error": "Insufficient credits",
           "credits_consumed": 0,
-          "required_credits": float(actual_cost),
+          "required_credits": float(base_cost),
           "available_credits": float(balance),
         }
 
@@ -211,7 +210,6 @@ class CreditService:
         credit_cache.cache_graph_credit_balance(
           graph_id=graph_id,
           balance=Decimal(str(consumption_result["new_balance"])),
-          multiplier=consumption_result["multiplier"],
           graph_tier=graph_tier_value,
         )
       except Exception as e:
@@ -221,10 +219,9 @@ class CreditService:
         "success": True,
         "credits_consumed": consumption_result["credits_consumed"],
         "base_cost": consumption_result["base_cost"],
-        "multiplier": consumption_result["multiplier"],
         "remaining_balance": consumption_result["new_balance"],
         "cached": False,
-        "reservation_id": consumption_result["reservation_id"],
+        "transaction_id": consumption_result["transaction_id"],
       }
     else:
       # Invalidate cache on failure to ensure consistency
@@ -241,7 +238,7 @@ class CreditService:
         "credits_consumed": 0,
         "required_credits": consumption_result.get(
           "required_credits",
-          float(base_cost * credits.credit_multiplier),
+          float(base_cost),
         ),
         "available_credits": consumption_result.get("available_credits", 0),
       }
@@ -413,7 +410,6 @@ class CreditService:
           ),
           "available_credits": shared_check.get("available_credits", 0),
           "base_cost": float(required_credits),
-          "multiplier": 1.0,  # Shared repositories don't use tier multipliers
           "cached": False,
           "repository_type": "shared",
         }
@@ -431,16 +427,14 @@ class CreditService:
     cached_data = credit_cache.get_cached_graph_credit_balance(graph_id)
 
     if cached_data:
-      balance, multiplier, graph_tier = cached_data
-      actual_cost = required_credits * multiplier
-      has_sufficient = balance >= actual_cost
+      balance, graph_tier = cached_data
+      has_sufficient = balance >= required_credits
 
       return {
         "has_sufficient_credits": has_sufficient,
-        "required_credits": float(actual_cost),
+        "required_credits": float(required_credits),
         "available_credits": float(balance),
         "base_cost": float(required_credits),
-        "multiplier": float(multiplier),
         "cached": True,
         "repository_type": "graph",
       }
@@ -457,8 +451,7 @@ class CreditService:
     consumed_this_month = self._get_consumed_this_month(graph_id)
     actual_balance = float(credits.monthly_allocation) - float(consumed_this_month)
 
-    actual_cost = required_credits * credits.credit_multiplier
-    has_sufficient = Decimal(str(actual_balance)) >= actual_cost
+    has_sufficient = Decimal(str(actual_balance)) >= required_credits
 
     # Cache the balance for future checks
     try:
@@ -470,7 +463,6 @@ class CreditService:
       credit_cache.cache_graph_credit_balance(
         graph_id=graph_id,
         balance=Decimal(str(actual_balance)),
-        multiplier=credits.credit_multiplier,
         graph_tier=graph_tier_value,
       )
     except Exception as e:
@@ -478,10 +470,9 @@ class CreditService:
 
     return {
       "has_sufficient_credits": has_sufficient,
-      "required_credits": float(actual_cost),
+      "required_credits": float(required_credits),
       "available_credits": actual_balance,
       "base_cost": float(required_credits),
-      "multiplier": float(credits.credit_multiplier),
       "remaining_balance": float(credits.current_balance),
       "cached": False,
       "repository_type": "graph",

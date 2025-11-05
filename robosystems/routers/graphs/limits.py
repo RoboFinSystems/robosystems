@@ -5,13 +5,21 @@ This module provides REST API endpoints for retrieving operational limits.
 """
 
 import asyncio
-from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import User
+from robosystems.models.api.graph import (
+  GraphLimitsResponse,
+  StorageLimits,
+  QueryLimits,
+  CopyOperationLimits,
+  BackupLimits,
+  RateLimits,
+  CreditLimits,
+)
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -56,6 +64,7 @@ async def _get_graph_client(graph_id: str) -> GraphClient:
 
 @router.get(
   "/limits",
+  response_model=GraphLimitsResponse,
   summary="Get Graph Operational Limits",
   description="""Get comprehensive operational limits for the graph database.
 
@@ -91,7 +100,7 @@ async def get_graph_limits(
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Dict[str, Any]:
+) -> GraphLimitsResponse:
   """
   Get comprehensive operational limits for the graph database.
 
@@ -170,12 +179,12 @@ async def get_graph_limits(
     # Get backup limits from tier configuration (based on graph tier)
     backup_limits = get_tier_backup_limits(graph_tier)
 
-    # Define rate limits based on graph tier (using rate_limit_multiplier from config)
+    # Define rate limits based on graph tier (using api_rate_multiplier from config)
     base_requests_per_minute = 60
     base_requests_per_hour = 1000
     base_burst_capacity = 10
 
-    multiplier = TierConfig.get_rate_limit_multiplier(graph_tier)
+    multiplier = TierConfig.get_api_rate_multiplier(graph_tier)
 
     rate_limits = {
       "requests_per_minute": int(base_requests_per_minute * multiplier)
@@ -208,29 +217,26 @@ async def get_graph_limits(
       except Exception:
         pass
 
-    # Build comprehensive response
-    response = {
-      "graph_id": graph_id,
-      "subscription_tier": user_tier,
-      "graph_tier": graph_tier,
-      "is_shared_repository": MultiTenantUtils.is_shared_repository(graph_id),
-      "storage": storage_limits,
-      "queries": query_limits,
-      "copy_operations": {
-        "max_file_size_gb": copy_limits["max_file_size_gb"],
-        "timeout_seconds": copy_limits["timeout_seconds"],
-        "concurrent_operations": copy_limits["concurrent_operations"],
-        "max_files_per_operation": copy_limits["max_files_per_operation"],
-        "daily_copy_operations": copy_limits["daily_copy_operations"],
-        "supported_formats": ["parquet", "csv", "json", "delta", "iceberg"],
-      },
-      "backups": backup_limits,
-      "rate_limits": rate_limits,
-    }
-
-    # Add credit limits if they exist
-    if credit_limits:
-      response["credits"] = credit_limits
+    # Build comprehensive response using typed models
+    response = GraphLimitsResponse(
+      graph_id=graph_id,
+      subscription_tier=user_tier,
+      graph_tier=graph_tier,
+      is_shared_repository=MultiTenantUtils.is_shared_repository(graph_id),
+      storage=StorageLimits(**storage_limits),
+      queries=QueryLimits(**query_limits),
+      copy_operations=CopyOperationLimits(
+        max_file_size_gb=copy_limits["max_file_size_gb"],
+        timeout_seconds=copy_limits["timeout_seconds"],
+        concurrent_operations=copy_limits["concurrent_operations"],
+        max_files_per_operation=copy_limits["max_files_per_operation"],
+        daily_copy_operations=copy_limits["daily_copy_operations"],
+        supported_formats=["parquet", "csv", "json", "delta", "iceberg"],
+      ),
+      backups=BackupLimits(**backup_limits),
+      rate_limits=RateLimits(**rate_limits),
+      credits=CreditLimits(**credit_limits) if credit_limits else None,
+    )
 
     # Record success
     circuit_breaker.record_success(graph_id, "graph_limits")

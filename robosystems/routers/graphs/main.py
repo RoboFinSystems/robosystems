@@ -5,16 +5,12 @@ This module handles creating new graph databases with flexible configurations,
 optionally including initial entities like companies.
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 
 from robosystems.logger import logger
 from robosystems.models.iam import User, UserLimits, UserGraph
-from robosystems.models.api.graph import (
-  GraphMetadata,
-  CustomSchemaDefinition,
-)
+from robosystems.models.api.graph import CreateGraphRequest
 from robosystems.models.api.user import (
   GraphInfo,
   UserGraphsResponse,
@@ -26,7 +22,11 @@ from robosystems.models.api.common import (
   create_error_response,
 )
 from robosystems.middleware.sse import create_operation_response
-from robosystems.models.api import AvailableExtensionsResponse, AvailableExtension
+from robosystems.models.api import (
+  AvailableExtensionsResponse,
+  AvailableExtension,
+  AvailableGraphTiersResponse,
+)
 from robosystems.middleware.auth.dependencies import (
   get_current_user,
   get_current_user_with_graph,
@@ -45,81 +45,6 @@ from robosystems.database import session
 
 # Create router for unified graph creation
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
-
-
-class InitialEntityData(BaseModel):
-  """Initial entity data for graph creation."""
-
-  name: str = Field(..., min_length=1, max_length=255, description="Entity name")
-  uri: str = Field(..., min_length=1, description="Entity website or URI")
-  cik: Optional[str] = Field(None, description="CIK number for SEC filings")
-  sic: Optional[str] = Field(None, description="SIC code")
-  sic_description: Optional[str] = Field(None, description="SIC description")
-  category: Optional[str] = Field(None, description="Business category")
-  state_of_incorporation: Optional[str] = Field(
-    None, description="State of incorporation"
-  )
-  fiscal_year_end: Optional[str] = Field(None, description="Fiscal year end (MMDD)")
-  ein: Optional[str] = Field(None, description="Employer Identification Number")
-
-
-class CreateGraphRequest(BaseModel):
-  """Request model for creating a new graph."""
-
-  # Core graph configuration
-  metadata: GraphMetadata = Field(
-    ..., description="Graph metadata including name, description, and schema extensions"
-  )
-
-  # Instance tier configuration
-  instance_tier: str = Field(
-    "kuzu-standard",
-    description="Instance tier: kuzu-standard, kuzu-large, kuzu-xlarge, neo4j-community-large, neo4j-enterprise-xlarge",
-    pattern="^(kuzu-standard|kuzu-large|kuzu-xlarge|neo4j-community-large|neo4j-enterprise-xlarge)$",
-  )
-
-  # Optional custom schema
-  custom_schema: Optional[CustomSchemaDefinition] = Field(
-    None,
-    description="Custom schema definition to apply",
-  )
-
-  # Optional initial entity (for backward compatibility with entity-graph endpoint)
-  initial_entity: Optional[InitialEntityData] = Field(
-    None,
-    description="Optional initial entity to create in the graph. If provided, creates a entity-focused graph.",
-  )
-
-  # Control whether to create entity node and upload initial data
-  create_entity: bool = Field(
-    default=True,
-    description="Whether to create the entity node and upload initial data. Only applies when initial_entity is provided. Set to False to create graph without populating entity data (useful for file-based ingestion workflows).",
-  )
-
-  # Additional configuration
-  tags: List[str] = Field(
-    default_factory=list,
-    description="Optional tags for organization",
-    max_items=10,
-  )  # type: ignore[call-arg]
-
-  class Config:
-    json_schema_extra = {
-      "example": {
-        "metadata": {
-          "graph_name": "Acme Consulting LLC",
-          "description": "Professional consulting services with full accounting integration",
-          "schema_extensions": ["roboledger"],
-        },
-        "instance_tier": "kuzu-standard",
-        "initial_entity": {
-          "name": "Acme Consulting LLC",
-          "uri": "https://acmeconsulting.com",
-          "cik": "0001234567",
-        },
-        "tags": ["consulting", "professional-services"],
-      }
-    }
 
 
 def _create_error_response(
@@ -318,9 +243,35 @@ async def get_graphs(
 This endpoint starts an asynchronous graph creation operation and returns
 connection details for monitoring progress via Server-Sent Events (SSE).
 
-**Operation Types:**
-- **Generic Graph**: Creates empty graph with schema extensions
-- **Entity Graph**: Creates graph with initial entity data
+**Graph Creation Options:**
+
+1. **Entity Graph with Initial Entity** (`initial_entity` provided, `create_entity=True`):
+   - Creates graph structure with entity schema extensions
+   - Populates an initial entity node with provided data
+   - Useful when you want a pre-configured entity to start with
+   - Example: Creating a company graph with the company already populated
+
+2. **Entity Graph without Initial Entity** (`initial_entity=None`, `create_entity=False`):
+   - Creates graph structure with entity schema extensions
+   - Graph starts empty, ready for data import
+   - Useful for bulk data imports or custom workflows
+   - Example: Creating a graph structure before importing from CSV/API
+
+3. **Generic Graph** (no `initial_entity` provided):
+   - Creates empty graph with custom schema extensions
+   - General-purpose knowledge graph
+   - Example: Analytics graphs, custom data models
+
+**Required Fields:**
+- `metadata.graph_name`: Unique name for the graph
+- `instance_tier`: Resource tier (kuzu-standard, kuzu-large, kuzu-xlarge)
+
+**Optional Fields:**
+- `metadata.description`: Human-readable description of the graph's purpose
+- `metadata.schema_extensions`: List of schema extensions (roboledger, roboinvestor, etc.)
+- `tags`: Organizational tags (max 10)
+- `initial_entity`: Entity data (required for entity graphs with initial data)
+- `create_entity`: Whether to populate initial entity (default: true when initial_entity provided)
 
 **Monitoring Progress:**
 Use the returned `operation_id` to connect to the SSE stream:
@@ -564,6 +515,7 @@ Extension listing is included - no credit consumption required.""",
   },
 )
 async def get_available_extensions(
+  current_user: User = Depends(get_current_user),  # noqa: ARG001
   _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
 ):
   """
@@ -672,6 +624,164 @@ async def get_available_extensions(
           enabled=False,
         ),
       ],
+    )
+
+
+@router.get(
+  "/tiers",
+  response_model=AvailableGraphTiersResponse,
+  summary="Get Available Graph Tiers",
+  description="""List all available graph database tier configurations.
+
+This endpoint provides comprehensive technical specifications for each available
+graph database tier, including instance types, resource limits, and features.
+
+**Tier Information:**
+Each tier includes:
+- Technical specifications (instance type, memory, storage)
+- Resource limits (subgraphs, credits, rate limits)
+- Feature list with capabilities
+- Availability status
+
+**Available Tiers:**
+- **kuzu-standard**: Multi-tenant entry-level tier
+- **kuzu-large**: Dedicated professional tier with subgraph support
+- **kuzu-xlarge**: Enterprise tier with maximum resources
+- **neo4j-community-large**: Neo4j Community Edition (optional, if enabled)
+- **neo4j-enterprise-xlarge**: Neo4j Enterprise Edition (optional, if enabled)
+
+**Use Cases:**
+- Display tier options in graph creation UI
+- Show technical specifications for tier selection
+- Validate tier availability before graph creation
+- Display feature comparisons
+
+**Note:**
+Tier listing is included - no credit consumption required.""",
+  operation_id="getAvailableGraphTiers",
+  responses={
+    200: {
+      "description": "Tiers retrieved successfully",
+      "content": {
+        "application/json": {
+          "example": {
+            "tiers": [
+              {
+                "tier": "kuzu-standard",
+                "name": "kuzu-standard",
+                "display_name": "Kuzu Standard",
+                "description": "Multi-tenant Kuzu tier for cost-efficient entry",
+                "backend": "kuzu",
+                "enabled": True,
+                "max_subgraphs": 0,
+                "storage_limit_gb": 500,
+                "monthly_credits": 10000,
+                "api_rate_multiplier": 1.0,
+                "monthly_price": 49.99,
+                "features": [
+                  "10,000 AI credits per month",
+                  "500GB storage limit",
+                  "Single database only",
+                  "14GB RAM",
+                  "30-day backup retention",
+                ],
+                "instance": {
+                  "type": "r7g.large",
+                  "memory_mb": 14336,
+                  "databases_per_instance": 10,
+                },
+                "limits": {
+                  "storage_gb": 500,
+                  "monthly_credits": 10000,
+                  "max_subgraphs": 0,
+                  "copy_operations": {
+                    "max_file_size_gb": 1.0,
+                    "timeout_seconds": 300,
+                    "concurrent_operations": 1,
+                    "max_files_per_operation": 100,
+                    "daily_copy_operations": 10,
+                  },
+                  "backup": {
+                    "max_backup_size_gb": 10,
+                    "backup_retention_days": 7,
+                    "max_backups_per_day": 2,
+                  },
+                },
+              }
+            ]
+          }
+        }
+      },
+    },
+    500: {"description": "Failed to retrieve tiers"},
+  },
+)
+async def get_available_graph_tiers(
+  current_user: User = Depends(get_current_user),  # noqa: ARG001
+  _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
+  include_disabled: bool = False,
+) -> AvailableGraphTiersResponse:
+  """
+  Get available graph database tiers with technical specifications.
+
+  Returns comprehensive information about all available graph tiers,
+  including technical specifications, resource limits, and features.
+
+  Args:
+      include_disabled: Whether to include disabled/optional tiers (default: False)
+  """
+  try:
+    from robosystems.config.tier_config import TierConfig
+    from robosystems.config import BillingConfig
+
+    # Get tier configurations from graph.yml
+    tiers = TierConfig.get_available_tiers(include_disabled=include_disabled)
+
+    # Filter out internal-only and not-yet-available tiers
+    excluded_tiers = ["kuzu-shared", "neo4j-community-large", "neo4j-enterprise-xlarge"]
+    tiers = [tier for tier in tiers if tier.get("tier") not in excluded_tiers]
+
+    # Try to add pricing information from billing config
+    try:
+      pricing_info = BillingConfig.get_all_pricing_info()
+      tier_pricing = pricing_info.get("subscription_tiers", {})
+
+      # Map old tier names to new tier names for pricing
+      pricing_mapping = {
+        "kuzu-standard": "standard",
+        "kuzu-large": "enterprise",
+        "kuzu-xlarge": "premium",
+      }
+
+      for tier in tiers:
+        tier_key = tier.get("tier", "")
+        mapped_key = pricing_mapping.get(tier_key, tier_key)
+
+        if mapped_key in tier_pricing and tier_pricing[mapped_key]:
+          tier["monthly_price"] = tier_pricing[mapped_key].get("monthly_price")
+        else:
+          # Default pricing if not found
+          default_prices = {
+            "kuzu-standard": 49.99,
+            "kuzu-large": 199.99,
+            "kuzu-xlarge": 499.99,
+            "neo4j-community-large": 299.99,
+            "neo4j-enterprise-xlarge": 999.99,
+          }
+          tier["monthly_price"] = default_prices.get(tier_key, None)
+
+    except Exception as pricing_error:
+      logger.warning(f"Could not load pricing information: {pricing_error}")
+      # Pricing remains None if we can't load it
+
+    return AvailableGraphTiersResponse(tiers=tiers)
+
+  except Exception as e:
+    logger.error(f"Failed to load tier configurations: {e}")
+    _raise_http_exception(
+      status.HTTP_500_INTERNAL_SERVER_ERROR,
+      ErrorCode.INTERNAL_ERROR,
+      f"Failed to retrieve tier configurations: {str(e)}",
     )
 
 

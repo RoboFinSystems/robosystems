@@ -96,7 +96,6 @@ class GraphUsageTracking(Model):
 
   # Credit metrics
   credits_consumed = Column(Numeric(10, 2), nullable=True)  # Credits used
-  credit_multiplier = Column(Numeric(3, 1), nullable=True)  # Tier multiplier applied
   base_credit_cost = Column(
     Numeric(10, 2), nullable=True
   )  # Base cost before multiplier
@@ -207,7 +206,6 @@ class GraphUsageTracking(Model):
     operation_type: str,
     credits_consumed: Decimal,
     base_credit_cost: Decimal,
-    credit_multiplier: Decimal,
     session: Session,
     duration_ms: Optional[int] = None,
     cached_operation: bool = False,
@@ -228,7 +226,6 @@ class GraphUsageTracking(Model):
       graph_tier=graph_tier,
       credits_consumed=credits_consumed,
       base_credit_cost=base_credit_cost,
-      credit_multiplier=credit_multiplier,
       duration_ms=duration_ms,
       cached_operation=cached_operation,
       status_code=status_code,
@@ -430,7 +427,6 @@ class GraphUsageTracking(Model):
           "operation_breakdown": {},
           "cached_operations": 0,
           "billable_operations": 0,
-          "avg_multiplier": Decimal("0"),
           "transaction_count": 0,
         }
 
@@ -466,21 +462,13 @@ class GraphUsageTracking(Model):
       else:
         graph_data["billable_operations"] += 1
 
-      # Track multiplier
-      if record.credit_multiplier is not None:
-        graph_data["avg_multiplier"] += record.credit_multiplier
-
       graph_data["transaction_count"] += 1
 
     # Calculate averages
     for graph_id, data in graph_credits.items():
-      if data["transaction_count"] > 0:
-        data["avg_multiplier"] = data["avg_multiplier"] / data["transaction_count"]
-
       # Convert Decimal to float for JSON serialization
       data["total_credits_consumed"] = float(data["total_credits_consumed"])
       data["total_base_cost"] = float(data["total_base_cost"])
-      data["avg_multiplier"] = float(data["avg_multiplier"])
 
       for op_type, op_data in data["operation_breakdown"].items():
         op_data["credits"] = float(op_data["credits"])
@@ -685,9 +673,6 @@ class GraphUsageTracking(Model):
       else None,
       "base_credit_cost": float(self.base_credit_cost)
       if self.base_credit_cost is not None
-      else None,
-      "credit_multiplier": float(self.credit_multiplier)
-      if self.credit_multiplier is not None
       else None,
       "duration_ms": self.duration_ms,
       "cached_operation": self.cached_operation,

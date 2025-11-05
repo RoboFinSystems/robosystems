@@ -54,7 +54,6 @@ class TestCreditService:
     plan.name = "standard"
     plan.tier = "standard"
     plan.monthly_credit_allocation = 1000.0
-    plan.credit_multiplier = Decimal("1.0")
     plan.base_price = 2900
     plan.is_active = True
     return plan
@@ -69,7 +68,6 @@ class TestCreditService:
     credits.current_balance = Decimal("1000.0")
     credits.monthly_allocation = Decimal("1000.0")
     credits.graph_tier = GraphTier.KUZU_STANDARD.value
-    credits.credit_multiplier = Decimal("1.0")
     credits.is_active = True
     credits.last_allocation_date = datetime.now(timezone.utc)
     return credits
@@ -124,7 +122,6 @@ class TestCreditService:
       # Setup mock cache to return cached data
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
-        Decimal("1.0"),
         "standard",
       )
 
@@ -185,7 +182,6 @@ class TestCreditService:
       # Setup mock cache to return cached data
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
-        Decimal("1.0"),
         "standard",
       )
 
@@ -227,7 +223,6 @@ class TestCreditService:
     # Create graph credits with low balance
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.current_balance = Decimal("5.0")
-    mock_credits.credit_multiplier = Decimal("1.0")
     mock_credits.graph_tier = GraphTier.KUZU_STANDARD
 
     # Mock cache import
@@ -235,7 +230,6 @@ class TestCreditService:
       # Setup mock cache to return low balance
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("5.0"),
-        Decimal("1.0"),
         "standard",
       )
 
@@ -271,7 +265,6 @@ class TestCreditService:
       # Setup mock cache
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
-        Decimal("1.0"),
         "standard",
       )
 
@@ -282,7 +275,6 @@ class TestCreditService:
       assert result["has_sufficient_credits"] is True
       assert result["available_credits"] == 1000.0
       assert result["required_credits"] == 100.0
-      assert result["multiplier"] == 1.0
       assert result["cached"] is True
 
   def test_get_credit_summary(self, credit_service, mock_session, sample_graph_credits):
@@ -395,37 +387,6 @@ class TestCreditService:
     assert result["error"] == "Graph tier upgrades are not supported"
     assert "architecturally optimized" in result["message"]
 
-  def test_consume_credits_with_multiplier(self, credit_service, mock_session):
-    """Test credit consumption with tier multiplier applied."""
-    mock_credits = Mock(spec=GraphCredits)
-    mock_credits.current_balance = Decimal("1000.0")
-    mock_credits.credit_multiplier = Decimal("0.8")  # 20% discount
-    mock_credits.graph_id = "graph123"
-    mock_credits.is_active = True
-    mock_credits.graph_tier = "kuzu-standard"
-    mock_credits.consume_credits_atomic = Mock(
-      return_value={
-        "success": True,
-        "credits_consumed": 80.0,
-        "new_balance": 920.0,
-        "base_cost": 100.0,
-        "multiplier": 0.8,
-        "reservation_id": "test-reservation-id",
-      }
-    )
-
-    # Mock the GraphCredits.get_by_graph_id static method
-    with patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits):
-      # Consume 100 credits (should actually consume 80 due to multiplier)
-      result = credit_service.consume_credits(
-        graph_id="graph123", operation_type="query", base_cost=Decimal("100.0")
-      )
-
-    assert result["credits_consumed"] == 80.0
-    assert result["success"] is True
-    assert result["multiplier"] == 0.8
-    mock_credits.consume_credits_atomic.assert_called_once()
-
   def test_get_operation_cost_with_unknown_type(self):
     """Test get_operation_cost with unknown operation type."""
     cost = get_operation_cost("unknown_operation_type")
@@ -456,7 +417,6 @@ class TestCreditService:
     mock_credits.current_balance = Decimal("750.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
     mock_credits.graph_tier = GraphTier.KUZU_LARGE.value
-    mock_credits.credit_multiplier = Decimal("0.9")
     mock_credits.last_allocation_date = datetime.now(timezone.utc)
     mock_credits.get_usage_summary = Mock(
       return_value={
@@ -540,9 +500,8 @@ class TestCreditCaching:
 
     # Verify result
     assert result is not None
-    balance, multiplier, tier = result
+    balance, tier = result
     assert balance == Decimal("1000.0")
-    assert multiplier == Decimal("2.0")
     assert tier == "enterprise"
 
     # Verify Redis was called correctly

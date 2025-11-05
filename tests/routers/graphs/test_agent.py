@@ -31,7 +31,6 @@ async def test_agent_router_basic(
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
     mock_credits.current_balance = 1000.0
-    mock_credits.credit_multiplier = 1.0
     mock_get_credits.return_value = mock_credits
 
     # Mock the AgentOrchestrator class instance
@@ -82,7 +81,6 @@ async def test_agent_endpoint_with_history(
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
     mock_credits.current_balance = 1000.0
-    mock_credits.credit_multiplier = 1.0
     mock_get_credits.return_value = mock_credits
 
     # Mock the AgentOrchestrator class instance
@@ -133,7 +131,6 @@ async def test_agent_endpoint_with_context(
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
     mock_credits.current_balance = 1000.0
-    mock_credits.credit_multiplier = 1.0
     mock_get_credits.return_value = mock_credits
 
     # Mock the AgentOrchestrator class instance
@@ -184,7 +181,6 @@ async def test_agent_error_handling(
     mock_credits = MagicMock()
     mock_credits.graph_id = "default"
     mock_credits.current_balance = 1000.0
-    mock_credits.credit_multiplier = 1.0
     mock_get_credits.return_value = mock_credits
 
     # Make orchestrator class raise an exception
@@ -268,7 +264,6 @@ class TestGraphIdValidation:
       mock_credits = MagicMock()
       mock_credits.graph_id = "test_graph"
       mock_credits.current_balance = 1000.0
-      mock_credits.credit_multiplier = 1.0
       mock_get_credits.return_value = mock_credits
 
       # Mock the AgentOrchestrator class instance

@@ -71,7 +71,6 @@ class TestCreditSystemIntegration:
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("1000.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
-    mock_credits.credit_multiplier = Decimal("1.0")
     mock_credits.graph_tier = GraphTier.KUZU_STANDARD.value
 
     with patch.object(GraphCredits, "create_for_graph", return_value=mock_credits):
@@ -87,7 +86,6 @@ class TestCreditSystemIntegration:
       # Verify credits were created
       assert credits.graph_id == graph_id
       assert credits.monthly_allocation == Decimal("1000.0")
-      assert credits.credit_multiplier == Decimal("1.0")
 
   def test_ai_credit_consumption(self, credit_service, mock_session):
     """Test AI credit consumption based on actual token usage."""
@@ -98,14 +96,12 @@ class TestCreditSystemIntegration:
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("1000.0")
     mock_credits.monthly_allocation = Decimal("5000.0")
-    mock_credits.credit_multiplier = Decimal("1.5")  # Enterprise multiplier
     mock_credits.graph_tier = GraphTier.KUZU_LARGE.value
 
     # Mock cache
     with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
-        Decimal("1.5"),
         "enterprise",
       )
 
@@ -186,14 +182,12 @@ class TestCreditSystemIntegration:
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("100.0")
-    mock_credits.credit_multiplier = Decimal("2.0")  # Premium multiplier
     mock_credits.graph_tier = GraphTier.KUZU_XLARGE.value
 
     # Mock cache
     with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("100.0"),
-        Decimal("2.0"),
         "premium",
       )
 
@@ -208,8 +202,7 @@ class TestCreditSystemIntegration:
       # Verify check results
       assert result["has_sufficient_credits"] is True
       assert result["available_credits"] == 100.0
-      assert result["required_credits"] == 100.0  # 50 * 2.0 multiplier
-      assert result["multiplier"] == 2.0
+      assert result["required_credits"] == 50.0  # No multiplier in simplified model
 
   def test_credit_transaction_history(self, credit_service, mock_session):
     """Test retrieving credit transaction history."""
@@ -267,7 +260,6 @@ class TestCreditSystemIntegration:
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("750.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
-    mock_credits.credit_multiplier = Decimal("1.0")
     mock_credits.graph_tier = GraphTier.KUZU_STANDARD.value
     mock_credits.last_allocation_date = datetime.now(timezone.utc).date()
 
@@ -282,7 +274,6 @@ class TestCreditSystemIntegration:
           return_value={
             "graph_id": graph_id,
             "graph_tier": GraphTier.KUZU_STANDARD.value,
-            "credit_multiplier": 1.0,
             "current_balance": 750.0,
             "monthly_allocation": 1000.0,
             "consumed_this_month": 250.0,
@@ -309,14 +300,12 @@ class TestCreditSystemIntegration:
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("5.0")  # Only 5 credits left
-    mock_credits.credit_multiplier = Decimal("1.0")
     mock_credits.graph_tier = GraphTier.KUZU_STANDARD.value
 
     # Mock cache
     with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("5.0"),
-        Decimal("1.0"),
         "standard",
       )
 

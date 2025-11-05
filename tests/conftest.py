@@ -435,7 +435,6 @@ def test_graph_with_credits(test_db, test_user, sample_graph):
     billing_admin_id=test_user.id,
     current_balance=Decimal("1000.0"),
     monthly_allocation=Decimal("1000.0"),
-    credit_multiplier=Decimal("1.0"),
     last_allocation_date=datetime.now(timezone.utc),
   )
   test_db.add(graph_credits)
