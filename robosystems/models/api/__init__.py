@@ -178,13 +178,7 @@ __all__ = [
   "ErrorCode",
   "create_error_response",
   "create_pagination_info",
-  # Entity models (new naming)
-  "EntityCreate",
-  "EntityUpdate",
-  "EntityResponse",
-  "EntityListResponse",
-  "EntityWithGraphResponse",
-  # Entity models (backward compatibility)
+  # Entity models
   "EntityCreate",
   "EntityUpdate",
   "EntityResponse",
