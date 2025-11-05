@@ -203,7 +203,6 @@ class TestCreditSystemIntegration:
       assert result["has_sufficient_credits"] is True
       assert result["available_credits"] == 100.0
       assert result["required_credits"] == 50.0  # No multiplier in simplified model
-      assert result["multiplier"] == 1.0  # Always 1.0 for backward compatibility
 
   def test_credit_transaction_history(self, credit_service, mock_session):
     """Test retrieving credit transaction history."""

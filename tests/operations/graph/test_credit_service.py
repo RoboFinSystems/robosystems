@@ -229,7 +229,7 @@ class TestCreditService:
     with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
       # Setup mock cache to return low balance
       mock_cache.get_cached_graph_credit_balance.return_value = (
-        Decimal("1000.0"),
+        Decimal("5.0"),
         "standard",
       )
 
@@ -275,7 +275,6 @@ class TestCreditService:
       assert result["has_sufficient_credits"] is True
       assert result["available_credits"] == 1000.0
       assert result["required_credits"] == 100.0
-      assert result["multiplier"] == 1.0
       assert result["cached"] is True
 
   def test_get_credit_summary(self, credit_service, mock_session, sample_graph_credits):
@@ -387,36 +386,6 @@ class TestCreditService:
     assert result["success"] is False
     assert result["error"] == "Graph tier upgrades are not supported"
     assert "architecturally optimized" in result["message"]
-
-  def test_consume_credits_with_multiplier(self, credit_service, mock_session):
-    """Test credit consumption with tier multiplier applied."""
-    mock_credits = Mock(spec=GraphCredits)
-    mock_credits.current_balance = Decimal("1000.0")
-    mock_credits.graph_id = "graph123"
-    mock_credits.is_active = True
-    mock_credits.graph_tier = "kuzu-standard"
-    mock_credits.consume_credits_atomic = Mock(
-      return_value={
-        "success": True,
-        "credits_consumed": 80.0,
-        "new_balance": 920.0,
-        "base_cost": 100.0,
-        "multiplier": 0.8,
-        "reservation_id": "test-reservation-id",
-      }
-    )
-
-    # Mock the GraphCredits.get_by_graph_id static method
-    with patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits):
-      # Consume 100 credits (should actually consume 80 due to multiplier)
-      result = credit_service.consume_credits(
-        graph_id="graph123", operation_type="query", base_cost=Decimal("100.0")
-      )
-
-    assert result["credits_consumed"] == 80.0
-    assert result["success"] is True
-    assert result["multiplier"] == 0.8
-    mock_credits.consume_credits_atomic.assert_called_once()
 
   def test_get_operation_cost_with_unknown_type(self):
     """Test get_operation_cost with unknown operation type."""

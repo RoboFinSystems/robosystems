@@ -219,10 +219,9 @@ class CreditService:
         "success": True,
         "credits_consumed": consumption_result["credits_consumed"],
         "base_cost": consumption_result["base_cost"],
-        "multiplier": consumption_result["multiplier"],
         "remaining_balance": consumption_result["new_balance"],
         "cached": False,
-        "reservation_id": consumption_result["reservation_id"],
+        "transaction_id": consumption_result["transaction_id"],
       }
     else:
       # Invalidate cache on failure to ensure consistency
@@ -411,7 +410,6 @@ class CreditService:
           ),
           "available_credits": shared_check.get("available_credits", 0),
           "base_cost": float(required_credits),
-          "multiplier": 1.0,  # Shared repositories don't use tier multipliers
           "cached": False,
           "repository_type": "shared",
         }
@@ -437,7 +435,6 @@ class CreditService:
         "required_credits": float(required_credits),
         "available_credits": float(balance),
         "base_cost": float(required_credits),
-        "multiplier": 1.0,
         "cached": True,
         "repository_type": "graph",
       }
@@ -476,7 +473,6 @@ class CreditService:
       "required_credits": float(required_credits),
       "available_credits": actual_balance,
       "base_cost": float(required_credits),
-      "multiplier": 1.0,
       "remaining_balance": float(credits.current_balance),
       "cached": False,
       "repository_type": "graph",

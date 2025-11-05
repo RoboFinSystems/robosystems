@@ -200,9 +200,9 @@ Defines credit costs for all operations.
 **Features:**
 
 - **Operation Costs**: Fixed costs per operation type
-- **Dynamic Pricing**: Result-based pricing for queries
-- **Storage Costs**: GB-hour based storage pricing
-- **Tier Discounts**: Multipliers for different tiers
+- **AI-Only Billing**: Only AI operations (Anthropic/OpenAI) consume credits
+- **Database Operations**: All database operations are included (no credits consumed)
+- **Storage Costs**: Optional separate billing at 0.05 credits per GB per day
 
 **Operation Costs:**
 
@@ -293,6 +293,29 @@ All business configuration lives in code, not database:
 - **Rate Limits**: Handle burst protection (1-minute windows)
 - **Credits**: Control volume usage (monthly allocations)
 - **Clear Separation**: Different concerns, different solutions
+
+### Rate Multipliers vs Credit Costs
+
+**IMPORTANT**: These are two separate systems that serve different purposes:
+
+**`api_rate_multiplier`** (Rate Limiting):
+- Scales API request rate limits based on subscription tier
+- Examples: 1.0x for standard, 2.5x for large, 5.0x for xlarge
+- Affects how many requests per minute you can make
+- Provides burst protection without limiting total volume
+- Does NOT affect credit costs
+
+**Credit Costs** (Billing):
+- Only AI operations (Anthropic/OpenAI API calls) consume credits
+- All database operations are completely FREE (queries, imports, backups, etc.)
+- No multipliers applied to credit costs - same price for all tiers
+- Billing is based on actual AI token usage (input + output tokens)
+- Storage has separate optional billing (0.05 credits per GB per day)
+
+**Example:**
+- A xlarge tier customer gets 5.0x more API requests per minute
+- But pays the same credit cost per AI operation as a standard tier customer
+- Database queries don't consume any credits regardless of tier
 
 ### Environment-Aware
 
