@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Create a test user account for AI testing and development.
+Create a test user account for automated testing and development.
 
-This script creates a user account, obtains JWT token and API key,
-and outputs the credentials for use in automated testing.
+This script creates a test user with an API key for programmatic access.
+Perfect for Puppeteer automation (frontend login) and API testing.
 """
 
 import argparse
@@ -220,20 +220,6 @@ def output_credentials(
   """Output the credentials in a formatted way."""
   granted_repositories = granted_repositories or []
 
-  print("\n" + "=" * 60)
-  print("🎉 TEST USER ACCOUNT CREATED SUCCESSFULLY!")
-  print("=" * 60)
-
-  print(f"\n📧 Email: {email}")
-  print(f"🔑 Password: {password}")
-  print(f"🌐 API Base URL: {base_url}")
-
-  if jwt_token:
-    print("\n🎫 JWT Token:")
-    print(f"   {jwt_token}")
-    print("\n📋 Authorization Header:")
-    print(f"   Authorization: Bearer {jwt_token}")
-
   # Extract the actual API key value
   api_key_value = None
   if api_key_data:
@@ -243,19 +229,38 @@ def output_credentials(
     else:
       api_key_value = api_key_data
 
+  # Derive frontend URL from API base URL
+  frontend_url = base_url.replace(":8000", ":3000")
+
+  print("\n" + "=" * 60)
+  print("🎉 TEST USER CREATED")
+  print("=" * 60)
+
+  print("\n📧 Credentials:")
+  print(f"   Email:    {email}")
+  print(f"   Password: {password}")
+
   if api_key_value:
-    print("\n🔐 API Key:")
+    print("\n🔐 API Key (use for programmatic access):")
     print(f"   {api_key_value}")
-    print("\n📋 API Key Header:")
-    print(f"   X-API-Key: {api_key_value}")
+    print("\n   Example:")
+    print(f'   curl -H "X-API-Key: {api_key_value}" {base_url}/v1/user')
 
   if granted_repositories:
     print("\n📚 Shared Repository Access:")
     for repo in granted_repositories:
-      repo_display = repo.upper()
-      print(f"   ✅ Admin access granted to {repo_display} shared repository")
-    print("   📊 Can query, read, and manage repository data")
-    print(f"   🔗 Repository API endpoints: {base_url}/v1/shared-repositories/*")
+      print(f"   ✅ {repo.upper()}")
+
+  print("\n🌐 URLs:")
+  print(f"   Frontend Login: {frontend_url}/login")
+  print(f"   API Base:       {base_url}")
+  print(f"   OpenAPI Spec:   {base_url}/openapi.json")
+
+  print("\n🎭 Puppeteer Login:")
+  print(f"   await page.goto('{frontend_url}/login');")
+  print(f"   await page.type('#email', '{email}');")
+  print(f"   await page.type('#password', '{password}');")
+  print("   await page.click('button[type=\"submit\"]');")
 
   # Only save to file if explicitly requested
   if save_file:
@@ -264,6 +269,7 @@ def output_credentials(
       "email": email,
       "password": password,
       "base_url": base_url,
+      "frontend_url": frontend_url,
       "jwt_token": jwt_token,
       "api_key": api_key_value,
       "user_id": user_data.get("user", {}).get("id"),
@@ -288,34 +294,6 @@ def output_credentials(
       print(f"\n💾 Credentials saved to: {credentials_file}")
     except Exception as e:
       print(f"\n⚠️  Could not save credentials file: {e}")
-
-  print("\n🤖 AI Testing Instructions:")
-  print("   - Use email/password for browser testing with Puppeteer")
-  print("   - Use JWT token for authenticated API requests")
-  print("   - Use API key for API key authentication")
-  print(f"   - Base URL: {base_url}")
-
-  print("\n🌐 Login URL for Puppeteer:")
-  print(f"   {base_url}/login")
-
-  print("\n📖 OpenAPI Specification:")
-  print(f"   {base_url} (Swagger UI)")
-  print(f"   {base_url}/openapi.json")
-  print(f"   {base_url}/docs (ReDoc)")
-
-  print("\n🔑 Authentication Methods:")
-  print("   1. JWT Bearer Token:")
-  print(f'      curl -H "Authorization: Bearer {jwt_token}" {base_url}/v1/user')
-  print("   2. API Key Header:")
-  print(f'      curl -H "X-API-Key: {api_key_value}" {base_url}/v1/user')
-  print("   3. Cookie-based (from login):")
-  print(f'      curl -b "auth-token={jwt_token}" {base_url}/v1/user')
-
-  print("\n🎭 Puppeteer Login Example:")
-  print(f"   await page.goto('{base_url}/login');")
-  print(f"   await page.type('#email', '{email}');")
-  print(f"   await page.type('#password', '{password}');")
-  print("   await page.click('button[type=\"submit\"]');")
 
   print("\n" + "=" * 60)
 
@@ -475,43 +453,30 @@ def main():
 
     # Output credentials
     if output_format == "json":
+      frontend_url = args.base_url.replace(":8000", ":3000")
       credentials = {
         "email": email,
         "password": args.password,
-        "base_url": args.base_url,
-        "jwt_token": jwt_token,
         "api_key": api_key_value,
         "user_id": user_data.get("user", {}).get("id"),
         "granted_repositories": granted_repositories,
+        "base_url": args.base_url,
+        "frontend_url": frontend_url,
+        "urls": {
+          "frontend_login": f"{frontend_url}/login",
+          "api_base": args.base_url,
+          "openapi_spec": f"{args.base_url}/openapi.json",
+        },
+        "puppeteer": {
+          "url": f"{frontend_url}/login",
+          "selectors": {
+            "email": "#email",
+            "password": "#password",
+            "submit": 'button[type="submit"]',
+          },
+        },
+        "api_example": f'curl -H "X-API-Key: {api_key_value}" {args.base_url}/v1/user',
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-        "login_url": f"{args.base_url}/login",
-        "openapi_spec": f"{args.base_url}/openapi.json",
-        "swagger_ui": f"{args.base_url}",
-        "redoc_ui": f"{args.base_url}/docs",
-        "auth_methods": {
-          "bearer_token": {
-            "header": "Authorization",
-            "value": f"Bearer {jwt_token}",
-            "example": f'curl -H "Authorization: Bearer {jwt_token}" {args.base_url}/v1/user',
-          },
-          "api_key": {
-            "header": "X-API-Key",
-            "value": api_key_value,
-            "example": f'curl -H "X-API-Key: {api_key_value}" {args.base_url}/v1/user',
-          },
-          "cookie": {
-            "header": "Cookie",
-            "value": f"auth-token={jwt_token}",
-            "example": f'curl -b "auth-token={jwt_token}" {args.base_url}/v1/user',
-          },
-        },
-        "puppeteer_login": {
-          "url": f"{args.base_url}/login",
-          "email_selector": "#email",
-          "password_selector": "#password",
-          "submit_selector": 'button[type="submit"]',
-          "example_code": f'await page.goto("{args.base_url}/login"); await page.type("#email", "{email}"); await page.type("#password", "{args.password}"); await page.click("button[type=\\"submit\\"]");',
-        },
       }
       print(json.dumps(credentials, indent=2))
     else:
