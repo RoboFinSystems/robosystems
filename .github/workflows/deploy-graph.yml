@@ -1,4 +1,4 @@
-name: Deploy Graph Database Writers and Replicas
+name: Deploy Graph Clusters
 
 on:
   workflow_call:
@@ -378,4 +378,3 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
-

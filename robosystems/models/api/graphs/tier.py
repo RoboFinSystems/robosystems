@@ -42,8 +42,10 @@ class GraphTierInstance(BaseModel):
   """Instance specifications for a tier."""
 
   type: str = Field(..., description="Instance type identifier")
-  memory_mb: int = Field(..., description="Memory in megabytes")
-  databases_per_instance: int = Field(..., description="Databases per instance")
+  memory_mb: int = Field(..., description="Memory allocated to your graph in megabytes")
+  is_multitenant: bool = Field(
+    ..., description="Whether this tier shares infrastructure with other graphs"
+  )
 
 
 class GraphTierInfo(BaseModel):

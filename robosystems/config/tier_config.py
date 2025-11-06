@@ -273,11 +273,6 @@ class TierConfig:
     """
     features = []
 
-    # Add credit allocation
-    monthly_credits = tier_config.get("monthly_credits")
-    if monthly_credits is not None and monthly_credits > 0:
-      features.append(f"{monthly_credits:,} AI credits per month")
-
     # Add storage limit
     storage_gb = tier_config.get("storage_limit_gb")
     if storage_gb is not None and storage_gb > 0:
@@ -285,6 +280,11 @@ class TierConfig:
         features.append(f"{storage_gb / 1000:.0f}TB storage limit")
       else:
         features.append(f"{storage_gb}GB storage limit")
+
+    # Add AI credits allocation
+    monthly_credits = tier_config.get("monthly_credits")
+    if monthly_credits is not None and monthly_credits > 0:
+      features.append(f"{monthly_credits:,} AI credits per month")
 
     # Add subgraph support
     max_subgraphs = tier_config.get("max_subgraphs")
@@ -297,20 +297,33 @@ class TierConfig:
     elif max_subgraphs > 0:
       features.append(f"Up to {max_subgraphs} subgraphs")
 
-    # Add instance type info
+    # Add instance type and memory info
     instance = tier_config.get("instance", {})
-    instance_type = instance.get("type", "").upper()
-    if "LARGE" in instance_type:
-      features.append("Dedicated large instance")
-    elif "XLARGE" in instance_type:
-      features.append("Dedicated extra-large instance")
-    elif "MEDIUM" in instance_type:
-      features.append("Dedicated medium instance")
+    databases_per_instance = instance.get("databases_per_instance", 1)
+    is_multitenant = databases_per_instance > 1
 
-    # Add memory info
-    max_memory_mb = instance.get("max_memory_mb", 0)
-    if max_memory_mb and max_memory_mb > 0:
-      features.append(f"{max_memory_mb / 1024:.0f}GB RAM")
+    if is_multitenant:
+      # Multi-tenant: Show shared infrastructure and per-database memory
+      features.append("Shared infrastructure")
+      memory_per_db_mb = instance.get("memory_per_db_mb", 0)
+      if memory_per_db_mb and memory_per_db_mb > 0:
+        if memory_per_db_mb >= 1024:
+          features.append(f"{memory_per_db_mb / 1024:.1f}GB RAM per graph")
+        else:
+          features.append(f"{memory_per_db_mb}MB RAM per graph")
+    else:
+      # Dedicated: Show instance type and total memory
+      instance_type = instance.get("type", "").upper()
+      if "XLARGE" in instance_type:
+        features.append("Dedicated extra-large instance")
+      elif "LARGE" in instance_type:
+        features.append("Dedicated large instance")
+      elif "MEDIUM" in instance_type:
+        features.append("Dedicated medium instance")
+
+      max_memory_mb = instance.get("max_memory_mb", 0)
+      if max_memory_mb and max_memory_mb > 0:
+        features.append(f"{max_memory_mb / 1024:.0f}GB RAM")
 
     # Add rate limit multiplier if not standard
     rate_multiplier = tier_config.get("api_rate_multiplier", 1.0)
@@ -364,7 +377,16 @@ class TierConfig:
         if not include_disabled:
           continue
 
-      # Format tier information for API response
+      instance_config = writer.get("instance", {})
+      databases_per_instance = instance_config.get("databases_per_instance", 1)
+      is_multitenant = databases_per_instance > 1
+
+      graph_memory_mb = (
+        instance_config.get("memory_per_db_mb")
+        if is_multitenant and instance_config.get("memory_per_db_mb")
+        else instance_config.get("max_memory_mb")
+      )
+
       tier_info = {
         "tier": writer.get("tier"),
         "name": writer.get("name"),
@@ -377,11 +399,10 @@ class TierConfig:
         "api_rate_multiplier": writer.get("api_rate_multiplier", 1.0),
         "features": cls._generate_tier_features(writer),
         "instance": {
-          "type": writer.get("instance", {}).get("type"),
-          "memory_mb": writer.get("instance", {}).get("max_memory_mb"),
-          "databases_per_instance": writer.get("instance", {}).get(
-            "databases_per_instance"
-          ),
+          "type": instance_config.get("type"),
+          "memory_mb": graph_memory_mb,
+          "databases_per_instance": instance_config.get("databases_per_instance", 1),
+          "is_multitenant": is_multitenant,
         },
         "limits": {
           "storage_gb": writer.get("storage_limit_gb"),

@@ -5,7 +5,11 @@ from pydantic import BaseModel, Field, field_validator
 
 class EntityCreate(BaseModel):
   name: str = Field(..., min_length=1, max_length=255)
-  uri: str = Field(..., min_length=1)
+  uri: str | None = Field(
+    None,
+    min_length=1,
+    description="Entity URI. If not provided, will be auto-generated as an RDF-style URI based on the graph ID.",
+  )
   cik: str | None = None
   database: str | None = None
   sic: str | None = None
@@ -24,6 +28,14 @@ class EntityCreate(BaseModel):
     description="Schema extensions to enable in the entity graph. If not specified, base schema only will be loaded for stability. Available extensions: roboledger, roboinvestor, roboscm, robofo, robohrm, roboepm, roboreport",
     examples=[["roboledger", "roboinvestor"]],
   )
+
+  @field_validator("uri")
+  @classmethod
+  def validate_uri(cls, v: str | None) -> str | None:
+    """Validate that URI is not an empty string."""
+    if v is not None and len(v.strip()) == 0:
+      raise ValueError("URI cannot be empty string")
+    return v
 
   @field_validator("extensions")
   @classmethod
@@ -63,6 +75,14 @@ class EntityUpdate(BaseModel):
   state_of_incorporation: str | None = None
   fiscal_year_end: str | None = None
   ein: str | None = None
+
+  @field_validator("uri")
+  @classmethod
+  def validate_uri(cls, v: str | None) -> str | None:
+    """Validate that URI is not an empty string."""
+    if v is not None and len(v.strip()) == 0:
+      raise ValueError("URI cannot be empty string")
+    return v
 
 
 class EntityResponse(BaseModel):
