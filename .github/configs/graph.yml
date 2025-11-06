@@ -355,6 +355,20 @@ staging:
       monthly_credits: 5000 # Reduced for staging
       api_rate_multiplier: 1.0
 
+      # Copy operation limits
+      copy_operations:
+        max_file_size_gb: 1.0
+        timeout_seconds: 300
+        concurrent_operations: 1
+        max_files_per_operation: 100
+        daily_copy_operations: 10
+
+      # Backup limits
+      backup_limits:
+        max_backup_size_gb: 10
+        backup_retention_days: 7
+        max_backups_per_day: 2
+
       instance:
         type: r7g.medium # 8GB RAM - smaller for staging
         databases_per_instance: 10

@@ -5,7 +5,11 @@ from pydantic import BaseModel, Field, field_validator
 
 class EntityCreate(BaseModel):
   name: str = Field(..., min_length=1, max_length=255)
-  uri: str = Field(..., min_length=1)
+  uri: str | None = Field(
+    None,
+    min_length=1,
+    description="Entity URI. If not provided, will be auto-generated as an RDF-style URI based on the graph ID.",
+  )
   cik: str | None = None
   database: str | None = None
   sic: str | None = None

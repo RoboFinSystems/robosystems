@@ -654,9 +654,11 @@ class EntityGraphService:
     entity_identifier = f"entity_{graph_id}"
     current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+    entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
+
     return {
       "identifier": entity_identifier,
-      "uri": entity_data.uri,
+      "uri": entity_uri,
       "scheme": None,
       "cik": entity_data.cik,
       "ticker": None,

@@ -1,4 +1,4 @@
-name: Deploy Graph Volumes Infrastructure
+name: Deploy Graph Volumes
 
 on:
   workflow_call:
@@ -47,7 +47,7 @@ on:
         required: false
         type: string
         default: ""
-      
+
       # Secrets Configuration
       graph_api_secret_arn:
         description: "ARN of the Graph API secret for Lambda authentication"
@@ -141,10 +141,10 @@ jobs:
           if [ -n "${{ inputs.lambda_code_bucket }}" ]; then
             STACK_PARAMS="$STACK_PARAMS \
                   ParameterKey=LambdaCodeBucket,ParameterValue=${{ inputs.lambda_code_bucket }}"
-            
+
             # Fetch S3 keys from manifest (which includes hashes in filenames)
             MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
-            
+
             VOLUME_MANAGER_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-manager".s3_key // empty')
             VOLUME_MONITOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-monitor".s3_key // empty')
             VOLUME_DETACHMENT_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-detachment".s3_key // empty')
