@@ -42,6 +42,16 @@ class TestUserRepositoryCredits:
     self.session.add(self.user)
     self.session.commit()
 
+    # Create Graph repository (required for foreign key)
+    from robosystems.models.iam import Graph
+
+    Graph.find_or_create_repository(
+      graph_id="sec",
+      graph_name="SEC Public Filings",
+      repository_type="sec",
+      session=self.session,
+    )
+
     # Create test user repository access
     self.repo_access = UserRepository(
       user_id=self.user.id,
@@ -105,6 +115,16 @@ class TestUserRepositoryCredits:
 
   def test_create_for_access(self):
     """Test creating credits for a new access record."""
+    # Create Graph repository (required for foreign key)
+    from robosystems.models.iam import Graph
+
+    Graph.find_or_create_repository(
+      graph_id="industry_tech",
+      graph_name="Industry Tech Repository",
+      repository_type="industry",
+      session=self.session,
+    )
+
     # Create another repo access
     repo_access2 = UserRepository(
       user_id=self.user.id,
@@ -147,6 +167,16 @@ class TestUserRepositoryCredits:
 
   def test_create_for_access_rollback_on_error(self):
     """Test rollback on error during credit creation."""
+    # Create Graph repository (required for foreign key)
+    from robosystems.models.iam import Graph
+
+    Graph.find_or_create_repository(
+      graph_id="sec2",
+      graph_name="SEC Repository 2",
+      repository_type="sec",
+      session=self.session,
+    )
+
     repo_access2 = UserRepository(
       user_id=self.user.id,
       repository_type=RepositoryType.SEC,
@@ -518,6 +548,16 @@ class TestUserRepositoryCreditTransaction:
     )
     self.session.add(self.user)
     self.session.commit()
+
+    # Create Graph repository (required for foreign key)
+    from robosystems.models.iam import Graph
+
+    Graph.find_or_create_repository(
+      graph_id="sec",
+      graph_name="SEC Public Filings",
+      repository_type="sec",
+      session=self.session,
+    )
 
     # Create test user repository access
     self.repo_access = UserRepository(

@@ -86,8 +86,8 @@ class UserRepository(Model):
   # Repository identification
   repository_type = Column(SQLEnum(RepositoryType), nullable=False)
   repository_name = Column(
-    String, nullable=False
-  )  # Specific instance (e.g., "sec", "industry_tech")
+    String, ForeignKey("graphs.graph_id", ondelete="RESTRICT"), nullable=False
+  )
 
   # Access control (from UserRepositoryAccess)
   access_level = Column(
@@ -119,12 +119,6 @@ class UserRepository(Model):
   granted_by = Column(String, ForeignKey("users.id"), nullable=True)
   granted_at = Column(DateTime(timezone=True), nullable=True)
 
-  # Graph database scaling support
-  graph_instance_id = Column(String, nullable=False, default="default")
-  graph_cluster_region = Column(String, nullable=True)
-  instance_tier = Column(String, nullable=False, default="kuzu-shared")
-  read_preference = Column(String, nullable=False, default="primary")
-
   # Configuration
   access_scope = Column(
     String, nullable=True
@@ -150,6 +144,11 @@ class UserRepository(Model):
   granter = relationship("User", foreign_keys=[granted_by], post_update=True)
   user_credits = relationship(
     "UserRepositoryCredits", back_populates="user_repository", uselist=False
+  )
+  graph = relationship(
+    "Graph",
+    foreign_keys=[repository_name],
+    primaryjoin="foreign(UserRepository.repository_name)==Graph.graph_id",
   )
 
   # Constraints and Indexes
@@ -440,12 +439,24 @@ class UserRepository(Model):
     return self.access_level == RepositoryAccessLevel.ADMIN  # type: ignore[return-value]
 
   def get_graph_connection_info(self) -> Dict[str, Any]:
-    """Get graph database connection information for this repository."""
+    """
+    Get graph database connection information for this repository.
+
+    Pulls infrastructure metadata from the Graph table via relationship.
+    """
+    if self.graph:
+      return {
+        "instance_id": self.graph.graph_instance_id,
+        "cluster_region": self.graph.graph_cluster_region,
+        "instance_tier": self.graph.graph_tier,
+        "repository_name": self.repository_name,
+        "repository_type": self.repository_type.value,
+      }
+
     return {
-      "instance_id": self.graph_instance_id,
-      "cluster_region": self.graph_cluster_region,
-      "instance_tier": self.instance_tier,
-      "read_preference": self.read_preference,
+      "instance_id": "kuzu-shared-prod",
+      "cluster_region": None,
+      "instance_tier": "kuzu-shared",
       "repository_name": self.repository_name,
       "repository_type": self.repository_type.value,
     }

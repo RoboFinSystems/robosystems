@@ -3,119 +3,226 @@ Shared Repository Service for creating and managing shared graph repositories.
 
 This service handles the creation of shared repositories (SEC, industry, economic, etc.)
 that are accessible across multiple companies. These repositories contain public data
-and are created on dedicated instances in production.
+and are created on dedicated shared instances.
 
-Key features:
-- Shared repository creation through normal API flow
-- Automatic DynamoDB registration via allocation manager
-- Support for different repository types (SEC, industry, economic, etc.)
-- Proper schema installation for each repository type
+Follows the same pattern as EntityGraphService and GenericGraphService:
+1. Create Kuzu database via Graph API client
+2. Install schema with extensions
+3. Create Graph metadata record in PostgreSQL
+4. Persist schema DDL (GraphSchema)
+5. Auto-create DuckDB staging tables (TableService)
+6. No UserGraph (repositories use UserRepository for access control)
+7. No credit pool (repositories use UserRepositoryCredits per user)
+
+Key differences from user graphs:
+- Fixed instance routing (kuzu-shared-prod) instead of allocation
+- System-managed, not user-created
+- Multiple users subscribe individually
 """
 
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 from ...logger import logger
-from ...graph_api.client import get_graph_client_for_instance
-from ...config import env
+from ...models.iam.graph_credits import GraphTier
 
 
 class SharedRepositoryService:
   """Service for creating and managing shared graph repositories."""
 
+  REPOSITORY_CONFIG = {
+    "sec": {
+      "name": "SEC EDGAR Filings",
+      "schema_type": "shared",
+      "extensions": ["roboledger"],
+      "data_source_type": "sec_edgar",
+      "data_source_url": "https://www.sec.gov/cgi-bin/browse-edgar",
+      "sync_frequency": "daily",
+    },
+    "industry": {
+      "name": "Industry Classifications",
+      "schema_type": "shared",
+      "extensions": [],
+      "data_source_type": "industry_data",
+      "data_source_url": None,
+      "sync_frequency": "weekly",
+    },
+    "economic": {
+      "name": "Economic Indicators",
+      "schema_type": "shared",
+      "extensions": [],
+      "data_source_type": "economic_data",
+      "data_source_url": None,
+      "sync_frequency": "daily",
+    },
+  }
+
   async def create_shared_repository(
     self,
     repository_name: str,
     created_by: Optional[str] = None,
+    instance_id: str = "kuzu-shared-prod",
   ) -> Dict[str, Any]:
     """
-    Create a shared repository on the shared master instance.
+    Create a shared repository following the same pattern as user graphs.
 
-    For shared repositories, we connect directly to the shared master
-    instead of allocating a new database slot.
+    This method:
+    1. Validates repository configuration
+    2. Creates Kuzu database via Graph API
+    3. Installs schema with extensions
+    4. Creates Graph metadata record in PostgreSQL
+    5. Persists schema DDL (GraphSchema)
+    6. Auto-creates DuckDB staging tables (TableService)
 
     Args:
         repository_name: Name of the repository (e.g., 'sec', 'industry')
         created_by: Optional user ID who initiated creation
+        instance_id: Instance identifier (default: kuzu-shared-prod)
 
     Returns:
         Dictionary containing repository creation details
     """
     logger.info(f"Creating shared repository: {repository_name}")
 
-    # Validate repository name
-    valid_repositories = ["sec", "industry", "economic", "regulatory", "market", "esg"]
-    if repository_name not in valid_repositories:
+    if repository_name not in self.REPOSITORY_CONFIG:
       raise ValueError(
         f"Invalid repository name: {repository_name}. "
-        f"Must be one of: {', '.join(valid_repositories)}"
+        f"Must be one of: {', '.join(self.REPOSITORY_CONFIG.keys())}"
       )
 
+    config = self.REPOSITORY_CONFIG[repository_name]
+    graph_id = repository_name
+
+    kuzu_client = None
+
     try:
-      # For shared repositories, connect to the shared master directly
-      # The shared master is already running and registered in DynamoDB
       from ...graph_api.client.factory import GraphClientFactory
 
-      # Get the shared master URL from DynamoDB discovery
-      shared_master_url = await GraphClientFactory._get_shared_master_url()
-      logger.info(f"Found shared master at {shared_master_url}")
-
-      # Extract IP from URL (format: http://IP:PORT)
-      import re
-
-      match = re.match(r"http://([^:]+):(\d+)", shared_master_url)
-      if not match:
-        raise ValueError(f"Invalid shared master URL format: {shared_master_url}")
-
-      master_ip = match.group(1)
-
-      # Create database on the shared master
-      kuzu_client = await get_graph_client_for_instance(master_ip)
+      logger.info(f"Connecting to shared instance for repository {graph_id}")
+      client = await GraphClientFactory.create_client(
+        graph_id=graph_id, operation_type="write"
+      )
+      kuzu_client = client
 
       try:
-        # Create the database with shared schema
-        logger.info(f"Creating database for repository: {repository_name}")
-        create_result = await kuzu_client.create_database(
-          graph_id=repository_name,
-          schema_type="shared",
-          repository_name=repository_name,
+        await kuzu_client.get_database(graph_id)
+        logger.info(f"Database {graph_id} already exists")
+      except Exception as e:
+        if getattr(e, "status_code", None) == 404:
+          logger.info(f"Creating database {graph_id}")
+          await kuzu_client.create_database(
+            graph_id=graph_id,
+            schema_type=config["schema_type"],
+            repository_name=repository_name,
+          )
+          logger.info(f"Created database {graph_id}")
+        else:
+          raise
+
+      schema_ddl = None
+      if config["extensions"]:
+        logger.info(f"Installing schema with extensions: {config['extensions']}")
+        from ...schemas.manager import SchemaManager
+
+        manager = SchemaManager()
+        schema_config = manager.create_schema_configuration(
+          name=f"{repository_name.upper()} Repository Schema",
+          description=f"Schema for {config['name']}",
+          extensions=config["extensions"],
         )
+        schema = manager.load_and_compile_schema(schema_config)
+        schema_ddl = schema.to_cypher()
 
-        logger.info(f"Database created successfully: {create_result.get('status')}")
+        result = await kuzu_client.install_schema(
+          graph_id=graph_id, custom_ddl=schema_ddl
+        )
+        logger.info(f"Schema installed: {result}")
 
-        # Step 3: Verify database is healthy
-        db_info = await kuzu_client.get_database_info(repository_name)
-        if not db_info.get("is_healthy", False):
-          raise RuntimeError(f"Database {repository_name} created but not healthy")
+      from ...database import get_db_session
+      from ...models.iam.graph import Graph
 
-        logger.info(f"Shared repository '{repository_name}' created successfully!")
+      db_gen = get_db_session()
+      db = next(db_gen)
 
-        # For shared master, we don't have instance_id from allocation
-        # Get it from DynamoDB if needed
-        instance_id = "shared-master"  # Default identifier
+      try:
+        repository_graph = Graph.find_or_create_repository(
+          graph_id=graph_id,
+          graph_name=config["name"],
+          repository_type=repository_name,
+          session=db,
+          base_schema=repository_name,
+          data_source_type=config["data_source_type"],
+          data_source_url=config["data_source_url"],
+          sync_frequency=config["sync_frequency"],
+          graph_tier=GraphTier.KUZU_SHARED,
+          graph_instance_id=instance_id,
+        )
+        logger.info(f"Graph metadata created/verified: {repository_graph.graph_id}")
 
-        return {
-          "repository_name": repository_name,
-          "graph_id": repository_name,
-          "instance_id": instance_id,
-          "status": "created",
-          "created_at": datetime.now(timezone.utc).isoformat(),
-          "created_by": created_by or "system",
-          "database_info": db_info,
-        }
+        if schema_ddl:
+          from ...models.iam import GraphSchema
+
+          existing_schema = GraphSchema.get_active_schema(graph_id, db)
+          if not existing_schema:
+            GraphSchema.create(
+              graph_id=graph_id,
+              schema_type=config["schema_type"],
+              schema_ddl=schema_ddl,
+              schema_json={
+                "base": repository_name,
+                "extensions": config["extensions"],
+              },
+              session=db,
+              commit=False,
+            )
+            logger.info(f"Persisted schema DDL for {graph_id}")
+
+            from ..graph.table_service import TableService
+
+            table_service = TableService(db)
+            created_tables = table_service.create_tables_from_schema(
+              graph_id=graph_id,
+              user_id="system",
+              schema_ddl=schema_ddl,
+            )
+            logger.info(
+              f"Auto-created {len(created_tables)} DuckDB staging tables for {graph_id}"
+            )
+
+        db.commit()
 
       finally:
-        await kuzu_client.close()
+        try:
+          next(db_gen)
+        except StopIteration:
+          pass
+
+      db_info = await kuzu_client.get_database_info(graph_id)
+
+      return {
+        "repository_name": repository_name,
+        "graph_id": graph_id,
+        "instance_id": instance_id,
+        "status": "created",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": created_by or "system",
+        "database_info": db_info,
+        "config": config,
+      }
 
     except Exception as e:
-      logger.error(f"Failed to create shared repository on shared master: {e}")
-      # No allocation to clean up since we're using the shared master directly
+      logger.error(f"Failed to create shared repository: {e}")
       raise
+
+    finally:
+      if kuzu_client:
+        await kuzu_client.close()
 
 
 async def ensure_shared_repository_exists(
   repository_name: str,
-  kuzu_url: Optional[str] = None,
+  created_by: Optional[str] = None,
+  instance_id: str = "kuzu-shared-prod",
 ) -> Dict[str, Any]:
   """
   Ensure a shared repository exists, creating it if necessary.
@@ -125,20 +232,15 @@ async def ensure_shared_repository_exists(
 
   Args:
       repository_name: Name of the repository (e.g., 'sec')
-      kuzu_url: Optional Kuzu URL override
+      created_by: Optional user ID who initiated creation
+      instance_id: Instance identifier (default: kuzu-shared-prod)
 
   Returns:
       Dictionary with repository status
   """
-  if not kuzu_url:
-    kuzu_url = env.GRAPH_API_URL
-
-  # Try to get database info first
   try:
     from ...graph_api.client.factory import GraphClientFactory
 
-    # Use factory to get proper client for shared repository
-    # Shared repositories automatically route to shared_master/shared_replica infrastructure
     client = await GraphClientFactory.create_client(
       graph_id=repository_name, operation_type="read"
     )
@@ -150,6 +252,7 @@ async def ensure_shared_repository_exists(
         return {
           "status": "exists",
           "repository_name": repository_name,
+          "graph_id": repository_name,
           "database_info": db_info,
         }
     finally:
@@ -157,6 +260,7 @@ async def ensure_shared_repository_exists(
   except Exception as e:
     logger.info(f"Repository {repository_name} not found, will create: {e}")
 
-  # Create the repository
   service = SharedRepositoryService()
-  return await service.create_shared_repository(repository_name)
+  return await service.create_shared_repository(
+    repository_name, created_by=created_by, instance_id=instance_id
+  )

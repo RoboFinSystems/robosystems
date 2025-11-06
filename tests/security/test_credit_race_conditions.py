@@ -31,6 +31,16 @@ class TestCreditRaceConditions:
   @pytest.mark.asyncio
   async def test_concurrent_credit_consumption_atomic(self, db_session, test_user):
     """Test that concurrent credit consumption is properly atomic."""
+    # Create Graph repository (required for foreign key)
+    from robosystems.models.iam import Graph
+
+    Graph.find_or_create_repository(
+      graph_id="sec",
+      graph_name="SEC Public Filings",
+      repository_type="sec",
+      session=db_session,
+    )
+
     # Create shared repository access with credits
     access = UserRepository.create_access(
       user_id=test_user.id,
@@ -79,6 +89,16 @@ class TestCreditRaceConditions:
 
   def test_credit_overflow_protection(self, db_session, test_user):
     """Test that credit balances cannot overflow."""
+    # Create Graph repository (required for foreign key)
+    from robosystems.models.iam import Graph
+
+    Graph.find_or_create_repository(
+      graph_id="sec_overflow",
+      graph_name="SEC Overflow Repository",
+      repository_type="sec",
+      session=db_session,
+    )
+
     # Create access with large monthly allocation
     access = UserRepository.create_access(
       user_id=test_user.id,

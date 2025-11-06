@@ -278,11 +278,11 @@ def output_credentials(
       "created_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
     }
 
-    # Save to a git-ignored location (local/ directory)
+    # Save to a git-ignored location (local/creds/ directory)
     import os
 
-    # Use local/ directory which should be git-ignored
-    local_dir = os.path.join(os.path.dirname(__file__), "..", "..", "local")
+    # Use local/creds/ directory which should be git-ignored
+    local_dir = os.path.join(os.path.dirname(__file__), "..", "..", "local", "creds")
     os.makedirs(local_dir, exist_ok=True)
 
     # Use user_id in filename to avoid overwriting previous test users

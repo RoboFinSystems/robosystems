@@ -721,3 +721,273 @@ class TestGraphModel:
         subgraph_name="second",
         is_subgraph=True,
       )
+
+
+class TestGraphRepositoryFeatures:
+  """Test suite for Graph repository features (shared repositories)."""
+
+  @pytest.fixture(autouse=True)
+  def setup(self):
+    """Set up unique identifiers for this test class."""
+    import uuid
+
+    self.unique_id = str(uuid.uuid4())[:8]
+
+  def test_find_or_create_repository_new(self, db_session):
+    """Test creating a new repository when it doesn't exist."""
+    result = Graph.find_or_create_repository(
+      graph_id=f"sec_{self.unique_id}",
+      graph_name="SEC Public Filings",
+      repository_type="sec",
+      session=db_session,
+      data_source_type="sec_edgar",
+      data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
+      sync_frequency="daily",
+      graph_tier=GraphTier.KUZU_SHARED,
+    )
+
+    assert result.graph_id == f"sec_{self.unique_id}"
+    assert result.is_repository is True
+    assert result.graph_type == "repository"
+    assert result.repository_type == "sec"
+    assert result.data_source_type == "sec_edgar"
+    assert result.data_source_url == "https://www.sec.gov/cgi-bin/browse-edgar"
+    assert result.sync_frequency == "daily"
+    assert result.sync_status == "active"
+    assert result.graph_tier == GraphTier.KUZU_SHARED.value
+
+  def test_find_or_create_repository_existing(self, db_session):
+    """Test that existing repository is returned without creating new one."""
+    repo_id = f"industry_{self.unique_id}"
+
+    # Create first time
+    first = Graph.find_or_create_repository(
+      graph_id=repo_id,
+      graph_name="Industry Benchmarks",
+      repository_type="industry",
+      session=db_session,
+    )
+
+    # Call again - should return existing
+    second = Graph.find_or_create_repository(
+      graph_id=repo_id,
+      graph_name="Industry Benchmarks",
+      repository_type="industry",
+      session=db_session,
+    )
+
+    assert first.graph_id == second.graph_id
+    assert first.created_at == second.created_at
+
+    # Verify only one exists in database
+    all_repos = db_session.query(Graph).filter(Graph.graph_id == repo_id).all()
+    assert len(all_repos) == 1
+
+  def test_repository_needs_sync_no_last_sync(self, db_session):
+    """Test needs_sync when last_sync_at is None."""
+    repo = Graph.find_or_create_repository(
+      graph_id=f"economic_{self.unique_id}",
+      graph_name="Economic Indicators",
+      repository_type="economic",
+      session=db_session,
+      sync_frequency="weekly",
+    )
+
+    # Clear last_sync_at
+    repo.last_sync_at = None
+    db_session.commit()
+
+    assert repo.needs_sync is True
+
+  def test_repository_needs_sync_recent(self, db_session):
+    """Test needs_sync when sync is recent."""
+    from datetime import datetime, timezone
+
+    repo = Graph.find_or_create_repository(
+      graph_id=f"sec_recent_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+      sync_frequency="daily",
+    )
+
+    # Set recent sync
+    repo.last_sync_at = datetime.now(timezone.utc)
+    repo.sync_status = "active"
+    db_session.commit()
+
+    assert repo.needs_sync is False
+
+  def test_repository_needs_sync_stale(self, db_session):
+    """Test needs_sync when sync is stale."""
+    from datetime import datetime, timezone, timedelta
+
+    repo = Graph.find_or_create_repository(
+      graph_id=f"sec_stale_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+      sync_frequency="daily",
+    )
+
+    # Set old sync (2 days ago)
+    repo.last_sync_at = datetime.now(timezone.utc) - timedelta(days=2)
+    db_session.commit()
+
+    assert repo.needs_sync is True
+
+  def test_repository_needs_sync_error_status(self, db_session):
+    """Test needs_sync when sync_status is error."""
+    from datetime import datetime, timezone
+
+    repo = Graph.find_or_create_repository(
+      graph_id=f"sec_error_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+      sync_frequency="daily",
+    )
+
+    repo.sync_status = "error"
+    repo.last_sync_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    assert repo.needs_sync is True
+
+  def test_get_all_repositories(self, db_session):
+    """Test getting all shared repositories."""
+    # Clean up existing repositories
+    from robosystems.models.iam import UserRepository
+
+    db_session.query(UserRepository).delete()
+    db_session.query(Graph).filter(Graph.is_repository.is_(True)).delete()
+    db_session.commit()
+
+    # Create repositories
+    Graph.find_or_create_repository(
+      graph_id=f"sec_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+    )
+
+    Graph.find_or_create_repository(
+      graph_id=f"industry_{self.unique_id}",
+      graph_name="Industry",
+      repository_type="industry",
+      session=db_session,
+    )
+
+    # Create a regular graph (not a repository)
+    Graph.create(
+      graph_id=f"kg_user_{self.unique_id}",
+      graph_name="User Graph",
+      graph_type="entity",
+      session=db_session,
+    )
+
+    repos = Graph.get_all_repositories(db_session)
+    assert len(repos) == 2
+    repo_types = [r.repository_type for r in repos]
+    assert "sec" in repo_types
+    assert "industry" in repo_types
+
+  def test_get_repository_by_type(self, db_session):
+    """Test getting a repository by its type."""
+    Graph.find_or_create_repository(
+      graph_id=f"sec_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+    )
+
+    repo = Graph.get_repository_by_type("sec", db_session)
+    assert repo is not None
+    assert repo.repository_type == "sec"
+    assert repo.is_repository is True
+
+    # Non-existent type
+    not_found = Graph.get_repository_by_type("nonexistent", db_session)
+    assert not_found is None
+
+  def test_update_sync_status_success(self, db_session):
+    """Test updating sync status to active."""
+    repo = Graph.find_or_create_repository(
+      graph_id=f"sec_sync_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+    )
+
+    repo.sync_status = "syncing"
+    repo.sync_error_message = "Old error"
+    db_session.commit()
+
+    repo.update_sync_status("active", session=db_session)
+
+    assert repo.sync_status == "active"
+    assert repo.last_sync_at is not None
+    assert repo.sync_error_message is None
+
+  def test_update_sync_status_error(self, db_session):
+    """Test updating sync status to error."""
+    repo = Graph.find_or_create_repository(
+      graph_id=f"sec_error_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+    )
+
+    repo.update_sync_status(
+      "error", error_message="Connection timeout", session=db_session
+    )
+
+    assert repo.sync_status == "error"
+    assert repo.sync_error_message == "Connection timeout"
+
+  def test_update_sync_status_non_repository_fails(self, db_session):
+    """Test that update_sync_status fails for non-repository graphs."""
+    graph = Graph.create(
+      graph_id=f"kg_user_{self.unique_id}",
+      graph_name="User Graph",
+      graph_type="entity",
+      session=db_session,
+    )
+
+    with pytest.raises(
+      ValueError, match="Can only update sync status for repository graphs"
+    ):
+      graph.update_sync_status("active", session=db_session)
+
+  def test_is_user_graph_property(self, db_session):
+    """Test is_user_graph property."""
+    # User graph
+    user_graph = Graph.create(
+      graph_id=f"kg_user_{self.unique_id}",
+      graph_name="User Graph",
+      graph_type="entity",
+      session=db_session,
+    )
+    assert user_graph.is_user_graph is True
+
+    # Repository
+    repo = Graph.find_or_create_repository(
+      graph_id=f"sec_{self.unique_id}",
+      graph_name="SEC",
+      repository_type="sec",
+      session=db_session,
+    )
+    assert repo.is_user_graph is False
+
+  def test_repository_type_validation(self, db_session):
+    """Test that repository graph type is set correctly."""
+    repo = Graph.find_or_create_repository(
+      graph_id=f"test_repo_{self.unique_id}",
+      graph_name="Test Repo",
+      repository_type="test",
+      session=db_session,
+    )
+
+    assert repo.graph_type == "repository"
+    assert repo.is_repository is True
+    assert repo.repository_type == "test"

@@ -148,31 +148,45 @@ class SECLocalPipeline:
 
   def _ensure_database_exists(self) -> bool:
     """
-    Check if SEC database file exists and create it if it doesn't.
+    Check if SEC repository metadata exists and create it if it doesn't.
+
+    This checks for Graph metadata in PostgreSQL, which is required for
+    the unified graph/repository infrastructure.
 
     Returns:
-        True if database exists or was created successfully, False otherwise
+        True if repository exists or was created successfully, False otherwise
     """
-    from pathlib import Path
-    from robosystems.config import env
+    from robosystems.models.iam.graph import Graph
+    from robosystems.database import get_db_session
 
-    db_path = Path(env.KUZU_DATABASE_PATH) / f"{self.sec_database}.kuzu"
+    db_gen = get_db_session()
+    db = next(db_gen)
+    try:
+      existing_graph = Graph.get_by_id(self.sec_database, db)
+      if existing_graph and existing_graph.is_repository:
+        logger.debug(
+          f"SEC repository metadata already exists: {existing_graph.graph_id}"
+        )
+        return True
 
-    if db_path.exists():
-      logger.debug(f"SEC database already exists at {db_path}")
-      return True
+      logger.info("SEC repository not found in database")
+      logger.info("🔄 Initializing SEC repository for first use...")
+      logger.info(
+        "This is a one-time setup that creates the database schema and metadata."
+      )
 
-    logger.info(f"SEC database file not found at {db_path}")
-    logger.info("🔄 Initializing SEC database for first use...")
-    logger.info("This is a one-time setup that creates the database schema and tables.")
-
-    success = self.reset_database(clear_s3=False)
-    if success:
-      logger.info("✅ SEC database initialized successfully")
-      return True
-    else:
-      logger.error("❌ Failed to initialize SEC database")
-      return False
+      success = self.reset_database(clear_s3=False)
+      if success:
+        logger.info("✅ SEC repository initialized successfully")
+        return True
+      else:
+        logger.error("❌ Failed to initialize SEC repository")
+        return False
+    finally:
+      try:
+        next(db_gen)
+      except StopIteration:
+        pass
 
   def load_company(
     self, ticker: str, year: int = None, force_reconsolidate: bool = False

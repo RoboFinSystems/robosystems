@@ -79,38 +79,45 @@ def _raise_http_exception(
 @router.get(
   "",
   response_model=UserGraphsResponse,
-  summary="Get User Graphs",
-  description="""List all graph databases accessible to the current user with roles and selection status.
+  summary="Get User Graphs and Repositories",
+  description="""List all graph databases and shared repositories accessible to the current user.
 
-Returns a comprehensive list of all graphs the user can access, including their
-role in each graph (admin or member) and which graph is currently selected as
-the active workspace.
+Returns a unified list of both user-created graphs and shared repositories (like SEC data)
+that the user has access to, including their role/access level and selection status.
 
 **Returned Information:**
-- Graph ID and display name for each accessible graph
-- User's role (admin/member) indicating permission level
-- Selection status (one graph can be marked as "selected")
-- Creation timestamp for each graph
+- Graph/Repository ID and display name
+- User's role/access level (admin/member for graphs, read/write/admin for repositories)
+- Selection status (only user graphs can be selected)
+- Creation timestamp
+- Repository type indicator (isRepository: true for shared repositories)
 
-**Graph Roles:**
-- `admin`: Full access - can manage graph settings, invite users, delete graph
-- `member`: Read/write access - can query and modify data, cannot manage settings
+**User Graphs (isRepository: false):**
+- Collaborative workspaces that can be shared with other users
+- Roles: `admin` (full access, can invite users) or `member` (read/write access)
+- Can be selected as active workspace
+- Graphs you create or have been invited to
+
+**Shared Repositories (isRepository: true):**
+- Read-only data repositories like SEC filings, industry benchmarks
+- Access levels: `read`, `write` (for data contributions), `admin`
+- Cannot be selected (each has separate subscription)
+- Require separate subscriptions (personal, cannot be shared)
 
 **Selected Graph Concept:**
-The "selected" graph is the user's currently active workspace. Many API operations
-default to the selected graph if no graph_id is provided. Users can change their
-selected graph via the `POST /v1/graphs/{graph_id}/select` endpoint.
+The "selected" graph is the user's currently active workspace (user graphs only).
+Many API operations default to the selected graph if no graph_id is provided.
+Users can change their selected graph via `POST /v1/graphs/{graph_id}/select`.
 
 **Use Cases:**
-- Display graph selector in UI
-- Show user's accessible workspaces
-- Identify which graph is currently active
-- Filter graphs by role for permission-based features
+- Display unified graph/repository selector in UI
+- Show all accessible data sources (both owned graphs and subscribed repositories)
+- Identify currently active workspace
+- Filter by type (user graphs vs repositories)
 
 **Empty Response:**
-New users or users without graph access will receive an empty list with
-`selectedGraphId: null`. Users should create a new graph or request access
-to an existing graph.
+New users receive an empty list with `selectedGraphId: null`. Users should create
+a graph or subscribe to a repository.
 
 **Note:**
 Graph listing is included - no credit consumption required.""",
@@ -122,8 +129,8 @@ Graph listing is included - no credit consumption required.""",
       "content": {
         "application/json": {
           "examples": {
-            "with_graphs": {
-              "summary": "User with multiple graphs",
+            "with_graphs_and_repositories": {
+              "summary": "User with graphs and repository subscriptions",
               "value": {
                 "graphs": [
                   {
@@ -132,6 +139,8 @@ Graph listing is included - no credit consumption required.""",
                     "role": "admin",
                     "isSelected": True,
                     "createdAt": "2024-01-15T10:00:00Z",
+                    "isRepository": False,
+                    "repositoryType": None,
                   },
                   {
                     "graphId": "kg9z8y7x6w5",
@@ -139,6 +148,17 @@ Graph listing is included - no credit consumption required.""",
                     "role": "member",
                     "isSelected": False,
                     "createdAt": "2024-02-20T14:30:00Z",
+                    "isRepository": False,
+                    "repositoryType": None,
+                  },
+                  {
+                    "graphId": "sec",
+                    "graphName": "SEC",
+                    "role": "read",
+                    "isSelected": False,
+                    "createdAt": "2024-03-01T09:00:00Z",
+                    "isRepository": True,
+                    "repositoryType": "sec",
                   },
                 ],
                 "selectedGraphId": "kg1a2b3c4d5",
@@ -177,15 +197,24 @@ async def get_graphs(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    # Get all user-graph relationships
+    # Get all user-graph relationships (user graphs)
     user_graphs = UserGraph.get_by_user_id(current_user.id, session)
+
+    # Get all user-repository relationships (shared repositories)
+    from robosystems.models.iam.user_repository import UserRepository
+
+    user_repositories = UserRepository.get_user_repositories(
+      current_user.id, session, active_only=True
+    )
 
     # Find the selected graph
     selected_graph_id = None
     graphs = []
     admin_graphs = 0
     member_graphs = 0
+    repository_count = 0
 
+    # Add user graphs
     for user_graph in user_graphs:
       if user_graph.is_selected:
         selected_graph_id = user_graph.graph_id
@@ -203,6 +232,30 @@ async def get_graphs(
           role=user_graph.role,
           isSelected=user_graph.is_selected,
           createdAt=user_graph.created_at.isoformat(),
+          isRepository=False,
+          repositoryType=None,
+        )
+      )
+
+    # Add repositories (shared repositories cannot be selected)
+    for user_repo in user_repositories:
+      repository_count += 1
+
+      graph_name = (
+        user_repo.graph.graph_name
+        if user_repo.graph
+        else user_repo.repository_name.upper()
+      )
+
+      graphs.append(
+        GraphInfo(
+          graphId=user_repo.repository_name,
+          graphName=graph_name,
+          role=user_repo.access_level.value,
+          isSelected=False,
+          createdAt=user_repo.created_at.isoformat(),
+          isRepository=True,
+          repositoryType=user_repo.repository_type.value,
         )
       )
 
@@ -217,6 +270,7 @@ async def get_graphs(
         "total_graphs": len(graphs),
         "admin_graphs": admin_graphs,
         "member_graphs": member_graphs,
+        "repository_count": repository_count,
         "has_selected_graph": bool(selected_graph_id),
       },
       user_id=user_id,

@@ -222,3 +222,42 @@ class TestMultiBackendSupport:
       assert backend == backend_type, (
         f"Tier {tier} has inconsistent backend ({backend}) and backend_type ({backend_type})"
       )
+
+
+class TestAllocationManagerRegression:
+  """Regression tests for KuzuAllocationManager critical bugs."""
+
+  def test_identify_graph_named_parameter_in_code(self):
+    """
+    Regression test: verify identify_graph uses named parameter in allocation_manager.py.
+
+    This test directly checks the source code to ensure the bug doesn't reoccur.
+    The bug was passing instance_tier as a positional argument where session
+    was expected, causing: AttributeError: 'GraphTier' object has no attribute 'query'
+
+    Bug: identify_graph(graph_id, instance_tier)  # WRONG
+    Fix: identify_graph(graph_id, graph_tier=instance_tier)  # CORRECT
+    """
+    import re
+    from pathlib import Path
+
+    allocation_manager_path = (
+      Path(__file__).parent.parent.parent.parent
+      / "robosystems"
+      / "middleware"
+      / "graph"
+      / "allocation_manager.py"
+    )
+
+    with open(allocation_manager_path, "r") as f:
+      content = f.read()
+
+    pattern = r"GraphTypeRegistry\.identify_graph\(\s*graph_id\s*,\s*graph_tier\s*="
+
+    matches = re.findall(pattern, content)
+
+    assert len(matches) > 0, (
+      "Expected to find GraphTypeRegistry.identify_graph(graph_id, graph_tier=...) "
+      "but named parameter usage not found in allocation_manager.py. "
+      "This could mean the bug has been reintroduced."
+    )

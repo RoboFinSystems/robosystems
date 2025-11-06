@@ -1,8 +1,8 @@
-"""Graph model for storing user-owned graph metadata.
+"""Graph model for storing all graph database metadata.
 
-This model tracks metadata for user-created graphs (entity and generic graphs).
-It does NOT include shared repositories (SEC, industry, economic) which have
-a different access and billing model managed through UserRepository.
+This model tracks metadata for both user-created graphs and shared repositories.
+User graphs use UserGraph for access control (role-based).
+Repository graphs use UserRepository for access control (subscription-based).
 """
 
 from datetime import datetime, timezone
@@ -37,7 +37,11 @@ class Graph(Model):
     Index("idx_graphs_tier", "graph_tier"),
     Index("idx_graphs_parent", "parent_graph_id"),
     Index("idx_graphs_is_subgraph", "is_subgraph"),
-    CheckConstraint("graph_type IN ('generic', 'entity')", name="check_graph_type"),
+    Index("idx_graphs_is_repository", "is_repository"),
+    Index("idx_graphs_repository_type", "repository_type"),
+    CheckConstraint(
+      "graph_type IN ('generic', 'entity', 'repository')", name="check_graph_type"
+    ),
     UniqueConstraint("parent_graph_id", "subgraph_index", name="unique_subgraph_index"),
     CheckConstraint(
       "(is_subgraph = false AND parent_graph_id IS NULL AND subgraph_index IS NULL AND subgraph_name IS NULL) OR "
@@ -90,6 +94,30 @@ class Graph(Model):
   subgraph_metadata = Column(
     JSONB, nullable=True
   )  # Additional subgraph-specific metadata (TTL, type, etc.)
+
+  # Repository support (for shared data repositories like SEC, industry, economic)
+  is_repository = Column(
+    Boolean, default=False, nullable=False
+  )  # True if this is a shared repository
+  repository_type = Column(
+    String, nullable=True
+  )  # Type of repository: "sec", "industry", "economic", etc.
+  data_source_type = Column(
+    String, nullable=True
+  )  # Source type: "sec_edgar", "bls_api", "fred_api", etc.
+  data_source_url = Column(String, nullable=True)  # URL or endpoint for data source
+  last_sync_at = Column(
+    DateTime, nullable=True
+  )  # Last successful data synchronization timestamp
+  sync_status = Column(
+    String, nullable=True
+  )  # Sync status: "active", "syncing", "error", "stale"
+  sync_frequency = Column(
+    String, nullable=True
+  )  # Expected sync frequency: "daily", "weekly", "monthly", "quarterly"
+  sync_error_message = Column(
+    String, nullable=True
+  )  # Last error message if sync_status is "error"
 
   # Timestamps
   created_at = Column(
@@ -174,8 +202,8 @@ class Graph(Model):
   ) -> "Graph":
     """Create a new graph metadata entry."""
     # Validate graph_type
-    if graph_type not in ["generic", "entity"]:
-      raise ValueError("graph_type must be either 'generic' or 'entity'")
+    if graph_type not in ["generic", "entity", "repository"]:
+      raise ValueError("graph_type must be 'generic', 'entity', or 'repository'")
 
     # Entity graphs should have base_schema
     if graph_type == "entity" and not base_schema:
@@ -293,3 +321,157 @@ class Graph(Model):
     import re
 
     return bool(re.match(r"^[a-zA-Z0-9]{1,20}$", name))
+
+  @classmethod
+  def get_all_repositories(cls, session: Session) -> Sequence["Graph"]:
+    """Get all shared repository graphs."""
+    return (
+      session.query(cls)
+      .filter(cls.is_repository.is_(True))
+      .order_by(cls.repository_type)
+      .all()
+    )
+
+  @classmethod
+  def get_repository_by_type(
+    cls, repository_type: str, session: Session
+  ) -> Optional["Graph"]:
+    """Get a repository by its type."""
+    return (
+      session.query(cls)
+      .filter(cls.is_repository.is_(True), cls.repository_type == repository_type)
+      .first()
+    )
+
+  @classmethod
+  def find_or_create_repository(
+    cls,
+    graph_id: str,
+    graph_name: str,
+    repository_type: str,
+    session: Session,
+    base_schema: Optional[str] = None,
+    data_source_type: Optional[str] = None,
+    data_source_url: Optional[str] = None,
+    sync_frequency: Optional[str] = None,
+    graph_tier: GraphTier = GraphTier.KUZU_SHARED,
+    graph_instance_id: str = "kuzu-shared-prod",
+  ) -> "Graph":
+    """
+    Find or create a repository graph entry.
+
+    This is used by data pipelines (SEC, etc.) to ensure repository metadata
+    exists on first access.
+
+    Args:
+        graph_id: Unique identifier (e.g., "sec", "industry")
+        graph_name: Human-readable name
+        repository_type: Type of repository (matches graph_id typically)
+        session: Database session
+        base_schema: Schema to use (e.g., "sec")
+        data_source_type: Source type (e.g., "sec_edgar")
+        data_source_url: URL for data source
+        sync_frequency: Sync frequency ("daily", "weekly", etc.)
+        graph_tier: Infrastructure tier
+        graph_instance_id: Instance identifier
+
+    Returns:
+        Graph: Existing or newly created repository graph
+    """
+    existing = cls.get_by_id(graph_id, session)
+    if existing:
+      return existing
+
+    repository = cls.create(
+      graph_id=graph_id,
+      graph_name=graph_name,
+      graph_type="repository",
+      session=session,
+      base_schema=base_schema or repository_type,
+      graph_tier=graph_tier,
+      graph_instance_id=graph_instance_id,
+      commit=False,
+    )
+
+    repository.is_repository = True
+    repository.repository_type = repository_type
+    repository.data_source_type = data_source_type
+    repository.data_source_url = data_source_url
+    repository.sync_frequency = sync_frequency
+    repository.sync_status = "active"
+
+    try:
+      session.commit()
+      session.refresh(repository)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+    return repository
+
+  def update_sync_status(
+    self,
+    status: str,
+    error_message: Optional[str] = None,
+    session: Session = None,
+  ) -> None:
+    """Update repository sync status."""
+    if not self.is_repository:
+      raise ValueError("Can only update sync status for repository graphs")
+
+    self.sync_status = status
+    if status == "active":
+      self.last_sync_at = datetime.now(timezone.utc)
+      self.sync_error_message = None
+    elif status == "error":
+      self.sync_error_message = error_message
+
+    self.updated_at = datetime.now(timezone.utc)
+
+    if session:
+      try:
+        session.commit()
+        session.refresh(self)
+      except SQLAlchemyError:
+        session.rollback()
+        raise
+
+  @property
+  def is_user_graph(self) -> bool:
+    """Check if this is a user-created graph (not a repository)."""
+    return not bool(self.is_repository)
+
+  @property
+  def needs_sync(self) -> bool:
+    """Check if repository needs synchronization."""
+    if not self.is_repository:
+      return False
+
+    if self.sync_status in ["error", "stale"]:
+      return True
+
+    if not self.last_sync_at:
+      return True
+
+    if not self.sync_frequency:
+      return False
+
+    from datetime import timedelta
+
+    frequency_map = {
+      "daily": timedelta(days=1),
+      "weekly": timedelta(weeks=1),
+      "monthly": timedelta(days=30),
+      "quarterly": timedelta(days=90),
+    }
+
+    sync_interval = frequency_map.get(str(self.sync_frequency))
+    if not sync_interval:
+      return False
+
+    last_sync = self.last_sync_at
+    if last_sync.tzinfo is None:
+      last_sync = last_sync.replace(tzinfo=timezone.utc)
+
+    time_since_sync = datetime.now(timezone.utc) - last_sync
+    return time_since_sync > sync_interval
