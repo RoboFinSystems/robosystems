@@ -281,6 +281,11 @@ class TierConfig:
       else:
         features.append(f"{storage_gb}GB storage limit")
 
+    # Add AI credits allocation
+    monthly_credits = tier_config.get("monthly_credits")
+    if monthly_credits is not None and monthly_credits > 0:
+      features.append(f"{monthly_credits:,} AI credits per month")
+
     # Add subgraph support
     max_subgraphs = tier_config.get("max_subgraphs")
     if max_subgraphs is None:
@@ -372,15 +377,10 @@ class TierConfig:
         if not include_disabled:
           continue
 
-      # Format tier information for API response
-      # For memory, return what the customer's graph actually gets:
-      # - Multi-tenant: memory_per_db_mb (what each database gets)
-      # - Dedicated: max_memory_mb (entire instance for one graph)
       instance_config = writer.get("instance", {})
       databases_per_instance = instance_config.get("databases_per_instance", 1)
       is_multitenant = databases_per_instance > 1
 
-      # Use per-database memory if multi-tenant, otherwise use total instance memory
       graph_memory_mb = (
         instance_config.get("memory_per_db_mb")
         if is_multitenant and instance_config.get("memory_per_db_mb")
@@ -401,6 +401,7 @@ class TierConfig:
         "instance": {
           "type": instance_config.get("type"),
           "memory_mb": graph_memory_mb,
+          "databases_per_instance": instance_config.get("databases_per_instance", 1),
           "is_multitenant": is_multitenant,
         },
         "limits": {

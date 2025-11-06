@@ -457,6 +457,7 @@ def main():
       credentials = {
         "email": email,
         "password": args.password,
+        "jwt_token": jwt_token,
         "api_key": api_key_value,
         "user_id": user_data.get("user", {}).get("id"),
         "granted_repositories": granted_repositories,

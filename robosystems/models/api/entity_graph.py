@@ -29,6 +29,14 @@ class EntityCreate(BaseModel):
     examples=[["roboledger", "roboinvestor"]],
   )
 
+  @field_validator("uri")
+  @classmethod
+  def validate_uri(cls, v: str | None) -> str | None:
+    """Validate that URI is not an empty string."""
+    if v is not None and len(v.strip()) == 0:
+      raise ValueError("URI cannot be empty string")
+    return v
+
   @field_validator("extensions")
   @classmethod
   def validate_extensions(cls, v: list[str] | None) -> list[str] | None:
@@ -67,6 +75,14 @@ class EntityUpdate(BaseModel):
   state_of_incorporation: str | None = None
   fiscal_year_end: str | None = None
   ein: str | None = None
+
+  @field_validator("uri")
+  @classmethod
+  def validate_uri(cls, v: str | None) -> str | None:
+    """Validate that URI is not an empty string."""
+    if v is not None and len(v.strip()) == 0:
+      raise ValueError("URI cannot be empty string")
+    return v
 
 
 class EntityResponse(BaseModel):
