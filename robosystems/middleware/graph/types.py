@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 import re
 
 from ...models.iam.graph_credits import GraphTier
+from ...logger import get_logger
+
+logger = get_logger(__name__)
 
 
 SHARED_REPO_WRITE_ERROR_MESSAGE = (
@@ -177,28 +180,46 @@ class GraphTypeRegistry:
       if graph:
         # Found in database - use actual metadata
         if graph.is_repository:
+          try:
+            tier = (
+              GraphTier(graph.graph_tier) if graph.graph_tier else GraphTier.KUZU_SHARED
+            )
+          except ValueError:
+            logger.warning(
+              f"Invalid graph_tier '{graph.graph_tier}' for {graph_id}, using KUZU_SHARED"
+            )
+            tier = GraphTier.KUZU_SHARED
+
           return GraphIdentity(
             graph_id=graph_id,
             category=GraphCategory.SHARED,
             graph_type=str(graph.repository_type)
             if graph.repository_type
             else "repository",
-            graph_tier=GraphTier(graph.graph_tier)
-            if graph.graph_tier
-            else GraphTier.KUZU_SHARED,
+            graph_tier=tier,
             access_pattern=AccessPattern.READ_ONLY,
           )
         else:
           # User graph
+          try:
+            tier = (
+              GraphTier(graph.graph_tier)
+              if graph.graph_tier
+              else graph_tier or GraphTier.KUZU_STANDARD
+            )
+          except ValueError:
+            logger.warning(
+              f"Invalid graph_tier '{graph.graph_tier}' for {graph_id}, using fallback"
+            )
+            tier = graph_tier or GraphTier.KUZU_STANDARD
+
           return GraphIdentity(
             graph_id=graph_id,
             category=GraphCategory.USER,
             graph_type=str(graph.graph_type)
             if graph.graph_type
             else UserGraphType.CUSTOM.value,
-            graph_tier=GraphTier(graph.graph_tier)
-            if graph.graph_tier
-            else graph_tier or GraphTier.KUZU_STANDARD,
+            graph_tier=tier,
             access_pattern=AccessPattern.READ_WRITE,
           )
 

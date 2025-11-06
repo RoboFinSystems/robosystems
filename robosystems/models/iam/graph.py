@@ -272,7 +272,20 @@ class Graph(Model):
     return session.query(cls).filter(cls.graph_type == graph_type).all()
 
   def update_extensions(self, extensions: List[str], session: Session) -> None:
-    """Update the schema extensions for this graph."""
+    """
+    Update the schema extensions for this graph.
+
+    This modifies the schema extensions list and commits the change to the database.
+    Note: This only updates the metadata - it does not modify the actual database schema.
+    Use SchemaManager.apply_extensions() to update the physical schema.
+
+    Args:
+        extensions: List of extension names (e.g., ["roboledger", "roboinvestor"])
+        session: Database session to use for the update
+
+    Raises:
+        SQLAlchemyError: If the database update fails
+    """
     self.schema_extensions = extensions
     self.updated_at = datetime.now(timezone.utc)
     try:
@@ -283,7 +296,19 @@ class Graph(Model):
       raise
 
   def delete(self, session: Session) -> None:
-    """Delete the graph metadata."""
+    """
+    Delete the graph metadata from the database.
+
+    This removes the Graph record and all associated relationships (UserGraph entries)
+    via cascade delete. Note: This does NOT delete the actual graph database -
+    use GraphClientFactory to delete the physical database.
+
+    Args:
+        session: Database session to use for the deletion
+
+    Raises:
+        SQLAlchemyError: If the database deletion fails
+    """
     session.delete(self)
     try:
       session.commit()
@@ -415,9 +440,31 @@ class Graph(Model):
     error_message: Optional[str] = None,
     session: Session = None,
   ) -> None:
-    """Update repository sync status."""
+    """
+    Update repository sync status and timestamp.
+
+    This method is used by sync pipelines to track the synchronization state
+    of shared repositories. When status is "active", it records the sync timestamp
+    and clears any error messages. When status is "error", it stores the error message.
+
+    Args:
+        status: Sync status ("active", "syncing", "error", "stale")
+        error_message: Error message if status is "error", otherwise ignored
+        session: Optional database session to commit changes immediately
+
+    Raises:
+        ValueError: If called on a non-repository graph or invalid status
+        SQLAlchemyError: If the database update fails
+    """
+    VALID_STATUSES = {"active", "syncing", "error", "stale"}
+
     if not self.is_repository:
       raise ValueError("Can only update sync status for repository graphs")
+
+    if status not in VALID_STATUSES:
+      raise ValueError(
+        f"Invalid sync status '{status}'. Must be one of: {', '.join(sorted(VALID_STATUSES))}"
+      )
 
     self.sync_status = status
     if status == "active":

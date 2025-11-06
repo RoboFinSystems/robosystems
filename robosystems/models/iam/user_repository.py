@@ -380,7 +380,28 @@ class UserRepository(Model):
     new_price_cents: Optional[int] = None,
     new_credits: Optional[int] = None,
   ) -> None:
-    """Upgrade repository plan to a different level."""
+    """
+    Upgrade or downgrade repository subscription plan.
+
+    This updates the repository plan (STARTER, ADVANCED, UNLIMITED) and optionally
+    adjusts pricing and credit allocations. When credits are updated, the method also
+    synchronizes the UserRepositoryCredits record to reflect the new allocation.
+
+    Use cases:
+    - User upgrades from STARTER to ADVANCED for more features
+    - User downgrades from UNLIMITED to ADVANCED to reduce costs
+    - Price adjustments due to promotional pricing
+    - Credit allocation changes without plan changes
+
+    Args:
+        new_plan: Target repository plan (STARTER, ADVANCED, or UNLIMITED)
+        session: Database session for the transaction
+        new_price_cents: Optional new monthly price in cents (overrides plan default)
+        new_credits: Optional new monthly credit allocation (overrides plan default)
+
+    Raises:
+        SQLAlchemyError: If the database update fails
+    """
     old_plan = self.repository_plan
     self.repository_plan = new_plan
     self.updated_at = datetime.now(timezone.utc)
@@ -462,7 +483,26 @@ class UserRepository(Model):
     }
 
   def get_repository_plan_config(self) -> Dict[str, Any]:
-    """Get repository plan configuration for this repository type and plan."""
+    """
+    Get repository plan configuration for this repository type and plan.
+
+    Returns hardcoded plan configurations including pricing, credit allocations,
+    and access levels. These configurations define the feature set for each
+    repository subscription tier (STARTER, ADVANCED, UNLIMITED).
+
+    Note: These configurations are currently hardcoded in the model but should
+    ideally be moved to a configuration file or database table for easier
+    updates without code changes.
+
+    Returns:
+        Dict containing plan configuration:
+        - name: Human-readable plan name
+        - monthly_credits: Credit allocation per month
+        - price_monthly: Monthly subscription price in dollars
+        - access_level: RepositoryAccessLevel (READ, WRITE, or ADMIN)
+
+        Empty dict if repository type or plan is not configured.
+    """
     configs = {
       RepositoryType.SEC: {
         "enabled": True,

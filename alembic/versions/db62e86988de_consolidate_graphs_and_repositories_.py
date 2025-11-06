@@ -21,7 +21,9 @@ def upgrade() -> None:
   # Add repository support columns to graphs table
   op.add_column(
     "graphs",
-    sa.Column("is_repository", sa.Boolean(), nullable=False, server_default="false"),
+    sa.Column(
+      "is_repository", sa.Boolean(), nullable=False, server_default=sa.text("false")
+    ),
   )
   op.add_column("graphs", sa.Column("repository_type", sa.String(), nullable=True))
   op.add_column("graphs", sa.Column("data_source_type", sa.String(), nullable=True))

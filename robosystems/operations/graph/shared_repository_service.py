@@ -210,13 +210,28 @@ class SharedRepositoryService:
         "config": config,
       }
 
+    except ValueError as e:
+      logger.error(f"Invalid repository configuration: {e}")
+      raise
+    except ConnectionError as e:
+      logger.error(f"Failed to connect to graph instance: {e}")
+      raise
+    except TimeoutError as e:
+      logger.error(f"Repository creation timed out: {e}")
+      raise
     except Exception as e:
-      logger.error(f"Failed to create shared repository: {e}")
+      logger.error(
+        f"Unexpected error creating shared repository {repository_name}: {e}",
+        exc_info=True,
+      )
       raise
 
     finally:
       if kuzu_client:
-        await kuzu_client.close()
+        try:
+          await kuzu_client.close()
+        except Exception as e:
+          logger.warning(f"Error closing kuzu client: {e}")
 
 
 async def ensure_shared_repository_exists(
@@ -257,8 +272,12 @@ async def ensure_shared_repository_exists(
         }
     finally:
       await client.close()
+  except (ConnectionError, TimeoutError) as e:
+    logger.warning(f"Could not connect to check repository {repository_name}: {e}")
   except Exception as e:
-    logger.info(f"Repository {repository_name} not found, will create: {e}")
+    logger.info(
+      f"Repository {repository_name} not found or inaccessible, will create: {e}"
+    )
 
   service = SharedRepositoryService()
   return await service.create_shared_repository(
