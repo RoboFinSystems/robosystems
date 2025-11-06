@@ -86,8 +86,8 @@ class UserRepository(Model):
   # Repository identification
   repository_type = Column(SQLEnum(RepositoryType), nullable=False)
   repository_name = Column(
-    String, nullable=False
-  )  # Specific instance (e.g., "sec", "industry_tech")
+    String, ForeignKey("graphs.graph_id", ondelete="RESTRICT"), nullable=False
+  )
 
   # Access control (from UserRepositoryAccess)
   access_level = Column(
@@ -119,12 +119,6 @@ class UserRepository(Model):
   granted_by = Column(String, ForeignKey("users.id"), nullable=True)
   granted_at = Column(DateTime(timezone=True), nullable=True)
 
-  # Graph database scaling support
-  graph_instance_id = Column(String, nullable=False, default="default")
-  graph_cluster_region = Column(String, nullable=True)
-  instance_tier = Column(String, nullable=False, default="kuzu-shared")
-  read_preference = Column(String, nullable=False, default="primary")
-
   # Configuration
   access_scope = Column(
     String, nullable=True
@@ -150,6 +144,11 @@ class UserRepository(Model):
   granter = relationship("User", foreign_keys=[granted_by], post_update=True)
   user_credits = relationship(
     "UserRepositoryCredits", back_populates="user_repository", uselist=False
+  )
+  graph = relationship(
+    "Graph",
+    foreign_keys=[repository_name],
+    primaryjoin="foreign(UserRepository.repository_name)==Graph.graph_id",
   )
 
   # Constraints and Indexes
@@ -381,7 +380,28 @@ class UserRepository(Model):
     new_price_cents: Optional[int] = None,
     new_credits: Optional[int] = None,
   ) -> None:
-    """Upgrade repository plan to a different level."""
+    """
+    Upgrade or downgrade repository subscription plan.
+
+    This updates the repository plan (STARTER, ADVANCED, UNLIMITED) and optionally
+    adjusts pricing and credit allocations. When credits are updated, the method also
+    synchronizes the UserRepositoryCredits record to reflect the new allocation.
+
+    Use cases:
+    - User upgrades from STARTER to ADVANCED for more features
+    - User downgrades from UNLIMITED to ADVANCED to reduce costs
+    - Price adjustments due to promotional pricing
+    - Credit allocation changes without plan changes
+
+    Args:
+        new_plan: Target repository plan (STARTER, ADVANCED, or UNLIMITED)
+        session: Database session for the transaction
+        new_price_cents: Optional new monthly price in cents (overrides plan default)
+        new_credits: Optional new monthly credit allocation (overrides plan default)
+
+    Raises:
+        SQLAlchemyError: If the database update fails
+    """
     old_plan = self.repository_plan
     self.repository_plan = new_plan
     self.updated_at = datetime.now(timezone.utc)
@@ -440,18 +460,49 @@ class UserRepository(Model):
     return self.access_level == RepositoryAccessLevel.ADMIN  # type: ignore[return-value]
 
   def get_graph_connection_info(self) -> Dict[str, Any]:
-    """Get graph database connection information for this repository."""
+    """
+    Get graph database connection information for this repository.
+
+    Pulls infrastructure metadata from the Graph table via relationship.
+    """
+    if self.graph:
+      return {
+        "instance_id": self.graph.graph_instance_id,
+        "cluster_region": self.graph.graph_cluster_region,
+        "instance_tier": self.graph.graph_tier,
+        "repository_name": self.repository_name,
+        "repository_type": self.repository_type.value,
+      }
+
     return {
-      "instance_id": self.graph_instance_id,
-      "cluster_region": self.graph_cluster_region,
-      "instance_tier": self.instance_tier,
-      "read_preference": self.read_preference,
+      "instance_id": "kuzu-shared-prod",
+      "cluster_region": None,
+      "instance_tier": "kuzu-shared",
       "repository_name": self.repository_name,
       "repository_type": self.repository_type.value,
     }
 
   def get_repository_plan_config(self) -> Dict[str, Any]:
-    """Get repository plan configuration for this repository type and plan."""
+    """
+    Get repository plan configuration for this repository type and plan.
+
+    Returns hardcoded plan configurations including pricing, credit allocations,
+    and access levels. These configurations define the feature set for each
+    repository subscription tier (STARTER, ADVANCED, UNLIMITED).
+
+    Note: These configurations are currently hardcoded in the model but should
+    ideally be moved to a configuration file or database table for easier
+    updates without code changes.
+
+    Returns:
+        Dict containing plan configuration:
+        - name: Human-readable plan name
+        - monthly_credits: Credit allocation per month
+        - price_monthly: Monthly subscription price in dollars
+        - access_level: RepositoryAccessLevel (READ, WRITE, or ADMIN)
+
+        Empty dict if repository type or plan is not configured.
+    """
     configs = {
       RepositoryType.SEC: {
         "enabled": True,

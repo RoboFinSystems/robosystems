@@ -315,7 +315,7 @@ class KuzuAllocationManager:
 
     try:
       # Get graph identity for routing
-      identity = GraphTypeRegistry.identify_graph(graph_id, instance_tier)
+      identity = GraphTypeRegistry.identify_graph(graph_id, graph_tier=instance_tier)
 
       # Get backend type for this tier
       tier_config = self.get_tier_config(instance_tier or GraphTier.KUZU_STANDARD)

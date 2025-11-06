@@ -41,6 +41,33 @@ class TestUserRepository:
     self.session.add_all([self.user, self.admin])
     self.session.commit()
 
+    # Create Graph repositories (required for foreign key)
+    from robosystems.models.iam import Graph
+
+    repository_names = [
+      ("sec", "SEC Public Filings", "sec"),
+      ("sec1", "SEC Repository 1", "sec"),
+      ("sec2", "SEC Repository 2", "sec"),
+      ("sec3", "SEC Repository 3", "sec"),
+      ("sec_temp", "SEC Temp Repository", "sec"),
+      ("sec_error", "SEC Error Repository", "sec"),
+      ("sec_active", "SEC Active Repository", "sec"),
+      ("sec_inactive", "SEC Inactive Repository", "sec"),
+      ("sec_expired", "SEC Expired Repository", "sec"),
+      ("sec_none", "SEC None Repository", "sec"),
+      ("sec_unique", "SEC Unique Repository", "sec"),
+      ("industry1", "Industry Repository 1", "industry"),
+      ("industry_tech", "Industry Tech Repository", "industry"),
+    ]
+
+    for graph_id, graph_name, repo_type in repository_names:
+      Graph.find_or_create_repository(
+        graph_id=graph_id,
+        graph_name=graph_name,
+        repository_type=repo_type,
+        session=self.session,
+      )
+
   def test_safe_helper_functions(self):
     """Test safe conversion helper functions."""
     # safe_str
@@ -601,23 +628,38 @@ class TestUserRepository:
     assert access.can_admin() is False
 
   def test_get_graph_connection_info(self):
-    """Test getting graph connection information."""
+    """Test getting graph connection information via Graph relationship."""
+    from robosystems.models.iam.graph import Graph
+    from robosystems.models.iam.graph_credits import GraphTier
+
+    # Create Graph record for SEC repository
+    Graph.find_or_create_repository(
+      graph_id="sec",
+      graph_name="SEC EDGAR Filings",
+      repository_type="sec",
+      session=self.session,
+      base_schema="sec",
+      data_source_type="sec_edgar",
+      data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
+      sync_frequency="daily",
+      graph_tier=GraphTier.KUZU_SHARED,
+      graph_instance_id="kuzu-shared-prod",
+    )
+
+    # Create UserRepository that references the Graph
     access = UserRepository(
       user_id=self.user.id,
       repository_type=RepositoryType.SEC,
       repository_name="sec",
-      graph_instance_id="instance123",
-      graph_cluster_region="us-east-1",
-      instance_tier="shared",
-      read_preference="primary",
     )
+    self.session.add(access)
+    self.session.commit()
 
+    # Get connection info - should pull from Graph relationship
     info = access.get_graph_connection_info()
 
-    assert info["instance_id"] == "instance123"
-    assert info["cluster_region"] == "us-east-1"
-    assert info["instance_tier"] == "shared"
-    assert info["read_preference"] == "primary"
+    assert info["instance_id"] == "kuzu-shared-prod"
+    assert info["instance_tier"] == GraphTier.KUZU_SHARED
     assert info["repository_name"] == "sec"
     assert info["repository_type"] == "sec"
 

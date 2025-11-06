@@ -289,30 +289,32 @@ class MultiTenantUtils:
   # ============================================================================
 
   @staticmethod
-  def get_graph_identity(graph_id: str) -> GraphIdentity:
+  def get_graph_identity(graph_id: str, session: Optional[Any] = None) -> GraphIdentity:
     """
     Get complete graph identity including category and type.
 
     Args:
         graph_id: Graph identifier
+        session: Optional database session for lookup
 
     Returns:
         GraphIdentity with full type information
     """
-    return GraphTypeRegistry.identify_graph(graph_id)
+    return GraphTypeRegistry.identify_graph(graph_id, session=session)
 
   @staticmethod
-  def get_graph_routing(graph_id: str) -> Dict[str, Any]:
+  def get_graph_routing(graph_id: str, session: Optional[Any] = None) -> Dict[str, Any]:
     """
     Get routing information for a graph based on its type.
 
     Args:
         graph_id: Graph identifier
+        session: Optional database session for lookup
 
     Returns:
         Dict with routing configuration including cluster type, access mode, etc.
     """
-    identity = MultiTenantUtils.get_graph_identity(graph_id)
+    identity = MultiTenantUtils.get_graph_identity(graph_id, session=session)
     routing_info = identity.get_routing_info()
 
     # Add database name

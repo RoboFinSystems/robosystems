@@ -50,8 +50,8 @@ async def get_graph_database(
       HTTPException: If graph not found or user doesn't have access
   """
   try:
-    # Get graph identity and routing info
-    routing_info = MultiTenantUtils.get_graph_routing(graph_id)
+    # Get graph identity and routing info (with database lookup)
+    routing_info = MultiTenantUtils.get_graph_routing(graph_id, session=db)
     identity = routing_info["graph_identity"]
 
     # Validate access if required
@@ -164,7 +164,8 @@ async def get_graph_repository_dependency(
       HTTPException: If graph not found or user doesn't have access
   """
   try:
-    # Get graph routing info
+    # Get graph routing info (with database lookup)
+    # Note: This dependency doesn't have db session access, will use fallback pattern matching
     routing_info = MultiTenantUtils.get_graph_routing(graph_id)
     identity = routing_info["graph_identity"]
 

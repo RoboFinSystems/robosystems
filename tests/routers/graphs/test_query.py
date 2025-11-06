@@ -323,8 +323,17 @@ async def test_cypher_query_sec_repository_with_access(
     RepositoryAccessLevel,
   )
   from robosystems.models.iam.user_repository_credits import UserRepositoryCredits
+  from robosystems.models.iam import Graph
   from decimal import Decimal
   import uuid
+
+  # Create SEC repository (required for foreign key)
+  Graph.find_or_create_repository(
+    graph_id="sec",
+    graph_name="SEC Public Filings",
+    repository_type="sec",
+    session=db_session,
+  )
 
   # Create a mock access record for SEC repository
   access_record = UserRepository(

@@ -1,5 +1,6 @@
 """User management API models."""
 
+from typing import Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -75,13 +76,15 @@ class GraphInfo(BaseModel):
   """Graph information for user."""
 
   graphId: str = Field(
-    ..., description="Graph database identifier", examples=["kg1a2b3c4d5"]
+    ..., description="Graph database identifier", examples=["kg1a2b3c4d5", "sec"]
   )
   graphName: str = Field(
-    ..., description="Display name for the graph", examples=["Acme Consulting LLC"]
+    ...,
+    description="Display name for the graph",
+    examples=["Acme Consulting LLC", "SEC EDGAR Filings"],
   )
   role: str = Field(
-    ..., description="User's role in this graph", examples=["admin", "member"]
+    ..., description="User's role/access level", examples=["admin", "member", "read"]
   )
   isSelected: bool = Field(
     ...,
@@ -90,6 +93,16 @@ class GraphInfo(BaseModel):
   )
   createdAt: str = Field(
     ..., description="Creation timestamp", examples=["2024-01-15T10:00:00Z"]
+  )
+  isRepository: bool = Field(
+    default=False,
+    description="Whether this is a shared repository (vs user graph)",
+    examples=[False, True],
+  )
+  repositoryType: Optional[str] = Field(
+    default=None,
+    description="Repository type if isRepository=true",
+    examples=[None, "sec", "industry", "economic"],
   )
 
   class Config:

@@ -378,6 +378,15 @@ class TestMCPAccessControl:
       RepositoryAccessLevel,
     )
     import uuid
+    from robosystems.models.iam import Graph
+
+    # Create SEC repository (required for foreign key)
+    Graph.find_or_create_repository(
+      graph_id="sec",
+      graph_name="SEC Public Filings",
+      repository_type="sec",
+      session=db_session,
+    )
 
     # Grant SEC access
     access = UserRepository(

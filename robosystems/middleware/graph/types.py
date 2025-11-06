@@ -12,6 +12,9 @@ from pydantic import BaseModel, Field
 import re
 
 from ...models.iam.graph_credits import GraphTier
+from ...logger import get_logger
+
+logger = get_logger(__name__)
 
 
 SHARED_REPO_WRITE_ERROR_MESSAGE = (
@@ -153,25 +156,81 @@ class GraphTypeRegistry:
 
   @classmethod
   def identify_graph(
-    cls, graph_id: str, graph_tier: Optional[GraphTier] = None
+    cls,
+    graph_id: str,
+    session: Optional[Any] = None,
+    graph_tier: Optional[GraphTier] = None,
   ) -> GraphIdentity:
     """
-    Identify a graph from its ID.
+    Identify a graph from its ID using database lookup.
 
     Args:
         graph_id: The graph identifier
+        session: Optional database session for lookup
         graph_tier: Optional graph tier override
 
     Returns:
         GraphIdentity with category and type information
     """
-    # Check if it's a shared repository
+    # Try database lookup first if session provided
+    if session:
+      from ...models.iam import Graph
+
+      graph = Graph.get_by_id(graph_id, session)
+      if graph:
+        # Found in database - use actual metadata
+        if graph.is_repository:
+          try:
+            tier = (
+              GraphTier(graph.graph_tier) if graph.graph_tier else GraphTier.KUZU_SHARED
+            )
+          except ValueError:
+            logger.warning(
+              f"Invalid graph_tier '{graph.graph_tier}' for {graph_id}, using KUZU_SHARED"
+            )
+            tier = GraphTier.KUZU_SHARED
+
+          return GraphIdentity(
+            graph_id=graph_id,
+            category=GraphCategory.SHARED,
+            graph_type=str(graph.repository_type)
+            if graph.repository_type
+            else "repository",
+            graph_tier=tier,
+            access_pattern=AccessPattern.READ_ONLY,
+          )
+        else:
+          # User graph
+          try:
+            tier = (
+              GraphTier(graph.graph_tier)
+              if graph.graph_tier
+              else graph_tier or GraphTier.KUZU_STANDARD
+            )
+          except ValueError:
+            logger.warning(
+              f"Invalid graph_tier '{graph.graph_tier}' for {graph_id}, using fallback"
+            )
+            tier = graph_tier or GraphTier.KUZU_STANDARD
+
+          return GraphIdentity(
+            graph_id=graph_id,
+            category=GraphCategory.USER,
+            graph_type=str(graph.graph_type)
+            if graph.graph_type
+            else UserGraphType.CUSTOM.value,
+            graph_tier=tier,
+            access_pattern=AccessPattern.READ_WRITE,
+          )
+
+    # Fallback: pattern-based detection (for cases without session)
+    # Check if it's a known shared repository
     if graph_id in cls.SHARED_REPOSITORIES:
       return GraphIdentity(
         graph_id=graph_id,
         category=GraphCategory.SHARED,
         graph_type=cls.SHARED_REPOSITORIES[graph_id].value,
-        graph_tier=GraphTier.KUZU_STANDARD,
+        graph_tier=GraphTier.KUZU_SHARED,
         access_pattern=AccessPattern.READ_ONLY,
       )
 
@@ -185,18 +244,7 @@ class GraphTypeRegistry:
         access_pattern=AccessPattern.RESTRICTED,
       )
 
-    # Check user graph patterns
-    for pattern, graph_type in cls.USER_GRAPH_PATTERNS:
-      if pattern.match(graph_id):
-        return GraphIdentity(
-          graph_id=graph_id,
-          category=GraphCategory.USER,
-          graph_type=UserGraphType.CUSTOM.value,  # Default to custom for all user graphs
-          graph_tier=graph_tier or GraphTier.KUZU_STANDARD,
-          access_pattern=AccessPattern.READ_WRITE,
-        )
-
-    # Default to custom user graph
+    # Default to user graph
     return GraphIdentity(
       graph_id=graph_id,
       category=GraphCategory.USER,

@@ -473,6 +473,8 @@ clean-data:
     rm -rf ./data/localstack
     rm -rf ./data/postgres
     rm -rf ./data/valkey
+    rm -rf ./local/creds
+    rm -f ./examples/credentials/config.json
 
 # Show help
 help:
