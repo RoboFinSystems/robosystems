@@ -38,38 +38,48 @@ dependencies = [
     "httpx-sse>=0.4.0",
     "uvicorn>=0.35.0,<1.0",
     "async_timeout>=5.0.0,<6.0",
+
     # Web framework
     "fastapi>=0.116.0,<1.0",
     "fastapi-limiter>=0.1.6,<1.0",
     "python-multipart>=0.0.16,<1.0",
     "sse-starlette>=2.4.1,<3.0",
+
     # Graph database
     "kuzu==0.11.3",
     "neo4j>=5.15.0,<6.0",
     "duckdb>=1.1.0,<2.0",
+
     # Database and ORM
     "alembic>=1.16.0,<2.0",
     "sqlalchemy>=2.0.0,<3.0",
     "psycopg2-binary>=2.9.0,<3.0",
+
     # Task queue and messaging
     "celery>=5.5.0,<6.0",
     "amqp>=5.3.0,<6.0",
     "redis>=6.2.0,<7.0",
+
     # AWS and cloud services
     "boto3>=1.39.0,<2.0",
+
     # Data processing
     "pandas>=2.3.0,<3.0",
     "pyarrow>=20.0.0",
+
     # Security and crypto
     "bcrypt>=4.3.0,<5.0",
     "pyjwt>=2.10.0,<3.0",
+
     # XBRL processing
     "arelle-release==2.37.12",
+
     # External integrations
     "anthropic>=0.57.0,<1.0",
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
     "plaid-python>=34.0,<35.0",
+
     # Observability
     "opentelemetry-api>=1.35.0,<2.0",
     "opentelemetry-sdk>=1.35.0,<2.0",
@@ -79,6 +89,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.55b0,<1.0",
     "opentelemetry-instrumentation-psycopg2>=0.55b0,<1.0",
     "opentelemetry-instrumentation-requests>=0.55b0,<1.0",
+
     # Utilities
     "beautifulsoup4>=4.13.0,<5.0",
     "email-validator>=2.2.0,<3.0",
@@ -97,8 +108,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  # Demo scripts
-    "robosystems-client>=0.2.8",
+    # RoboSystems client for demo
+    "robosystems-client>=0.2.10,<0.3",
 
     # Testing framework
     "pytest>=8.4.0,<9.0",
