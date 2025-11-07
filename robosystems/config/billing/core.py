@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 # Unified billing plans configuration (aligned with GraphTier infrastructure)
+# NOTE: Stripe prices are auto-created from this config on first checkout
 DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
   {
     "name": "kuzu-standard",

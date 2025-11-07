@@ -25,21 +25,22 @@ class TestValkeyDatabase:
     assert ValkeyDatabase.CREDITS_CACHE == 6
     assert ValkeyDatabase.RATE_LIMITING == 7
     assert ValkeyDatabase.KUZU_CACHE == 8
+    assert ValkeyDatabase.BILLING_CACHE == 9
 
   def test_get_next_available(self):
     """Test getting the next available database number."""
-    # Currently databases 0-8 are used, so next should be 9
+    # Currently databases 0-9 are used, so next should be 10
     next_db = ValkeyDatabase.get_next_available()
-    assert next_db == 9
+    assert next_db == 10
 
   def test_get_next_available_validates_range(self):
     """Test that get_next_available respects the 0-15 range."""
-    # The current implementation uses databases 0-8, so 9 should be next
+    # The current implementation uses databases 0-9, so 10 should be next
     next_db = ValkeyDatabase.get_next_available()
     assert next_db >= 0
     assert next_db <= 15
-    # Since we have 9 databases defined (0-8), next should be 9
-    assert next_db == 9
+    # Since we have 10 databases defined (0-9), next should be 10
+    assert next_db == 10
 
   def test_get_next_available_algorithm(self):
     """Test the algorithm by mocking the enum iteration."""
@@ -65,9 +66,10 @@ class TestValkeyDatabase:
   def test_enum_iteration(self):
     """Test that we can iterate over database enum."""
     databases = list(ValkeyDatabase)
-    assert len(databases) == 9  # Currently 9 databases allocated
+    assert len(databases) == 10  # Currently 10 databases allocated (0-9)
     assert ValkeyDatabase.CELERY_BROKER in databases
     assert ValkeyDatabase.KUZU_CACHE in databases
+    assert ValkeyDatabase.BILLING_CACHE in databases
 
 
 class TestValkeyURLBuilder:

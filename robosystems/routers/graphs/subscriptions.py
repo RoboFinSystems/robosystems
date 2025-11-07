@@ -18,14 +18,20 @@ from ...database import get_db_session
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import subscription_aware_rate_limit_dependency
 from ...models.iam import User
-from ...models.billing import BillingCustomer, BillingSubscription
+from ...models.iam.user_repository import RepositoryType, RepositoryPlan
+from ...models.billing import BillingCustomer, BillingSubscription, BillingAuditLog
+from ...models.billing.audit_log import BillingEventType
 from ...models.api.billing.subscription import (
   GraphSubscriptionResponse,
   CreateRepositorySubscriptionRequest,
   UpgradeSubscriptionRequest,
   CancellationResponse,
 )
-from ...config import BillingConfig
+from ...config import BillingConfig, env
+from ...operations.graph.repository_subscription_service import (
+  RepositorySubscriptionService,
+)
+from ...operations.graph.subscription_service import generate_subscription_invoice
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +227,18 @@ async def create_repository_subscription(
         detail=f"Invalid plan '{request.plan_name}' for repository '{graph_id}'",
       )
 
-    BillingCustomer.get_or_create(current_user.id, db)
+    customer = BillingCustomer.get_or_create(current_user.id, db)
+
+    can_provision, error_message = customer.can_provision_resources(
+      environment=env.ENVIRONMENT, billing_enabled=env.BILLING_ENABLED
+    )
+
+    if not can_provision:
+      raise HTTPException(
+        status_code=402,
+        detail=error_message
+        or "Valid payment method required to subscribe to repositories.",
+      )
 
     subscription = BillingSubscription.create_subscription(
       user_id=current_user.id,
@@ -233,10 +250,72 @@ async def create_repository_subscription(
       billing_interval="monthly",
     )
 
+    BillingAuditLog.log_event(
+      session=db,
+      event_type=BillingEventType.SUBSCRIPTION_CREATED,
+      billing_customer_user_id=current_user.id,
+      subscription_id=subscription.id,
+      description=f"Created {request.plan_name} subscription for {graph_id} repository",
+      actor_type="user",
+      actor_user_id=current_user.id,
+      event_data={
+        "resource_type": "repository",
+        "resource_id": graph_id,
+        "plan_name": request.plan_name,
+        "base_price_cents": plan_config["price_cents"],
+      },
+    )
+
     subscription.activate(db)
 
+    BillingAuditLog.log_event(
+      session=db,
+      event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
+      billing_customer_user_id=current_user.id,
+      subscription_id=subscription.id,
+      description=f"Activated subscription for {graph_id} repository",
+      actor_type="system",
+      event_data={
+        "current_period_start": subscription.current_period_start.isoformat(),
+        "current_period_end": subscription.current_period_end.isoformat(),
+      },
+    )
+
+    generate_subscription_invoice(
+      subscription=subscription,
+      customer=customer,
+      description=f"{graph_id.upper()} Repository Subscription - {request.plan_name}",
+      session=db,
+    )
+
+    plan_tier = (
+      request.plan_name.split("-")[-1]
+      if "-" in request.plan_name
+      else request.plan_name
+    )
+    try:
+      repository_type = RepositoryType(graph_id)
+      repository_plan = RepositoryPlan(plan_tier)
+    except ValueError as e:
+      logger.error(f"Invalid repository type or plan: {e}")
+      raise HTTPException(
+        status_code=400,
+        detail=f"Invalid repository type '{graph_id}' or plan '{plan_tier}'",
+      )
+
+    repo_service = RepositorySubscriptionService(db)
+    try:
+      repo_service.create_repository_subscription(
+        user_id=current_user.id,
+        repository_type=repository_type,
+        repository_plan=repository_plan,
+      )
+    except ValueError as e:
+      logger.error(f"Failed to create repository access: {e}")
+      raise HTTPException(status_code=400, detail=str(e))
+
     logger.info(
-      f"Created repository subscription for user {current_user.id} to {graph_id}",
+      f"Created repository subscription and access for user {current_user.id} to {graph_id}",
       extra={
         "user_id": current_user.id,
         "repository": graph_id,

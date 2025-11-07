@@ -79,6 +79,392 @@ BillingSubscription (source of truth)
 - Canceled subscriptions → deactivated credit pools
 - Ensures credits and subscriptions never go out of sync
 
+## Payment-First Provisioning
+
+### Overview
+
+The platform uses a **payment-first checkout flow** where users add payment methods before resources are provisioned. This prevents unpaid resource creation and ensures billing is set up before infrastructure costs are incurred.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│               PAYMENT-FIRST FLOW                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. USER INITIATES CHECKOUT                                 │
+│     └─► POST /v1/billing/checkout/graph or /repository      │
+│         └─► Create BillingSubscription (status=pending)     │
+│             └─► Create Stripe Checkout Session              │
+│                 └─► Redirect to Stripe payment page         │
+│                                                             │
+│  2. USER COMPLETES PAYMENT                                  │
+│     └─► Stripe Checkout Session                             │
+│         └─► Add payment method (card)                       │
+│             └─► Stripe webhook: checkout.session.completed  │
+│                 └─► Update subscription (status=provision)  │
+│                     └─► Trigger Celery task                 │
+│                                                             │
+│  3. RESOURCE PROVISIONING                                   │
+│     └─► Celery Worker                                       │
+│         ├─► provision_graph_task                            │
+│         │   └─► Create graph database                       │
+│         │       └─► Activate subscription                   │
+│         │           └─► Status: active                      │
+│         │                                                   │
+│         └─► provision_repository_access_task                │
+│             └─► Allocate credits                            │
+│                 └─► Grant access                            │
+│                     └─► Generate invoice                    │
+│                         └─► Activate subscription           │
+│                             └─► Status: active              │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Stripe Webhook Setup
+
+#### 1. Configure Webhook Endpoint in Stripe Dashboard
+
+1. Navigate to **Developers** → **Webhooks** in Stripe Dashboard
+2. Click **Add endpoint**
+3. Set endpoint URL:
+   - **Staging**: `https://staging-api.robosystems.com/admin/v1/webhooks/stripe`
+   - **Production**: `https://api.robosystems.com/admin/v1/webhooks/stripe`
+4. Select events to listen for:
+   - `checkout.session.completed` - Payment method collected
+   - `invoice.payment_succeeded` - Payment successful
+   - `invoice.payment_failed` - Payment failed
+   - `customer.subscription.updated` - Subscription changes
+   - `customer.subscription.deleted` - Subscription canceled
+5. Save and copy the **Signing Secret** (starts with `whsec_`)
+
+#### 2. Set Environment Variables
+
+Add to `.env` and AWS Secrets Manager:
+
+```bash
+STRIPE_SECRET_KEY=sk_test_...      # Test: sk_test_*, Prod: sk_live_*
+STRIPE_WEBHOOK_SECRET=whsec_...    # From Stripe Dashboard
+STRIPE_PUBLISHABLE_KEY=pk_test_... # For frontend
+BILLING_ENABLED=true
+```
+
+**IMPORTANT**: Environment validation will fail on startup if:
+
+- `BILLING_ENABLED=true` and Stripe keys are missing
+- Test key (`sk_test_`) used in production environment
+- Invalid key format (must start with `sk_live_` or `sk_test_`)
+- Invalid webhook secret format (must start with `whsec_`)
+
+#### 3. Verify Webhook Security
+
+The webhook endpoint (`/admin/v1/webhooks/stripe`) does NOT use `@require_admin` authentication because Stripe webhooks cannot provide admin API keys. Instead, security is enforced through **Stripe webhook signature verification**:
+
+```python
+payload = await request.body()
+signature = request.headers.get("stripe-signature")
+
+provider = get_payment_provider("stripe")
+event = provider.verify_webhook(payload, signature)
+```
+
+This verifies:
+
+- Webhook originated from Stripe
+- Payload hasn't been tampered with
+- Timestamp is recent (prevents replay attacks)
+
+#### 4. Test Webhook Integration
+
+Use Stripe CLI for local testing:
+
+```bash
+# Install Stripe CLI
+brew install stripe/stripe-cli/stripe
+
+# Login to Stripe
+stripe login
+
+# Forward webhooks to local dev server
+stripe listen --forward-to localhost:8000/admin/v1/webhooks/stripe
+
+# Trigger test events
+stripe trigger checkout.session.completed
+stripe trigger invoice.payment_succeeded
+stripe trigger customer.subscription.updated
+```
+
+#### 5. Monitor Webhooks
+
+In Stripe Dashboard → **Developers** → **Webhooks**:
+
+- View event delivery logs
+- Retry failed deliveries
+- Check response codes
+- Inspect payloads
+
+### Webhook Event Handlers
+
+#### `checkout.session.completed`
+
+**Purpose**: User completed checkout and added payment method
+
+**Handler**: `handle_checkout_completed()`
+
+**Actions**:
+
+1. Find subscription by session ID
+2. Mark customer as having payment method
+3. Update subscription status to `provisioning`
+4. Trigger provisioning task (`provision_graph_task` or `provision_repository_access_task`)
+
+#### `invoice.payment_succeeded`
+
+**Purpose**: Payment processed successfully
+
+**Handler**: `handle_payment_succeeded()`
+
+**Actions**:
+
+1. Find subscription by Stripe subscription ID
+2. Mark customer as having payment method
+3. Trigger provisioning if status is `pending_payment` or `provisioning`
+
+#### `invoice.payment_failed`
+
+**Purpose**: Payment attempt failed
+
+**Handler**: `handle_payment_failed()`
+
+**Actions**:
+
+1. Find subscription by Stripe subscription ID
+2. Update subscription status to `unpaid`
+3. Store error message in subscription metadata
+
+#### `customer.subscription.updated`
+
+**Purpose**: Subscription status changed in Stripe
+
+**Handler**: `handle_subscription_updated()`
+
+**Actions**:
+
+1. Map Stripe status to internal status:
+   - `active` → `active`
+   - `past_due` → `past_due`
+   - `unpaid` → `unpaid`
+   - `canceled` → `canceled`
+   - `incomplete` → `pending_payment`
+   - `trialing` → `active`
+2. Update subscription status in database
+
+#### `customer.subscription.deleted`
+
+**Purpose**: Subscription canceled in Stripe
+
+**Handler**: `handle_subscription_deleted()`
+
+**Actions**:
+
+1. Find subscription by Stripe subscription ID
+2. Cancel subscription immediately
+3. Mark status as `canceled`
+
+### Provisioning Tasks
+
+#### `provision_graph_task`
+
+**File**: `tasks/graph_operations/provision_graph.py`
+
+**Triggered By**: Webhook after payment confirmation
+
+**Process**:
+
+1. Query subscription (must be in `provisioning` status)
+2. Create graph database via `GenericGraphServiceSync`
+3. Set subscription `resource_id` to graph ID
+4. Activate subscription (status → `active`)
+5. Commit transaction
+
+**Retry Logic**:
+
+- Max retries: 3
+- Initial delay: 60 seconds
+- Exponential backoff enabled
+- Max backoff: 600 seconds (10 minutes)
+- Retries on: `ConnectionError`, `TimeoutError`, `OperationalError`
+
+**Cleanup on Failure**:
+
+- After all retries exhausted, delete partially created graph
+- Update subscription status to `failed`
+- Store error in subscription metadata
+
+#### `provision_repository_access_task`
+
+**File**: `tasks/billing/provision_repository.py`
+
+**Triggered By**: Webhook after payment confirmation
+
+**Process**:
+
+1. Query subscription (must be in `provisioning` status)
+2. Allocate monthly credits via `RepositorySubscriptionService`
+3. Grant repository access
+4. Set subscription `resource_id` to repository name
+5. Activate subscription (status → `active`)
+6. Create audit log entry
+7. Generate subscription invoice
+8. Commit transaction
+
+**Retry Logic**:
+
+- Max retries: 3
+- Initial delay: 60 seconds
+- Exponential backoff enabled
+- Max backoff: 600 seconds (10 minutes)
+- Retries on: `ConnectionError`, `TimeoutError`, `OperationalError`
+
+**Cleanup on Failure**:
+
+- After all retries exhausted, revoke repository access
+- Update subscription status to `failed`
+- Store error in subscription metadata
+
+### Payment Provider Abstraction
+
+The platform uses an abstract `PaymentProvider` interface for extensibility:
+
+**Current Provider**: Stripe (`StripePaymentProvider`)
+
+**Future Providers**: Crossmint (crypto payments)
+
+**Key Methods**:
+
+- `create_customer()` - Create customer in payment system
+- `create_checkout_session()` - Generate payment page URL
+- `verify_webhook()` - Verify webhook signature
+- `list_payment_methods()` - Get customer payment methods
+- `list_invoices()` - Get billing history
+- `get_upcoming_invoice()` - Preview next charge
+
+**Price Auto-Creation**:
+
+The Stripe provider automatically creates Stripe products and prices from billing config:
+
+1. Check Redis cache for existing price ID (24-hour TTL)
+2. If not cached, search Stripe for product by metadata
+3. If not found, create product and price from `BillingConfig`
+4. Cache price ID for future requests
+5. Use distributed locks to prevent race conditions
+
+**API Version Pinning**:
+
+The Stripe provider pins to API version `2024-11-20.acacia` to prevent unexpected breaking changes during Stripe API updates.
+
+### Error Handling
+
+#### Transaction Management
+
+All provisioning tasks use explicit transaction management:
+
+**Success Path**:
+
+- Complete all operations
+- `session.commit()` at end
+
+**Failure Path**:
+
+- `session.rollback()` to undo partial changes
+- `session.refresh(subscription)` to reload from database
+- Update subscription status to `failed` in separate transaction
+- Nested error handling prevents cascading failures
+
+#### Webhook Failures
+
+If webhook processing fails:
+
+1. Return 500 status to Stripe
+2. Stripe automatically retries with exponential backoff
+3. Webhook appears in Stripe Dashboard with error details
+4. Manual retry available through Stripe Dashboard
+
+#### Provisioning Failures
+
+If provisioning fails after retries exhausted:
+
+1. Cleanup partial resources (delete graph, revoke access)
+2. Update subscription status to `failed`
+3. Store detailed error message in subscription metadata
+4. User sees error in subscription status API
+
+### Testing
+
+#### Unit Tests
+
+```bash
+# Test webhook handlers
+just test tests/routers/admin/test_webhooks.py
+
+# Test provisioning tasks
+just test tests/tasks/billing/test_provision_repository.py
+just test tests/tasks/graph_operations/test_provision_graph.py
+
+# Test payment provider
+just test tests/operations/billing/test_payment_provider.py
+```
+
+#### Integration Testing
+
+Use Stripe test mode:
+
+1. Set `STRIPE_SECRET_KEY=sk_test_...`
+2. Use Stripe test cards (e.g., `4242 4242 4242 4242`)
+3. Trigger test webhooks via Stripe CLI
+4. Verify provisioning completes
+5. Check subscription status in database
+
+### Monitoring
+
+#### Key Metrics
+
+- **Webhook Success Rate**: Monitor 200 responses vs 4xx/5xx
+- **Provisioning Success Rate**: Track `active` vs `failed` subscriptions
+- **Provisioning Duration**: Time from webhook to activation
+- **Retry Frequency**: How often tasks retry before success/failure
+- **Cleanup Actions**: Frequency of partial resource cleanup
+
+#### Logs
+
+All provisioning operations log at INFO level:
+
+- Webhook events received and processed
+- Provisioning task start/completion
+- Resource creation (graph ID, credits allocated)
+- Error details with subscription ID and user ID
+
+#### Alerts
+
+Configure alerts for:
+
+- Webhook failures (non-200 responses)
+- Provisioning failures after all retries
+- Cleanup operations (indicates problems)
+- Unusual provisioning duration (>5 minutes)
+
+### Security Considerations
+
+1. **Webhook Verification**: All webhooks verified via Stripe signature
+2. **No Admin Auth**: Webhooks bypass admin middleware (Stripe can't provide API keys)
+3. **HTTPS Required**: Webhooks only work over HTTPS (enforced by Stripe)
+4. **API Version Pinning**: Prevents unexpected breaking changes
+5. **Environment Validation**: Startup checks prevent production misconfig
+6. **Test Key Detection**: Prevents test keys in production environment
+
+---
+
 ## Task Files
 
 ### Core Billing Tasks

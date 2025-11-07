@@ -88,20 +88,20 @@ class TestGraphSubscriptionService:
     ):
       # Mock no existing subscription
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      mock_session.query.return_value.filter.return_value.count.return_value = 0
 
-      subscription_service.create_graph_subscription(
+      result = subscription_service.create_graph_subscription(
         user_id, graph_id, plan_name="kuzu-standard"
       )
 
       # Verify subscription creation
       assert mock_session.add.called
       assert mock_session.commit.called
-      added_subscription = mock_session.add.call_args[0][0]
-      assert added_subscription.billing_customer_user_id == user_id
-      assert added_subscription.resource_type == "graph"
-      assert added_subscription.resource_id == graph_id
-      assert added_subscription.plan_name == "kuzu-standard"
-      assert added_subscription.status == SubscriptionStatus.ACTIVE.value
+      assert result.billing_customer_user_id == user_id
+      assert result.resource_type == "graph"
+      assert result.resource_id == graph_id
+      assert result.plan_name == "kuzu-standard"
+      assert result.status == SubscriptionStatus.ACTIVE.value
 
   def test_create_graph_subscription_new(
     self, subscription_service, sample_billing_plans, mock_session
@@ -119,19 +119,21 @@ class TestGraphSubscriptionService:
     ):
       # Mock existing subscription check (none exists)
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      mock_session.query.return_value.filter.return_value.count.return_value = 0
 
       # Call the method
-      subscription_service.create_graph_subscription(user_id, graph_id, plan_name)
+      result = subscription_service.create_graph_subscription(
+        user_id, graph_id, plan_name
+      )
 
       # Verify subscription creation
       assert mock_session.add.called
       assert mock_session.commit.called
-      added_subscription = mock_session.add.call_args[0][0]
-      assert added_subscription.billing_customer_user_id == user_id
-      assert added_subscription.resource_type == "graph"
-      assert added_subscription.resource_id == graph_id
-      assert added_subscription.plan_name == "kuzu-standard"
-      assert added_subscription.status == SubscriptionStatus.ACTIVE.value
+      assert result.billing_customer_user_id == user_id
+      assert result.resource_type == "graph"
+      assert result.resource_id == graph_id
+      assert result.plan_name == "kuzu-standard"
+      assert result.status == SubscriptionStatus.ACTIVE.value
 
   def test_create_graph_subscription_existing(self, subscription_service, mock_session):
     """Test creating subscription when one already exists."""
@@ -191,42 +193,12 @@ class TestGraphSubscriptionService:
 class TestSubscriptionHelperFunctions:
   """Test module-level helper functions."""
 
-  def test_get_available_plans_dev_restricted(self):
-    """Test available plans in dev with premium disabled."""
+  def test_get_available_plans(self):
+    """Test available plans returns all plans from centralized config."""
     import robosystems.operations.graph.subscription_service as sub_service
 
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_PREMIUM_PLANS_ENABLED", False),
-      patch.object(sub_service, "ENVIRONMENT", "dev"),
-    ):
-      plans = sub_service.get_available_plans()
-      assert plans == ["kuzu-standard"]  # Updated to match actual return values
-
-  def test_get_available_plans_dev_unrestricted(self):
-    """Test available plans in dev with premium enabled."""
-    import robosystems.operations.graph.subscription_service as sub_service
-
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_PREMIUM_PLANS_ENABLED", True),
-      patch.object(sub_service, "ENVIRONMENT", "dev"),
-    ):
-      plans = sub_service.get_available_plans()
-      assert plans == ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
-
-  def test_get_available_plans_prod(self):
-    """Test available plans in prod (restrictions don't apply)."""
-    import robosystems.operations.graph.subscription_service as sub_service
-
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_PREMIUM_PLANS_ENABLED", False),
-      patch.object(sub_service, "ENVIRONMENT", "prod"),
-    ):
-      plans = sub_service.get_available_plans()
-      # In prod, restrictions don't apply
-      assert plans == ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
+    plans = sub_service.get_available_plans()
+    assert plans == ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
 
   def test_is_payment_required_dev_bypass(self):
     """Test payment requirement in dev with bypass."""
@@ -261,24 +233,8 @@ class TestSubscriptionHelperFunctions:
     ):
       assert sub_service.is_payment_required() is True
 
-  def test_get_max_plan_tier_dev_restricted(self):
-    """Test max plan tier in dev with premium disabled."""
+  def test_get_max_plan_tier(self):
+    """Test max plan tier returns last plan from centralized config."""
     import robosystems.operations.graph.subscription_service as sub_service
 
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_PREMIUM_PLANS_ENABLED", False),
-      patch.object(sub_service, "ENVIRONMENT", "dev"),
-    ):
-      assert sub_service.get_max_plan_tier() == "kuzu-standard"
-
-  def test_get_max_plan_tier_dev_unrestricted(self):
-    """Test max plan tier in dev with premium enabled."""
-    import robosystems.operations.graph.subscription_service as sub_service
-
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_PREMIUM_PLANS_ENABLED", True),
-      patch.object(sub_service, "ENVIRONMENT", "dev"),
-    ):
-      assert sub_service.get_max_plan_tier() == "kuzu-xlarge"
+    assert sub_service.get_max_plan_tier() == "kuzu-xlarge"

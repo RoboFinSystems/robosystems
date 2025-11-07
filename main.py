@@ -20,10 +20,13 @@ from robosystems.routers import (
   status_router_v1,
   offering_router_v1,
   operations_router_v1,
+  billing_router_v1,
 )
 from robosystems.routers.admin import (
   subscription_router as admin_subscription_router,
   customer_router as admin_customer_router,
+  invoice_router as admin_invoice_router,
+  webhooks_router as admin_webhooks_router,
 )
 from robosystems.middleware.otel import setup_telemetry
 from robosystems.middleware.database import DatabaseSessionMiddleware
@@ -296,11 +299,14 @@ def create_app() -> FastAPI:
   app.include_router(graph_router)
   app.include_router(offering_router_v1)
   app.include_router(operations_router_v1)  # Unified SSE operations monitoring
+  app.include_router(billing_router_v1)
 
   # Include admin routers (hidden from public docs)
   # The admin routers will not appear in the auto-generated docs
   app.include_router(admin_subscription_router, include_in_schema=False)
   app.include_router(admin_customer_router, include_in_schema=False)
+  app.include_router(admin_invoice_router, include_in_schema=False)
+  app.include_router(admin_webhooks_router, include_in_schema=False)
 
   # Custom OpenAPI schema
   def custom_openapi():

@@ -416,14 +416,11 @@ repo-check-repo user_id repository env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
 
 ## Admin CLI ##
-# Remote administration via admin API
-# - dev: Uses localhost:8000 and ADMIN_API_KEY from .env.local
-# - staging/prod: Uses remote URLs and AWS Secrets Manager for auth
-#
-# Examples:
-#   just admin-subscriptions-list                    # Dev (default)
-#   just admin-subscriptions-list prod               # Production
-#   just admin-subscriptions-list staging            # Staging
+# Admin CLI for remote administration via admin API
+
+# Show subscription and customer statistics
+admin-stats environment="dev" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} stats
 
 # List all subscriptions
 admin-subscriptions-list environment="dev" status="" tier="" email="" include_canceled="" limit="100" env=_local_env:
@@ -433,29 +430,17 @@ admin-subscriptions-list environment="dev" status="" tier="" email="" include_ca
 admin-subscription-get subscription_id environment="dev" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions get {{subscription_id}}
 
-# Create new subscription
-admin-subscription-create resource_id user_id plan_name billing_interval="monthly" environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions create --resource-id {{resource_id}} --user-id {{user_id}} --plan-name {{plan_name}} --billing-interval {{billing_interval}}
-
-# Update subscription
-admin-subscription-update subscription_id environment="dev" status="" plan_name="" price="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions update {{subscription_id}} {{ if status != "" { "--status " + status } else { "" } }} {{ if plan_name != "" { "--plan-name " + plan_name } else { "" } }} {{ if price != "" { "--price " + price } else { "" } }}
-
-# View subscription audit log
-admin-subscription-audit subscription_id environment="dev" event_type="" limit="50" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions audit {{subscription_id}} {{ if event_type != "" { "--event-type " + event_type } else { "" } }} --limit {{limit}}
-
 # List all customers
 admin-customers-list environment="dev" limit="100" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} customers list --limit {{limit}}
 
-# Update customer billing settings
-admin-customer-update user_id environment="dev" invoice_billing="" billing_email="" billing_contact_name="" payment_terms="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} customers update {{user_id}} {{ if invoice_billing == "true" { "--invoice-billing" } else if invoice_billing == "false" { "--no-invoice-billing" } else { "" } }} {{ if billing_email != "" { "--billing-email " + billing_email } else { "" } }} {{ if billing_contact_name != "" { "--billing-contact-name " + billing_contact_name } else { "" } }} {{ if payment_terms != "" { "--payment-terms " + payment_terms } else { "" } }}
+# List invoices
+admin-invoices-list environment="dev" status="" user_id="" limit="100" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} invoices list {{ if status != "" { "--status " + status } else { "" } }} {{ if user_id != "" { "--user-id " + user_id } else { "" } }} --limit {{limit}}
 
-# Show subscription and customer statistics
-admin-stats environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} stats
+# Get invoice details
+admin-invoice-get invoice_id environment="dev" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} invoices get {{invoice_id}}
 
 ## Credit Admin Tools ##
 # Monthly credit allocation is automated via Celery Beat - these commands are for manual operations only

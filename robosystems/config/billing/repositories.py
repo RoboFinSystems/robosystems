@@ -29,6 +29,7 @@ class RepositoryBillingConfig:
   """Configuration for shared repository billing and rate limits."""
 
   # Repository subscription tiers (monthly pricing)
+  # NOTE: Stripe prices are auto-created from this config on first checkout
   REPOSITORY_PLANS = {
     RepositoryPlan.STARTER: {
       "name": "Starter",

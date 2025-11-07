@@ -79,6 +79,7 @@ dependencies = [
     "intuit-oauth>=1.2.0,<2.0",
     "python-quickbooks>=0.9.0,<1.0",
     "plaid-python>=34.0,<35.0",
+    "stripe>=11.1.0,<12.0",
 
     # Observability
     "opentelemetry-api>=1.35.0,<2.0",

@@ -71,13 +71,13 @@ class TestSubscriptionEdgeCases:
       return_value=plan_config,
     ):
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      mock_session.query.return_value.filter.return_value.count.return_value = 0
 
-      subscription_service.create_graph_subscription(user_id, graph_id, "free")
+      result = subscription_service.create_graph_subscription(user_id, graph_id, "free")
 
-      added_sub = mock_session.add.call_args[0][0]
-      assert added_sub.billing_customer_user_id == user_id
-      assert added_sub.resource_type == "graph"
-      assert added_sub.resource_id == graph_id
+      assert result.billing_customer_user_id == user_id
+      assert result.resource_type == "graph"
+      assert result.resource_id == graph_id
 
   def test_plan_downgrade_not_allowed(self, subscription_service, mock_session):
     """Test that plan downgrades are not allowed (conceptually)."""
@@ -102,12 +102,6 @@ class TestSubscriptionEdgeCases:
 
   def test_environment_variable_edge_cases(self):
     """Test environment variable parsing edge cases."""
-    # Test with uppercase values
-    with patch.dict("os.environ", {"BILLING_PREMIUM_PLANS_ENABLED": "TRUE"}):
-      # Should handle case-insensitive
-      # Re-import won't change the value, so test the function directly
-      assert os.getenv("BILLING_PREMIUM_PLANS_ENABLED", "false").lower() == "true"
-
     # Test with invalid values
     with patch.dict("os.environ", {"BILLING_ENABLED": "yes"}):
       # Should treat as false (not "true")
@@ -122,12 +116,14 @@ class TestSubscriptionEdgeCases:
       return_value=plan_config,
     ):
       mock_session.query.return_value.filter.return_value.first.return_value = None
+      mock_session.query.return_value.filter.return_value.count.return_value = 0
 
-      subscription_service.create_graph_subscription("user123", "graph456", "pro")
+      result = subscription_service.create_graph_subscription(
+        "user123", "graph456", "pro"
+      )
 
-      added_sub = mock_session.add.call_args[0][0]
-      assert added_sub.current_period_start is not None
-      assert added_sub.current_period_end is not None
+      assert result.current_period_start is not None
+      assert result.current_period_end is not None
 
   def test_floating_point_precision_in_billing(self, subscription_service):
     """Test handling floating point precision issues in billing calculations."""

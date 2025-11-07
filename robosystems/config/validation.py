@@ -73,6 +73,29 @@ class EnvValidator:
           elif len(str(value)) < 32:
             errors.append(f"{var_name}: Must be at least 32 characters for security")
 
+    # Billing/Stripe validation - required when billing is enabled
+    if getattr(env_config, "BILLING_ENABLED", False):
+      stripe_vars = {
+        "STRIPE_SECRET_KEY": "Stripe payment processing",
+        "STRIPE_WEBHOOK_SECRET": "Stripe webhook verification",
+      }
+      for var_name, description in stripe_vars.items():
+        value = getattr(env_config, var_name, None)
+        if not value:
+          errors.append(
+            f"{var_name}: {description} is required when BILLING_ENABLED=true"
+          )
+        elif var_name == "STRIPE_SECRET_KEY":
+          if value.startswith("sk_test_") and env_config.ENVIRONMENT == "prod":
+            errors.append(
+              f"{var_name}: Cannot use test key (sk_test_) in production environment"
+            )
+          elif not value.startswith(("sk_live_", "sk_test_")):
+            errors.append(f"{var_name}: Must be a valid Stripe secret key")
+        elif var_name == "STRIPE_WEBHOOK_SECRET":
+          if not value.startswith("whsec_"):
+            errors.append(f"{var_name}: Must be a valid Stripe webhook secret")
+
     # Variables that should be set for specific features
     feature_vars = {
       # QuickBooks integration

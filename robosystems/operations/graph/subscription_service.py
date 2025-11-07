@@ -4,23 +4,27 @@ import logging
 from typing import List
 from sqlalchemy.orm import Session
 
-from ...models.billing import BillingCustomer, BillingSubscription
+from ...models.billing import (
+  BillingCustomer,
+  BillingSubscription,
+  BillingInvoice,
+  BillingAuditLog,
+)
+from ...models.billing.audit_log import BillingEventType
 from ...models.iam.graph_credits import GraphTier
 from ...config import BillingConfig, env
 
 logger = logging.getLogger(__name__)
 
-BILLING_PREMIUM_PLANS_ENABLED = env.BILLING_PREMIUM_PLANS_ENABLED
 BILLING_ENABLED = env.BILLING_ENABLED
 ENVIRONMENT = env.ENVIRONMENT
 
 
 def get_available_plans() -> List[str]:
-  """Get list of available billing plans based on environment settings."""
-  if not BILLING_PREMIUM_PLANS_ENABLED and ENVIRONMENT == "dev":
-    return ["kuzu-standard"]
-  else:
-    return ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
+  """Get list of available billing plans from centralized config."""
+  from ...config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
+
+  return [plan["name"] for plan in DEFAULT_GRAPH_BILLING_PLANS]
 
 
 def is_payment_required() -> bool:
@@ -33,10 +37,88 @@ def is_payment_required() -> bool:
 
 
 def get_max_plan_tier() -> str:
-  """Get the maximum plan tier allowed in current environment."""
-  if not BILLING_PREMIUM_PLANS_ENABLED and ENVIRONMENT == "dev":
+  """Get the maximum plan tier from centralized config."""
+  from ...config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
+
+  if not DEFAULT_GRAPH_BILLING_PLANS:
     return "kuzu-standard"
-  return "kuzu-xlarge"
+  return DEFAULT_GRAPH_BILLING_PLANS[-1]["name"]
+
+
+def generate_subscription_invoice(
+  subscription: BillingSubscription,
+  customer: BillingCustomer,
+  description: str,
+  session: Session,
+) -> BillingInvoice:
+  """Generate an invoice for a subscription.
+
+  Creates an invoice in OPEN status immediately when a subscription is created.
+  The invoice will be paid through Stripe webhook (credit card customers) or
+  manually tracked (enterprise customers with invoice billing).
+
+  Args:
+      subscription: The subscription to invoice
+      customer: The billing customer
+      description: Line item description
+      session: Database session
+
+  Returns:
+      BillingInvoice instance in OPEN status
+  """
+  invoice = BillingInvoice.create_invoice(
+    user_id=subscription.billing_customer_user_id,
+    period_start=subscription.current_period_start,
+    period_end=subscription.current_period_end,
+    payment_terms=customer.payment_terms,
+    session=session,
+  )
+
+  invoice.add_line_item(
+    subscription_id=subscription.id,
+    resource_type=subscription.resource_type,
+    resource_id=subscription.resource_id,
+    description=description,
+    amount_cents=subscription.base_price_cents,
+    session=session,
+  )
+
+  invoice.finalize(session)
+
+  BillingAuditLog.log_event(
+    session=session,
+    event_type=BillingEventType.INVOICE_GENERATED,
+    billing_customer_user_id=subscription.billing_customer_user_id,
+    subscription_id=subscription.id,
+    invoice_id=invoice.id,
+    description=f"Invoice {invoice.invoice_number} generated for subscription {subscription.id}",
+    actor_type="system",
+    event_data={
+      "invoice_number": invoice.invoice_number,
+      "amount_cents": subscription.base_price_cents,
+      "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+      "payment_terms": customer.payment_terms,
+      "resource_type": subscription.resource_type,
+      "resource_id": subscription.resource_id,
+      "plan_name": subscription.plan_name,
+    },
+  )
+
+  logger.info(
+    f"Generated invoice {invoice.invoice_number} for subscription {subscription.id}",
+    extra={
+      "invoice_id": invoice.id,
+      "invoice_number": invoice.invoice_number,
+      "subscription_id": subscription.id,
+      "user_id": subscription.billing_customer_user_id,
+      "amount_cents": subscription.base_price_cents,
+      "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
+      "payment_terms": customer.payment_terms,
+      "invoice_billing_enabled": customer.invoice_billing_enabled,
+    },
+  )
+
+  return invoice
 
 
 class GraphSubscriptionService:
@@ -82,7 +164,7 @@ class GraphSubscriptionService:
       logger.warning(f"Subscription already exists for graph {graph_id}")
       return existing
 
-    BillingCustomer.get_or_create(user_id, self.session)
+    customer = BillingCustomer.get_or_create(user_id, self.session)
 
     subscription = BillingSubscription.create_subscription(
       user_id=user_id,
@@ -94,7 +176,44 @@ class GraphSubscriptionService:
       billing_interval="monthly",
     )
 
+    BillingAuditLog.log_event(
+      session=self.session,
+      event_type=BillingEventType.SUBSCRIPTION_CREATED,
+      billing_customer_user_id=user_id,
+      subscription_id=subscription.id,
+      description=f"Created {plan_name} subscription for graph {graph_id}",
+      actor_type="user",
+      actor_user_id=user_id,
+      event_data={
+        "resource_type": "graph",
+        "resource_id": graph_id,
+        "plan_name": plan_name,
+        "base_price_cents": plan_config["base_price_cents"],
+        "graph_tier": tier.value,
+      },
+    )
+
     subscription.activate(self.session)
+
+    BillingAuditLog.log_event(
+      session=self.session,
+      event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
+      billing_customer_user_id=user_id,
+      subscription_id=subscription.id,
+      description=f"Activated subscription for graph {graph_id}",
+      actor_type="system",
+      event_data={
+        "current_period_start": subscription.current_period_start.isoformat(),
+        "current_period_end": subscription.current_period_end.isoformat(),
+      },
+    )
+
+    generate_subscription_invoice(
+      subscription=subscription,
+      customer=customer,
+      description=f"Graph Database Subscription - {plan_name}",
+      session=self.session,
+    )
 
     logger.info(
       f"Created billing subscription for graph {graph_id} with plan {plan_name}",
