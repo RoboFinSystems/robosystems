@@ -136,8 +136,17 @@ async def get_graph_limits(
 
     # Get graph information if it exists
     graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
-    # Default to kuzu-standard if graph doesn't exist (shouldn't happen in practice)
-    graph_tier = graph.graph_tier if graph else "kuzu-standard"
+
+    # Determine graph tier:
+    # - User graphs: Use tier from database
+    # - Shared repositories: Use kuzu-shared tier
+    # - Fallback: kuzu-standard (shouldn't happen in practice)
+    if graph:
+      graph_tier = graph.graph_tier
+    elif MultiTenantUtils.is_shared_repository(graph_id):
+      graph_tier = "kuzu-shared"
+    else:
+      graph_tier = "kuzu-standard"
 
     # Get storage information (based on graph tier)
     max_storage_gb = TierConfig.get_storage_limit_gb(graph_tier)

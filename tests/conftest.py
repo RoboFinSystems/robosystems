@@ -110,7 +110,7 @@ def client(test_db):
     patch("robosystems.database.session", test_db),
     patch("robosystems.middleware.auth.dependencies.session", test_db),
     patch("robosystems.middleware.auth.utils.session", test_db),
-    patch("robosystems.routers.user.user.session", test_db),
+    patch("robosystems.routers.user.api_keys.session", test_db),
   ):
     client = TestClient(app)
     yield client

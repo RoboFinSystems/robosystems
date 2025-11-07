@@ -1,19 +1,21 @@
 """
 User management and profile endpoints.
 
-Provides user profile management and usage limits functionality.
+Provides user profile management, security, and usage limits functionality.
 """
 
 from fastapi import APIRouter
 
-from .user import router as user_router
+from .main import router as main_router
+from .password import router as password_router
+from .api_keys import router as api_keys_router
 from .limits import router as limits_router
 
-# Create composite router
 router = APIRouter()
 
-# Include sub-routers
-router.include_router(user_router)
-router.include_router(limits_router, prefix="/user/limits")
+router.include_router(main_router)
+router.include_router(password_router)
+router.include_router(api_keys_router)
+router.include_router(limits_router)
 
 __all__ = ["router"]

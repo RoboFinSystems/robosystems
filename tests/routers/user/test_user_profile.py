@@ -160,7 +160,7 @@ class TestUserProfile:
     # Reset the dependency overrides
     app.dependency_overrides = {}
 
-  @patch("robosystems.routers.user.user.get_endpoint_metrics")
+  @patch("robosystems.routers.user.main.get_endpoint_metrics")
   @patch("robosystems.security.audit_logger.SecurityAuditLogger.log_security_event")
   def test_update_user_profile_success(
     self,
@@ -625,7 +625,7 @@ class TestUserAPIKeys:
     update_data = {"name": "Updated API Key Name", "description": "Updated description"}
 
     # Mock the database session save
-    with patch("robosystems.routers.user.user.session") as mock_session:
+    with patch("robosystems.routers.user.api_keys.session") as mock_session:
       # Update mock API key attributes
       def save_side_effect():
         mock_api_key.name = update_data["name"]
@@ -672,7 +672,7 @@ class TestUserAPIKeys:
     mock_get_by_user_id.return_value = client_with_api_keys.mock_user.api_keys
 
     # Mock the database session and deactivate method
-    with patch("robosystems.routers.user.user.session"):
+    with patch("robosystems.routers.user.api_keys.session"):
       with patch.object(mock_api_key, "deactivate") as mock_deactivate:
         response = client_with_api_keys.delete(f"/v1/user/api-keys/{mock_api_key.id}")
 
@@ -762,7 +762,7 @@ class TestUserPasswordUpdate:
     app.dependency_overrides = {}
 
   @patch("robosystems.models.iam.User.get_by_id")
-  @patch("robosystems.routers.user.user.session")
+  @patch("robosystems.routers.user.password.session")
   def test_update_password_success(
     self, mock_session, mock_get_by_id, client_with_password_user: TestClient
   ):
@@ -794,7 +794,7 @@ class TestUserPasswordUpdate:
     mock_session.commit.assert_called_once()
 
   @patch("robosystems.models.iam.User.get_by_id")
-  @patch("robosystems.routers.user.user.session")
+  @patch("robosystems.routers.user.password.session")
   def test_update_password_wrong_current(
     self, mock_session, mock_get_by_id, client_with_password_user: TestClient
   ):
