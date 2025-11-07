@@ -1,10 +1,10 @@
 """Admin webhook handlers for payment providers."""
 
-from fastapi import APIRouter, Request, HTTPException, status
+from fastapi import APIRouter, Request, HTTPException, status, Depends
 from sqlalchemy.orm import Session
 
 from ...database import get_db_session
-from ...models.billing import BillingCustomer, BillingSubscription
+from ...models.billing import BillingCustomer, BillingSubscription, BillingAuditLog
 from ...operations.billing.payment_provider import get_payment_provider
 from ...logger import get_logger
 
@@ -33,10 +33,10 @@ through Stripe's webhook signature verification (verify_webhook).
 Webhooks are verified using Stripe signature before processing.""",
   operation_id="handleStripeWebhook",
 )
-async def handle_stripe_webhook(request: Request):
+async def handle_stripe_webhook(
+  request: Request, db: Session = Depends(get_db_session)
+):
   """Handle Stripe webhook events."""
-  db: Session = next(get_db_session())
-
   try:
     payload = await request.body()
     signature = request.headers.get("stripe-signature")
@@ -54,12 +54,20 @@ async def handle_stripe_webhook(request: Request):
 
     event_type = event.get("type")
     event_data = event.get("data", {}).get("object", {})
+    event_id = event.get("id")
+
+    if BillingAuditLog.is_webhook_processed(event_id, "stripe", db):
+      logger.info(
+        f"Webhook event already processed: {event_id}",
+        extra={"event_id": event_id, "event_type": event_type},
+      )
+      return {"status": "success", "message": "Event already processed"}
 
     logger.info(
       f"Processing Stripe webhook: {event_type}",
       extra={
         "event_type": event_type,
-        "event_id": event.get("id"),
+        "event_id": event_id,
       },
     )
 
@@ -81,6 +89,10 @@ async def handle_stripe_webhook(request: Request):
     else:
       logger.info(f"Unhandled webhook event type: {event_type}")
 
+    BillingAuditLog.mark_webhook_processed(
+      event_id, "stripe", event_type, event_data, db
+    )
+
     return {"status": "success"}
 
   except HTTPException:
@@ -88,8 +100,6 @@ async def handle_stripe_webhook(request: Request):
   except Exception as e:
     logger.error(f"Failed to process webhook: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail="Failed to process webhook")
-  finally:
-    db.close()
 
 
 async def handle_checkout_completed(session_data: dict, db: Session):
@@ -97,12 +107,21 @@ async def handle_checkout_completed(session_data: dict, db: Session):
   session_id = session_data.get("id")
   customer_id = session_data.get("customer")
   payment_status = session_data.get("payment_status")
+  stripe_subscription_id = session_data.get("subscription")
+  metadata = session_data.get("metadata", {})
 
   logger.info(
     f"Checkout completed: session_id={session_id}, payment_status={payment_status}"
   )
 
   subscription = BillingSubscription.get_by_provider_subscription_id(session_id, db)
+
+  if not subscription and metadata.get("subscription_id"):
+    subscription = (
+      db.query(BillingSubscription)
+      .filter(BillingSubscription.id == metadata["subscription_id"])
+      .first()
+    )
 
   if not subscription:
     logger.warning(f"Subscription not found for checkout session: {session_id}")
@@ -120,6 +139,10 @@ async def handle_checkout_completed(session_data: dict, db: Session):
     if not customer.stripe_customer_id:
       customer.stripe_customer_id = customer_id
 
+    if stripe_subscription_id:
+      subscription.stripe_subscription_id = stripe_subscription_id
+      subscription.provider_subscription_id = stripe_subscription_id
+
     subscription.status = "provisioning"
     subscription.provider_customer_id = customer_id
 
@@ -130,6 +153,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
       extra={
         "subscription_id": subscription.id,
         "session_id": session_id,
+        "stripe_subscription_id": stripe_subscription_id,
       },
     )
 
@@ -291,6 +315,8 @@ async def trigger_resource_provisioning(subscription: BillingSubscription, db: S
         graph_config=resource_config,
       )
 
+      if not subscription.subscription_metadata:
+        subscription.subscription_metadata = {}
       subscription.subscription_metadata["operation_id"] = result.id  # type: ignore[index]
       subscription.status = "provisioning"
       db.commit()
@@ -306,6 +332,8 @@ async def trigger_resource_provisioning(subscription: BillingSubscription, db: S
         repository_name=repository_name,
       )
 
+      if not subscription.subscription_metadata:
+        subscription.subscription_metadata = {}
       subscription.subscription_metadata["operation_id"] = result.id  # type: ignore[index]
       subscription.resource_id = repository_name
       subscription.status = "active"
@@ -322,5 +350,7 @@ async def trigger_resource_provisioning(subscription: BillingSubscription, db: S
   except Exception as e:
     logger.error(f"Failed to trigger provisioning: {e}", exc_info=True)
     subscription.status = "failed"
+    if not subscription.subscription_metadata:
+      subscription.subscription_metadata = {}
     subscription.subscription_metadata["error"] = str(e)  # type: ignore[index]
     db.commit()

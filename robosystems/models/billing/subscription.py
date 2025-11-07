@@ -53,7 +53,7 @@ class BillingSubscription(Base):
   billing_customer_user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
   resource_type = Column(String, nullable=False)
-  resource_id = Column(String, nullable=False)
+  resource_id = Column(String, nullable=True)
 
   plan_name = Column(String, nullable=False)
   billing_interval = Column(String, default="monthly", nullable=False)

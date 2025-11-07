@@ -51,10 +51,11 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 400
     assert "Invalid webhook signature" in response.json()["detail"]
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_checkout_completed")
   def test_webhook_checkout_completed_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling checkout.session.completed event."""
     mock_provider = Mock()
@@ -66,6 +67,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -76,11 +78,14 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     assert response.json() == {"status": "success"}
     mock_handle.assert_called_once()
+    mock_audit_log.is_webhook_processed.assert_called_once()
+    mock_audit_log.mark_webhook_processed.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_payment_succeeded")
   def test_webhook_payment_succeeded_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling invoice.payment_succeeded event."""
     mock_provider = Mock()
@@ -92,6 +97,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
