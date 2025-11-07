@@ -67,14 +67,6 @@ MAIN_API_TAGS = [
     "description": "👤 User management - Profile, settings, and account information",
   },
   {
-    "name": "User Limits",
-    "description": "🚧 User limits - Rate limits and usage restrictions",
-  },
-  {
-    "name": "User Analytics",
-    "description": "📈 User analytics - Usage patterns and activity metrics",
-  },
-  {
     "name": "Operations",
     "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
   },
