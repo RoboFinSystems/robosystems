@@ -17,7 +17,6 @@ from robosystems.models.iam.user_graph import UserGraph  # noqa: F401
 from robosystems.models.iam.user_limits import UserLimits  # noqa: F401
 from robosystems.models.iam.connection_credentials import ConnectionCredentials  # noqa: F401
 from robosystems.models.iam.graph_backup import GraphBackup  # noqa: F401
-from robosystems.models.iam.user_usage_tracking import UserUsageTracking  # noqa: F401
 from robosystems.models.iam.graph_usage_tracking import GraphUsageTracking  # noqa: F401
 from robosystems.models.iam.graph import Graph  # noqa: F401
 from robosystems.models.iam.graph_credits import GraphCredits, GraphCreditTransaction  # noqa: F401

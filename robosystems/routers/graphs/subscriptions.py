@@ -30,7 +30,7 @@ from ...config import BillingConfig
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-  tags=["Graph Subscriptions"],
+  tags=["Subscriptions"],
   dependencies=[Depends(get_current_user)],
 )
 

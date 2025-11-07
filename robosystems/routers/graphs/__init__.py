@@ -2,13 +2,13 @@
 Graph management routers.
 
 This module contains routers for graph database management operations
-including creation, listing, selection, backup, analytics, and other
+including creation, listing, selection, backup, usage analytics, and other
 graph-level administrative functions.
 """
 
 from .main import router as main_router
 from .backups import router as backups_router
-from .analytics import router as analytics_router
+from .usage import router as usage_router
 from .query import router as query_router
 from .schema import router as schema_router
 from .connections import router as connections_router
@@ -23,7 +23,7 @@ from .tables import router as tables_router
 __all__ = [
   "main_router",
   "backups_router",
-  "analytics_router",
+  "usage_router",
   "query_router",
   "schema_router",
   "connections_router",

@@ -1,6 +1,6 @@
 """Graph query API models."""
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
 
@@ -21,11 +21,60 @@ class GraphMetricsResponse(BaseModel):
   health_status: Dict[str, Any] = Field(..., description="Database health information")
 
 
+class StorageSummary(BaseModel):
+  """Storage usage summary."""
+
+  graph_tier: str = Field(..., description="Subscription tier")
+  avg_storage_gb: float = Field(..., description="Average storage in GB")
+  max_storage_gb: float = Field(..., description="Peak storage in GB")
+  min_storage_gb: float = Field(..., description="Minimum storage in GB")
+  total_gb_hours: float = Field(..., description="Total GB-hours for billing")
+  measurement_count: int = Field(..., description="Number of measurements taken")
+
+
+class CreditSummary(BaseModel):
+  """Credit consumption summary."""
+
+  graph_tier: str = Field(..., description="Subscription tier")
+  total_credits_consumed: float = Field(..., description="Total credits consumed")
+  total_base_cost: float = Field(..., description="Total base cost before multipliers")
+  operation_breakdown: Dict[str, Any] = Field(
+    ..., description="Credit usage by operation type"
+  )
+  cached_operations: int = Field(..., description="Number of cached operations")
+  billable_operations: int = Field(..., description="Number of billable operations")
+  transaction_count: int = Field(..., description="Total transaction count")
+
+
+class PerformanceInsights(BaseModel):
+  """Performance analytics."""
+
+  analysis_period_days: int = Field(..., description="Analysis period in days")
+  total_operations: int = Field(..., description="Total operations analyzed")
+  operation_stats: Dict[str, Any] = Field(
+    ..., description="Performance stats by operation type"
+  )
+  slow_queries: List[Dict[str, Any]] = Field(
+    ..., description="Top slow queries (over 5 seconds)"
+  )
+  performance_score: int = Field(..., description="Performance score (0-100)")
+
+
 class GraphUsageResponse(BaseModel):
   """Response model for graph usage statistics."""
 
   graph_id: str = Field(..., description="Graph database identifier")
-  storage_usage: Dict[str, Any] = Field(..., description="Storage usage information")
-  query_statistics: Dict[str, Any] = Field(..., description="Query statistics")
-  recent_activity: Dict[str, Any] = Field(..., description="Recent activity summary")
+  time_range: str = Field(..., description="Time range for usage data")
+  storage_summary: Optional[StorageSummary] = Field(
+    None, description="Storage usage summary"
+  )
+  credit_summary: Optional[CreditSummary] = Field(
+    None, description="Credit consumption summary"
+  )
+  performance_insights: Optional[PerformanceInsights] = Field(
+    None, description="Performance analytics"
+  )
+  recent_events: List[Dict[str, Any]] = Field(
+    default_factory=list, description="Recent usage events"
+  )
   timestamp: str = Field(..., description="Usage collection timestamp")

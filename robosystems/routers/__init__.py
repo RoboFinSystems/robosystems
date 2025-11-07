@@ -14,7 +14,7 @@ from .status import router as status_router
 from .graphs import (
   main_router as graph_router,
   backups_router,
-  analytics_router,
+  usage_router,
   query_router,
   schema_router,
   credits_router,
@@ -37,7 +37,7 @@ router.include_router(connections_router, prefix="/connections")
 router.include_router(agent_router, prefix="/agent")
 router.include_router(mcp_router, prefix="/mcp")
 router.include_router(backups_router, prefix="/backups")
-router.include_router(analytics_router, prefix="/analytics")
+router.include_router(usage_router, prefix="/analytics")
 router.include_router(query_router)  # No prefix - handled in the query module itself
 router.include_router(schema_router)  # No prefix - handled in the schema module itself
 router.include_router(credits_router)  # Already has /credits prefix

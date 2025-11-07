@@ -584,11 +584,6 @@ async def execute_cypher_query(
           },
         )
 
-        # Track query execution for analytics
-        from robosystems.routers.graphs.analytics import track_query_execution
-
-        track_query_execution(graph_id, execution_time)
-
         # Return complete result
         return CypherQueryResponse(
           success=True,
