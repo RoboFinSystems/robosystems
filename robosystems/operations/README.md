@@ -44,7 +44,7 @@ High-level business operations for graph database management:
 
 - **`GenericGraphService`** - Core graph CRUD operations
 - **`EntityGraphService`** - Entity-specific graph workflows
-- **`GraphSubscriptionService`** - Graph subscription lifecycle management
+- **`GraphSubscriptionService`** - Billing subscription creation for graphs (uses billing namespace)
 - **`CreditService`** - Credit-based billing and consumption tracking
 - **`GraphPricingService`** - Dynamic pricing calculations
 - **`GraphMetricsService`** - Analytics and performance metrics
@@ -126,9 +126,9 @@ async def create_entity_with_data(user_id: str, entity_data: dict):
     graph_service = EntityGraphService()
     graph_id = await graph_service.create_entity_graph(entity_data)
 
-    # 2. Set up subscriptions
-    subscription_service = GraphSubscriptionService(user_id, graph_id)
-    await subscription_service.initialize_default_subscription()
+    # 2. Set up billing subscription (done automatically by Celery task)
+    # The create_graph Celery task now handles subscription creation
+    # using GraphSubscriptionService with the billing namespace
 
     # 3. Initialize credit allocation
     credit_service = CreditService(user_id, graph_id)

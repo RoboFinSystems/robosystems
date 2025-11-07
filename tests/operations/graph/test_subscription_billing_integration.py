@@ -8,11 +8,10 @@ from robosystems.operations.graph.subscription_service import GraphSubscriptionS
 from robosystems.models.iam import (
   User,
   UserLimits,
-  GraphSubscription,
-  SubscriptionStatus,
   UserGraph,
   GraphUsageTracking,
 )
+from robosystems.models.billing import BillingSubscription, SubscriptionStatus
 
 
 class TestSubscriptionBillingIntegration:
@@ -145,7 +144,7 @@ class TestSubscriptionBillingIntegration:
       # Mock existing subscriptions
       subscriptions = []
       for graph in graphs:
-        sub = Mock(spec=GraphSubscription)
+        sub = Mock(spec=BillingSubscription)
         sub.user_id = user.id
         sub.graph_id = graph.graph_id
         sub.plan_id = pro_plan.id

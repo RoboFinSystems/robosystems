@@ -38,7 +38,7 @@ class CreditService:
 
     # Warm up operation cost cache on initialization
     try:
-      from ...middleware.credits.cache import credit_cache
+      from ...middleware.billing.cache import credit_cache
 
       credit_cache.warmup_operation_costs(CREDIT_COSTS)
     except Exception as e:
@@ -156,7 +156,7 @@ class CreditService:
       )
 
     # Try to get cached balance first
-    from ...middleware.credits.cache import credit_cache
+    from ...middleware.billing.cache import credit_cache
 
     cached_data = credit_cache.get_cached_graph_credit_balance(graph_id)
 
@@ -196,7 +196,7 @@ class CreditService:
     if consumption_result["success"]:
       # Update cache with new balance from atomic operation
       try:
-        from ...middleware.credits.cache import credit_cache
+        from ...middleware.billing.cache import credit_cache
 
         # Invalidate old cache and set new one with updated balance
         credit_cache.invalidate_graph_credit_balance(graph_id)
@@ -226,7 +226,7 @@ class CreditService:
     else:
       # Invalidate cache on failure to ensure consistency
       try:
-        from ...middleware.credits.cache import credit_cache
+        from ...middleware.billing.cache import credit_cache
 
         credit_cache.invalidate_graph_credit_balance(graph_id)
       except Exception as e:
@@ -246,7 +246,7 @@ class CreditService:
   def get_credit_summary(self, graph_id: str) -> Dict[str, Any]:
     """Get comprehensive credit summary for a graph."""
     # Try cache first
-    from ...middleware.credits.cache import credit_cache
+    from ...middleware.billing.cache import credit_cache
 
     cached_summary = credit_cache.get_cached_credit_summary(graph_id)
     if cached_summary:
@@ -261,7 +261,7 @@ class CreditService:
 
     # Cache the summary
     try:
-      from ...middleware.credits.cache import credit_cache
+      from ...middleware.billing.cache import credit_cache
 
       credit_cache.cache_credit_summary(graph_id, summary)
     except Exception as e:
@@ -282,7 +282,7 @@ class CreditService:
 
       # Invalidate cache after allocation
       try:
-        from ...middleware.credits.cache import credit_cache
+        from ...middleware.billing.cache import credit_cache
 
         credit_cache.invalidate_graph_credit_balance(graph_id)
       except Exception as e:
@@ -334,7 +334,7 @@ class CreditService:
 
     # Invalidate cache after bonus credits
     try:
-      from ...middleware.credits.cache import credit_cache
+      from ...middleware.billing.cache import credit_cache
 
       credit_cache.invalidate_graph_credit_balance(graph_id)
     except Exception as e:
@@ -422,7 +422,7 @@ class CreditService:
 
     # Original graph credit logic for regular graphs
     # Try cache first for quick balance check
-    from ...middleware.credits.cache import credit_cache
+    from ...middleware.billing.cache import credit_cache
 
     cached_data = credit_cache.get_cached_graph_credit_balance(graph_id)
 
@@ -455,7 +455,7 @@ class CreditService:
 
     # Cache the balance for future checks
     try:
-      from ...middleware.credits.cache import credit_cache
+      from ...middleware.billing.cache import credit_cache
 
       # graph_tier is always a string from the property
       graph_tier_value = credits.graph_tier
@@ -631,7 +631,7 @@ class CreditService:
 
     # Invalidate all credit caches after bulk allocation
     try:
-      from ...middleware.credits.cache import credit_cache
+      from ...middleware.billing.cache import credit_cache
 
       credit_cache.invalidate_all_graph_credits()
     except Exception as e:
@@ -1090,10 +1090,10 @@ class CreditService:
     metadata: Optional[Dict[str, Any]] = None,
   ) -> Dict[str, Any]:
     """
-    Consume credits for daily storage usage.
+    Consume credits for daily storage overage.
 
-    Storage charges are applied daily and can result in negative balances.
-    This is expected behavior - users cannot "turn off" storage.
+    Only charges for storage ABOVE the included limit in the subscription.
+    Storage charges can result in negative balances - users cannot "turn off" storage.
 
     Args:
         graph_id: Graph identifier
@@ -1112,22 +1112,58 @@ class CreditService:
         "credits_consumed": 0,
       }
 
-    # Calculate storage cost (flat pricing - no tier multiplier)
-    actual_cost = get_operation_cost("storage_daily") * storage_gb
+    # Get subscription plan to find included storage
+    graph_tier = (
+      credits.graph_tier
+      if hasattr(credits.graph_tier, "value")
+      else str(credits.graph_tier)
+    )
+    plan_config = BillingConfig.get_subscription_plan(graph_tier)
+
+    if not plan_config:
+      logger.warning(
+        f"No billing plan found for tier {graph_tier}, treating all storage as overage"
+      )
+      included_gb = Decimal("0")
+    else:
+      included_gb = Decimal(str(plan_config.get("included_gb", 0)))
+
+    # Calculate overage (only charge for storage above included limit)
+    overage_gb = max(Decimal("0"), storage_gb - included_gb)
+
+    # If no overage, no charges
+    if overage_gb <= 0:
+      return {
+        "success": True,
+        "credits_consumed": 0,
+        "overage_gb": 0,
+        "included_gb": float(included_gb),
+        "total_storage_gb": float(storage_gb),
+        "remaining_balance": float(credits.current_balance),
+        "went_negative": False,
+        "storage_charge": True,
+        "message": "Storage within included limit - no charges applied",
+      }
+
+    # Calculate overage cost (10 credits per GB per day)
+    overage_cost = get_operation_cost("storage_daily") * overage_gb
 
     # Storage charges are always applied, even if it results in negative balance
     old_balance = credits.current_balance
-    credits.current_balance -= actual_cost
+    credits.current_balance -= overage_cost
     credits.updated_at = datetime.now(timezone.utc)
 
     # Record transaction
     transaction_metadata = {
-      "storage_gb": str(storage_gb),
-      "flat_storage_cost": str(actual_cost),
-      "storage_multiplier": "1.0",  # Always 1.0 for flat pricing
+      "total_storage_gb": str(storage_gb),
+      "included_gb": str(included_gb),
+      "overage_gb": str(overage_gb),
+      "overage_cost": str(overage_cost),
+      "credits_per_gb_day": "10",
       "old_balance": str(old_balance),
       "new_balance": str(credits.current_balance),
       "allows_negative": True,
+      "graph_tier": graph_tier,
     }
     if metadata:
       transaction_metadata.update(metadata)
@@ -1135,8 +1171,8 @@ class CreditService:
     GraphCreditTransaction.create_transaction(
       graph_credits_id=credits.id,
       transaction_type=CreditTransactionType.CONSUMPTION,
-      amount=-actual_cost,
-      description=f"Daily storage charge: {storage_gb} GB",
+      amount=-overage_cost,
+      description=f"Daily storage overage: {overage_gb} GB (total: {storage_gb} GB, included: {included_gb} GB)",
       metadata=transaction_metadata,
       session=self.session,
     )
@@ -1145,9 +1181,9 @@ class CreditService:
 
     # Update cache with new balance
     try:
-      from ...middleware.credits.cache import credit_cache
+      from ...middleware.billing.cache import credit_cache
 
-      credit_cache.update_cached_balance_after_consumption(graph_id, actual_cost)
+      credit_cache.update_cached_balance_after_consumption(graph_id, overage_cost)
     except Exception as e:
       logger.warning(f"Failed to update credit cache after storage consumption: {e}")
 
@@ -1156,10 +1192,11 @@ class CreditService:
 
     return {
       "success": True,
-      "credits_consumed": float(actual_cost),
-      "flat_storage_cost": float(actual_cost),
-      "storage_multiplier": 1.0,  # Always 1.0 for flat pricing
-      "storage_gb": float(storage_gb),
+      "credits_consumed": float(overage_cost),
+      "overage_gb": float(overage_gb),
+      "included_gb": float(included_gb),
+      "total_storage_gb": float(storage_gb),
+      "credits_per_gb_day": 10,
       "remaining_balance": float(credits.current_balance),
       "went_negative": went_negative,
       "old_balance": float(old_balance),
@@ -1186,7 +1223,7 @@ def get_operation_cost(operation_type: str) -> Decimal:
   """Get the base credit cost for an operation type."""
   # Try cache first
   try:
-    from ...middleware.credits.cache import credit_cache
+    from ...middleware.billing.cache import credit_cache
 
     cached_cost = credit_cache.get_cached_operation_cost(operation_type)
     if cached_cost is not None:
@@ -1200,7 +1237,7 @@ def get_operation_cost(operation_type: str) -> Decimal:
 
   # Cache the cost
   try:
-    from ...middleware.credits.cache import credit_cache
+    from ...middleware.billing.cache import credit_cache
 
     credit_cache.cache_operation_cost(operation_type, cost)
   except Exception as e:

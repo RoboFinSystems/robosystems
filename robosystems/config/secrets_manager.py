@@ -127,7 +127,11 @@ class SecretsManager:
 
       # Parse the secret string
       if "SecretString" in response:
-        secret_data = json.loads(response["SecretString"])
+        # Special case: admin key is stored as raw string, not JSON
+        if secret_type == "admin":
+          secret_data = {"ADMIN_API_KEY": response["SecretString"]}
+        else:
+          secret_data = json.loads(response["SecretString"])
       else:
         # Handle binary secrets (not expected for our use case)
         raise ValueError(f"Binary secret not supported for {secret_id}")
@@ -219,6 +223,20 @@ class SecretsManager:
 
     secrets = self.get_secret("postgres")
     return secrets.get("DATABASE_URL", "")
+
+  def get_admin_key(self) -> str:
+    """
+    Get the admin API key from secrets.
+
+    Returns:
+        Admin API key string.
+    """
+    if self.environment not in ["prod", "staging"]:
+      # For local dev, optionally use env var
+      return os.getenv("ADMIN_API_KEY", "")
+
+    secrets = self.get_secret("admin")
+    return secrets.get("ADMIN_API_KEY", "")
 
   def get_s3_credentials(self) -> Dict[str, str]:
     """
@@ -356,6 +374,8 @@ SECRET_MAPPINGS = {
   "AGENT_POST_ENABLED": (None, "AGENT_POST_ENABLED"),
   # Runtime configuration
   "USER_GRAPHS_DEFAULT_LIMIT": (None, "USER_GRAPHS_DEFAULT_LIMIT"),
+  # Admin API key (stored as raw string, wrapped in dict by get_secret)
+  "ADMIN_API_KEY": ("admin", "ADMIN_API_KEY"),
 }
 
 

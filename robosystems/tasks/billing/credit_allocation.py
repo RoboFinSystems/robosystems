@@ -1,8 +1,9 @@
 """
-Graph credits allocation tasks.
+Graph credits health check and utility tasks.
 
-This module handles automated monthly credit allocation for user graphs,
-complementing the shared repository credit allocation system.
+This module provides health monitoring and utility functions for the graph
+credit system. Monthly credit allocation is now handled by monthly_credit_reset.py,
+which includes overage processing before allocation.
 """
 
 import logging
@@ -14,7 +15,6 @@ from sqlalchemy import func
 
 from ...database import session as SessionLocal
 from ...models.iam.graph_credits import GraphCredits
-from ...operations.graph.credit_service import CreditService
 
 logger = logging.getLogger(__name__)
 
@@ -22,39 +22,6 @@ logger = logging.getLogger(__name__)
 def get_celery_db_session():
   """Get a database session for Celery tasks."""
   return SessionLocal()
-
-
-@shared_task(name="allocate_monthly_graph_credits")
-def allocate_monthly_graph_credits() -> Dict[str, Any]:
-  """
-  Allocate monthly credits for all user graphs that are due.
-
-  This task runs monthly to ensure all active graphs receive their
-  credit allocations according to their subscription plans.
-
-  Returns:
-      Summary of allocation results
-  """
-  logger.info("Starting monthly graph credit allocation")
-
-  db = get_celery_db_session()
-  try:
-    credit_service = CreditService(db)
-    result = credit_service.bulk_allocate_monthly_credits()
-
-    logger.info(
-      f"Graph credit allocation completed: "
-      f"{result['allocated_count']} graphs allocated, "
-      f"{result['total_credits_allocated']} total credits"
-    )
-
-    return result
-
-  except Exception as e:
-    logger.error(f"Failed to allocate graph credits: {e}")
-    raise
-  finally:
-    db.close()
 
 
 @shared_task(name="allocate_graph_credits_for_user")

@@ -181,3 +181,40 @@ class CancellationResponse(BaseModel):
   message: str = Field(..., description="Cancellation confirmation message")
   subscription_id: str = Field(..., description="ID of the cancelled subscription")
   cancelled_at: str = Field(..., description="Cancellation timestamp (ISO format)")
+
+
+class GraphSubscriptionResponse(BaseModel):
+  """Response for graph or repository subscription details."""
+
+  id: str = Field(..., description="Subscription ID")
+  resource_type: str = Field(..., description="Resource type (graph or repository)")
+  resource_id: str = Field(..., description="Resource identifier")
+  plan_name: str = Field(..., description="Current plan name")
+  billing_interval: str = Field(..., description="Billing interval")
+  status: str = Field(..., description="Subscription status")
+  base_price_cents: int = Field(..., description="Base price in cents")
+  current_period_start: str | None = Field(
+    None, description="Current billing period start"
+  )
+  current_period_end: str | None = Field(None, description="Current billing period end")
+  started_at: str | None = Field(None, description="Subscription start date")
+  canceled_at: str | None = Field(None, description="Cancellation date")
+  created_at: str = Field(..., description="Creation timestamp")
+
+
+class CreateRepositorySubscriptionRequest(BaseModel):
+  """Request to create a repository subscription."""
+
+  plan_name: str = Field(
+    ...,
+    description="Plan name for the repository subscription",
+    examples=["sec-starter"],
+  )
+
+
+class UpgradeSubscriptionRequest(BaseModel):
+  """Request to upgrade a subscription."""
+
+  new_plan_name: str = Field(
+    ..., description="New plan name to upgrade to", examples=["sec-professional"]
+  )

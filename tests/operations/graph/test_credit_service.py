@@ -29,7 +29,7 @@ class TestCreditService:
   def credit_service(self, mock_session):
     """Create a CreditService instance with mocked session."""
     # Mock the credit_cache at the module level where it's imported
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       # Setup default mock behavior
       mock_cache.warmup_operation_costs.return_value = None
       mock_cache.get_cached_graph_credit_balance.return_value = None
@@ -118,7 +118,7 @@ class TestCreditService:
   ):
     """Test successful AI credit consumption."""
     # Mock cache import
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       # Setup mock cache to return cached data
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
@@ -178,7 +178,7 @@ class TestCreditService:
   ):
     """Test that included operations (queries, imports, etc.) don't consume credits."""
     # Mock cache import
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       # Setup mock cache to return cached data
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
@@ -226,7 +226,7 @@ class TestCreditService:
     mock_credits.graph_tier = GraphTier.KUZU_STANDARD
 
     # Mock cache import
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       # Setup mock cache to return low balance
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("5.0"),
@@ -261,7 +261,7 @@ class TestCreditService:
   ):
     """Test checking credit balance."""
     # Mock cache import
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       # Setup mock cache
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
@@ -280,7 +280,7 @@ class TestCreditService:
   def test_get_credit_summary(self, credit_service, mock_session, sample_graph_credits):
     """Test getting credit summary."""
     # Mock cache import
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       # Setup mock cache to return None (cache miss)
       mock_cache.get_cached_credit_summary.return_value = None
 
@@ -329,7 +329,7 @@ class TestCreditService:
       sample_graph_credits.allocate_monthly_credits = Mock(return_value=True)
 
       # Mock cache import
-      with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+      with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
         # Allocate credits
         result = credit_service.allocate_monthly_credits("graph123")
 
@@ -349,7 +349,7 @@ class TestCreditService:
     """Test getting operation costs."""
     # Clear cache to ensure we get fresh values from configuration
     try:
-      from robosystems.middleware.credits.cache import credit_cache
+      from robosystems.middleware.billing.cache import credit_cache
 
       credit_cache._redis.flushdb()
     except Exception:
@@ -397,7 +397,7 @@ class TestCreditService:
     """Test getting credit summary with cached value."""
     # Mock the cache module's get_cached_credit_summary function
     with patch(
-      "robosystems.middleware.credits.cache.credit_cache.get_cached_credit_summary"
+      "robosystems.middleware.billing.cache.credit_cache.get_cached_credit_summary"
     ) as mock_get_summary:
       mock_get_summary.return_value = {
         "current_balance": 500.0,
@@ -428,11 +428,11 @@ class TestCreditService:
     )
 
     with patch(
-      "robosystems.middleware.credits.cache.credit_cache.get_cached_credit_summary",
+      "robosystems.middleware.billing.cache.credit_cache.get_cached_credit_summary",
       return_value=None,
     ):
       with patch(
-        "robosystems.middleware.credits.cache.credit_cache.cache_credit_summary"
+        "robosystems.middleware.billing.cache.credit_cache.cache_credit_summary"
       ):
         with patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits):
           result = credit_service.get_credit_summary("graph123")
@@ -485,7 +485,7 @@ class TestCreditCaching:
 
   def test_cache_balance_and_retrieve(self, mock_redis):
     """Test caching and retrieving credit balance."""
-    from robosystems.middleware.credits.cache import CreditCache
+    from robosystems.middleware.billing.cache import CreditCache
 
     cache = CreditCache()
     cache._redis = mock_redis
@@ -509,7 +509,7 @@ class TestCreditCaching:
 
   def test_cache_invalidation(self, mock_redis):
     """Test cache invalidation."""
-    from robosystems.middleware.credits.cache import CreditCache
+    from robosystems.middleware.billing.cache import CreditCache
 
     cache = CreditCache()
     cache._redis = mock_redis
@@ -526,7 +526,7 @@ class TestCreditCaching:
 
   def test_optimistic_balance_update(self, mock_redis):
     """Test optimistic balance update after consumption."""
-    from robosystems.middleware.credits.cache import CreditCache
+    from robosystems.middleware.billing.cache import CreditCache
 
     cache = CreditCache()
     cache._redis = mock_redis

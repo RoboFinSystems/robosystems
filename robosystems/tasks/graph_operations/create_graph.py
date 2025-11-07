@@ -6,6 +6,8 @@ import logging
 from typing import Dict, Any
 from ...celery import celery_app
 from ...operations.graph.generic_graph_service import GenericGraphServiceSync
+from ...operations.graph.subscription_service import GraphSubscriptionService
+from ...database import get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,37 @@ def create_graph_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
       custom_schema=task_data.get("custom_schema"),
       cancellation_callback=check_cancellation,
     )
+
+    # Create billing subscription for the graph
+    try:
+      session = next(get_db_session())
+      try:
+        subscription_service = GraphSubscriptionService(session)
+        plan_name = task_data.get("tier", "kuzu-standard")
+        graph_id = result.get("graph_id")
+
+        subscription = subscription_service.create_graph_subscription(
+          user_id=user_id,
+          graph_id=graph_id,
+          plan_name=plan_name,
+        )
+
+        logger.info(
+          f"Created billing subscription {subscription.id} for graph {graph_id}",
+          extra={
+            "user_id": user_id,
+            "graph_id": graph_id,
+            "subscription_id": subscription.id,
+            "plan_name": plan_name,
+          },
+        )
+      finally:
+        session.close()
+    except Exception as billing_error:
+      logger.error(
+        f"Failed to create billing subscription for graph {result.get('graph_id')}: {billing_error}",
+        extra={"user_id": user_id, "graph_id": result.get("graph_id")},
+      )
 
     logger.info(f"Graph creation task completed successfully for user {user_id}")
     return result
@@ -144,6 +177,38 @@ def create_graph_sse_task(
       cancellation_callback=check_cancellation,
       progress_callback=progress_callback,
     )
+
+    # Create billing subscription for the graph
+    progress_tracker.emit_progress("Creating billing subscription...", 95)
+    try:
+      session = next(get_db_session())
+      try:
+        subscription_service = GraphSubscriptionService(session)
+        plan_name = task_data.get("tier", "kuzu-standard")
+        graph_id = result.get("graph_id")
+
+        subscription = subscription_service.create_graph_subscription(
+          user_id=user_id,
+          graph_id=graph_id,
+          plan_name=plan_name,
+        )
+
+        logger.info(
+          f"Created billing subscription {subscription.id} for graph {graph_id}",
+          extra={
+            "user_id": user_id,
+            "graph_id": graph_id,
+            "subscription_id": subscription.id,
+            "plan_name": plan_name,
+          },
+        )
+      finally:
+        session.close()
+    except Exception as billing_error:
+      logger.error(
+        f"Failed to create billing subscription for graph {result.get('graph_id')}: {billing_error}",
+        extra={"user_id": user_id, "graph_id": result.get("graph_id")},
+      )
 
     # Emit completion event with graph-specific context
     progress_tracker.emit_completion(

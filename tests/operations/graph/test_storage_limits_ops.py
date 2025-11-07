@@ -341,12 +341,13 @@ class TestStorageCreditsConsumption:
   """Test storage credit consumption functionality."""
 
   def test_consume_storage_credits_success(self, db_session, sample_graph_credits):
-    """Test successful storage credit consumption."""
+    """Test successful storage credit consumption with overage."""
     credit_service = CreditService(db_session)
 
     # Record initial balance
     initial_balance = sample_graph_credits.current_balance
-    storage_gb = Decimal("100")
+    # Standard tier has 100 GB included, so 200 GB total = 100 GB overage
+    storage_gb = Decimal("200")
 
     result = credit_service.consume_storage_credits(
       graph_id=sample_graph_credits.graph_id,
@@ -355,10 +356,11 @@ class TestStorageCreditsConsumption:
     )
 
     assert result["success"] is True
-    assert result["storage_gb"] == 100.0
-    assert result["flat_storage_cost"] == 1000.0  # 100 * 10.0 (updated storage cost)
-    assert result["storage_multiplier"] == 1.0  # Flat pricing
-    assert result["credits_consumed"] == 1000.0
+    assert result["total_storage_gb"] == 200.0
+    assert result["included_gb"] == 100.0
+    assert result["overage_gb"] == 100.0
+    assert result["credits_per_gb_day"] == 10
+    assert result["credits_consumed"] == 1000.0  # 100 GB overage * 10 credits/GB/day
 
     # Check balance was updated
     db_session.refresh(sample_graph_credits)
@@ -376,9 +378,10 @@ class TestStorageCreditsConsumption:
     db_session.commit()
 
     # Consume more storage credits than available
+    # Standard tier has 100 GB included, so 200 GB = 100 GB overage = 1000 credits
     result = credit_service.consume_storage_credits(
       graph_id=sample_graph_credits.graph_id,
-      storage_gb=Decimal("100"),  # Costs 5.0 credits
+      storage_gb=Decimal("200"),  # 100 GB overage = 1000 credits
     )
 
     assert result["success"] is True
@@ -389,12 +392,13 @@ class TestStorageCreditsConsumption:
   def test_consume_storage_credits_creates_transaction(
     self, db_session, sample_graph_credits
   ):
-    """Test that storage consumption creates transaction record."""
+    """Test that storage overage consumption creates transaction record."""
     credit_service = CreditService(db_session)
 
+    # Standard tier has 100 GB included, use 150 GB = 50 GB overage
     credit_service.consume_storage_credits(
       graph_id=sample_graph_credits.graph_id,
-      storage_gb=Decimal("50"),
+      storage_gb=Decimal("150"),
     )
 
     # Check transaction was created
@@ -410,16 +414,18 @@ class TestStorageCreditsConsumption:
         GraphCreditTransaction.transaction_type
         == CreditTransactionType.CONSUMPTION.value
       )
-      .filter(GraphCreditTransaction.description.contains("Daily storage charge"))
+      .filter(GraphCreditTransaction.description.contains("Daily storage overage"))
       .first()
     )
 
     assert transaction is not None
-    assert transaction.amount == Decimal("-500.0")  # -50 * 10.0 (updated storage cost)
+    assert transaction.amount == Decimal("-500.0")  # -50 GB overage * 10 credits/GB/day
     metadata = transaction.get_metadata()
-    assert metadata["storage_gb"] == "50"
-    assert metadata["flat_storage_cost"] == "500"
-    assert metadata["storage_multiplier"] == "1.0"
+    assert metadata["total_storage_gb"] == "150"
+    assert metadata["included_gb"] == "100"
+    assert metadata["overage_gb"] == "50"
+    assert metadata["overage_cost"] == "500"
+    assert metadata["credits_per_gb_day"] == "10"
     assert metadata["allows_negative"] is True
 
   def test_consume_storage_credits_no_credit_pool(self, db_session):

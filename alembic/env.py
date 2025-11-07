@@ -28,9 +28,12 @@ from robosystems.models.iam.user_repository_credits import (  # noqa: F401
 from robosystems.models.iam.user_repository import (
   UserRepository,  # noqa: F401
 )
-from robosystems.models.iam.graph_subscription import (
-  GraphSubscription,  # noqa: F401
-)
+
+# Import all billing models
+from robosystems.models.billing.customer import BillingCustomer  # noqa: F401
+from robosystems.models.billing.subscription import BillingSubscription  # noqa: F401
+from robosystems.models.billing.invoice import BillingInvoice, BillingInvoiceLineItem  # noqa: F401
+from robosystems.models.billing.audit_log import BillingAuditLog  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

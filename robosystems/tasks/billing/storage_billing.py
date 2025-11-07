@@ -2,8 +2,23 @@
 Daily Storage Credit Consumption Task
 
 This task runs daily to calculate average storage usage and consume credits
-for each graph database. Unlike API operations, storage charges are always
-applied and can result in negative credit balances.
+for each graph database. Storage charges are always applied and can result in
+negative credit balances (users cannot "turn off" storage).
+
+Storage Billing Model:
+---------------------
+- Each subscription tier includes storage (100GB/500GB/2TB)
+- Only OVERAGE above included limit consumes credits
+- Rate: 10 credits/GB/day for storage above limit
+- Charges applied even if balance goes negative
+- Negative balances are invoiced at month-end by monthly_credit_reset task
+
+Storage Data Source:
+-------------------
+- Hourly snapshots collected by usage_collector task
+- Storage breakdown: files (S3), tables (S3), graphs (EBS), subgraphs (EBS)
+- Daily billing uses average of all snapshots for the day
+- Detailed breakdown enables storage analytics and optimization
 """
 
 import logging

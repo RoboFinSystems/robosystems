@@ -879,6 +879,43 @@ Resources:
         HostedZoneId: !GetAtt ApiALB.CanonicalHostedZoneID
         EvaluateTargetHealth: true
 
+  # ===========================================
+  # Admin API Key Management Resources
+  # ===========================================
+
+  # Secret to store the admin API key
+  AdminKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub robosystems/${Environment}/admin
+      Description: Admin API key for subscription management
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: AdminAPIKey
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CloudWatch alarm for failed admin authentications
+  FailedAdminAuthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-${Environment}-api-failed-admin-auth
+      AlarmDescription: Alert on multiple failed admin authentication attempts
+      MetricName: FailedAdminAuth
+      Namespace: RoboSystems/Admin
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
 Outputs:
   ApiUrl:
     Description: URL of the API endpoint
@@ -907,3 +944,23 @@ Outputs:
     Value: !Ref ApiALB
     Export:
       Name: !Sub ${AWS::StackName}-ApiALBArn
+
+  # Admin Key Outputs
+  AdminKeySecretArn:
+    Description: ARN of the admin key secret
+    Value: !Ref AdminKeySecret
+    Export:
+      Name: !Sub ${AWS::StackName}-AdminKeySecretArn
+
+  AdminKeyInstructions:
+    Description: Instructions for using the admin key
+    Value: !Sub |
+      Admin key has been created in AWS Secrets Manager.
+
+      To retrieve the key:
+      aws secretsmanager get-secret-value --secret-id robosystems/${Environment}/admin --region ${AWS::Region}
+
+      The admin API is accessible at: https://${DomainName}/admin/v1/subscriptions
+
+      Use the key as a Bearer token:
+      curl -H "Authorization: Bearer <KEY>" https://${DomainName}/admin/v1/subscriptions

@@ -196,7 +196,7 @@ class TestUserModel:
       UserLimits = None  # type: ignore
       has_user_limits = False
     try:
-      from robosystems.models.iam.graph_subscription import (
+      from robosystems.models.iam.graph_subscription import (  # type: ignore
         GraphSubscription as _GraphSubscription,
       )
 
@@ -421,7 +421,6 @@ class TestUserModel:
     assert hasattr(user, "user_graphs")
     assert hasattr(user, "limits")
     assert hasattr(user, "user_repositories")
-    assert hasattr(user, "graph_subscriptions")
 
   @patch("robosystems.models.iam.user.Session")
   def test_create_user_rollback_on_error(self, mock_session_class):

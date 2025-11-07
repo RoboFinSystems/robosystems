@@ -11,13 +11,13 @@ from .backups import router as backups_router
 from .analytics import router as analytics_router
 from .query import router as query_router
 from .schema import router as schema_router
-from .billing import router as billing_router
 from .connections import router as connections_router
 from .credits import router as credits_router
 from .health import router as health_router
 from .info import router as info_router
 from .limits import router as limits_router
 from .subgraphs import router as subgraphs_router
+from .subscriptions import router as subscriptions_router
 from .tables import router as tables_router
 
 __all__ = [
@@ -26,12 +26,12 @@ __all__ = [
   "analytics_router",
   "query_router",
   "schema_router",
-  "billing_router",
   "connections_router",
   "credits_router",
   "health_router",
   "info_router",
   "limits_router",
   "subgraphs_router",
+  "subscriptions_router",
   "tables_router",
 ]

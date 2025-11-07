@@ -17,12 +17,12 @@ from .graphs import (
   analytics_router,
   query_router,
   schema_router,
-  billing_router as graph_billing_router,
   credits_router,
   health_router,
   info_router,
   limits_router,
   subgraphs_router,
+  subscriptions_router,
   tables_router,
 )  # Removed allocation_router - too dangerous for public API
 from .graphs.mcp import router as mcp_router
@@ -40,12 +40,14 @@ router.include_router(backups_router, prefix="/backups")
 router.include_router(analytics_router, prefix="/analytics")
 router.include_router(query_router)  # No prefix - handled in the query module itself
 router.include_router(schema_router)  # No prefix - handled in the schema module itself
-router.include_router(graph_billing_router, prefix="/billing")
 router.include_router(credits_router)  # Already has /credits prefix
 router.include_router(health_router)  # No prefix - handles /health internally
 router.include_router(info_router)  # No prefix - handles /info internally
 router.include_router(limits_router)  # No prefix - handles /limits internally
 router.include_router(subgraphs_router, prefix="/subgraphs")
+router.include_router(
+  subscriptions_router, prefix="/subscriptions"
+)  # Unified subscription management
 router.include_router(
   tables_router
 )  # No prefix - handles all /tables and /files paths internally

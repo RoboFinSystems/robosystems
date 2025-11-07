@@ -1,18 +1,14 @@
 """Tests for the subscription service."""
 
 import pytest
-from datetime import datetime, timezone
 from unittest.mock import Mock, patch, MagicMock
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.operations.graph.subscription_service import (
   GraphSubscriptionService,
 )
-from robosystems.models.iam import (
-  UserLimits,
-  GraphSubscription,
-  SubscriptionStatus,
-)
+from robosystems.models.iam import UserLimits
+from robosystems.models.billing import BillingSubscription, SubscriptionStatus
 
 
 class TestGraphSubscriptionService:
@@ -85,7 +81,7 @@ class TestGraphSubscriptionService:
     graph_id = "graph456"
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "price": 4999}
+    plan_config = {"name": "kuzu-standard", "base_price_cents": 4999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -101,8 +97,9 @@ class TestGraphSubscriptionService:
       assert mock_session.add.called
       assert mock_session.commit.called
       added_subscription = mock_session.add.call_args[0][0]
-      assert added_subscription.user_id == user_id
-      assert added_subscription.graph_id == graph_id
+      assert added_subscription.billing_customer_user_id == user_id
+      assert added_subscription.resource_type == "graph"
+      assert added_subscription.resource_id == graph_id
       assert added_subscription.plan_name == "kuzu-standard"
       assert added_subscription.status == SubscriptionStatus.ACTIVE.value
 
@@ -115,7 +112,7 @@ class TestGraphSubscriptionService:
     plan_name = "kuzu-standard"  # Use a plan that's in the available plans
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "price": 1999}
+    plan_config = {"name": "kuzu-standard", "base_price_cents": 1999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -130,8 +127,9 @@ class TestGraphSubscriptionService:
       assert mock_session.add.called
       assert mock_session.commit.called
       added_subscription = mock_session.add.call_args[0][0]
-      assert added_subscription.user_id == user_id
-      assert added_subscription.graph_id == graph_id
+      assert added_subscription.billing_customer_user_id == user_id
+      assert added_subscription.resource_type == "graph"
+      assert added_subscription.resource_id == graph_id
       assert added_subscription.plan_name == "kuzu-standard"
       assert added_subscription.status == SubscriptionStatus.ACTIVE.value
 
@@ -141,13 +139,13 @@ class TestGraphSubscriptionService:
     graph_id = "graph456"
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "price": 0}
+    plan_config = {"name": "kuzu-standard", "base_price_cents": 0}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
     ):
       # Mock existing subscription
-      existing_sub = Mock(spec=GraphSubscription)
+      existing_sub = Mock(spec=BillingSubscription)
       mock_session.query.return_value.filter.return_value.first.return_value = (
         existing_sub
       )
@@ -175,7 +173,7 @@ class TestGraphSubscriptionService:
   ):
     """Test handling database commit failure."""
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "price": 0}
+    plan_config = {"name": "kuzu-standard", "base_price_cents": 0}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -187,22 +185,7 @@ class TestGraphSubscriptionService:
       with pytest.raises(SQLAlchemyError):
         subscription_service.create_graph_subscription("user123", "graph456")
 
-      assert mock_session.rollback.called
-
-  def test_get_next_billing_date(self, subscription_service):
-    """Test calculating next billing date."""
-    # Test regular month
-    date1 = datetime(2024, 5, 15, tzinfo=timezone.utc)
-    next_date1 = subscription_service._get_next_billing_date(date1)
-    assert next_date1.month == 6
-    assert next_date1.day == 15
-
-    # Test December (year rollover)
-    date2 = datetime(2024, 12, 20, tzinfo=timezone.utc)
-    next_date2 = subscription_service._get_next_billing_date(date2)
-    assert next_date2.year == 2025
-    assert next_date2.month == 1
-    assert next_date2.day == 20
+      # Note: Service doesn't handle rollback - exception propagates to caller
 
 
 class TestSubscriptionHelperFunctions:

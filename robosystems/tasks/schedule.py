@@ -30,9 +30,9 @@ if env.ENVIRONMENT != "dev":
           "priority": 8,
         },
       },
-      # Monthly graph credit allocation (30 minutes after shared credits)
-      "allocate-monthly-graph-credits": {
-        "task": "robosystems.tasks.billing.credit_allocation.allocate_monthly_graph_credits",
+      # Monthly credit reset and overage processing
+      "monthly-credit-reset": {
+        "task": "robosystems.tasks.billing.monthly_credit_reset.monthly_credit_reset",
         "schedule": crontab(
           hour=env.CREDIT_ALLOCATION_HOUR,
           minute=30,
@@ -41,6 +41,19 @@ if env.ENVIRONMENT != "dev":
         "options": {
           "queue": QUEUE_DEFAULT,
           "priority": 8,
+        },
+      },
+      # Monthly usage report generation (2nd of month at 6 AM)
+      "monthly-usage-report": {
+        "task": "robosystems.tasks.billing.monthly_credit_reset.generate_monthly_usage_report",
+        "schedule": crontab(
+          hour=6,
+          minute=0,
+          day_of_month=2,
+        ),
+        "options": {
+          "queue": QUEUE_DEFAULT,
+          "priority": 5,
         },
       },
       # Daily storage billing

@@ -9,7 +9,6 @@ from fastapi import APIRouter
 from .user import router as user_router
 from .limits import router as limits_router
 from .analytics import router as analytics_router
-from .subscription import router as subscription_router
 
 # Create composite router
 router = APIRouter()
@@ -18,6 +17,5 @@ router = APIRouter()
 router.include_router(user_router)
 router.include_router(limits_router, prefix="/user/limits")
 router.include_router(analytics_router, prefix="/user/analytics")
-router.include_router(subscription_router, prefix="/user/subscriptions")
 
 __all__ = ["router"]

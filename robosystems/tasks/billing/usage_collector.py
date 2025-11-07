@@ -1,8 +1,27 @@
 """
-Celery task for collecting graph database usage metrics.
+Hourly Storage Usage Collection Task
 
-This task runs hourly to collect usage data from all Kuzu instances
-and store it for billing purposes.
+This task runs hourly to collect detailed storage metrics from all graph databases
+and store them as usage snapshots for billing and analytics.
+
+Storage Collection Process:
+--------------------------
+1. Query all user graphs from database
+2. For each graph:
+   - Calculate storage using StorageCalculator:
+     * Files: S3 user-uploaded files (GraphFile table)
+     * Tables: S3 CSV/Parquet imports (GraphTable table)
+     * Graphs: EBS Kuzu database files (filesystem walk)
+     * Subgraphs: EBS subgraph data
+   - Get instance metadata from Graph API (instance_id, region)
+   - Record snapshot with full breakdown in GraphUsageTracking
+3. Clean up old snapshots (retain 1 year)
+
+Billing Flow:
+------------
+Hourly: This task → GraphUsageTracking snapshots
+Daily: daily_storage_billing → Averages snapshots → Consumes credits for overages
+Monthly: monthly_credit_reset → Invoices negative balances → Allocates fresh credits
 """
 
 import asyncio
@@ -15,6 +34,7 @@ from sqlalchemy.orm import Session
 from ...celery import celery_app
 from ...models.iam import UserGraph, GraphUsageTracking
 from ...graph_api.client.factory import GraphClientFactory
+from ...operations.graph.storage_service import StorageCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +63,9 @@ def graph_usage_collector(self):
       collection_timestamp = datetime.now(timezone.utc)
       failed_graphs = []
 
+      # Initialize storage calculator
+      calculator = StorageCalculator(db_session)
+
       # Collect metrics for each graph
       for graph_info in user_graphs:
         graph_id = graph_info["graph_id"]
@@ -52,25 +75,28 @@ def graph_usage_collector(self):
         logger.debug(f"Collecting metrics for graph {graph_id} (user: {user_id})")
 
         try:
-          # Collect metrics for this specific graph
-          metrics = asyncio.run(collect_graph_metrics(graph_id))
+          # Calculate detailed storage breakdown
+          storage_breakdown = calculator.calculate_graph_storage(graph_id, user_id)
 
-          if metrics:
-            # Record usage
-            GraphUsageTracking.record_storage_usage(
-              user_id=user_id,
-              graph_id=graph_id,
-              graph_tier=graph_tier,
-              storage_bytes=metrics.get("size_bytes", 0),
-              instance_id=metrics.get("instance_id"),
-              region=metrics.get("region", "us-east-1"),
-              session=db_session,
-              auto_commit=False,  # We'll commit all at once
-            )
-            total_records += 1
-          else:
-            logger.warning(f"No metrics returned for graph {graph_id}")
-            failed_graphs.append(graph_id)
+          # Get instance metadata from graph API
+          metadata = asyncio.run(collect_graph_metrics(graph_id))
+
+          # Record usage with storage breakdown
+          GraphUsageTracking.record_storage_usage(
+            user_id=user_id,
+            graph_id=graph_id,
+            graph_tier=graph_tier,
+            storage_bytes=float(storage_breakdown["total_bytes"]),
+            files_storage_gb=float(storage_breakdown["files_gb"]),
+            tables_storage_gb=float(storage_breakdown["tables_gb"]),
+            graphs_storage_gb=float(storage_breakdown["graphs_gb"]),
+            subgraphs_storage_gb=float(storage_breakdown["subgraphs_gb"]),
+            instance_id=metadata.get("instance_id") if metadata else None,
+            region=metadata.get("region", "us-east-1"),
+            session=db_session,
+            auto_commit=False,
+          )
+          total_records += 1
 
         except Exception as e:
           logger.error(f"Failed to collect metrics for graph {graph_id}: {e}")
@@ -161,9 +187,7 @@ def get_user_graphs_with_details(session: Session) -> List[Dict]:
 
   # Join UserGraph with Graph to get tier information
   results = (
-    session.query(
-      UserGraph.graph_id, UserGraph.user_id, UserGraph.entity_id, Graph.graph_tier
-    )
+    session.query(UserGraph.graph_id, UserGraph.user_id, Graph.graph_tier)
     .join(Graph, UserGraph.graph_id == Graph.graph_id)
     .all()
   )
@@ -174,7 +198,6 @@ def get_user_graphs_with_details(session: Session) -> List[Dict]:
       {
         "graph_id": row.graph_id,
         "user_id": row.user_id,
-        "entity_id": row.entity_id,
         "graph_tier": row.graph_tier or "standard",
       }
     )

@@ -145,6 +145,46 @@ class BillingConfig:
     return None
 
   @classmethod
+  def get_repository_plan(
+    cls, repository_id: str, plan_name: str
+  ) -> Optional[Dict[str, Any]]:
+    """
+    Get plan details for a specific repository subscription.
+
+    Args:
+        repository_id: Repository identifier (e.g., 'sec', 'industry')
+        plan_name: Plan name (e.g., 'sec-starter', 'starter')
+
+    Returns:
+        Dict with plan details including price_cents, monthly_credits, features
+    """
+    from .repositories import RepositoryBillingConfig, RepositoryPlan
+
+    # Extract the plan tier from the plan name (e.g., 'sec-starter' -> 'starter')
+    plan_tier = plan_name.split("-")[-1] if "-" in plan_name else plan_name
+
+    # Validate the plan tier
+    try:
+      repo_plan = RepositoryPlan(plan_tier)
+    except ValueError:
+      logger.warning(f"Invalid repository plan: {plan_name}")
+      return None
+
+    # Get plan details
+    plan_details = RepositoryBillingConfig.get_plan_details(repo_plan)
+    if not plan_details:
+      return None
+
+    # Return in a consistent format with subscription plans
+    return {
+      "name": plan_name,
+      "price_cents": plan_details["price_cents"],
+      "monthly_credits": plan_details["monthly_credits"],
+      "features": plan_details["features"],
+      "description": plan_details["description"],
+    }
+
+  @classmethod
   def validate_configuration(cls) -> Dict[str, Any]:
     """
     Validate that all billing configuration is consistent.

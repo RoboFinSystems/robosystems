@@ -5,7 +5,7 @@ import json
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from robosystems.middleware.credits.cache import CreditCache, credit_cache
+from robosystems.middleware.billing.cache import CreditCache, credit_cache
 
 
 class TestCreditCache:
@@ -246,7 +246,7 @@ class TestCreditCacheSingleton:
   def test_singleton_initialization(self):
     """Test that singleton initializes Redis connection."""
     # Re-import to trigger initialization
-    from robosystems.middleware.credits.cache import CreditCache
+    from robosystems.middleware.billing.cache import CreditCache
 
     new_cache = CreditCache()
 
@@ -257,7 +257,7 @@ class TestCreditCacheSingleton:
 class TestCreditCacheIntegration:
   """Integration tests for credit cache with CreditService."""
 
-  @patch("robosystems.middleware.credits.cache.credit_cache")
+  @patch("robosystems.middleware.billing.cache.credit_cache")
   def test_credit_service_uses_cache(self, mock_cache):
     """Test that CreditService properly integrates with cache."""
     from robosystems.operations.graph.credit_service import CreditService
