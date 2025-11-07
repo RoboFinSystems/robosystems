@@ -618,30 +618,44 @@ class TestUserAPIKeys:
     self, mock_get_by_user_id, client_with_api_keys: TestClient
   ):
     """Test successful API key update."""
+    from unittest.mock import MagicMock
+    from main import app
+    from robosystems.database import get_db_session
+
+    # Create a mock database session
+    mock_db = MagicMock()
+    mock_db.commit.return_value = None
+    mock_db.refresh.return_value = None
+
+    # Override the database dependency for this test
+    def mock_get_db():
+      yield mock_db
+
+    app.dependency_overrides[get_db_session] = mock_get_db
+
     # Mock the API key lookup - returns all user API keys
     mock_api_key = client_with_api_keys.mock_user.api_keys[0]
     mock_get_by_user_id.return_value = client_with_api_keys.mock_user.api_keys
 
     update_data = {"name": "Updated API Key Name", "description": "Updated description"}
 
-    # Mock the database session save
-    with patch("robosystems.routers.user.api_keys.session") as mock_session:
-      # Update mock API key attributes
-      def save_side_effect():
-        mock_api_key.name = update_data["name"]
-        mock_api_key.description = update_data["description"]
+    # Update the mock's attributes so they return the right values
+    mock_api_key.name = update_data["name"]
+    mock_api_key.description = update_data["description"]
 
-      mock_session.commit.side_effect = save_side_effect
+    response = client_with_api_keys.put(
+      f"/v1/user/api-keys/{mock_api_key.id}", json=update_data
+    )
 
-      response = client_with_api_keys.put(
-        f"/v1/user/api-keys/{mock_api_key.id}", json=update_data
-      )
+    # Clean up the override
+    del app.dependency_overrides[get_db_session]
 
-      assert response.status_code == 200
-      data = response.json()
+    assert response.status_code == 200
+    data = response.json()
 
-      assert data["name"] == "Updated API Key Name"
-      assert data["description"] == "Updated description"
+    # Verify the response contains the updated data
+    assert data["name"] == update_data["name"]
+    assert data["description"] == update_data["description"]
 
   @patch("robosystems.models.iam.UserAPIKey.get_by_user_id")
   def test_update_api_key_not_found(
@@ -672,19 +686,19 @@ class TestUserAPIKeys:
     mock_get_by_user_id.return_value = client_with_api_keys.mock_user.api_keys
 
     # Mock the database session and deactivate method
-    with patch("robosystems.routers.user.api_keys.session"):
-      with patch.object(mock_api_key, "deactivate") as mock_deactivate:
-        response = client_with_api_keys.delete(f"/v1/user/api-keys/{mock_api_key.id}")
+    # The session is now dependency-injected, so we don't need to patch it
+    with patch.object(mock_api_key, "deactivate") as mock_deactivate:
+      response = client_with_api_keys.delete(f"/v1/user/api-keys/{mock_api_key.id}")
 
-        assert response.status_code == 200
-        data = response.json()
+      assert response.status_code == 200
+      data = response.json()
 
-        # SuccessResponse format
-        assert data["success"] is True
-        assert "revoked" in data["message"].lower()
+      # SuccessResponse format
+      assert data["success"] is True
+      assert "revoked" in data["message"].lower()
 
-        # Verify deactivate method was called
-        mock_deactivate.assert_called_once()
+      # Verify deactivate method was called
+      mock_deactivate.assert_called_once()
 
   @patch("robosystems.models.iam.UserAPIKey.get_by_user_id")
   def test_revoke_api_key_not_found(
@@ -762,18 +776,28 @@ class TestUserPasswordUpdate:
     app.dependency_overrides = {}
 
   @patch("robosystems.models.iam.User.get_by_id")
-  @patch("robosystems.routers.user.password.session")
   def test_update_password_success(
-    self, mock_session, mock_get_by_id, client_with_password_user: TestClient
+    self, mock_get_by_id, client_with_password_user: TestClient
   ):
     """Test successful password update."""
+    from unittest.mock import MagicMock
+    from main import app
+    from robosystems.database import get_db_session
+
+    # Create a mock database session
+    mock_db = MagicMock()
+    mock_db.commit.return_value = None
+    mock_db.refresh.return_value = None
+    mock_db.rollback.return_value = None
+
+    # Override the database dependency for this test
+    def mock_get_db():
+      yield mock_db
+
+    app.dependency_overrides[get_db_session] = mock_get_db
+
     # Mock the user lookup
     mock_get_by_id.return_value = client_with_password_user.mock_user
-
-    # Mock session operations
-    mock_session.commit = Mock()
-    mock_session.refresh = Mock()
-    mock_session.rollback = Mock()
 
     password_data = {
       "current_password": "originalPassword123",
@@ -783,6 +807,9 @@ class TestUserPasswordUpdate:
 
     response = client_with_password_user.put("/v1/user/password", json=password_data)
 
+    # Clean up the override
+    del app.dependency_overrides[get_db_session]
+
     assert response.status_code == 200
     data = response.json()
 
@@ -791,19 +818,15 @@ class TestUserPasswordUpdate:
     assert "updated" in data["message"].lower()
 
     # Verify session operations were called
-    mock_session.commit.assert_called_once()
+    mock_db.commit.assert_called_once()
 
   @patch("robosystems.models.iam.User.get_by_id")
-  @patch("robosystems.routers.user.password.session")
   def test_update_password_wrong_current(
-    self, mock_session, mock_get_by_id, client_with_password_user: TestClient
+    self, mock_get_by_id, client_with_password_user: TestClient
   ):
     """Test password update with wrong current password."""
     # Mock the user lookup
     mock_get_by_id.return_value = client_with_password_user.mock_user
-
-    # Mock session operations
-    mock_session.rollback = Mock()
 
     password_data = {
       "current_password": "wrongPassword123",
