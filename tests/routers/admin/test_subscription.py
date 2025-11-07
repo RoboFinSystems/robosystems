@@ -680,7 +680,7 @@ class TestListCustomers:
   ):
     """Test successfully listing customers."""
     response = client.get(
-      "/admin/v1/subscriptions/customers/all",
+      "/admin/v1/customers",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -701,7 +701,7 @@ class TestListCustomers:
     )
 
     response = client.get(
-      "/admin/v1/subscriptions/customers/all?has_payment_method=true",
+      "/admin/v1/customers?has_payment_method=true",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -722,7 +722,7 @@ class TestListCustomers:
     )
 
     response = client.get(
-      "/admin/v1/subscriptions/customers/all?invoice_billing_enabled=true",
+      "/admin/v1/customers?invoice_billing_enabled=true",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -746,7 +746,7 @@ class TestListCustomers:
       BillingCustomer.get_or_create(user_id=user.id, session=db_session)
 
     response = client.get(
-      "/admin/v1/subscriptions/customers/all?limit=2&offset=0",
+      "/admin/v1/customers?limit=2&offset=0",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -756,7 +756,7 @@ class TestListCustomers:
 
   def test_list_customers_unauthorized(self, client):
     """Test listing customers without authentication."""
-    response = client.get("/admin/v1/subscriptions/customers/all")
+    response = client.get("/admin/v1/customers")
     assert response.status_code == 401
 
 
@@ -775,7 +775,7 @@ class TestUpdateCustomer:
     }
 
     response = client.patch(
-      f"/admin/v1/subscriptions/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_customer.user_id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -793,7 +793,7 @@ class TestUpdateCustomer:
     payload = {"payment_terms": "net_90"}
 
     response = client.patch(
-      f"/admin/v1/subscriptions/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_customer.user_id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -814,7 +814,7 @@ class TestUpdateCustomer:
     payload = {"payment_terms": "net_30"}
 
     response = client.patch(
-      f"/admin/v1/subscriptions/customers/{test_user.id}",
+      f"/admin/v1/customers/{test_user.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -830,7 +830,7 @@ class TestUpdateCustomer:
     payload = {"payment_terms": "net_60"}
 
     response = client.patch(
-      f"/admin/v1/subscriptions/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_customer.user_id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -853,7 +853,7 @@ class TestUpdateCustomer:
     payload = {"payment_terms": "net_60"}
 
     response = client.patch(
-      f"/admin/v1/subscriptions/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_customer.user_id}",
       params=payload,
     )
     assert response.status_code == 401
