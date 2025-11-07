@@ -150,6 +150,10 @@ class TestSchemaManagementIntegration:
         "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
       ) as mock_task,
       patch("robosystems.models.iam.UserLimits.get_by_user_id") as mock_get_limits,
+      patch(
+        "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+        return_value=(True, None),
+      ),
     ):
       # Mock user limits to allow graph creation
       mock_limits = MagicMock()

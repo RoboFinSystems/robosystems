@@ -460,14 +460,6 @@ class QueryQueueManager:
       query.status = QueryStatus.COMPLETED
       query.result = result
 
-      # Track query execution for analytics
-      from robosystems.routers.graphs.analytics import track_query_execution
-
-      execution_time_ms = (
-        query.execution_time_seconds * 1000 if query.execution_time_seconds else 0
-      )
-      track_query_execution(query.graph_id, execution_time_ms)
-
     except asyncio.TimeoutError:
       query.status = QueryStatus.FAILED
       query.error = f"Query timeout after {self.query_timeout} seconds"

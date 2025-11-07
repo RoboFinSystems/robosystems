@@ -26,7 +26,7 @@ class TestCreditSystemIntegration:
   @pytest.fixture
   def credit_service(self, mock_session):
     """Create a CreditService instance with mocked session."""
-    with patch("robosystems.middleware.credits.cache.credit_cache"):
+    with patch("robosystems.middleware.billing.cache.credit_cache"):
       return CreditService(mock_session)
 
   @pytest.fixture
@@ -99,7 +99,7 @@ class TestCreditSystemIntegration:
     mock_credits.graph_tier = GraphTier.KUZU_LARGE.value
 
     # Mock cache
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("1000.0"),
         "enterprise",
@@ -185,7 +185,7 @@ class TestCreditSystemIntegration:
     mock_credits.graph_tier = GraphTier.KUZU_XLARGE.value
 
     # Mock cache
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("100.0"),
         "premium",
@@ -264,7 +264,7 @@ class TestCreditSystemIntegration:
     mock_credits.last_allocation_date = datetime.now(timezone.utc).date()
 
     # Mock cache miss then hit
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       mock_cache.get_cached_credit_summary.return_value = None  # Cache miss
 
       # Mock GraphCredits.get_by_graph_id
@@ -303,7 +303,7 @@ class TestCreditSystemIntegration:
     mock_credits.graph_tier = GraphTier.KUZU_STANDARD.value
 
     # Mock cache
-    with patch("robosystems.middleware.credits.cache.credit_cache") as mock_cache:
+    with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
       mock_cache.get_cached_graph_credit_balance.return_value = (
         Decimal("5.0"),
         "standard",

@@ -199,7 +199,11 @@ class TestSecretValueFunction:
 
   def test_get_secret_value_from_mappings(self):
     """Test that mapped secrets are retrieved correctly."""
-    with patch("os.getenv") as mock_getenv, patch("boto3.client") as mock_boto:
+    with (
+      patch("os.getenv") as mock_getenv,
+      patch("robosystems.config.secrets_manager.boto3.client") as mock_boto,
+      patch("robosystems.config.secrets_manager._secrets_manager", None),
+    ):
       mock_getenv.side_effect = lambda key, default=None: {
         "ENVIRONMENT": "staging"
       }.get(key, default)

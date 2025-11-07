@@ -13,10 +13,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
 
-from ...models.iam import (
-  GraphUsageTracking,
-  GraphSubscription,
-)
+from ...models.iam import GraphUsageTracking
+from ...models.billing import BillingSubscription
 from ...config import BillingConfig
 
 logger = logging.getLogger(__name__)
@@ -32,11 +30,12 @@ class GraphPricingService:
   def get_subscription_plan(self, user_id: str, graph_id: str) -> Optional[Dict]:
     """Get the billing plan for a graph subscription."""
     subscription = (
-      self.session.query(GraphSubscription)
+      self.session.query(BillingSubscription)
       .filter(
-        GraphSubscription.user_id == user_id,
-        GraphSubscription.graph_id == graph_id,
-        GraphSubscription.status == "active",
+        BillingSubscription.billing_customer_user_id == user_id,
+        BillingSubscription.resource_type == "graph",
+        BillingSubscription.resource_id == graph_id,
+        BillingSubscription.status == "active",
       )
       .first()
     )

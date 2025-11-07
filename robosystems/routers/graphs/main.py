@@ -378,6 +378,9 @@ async def create_graph(
   try:
     from robosystems.database import get_db_session
     from robosystems.models.iam.graph_credits import GraphTier
+    from robosystems.middleware.billing.enforcement import (
+      check_can_provision_graph,
+    )
 
     # Get database session for user limits check
     db = next(get_db_session())
@@ -408,6 +411,19 @@ async def create_graph(
         "kuzu-xlarge": GraphTier.KUZU_XLARGE,
       }
       graph_tier = tier_map.get(request.instance_tier.lower(), GraphTier.KUZU_STANDARD)
+
+      # Check billing before allowing graph creation
+      can_provision, billing_error = check_can_provision_graph(
+        user_id=current_user.id,
+        requested_tier=graph_tier,
+        session=db,
+      )
+      if not can_provision:
+        _raise_http_exception(
+          status_code=status.HTTP_403_FORBIDDEN,
+          error_code="billing_required",
+          message=billing_error or "Valid payment method required to create graphs.",
+        )
 
       # Log the request
       logger.info("=== GRAPH CREATION REQUEST (SSE) ===")

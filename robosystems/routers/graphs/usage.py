@@ -1,15 +1,13 @@
-"""Analytics and usage monitoring API endpoints."""
+"""Graph usage analytics and monitoring API endpoints."""
 
 import asyncio
 import time
-from collections import defaultdict
-from datetime import datetime, timezone
-from typing import DefaultDict
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import User
+from robosystems.models.iam import User, GraphUsageTracking
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -20,6 +18,9 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.models.api.graphs.metrics import (
   GraphMetricsResponse,
   GraphUsageResponse,
+  StorageSummary,
+  CreditSummary,
+  PerformanceInsights,
 )
 from robosystems.operations.graph.metrics_service import GraphMetricsService
 from robosystems.database import get_db_session
@@ -27,7 +28,6 @@ from sqlalchemy.orm import Session
 from robosystems.logger import logger
 from robosystems.models.api.common import ErrorResponse
 
-# Import robustness middleware
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
@@ -38,59 +38,9 @@ from robosystems.middleware.robustness import (
 )
 
 
-# Create router for analytics endpoints
-router = APIRouter(tags=["Graph Analytics"])
+router = APIRouter(tags=["Usage"])
 
-# Initialize services
 graph_metrics_service = GraphMetricsService()
-
-# In-memory query analytics tracking
-query_analytics_cache: DefaultDict[str, dict] = defaultdict(
-  lambda: {
-    "total_queries": 0,
-    "queries_today": 0,
-    "last_query_time": None,
-    "total_execution_time": 0.0,
-    "query_count_by_day": defaultdict(int),
-  }
-)
-
-
-def track_query_execution(graph_id: str, execution_time_ms: float):
-  """Track query execution for analytics."""
-  from datetime import datetime, timezone
-
-  now = datetime.now(timezone.utc)
-  today_key = now.strftime("%Y-%m-%d")
-
-  cache = query_analytics_cache[graph_id]
-  cache["total_queries"] += 1
-  cache["queries_today"] = cache["query_count_by_day"][today_key] + 1
-  cache["query_count_by_day"][today_key] += 1
-  cache["last_query_time"] = now.isoformat()
-  cache["total_execution_time"] += execution_time_ms
-
-
-def get_query_analytics(graph_id: str) -> dict:
-  """Get query analytics for a specific graph."""
-  from datetime import datetime, timezone
-
-  cache = query_analytics_cache[graph_id]
-  today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-  # Calculate average query time
-  avg_time = 0
-  if cache["total_queries"] > 0:
-    avg_time = cache["total_execution_time"] / cache["total_queries"]
-
-  # Get today's queries from the day-specific counter
-  queries_today = cache["query_count_by_day"][today_key]
-
-  return {
-    "total_queries": cache["total_queries"],
-    "queries_today": queries_today,
-    "avg_query_time_ms": round(avg_time, 2),
-  }
 
 
 @router.get(
@@ -148,20 +98,17 @@ async def get_graph_metrics(
   - Database size estimates
   - Health status
   """
-  # Initialize robustness components
   circuit_breaker = CircuitBreakerManager()
   timeout_coordinator = TimeoutCoordinator()
   operation_logger = get_operation_logger()
 
-  # Record operation start and get timing
   operation_start_time = time.time()
-  operation_timeout = 30.0  # Initialize to avoid unbound variable error
+  operation_timeout = 30.0
 
-  # Record operation start metrics
   record_operation_metric(
     operation_type=OperationType.ANALYTICS_QUERY,
-    status=OperationStatus.SUCCESS,  # Will be updated on completion
-    duration_ms=0.0,  # Will be updated on completion
+    status=OperationStatus.SUCCESS,
+    duration_ms=0.0,
     endpoint="/v1/graphs/{graph_id}/analytics",
     graph_id=graph_id,
     user_id=current_user.id,
@@ -171,14 +118,11 @@ async def get_graph_metrics(
     },
   )
 
-  # Initialize timeout (will be overridden in try block)
   operation_timeout = 30.0
 
   try:
-    # Check circuit breaker before processing
     circuit_breaker.check_circuit(graph_id, "analytics_metrics")
 
-    # Set up timeout coordination for analytics operations
     operation_timeout = timeout_coordinator.calculate_timeout(
       operation_type="analytics_query",
       complexity_factors={
@@ -188,12 +132,11 @@ async def get_graph_metrics(
       },
     )
 
-    # Log the request with operation logger
     operation_logger.log_external_service_call(
       endpoint="/v1/graphs/{graph_id}/analytics",
       service_name="graph_metrics_service",
       operation="collect_comprehensive_metrics",
-      duration_ms=0.0,  # Will be updated on completion
+      duration_ms=0.0,
       status="processing",
       graph_id=graph_id,
       user_id=current_user.id,
@@ -201,9 +144,6 @@ async def get_graph_metrics(
         "analytics_type": "comprehensive_metrics",
       },
     )
-
-    # Collect metrics for the specific graph with timeout coordination
-    import asyncio
 
     metrics = await asyncio.wait_for(
       graph_metrics_service.collect_metrics_for_graph_async(graph_id),
@@ -216,7 +156,6 @@ async def get_graph_metrics(
         detail=f"Metrics not available for graph {graph_id}",
       )
 
-    # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
       endpoint=f"/v1/graphs/{graph_id}/analytics",
@@ -231,11 +170,9 @@ async def get_graph_metrics(
       user_id=current_user.id,
     )
 
-    # Record successful operation
     operation_duration_ms = (time.time() - operation_start_time) * 1000
     circuit_breaker.record_success(graph_id, "analytics_metrics")
 
-    # Record success metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.SUCCESS,
@@ -255,12 +192,10 @@ async def get_graph_metrics(
 
     return GraphMetricsResponse(**metrics)
 
-  except asyncio.TimeoutError:  # type: ignore[name-defined]
-    # Record circuit breaker failure and timeout metrics
+  except asyncio.TimeoutError:
     circuit_breaker.record_failure(graph_id, "analytics_metrics")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record timeout failure metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
@@ -283,11 +218,9 @@ async def get_graph_metrics(
     )
     raise HTTPException(status_code=504, detail="Analytics operation timed out")
   except HTTPException:
-    # Record circuit breaker failure for HTTP exceptions
     circuit_breaker.record_failure(graph_id, "analytics_metrics")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
@@ -303,11 +236,9 @@ async def get_graph_metrics(
     )
     raise
   except Exception as e:
-    # Record circuit breaker failure for general exceptions
     circuit_breaker.record_failure(graph_id, "analytics_metrics")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
@@ -333,198 +264,269 @@ async def get_graph_metrics(
 @router.get(
   "/usage",
   response_model=GraphUsageResponse,
-  summary="Get Usage Statistics",
-  description="""Get detailed usage statistics for the graph.
+  summary="Get Graph Usage Analytics",
+  description="""Get comprehensive usage analytics tracked by the GraphUsageTracking model.
 
 Provides temporal usage patterns including:
-- **Query Volume**: API calls per day/hour
-- **Credit Consumption**: Usage patterns and trends
-- **Operation Breakdown**: Usage by operation type
-- **User Activity**: Access patterns by user role
-- **Peak Usage Times**: Identify high-activity periods
+- **Storage Analytics**: GB-hours for billing, breakdown by type (files, tables, graphs, subgraphs)
+- **Credit Analytics**: Consumption patterns, operation breakdown, cached vs billable
+- **Performance Insights**: Operation stats, slow queries, performance scoring
+- **Recent Events**: Latest usage events with full details
 
 Time ranges available:
-- Last 24 hours (hourly breakdown)
-- Last 7 days (daily breakdown)
-- Last 30 days (daily breakdown)
-- Custom date ranges
+- `24h` - Last 24 hours (hourly breakdown)
+- `7d` - Last 7 days (daily breakdown)
+- `30d` - Last 30 days (daily breakdown)
+- `current_month` - Current billing month
+- `last_month` - Previous billing month
+
+Include options:
+- `storage` - Storage usage summary (GB-hours, averages, peaks)
+- `credits` - Credit consumption analytics
+- `performance` - Performance insights and optimization opportunities
+- `events` - Recent usage events (last 50)
 
 Useful for:
+- Billing and cost analysis
 - Capacity planning
-- Cost optimization
+- Performance optimization
 - Usage trend analysis
-- Performance tuning
 
 Note:
 This operation is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
-  operation_id="getGraphUsageStats",
+  operation_id="getGraphUsageAnalytics",
   responses={
     200: {
-      "description": "Usage statistics retrieved successfully",
+      "description": "Usage analytics retrieved successfully",
       "model": GraphUsageResponse,
     },
     403: {"description": "Access denied to graph", "model": ErrorResponse},
-    500: {"description": "Failed to retrieve usage statistics", "model": ErrorResponse},
+    500: {"description": "Failed to retrieve usage analytics", "model": ErrorResponse},
   },
 )
 @endpoint_metrics_decorator(
-  endpoint_name="/v1/graphs/{graph_id}/graph/analytics/usage",
+  endpoint_name="/v1/graphs/{graph_id}/usage",
   business_event_type="graph_usage_accessed",
 )
-async def get_graph_usage_stats(
-  graph_id: str = Path(..., description="The graph ID to get usage stats for"),
-  include_details: bool = Query(
-    False, description="Include detailed metrics (may be slower)"
+async def get_graph_usage_analytics(
+  graph_id: str = Path(..., description="The graph ID to get usage analytics for"),
+  time_range: str = Query(
+    "30d",
+    description="Time range: 24h, 7d, 30d, current_month, last_month",
+    pattern="^(24h|7d|30d|current_month|last_month)$",
   ),
+  include_storage: bool = Query(True, description="Include storage usage summary"),
+  include_credits: bool = Query(True, description="Include credit consumption summary"),
+  include_performance: bool = Query(
+    False, description="Include performance insights (may be slower)"
+  ),
+  include_events: bool = Query(False, description="Include recent usage events"),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphUsageResponse:
   """
-  Get usage statistics for the specified graph.
+  Get comprehensive usage analytics from GraphUsageTracking model.
 
-  This endpoint provides usage information for a specific graph including:
-  - Storage usage
-  - Query statistics
-  - Recent activity
-  - Optional detailed metrics
+  This endpoint queries the graph_usage_tracking table for:
+  - Storage usage summaries (GB-hours, breakdown by type)
+  - Credit consumption analytics (operation breakdown, cached vs billable)
+  - Performance insights (slow queries, optimization opportunities)
+  - Recent usage events (last 50 events)
   """
-  # Initialize robustness components
   circuit_breaker = CircuitBreakerManager()
   timeout_coordinator = TimeoutCoordinator()
   operation_logger = get_operation_logger()
 
-  # Record operation start and get timing
   operation_start_time = time.time()
-  operation_timeout = 30.0  # Initialize to avoid unbound variable error
+  operation_timeout = 30.0
 
-  # Record operation start metrics
   record_operation_metric(
     operation_type=OperationType.ANALYTICS_QUERY,
-    status=OperationStatus.SUCCESS,  # Will be updated on completion
-    duration_ms=0.0,  # Will be updated on completion
-    endpoint="/v1/graphs/{graph_id}/graph/analytics/usage",
+    status=OperationStatus.SUCCESS,
+    duration_ms=0.0,
+    endpoint="/v1/graphs/{graph_id}/usage",
     graph_id=graph_id,
     user_id=current_user.id,
-    operation_name="get_usage_stats",
+    operation_name="get_usage_analytics",
     metadata={
-      "analytics_type": "usage_statistics",
-      "include_details": include_details,
+      "analytics_type": "usage_analytics",
+      "time_range": time_range,
+      "include_storage": include_storage,
+      "include_credits": include_credits,
+      "include_performance": include_performance,
+      "include_events": include_events,
     },
   )
 
-  # Initialize timeout (will be overridden in try block)
   operation_timeout = 30.0
 
   try:
-    # Check circuit breaker before processing
     circuit_breaker.check_circuit(graph_id, "analytics_usage")
 
-    # Set up timeout coordination based on detail level
     operation_timeout = timeout_coordinator.calculate_timeout(
       operation_type="analytics_query",
       complexity_factors={
-        "operation": "usage_statistics",
-        "include_details": include_details,
-        "expected_complexity": "high" if include_details else "medium",
+        "operation": "usage_analytics",
+        "include_performance": include_performance,
+        "expected_complexity": "high" if include_performance else "medium",
       },
     )
 
-    # Log the request with operation logger
     operation_logger.log_external_service_call(
-      endpoint="/v1/graphs/{graph_id}/graph/analytics/usage",
-      service_name="graph_metrics_service",
-      operation="collect_usage_statistics",
-      duration_ms=0.0,  # Will be updated on completion
+      endpoint="/v1/graphs/{graph_id}/usage",
+      service_name="graph_usage_tracking",
+      operation="query_usage_analytics",
+      duration_ms=0.0,
       status="processing",
       graph_id=graph_id,
       user_id=current_user.id,
       metadata={
-        "analytics_type": "usage_statistics",
-        "include_details": include_details,
+        "analytics_type": "usage_analytics",
+        "time_range": time_range,
       },
     )
 
-    # Get graph usage statistics with timeout coordination
-    if include_details:
-      graph_metrics = await asyncio.wait_for(
-        graph_metrics_service.collect_metrics_for_graph_async(graph_id),
-        timeout=operation_timeout,
-      )
-    else:
-      # Use the same method but with less detail for basic usage
-      graph_metrics = await asyncio.wait_for(
-        graph_metrics_service.collect_metrics_for_graph_async(graph_id),
-        timeout=operation_timeout,
+    now = datetime.now(timezone.utc)
+    year, month = _parse_time_range(time_range, now)
+
+    storage_summary = None
+    credit_summary = None
+    performance_insights = None
+    recent_events = []
+
+    if include_storage:
+      storage_data = GraphUsageTracking.get_monthly_storage_summary(
+        user_id=current_user.id,
+        year=year,
+        month=month,
+        session=db,
       )
 
-    # Compile usage response
-    storage_usage = graph_metrics.get("estimated_size", {})
-    query_statistics = get_query_analytics(graph_id)
-    recent_activity = {
-      "last_modified": graph_metrics.get("last_modified"),
-      "last_accessed": datetime.now(timezone.utc).isoformat(),
-    }
+      if graph_id in storage_data:
+        graph_storage = storage_data[graph_id]
+        storage_summary = StorageSummary(
+          graph_tier=graph_storage["graph_tier"],
+          avg_storage_gb=graph_storage["avg_storage_gb"],
+          max_storage_gb=graph_storage["max_storage_gb"],
+          min_storage_gb=graph_storage["min_storage_gb"],
+          total_gb_hours=graph_storage["total_gb_hours"],
+          measurement_count=graph_storage["measurement_count"],
+        )
 
-    # Record business event
+    if include_credits:
+      credit_data = GraphUsageTracking.get_monthly_credit_summary(
+        user_id=current_user.id,
+        year=year,
+        month=month,
+        session=db,
+      )
+
+      if graph_id in credit_data:
+        graph_credits = credit_data[graph_id]
+        credit_summary = CreditSummary(
+          graph_tier=graph_credits["graph_tier"],
+          total_credits_consumed=graph_credits["total_credits_consumed"],
+          total_base_cost=graph_credits["total_base_cost"],
+          operation_breakdown=graph_credits["operation_breakdown"],
+          cached_operations=graph_credits["cached_operations"],
+          billable_operations=graph_credits["billable_operations"],
+          transaction_count=graph_credits["transaction_count"],
+        )
+
+    if include_performance:
+      performance_days = _get_days_from_time_range(time_range)
+      perf_data = GraphUsageTracking.get_performance_insights(
+        user_id=current_user.id,
+        graph_id=graph_id,
+        session=db,
+        days=performance_days,
+      )
+
+      if "message" not in perf_data:
+        performance_insights = PerformanceInsights(
+          analysis_period_days=perf_data["analysis_period_days"],
+          total_operations=perf_data["total_operations"],
+          operation_stats=perf_data["operation_stats"],
+          slow_queries=perf_data["slow_queries"],
+          performance_score=perf_data["performance_score"],
+        )
+
+    if include_events:
+      cutoff_date = now - timedelta(days=_get_days_from_time_range(time_range))
+      events = (
+        db.query(GraphUsageTracking)
+        .filter(
+          GraphUsageTracking.user_id == current_user.id,
+          GraphUsageTracking.graph_id == graph_id,
+          GraphUsageTracking.recorded_at >= cutoff_date,
+        )
+        .order_by(GraphUsageTracking.recorded_at.desc())
+        .limit(50)
+        .all()
+      )
+
+      recent_events = [event.to_dict() for event in events]
+
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint=f"/v1/graphs/{graph_id}/graph/analytics/usage",
+      endpoint=f"/v1/graphs/{graph_id}/usage",
       method="GET",
       event_type="graph_usage_accessed",
       event_data={
         "user_id": current_user.id,
         "graph_id": graph_id,
-        "include_details": include_details,
+        "time_range": time_range,
+        "include_storage": include_storage,
+        "include_credits": include_credits,
+        "include_performance": include_performance,
       },
       user_id=current_user.id,
     )
 
-    # Record successful operation
     operation_duration_ms = (time.time() - operation_start_time) * 1000
     circuit_breaker.record_success(graph_id, "analytics_usage")
 
-    # Record success metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.SUCCESS,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/graph/analytics/usage",
+      endpoint="/v1/graphs/{graph_id}/usage",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_usage_stats",
+      operation_name="get_usage_analytics",
       metadata={
-        "analytics_type": "usage_statistics",
-        "include_details": include_details,
+        "analytics_type": "usage_analytics",
+        "time_range": time_range,
       },
     )
 
     return GraphUsageResponse(
       graph_id=graph_id,
-      storage_usage=storage_usage,
-      query_statistics=query_statistics,
-      recent_activity=recent_activity,
-      timestamp=datetime.now(timezone.utc).isoformat(),
+      time_range=time_range,
+      storage_summary=storage_summary,
+      credit_summary=credit_summary,
+      performance_insights=performance_insights,
+      recent_events=recent_events,
+      timestamp=now.isoformat(),
     )
 
   except asyncio.TimeoutError:
-    # Record circuit breaker failure and timeout metrics
     circuit_breaker.record_failure(graph_id, "analytics_usage")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record timeout failure metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/graph/analytics/usage",
+      endpoint="/v1/graphs/{graph_id}/usage",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_usage_stats",
+      operation_name="get_usage_analytics",
       metadata={
-        "analytics_type": "usage_statistics",
-        "include_details": include_details,
+        "analytics_type": "usage_analytics",
+        "time_range": time_range,
         "error_type": "timeout",
         "timeout_seconds": operation_timeout
         if "operation_timeout" in locals()
@@ -533,54 +535,80 @@ async def get_graph_usage_stats(
     )
 
     logger.error(
-      f"Analytics usage operation timeout after {operation_timeout}s for user {current_user.id}"
+      f"Usage analytics operation timeout after {operation_timeout}s for user {current_user.id}"
     )
-    raise HTTPException(status_code=504, detail="Analytics usage operation timed out")
+    raise HTTPException(status_code=504, detail="Usage analytics operation timed out")
   except HTTPException:
-    # Record circuit breaker failure for HTTP exceptions
     circuit_breaker.record_failure(graph_id, "analytics_usage")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/graph/analytics/usage",
+      endpoint="/v1/graphs/{graph_id}/usage",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_usage_stats",
+      operation_name="get_usage_analytics",
       metadata={
-        "analytics_type": "usage_statistics",
-        "include_details": include_details,
+        "analytics_type": "usage_analytics",
+        "time_range": time_range,
         "error_type": "http_exception",
       },
     )
     raise
   except Exception as e:
-    # Record circuit breaker failure for general exceptions
     circuit_breaker.record_failure(graph_id, "analytics_usage")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
-    # Record failure metrics
     record_operation_metric(
       operation_type=OperationType.ANALYTICS_QUERY,
       status=OperationStatus.FAILURE,
       duration_ms=operation_duration_ms,
-      endpoint="/v1/graphs/{graph_id}/graph/analytics/usage",
+      endpoint="/v1/graphs/{graph_id}/usage",
       graph_id=graph_id,
       user_id=current_user.id,
-      operation_name="get_usage_stats",
+      operation_name="get_usage_analytics",
       metadata={
-        "analytics_type": "usage_statistics",
-        "include_details": include_details,
+        "analytics_type": "usage_analytics",
+        "time_range": time_range,
         "error_type": type(e).__name__,
         "error_message": str(e),
       },
     )
 
-    logger.error(f"Error getting usage stats for graph {graph_id}: {str(e)}")
+    logger.error(f"Error getting usage analytics for graph {graph_id}: {str(e)}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve usage statistics: {str(e)}",
+      detail=f"Failed to retrieve usage analytics: {str(e)}",
     )
+
+
+def _parse_time_range(time_range: str, now: datetime) -> tuple[int, int]:
+  """Parse time range string into year and month for billing queries."""
+  if time_range == "current_month":
+    return now.year, now.month
+  elif time_range == "last_month":
+    last_month = now - timedelta(days=now.day)
+    return last_month.year, last_month.month
+  else:
+    return now.year, now.month
+
+
+def _get_days_from_time_range(time_range: str) -> int:
+  """Convert time range string to number of days."""
+  if time_range == "24h":
+    return 1
+  elif time_range == "7d":
+    return 7
+  elif time_range == "30d":
+    return 30
+  elif time_range == "current_month":
+    now = datetime.now(timezone.utc)
+    return now.day
+  elif time_range == "last_month":
+    now = datetime.now(timezone.utc)
+    last_month = now - timedelta(days=now.day)
+    return (now - last_month).days
+  else:
+    return 30

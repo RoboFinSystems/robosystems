@@ -2,16 +2,14 @@
 
 import os
 import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch, MagicMock
 from sqlalchemy.exc import IntegrityError
 from decimal import Decimal
 
 from robosystems.operations.graph.subscription_service import GraphSubscriptionService
-from robosystems.models.iam import (
-  SubscriptionStatus,
-  GraphUsageTracking,
-)
+from robosystems.models.billing import SubscriptionStatus
+from robosystems.models.iam import GraphUsageTracking
 
 
 class TestSubscriptionEdgeCases:
@@ -33,7 +31,7 @@ class TestSubscriptionEdgeCases:
   ):
     """Test handling database constraint violations during subscription creation."""
     # Mock plan exists
-    plan_config = {"name": "starter", "price": 999}
+    plan_config = {"name": "starter", "base_price_cents": 999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -49,7 +47,7 @@ class TestSubscriptionEdgeCases:
       with pytest.raises(IntegrityError):
         subscription_service.create_graph_subscription("user123", "graph456", "starter")
 
-      assert mock_session.rollback.called
+      # Note: Service doesn't handle rollback - exception propagates to caller
 
   def test_concurrent_plan_modifications(self, subscription_service, mock_session):
     """Test handling concurrent modifications to billing plans."""
@@ -62,35 +60,12 @@ class TestSubscriptionEdgeCases:
       with pytest.raises(ValueError, match="Billing plan 'kuzu-xlarge' not found"):
         subscription_service.create_graph_subscription("user123", "graph456", "starter")
 
-  def test_timezone_handling_edge_cases(self, subscription_service):
-    """Test timezone handling for billing periods across DST changes."""
-    # Test date during DST transition
-    dst_date = datetime(2024, 3, 10, 2, 0, 0, tzinfo=timezone.utc)  # Spring forward
-
-    next_billing = subscription_service._get_next_billing_date(dst_date)
-
-    # Should maintain the same day of month
-    assert next_billing.day == dst_date.day
-    assert next_billing.month == 4
-
-  def test_leap_year_billing_calculations(self, subscription_service):
-    """Test billing date calculations around leap years."""
-    # February 29 in a leap year
-    leap_date = datetime(2024, 2, 29, 12, 0, 0, tzinfo=timezone.utc)
-
-    next_billing = subscription_service._get_next_billing_date(leap_date)
-
-    # Should handle gracefully - March doesn't have 29 days
-    assert next_billing.year == 2024
-    assert next_billing.month == 3
-    assert next_billing.day == 29  # Our simple implementation keeps the day
-
   def test_unicode_and_special_characters(self, subscription_service, mock_session):
     """Test handling unicode and special characters in IDs."""
     user_id = "user_🚀_123"
     graph_id = "entity_<script>alert('xss')</script>"
 
-    plan_config = {"name": "free", "price": 0}
+    plan_config = {"name": "free", "base_price_cents": 0}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -100,8 +75,9 @@ class TestSubscriptionEdgeCases:
       subscription_service.create_graph_subscription(user_id, graph_id, "free")
 
       added_sub = mock_session.add.call_args[0][0]
-      assert added_sub.user_id == user_id
-      assert added_sub.graph_id == graph_id
+      assert added_sub.billing_customer_user_id == user_id
+      assert added_sub.resource_type == "graph"
+      assert added_sub.resource_id == graph_id
 
   def test_plan_downgrade_not_allowed(self, subscription_service, mock_session):
     """Test that plan downgrades are not allowed (conceptually)."""
@@ -140,7 +116,7 @@ class TestSubscriptionEdgeCases:
   def test_subscription_with_null_dates(self, subscription_service, mock_session):
     """Test handling subscriptions with null date fields."""
     # Create subscription
-    plan_config = {"name": "pro", "price": 9999}
+    plan_config = {"name": "pro", "base_price_cents": 9999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -207,26 +183,3 @@ class TestSubscriptionEdgeCases:
     # In real implementation, might use defaults or skip invalid records
     assert usage_record.size_bytes is None
     assert usage_record.query_count < 0
-
-  def test_subscription_with_future_dates(self, subscription_service, mock_session):
-    """Test handling subscriptions with future start dates."""
-    plan_config = {"name": "pro", "price": 9999}
-    with patch(
-      "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
-      return_value=plan_config,
-    ):
-      mock_session.query.return_value.filter.return_value.first.return_value = None
-
-      # Override datetime to simulate future subscription
-      future_start = datetime.now(timezone.utc) + timedelta(days=7)
-
-      with patch(
-        "robosystems.operations.graph.subscription_service.datetime"
-      ) as mock_dt:
-        mock_dt.now.return_value = future_start
-        mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
-
-        subscription_service.create_graph_subscription("user123", "graph456", "pro")
-
-        added_sub = mock_session.add.call_args[0][0]
-        assert added_sub.current_period_start == future_start

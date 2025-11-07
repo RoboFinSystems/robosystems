@@ -110,7 +110,7 @@ def get_graph_access(
 
 router = APIRouter(
   prefix="/credits",
-  tags=["Graph Credits"],
+  tags=["Credits"],
 )
 
 # Credit API models moved to robosystems.models.api.credits

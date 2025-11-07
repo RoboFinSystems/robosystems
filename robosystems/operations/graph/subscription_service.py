@@ -1,22 +1,15 @@
-"""Service for managing graph database subscriptions (entity-specific databases)."""
+"""Service for managing graph database subscriptions."""
 
 import logging
-from datetime import datetime, timezone
 from typing import List
-from dateutil.relativedelta import relativedelta
-
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 
-from ...models.iam import (
-  GraphSubscription,
-  SubscriptionStatus,
-)
+from ...models.billing import BillingCustomer, BillingSubscription
+from ...models.iam.graph_credits import GraphTier
 from ...config import BillingConfig, env
 
 logger = logging.getLogger(__name__)
 
-# Billing configuration from environment
 BILLING_PREMIUM_PLANS_ENABLED = env.BILLING_PREMIUM_PLANS_ENABLED
 BILLING_ENABLED = env.BILLING_ENABLED
 ENVIRONMENT = env.ENVIRONMENT
@@ -25,20 +18,18 @@ ENVIRONMENT = env.ENVIRONMENT
 def get_available_plans() -> List[str]:
   """Get list of available billing plans based on environment settings."""
   if not BILLING_PREMIUM_PLANS_ENABLED and ENVIRONMENT == "dev":
-    # In dev with premium disabled, only allow kuzu-standard
     return ["kuzu-standard"]
   else:
-    # All plans available
     return ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
 
 
 def is_payment_required() -> bool:
   """Check if payment authentication is required."""
   if not BILLING_ENABLED:
-    return False  # No payment when billing disabled
+    return False
   if ENVIRONMENT == "dev":
-    return False  # No payment in dev
-  return True  # Payment required in prod/staging with billing enabled
+    return False
+  return True
 
 
 def get_max_plan_tier() -> str:
@@ -49,7 +40,7 @@ def get_max_plan_tier() -> str:
 
 
 class GraphSubscriptionService:
-  """Service for managing graph database subscriptions and billing plans."""
+  """Service for managing graph database subscriptions and billing."""
 
   def __init__(self, session: Session):
     """Initialize subscription service with database session."""
@@ -60,76 +51,59 @@ class GraphSubscriptionService:
     user_id: str,
     graph_id: str,
     plan_name: str = "kuzu-standard",
-  ) -> GraphSubscription:
-    """
-    Create a subscription for a specific graph database.
+    tier: GraphTier = GraphTier.KUZU_STANDARD,
+  ) -> BillingSubscription:
+    """Create a billing subscription for a graph database.
 
     Args:
-        user_id: User ID
+        user_id: User ID (billing owner)
         graph_id: Graph database ID
         plan_name: Billing plan name
+        tier: Graph tier
 
     Returns:
-        GraphSubscription instance
+        BillingSubscription instance
     """
-    # Check if plan is available in current environment
     available_plans = get_available_plans()
     if plan_name not in available_plans:
-      # Downgrade to max available plan
       max_tier = get_max_plan_tier()
-      logger.warning(
-        f"Plan '{plan_name}' not available in dev environment, using '{max_tier}' instead"
-      )
+      logger.warning(f"Plan '{plan_name}' not available, using '{max_tier}' instead")
       plan_name = max_tier
 
-    # Get the billing plan from config
     plan_config = BillingConfig.get_subscription_plan(plan_name)
-
     if not plan_config:
       raise ValueError(f"Billing plan '{plan_name}' not found")
 
-    # Check if subscription already exists
-    existing = (
-      self.session.query(GraphSubscription)
-      .filter(
-        GraphSubscription.user_id == user_id,
-        GraphSubscription.graph_id == graph_id,
-      )
-      .first()
+    existing = BillingSubscription.get_by_resource(
+      resource_type="graph", resource_id=graph_id, session=self.session
     )
 
     if existing:
       logger.warning(f"Subscription already exists for graph {graph_id}")
       return existing
 
-    # Calculate billing period
-    now = datetime.now(timezone.utc)
-    period_start = now
-    period_end = self._get_next_billing_date(now)
+    BillingCustomer.get_or_create(user_id, self.session)
 
-    # Create subscription
-    subscription = GraphSubscription(
+    subscription = BillingSubscription.create_subscription(
       user_id=user_id,
-      graph_id=graph_id,
+      resource_type="graph",
+      resource_id=graph_id,
       plan_name=plan_name,
-      status=SubscriptionStatus.ACTIVE.value,
-      current_period_start=period_start,
-      current_period_end=period_end,
+      base_price_cents=plan_config["base_price_cents"],
+      session=self.session,
+      billing_interval="monthly",
     )
 
-    self.session.add(subscription)
+    subscription.activate(self.session)
 
-    try:
-      self.session.commit()
-      logger.info(f"Created subscription for graph {graph_id} with plan {plan_name}")
-      return subscription
-    except SQLAlchemyError as e:
-      self.session.rollback()
-      logger.error(f"Failed to create subscription: {e}")
-      raise
+    logger.info(
+      f"Created billing subscription for graph {graph_id} with plan {plan_name}",
+      extra={
+        "user_id": user_id,
+        "graph_id": graph_id,
+        "plan_name": plan_name,
+        "subscription_id": subscription.id,
+      },
+    )
 
-  def _get_next_billing_date(self, from_date: datetime) -> datetime:
-    """Calculate next billing date (1 month from given date)."""
-    # Use relativedelta to handle month-end dates correctly
-    # e.g., Jan 31 + 1 month = Feb 28/29, not an invalid Feb 31
-    return from_date + relativedelta(months=1)
+    return subscription

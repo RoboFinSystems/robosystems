@@ -39,20 +39,20 @@ MAIN_API_TAGS = [
     "description": "🌳 Subgraphs - Manage subgraph databases for version control and memory context",
   },
   {
+    "name": "Usage",
+    "description": "📊 Usage - Monitor usage, metrics, and system performance",
+  },
+  {
+    "name": "Credits",
+    "description": "🪙 Credits - Manage credit-based usage and allocation",
+  },
+  {
+    "name": "Subscriptions",
+    "description": "💳 Subscriptions - Manage graph database subscriptions and billing",
+  },
+  {
     "name": "Graph Limits",
     "description": "🚧 Graph limits - Retrieve operational limits and tier-based constraints",
-  },
-  {
-    "name": "Graph Analytics",
-    "description": "📊 Usage analytics - Monitor usage, metrics, and system performance",
-  },
-  {
-    "name": "Graph Credits",
-    "description": "🪙 Graph credits - Manage credit-based usage and allocation",
-  },
-  {
-    "name": "Graph Billing",
-    "description": "💳 Graph billing - Manage graph database billing and invoicing",
   },
   {
     "name": "Graph Health",
@@ -67,10 +67,6 @@ MAIN_API_TAGS = [
     "description": "👤 User management - Profile, settings, and account information",
   },
   {
-    "name": "User Subscriptions",
-    "description": "💳 Subscription management - Subscribe to shared graph databases",
-  },
-  {
     "name": "User Limits",
     "description": "🚧 User limits - Rate limits and usage restrictions",
   },
@@ -79,12 +75,12 @@ MAIN_API_TAGS = [
     "description": "📈 User analytics - Usage patterns and activity metrics",
   },
   {
-    "name": "Auth",
-    "description": "🔐 Authentication - Login, register, and access token management",
-  },
-  {
     "name": "Operations",
     "description": "⏱️ Operation monitoring - Track SSE stream status and progress",
+  },
+  {
+    "name": "Auth",
+    "description": "🔐 Authentication - Login, register, and access token management",
   },
   {
     "name": "Service Offerings",

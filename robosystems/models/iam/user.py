@@ -50,11 +50,6 @@ class User(Model):
     cascade="all, delete-orphan",
     foreign_keys="UserRepository.user_id",
   )
-  graph_subscriptions = relationship(
-    "GraphSubscription",
-    back_populates="user",
-    cascade="all, delete-orphan",
-  )
 
   def __repr__(self) -> str:
     """String representation of the user."""

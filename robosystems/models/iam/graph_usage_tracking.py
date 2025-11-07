@@ -90,9 +90,19 @@ class GraphUsageTracking(Model):
   region = Column(String, nullable=True)  # AWS region
 
   # Storage metrics (for storage overage billing)
-  storage_bytes = Column(Float, nullable=True)  # Current storage size
-  storage_gb = Column(Float, nullable=True)  # Storage in GB
-  storage_delta_gb = Column(Float, nullable=True)  # Change in storage
+  storage_bytes = Column(Float, nullable=True)  # Total storage size in bytes
+  storage_gb = Column(Float, nullable=True)  # Total storage in GB
+  storage_delta_gb = Column(
+    Float, nullable=True
+  )  # Change in storage since last snapshot
+
+  # Storage breakdown by type (all in GB)
+  files_storage_gb = Column(Float, nullable=True)  # S3: User-uploaded files
+  tables_storage_gb = Column(Float, nullable=True)  # S3: CSV/Parquet table imports
+  graphs_storage_gb = Column(Float, nullable=True)  # EBS: Kuzu database files
+  subgraphs_storage_gb = Column(
+    Float, nullable=True
+  )  # EBS: Subgraph data (part of database)
 
   # Credit metrics
   credits_consumed = Column(Numeric(10, 2), nullable=True)  # Credits used
@@ -160,11 +170,35 @@ class GraphUsageTracking(Model):
     storage_bytes: float,
     session: Session,
     storage_delta_gb: Optional[float] = None,
+    files_storage_gb: Optional[float] = None,
+    tables_storage_gb: Optional[float] = None,
+    graphs_storage_gb: Optional[float] = None,
+    subgraphs_storage_gb: Optional[float] = None,
     instance_id: Optional[str] = None,
     region: Optional[str] = None,
     auto_commit: bool = True,
   ) -> "GraphUsageTracking":
-    """Record storage usage snapshot."""
+    """
+    Record storage usage snapshot with breakdown by type.
+
+    Args:
+        user_id: User ID
+        graph_id: Graph ID
+        graph_tier: Subscription tier
+        storage_bytes: Total storage in bytes
+        session: Database session
+        storage_delta_gb: Change since last snapshot
+        files_storage_gb: S3 user-uploaded files storage
+        tables_storage_gb: S3 table imports storage
+        graphs_storage_gb: EBS main database storage
+        subgraphs_storage_gb: EBS subgraph storage
+        instance_id: Infrastructure instance ID
+        region: AWS region
+        auto_commit: Whether to commit immediately
+
+    Returns:
+        Created usage record
+    """
     now = datetime.now(timezone.utc)
     storage_gb = storage_bytes / (1024**3)
 
@@ -176,6 +210,10 @@ class GraphUsageTracking(Model):
       storage_bytes=storage_bytes,
       storage_gb=storage_gb,
       storage_delta_gb=storage_delta_gb,
+      files_storage_gb=files_storage_gb,
+      tables_storage_gb=tables_storage_gb,
+      graphs_storage_gb=graphs_storage_gb,
+      subgraphs_storage_gb=subgraphs_storage_gb,
       instance_id=instance_id,
       region=region,
       recorded_at=now,

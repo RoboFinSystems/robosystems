@@ -15,12 +15,13 @@ models/iam/
 ├── graph.py                      # Graph database metadata
 ├── user_graph.py                 # User-graph relationships
 ├── graph_credits.py              # Credit-based billing system
-├── graph_subscription.py         # Subscription management
 ├── graph_usage_tracking.py       # Graph-level usage analytics
 ├── graph_backup.py               # Database backup tracking
 ├── connection_credentials.py     # External service credentials
 ├── user_repository.py            # Shared repository access
 └── user_repository_credits.py    # Repository-based credits
+
+Note: Billing subscription management has been moved to `models/billing/` namespace.
 ```
 
 ## 🎯 Purpose
@@ -84,8 +85,9 @@ Multi-tenant graph database infrastructure:
 - **`UserGraph`** - User ownership and permissions for graphs
 - **`GraphCredits`** - Credit-based billing and consumption tracking
 - **`GraphCreditTransaction`** - Individual credit transaction records
-- **`GraphSubscription`** - Subscription tiers and billing plans
 - **`GraphBackup`** - Database backup and restore operations
+
+*Note: Billing subscriptions are now managed in `models/billing/` (BillingSubscription, BillingCustomer).*
 
 ### 3. **Usage Analytics**
 
@@ -144,11 +146,15 @@ else:
 Comprehensive foreign key relationships:
 
 ```python
-# User → Multiple Graphs → Multiple Subscriptions
-user.user_graphs[0].graph.graph_subscriptions[0].plan.name
+# User → Multiple Graphs → Credit Tracking
+user.user_graphs[0].graph.graph_credits.available_credits
 
 # Graph → Credit Tracking → Transaction History
 graph.user_graphs[0].graph_credits.transactions[-1].description
+
+# Billing subscriptions are accessed via models/billing/ namespace
+# from robosystems.models.billing import BillingSubscription
+# subscription = BillingSubscription.get_by_resource("graph", graph_id, session)
 ```
 
 ### 4. **Audit Trail**

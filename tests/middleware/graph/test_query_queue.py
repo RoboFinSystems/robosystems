@@ -533,32 +533,28 @@ class TestQueryQueueManager:
   async def test_execute_query_success(self, queue_manager, mock_metrics):
     """Test successful query execution."""
 
-    # Mock executor and track_query_execution
+    # Mock executor
     async def mock_executor(cypher, params, graph_id):
       return {"result": "success"}
 
     queue_manager._query_executor = mock_executor
 
-    with patch(
-      "robosystems.routers.graphs.analytics.track_query_execution"
-    ) as mock_track:
-      query = QueuedQuery(
-        id="test_query",
-        cypher="MATCH (n) RETURN n",
-        parameters=None,
-        graph_id="test_graph",
-        user_id="user_123",
-        credits_reserved=5.0,
-        priority=5,
-      )
-      query.started_at = datetime.now(timezone.utc)
+    query = QueuedQuery(
+      id="test_query",
+      cypher="MATCH (n) RETURN n",
+      parameters=None,
+      graph_id="test_graph",
+      user_id="user_123",
+      credits_reserved=5.0,
+      priority=5,
+    )
+    query.started_at = datetime.now(timezone.utc)
 
-      await queue_manager._execute_query(query)
+    await queue_manager._execute_query(query)
 
-      assert query.status == QueryStatus.COMPLETED
-      assert query.result == {"result": "success"}
-      assert query.completed_at is not None
-      mock_track.assert_called_once()
+    assert query.status == QueryStatus.COMPLETED
+    assert query.result == {"result": "success"}
+    assert query.completed_at is not None
 
   @pytest.mark.asyncio
   async def test_execute_query_timeout(self, queue_manager, mock_metrics):

@@ -6,7 +6,6 @@ from .connection_service import (
   CredentialsNotFoundError,
   UserAccessDeniedError,
 )
-from .user_limits_service import UserLimitsService
 
 # Graph operations (high-level business logic)
 from .graph.generic_graph_service import GenericGraphService, GenericGraphServiceSync
@@ -46,7 +45,6 @@ __all__ = [
   "CredentialsNotFoundError",
   "UserAccessDeniedError",
   "RepositorySubscriptionService",
-  "UserLimitsService",
   # Graph operations
   "GenericGraphService",
   "GenericGraphServiceSync",

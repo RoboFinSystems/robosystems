@@ -47,7 +47,7 @@ The test suite is organized by component, mirroring the application structure:
 - **`config/`** - Configuration validation and billing plan tests
 - **`middleware/`** - Request/response middleware layers
   - `auth/` - Authentication, cache validation, distributed locks (20+ test files)
-  - `credits/` - Credit consumption and billing middleware
+  - `billing/` - Credit consumption and subscription billing middleware
   - `graph/` - Graph database routing and multi-tenancy
   - `mcp/` - Model Context Protocol integration
   - `otel/` - OpenTelemetry metrics and tracing
@@ -56,6 +56,7 @@ The test suite is organized by component, mirroring the application structure:
   - `sse/` - Server-sent events for real-time updates
 - **`models/`** - Database models and schemas
   - `api/` - API request/response models
+  - `billing/` - Billing and subscription models (customer, subscription, invoice, audit log)
   - `iam/` - Identity and access management models
 - **`operations/`** - Business logic services
   - `agents/` - AI agent operations and orchestration

@@ -196,7 +196,7 @@ class TestUserModel:
       UserLimits = None  # type: ignore
       has_user_limits = False
     try:
-      from robosystems.models.iam.graph_subscription import (
+      from robosystems.models.iam.graph_subscription import (  # type: ignore
         GraphSubscription as _GraphSubscription,
       )
 
@@ -220,6 +220,25 @@ class TestUserModel:
     if has_graph_subscription:
       db_session.query(GraphSubscription).delete()  # type: ignore
     db_session.query(Graph).delete()
+
+    # Delete billing tables before deleting users (in dependency order)
+    try:
+      from robosystems.models.billing import (
+        BillingAuditLog,
+        BillingInvoiceLineItem,
+        BillingInvoice,
+        BillingSubscription,
+        BillingCustomer,
+      )
+
+      db_session.query(BillingAuditLog).delete()
+      db_session.query(BillingInvoiceLineItem).delete()
+      db_session.query(BillingInvoice).delete()
+      db_session.query(BillingSubscription).delete()
+      db_session.query(BillingCustomer).delete()
+    except ImportError:
+      pass
+
     db_session.query(User).delete()
     db_session.commit()
 
@@ -421,7 +440,6 @@ class TestUserModel:
     assert hasattr(user, "user_graphs")
     assert hasattr(user, "limits")
     assert hasattr(user, "user_repositories")
-    assert hasattr(user, "graph_subscriptions")
 
   @patch("robosystems.models.iam.user.Session")
   def test_create_user_rollback_on_error(self, mock_session_class):
