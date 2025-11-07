@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, status, HTTPException
+from sqlalchemy.orm import Session
 import bcrypt
 
 from ...middleware.auth.dependencies import get_current_user
@@ -18,11 +19,11 @@ from ...models.api.common import (
   ErrorCode,
   create_error_response,
 )
-from ...database import session
+from ...database import get_db_session
 from ...logger import logger
 from ...security.input_validation import validate_password_strength
 
-router = APIRouter(tags=["User Password"])
+router = APIRouter(tags=["User"])
 
 
 @router.put(
@@ -48,6 +49,7 @@ router = APIRouter(tags=["User Password"])
 async def update_user_password(
   request: UpdatePasswordRequest,
   current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ):
   """
@@ -127,7 +129,7 @@ async def update_user_password(
       request.new_password.encode("utf-8"), salt
     ).decode("utf-8")
 
-    user_in_session = User.get_by_id(user_id, session)
+    user_in_session = User.get_by_id(user_id, db)
     if not user_in_session:
       raise create_error_response(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -138,8 +140,8 @@ async def update_user_password(
     user_in_session.password_hash = new_password_hash
     user_in_session.updated_at = datetime.now(timezone.utc)
 
-    session.commit()
-    session.refresh(user_in_session)
+    db.commit()
+    db.refresh(user_in_session)
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -157,7 +159,7 @@ async def update_user_password(
   except HTTPException:
     raise
   except Exception as e:
-    session.rollback()
+    db.rollback()
     logger.error(f"Error updating password: {str(e)}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

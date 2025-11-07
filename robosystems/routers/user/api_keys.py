@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, status, HTTPException
+from sqlalchemy.orm import Session
 
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import user_management_rate_limit_dependency
@@ -23,11 +24,11 @@ from ...models.api.common import (
   ErrorCode,
   create_error_response,
 )
-from ...database import session
+from ...database import get_db_session
 from ...logger import logger
 from ...security.input_validation import sanitize_string
 
-router = APIRouter(tags=["User API Keys"])
+router = APIRouter(tags=["User"])
 
 
 @router.get(
@@ -43,6 +44,7 @@ router = APIRouter(tags=["User API Keys"])
 )
 async def list_api_keys(
   current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> APIKeysResponse:
   """
@@ -60,7 +62,7 @@ async def list_api_keys(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    api_keys = UserAPIKey.get_by_user_id(current_user.id, session)
+    api_keys = UserAPIKey.get_by_user_id(current_user.id, db)
 
     api_key_infos = []
     active_keys = 0
@@ -128,6 +130,7 @@ async def list_api_keys(
 async def create_api_key(
   request: CreateAPIKeyRequest,
   current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> CreateAPIKeyResponse:
   """
@@ -173,7 +176,7 @@ async def create_api_key(
       name=sanitized_name,
       description=sanitized_description,
       expires_at=expires_at,
-      session=session,
+      session=db,
     )
 
     api_key_info = APIKeyInfo(
@@ -229,6 +232,7 @@ async def update_api_key(
   api_key_id: str,
   request: UpdateAPIKeyRequest,
   current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ) -> APIKeyInfo:
   """
@@ -248,7 +252,7 @@ async def update_api_key(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    api_keys = UserAPIKey.get_by_user_id(current_user.id, session)
+    api_keys = UserAPIKey.get_by_user_id(current_user.id, db)
     api_key = None
     for key in api_keys:
       if key.id == api_key_id:
@@ -278,8 +282,8 @@ async def update_api_key(
     if request.description is not None:
       api_key.description = sanitize_string(request.description, max_length=500)
 
-    session.commit()
-    session.refresh(api_key)
+    db.commit()
+    db.refresh(api_key)
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -335,6 +339,7 @@ async def update_api_key(
 async def revoke_api_key(
   api_key_id: str,
   current_user: User = Depends(get_current_user),
+  db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(user_management_rate_limit_dependency),
 ):
   """
@@ -353,7 +358,7 @@ async def revoke_api_key(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    api_keys = UserAPIKey.get_by_user_id(current_user.id, session)
+    api_keys = UserAPIKey.get_by_user_id(current_user.id, db)
     api_key = None
     for key in api_keys:
       if key.id == api_key_id:
@@ -377,7 +382,7 @@ async def revoke_api_key(
 
     was_already_inactive = not api_key.is_active
 
-    api_key.deactivate(session)
+    api_key.deactivate(db)
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(

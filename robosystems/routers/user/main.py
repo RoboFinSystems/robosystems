@@ -27,7 +27,7 @@ from ...security.input_validation import (
   sanitize_string,
 )
 
-router = APIRouter(tags=["User Profile"])
+router = APIRouter(tags=["User"])
 
 
 @router.get(

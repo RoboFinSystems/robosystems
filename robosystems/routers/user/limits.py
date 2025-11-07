@@ -13,7 +13,7 @@ from ...models.iam import User, UserLimits
 from ...models.api.user import UserLimitsResponse, UserUsageResponse
 from ...database import get_db_session
 
-router = APIRouter(tags=["User Limits"])
+router = APIRouter(tags=["User"])
 
 
 @router.get(
