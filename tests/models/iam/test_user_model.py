@@ -220,6 +220,25 @@ class TestUserModel:
     if has_graph_subscription:
       db_session.query(GraphSubscription).delete()  # type: ignore
     db_session.query(Graph).delete()
+
+    # Delete billing tables before deleting users (in dependency order)
+    try:
+      from robosystems.models.billing import (
+        BillingAuditLog,
+        BillingInvoiceLineItem,
+        BillingInvoice,
+        BillingSubscription,
+        BillingCustomer,
+      )
+
+      db_session.query(BillingAuditLog).delete()
+      db_session.query(BillingInvoiceLineItem).delete()
+      db_session.query(BillingInvoice).delete()
+      db_session.query(BillingSubscription).delete()
+      db_session.query(BillingCustomer).delete()
+    except ImportError:
+      pass
+
     db_session.query(User).delete()
     db_session.commit()
 

@@ -96,14 +96,58 @@ class StorageCalculator:
     """
     Calculate storage for main Kuzu graph database (EBS).
 
-    For local development, we can estimate based on file sizes.
-    For production, this should query the actual EBS volume or Kuzu database size.
-
-    TODO: Implement production EBS volume size query via AWS API
-    TODO: Or query Kuzu database size directly
+    Queries the Graph API metrics endpoint to get accurate database size
+    from the Kuzu instance, which works correctly in both development and production.
 
     Returns:
         Total bytes of graph database storage
+    """
+    import asyncio
+
+    try:
+      return asyncio.run(self._fetch_graph_database_size(graph_id))
+    except Exception as e:
+      logger.warning(
+        f"Failed to fetch database size from Graph API for {graph_id}: {e}. "
+        "Falling back to filesystem estimate."
+      )
+      return self._calculate_graph_database_storage_fallback(graph_id)
+
+  async def _fetch_graph_database_size(self, graph_id: str) -> int:
+    """
+    Fetch database size from Graph API metrics endpoint.
+
+    Args:
+        graph_id: Graph database identifier
+
+    Returns:
+        Total bytes of graph database storage
+    """
+    from ...graph_api.client.factory import GraphClientFactory
+
+    try:
+      client = await GraphClientFactory.create_client(
+        graph_id=graph_id, operation_type="read"
+      )
+
+      metrics = await client.get_database_metrics(graph_id)
+      await client.close()
+
+      return int(metrics.get("size_bytes", 0))
+
+    except Exception as e:
+      logger.error(f"Error fetching database metrics for {graph_id}: {e}")
+      raise
+
+  def _calculate_graph_database_storage_fallback(self, graph_id: str) -> int:
+    """
+    Fallback method using filesystem walk for local development.
+
+    Args:
+        graph_id: Graph database identifier
+
+    Returns:
+        Total bytes of graph database storage (estimated)
     """
     import os
 

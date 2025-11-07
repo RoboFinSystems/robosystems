@@ -267,7 +267,7 @@ def list_subscriptions(client, status, tier, email, include_canceled, limit):
     return
 
   table = Table(title="Subscriptions", show_header=True, header_style="bold cyan")
-  table.add_column("ID", overflow="fold")
+  table.add_column("ID", no_wrap=True)
   table.add_column("Resource", overflow="fold")
   table.add_column("Customer", overflow="fold")
   table.add_column("Status", overflow="fold")
@@ -278,7 +278,7 @@ def list_subscriptions(client, status, tier, email, include_canceled, limit):
 
   for sub in subscriptions:
     table.add_row(
-      sub["id"][:12] + "...",
+      sub["id"],
       sub["resource_id"],
       sub.get("customer_email", "N/A"),
       sub["status"],
@@ -307,7 +307,9 @@ def get_subscription(client, subscription_id):
 
   click.echo(f"\nID: {sub['id']}")
   click.echo(f"Resource: {sub['resource_type']} / {sub['resource_id']}")
-  click.echo(f"Customer: {sub.get('customer_name', 'N/A')} ({sub.get('customer_email', 'N/A')})")
+  click.echo(
+    f"Customer: {sub.get('customer_name', 'N/A')} ({sub.get('customer_email', 'N/A')})"
+  )
   click.echo(f"Status: {sub['status']}")
 
   click.echo("\nBILLING")
@@ -319,7 +321,9 @@ def get_subscription(client, subscription_id):
     else "  Base Price: Free"
   )
   click.echo(f"  Payment Method: {'Yes' if sub.get('has_payment_method') else 'No'}")
-  click.echo(f"  Invoice Billing: {'Yes' if sub.get('invoice_billing_enabled') else 'No'}")
+  click.echo(
+    f"  Invoice Billing: {'Yes' if sub.get('invoice_billing_enabled') else 'No'}"
+  )
 
   click.echo("\nDATES")
   if sub.get("started_at"):
@@ -478,16 +482,14 @@ def customers():
 def list_customers(client, limit):
   """List all customers with their billing settings."""
   params = {"limit": limit}
-  customers_data = client._make_request(
-    "GET", "/admin/v1/subscriptions/customers/all", params=params
-  )
+  customers_data = client._make_request("GET", "/admin/v1/customers", params=params)
 
   if not customers_data:
     console.print("\n[yellow]No customers found.[/yellow]")
     return
 
   table = Table(title="Customers", show_header=True, header_style="bold cyan")
-  table.add_column("User ID", overflow="fold")
+  table.add_column("User ID", no_wrap=True)
   table.add_column("Name", overflow="fold")
   table.add_column("Email", overflow="fold")
   table.add_column("Payment Method", overflow="fold")
@@ -497,7 +499,7 @@ def list_customers(client, limit):
 
   for customer in customers_data:
     table.add_row(
-      customer["user_id"][:12] + "...",
+      customer["user_id"],
       customer.get("user_name", "N/A"),
       customer.get("user_email", "N/A"),
       "Yes" if customer.get("has_payment_method") else "No",
@@ -547,84 +549,17 @@ def update_customer(
     return
 
   customer = client._make_request(
-    "PATCH", f"/admin/v1/subscriptions/customers/{user_id}", params=params
+    "PATCH", f"/admin/v1/customers/{user_id}", params=params
   )
 
   click.echo(f"✅ Updated customer {customer['user_id']}")
   click.echo(f"   Name: {customer.get('user_name', 'N/A')}")
-  click.echo(f"   Invoice Billing: {'Yes' if customer.get('invoice_billing_enabled') else 'No'}")
+  click.echo(
+    f"   Invoice Billing: {'Yes' if customer.get('invoice_billing_enabled') else 'No'}"
+  )
   click.echo(f"   Payment Terms: {customer['payment_terms']}")
   if billing_email:
     click.echo(f"   Billing Email: {customer.get('billing_email', 'N/A')}")
-
-
-@cli.group()
-def repository():
-  """Manage shared repository access (SEC, industry, economic, market data)."""
-  pass
-
-
-@repository.command("grant")
-@click.argument("user_id")
-@click.argument("repository_name")
-@click.option(
-  "--plan",
-  type=click.Choice(["STANDARD", "ENTERPRISE", "PREMIUM"]),
-  default="STANDARD",
-  help="Repository access plan",
-)
-@click.pass_obj
-def grant_repository_access(client, user_id, repository_name, plan):
-  """Grant user access to a shared repository.
-
-  NOTE: This command is not yet implemented. Repository access API endpoints
-  need to be built first. For now, use the bastion host for repository access
-  management.
-  """
-  click.echo("❌ Repository access management via API is not yet implemented.")
-  click.echo("\nPlease use the bastion host for repository access operations:")
-  click.echo("  ssh -i ~/.ssh/robosystems.pem ubuntu@<bastion-ip>")
-  click.echo("  ./bastion.sh")
-  click.echo("  Choose: Repository Access Management > Grant Access")
-  click.echo("\nAPI endpoints for repository access will be added in a future release.")
-
-
-@repository.command("revoke")
-@click.argument("user_id")
-@click.argument("repository_name")
-@click.pass_obj
-def revoke_repository_access(client, user_id, repository_name):
-  """Revoke user access to a shared repository.
-
-  NOTE: This command is not yet implemented. Repository access API endpoints
-  need to be built first. For now, use the bastion host for repository access
-  management.
-  """
-  click.echo("❌ Repository access management via API is not yet implemented.")
-  click.echo("\nPlease use the bastion host for repository access operations:")
-  click.echo("  ssh -i ~/.ssh/robosystems.pem ubuntu@<bastion-ip>")
-  click.echo("  ./bastion.sh")
-  click.echo("  Choose: Repository Access Management > Revoke Access")
-  click.echo("\nAPI endpoints for repository access will be added in a future release.")
-
-
-@repository.command("list")
-@click.option("--user-id", help="Filter by user ID")
-@click.option("--repository", help="Filter by repository name")
-@click.pass_obj
-def list_repository_access(client, user_id, repository):
-  """List repository access grants.
-
-  NOTE: This command is not yet implemented. Repository access API endpoints
-  need to be built first. For now, use the bastion host for repository access
-  management.
-  """
-  click.echo("❌ Repository access management via API is not yet implemented.")
-  click.echo("\nPlease use the bastion host for repository access operations:")
-  click.echo("  ssh -i ~/.ssh/robosystems.pem ubuntu@<bastion-ip>")
-  click.echo("  ./bastion.sh")
-  click.echo("  Choose: Repository Access Management > List Access")
-  click.echo("\nAPI endpoints for repository access will be added in a future release.")
 
 
 @cli.command()
