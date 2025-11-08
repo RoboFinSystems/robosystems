@@ -28,7 +28,7 @@ class TestProvisionRepositoryAccessTask:
 
     sub = Mock(spec=BillingSubscription)
     sub.id = "sub_456"
-    sub.billing_customer_user_id = "user_123"
+    sub.org_id = "org_123"
     sub.resource_type = "repository"
     sub.resource_id = "sec"
     sub.plan_name = "starter"

@@ -11,7 +11,7 @@ from robosystems.graph_api.client.factory import (
   get_graph_client_for_instance,
   get_graph_client_for_sec_ingestion,
 )
-from robosystems.middleware.graph.types import GraphTier
+from robosystems.config.graph_tier import GraphTier
 
 
 class TestCircuitBreaker:

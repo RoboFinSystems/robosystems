@@ -254,27 +254,29 @@ class TestGraphTableModel:
     assert isinstance(found.schema_json, dict)
     assert len(found.schema_json["columns"]) == 3
 
-  def test_multiple_graphs_same_table_name(self, db_session, test_user):
-    from robosystems.models.iam import UserGraph
-    from robosystems.middleware.graph.types import GraphTier
+  def test_multiple_graphs_same_table_name(self, db_session, test_user, test_org):
+    from robosystems.models.iam import GraphUser
+    from robosystems.config.graph_tier import GraphTier
 
     graph1 = Graph.create(
       graph_id="graph1",
       graph_name="Graph 1",
       graph_type="entity",
       graph_tier=GraphTier.KUZU_STANDARD,
+      org_id=test_org.id,
       session=db_session,
     )
-    UserGraph.create(user_id=test_user.id, graph_id=graph1.graph_id, session=db_session)
+    GraphUser.create(user_id=test_user.id, graph_id=graph1.graph_id, session=db_session)
 
     graph2 = Graph.create(
       graph_id="graph2",
       graph_name="Graph 2",
       graph_type="entity",
       graph_tier=GraphTier.KUZU_STANDARD,
+      org_id=test_org.id,
       session=db_session,
     )
-    UserGraph.create(user_id=test_user.id, graph_id=graph2.graph_id, session=db_session)
+    GraphUser.create(user_id=test_user.id, graph_id=graph2.graph_id, session=db_session)
 
     schema_json = {"columns": []}
 

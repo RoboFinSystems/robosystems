@@ -168,10 +168,10 @@ async def list_tables(
     db_tables = GraphTable.get_all_for_graph(graph_id, db)
 
     from robosystems.operations.graph.table_service import TableService
-    from robosystems.models.iam import UserGraph
+    from robosystems.models.iam import GraphUser
 
     table_service = TableService(db)
-    user_graph = db.query(UserGraph).filter(UserGraph.graph_id == graph_id).first()
+    user_graph = db.query(GraphUser).filter(GraphUser.graph_id == graph_id).first()
     user_id = user_graph.user_id if user_graph else "unknown"
 
     tables = [

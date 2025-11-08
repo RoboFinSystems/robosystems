@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import Mock, patch
-from robosystems.operations.billing.payment_provider import (
+from robosystems.operations.providers.payment_provider import (
   PaymentProvider,
   StripePaymentProvider,
 )
@@ -32,7 +32,7 @@ class TestStripeCustomerOperations:
   @pytest.fixture
   def stripe_provider(self):
     """Create Stripe provider with mocked Stripe."""
-    with patch("robosystems.operations.billing.payment_provider.env"):
+    with patch("robosystems.operations.providers.payment_provider.env"):
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
@@ -82,7 +82,7 @@ class TestStripeCheckoutSessions:
   @pytest.fixture
   def stripe_provider(self):
     """Create Stripe provider with mocked Stripe."""
-    with patch("robosystems.operations.billing.payment_provider.env") as mock_env:
+    with patch("robosystems.operations.providers.payment_provider.env") as mock_env:
       mock_env.ROBOSYSTEMS_URL = "https://robosystems.example.com"
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
@@ -125,7 +125,7 @@ class TestStripeCheckoutSessions:
     call_args = stripe_provider.stripe.checkout.Session.create.call_args
     assert call_args[1]["metadata"] == metadata
 
-  @patch("robosystems.operations.billing.payment_provider.env")
+  @patch("robosystems.operations.providers.payment_provider.env")
   def test_checkout_session_urls_use_environment(self, mock_env, stripe_provider):
     """Test that success/cancel URLs use environment configuration."""
     mock_env.ROBOSYSTEMS_URL = "https://robosystems.example.com"
@@ -138,8 +138,8 @@ class TestStripeCheckoutSessions:
     stripe_provider.create_checkout_session("cus_123", "price_456", {})
 
     call_args = stripe_provider.stripe.checkout.Session.create.call_args
-    assert "robosystems.example.com/billing/success" in call_args[1]["success_url"]
-    assert "robosystems.example.com/billing/cancel" in call_args[1]["cancel_url"]
+    assert "robosystems.example.com/checkout" in call_args[1]["success_url"]
+    assert "robosystems.example.com/billing" in call_args[1]["cancel_url"]
 
   def test_checkout_session_mode_is_subscription(self, stripe_provider):
     """Test that checkout mode is set to subscription."""
@@ -160,7 +160,7 @@ class TestStripeSubscriptionOperations:
   @pytest.fixture
   def stripe_provider(self):
     """Create Stripe provider with mocked Stripe."""
-    with patch("robosystems.operations.billing.payment_provider.env"):
+    with patch("robosystems.operations.providers.payment_provider.env"):
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
@@ -174,6 +174,15 @@ class TestStripeSubscriptionOperations:
     mock_subscription.id = "sub_test123"
     stripe_provider.stripe.Subscription.create.return_value = mock_subscription
 
+    mock_pm = Mock()
+    mock_pm.id = "pm_test123"
+    mock_payment_methods = Mock()
+    mock_payment_methods.data = [mock_pm]
+    stripe_provider.stripe.PaymentMethod.list.return_value = mock_payment_methods
+
+    mock_customer = {"invoice_settings": {"default_payment_method": None}}
+    stripe_provider.stripe.Customer.retrieve.return_value = mock_customer
+
     result = stripe_provider.create_subscription(
       customer_id="cus_123", price_id="price_456", metadata={"plan": "standard"}
     )
@@ -183,6 +192,7 @@ class TestStripeSubscriptionOperations:
       customer="cus_123",
       items=[{"price": "price_456"}],
       metadata={"plan": "standard"},
+      default_payment_method="pm_test123",
     )
 
   def test_create_subscription_with_metadata(self, stripe_provider):
@@ -190,6 +200,15 @@ class TestStripeSubscriptionOperations:
     mock_subscription = Mock()
     mock_subscription.id = "sub_test456"
     stripe_provider.stripe.Subscription.create.return_value = mock_subscription
+
+    mock_pm = Mock()
+    mock_pm.id = "pm_test456"
+    mock_payment_methods = Mock()
+    mock_payment_methods.data = [mock_pm]
+    stripe_provider.stripe.PaymentMethod.list.return_value = mock_payment_methods
+
+    mock_customer = {"invoice_settings": {"default_payment_method": None}}
+    stripe_provider.stripe.Customer.retrieve.return_value = mock_customer
 
     metadata = {"user_id": "user_123", "graph_id": "kg_456", "tier": "enterprise"}
     stripe_provider.create_subscription("cus_123", "price_789", metadata)
@@ -208,7 +227,7 @@ class TestStripeWebhookVerification:
     class SignatureVerificationError(Exception):
       pass
 
-    with patch("robosystems.operations.billing.payment_provider.env") as mock_env:
+    with patch("robosystems.operations.providers.payment_provider.env") as mock_env:
       mock_env.STRIPE_WEBHOOK_SECRET = "whsec_test123"
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
@@ -269,7 +288,7 @@ class TestStripePaymentMethods:
   @pytest.fixture
   def stripe_provider(self):
     """Create Stripe provider with mocked Stripe."""
-    with patch("robosystems.operations.billing.payment_provider.env"):
+    with patch("robosystems.operations.providers.payment_provider.env"):
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
@@ -350,7 +369,7 @@ class TestStripeInvoiceOperations:
   @pytest.fixture
   def stripe_provider(self):
     """Create Stripe provider with mocked Stripe."""
-    with patch("robosystems.operations.billing.payment_provider.env"):
+    with patch("robosystems.operations.providers.payment_provider.env"):
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()
@@ -485,7 +504,7 @@ class TestStripeCaching:
   @pytest.fixture
   def stripe_provider(self):
     """Create Stripe provider with mocked Redis."""
-    with patch("robosystems.operations.billing.payment_provider.env"):
+    with patch("robosystems.operations.providers.payment_provider.env"):
       with patch.object(StripePaymentProvider, "__init__", lambda self: None):
         provider = StripePaymentProvider()
         provider.stripe = Mock()

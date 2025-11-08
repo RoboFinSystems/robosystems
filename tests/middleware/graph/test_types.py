@@ -7,8 +7,9 @@ from robosystems.middleware.graph.types import (
   GraphCategory,
   AccessPattern,
 )
-from robosystems.models.iam import Graph
-from robosystems.models.iam.graph_credits import GraphTier
+from robosystems.models.iam import Graph, Org
+from robosystems.models.iam.org import OrgType
+from robosystems.config.graph_tier import GraphTier
 
 
 class TestGraphTypeRegistry:
@@ -20,6 +21,21 @@ class TestGraphTypeRegistry:
     import uuid
 
     self.unique_id = str(uuid.uuid4())[:8]
+
+  @pytest.fixture
+  def test_org(self, db_session):
+    """Create a test organization."""
+    import uuid
+
+    unique_id = str(uuid.uuid4())[:8]
+    org = Org(
+      id=f"test_org_{unique_id}",
+      name=f"Test Org {unique_id}",
+      org_type=OrgType.PERSONAL,
+    )
+    db_session.add(org)
+    db_session.commit()
+    return org
 
   def test_identify_graph_with_database_lookup_repository(self, db_session):
     """Test identify_graph uses database lookup for repository graphs."""
@@ -39,12 +55,13 @@ class TestGraphTypeRegistry:
     assert identity.graph_tier == GraphTier.KUZU_SHARED
     assert identity.access_pattern == AccessPattern.READ_ONLY
 
-  def test_identify_graph_with_database_lookup_user_graph(self, db_session):
+  def test_identify_graph_with_database_lookup_user_graph(self, db_session, test_org):
     """Test identify_graph uses database lookup for user graphs."""
     user_graph = Graph.create(
       graph_id=f"kg_{self.unique_id}",
       graph_name="Test User Graph",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       schema_extensions=["roboledger"],
       graph_tier=GraphTier.KUZU_STANDARD,

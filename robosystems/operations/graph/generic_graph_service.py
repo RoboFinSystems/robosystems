@@ -7,15 +7,14 @@ configurations including custom schemas and schema extensions.
 """
 
 import asyncio
-import uuid
 from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime, timezone
 from ...logger import logger
 from ...config import env
-from ...models.iam import UserGraph
+from ...models.iam import GraphUser
 from ...database import get_db_session
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
-from ...models.iam.graph_credits import GraphTier
+from ...config.graph_tier import GraphTier
 
 
 class GenericGraphService:
@@ -60,26 +59,31 @@ class GenericGraphService:
     """
     logger.info(f"Starting graph creation for user {user_id}")
 
-    # Always generate graph ID using the standard kg pattern
-    # This ensures security and consistency across all graph types
-    # Using UUID directly for simplicity and uniqueness
-    unique_id = str(uuid.uuid4()).replace("-", "")[:16]
+    # Generate time-ordered graph ID using ULID for optimal database performance
+    # ULID provides sequential IDs that prevent B-tree fragmentation at scale
+    from ...utils.ulid import generate_ulid_hex
+
+    unique_id = generate_ulid_hex(16)
     graph_id = f"kg{unique_id}"
 
     logger.info(f"Creating graph with ID: {graph_id}")
 
-    # Step 1: Validate user permissions using UserLimits
+    # Step 1: Validate org resource limits
     if progress_callback:
-      progress_callback("Checking user limits and permissions...", 10)
+      progress_callback("Checking organization limits and permissions...", 10)
 
-    from ...models.iam import UserLimits
+    from ...models.iam import OrgUser, OrgLimits
 
     db_gen = get_db_session()
     db = next(db_gen)
     try:
-      # Check user's graph creation limits (subscription-based)
-      user_limits = UserLimits.get_or_create_for_user(user_id, db)
-      can_create, reason = user_limits.can_create_user_graph(db)
+      user_orgs = OrgUser.get_user_orgs(user_id, db)
+      if not user_orgs:
+        raise ValueError("User has no organization")
+
+      org_id = user_orgs[0].org_id
+      org_limits = OrgLimits.get_or_create_for_org(org_id, db)
+      can_create, reason = org_limits.can_create_graph(db)
       if not can_create:
         raise ValueError(reason)
     finally:
@@ -281,6 +285,7 @@ class GenericGraphService:
         graph_id=graph_id,
         graph_name=metadata.get("name", graph_id),
         graph_type="generic",  # This is a generic graph, not a entity graph
+        org_id=org_id,
         session=db,
         base_schema=None
         if custom_schema
@@ -304,8 +309,8 @@ class GenericGraphService:
 
       logger.info(f"Graph metadata created: {graph}")
 
-      # Then create UserGraph relationship
-      user_graph = UserGraph(
+      # Then create GraphUser relationship
+      user_graph = GraphUser(
         user_id=user_id,
         graph_id=graph_id,
         role="admin",  # Owner gets admin role

@@ -1,22 +1,23 @@
-"""Integration tests for Graph and UserGraph models working together."""
+"""Integration tests for Graph and GraphUser models working together."""
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from robosystems.models.iam import Graph, UserGraph, User, GraphCredits
-from robosystems.models.iam.graph_credits import GraphTier
+from robosystems.models.iam import Graph, GraphUser, User, GraphCredits
+from robosystems.config.graph_tier import GraphTier
 
 
 class TestGraphUserIntegration:
-  """Test Graph and UserGraph models working together."""
+  """Test Graph and GraphUser models working together."""
 
-  def test_create_graph_with_user_access(self, test_db, test_user):
+  def test_create_graph_with_user_access(self, test_db, test_user, test_org):
     """Test creating a graph and granting user access in one flow."""
     # Create graph
     graph = Graph.create(
       graph_id="entity_integration_test",
       graph_name="Integration Test Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
       base_schema="base",
       schema_extensions=["roboledger"],
@@ -28,7 +29,7 @@ class TestGraphUserIntegration:
     )
 
     # Grant user access
-    user_graph = UserGraph.create(
+    user_graph = GraphUser.create(
       user_id=test_user.id,
       graph_id=graph.graph_id,
       role="admin",
@@ -42,17 +43,18 @@ class TestGraphUserIntegration:
     assert user_graph.graph.has_specific_extension("roboledger")
 
     # Verify we can query through relationships
-    user_graphs = UserGraph.get_by_user_id(test_user.id, test_db)
-    assert len(user_graphs) == 1
-    assert user_graphs[0].graph.graph_tier == GraphTier.KUZU_STANDARD.value
+    graph_users = GraphUser.get_by_user_id(test_user.id, test_db)
+    assert len(graph_users) == 1
+    assert graph_users[0].graph.graph_tier == GraphTier.KUZU_STANDARD.value
 
-  def test_graph_deletion_cascades(self, test_db, test_user):
-    """Test that deleting a graph removes all UserGraph relationships."""
+  def test_graph_deletion_cascades(self, test_db, test_user, test_org):
+    """Test that deleting a graph removes all GraphUser relationships."""
     # Create graph
     graph = Graph.create(
       graph_id="cascade_test",
       graph_name="Cascade Test",
       graph_type="generic",
+      org_id=test_org.id,
       session=test_db,
     )
 
@@ -71,35 +73,35 @@ class TestGraphUserIntegration:
       session=test_db,
     )
 
-    UserGraph.create(
+    GraphUser.create(
       user_id=user1.id, graph_id=graph.graph_id, role="admin", session=test_db
     )
-    UserGraph.create(
+    GraphUser.create(
       user_id=user2.id, graph_id=graph.graph_id, role="member", session=test_db
     )
 
     # Verify relationships exist
-    assert len(UserGraph.get_by_graph_id(graph.graph_id, test_db)) == 2
+    assert len(GraphUser.get_by_graph_id(graph.graph_id, test_db)) == 2
 
     # Delete the graph
     graph.delete(test_db)
 
     # Verify cascade deletion
     assert Graph.get_by_id("cascade_test", test_db) is None
-    assert len(UserGraph.get_by_graph_id("cascade_test", test_db)) == 0
+    assert len(GraphUser.get_by_graph_id("cascade_test", test_db)) == 0
 
-  def test_user_cannot_access_deleted_graph(self, test_db, test_user):
+  def test_user_cannot_access_deleted_graph(self, test_db, test_user, test_org):
     """Test that users cannot create relationships to non-existent graphs."""
     # This should fail due to foreign key constraint
     with pytest.raises(IntegrityError):
-      UserGraph.create(
+      GraphUser.create(
         user_id=test_user.id,
         graph_id="non_existent_graph",
         role="admin",
         session=test_db,
       )
 
-  def test_multi_tenant_access_control(self, test_db):
+  def test_multi_tenant_access_control(self, test_db, test_org):
     """Test multi-tenant access control scenarios."""
     # Create two users
     import bcrypt
@@ -127,6 +129,7 @@ class TestGraphUserIntegration:
       graph_id="tenant1_entity",
       graph_name="Tenant 1 Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
     )
 
@@ -134,30 +137,32 @@ class TestGraphUserIntegration:
       graph_id="tenant2_entity",
       graph_name="Tenant 2 Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
     )
 
     # Grant access
-    UserGraph.create(
+    GraphUser.create(
       user_id=user1.id, graph_id=graph1.graph_id, role="admin", session=test_db
     )
-    UserGraph.create(
+    GraphUser.create(
       user_id=user2.id, graph_id=graph2.graph_id, role="admin", session=test_db
     )
 
     # Verify isolation
-    assert UserGraph.user_has_access(user1.id, graph1.graph_id, test_db) is True
-    assert UserGraph.user_has_access(user1.id, graph2.graph_id, test_db) is False
-    assert UserGraph.user_has_access(user2.id, graph1.graph_id, test_db) is False
-    assert UserGraph.user_has_access(user2.id, graph2.graph_id, test_db) is True
+    assert GraphUser.user_has_access(user1.id, graph1.graph_id, test_db) is True
+    assert GraphUser.user_has_access(user1.id, graph2.graph_id, test_db) is False
+    assert GraphUser.user_has_access(user2.id, graph1.graph_id, test_db) is False
+    assert GraphUser.user_has_access(user2.id, graph2.graph_id, test_db) is True
 
-  def test_shared_graph_multiple_users(self, test_db):
+  def test_shared_graph_multiple_users(self, test_db, test_org):
     """Test multiple users sharing access to the same graph."""
     # Create a graph
     graph = Graph.create(
       graph_id="shared_graph",
       graph_name="Shared Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
       schema_extensions=["roboledger"],
     )
@@ -183,7 +188,7 @@ class TestGraphUserIntegration:
 
     # Grant different levels of access
     for user, role in zip(users, roles):
-      UserGraph.create(
+      GraphUser.create(
         user_id=user.id,
         graph_id=graph.graph_id,
         role=role,
@@ -191,7 +196,7 @@ class TestGraphUserIntegration:
       )
 
     # Verify access levels
-    graph_users = UserGraph.get_by_graph_id(graph.graph_id, test_db)
+    graph_users = GraphUser.get_by_graph_id(graph.graph_id, test_db)
     assert len(graph_users) == 4
 
     admin_count = sum(1 for ug in graph_users if ug.role == "admin")
@@ -202,7 +207,7 @@ class TestGraphUserIntegration:
     assert member_count == 2
     assert viewer_count == 1
 
-  def test_graph_selection_across_multiple_graphs(self, test_db, test_user):
+  def test_graph_selection_across_multiple_graphs(self, test_db, test_user, test_org):
     """Test graph selection when user has access to multiple graphs."""
     # Create multiple graphs
     graphs = []
@@ -211,12 +216,13 @@ class TestGraphUserIntegration:
         graph_id=f"multi_graph_{i}",
         graph_name=f"Graph {i}",
         graph_type="entity" if i < 2 else "generic",
+        org_id=test_org.id,
         session=test_db,
       )
       graphs.append(graph)
 
       # Grant access
-      UserGraph.create(
+      GraphUser.create(
         user_id=test_user.id,
         graph_id=graph.graph_id,
         role="admin",
@@ -225,24 +231,25 @@ class TestGraphUserIntegration:
       )
 
     # Verify initial selection
-    selected = UserGraph.get_selected_graph(test_user.id, test_db)
+    selected = GraphUser.get_selected_graph(test_user.id, test_db)
     assert selected.graph_id == "multi_graph_0"
 
     # Switch selection
-    UserGraph.set_selected_graph(test_user.id, "multi_graph_2", test_db)
+    GraphUser.set_selected_graph(test_user.id, "multi_graph_2", test_db)
 
     # Verify new selection
-    selected = UserGraph.get_selected_graph(test_user.id, test_db)
+    selected = GraphUser.get_selected_graph(test_user.id, test_db)
     assert selected.graph_id == "multi_graph_2"
     assert selected.graph.graph_type == "generic"
 
-  def test_graph_with_credits_integration(self, test_db, test_user):
+  def test_graph_with_credits_integration(self, test_db, test_user, test_org):
     """Test that graph tier affects credit calculations correctly."""
     # Create graphs with different tiers
     standard_graph = Graph.create(
       graph_id="standard_tier_graph",
       graph_name="Standard Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
       graph_tier=GraphTier.KUZU_STANDARD,
     )
@@ -251,19 +258,20 @@ class TestGraphUserIntegration:
       graph_id="premium_tier_graph",
       graph_name="Premium Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
       graph_tier=GraphTier.KUZU_XLARGE,
     )
 
     # Grant access
-    UserGraph.create(
+    GraphUser.create(
       user_id=test_user.id,
       graph_id=standard_graph.graph_id,
       role="admin",
       session=test_db,
     )
 
-    UserGraph.create(
+    GraphUser.create(
       user_id=test_user.id,
       graph_id=premium_graph.graph_id,
       role="admin",
@@ -302,13 +310,14 @@ class TestGraphUserIntegration:
     assert standard_credits.current_balance == Decimal("1000.0")
     assert premium_credits.current_balance == Decimal("1000.0")
 
-  def test_graph_metadata_access_through_user_graph(self, test_db, test_user):
-    """Test accessing graph metadata through UserGraph relationship."""
+  def test_graph_metadata_access_through_user_graph(self, test_db, test_user, test_org):
+    """Test accessing graph metadata through GraphUser relationship."""
     # Create a graph with rich metadata
     graph = Graph.create(
       graph_id="metadata_rich_graph",
       graph_name="Metadata Test Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
       schema_extensions=["roboledger", "roboinvestor"],
       graph_metadata={
@@ -320,7 +329,7 @@ class TestGraphUserIntegration:
     )
 
     # Grant user access
-    user_graph = UserGraph.create(
+    user_graph = GraphUser.create(
       user_id=test_user.id,
       graph_id=graph.graph_id,
       role="viewer",
@@ -333,13 +342,14 @@ class TestGraphUserIntegration:
     assert "fintech" in user_graph.graph.graph_metadata["tags"]
     assert user_graph.graph.has_specific_extension("roboinvestor")
 
-  def test_role_based_operations(self, test_db):
+  def test_role_based_operations(self, test_db, test_org):
     """Test operations that depend on user roles."""
     # Create graph
     graph = Graph.create(
       graph_id="role_test_graph",
       graph_name="Role Test Entity",
       graph_type="entity",
+      org_id=test_org.id,
       session=test_db,
     )
 
@@ -362,28 +372,28 @@ class TestGraphUserIntegration:
     test_db.commit()
 
     # Grant different access levels
-    UserGraph.create(
+    GraphUser.create(
       user_id=admin_user.id, graph_id=graph.graph_id, role="admin", session=test_db
     )
-    UserGraph.create(
+    GraphUser.create(
       user_id=member_user.id, graph_id=graph.graph_id, role="member", session=test_db
     )
-    UserGraph.create(
+    GraphUser.create(
       user_id=viewer_user.id, graph_id=graph.graph_id, role="viewer", session=test_db
     )
 
     # Test role-based checks
     assert (
-      UserGraph.user_has_admin_access(admin_user.id, graph.graph_id, test_db) is True
+      GraphUser.user_has_admin_access(admin_user.id, graph.graph_id, test_db) is True
     )
     assert (
-      UserGraph.user_has_admin_access(member_user.id, graph.graph_id, test_db) is False
+      GraphUser.user_has_admin_access(member_user.id, graph.graph_id, test_db) is False
     )
     assert (
-      UserGraph.user_has_admin_access(viewer_user.id, graph.graph_id, test_db) is False
+      GraphUser.user_has_admin_access(viewer_user.id, graph.graph_id, test_db) is False
     )
 
     # All have basic access
-    assert UserGraph.user_has_access(admin_user.id, graph.graph_id, test_db) is True
-    assert UserGraph.user_has_access(member_user.id, graph.graph_id, test_db) is True
-    assert UserGraph.user_has_access(viewer_user.id, graph.graph_id, test_db) is True
+    assert GraphUser.user_has_access(admin_user.id, graph.graph_id, test_db) is True
+    assert GraphUser.user_has_access(member_user.id, graph.graph_id, test_db) is True
+    assert GraphUser.user_has_access(viewer_user.id, graph.graph_id, test_db) is True

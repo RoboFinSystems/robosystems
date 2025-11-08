@@ -1,6 +1,5 @@
 """Billing invoice models - consolidated invoicing for all resources."""
 
-import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from enum import Enum
@@ -9,6 +8,7 @@ from sqlalchemy.orm import relationship, Session
 
 from ...database import Base
 from ...logger import get_logger
+from ...utils.ulid import generate_prefixed_ulid
 
 logger = get_logger(__name__)
 
@@ -32,11 +32,9 @@ class BillingInvoice(Base):
 
   __tablename__ = "billing_invoices"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"binv_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("binv"))
 
-  billing_customer_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+  org_id = Column(String, ForeignKey("orgs.id"), nullable=False)
 
   invoice_number = Column(String, unique=True, nullable=False)
 
@@ -75,7 +73,7 @@ class BillingInvoice(Base):
   )
 
   __table_args__ = (
-    Index("idx_billing_invoice_customer", "billing_customer_user_id"),
+    Index("idx_billing_invoice_org", "org_id"),
     Index("idx_billing_invoice_status", "status"),
     Index("idx_billing_invoice_period", "period_start", "period_end"),
     Index("idx_billing_invoice_due_date", "due_date"),
@@ -87,7 +85,7 @@ class BillingInvoice(Base):
   @classmethod
   def create_invoice(
     cls,
-    user_id: str,
+    org_id: str,
     period_start: datetime,
     period_end: datetime,
     session: Session,
@@ -108,7 +106,7 @@ class BillingInvoice(Base):
     due_date = now + timedelta(days=terms_days)
 
     invoice = cls(
-      billing_customer_user_id=user_id,
+      org_id=org_id,
       invoice_number=invoice_number,
       period_start=period_start,
       period_end=period_end,
@@ -123,7 +121,7 @@ class BillingInvoice(Base):
     session.commit()
     session.refresh(invoice)
 
-    logger.info(f"Created invoice {invoice_number} for user {user_id}")
+    logger.info(f"Created invoice {invoice_number} for org {org_id}")
 
     return invoice
 
@@ -212,15 +210,56 @@ class BillingInvoice(Base):
 
     logger.info(f"Marked invoice {self.invoice_number} as paid")
 
+  @classmethod
+  def get_by_org_id(cls, org_id: str, session: Session) -> list["BillingInvoice"]:
+    """Get all invoices for an organization."""
+    return session.query(cls).filter(cls.org_id == org_id).all()
+
+  @classmethod
+  def get_by_user_id(cls, user_id: str, session: Session) -> list["BillingInvoice"]:
+    """Get all invoices for a user (looks up user's org first)."""
+    from ..iam import OrgUser
+
+    membership = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
+
+    if not membership:
+      return []
+
+    return cls.get_by_org_id(membership.org_id, session)
+
+  @classmethod
+  def get_invoice_for_period(
+    cls,
+    org_id: str,
+    period_start: datetime,
+    period_end: datetime,
+    session: Session,
+  ) -> Optional["BillingInvoice"]:
+    """Get invoice for a specific billing period for an organization."""
+    return (
+      session.query(cls)
+      .filter(
+        cls.org_id == org_id,
+        cls.period_start == period_start,
+        cls.period_end == period_end,
+      )
+      .first()
+    )
+
+  @classmethod
+  def get_by_stripe_invoice_id(
+    cls, stripe_invoice_id: str, session: Session
+  ) -> Optional["BillingInvoice"]:
+    """Get invoice by Stripe invoice ID."""
+    return session.query(cls).filter(cls.stripe_invoice_id == stripe_invoice_id).first()
+
 
 class BillingInvoiceLineItem(Base):
   """Line item for a billing invoice."""
 
   __tablename__ = "billing_invoice_line_items"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"bli_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("bli"))
 
   invoice_id = Column(String, ForeignKey("billing_invoices.id"), nullable=False)
 

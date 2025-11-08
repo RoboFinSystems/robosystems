@@ -272,55 +272,6 @@ class TestKuzuClientExtended:
       assert result["task_id"] == "task-456"
       assert result["status"] == "queued"
 
-  # Test ingest_with_sse method
-  @pytest.mark.asyncio
-  @pytest.mark.skip(reason="Complex SSE mocking - needs refactoring")
-  async def test_ingest_with_sse(self, client):
-    """Test SSE-based ingestion monitoring."""
-    # Mock the SSE connection with proper async iteration
-    mock_sse_event = Mock()
-    mock_sse_event.data = json.dumps(
-      {
-        "task_id": "task-789",
-        "status": "completed",
-        "progress": 100,
-        "rows_imported": 50,
-      }
-    )
-    mock_sse_event.event = "task_update"
-
-    # Create a proper async iterator
-    class MockSSEIterator:
-      def __init__(self):
-        self.called = False
-
-      def __aiter__(self):
-        return self
-
-      async def __anext__(self):
-        if not self.called:
-          self.called = True
-          return mock_sse_event
-        raise StopAsyncIteration
-
-    mock_sse_context = AsyncMock()
-    mock_sse_context.aiter_sse.return_value = MockSSEIterator()
-
-    with patch("robosystems.graph_api.client.client.aconnect_sse") as mock_connect:
-      mock_connect.return_value = mock_sse_context
-
-      result = await client.ingest_with_sse(
-        graph_id="test_db",
-        table_name="TestTable",
-        s3_pattern="s3://bucket/data/*.csv",
-        ignore_errors=True,
-      )
-      # Task ID is auto-generated, so just check it exists
-      assert "task_id" in result
-      assert result["task_id"].startswith("ingest_test_db_TestTable_")
-      # The SSE event has status="completed"
-      assert result["status"] == "completed"
-
   # Test get_task_status method
   @pytest.mark.asyncio
   async def test_get_task_status(self, client):
@@ -556,64 +507,6 @@ class TestKuzuClientExtended:
     result = await client._execute_with_retry(mock_func)
     assert result == {"success": True}
     assert not client._circuit_breaker_open
-
-  # Test SSE monitoring with timeout
-  @pytest.mark.asyncio
-  @pytest.mark.skip(reason="Complex SSE mocking - needs refactoring")
-  async def test_monitor_ingestion_sse_timeout(self, client):
-    """Test SSE monitoring with timeout."""
-    # Mock SSE events with delay
-    mock_sse_context = AsyncMock()
-
-    async def mock_iter():
-      # Simulate timeout - no events
-      import asyncio
-
-      await asyncio.sleep(2)  # Will timeout
-
-    mock_sse_context.__aiter__ = mock_iter
-    mock_sse_context.__aenter__.return_value = mock_sse_context
-    mock_sse_context.__aexit__.return_value = None
-
-    with patch("robosystems.graph_api.client.client.aconnect_sse") as mock_connect:
-      mock_connect.return_value = mock_sse_context
-
-      result = await client._monitor_ingestion_sse(
-        task_id="timeout-task",
-        timeout=1,  # 1 second timeout
-      )
-      assert result["status"] == "timeout"
-      assert "Monitoring timeout" in result["message"]
-
-  # Test SSE monitoring with error event
-  @pytest.mark.asyncio
-  @pytest.mark.skip(reason="Complex SSE mocking - needs refactoring")
-  async def test_monitor_ingestion_sse_error_event(self, client):
-    """Test SSE monitoring with error event."""
-    mock_error_event = Mock()
-    mock_error_event.data = json.dumps(
-      {
-        "status": "failed",
-        "error": "Database connection lost",
-      }
-    )
-    mock_error_event.event = "error"
-
-    mock_sse_context = AsyncMock()
-
-    async def mock_iter():
-      yield mock_error_event
-
-    mock_sse_context.__aiter__ = mock_iter
-    mock_sse_context.__aenter__.return_value = mock_sse_context
-    mock_sse_context.__aexit__.return_value = None
-
-    with patch("robosystems.graph_api.client.client.aconnect_sse") as mock_connect:
-      mock_connect.return_value = mock_sse_context
-
-      result = await client._monitor_ingestion_sse(task_id="error-task")
-      assert result["status"] == "failed"
-      assert "Database connection lost" in result["error"]
 
   # Test various exception types
   @pytest.mark.asyncio

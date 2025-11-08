@@ -1,6 +1,5 @@
 """Billing subscription model - polymorphic subscriptions for any resource type."""
 
-import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from enum import Enum
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ...database import Base
 from ...logger import get_logger
+from ...utils.ulid import generate_prefixed_ulid
 
 logger = get_logger(__name__)
 
@@ -46,11 +46,9 @@ class BillingSubscription(Base):
 
   __tablename__ = "billing_subscriptions"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"bsub_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("bsub"))
 
-  billing_customer_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+  org_id = Column(String, ForeignKey("orgs.id"), nullable=False)
 
   resource_type = Column(String, nullable=False)
   resource_id = Column(String, nullable=True)
@@ -91,7 +89,7 @@ class BillingSubscription(Base):
   )
 
   __table_args__ = (
-    Index("idx_billing_sub_customer", "billing_customer_user_id"),
+    Index("idx_billing_sub_org", "org_id"),
     Index("idx_billing_sub_resource", "resource_type", "resource_id"),
     Index("idx_billing_sub_status", "status"),
     Index("idx_billing_sub_stripe", "stripe_subscription_id"),
@@ -104,7 +102,7 @@ class BillingSubscription(Base):
   @classmethod
   def create_subscription(
     cls,
-    user_id: str,
+    org_id: str,
     resource_type: str,
     resource_id: str,
     plan_name: str,
@@ -117,7 +115,7 @@ class BillingSubscription(Base):
     now = datetime.now(timezone.utc)
 
     subscription = cls(
-      billing_customer_user_id=user_id,
+      org_id=org_id,
       resource_type=resource_type,
       resource_id=resource_id,
       plan_name=plan_name,
@@ -150,16 +148,16 @@ class BillingSubscription(Base):
     )
 
   @classmethod
-  def get_by_resource_and_user(
+  def get_by_resource_and_org(
     cls,
     resource_type: str,
     resource_id: str,
-    user_id: str,
+    org_id: str,
     session: Session,
   ) -> Optional["BillingSubscription"]:
-    """Get subscription for a specific resource and user.
+    """Get subscription for a specific resource and organization.
 
-    This is particularly useful for shared repositories where multiple users
+    This is particularly useful for shared repositories where multiple orgs
     can have separate subscriptions to the same resource.
     """
     return (
@@ -167,24 +165,61 @@ class BillingSubscription(Base):
       .filter(
         cls.resource_type == resource_type,
         cls.resource_id == resource_id,
-        cls.billing_customer_user_id == user_id,
+        cls.org_id == org_id,
       )
       .first()
+    )
+
+  @classmethod
+  def get_by_resource_and_user(
+    cls,
+    resource_type: str,
+    resource_id: str,
+    user_id: str,
+    session: Session,
+  ) -> Optional["BillingSubscription"]:
+    """Get subscription for a specific resource and user (looks up user's org first)."""
+    from ..iam import OrgUser
+
+    membership = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
+
+    if not membership:
+      return None
+
+    return cls.get_by_resource_and_org(
+      resource_type=resource_type,
+      resource_id=resource_id,
+      org_id=membership.org_id,
+      session=session,
+    )
+
+  @classmethod
+  def get_active_subscriptions_for_org(
+    cls, org_id: str, session: Session
+  ) -> list["BillingSubscription"]:
+    """Get all active subscriptions for an organization."""
+    return (
+      session.query(cls)
+      .filter(
+        cls.org_id == org_id,
+        cls.status == SubscriptionStatus.ACTIVE.value,
+      )
+      .all()
     )
 
   @classmethod
   def get_active_subscriptions_for_user(
     cls, user_id: str, session: Session
   ) -> list["BillingSubscription"]:
-    """Get all active subscriptions for a user."""
-    return (
-      session.query(cls)
-      .filter(
-        cls.billing_customer_user_id == user_id,
-        cls.status == SubscriptionStatus.ACTIVE.value,
-      )
-      .all()
-    )
+    """Get all active subscriptions for a user (looks up user's org first)."""
+    from ..iam import OrgUser
+
+    membership = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
+
+    if not membership:
+      return []
+
+    return cls.get_active_subscriptions_for_org(membership.org_id, session)
 
   @classmethod
   def get_by_provider_subscription_id(

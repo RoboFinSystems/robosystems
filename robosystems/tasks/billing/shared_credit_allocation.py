@@ -136,7 +136,25 @@ def allocate_monthly_shared_credits(self) -> Dict[str, Any]:
 
       for subscription in active_subscriptions:
         try:
-          user_id = subscription.billing_customer_user_id
+          from ...models.iam import OrgUser, OrgRole
+
+          owner = (
+            db.query(OrgUser)
+            .filter(
+              OrgUser.org_id == subscription.org_id,
+              OrgUser.role == OrgRole.OWNER,
+            )
+            .first()
+          )
+
+          if not owner:
+            logger.warning(
+              f"No owner found for org {subscription.org_id}, skipping subscription {subscription.id}"
+            )
+            failed_count += 1
+            continue
+
+          user_id = owner.user_id
           repository_name = subscription.resource_id
           plan_name = subscription.plan_name
 

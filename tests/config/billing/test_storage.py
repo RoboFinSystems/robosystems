@@ -15,15 +15,15 @@ class TestStorageBillingConfig:
 
   def test_storage_included_constants(self):
     """Test STORAGE_INCLUDED constants."""
-    assert StorageBillingConfig.STORAGE_INCLUDED["standard"] == 100
-    assert StorageBillingConfig.STORAGE_INCLUDED["enterprise"] == 500
-    assert StorageBillingConfig.STORAGE_INCLUDED["premium"] == 2000
+    assert StorageBillingConfig.STORAGE_INCLUDED["kuzu-standard"] == 100
+    assert StorageBillingConfig.STORAGE_INCLUDED["kuzu-large"] == 500
+    assert StorageBillingConfig.STORAGE_INCLUDED["kuzu-xlarge"] == 2000
 
   def test_overage_costs_constants(self):
     """Test OVERAGE_COSTS constants."""
-    assert StorageBillingConfig.OVERAGE_COSTS["standard"] == Decimal("1.00")
-    assert StorageBillingConfig.OVERAGE_COSTS["enterprise"] == Decimal("0.50")
-    assert StorageBillingConfig.OVERAGE_COSTS["premium"] == Decimal("0.25")
+    assert StorageBillingConfig.OVERAGE_COSTS["kuzu-standard"] == Decimal("1.00")
+    assert StorageBillingConfig.OVERAGE_COSTS["kuzu-large"] == Decimal("0.50")
+    assert StorageBillingConfig.OVERAGE_COSTS["kuzu-xlarge"] == Decimal("0.25")
 
   def test_storage_types_constants(self):
     """Test STORAGE_TYPES constants."""
@@ -36,9 +36,9 @@ class TestCalculateStorageOverage:
   """Test calculate_storage_overage method."""
 
   def test_no_overage_standard_tier(self):
-    """Test no overage for standard tier within limits."""
+    """Test no overage for kuzu-standard tier within limits."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("50"), tier="standard"
+      storage_gb=Decimal("50"), tier="kuzu-standard"
     )
 
     expected = {
@@ -53,7 +53,7 @@ class TestCalculateStorageOverage:
   def test_no_overage_exactly_at_limit(self):
     """Test no overage when exactly at included limit."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("100"), tier="standard"
+      storage_gb=Decimal("100"), tier="kuzu-standard"
     )
 
     expected = {
@@ -66,9 +66,9 @@ class TestCalculateStorageOverage:
     assert result == expected
 
   def test_overage_standard_tier(self):
-    """Test overage calculation for standard tier."""
+    """Test overage calculation for kuzu-standard tier."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("150"), tier="standard"
+      storage_gb=Decimal("150"), tier="kuzu-standard"
     )
 
     expected = {
@@ -82,9 +82,9 @@ class TestCalculateStorageOverage:
     assert result == expected
 
   def test_overage_enterprise_tier(self):
-    """Test overage calculation for enterprise tier."""
+    """Test overage calculation for kuzu-large tier."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("600"), tier="enterprise"
+      storage_gb=Decimal("600"), tier="kuzu-large"
     )
 
     expected = {
@@ -98,9 +98,9 @@ class TestCalculateStorageOverage:
     assert result == expected
 
   def test_overage_premium_tier(self):
-    """Test overage calculation for premium tier."""
+    """Test overage calculation for kuzu-xlarge tier."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("2100"), tier="premium"
+      storage_gb=Decimal("2100"), tier="kuzu-xlarge"
     )
 
     expected = {
@@ -116,7 +116,7 @@ class TestCalculateStorageOverage:
   def test_overage_with_cold_storage(self):
     """Test overage calculation with cold storage type."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("150"), tier="standard", storage_type="cold"
+      storage_gb=Decimal("150"), tier="kuzu-standard", storage_type="cold"
     )
 
     expected = {
@@ -132,7 +132,7 @@ class TestCalculateStorageOverage:
   def test_overage_with_hot_storage(self):
     """Test overage calculation with hot storage type."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("150"), tier="standard", storage_type="hot"
+      storage_gb=Decimal("150"), tier="kuzu-standard", storage_type="hot"
     )
 
     expected = {
@@ -164,7 +164,7 @@ class TestCalculateStorageOverage:
   def test_overage_unknown_storage_type(self):
     """Test overage calculation with unknown storage type defaults to 1.0 multiplier."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("150"), tier="standard", storage_type="unknown_type"
+      storage_gb=Decimal("150"), tier="kuzu-standard", storage_type="unknown_type"
     )
 
     expected = {
@@ -181,7 +181,7 @@ class TestCalculateStorageOverage:
     """Test overage calculation with very large storage amounts."""
     result = StorageBillingConfig.calculate_storage_overage(
       storage_gb=Decimal("10000"),  # 10 TB
-      tier="premium",
+      tier="kuzu-xlarge",
     )
 
     expected = {
@@ -197,7 +197,7 @@ class TestCalculateStorageOverage:
   def test_fractional_storage_amounts(self):
     """Test overage calculation with fractional GB amounts."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("150.75"), tier="standard"
+      storage_gb=Decimal("150.75"), tier="kuzu-standard"
     )
 
     expected = {
@@ -213,7 +213,7 @@ class TestCalculateStorageOverage:
   def test_zero_storage(self):
     """Test overage calculation with zero storage."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("0"), tier="standard"
+      storage_gb=Decimal("0"), tier="kuzu-standard"
     )
 
     expected = {
@@ -230,8 +230,8 @@ class TestGetStorageLimits:
   """Test get_storage_limits method."""
 
   def test_storage_limits_standard_tier(self):
-    """Test storage limits for standard tier."""
-    result = StorageBillingConfig.get_storage_limits("standard")
+    """Test storage limits for kuzu-standard tier."""
+    result = StorageBillingConfig.get_storage_limits("kuzu-standard")
 
     expected = {
       "included_gb": 100,
@@ -243,8 +243,8 @@ class TestGetStorageLimits:
     assert result == expected
 
   def test_storage_limits_enterprise_tier(self):
-    """Test storage limits for enterprise tier."""
-    result = StorageBillingConfig.get_storage_limits("enterprise")
+    """Test storage limits for kuzu-large tier."""
+    result = StorageBillingConfig.get_storage_limits("kuzu-large")
 
     expected = {
       "included_gb": 500,
@@ -256,8 +256,8 @@ class TestGetStorageLimits:
     assert result == expected
 
   def test_storage_limits_premium_tier(self):
-    """Test storage limits for premium tier."""
-    result = StorageBillingConfig.get_storage_limits("premium")
+    """Test storage limits for kuzu-xlarge tier."""
+    result = StorageBillingConfig.get_storage_limits("kuzu-xlarge")
 
     expected = {
       "included_gb": 2000,
@@ -283,7 +283,7 @@ class TestGetStorageLimits:
 
   def test_all_limits_are_integers(self):
     """Test that all storage limits are returned as integers."""
-    for tier in ["standard", "enterprise", "premium"]:
+    for tier in ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]:
       result = StorageBillingConfig.get_storage_limits(tier)
 
       for key, value in result.items():
@@ -291,7 +291,7 @@ class TestGetStorageLimits:
 
   def test_limit_relationships(self):
     """Test relationships between different storage limits."""
-    for tier in ["standard", "enterprise", "premium"]:
+    for tier in ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]:
       result = StorageBillingConfig.get_storage_limits(tier)
 
       included = result["included_gb"]
@@ -314,7 +314,7 @@ class TestEdgeCases:
   def test_very_small_decimal_amounts(self):
     """Test with very small decimal amounts."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("100.001"), tier="standard"
+      storage_gb=Decimal("100.001"), tier="kuzu-standard"
     )
 
     # Should have minimal overage
@@ -324,7 +324,7 @@ class TestEdgeCases:
   def test_precision_preservation(self):
     """Test that decimal precision is preserved in calculations."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("123.456"), tier="enterprise", storage_type="cold"
+      storage_gb=Decimal("123.456"), tier="kuzu-large", storage_type="cold"
     )
 
     # 123.456 - 500 = -376.544 (no overage, but test precision)
@@ -335,7 +335,7 @@ class TestEdgeCases:
   def test_complex_calculation_precision(self):
     """Test precision in complex overage calculations."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("523.789"), tier="enterprise", storage_type="cold"
+      storage_gb=Decimal("523.789"), tier="kuzu-large", storage_type="cold"
     )
 
     # Overage: 523.789 - 500 = 23.789 GB
@@ -351,12 +351,12 @@ class TestEdgeCases:
     """Test that string tier names are handled correctly."""
     # Test case sensitivity (should be case sensitive)
     result_lower = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("150"), tier="standard"
+      storage_gb=Decimal("150"), tier="kuzu-standard"
     )
 
     result_upper = StorageBillingConfig.calculate_storage_overage(
       storage_gb=Decimal("150"),
-      tier="STANDARD",  # Uppercase - should default to unknown tier
+      tier="KUZU-STANDARD",  # Uppercase - should default to unknown tier
     )
 
     # Lower case should work normally
@@ -369,13 +369,15 @@ class TestEdgeCases:
     """Test handling of None or invalid values."""
     # These should raise appropriate errors rather than crash
     with pytest.raises((TypeError, AttributeError)):
-      StorageBillingConfig.calculate_storage_overage(storage_gb=None, tier="standard")
+      StorageBillingConfig.calculate_storage_overage(
+        storage_gb=None, tier="kuzu-standard"
+      )
 
   def test_negative_storage_amounts(self):
     """Test handling of negative storage amounts."""
     # This should behave as if storage is 0 or less than included
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("-10"), tier="standard"
+      storage_gb=Decimal("-10"), tier="kuzu-standard"
     )
 
     # Negative storage should result in no overage
@@ -390,7 +392,7 @@ class TestCostCalculationAccuracy:
     """Test calculations that should result in exact dollar amounts."""
     result = StorageBillingConfig.calculate_storage_overage(
       storage_gb=Decimal("200"),  # 100 GB overage
-      tier="standard",
+      tier="kuzu-standard",
     )
 
     assert result["overage_cost"] == Decimal("100.00")
@@ -398,8 +400,8 @@ class TestCostCalculationAccuracy:
   def test_cent_precision(self):
     """Test that calculations maintain cent precision."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("501"),  # 1 GB overage above enterprise limit (500 GB)
-      tier="enterprise",
+      storage_gb=Decimal("501"),  # 1 GB overage above kuzu-large limit (500 GB)
+      tier="kuzu-large",
       storage_type="standard",
     )
 
@@ -409,8 +411,8 @@ class TestCostCalculationAccuracy:
   def test_sub_cent_calculations(self):
     """Test calculations that result in sub-cent amounts."""
     result = StorageBillingConfig.calculate_storage_overage(
-      storage_gb=Decimal("2000.1"),  # 0.1 GB overage above premium limit (2000 GB)
-      tier="premium",
+      storage_gb=Decimal("2000.1"),  # 0.1 GB overage above kuzu-xlarge limit (2000 GB)
+      tier="kuzu-xlarge",
       storage_type="cold",
     )
 
@@ -421,7 +423,7 @@ class TestCostCalculationAccuracy:
     """Test calculations with large storage amounts."""
     result = StorageBillingConfig.calculate_storage_overage(
       storage_gb=Decimal("100000"),  # Very large amount
-      tier="standard",
+      tier="kuzu-standard",
     )
 
     # 99,900 GB overage * $1.00/GB = $99,900.00

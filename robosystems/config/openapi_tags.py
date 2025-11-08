@@ -27,16 +27,12 @@ MAIN_API_TAGS = [
     "description": "📐 Schema management - Validate and manage custom graph schemas",
   },
   {
-    "name": "Connections",
-    "description": "🔗 Connections - Manage external service integrations and data connections",
+    "name": "Subgraphs",
+    "description": "🌳 Subgraphs - Manage subgraph databases for version control and memory context",
   },
   {
     "name": "Backup",
     "description": "💾 Database backup - Create, restore, and manage graph database backups",
-  },
-  {
-    "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Manage subgraph databases for version control and memory context",
   },
   {
     "name": "Usage",
@@ -49,6 +45,10 @@ MAIN_API_TAGS = [
   {
     "name": "Subscriptions",
     "description": "💳 Subscriptions - Manage graph database subscriptions and billing",
+  },
+  {
+    "name": "Connections",
+    "description": "🔗 Connections - Manage external service integrations and data connections",
   },
   {
     "name": "Graph Limits",
@@ -65,6 +65,22 @@ MAIN_API_TAGS = [
   {
     "name": "User",
     "description": "👤 User management - Profile, settings, and account information",
+  },
+  {
+    "name": "Org",
+    "description": "🏢 Organizations - Manage organizations and team collaboration",
+  },
+  {
+    "name": "Org Members",
+    "description": "👥 Organization members - Manage team members, roles, and permissions",
+  },
+  {
+    "name": "Org Usage",
+    "description": "📈 Organization usage - Track organization-wide usage, limits, and analytics",
+  },
+  {
+    "name": "Billing",
+    "description": "🛒 Billing - Create and manage billing checkout sessions",
   },
   {
     "name": "Operations",

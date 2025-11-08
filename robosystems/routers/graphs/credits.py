@@ -20,7 +20,7 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.models.iam import User, UserGraph
+from robosystems.models.iam import User, GraphUser
 from robosystems.models.iam.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import (
   CreditService,
@@ -46,7 +46,7 @@ def get_graph_access(
   graph_id: str = Path(..., description="Graph database identifier"),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
-) -> UserGraph:
+) -> GraphUser:
   """Get user's access to a graph with proper authorization validation."""
   from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
   from robosystems.models.iam.user_repository import UserRepository
@@ -65,9 +65,9 @@ def get_graph_access(
         detail=f"Access denied to shared repository {graph_id}",
       )
 
-    # For shared repositories, create a synthetic UserGraph object
-    # since credits system expects UserGraph interface
-    user_graph = UserGraph()
+    # For shared repositories, create a synthetic GraphUser object
+    # since credits system expects GraphUser interface
+    user_graph = GraphUser()
     user_graph.user_id = str(current_user.id)
     user_graph.graph_id = graph_id
     user_graph.role = "reader"  # Default role for shared repositories
@@ -75,7 +75,7 @@ def get_graph_access(
 
   elif identity.is_user_graph:
     # Check user graph access
-    if not UserGraph.user_has_access(str(current_user.id), graph_id, db):
+    if not GraphUser.user_has_access(str(current_user.id), graph_id, db):
       logger.warning(
         f"User {current_user.id} attempted access to user graph {graph_id} without permission"
       )
@@ -86,8 +86,8 @@ def get_graph_access(
 
     # Get the actual user graph relationship
     user_graph = (
-      db.query(UserGraph)
-      .filter(UserGraph.user_id == str(current_user.id), UserGraph.graph_id == graph_id)
+      db.query(GraphUser)
+      .filter(GraphUser.user_id == str(current_user.id), GraphUser.graph_id == graph_id)
       .first()
     )
     if not user_graph:
@@ -145,7 +145,7 @@ async def get_credit_summary(
     ..., description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')"
   ),
   current_user: User = Depends(get_current_user_with_graph),
-  user_graph: UserGraph = Depends(get_graph_access),
+  user_graph: GraphUser = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> CreditSummaryResponse:
@@ -436,7 +436,7 @@ async def check_credit_balance(
     None, description="Custom base cost (uses default if not provided)"
   ),
   current_user: User = Depends(get_current_user_with_graph),
-  user_graph: UserGraph = Depends(get_graph_access),
+  user_graph: GraphUser = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict:
@@ -540,7 +540,7 @@ async def get_storage_usage(
     30, ge=1, le=365, description="Number of days of history to return"
   ),
   current_user: User = Depends(get_current_user_with_graph),
-  user_graph: UserGraph = Depends(get_graph_access),
+  user_graph: GraphUser = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> dict:
@@ -563,7 +563,7 @@ async def get_storage_usage(
   try:
     from datetime import datetime, timedelta
     from sqlalchemy import func
-    from ...models.iam.graph_usage_tracking import GraphUsageTracking, UsageEventType
+    from ...models.iam.graph_usage import GraphUsage, UsageEventType
 
     # Get storage usage records for the period
     end_date = datetime.now()
@@ -571,18 +571,18 @@ async def get_storage_usage(
 
     usage_records = (
       db.query(
-        func.date(GraphUsageTracking.recorded_at).label("usage_date"),
-        func.avg(GraphUsageTracking.storage_gb).label("avg_storage_gb"),
-        func.count(GraphUsageTracking.id).label("measurement_count"),
+        func.date(GraphUsage.recorded_at).label("usage_date"),
+        func.avg(GraphUsage.storage_gb).label("avg_storage_gb"),
+        func.count(GraphUsage.id).label("measurement_count"),
       )
       .filter(
-        GraphUsageTracking.graph_id == graph_id,
-        GraphUsageTracking.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
-        GraphUsageTracking.recorded_at >= start_date,
-        GraphUsageTracking.recorded_at <= end_date,
+        GraphUsage.graph_id == graph_id,
+        GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
+        GraphUsage.recorded_at >= start_date,
+        GraphUsage.recorded_at <= end_date,
       )
-      .group_by(func.date(GraphUsageTracking.recorded_at))
-      .order_by(func.date(GraphUsageTracking.recorded_at).desc())
+      .group_by(func.date(GraphUsage.recorded_at))
+      .order_by(func.date(GraphUsage.recorded_at).desc())
       .all()
     )
 
@@ -700,7 +700,7 @@ async def check_storage_limits(
     ..., description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')"
   ),
   current_user: User = Depends(get_current_user_with_graph),
-  user_graph: UserGraph = Depends(get_graph_access),
+  user_graph: GraphUser = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> StorageLimitResponse:

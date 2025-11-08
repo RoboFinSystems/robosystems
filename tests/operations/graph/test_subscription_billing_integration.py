@@ -7,9 +7,9 @@ from unittest.mock import Mock, patch, MagicMock
 from robosystems.operations.graph.subscription_service import GraphSubscriptionService
 from robosystems.models.iam import (
   User,
-  UserLimits,
-  UserGraph,
-  GraphUsageTracking,
+  OrgLimits,
+  GraphUser,
+  GraphUsage,
 )
 from robosystems.models.billing import BillingSubscription, SubscriptionStatus
 
@@ -84,7 +84,7 @@ class TestSubscriptionBillingIntegration:
     # Create user graphs
     graphs = []
     for i in range(3):
-      graph = Mock(spec=UserGraph)
+      graph = Mock(spec=GraphUser)
       graph.user_id = user.id
       graph.graph_id = f"entity_{1000 + i}"
       graph.entity_id = f"comp_{1000 + i}"
@@ -101,7 +101,7 @@ class TestSubscriptionBillingIntegration:
 
     for graph in sample_user_with_graphs["graphs"]:
       for day in range(7):
-        record = Mock(spec=GraphUsageTracking)
+        record = Mock(spec=GraphUsage)
         record.user_id = sample_user_with_graphs["user"].id
         record.graph_id = graph.graph_id
         record.entity_id = graph.entity_id
@@ -128,13 +128,13 @@ class TestSubscriptionBillingIntegration:
     user = sample_user_with_graphs["user"]
     graphs = sample_user_with_graphs["graphs"]
 
-    # Set up user on Pro plan
-    user_limits = Mock(spec=UserLimits)
-    user_limits.user_id = user.id
+    # Set up organization with Pro plan
+    user_limits = Mock(spec=OrgLimits)
+    user_limits.org_id = "org_test_123"
     user_limits.subscription_tier = "pro"
     user_limits.max_api_calls_per_hour = 1000
 
-    with patch.object(UserLimits, "get_by_user_id", return_value=user_limits):
+    with patch.object(OrgLimits, "get_or_create_for_org", return_value=user_limits):
       # Create graph subscriptions
       pro_plan = sample_billing_plans["pro"]
       mock_db_session.query.return_value.filter.return_value.first.return_value = (
@@ -186,15 +186,14 @@ class TestSubscriptionBillingIntegration:
   ):
     """Test calculating monthly billing with storage overages."""
     GraphSubscriptionService(mock_db_session)
-    user = sample_user_with_graphs["user"]
 
-    # Set up user on Starter plan with lower storage limits
-    user_limits = Mock(spec=UserLimits)
-    user_limits.user_id = user.id
+    # Set up organization on Starter plan with lower storage limits
+    user_limits = Mock(spec=OrgLimits)
+    user_limits.org_id = "org_test_123"
     user_limits.subscription_tier = "starter"
     user_limits.max_api_calls_per_hour = 1000
 
-    with patch.object(UserLimits, "get_by_user_id", return_value=user_limits):
+    with patch.object(OrgLimits, "get_or_create_for_org", return_value=user_limits):
       starter_plan = sample_billing_plans["starter"]
       mock_db_session.query.return_value.filter.return_value.first.return_value = (
         starter_plan
@@ -203,7 +202,7 @@ class TestSubscriptionBillingIntegration:
       # Create usage data that exceeds starter plan limits (10GB)
       overage_usage = []
       for i in range(3):
-        record = Mock(spec=GraphUsageTracking)
+        record = Mock(spec=GraphUsage)
         record.graph_id = f"entity_{1000 + i}"
         record.size_bytes = 5 * 1024**3  # 5GB per database = 15GB total
         record.query_count = 1000
@@ -313,7 +312,7 @@ class TestSubscriptionBillingIntegration:
     usage_records = []
     for instance_id, databases in instance_usage.items():
       for graph_id, metrics in databases.items():
-        record = Mock(spec=GraphUsageTracking)
+        record = Mock(spec=GraphUsage)
         record.instance_id = instance_id
         record.graph_id = graph_id
         record.size_bytes = metrics["size_bytes"]
@@ -339,7 +338,7 @@ class TestSubscriptionBillingIntegration:
     test_usage = []
     for day in range(7):
       for graph_num in range(3):
-        record = Mock(spec=GraphUsageTracking)
+        record = Mock(spec=GraphUsage)
         record.graph_id = f"entity_{1000 + graph_num}"
         record.recorded_at = base_time + timedelta(days=day)
 

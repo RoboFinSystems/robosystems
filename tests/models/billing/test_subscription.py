@@ -14,8 +14,19 @@ from robosystems.models.iam import User
 
 @pytest.fixture
 def test_user(db_session: Session):
-  """Create a test user."""
+  """Create a test user with org."""
+  from robosystems.models.iam import Org, OrgUser, OrgRole, OrgType
+
   unique_id = str(uuid.uuid4())[:8]
+
+  org = Org(
+    id=f"test_org_{unique_id}",
+    name=f"Test Org {unique_id}",
+    org_type=OrgType.PERSONAL,
+  )
+  db_session.add(org)
+  db_session.flush()
+
   user = User(
     id=f"test_user_{unique_id}",
     email=f"test+{unique_id}@example.com",
@@ -23,17 +34,34 @@ def test_user(db_session: Session):
     password_hash="test_hash",
   )
   db_session.add(user)
+  db_session.flush()
+
+  org_user = OrgUser(
+    org_id=org.id,
+    user_id=user.id,
+    role=OrgRole.OWNER,
+  )
+  db_session.add(org_user)
   db_session.commit()
   return user
+
+
+@pytest.fixture
+def test_org(test_user, db_session: Session):
+  """Get org for test user."""
+  from robosystems.models.iam import OrgUser
+
+  org_users = OrgUser.get_user_orgs(test_user.id, db_session)
+  return org_users[0].org
 
 
 class TestBillingSubscriptionCreation:
   """Tests for subscription creation."""
 
-  def test_create_subscription_success(self, db_session: Session, test_user):
+  def test_create_subscription_success(self, db_session: Session, test_user, test_org):
     """Test successful subscription creation."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -42,7 +70,7 @@ class TestBillingSubscriptionCreation:
     )
 
     assert subscription.id.startswith("bsub_")
-    assert subscription.billing_customer_user_id == test_user.id
+    assert subscription.org_id == test_org.id
     assert subscription.resource_type == "graph"
     assert subscription.resource_id == "kg123abc"
     assert subscription.plan_name == "standard"
@@ -52,11 +80,11 @@ class TestBillingSubscriptionCreation:
     assert subscription.created_at is not None
 
   def test_create_subscription_with_custom_interval(
-    self, db_session: Session, test_user
+    self, db_session: Session, test_user, test_org
   ):
     """Test subscription creation with custom billing interval."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="repository",
       resource_id="sec",
       plan_name="enterprise",
@@ -67,12 +95,14 @@ class TestBillingSubscriptionCreation:
 
     assert subscription.billing_interval == "annual"
 
-  def test_create_subscription_with_stripe_id(self, db_session: Session, test_user):
+  def test_create_subscription_with_stripe_id(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test subscription creation with Stripe subscription ID."""
     stripe_sub_id = "sub_1234567890"
 
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="large",
@@ -83,10 +113,12 @@ class TestBillingSubscriptionCreation:
 
     assert subscription.stripe_subscription_id == stripe_sub_id
 
-  def test_create_repository_subscription(self, db_session: Session, test_user):
+  def test_create_repository_subscription(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test creating a subscription for a shared repository."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="repository",
       resource_id="sec",
       plan_name="standard",
@@ -101,11 +133,11 @@ class TestBillingSubscriptionCreation:
 class TestBillingSubscriptionQueries:
   """Tests for subscription query methods."""
 
-  def test_get_by_resource(self, db_session: Session, test_user):
+  def test_get_by_resource(self, db_session: Session, test_user, test_org):
     """Test getting subscription by resource."""
     resource_id = f"kg_{str(uuid.uuid4())[:8]}"
     created_sub = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id=resource_id,
       plan_name="standard",
@@ -128,10 +160,10 @@ class TestBillingSubscriptionQueries:
 
     assert found_sub is None
 
-  def test_get_by_resource_and_user(self, db_session: Session, test_user):
+  def test_get_by_resource_and_user(self, db_session: Session, test_user, test_org):
     """Test getting subscription by resource and user."""
     created_sub = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="repository",
       resource_id="sec",
       plan_name="standard",
@@ -139,20 +171,22 @@ class TestBillingSubscriptionQueries:
       session=db_session,
     )
 
-    found_sub = BillingSubscription.get_by_resource_and_user(
+    found_sub = BillingSubscription.get_by_resource_and_org(
       resource_type="repository",
       resource_id="sec",
-      user_id=test_user.id,
+      org_id=test_org.id,
       session=db_session,
     )
 
     assert found_sub is not None
     assert found_sub.id == created_sub.id
 
-  def test_get_by_resource_and_user_wrong_user(self, db_session: Session, test_user):
+  def test_get_by_resource_and_user_wrong_user(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test getting subscription with wrong user ID."""
     BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="repository",
       resource_id="sec",
       plan_name="standard",
@@ -160,19 +194,21 @@ class TestBillingSubscriptionQueries:
       session=db_session,
     )
 
-    found_sub = BillingSubscription.get_by_resource_and_user(
+    found_sub = BillingSubscription.get_by_resource_and_org(
       resource_type="repository",
       resource_id="sec",
-      user_id="wrong_user_id",
+      org_id="wrong_org_id",
       session=db_session,
     )
 
     assert found_sub is None
 
-  def test_get_active_subscriptions_for_user(self, db_session: Session, test_user):
+  def test_get_active_subscriptions_for_org(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test getting all active subscriptions for a user."""
     sub1 = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg1",
       plan_name="standard",
@@ -182,7 +218,7 @@ class TestBillingSubscriptionQueries:
     sub1.activate(db_session)
 
     sub2 = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="repository",
       resource_id="sec",
       plan_name="standard",
@@ -192,7 +228,7 @@ class TestBillingSubscriptionQueries:
     sub2.activate(db_session)
 
     BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg2",
       plan_name="standard",
@@ -200,8 +236,8 @@ class TestBillingSubscriptionQueries:
       session=db_session,
     )
 
-    active_subs = BillingSubscription.get_active_subscriptions_for_user(
-      user_id=test_user.id, session=db_session
+    active_subs = BillingSubscription.get_active_subscriptions_for_org(
+      org_id=test_org.id, session=db_session
     )
 
     assert len(active_subs) == 2
@@ -211,10 +247,10 @@ class TestBillingSubscriptionQueries:
 class TestBillingSubscriptionLifecycle:
   """Tests for subscription lifecycle methods."""
 
-  def test_activate_subscription(self, db_session: Session, test_user):
+  def test_activate_subscription(self, db_session: Session, test_user, test_org):
     """Test activating a subscription."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -231,10 +267,10 @@ class TestBillingSubscriptionLifecycle:
     assert subscription.current_period_end > subscription.current_period_start
     assert subscription.is_active() is True
 
-  def test_pause_subscription(self, db_session: Session, test_user):
+  def test_pause_subscription(self, db_session: Session, test_user, test_org):
     """Test pausing an active subscription."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -248,10 +284,12 @@ class TestBillingSubscriptionLifecycle:
     assert subscription.status == SubscriptionStatus.PAUSED.value
     assert subscription.is_active() is False
 
-  def test_cancel_subscription_immediate(self, db_session: Session, test_user):
+  def test_cancel_subscription_immediate(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test immediate subscription cancellation."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -268,10 +306,12 @@ class TestBillingSubscriptionLifecycle:
     assert subscription.ends_at == subscription.canceled_at
     assert subscription.is_active() is False
 
-  def test_cancel_subscription_end_of_period(self, db_session: Session, test_user):
+  def test_cancel_subscription_end_of_period(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test cancellation at end of billing period."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -290,10 +330,10 @@ class TestBillingSubscriptionLifecycle:
 class TestBillingSubscriptionUpdates:
   """Tests for subscription update methods."""
 
-  def test_update_plan(self, db_session: Session, test_user):
+  def test_update_plan(self, db_session: Session, test_user, test_org):
     """Test updating subscription plan."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -308,10 +348,10 @@ class TestBillingSubscriptionUpdates:
     assert subscription.plan_name == "large"
     assert subscription.base_price_cents == 9999
 
-  def test_update_plan_upgrade(self, db_session: Session, test_user):
+  def test_update_plan_upgrade(self, db_session: Session, test_user, test_org):
     """Test upgrading subscription plan."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -326,10 +366,10 @@ class TestBillingSubscriptionUpdates:
     assert subscription.plan_name == "xlarge"
     assert subscription.base_price_cents == 19999
 
-  def test_update_plan_downgrade(self, db_session: Session, test_user):
+  def test_update_plan_downgrade(self, db_session: Session, test_user, test_org):
     """Test downgrading subscription plan."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="xlarge",
@@ -344,11 +384,11 @@ class TestBillingSubscriptionUpdates:
     assert subscription.plan_name == "standard"
     assert subscription.base_price_cents == 2999
 
-  def test_update_stripe_subscription(self, db_session: Session, test_user):
+  def test_update_stripe_subscription(self, db_session: Session, test_user, test_org):
     """Test updating Stripe subscription details."""
     unique_id = str(uuid.uuid4())[:8]
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id=f"kg_{unique_id}",
       plan_name="standard",
@@ -375,10 +415,12 @@ class TestBillingSubscriptionUpdates:
 class TestBillingSubscriptionStatusChecks:
   """Tests for subscription status checking methods."""
 
-  def test_is_active_for_active_subscription(self, db_session: Session, test_user):
+  def test_is_active_for_active_subscription(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test is_active returns True for active subscription."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -389,10 +431,12 @@ class TestBillingSubscriptionStatusChecks:
 
     assert subscription.is_active() is True
 
-  def test_is_active_for_pending_subscription(self, db_session: Session, test_user):
+  def test_is_active_for_pending_subscription(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test is_active returns False for pending subscription."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -402,10 +446,12 @@ class TestBillingSubscriptionStatusChecks:
 
     assert subscription.is_active() is False
 
-  def test_is_active_for_paused_subscription(self, db_session: Session, test_user):
+  def test_is_active_for_paused_subscription(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test is_active returns False for paused subscription."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -417,10 +463,12 @@ class TestBillingSubscriptionStatusChecks:
 
     assert subscription.is_active() is False
 
-  def test_is_active_for_canceled_subscription(self, db_session: Session, test_user):
+  def test_is_active_for_canceled_subscription(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test is_active returns False for canceled subscription."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -436,10 +484,10 @@ class TestBillingSubscriptionStatusChecks:
 class TestBillingSubscriptionRepr:
   """Tests for subscription string representation."""
 
-  def test_repr_format(self, db_session: Session, test_user):
+  def test_repr_format(self, db_session: Session, test_user, test_org):
     """Test subscription __repr__ format."""
     subscription = BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123abc",
       plan_name="standard",
@@ -457,11 +505,11 @@ class TestBillingSubscriptionRepr:
 class TestBillingSubscriptionIndexes:
   """Tests to ensure database indexes work correctly."""
 
-  def test_query_by_customer_uses_index(self, db_session: Session, test_user):
+  def test_query_by_customer_uses_index(self, db_session: Session, test_user, test_org):
     """Test querying by customer (should use idx_billing_sub_customer)."""
     for i in range(5):
       BillingSubscription.create_subscription(
-        user_id=test_user.id,
+        org_id=test_org.id,
         resource_type="graph",
         resource_id=f"kg{i}",
         plan_name="standard",
@@ -471,16 +519,16 @@ class TestBillingSubscriptionIndexes:
 
     subs = (
       db_session.query(BillingSubscription)
-      .filter(BillingSubscription.billing_customer_user_id == test_user.id)
+      .filter(BillingSubscription.org_id == test_org.id)
       .all()
     )
 
     assert len(subs) == 5
 
-  def test_query_by_resource_uses_index(self, db_session: Session, test_user):
+  def test_query_by_resource_uses_index(self, db_session: Session, test_user, test_org):
     """Test querying by resource (should use idx_billing_sub_resource)."""
     BillingSubscription.create_subscription(
-      user_id=test_user.id,
+      org_id=test_org.id,
       resource_type="graph",
       resource_id="kg123",
       plan_name="standard",
@@ -494,11 +542,11 @@ class TestBillingSubscriptionIndexes:
 
     assert sub is not None
 
-  def test_query_by_status_uses_index(self, db_session: Session, test_user):
+  def test_query_by_status_uses_index(self, db_session: Session, test_user, test_org):
     """Test querying by status (should use idx_billing_sub_status)."""
     for i in range(3):
       sub = BillingSubscription.create_subscription(
-        user_id=test_user.id,
+        org_id=test_org.id,
         resource_type="graph",
         resource_id=f"kg{i}",
         plan_name="standard",
@@ -512,7 +560,7 @@ class TestBillingSubscriptionIndexes:
       db_session.query(BillingSubscription)
       .filter(
         BillingSubscription.status == SubscriptionStatus.ACTIVE.value,
-        BillingSubscription.billing_customer_user_id == test_user.id,
+        BillingSubscription.org_id == test_org.id,
       )
       .all()
     )

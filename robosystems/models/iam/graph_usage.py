@@ -1,5 +1,5 @@
 """
-Enhanced Graph Usage Tracking for Credit System
+Graph Usage Tracking for Credit System
 
 This model tracks comprehensive usage metrics for:
 1. Storage usage (for storage overage billing)
@@ -31,7 +31,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ...database import Model
-from ...utils import default_usage_ulid
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class UsageEventType(str, Enum):
@@ -63,16 +63,16 @@ class UsageEventType(str, Enum):
   ERROR_EVENT = "error_event"  # Error occurrences
 
 
-class GraphUsageTracking(Model):
+class GraphUsage(Model):
   """
   Comprehensive usage tracking for credit system and analytics.
 
   This model tracks all usage events for billing, analytics, and optimization.
   """
 
-  __tablename__ = "graph_usage_tracking"
+  __tablename__ = "graph_usage"
 
-  id = Column(String, primary_key=True, default=default_usage_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("usg"))
 
   # Core identification
   user_id = Column(String, nullable=False, index=True)
@@ -159,7 +159,7 @@ class GraphUsageTracking(Model):
   )
 
   def __repr__(self) -> str:
-    return f"<GraphUsageTracking {self.event_type} graph={self.graph_id} credits={self.credits_consumed}>"
+    return f"<GraphUsage {self.event_type} graph={self.graph_id} credits={self.credits_consumed}>"
 
   @classmethod
   def record_storage_usage(
@@ -177,7 +177,7 @@ class GraphUsageTracking(Model):
     instance_id: Optional[str] = None,
     region: Optional[str] = None,
     auto_commit: bool = True,
-  ) -> "GraphUsageTracking":
+  ) -> "GraphUsage":
     """
     Record storage usage snapshot with breakdown by type.
 
@@ -250,7 +250,7 @@ class GraphUsageTracking(Model):
     status_code: Optional[int] = None,
     metadata: Optional[Dict[str, Any]] = None,
     auto_commit: bool = True,
-  ) -> "GraphUsageTracking":
+  ) -> "GraphUsage":
     """Record credit consumption event."""
     import json
 
@@ -306,7 +306,7 @@ class GraphUsageTracking(Model):
     error_message: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     auto_commit: bool = True,
-  ) -> "GraphUsageTracking":
+  ) -> "GraphUsage":
     """Record API usage event."""
     import json
 

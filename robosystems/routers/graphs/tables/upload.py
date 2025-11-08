@@ -86,7 +86,7 @@ from robosystems.config.constants import (
   FALLBACK_BYTES_PER_ROW_CSV,
   FALLBACK_BYTES_PER_ROW_JSON,
 )
-from robosystems.config.tier_config import get_tier_storage_limit
+from robosystems.config.graph_tier import get_tier_storage_limit
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.graph.types import (
   GraphTypeRegistry,

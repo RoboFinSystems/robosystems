@@ -13,7 +13,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
 
-from ...models.iam import GraphUsageTracking
+from ...models.iam import GraphUsage
 from ...models.billing import BillingSubscription
 from ...config import BillingConfig
 
@@ -29,10 +29,16 @@ class GraphPricingService:
 
   def get_subscription_plan(self, user_id: str, graph_id: str) -> Optional[Dict]:
     """Get the billing plan for a graph subscription."""
+    from ...models.billing import BillingCustomer
+
+    customer = BillingCustomer.get_by_user_id(user_id, self.session)
+    if not customer:
+      return BillingConfig.get_subscription_plan("kuzu-standard")
+
     subscription = (
       self.session.query(BillingSubscription)
       .filter(
-        BillingSubscription.billing_customer_user_id == user_id,
+        BillingSubscription.org_id == customer.org_id,
         BillingSubscription.resource_type == "graph",
         BillingSubscription.resource_id == graph_id,
         BillingSubscription.status == "active",
@@ -65,12 +71,12 @@ class GraphPricingService:
 
     # Get usage records for the month
     usage_records = (
-      self.session.query(GraphUsageTracking)
+      self.session.query(GraphUsage)
       .filter(
-        GraphUsageTracking.user_id == user_id,
-        GraphUsageTracking.graph_id == graph_id,
-        GraphUsageTracking.billing_year == year,
-        GraphUsageTracking.billing_month == month,
+        GraphUsage.user_id == user_id,
+        GraphUsage.graph_id == graph_id,
+        GraphUsage.billing_year == year,
+        GraphUsage.billing_month == month,
       )
       .all()
     )

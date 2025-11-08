@@ -1,7 +1,7 @@
 """drop user_usage_tracking table
 
 Revision ID: c4cc411768f2
-Revises: 7a35e59fc400
+Revises: e40df94401d2
 Create Date: 2025-11-07 01:42:14.636928
 
 """
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "c4cc411768f2"
-down_revision = "7a35e59fc400"
+down_revision = "e40df94401d2"
 branch_labels = None
 depends_on = None
 

@@ -100,7 +100,7 @@ class TestValidateAPIKeyWithGraph:
 
   @patch("robosystems.middleware.auth.utils.api_key_cache")
   @patch("robosystems.middleware.auth.utils.UserAPIKey")
-  @patch("robosystems.middleware.auth.utils.UserGraph")
+  @patch("robosystems.middleware.auth.utils.GraphUser")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   @patch("robosystems.middleware.auth.utils.SecurityAuditLogger")
   def test_validate_api_key_with_graph_standard_db(

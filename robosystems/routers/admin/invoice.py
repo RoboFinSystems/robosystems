@@ -33,7 +33,10 @@ async def list_invoices(
       query = query.filter(BillingInvoice.status == status)
 
     if user_id:
-      query = query.filter(BillingInvoice.billing_customer_user_id == user_id)
+      from ...models.iam import OrgUser
+
+      query = query.join(OrgUser, BillingInvoice.org_id == OrgUser.org_id)
+      query = query.filter(OrgUser.user_id == user_id)
 
     total = query.count()
     invoices = (
@@ -42,9 +45,19 @@ async def list_invoices(
 
     results = []
     for invoice in invoices:
-      user = (
-        session.query(User).filter(User.id == invoice.billing_customer_user_id).first()
+      from ...models.iam import OrgUser
+
+      owner = (
+        session.query(OrgUser)
+        .join(User, OrgUser.user_id == User.id)
+        .filter(
+          OrgUser.org_id == invoice.org_id,
+          OrgUser.role == "OWNER",
+        )
+        .first()
       )
+
+      user = owner.user if owner else None
 
       line_items = (
         session.query(BillingInvoiceLineItem)
@@ -56,7 +69,7 @@ async def list_invoices(
         InvoiceResponse(
           id=invoice.id,
           invoice_number=invoice.invoice_number,
-          billing_customer_user_id=invoice.billing_customer_user_id,
+          billing_customer_user_id=user.id if user else invoice.org_id,
           user_email=user.email if user else None,
           user_name=user.name if user else None,
           status=invoice.status,
@@ -121,9 +134,19 @@ async def get_invoice(
     if not invoice:
       raise HTTPException(status_code=404, detail="Invoice not found")
 
-    user = (
-      session.query(User).filter(User.id == invoice.billing_customer_user_id).first()
+    from ...models.iam import OrgUser
+
+    owner = (
+      session.query(OrgUser)
+      .join(User, OrgUser.user_id == User.id)
+      .filter(
+        OrgUser.org_id == invoice.org_id,
+        OrgUser.role == "OWNER",
+      )
+      .first()
     )
+
+    user = owner.user if owner else None
 
     line_items = (
       session.query(BillingInvoiceLineItem)
@@ -142,7 +165,7 @@ async def get_invoice(
     return InvoiceResponse(
       id=invoice.id,
       invoice_number=invoice.invoice_number,
-      billing_customer_user_id=invoice.billing_customer_user_id,
+      billing_customer_user_id=user.id if user else invoice.org_id,
       user_email=user.email if user else None,
       user_name=user.name if user else None,
       status=invoice.status,
@@ -215,9 +238,19 @@ async def mark_invoice_paid(
       },
     )
 
-    user = (
-      session.query(User).filter(User.id == invoice.billing_customer_user_id).first()
+    from ...models.iam import OrgUser
+
+    owner = (
+      session.query(OrgUser)
+      .join(User, OrgUser.user_id == User.id)
+      .filter(
+        OrgUser.org_id == invoice.org_id,
+        OrgUser.role == "OWNER",
+      )
+      .first()
     )
+
+    user = owner.user if owner else None
 
     line_items = (
       session.query(BillingInvoiceLineItem)
@@ -228,7 +261,7 @@ async def mark_invoice_paid(
     return InvoiceResponse(
       id=invoice.id,
       invoice_number=invoice.invoice_number,
-      billing_customer_user_id=invoice.billing_customer_user_id,
+      billing_customer_user_id=user.id if user else invoice.org_id,
       user_email=user.email if user else None,
       user_name=user.name if user else None,
       status=invoice.status,

@@ -21,7 +21,7 @@ from .utils import (
   record_operation_metrics,
   handle_circuit_breaker_check,
 )
-from robosystems.config.tier_config import get_tier_max_subgraphs
+from robosystems.config.graph_tier import get_tier_max_subgraphs
 
 router = APIRouter()
 

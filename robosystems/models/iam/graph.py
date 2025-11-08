@@ -1,8 +1,13 @@
 """Graph model for storing all graph database metadata.
 
 This model tracks metadata for both user-created graphs and shared repositories.
-User graphs use UserGraph for access control (role-based).
+User graphs use GraphUser for access control (role-based).
 Repository graphs use UserRepository for access control (subscription-based).
+
+Graph Ownership:
+- Each graph is owned by an organization (org_id)
+- The organization is responsible for billing
+- Only users within the organization can be granted access
 """
 
 from datetime import datetime, timezone
@@ -17,13 +22,14 @@ from sqlalchemy import (
   Boolean,
   Integer,
   UniqueConstraint,
+  ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Model
-from .graph_credits import GraphTier
+from ...config.graph_tier import GraphTier
 
 
 class Graph(Model):
@@ -31,6 +37,7 @@ class Graph(Model):
 
   __tablename__ = "graphs"
   __table_args__ = (
+    Index("idx_graphs_org", "org_id"),
     Index("idx_graphs_type", "graph_type"),
     Index("idx_graphs_instance", "graph_instance_id"),
     Index("idx_graphs_schema_extensions", "schema_extensions", postgresql_using="gin"),
@@ -54,6 +61,12 @@ class Graph(Model):
   graph_id = Column(
     String, primary_key=True
   )  # e.g., "kg1a2b3c4d5", "sec", "generic_123"
+
+  # Ownership - graph is owned by an organization
+  # Nullable for shared repositories which are system-wide
+  org_id = Column(
+    String, ForeignKey("orgs.id"), nullable=True
+  )  # Organization that owns and pays for this graph (None for shared repositories)
 
   # Basic metadata
   graph_name = Column(String, nullable=False)  # Human-readable name
@@ -134,8 +147,9 @@ class Graph(Model):
   graph_metadata = Column(JSONB, nullable=True)  # Flexible field for future use
 
   # Relationships
-  user_graphs = relationship(
-    "UserGraph", back_populates="graph", cascade="all, delete-orphan"
+  org = relationship("Org", back_populates="graphs")
+  graph_users = relationship(
+    "GraphUser", back_populates="graph", cascade="all, delete-orphan"
   )
 
   def __repr__(self) -> str:
@@ -184,6 +198,7 @@ class Graph(Model):
   def create(
     cls,
     graph_id: str,
+    org_id: Optional[str],
     graph_name: str,
     graph_type: str,
     session: Session,
@@ -224,6 +239,7 @@ class Graph(Model):
 
     graph = cls(
       graph_id=graph_id,
+      org_id=org_id,
       graph_name=graph_name,
       graph_type=graph_type,
       base_schema=base_schema,
@@ -409,6 +425,7 @@ class Graph(Model):
 
     repository = cls.create(
       graph_id=graph_id,
+      org_id=None,  # Shared repositories are not owned by any org
       graph_name=graph_name,
       graph_type="repository",
       session=session,

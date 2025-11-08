@@ -7,7 +7,6 @@ error handling, and response formats.
 
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from robosystems.operations.agents.base import AgentMode
@@ -205,24 +204,6 @@ class TestAgentEndpoints:
     assert data["name"] == "Financial Agent"
     assert "financial_analysis" in data["capabilities"]
 
-  @pytest.mark.skip(reason="Router validation mismatch - needs investigation")
-  def test_recommend_agent_endpoint(self, client, mock_orchestrator):
-    """Test agent recommendation endpoint."""
-    response = client.post(
-      "/v1/graphs/test_graph/agent/recommend",
-      json={"query": "Need financial analysis"},
-      headers={"Authorization": "Bearer test_token"},
-    )
-
-    if response.status_code != 200:
-      print(f"Response status: {response.status_code}")
-      print(f"Response body: {response.text}")
-    assert response.status_code == 200
-    data = response.json()
-    assert "recommendations" in data
-    assert data["recommendations"][0]["agent_type"] == "financial"
-    assert data["recommendations"][0]["confidence"] == 0.9
-
   def test_agent_with_streaming(self, client, mock_orchestrator):
     """Test agent with streaming mode."""
     request_data = {
@@ -302,39 +283,6 @@ class TestAgentEndpoints:
     )
 
     assert response.status_code == 401
-
-  @pytest.mark.skip(reason="Dependency override conflict with client fixture")
-  def test_agent_graph_permissions(self, client, mock_dependencies):
-    """Test graph access permissions."""
-    # Mock permission check to fail
-    with patch("robosystems.routers.graphs.agent.get_graph_repository") as mock_repo:
-      mock_repo.side_effect = HTTPException(status_code=403, detail="Access denied")
-
-      response = client.post(
-        "/v1/graphs/test_graph/agent",
-        json={"message": "Test query"},
-        headers={"Authorization": "Bearer test_token"},
-      )
-
-      assert response.status_code == 403
-
-  @pytest.mark.skip(reason="Dependency override conflict with client fixture")
-  def test_agent_rate_limiting(self, client):
-    """Test rate limiting on agent endpoints."""
-    with patch(
-      "robosystems.routers.graphs.agent.subscription_aware_rate_limit_dependency"
-    ) as mock_rate_limit:
-      mock_rate_limit.side_effect = HTTPException(
-        status_code=429, detail="Rate limit exceeded"
-      )
-
-      response = client.post(
-        "/v1/graphs/test_graph/agent",
-        json={"message": "Test query"},
-        headers={"Authorization": "Bearer test_token"},
-      )
-
-      assert response.status_code == 429
 
   def test_agent_credit_consumption(self, client, mock_orchestrator):
     """Test credit consumption tracking."""

@@ -735,38 +735,6 @@ class TestFastAPIEndpoints:
     assert data["is_healthy"] is True
     assert "database_path" in data
 
-  @pytest.mark.skip(
-    reason="Status router and connection stats endpoint not implemented"
-  )
-  def test_connection_pool_stats_endpoint(self):
-    """Test connection pool statistics endpoint."""
-    # Mock cluster service
-    mock_stats = {
-      "total_connections": 5,
-      "database_pools": {
-        "db1": {"total_connections": 2, "healthy_connections": 2},
-        "db2": {"total_connections": 3, "healthy_connections": 3},
-      },
-      "stats": {
-        "connections_created": 10,
-        "connections_reused": 50,
-        "connections_closed": 5,
-      },
-    }
-    self.mock_service.db_manager.connection_pool.get_stats.return_value = mock_stats
-
-    app = create_app()
-    client = TestClient(app)
-
-    response = client.get("/status/connections")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert "connection_pool" in data
-    assert data["connection_pool"]["total_connections"] == 5
-    assert "database_pools" in data["connection_pool"]
-    assert "stats" in data["connection_pool"]
-
   def test_ingest_data_endpoint_read_only(self):
     """Test data ingestion endpoint on read-only node."""
     # Mock cluster service as read-only

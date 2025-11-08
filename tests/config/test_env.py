@@ -167,11 +167,11 @@ def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
   monkeypatch.setattr(EnvConfig, "GRAPH_MAX_QUERY_LENGTH", 1024, raising=False)
   monkeypatch.setattr(env, "get_int_env", lambda key, default: default, raising=False)
   monkeypatch.setattr(
-    "robosystems.config.tier_config.TierConfig.get_instance_config",
+    "robosystems.config.graph_tier.GraphTierConfig.get_instance_config",
     classmethod(fake_get_instance_config),
   )
   monkeypatch.setattr(
-    "robosystems.config.tier_config.TierConfig.get_tier_config",
+    "robosystems.config.graph_tier.GraphTierConfig.get_tier_config",
     classmethod(fake_get_tier_config),
   )
 
@@ -217,11 +217,11 @@ def test_get_kuzu_tier_config_falls_back_on_errors(monkeypatch):
     fallback_get_int_env,
   )
   monkeypatch.setattr(
-    "robosystems.config.tier_config.TierConfig.get_instance_config",
+    "robosystems.config.graph_tier.GraphTierConfig.get_instance_config",
     classmethod(raise_error),
   )
   monkeypatch.setattr(
-    "robosystems.config.tier_config.TierConfig.get_tier_config",
+    "robosystems.config.graph_tier.GraphTierConfig.get_tier_config",
     classmethod(raise_error),
   )
 

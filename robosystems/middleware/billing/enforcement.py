@@ -4,7 +4,8 @@ from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 
 from ...models.billing import BillingCustomer, BillingSubscription, SubscriptionStatus
-from ...models.iam import GraphTier
+from ...models.iam import OrgUser
+from ...config.graph_tier import GraphTier
 from ...config import env
 from ...logger import get_logger
 
@@ -26,7 +27,18 @@ def check_can_provision_graph(
   Returns:
       Tuple of (can_provision, error_message)
   """
-  billing_customer = BillingCustomer.get_or_create(user_id, session)
+  # Get user's organization - billing is org-level, not user-level
+  org_user = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
+
+  if not org_user:
+    logger.error(
+      f"User {user_id} has no organization - cannot check billing",
+      extra={"user_id": user_id},
+    )
+    return (False, "User is not a member of any organization")
+
+  # Get or create billing customer for the user's organization
+  billing_customer = BillingCustomer.get_or_create(org_user.org_id, session)
 
   can_provision, error_message = billing_customer.can_provision_resources(
     environment=env.ENVIRONMENT, billing_enabled=env.BILLING_ENABLED
@@ -34,13 +46,21 @@ def check_can_provision_graph(
 
   if not can_provision:
     logger.warning(
-      f"User {user_id} cannot provision graph: {error_message}",
-      extra={"user_id": user_id, "requested_tier": requested_tier.value},
+      f"User {user_id} (org {org_user.org_id}) cannot provision graph: {error_message}",
+      extra={
+        "user_id": user_id,
+        "org_id": org_user.org_id,
+        "requested_tier": requested_tier.value,
+      },
     )
   else:
     logger.info(
-      f"User {user_id} authorized to provision {requested_tier.value} graph",
-      extra={"user_id": user_id, "requested_tier": requested_tier.value},
+      f"User {user_id} (org {org_user.org_id}) authorized to provision {requested_tier.value} graph",
+      extra={
+        "user_id": user_id,
+        "org_id": org_user.org_id,
+        "requested_tier": requested_tier.value,
+      },
     )
 
   return (can_provision, error_message)

@@ -8,7 +8,7 @@ and core billing functionality.
 from typing import Dict, Any, Optional, List
 from decimal import Decimal
 from ..credits import CreditConfig
-from ..tier_config import get_tier_monthly_credits
+from ..graph_tier import get_tier_monthly_credits
 import logging
 
 logger = logging.getLogger(__name__)

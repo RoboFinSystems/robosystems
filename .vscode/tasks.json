@@ -117,10 +117,10 @@
       "problemMatcher": []
     },
     {
-      "label": "Test Code Quality",
+      "label": "Test Code",
       "type": "shell",
       "command": "just",
-      "args": ["test-code-quality"],
+      "args": ["test-code"],
       "problemMatcher": []
     },
     {
@@ -141,7 +141,7 @@
       "label": "Lint Fix",
       "type": "shell",
       "command": "just",
-      "args": ["lint-fix"],
+      "args": ["lint", "fix"],
       "problemMatcher": []
     },
     {

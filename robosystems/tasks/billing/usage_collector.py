@@ -14,12 +14,12 @@ Storage Collection Process:
      * Graphs: EBS Kuzu database files (filesystem walk)
      * Subgraphs: EBS subgraph data
    - Get instance metadata from Graph API (instance_id, region)
-   - Record snapshot with full breakdown in GraphUsageTracking
+   - Record snapshot with full breakdown in GraphUsage
 3. Clean up old snapshots (retain 1 year)
 
 Billing Flow:
 ------------
-Hourly: This task → GraphUsageTracking snapshots
+Hourly: This task → GraphUsage snapshots
 Daily: daily_storage_billing → Averages snapshots → Consumes credits for overages
 Monthly: monthly_credit_reset → Invoices negative balances → Allocates fresh credits
 """
@@ -32,7 +32,7 @@ from typing import List, Dict
 from sqlalchemy.orm import Session
 
 from ...celery import celery_app
-from ...models.iam import UserGraph, GraphUsageTracking
+from ...models.iam import GraphUser, GraphUsage
 from ...graph_api.client.factory import GraphClientFactory
 from ...operations.graph.storage_service import StorageCalculator
 
@@ -82,7 +82,7 @@ def graph_usage_collector(self):
           metadata = asyncio.run(collect_graph_metrics(graph_id))
 
           # Record usage with storage breakdown
-          GraphUsageTracking.record_storage_usage(
+          GraphUsage.record_storage_usage(
             user_id=user_id,
             graph_id=graph_id,
             graph_tier=graph_tier,
@@ -111,7 +111,7 @@ def graph_usage_collector(self):
       )
 
       # Clean up old records (older than 1 year)
-      deleted = GraphUsageTracking.cleanup_old_records(db_session, older_than_days=365)
+      deleted = GraphUsage.cleanup_old_records(db_session, older_than_days=365)
       if deleted["deleted_records"] > 0:
         logger.info(f"Cleaned up {deleted['deleted_records']} old usage records")
 
@@ -187,8 +187,8 @@ def get_user_graphs_with_details(session: Session) -> List[Dict]:
 
   # Join UserGraph with Graph to get tier information
   results = (
-    session.query(UserGraph.graph_id, UserGraph.user_id, Graph.graph_tier)
-    .join(Graph, UserGraph.graph_id == Graph.graph_id)
+    session.query(GraphUser.graph_id, GraphUser.user_id, Graph.graph_tier)
+    .join(Graph, GraphUser.graph_id == Graph.graph_id)
     .all()
   )
 

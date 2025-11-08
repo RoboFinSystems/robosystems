@@ -12,7 +12,7 @@ from robosystems.operations.graph.generic_graph_service import (
   GenericGraphService,
   GenericGraphServiceSync,
 )
-from robosystems.middleware.graph.types import GraphTier
+from robosystems.config.graph_tier import GraphTier
 
 
 class TestGenericGraphService:
@@ -35,9 +35,9 @@ class TestGenericGraphService:
 
   @pytest.fixture
   def mock_user_limits(self):
-    """Mock UserLimits."""
+    """Mock OrgLimits."""
     mock_limits = Mock()
-    mock_limits.can_create_user_graph = Mock(return_value=(True, None))
+    mock_limits.can_create_graph = Mock(return_value=(True, None))
     return mock_limits
 
   @pytest.fixture
@@ -90,65 +90,70 @@ class TestGenericGraphService:
         iter([mock_db_session, None]),  # User-graph relationship
       ]
 
-      with patch("robosystems.models.iam.UserLimits") as mock_limits_class:
-        mock_limits_class.get_or_create_for_user.return_value = mock_user_limits
+      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+        mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch(
-          "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
-        ) as mock_alloc_class:
-          mock_manager = AsyncMock()
-          mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
-          mock_alloc_class.return_value = mock_manager
+        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+          mock_org_user = Mock()
+          mock_org_user.org_id = "org_test_123"
+          mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.graph_api.client.get_graph_client_for_instance"
-          ) as mock_get_client:
-            mock_get_client.return_value = mock_kuzu_client
+            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+          ) as mock_alloc_class:
+            mock_manager = AsyncMock()
+            mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
+            mock_alloc_class.return_value = mock_manager
 
-            with patch("robosystems.models.iam.graph.Graph") as mock_graph_class:
-              mock_graph = Mock()
-              mock_graph_class.create.return_value = mock_graph
+            with patch(
+              "robosystems.graph_api.client.get_graph_client_for_instance"
+            ) as mock_get_client:
+              mock_get_client.return_value = mock_kuzu_client
 
-              with patch("robosystems.models.iam.UserGraph"):
-                with patch("robosystems.models.iam.GraphSchema") as mock_schema_class:
-                  mock_schema_class.create.return_value = Mock()
+              with patch("robosystems.models.iam.graph.Graph") as mock_graph_class:
+                mock_graph = Mock()
+                mock_graph_class.create.return_value = mock_graph
 
-                  with patch(
-                    "robosystems.operations.graph.table_service.TableService"
-                  ) as mock_table_service_class:
-                    mock_table_service = Mock()
-                    mock_table_service.create_tables_from_schema.return_value = []
-                    mock_table_service_class.return_value = mock_table_service
+                with patch("robosystems.models.iam.GraphUser"):
+                  with patch("robosystems.models.iam.GraphSchema") as mock_schema_class:
+                    mock_schema_class.create.return_value = Mock()
 
                     with patch(
-                      "robosystems.operations.graph.credit_service.CreditService"
-                    ) as mock_credit_class:
-                      mock_credit_service = Mock()
-                      mock_credit_class.return_value = mock_credit_service
+                      "robosystems.operations.graph.table_service.TableService"
+                    ) as mock_table_service_class:
+                      mock_table_service = Mock()
+                      mock_table_service.create_tables_from_schema.return_value = []
+                      mock_table_service_class.return_value = mock_table_service
 
-                      result = await service.create_graph(
-                        graph_id=None,
-                        schema_extensions=["roboledger", "robofo"],
-                        metadata=valid_metadata,
-                        tier="kuzu-standard",
-                        initial_data=None,
-                        user_id="user123",
-                        custom_schema=None,
-                      )
+                      with patch(
+                        "robosystems.operations.graph.credit_service.CreditService"
+                      ) as mock_credit_class:
+                        mock_credit_service = Mock()
+                        mock_credit_class.return_value = mock_credit_service
 
-                      assert result["status"] == "created"
-                      assert result["graph_id"].startswith("kg")
-                      assert len(result["graph_id"]) == 18
-                      assert result["tier"] == "kuzu-standard"
-                      assert result["metadata"]["name"] == "Test Graph"
-                      assert result["schema_info"]["type"] == "extensions"
-                      assert result["schema_info"]["extensions"] == [
-                        "roboledger",
-                        "robofo",
-                      ]
+                        result = await service.create_graph(
+                          graph_id=None,
+                          schema_extensions=["roboledger", "robofo"],
+                          metadata=valid_metadata,
+                          tier="kuzu-standard",
+                          initial_data=None,
+                          user_id="user123",
+                          custom_schema=None,
+                        )
 
-                      # Verify allocation was called with correct tier
-                      mock_manager.allocate_database.assert_called_once()
+                        assert result["status"] == "created"
+                        assert result["graph_id"].startswith("kg")
+                        assert len(result["graph_id"]) == 18
+                        assert result["tier"] == "kuzu-standard"
+                        assert result["metadata"]["name"] == "Test Graph"
+                        assert result["schema_info"]["type"] == "extensions"
+                        assert result["schema_info"]["extensions"] == [
+                          "roboledger",
+                          "robofo",
+                        ]
+
+                        # Verify allocation was called with correct tier
+                        mock_manager.allocate_database.assert_called_once()
                       call_args = mock_manager.allocate_database.call_args
                       assert (
                         call_args.kwargs["instance_tier"] == GraphTier.KUZU_STANDARD
@@ -208,98 +213,107 @@ class TestGenericGraphService:
         iter([mock_db_session, None]),  # User-graph relationship
       ]
 
-      with patch("robosystems.models.iam.UserLimits") as mock_limits_class:
-        mock_limits_class.get_or_create_for_user.return_value = mock_user_limits
+      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+        mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch(
-          "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
-        ) as mock_alloc_class:
-          mock_manager = AsyncMock()
-          mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
-          mock_alloc_class.return_value = mock_manager
+        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+          mock_org_user = Mock()
+          mock_org_user.org_id = "org_test_123"
+          mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.graph_api.client.get_graph_client_for_instance"
-          ) as mock_get_client:
-            mock_get_client.return_value = mock_kuzu_client
+            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+          ) as mock_alloc_class:
+            mock_manager = AsyncMock()
+            mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
+            mock_alloc_class.return_value = mock_manager
 
             with patch(
-              "robosystems.schemas.custom.CustomSchemaManager"
-            ) as mock_schema_mgr:
-              mock_parsed_schema = Mock()
-              mock_parsed_schema.to_cypher.return_value = (
-                "CREATE NODE TABLE Metric (value DOUBLE, timestamp TIMESTAMP);"
-              )
-              mock_schema_instance = Mock()
-              mock_schema_instance.create_from_dict.return_value = mock_parsed_schema
-              mock_schema_instance.merge_with_base.return_value = mock_parsed_schema
-              mock_schema_mgr.return_value = mock_schema_instance
+              "robosystems.graph_api.client.get_graph_client_for_instance"
+            ) as mock_get_client:
+              mock_get_client.return_value = mock_kuzu_client
 
-              with patch("robosystems.models.iam.graph.Graph") as mock_graph_class:
-                mock_graph = Mock()
-                mock_graph_class.create.return_value = mock_graph
+              with patch(
+                "robosystems.schemas.custom.CustomSchemaManager"
+              ) as mock_schema_mgr:
+                mock_parsed_schema = Mock()
+                mock_parsed_schema.to_cypher.return_value = (
+                  "CREATE NODE TABLE Metric (value DOUBLE, timestamp TIMESTAMP);"
+                )
+                mock_schema_instance = Mock()
+                mock_schema_instance.create_from_dict.return_value = mock_parsed_schema
+                mock_schema_instance.merge_with_base.return_value = mock_parsed_schema
+                mock_schema_mgr.return_value = mock_schema_instance
 
-                with patch("robosystems.models.iam.UserGraph"):
-                  with patch("robosystems.models.iam.GraphSchema") as mock_schema_class:
-                    mock_schema_class.create.return_value = Mock()
+                with patch("robosystems.models.iam.graph.Graph") as mock_graph_class:
+                  mock_graph = Mock()
+                  mock_graph_class.create.return_value = mock_graph
 
+                  with patch("robosystems.models.iam.GraphUser"):
                     with patch(
-                      "robosystems.operations.graph.table_service.TableService"
-                    ) as mock_table_service_class:
-                      mock_table_service = Mock()
-                      mock_table_service.create_tables_from_schema.return_value = [
-                        "Metric"
-                      ]
-                      mock_table_service_class.return_value = mock_table_service
+                      "robosystems.models.iam.GraphSchema"
+                    ) as mock_schema_class:
+                      mock_schema_class.create.return_value = Mock()
 
                       with patch(
-                        "robosystems.operations.graph.credit_service.CreditService"
-                      ) as mock_credit_class:
-                        mock_credit_service = Mock()
-                        mock_credit_class.return_value = mock_credit_service
+                        "robosystems.operations.graph.table_service.TableService"
+                      ) as mock_table_service_class:
+                        mock_table_service = Mock()
+                        mock_table_service.create_tables_from_schema.return_value = [
+                          "Metric"
+                        ]
+                        mock_table_service_class.return_value = mock_table_service
 
-                        result = await service.create_graph(
-                          graph_id=None,
-                          schema_extensions=[],
-                          metadata=valid_metadata,
-                          tier="kuzu-xlarge",
-                          initial_data=None,
-                          user_id="user123",
-                          custom_schema=custom_schema,
-                        )
+                        with patch(
+                          "robosystems.operations.graph.credit_service.CreditService"
+                        ) as mock_credit_class:
+                          mock_credit_service = Mock()
+                          mock_credit_class.return_value = mock_credit_service
 
-                        assert result["status"] == "created"
-                        assert result["schema_info"]["type"] == "custom"
-                        assert (
-                          result["schema_info"]["custom_schema_name"]
-                          == "CustomAnalytics"
-                        )
-                        assert result["schema_info"]["custom_schema_version"] == "1.0.0"
+                          result = await service.create_graph(
+                            graph_id=None,
+                            schema_extensions=[],
+                            metadata=valid_metadata,
+                            tier="kuzu-xlarge",
+                            initial_data=None,
+                            user_id="user123",
+                            custom_schema=custom_schema,
+                          )
 
-                        # Verify custom schema was processed
-                        mock_schema_instance.create_from_dict.assert_called_once_with(
-                          custom_schema
-                        )
-                        mock_schema_instance.merge_with_base.assert_called_once()
+                          assert result["status"] == "created"
+                          assert result["schema_info"]["type"] == "custom"
+                          assert (
+                            result["schema_info"]["custom_schema_name"]
+                            == "CustomAnalytics"
+                          )
+                          assert (
+                            result["schema_info"]["custom_schema_version"] == "1.0.0"
+                          )
 
-                        # Verify database created with custom DDL
-                        mock_kuzu_client.create_database.assert_called_once()
-                        call_args = mock_kuzu_client.create_database.call_args
-                        assert call_args.kwargs["schema_type"] == "custom"
-                        assert call_args.kwargs["custom_schema_ddl"] is not None
+                          # Verify custom schema was processed
+                          mock_schema_instance.create_from_dict.assert_called_once_with(
+                            custom_schema
+                          )
+                          mock_schema_instance.merge_with_base.assert_called_once()
 
-                        # Verify no schema extensions installed for custom schema
-                        mock_kuzu_client.install_schema.assert_not_called()
+                          # Verify database created with custom DDL
+                          mock_kuzu_client.create_database.assert_called_once()
+                          call_args = mock_kuzu_client.create_database.call_args
+                          assert call_args.kwargs["schema_type"] == "custom"
+                          assert call_args.kwargs["custom_schema_ddl"] is not None
 
-                        # Verify auto-table creation happened
-                        mock_table_service.create_tables_from_schema.assert_called_once()
+                          # Verify no schema extensions installed for custom schema
+                          mock_kuzu_client.install_schema.assert_not_called()
+
+                          # Verify auto-table creation happened
+                          mock_table_service.create_tables_from_schema.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_create_graph_user_limit_exceeded(
     self, service, mock_db_session, mock_user_limits, valid_metadata
   ):
     """Test graph creation when user limit is exceeded."""
-    mock_user_limits.can_create_user_graph.return_value = (
+    mock_user_limits.can_create_graph.return_value = (
       False,
       "Graph limit exceeded",
     )
@@ -309,20 +323,25 @@ class TestGenericGraphService:
     ) as mock_get_db:
       mock_get_db.return_value = iter([mock_db_session, None])
 
-      with patch("robosystems.models.iam.UserLimits") as mock_limits_class:
-        mock_limits_class.get_or_create_for_user.return_value = mock_user_limits
+      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+        mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with pytest.raises(ValueError) as exc_info:
-          await service.create_graph(
-            graph_id=None,
-            schema_extensions=[],
-            metadata=valid_metadata,
-            tier="kuzu-standard",
-            initial_data=None,
-            user_id="user123",
-          )
+        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+          mock_org_user = Mock()
+          mock_org_user.org_id = "org_test_123"
+          mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
-        assert "Graph limit exceeded" in str(exc_info.value)
+          with pytest.raises(ValueError) as exc_info:
+            await service.create_graph(
+              graph_id=None,
+              schema_extensions=[],
+              metadata=valid_metadata,
+              tier="kuzu-standard",
+              initial_data=None,
+              user_id="user123",
+            )
+
+          assert "Graph limit exceeded" in str(exc_info.value)
 
   @pytest.mark.asyncio
   async def test_create_graph_allocation_failure(
@@ -334,27 +353,32 @@ class TestGenericGraphService:
     ) as mock_get_db:
       mock_get_db.return_value = iter([mock_db_session, None])
 
-      with patch("robosystems.models.iam.UserLimits") as mock_limits_class:
-        mock_limits_class.get_or_create_for_user.return_value = mock_user_limits
+      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+        mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch(
-          "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
-        ) as mock_alloc_class:
-          mock_manager = AsyncMock()
-          mock_manager.allocate_database.return_value = None
-          mock_alloc_class.return_value = mock_manager
+        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+          mock_org_user = Mock()
+          mock_org_user.org_id = "org_test_123"
+          mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
-          with pytest.raises(RuntimeError) as exc_info:
-            await service.create_graph(
-              graph_id=None,
-              schema_extensions=[],
-              metadata=valid_metadata,
-              tier="kuzu-standard",
-              initial_data=None,
-              user_id="user123",
-            )
+          with patch(
+            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+          ) as mock_alloc_class:
+            mock_manager = AsyncMock()
+            mock_manager.allocate_database.return_value = None
+            mock_alloc_class.return_value = mock_manager
 
-          assert "Failed to allocate database" in str(exc_info.value)
+            with pytest.raises(RuntimeError) as exc_info:
+              await service.create_graph(
+                graph_id=None,
+                schema_extensions=[],
+                metadata=valid_metadata,
+                tier="kuzu-standard",
+                initial_data=None,
+                user_id="user123",
+              )
+
+            assert "Failed to allocate database" in str(exc_info.value)
 
   @pytest.mark.asyncio
   async def test_create_graph_invalid_custom_schema(
@@ -373,37 +397,42 @@ class TestGenericGraphService:
     ) as mock_get_db:
       mock_get_db.return_value = iter([mock_db_session, None])
 
-      with patch("robosystems.models.iam.UserLimits") as mock_limits_class:
-        mock_limits_class.get_or_create_for_user.return_value = mock_user_limits
+      with patch("robosystems.models.iam.OrgLimits") as mock_limits_class:
+        mock_limits_class.get_or_create_for_org.return_value = mock_user_limits
 
-        with patch(
-          "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
-        ) as mock_alloc_class:
-          mock_manager = AsyncMock()
-          mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
-          mock_alloc_class.return_value = mock_manager
+        with patch("robosystems.models.iam.OrgUser") as mock_org_user_class:
+          mock_org_user = Mock()
+          mock_org_user.org_id = "org_test_123"
+          mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.schemas.custom.CustomSchemaManager"
-          ) as mock_schema_mgr:
-            mock_schema_instance = Mock()
-            mock_schema_instance.create_from_dict.side_effect = Exception(
-              "Invalid schema format"
-            )
-            mock_schema_mgr.return_value = mock_schema_instance
+            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+          ) as mock_alloc_class:
+            mock_manager = AsyncMock()
+            mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
+            mock_alloc_class.return_value = mock_manager
 
-            with pytest.raises(ValueError) as exc_info:
-              await service.create_graph(
-                graph_id=None,
-                schema_extensions=[],
-                metadata=valid_metadata,
-                tier="kuzu-standard",
-                initial_data=None,
-                user_id="user123",
-                custom_schema=invalid_schema,
+            with patch(
+              "robosystems.schemas.custom.CustomSchemaManager"
+            ) as mock_schema_mgr:
+              mock_schema_instance = Mock()
+              mock_schema_instance.create_from_dict.side_effect = Exception(
+                "Invalid schema format"
               )
+              mock_schema_mgr.return_value = mock_schema_instance
 
-            assert "Invalid custom schema" in str(exc_info.value)
+              with pytest.raises(ValueError) as exc_info:
+                await service.create_graph(
+                  graph_id=None,
+                  schema_extensions=[],
+                  metadata=valid_metadata,
+                  tier="kuzu-standard",
+                  initial_data=None,
+                  user_id="user123",
+                  custom_schema=invalid_schema,
+                )
+
+              assert "Invalid custom schema" in str(exc_info.value)
 
 
 class TestGenericGraphServiceSync:

@@ -15,7 +15,7 @@ models/iam/
 ├── graph.py                      # Graph database metadata
 ├── user_graph.py                 # User-graph relationships
 ├── graph_credits.py              # Credit-based billing system
-├── graph_usage_tracking.py       # Graph-level usage analytics
+├── graph_usage.py       # Graph-level usage analytics
 ├── graph_backup.py               # Database backup tracking
 ├── connection_credentials.py     # External service credentials
 ├── user_repository.py            # Shared repository access

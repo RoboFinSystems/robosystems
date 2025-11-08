@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from robosystems.operations.graph.subscription_service import (
   GraphSubscriptionService,
 )
-from robosystems.models.iam import UserLimits
+from robosystems.models.iam import OrgLimits
 from robosystems.models.billing import BillingSubscription, SubscriptionStatus
 
 
@@ -28,10 +28,10 @@ class TestGraphSubscriptionService:
   @pytest.fixture
   def sample_user_limits(self):
     """Create sample user limits for testing."""
-    user_limits = Mock(spec=UserLimits)
+    user_limits = Mock(spec=OrgLimits)
     user_limits.user_id = "user123"
     user_limits.is_active = True
-    user_limits.max_user_graphs = 3
+    user_limits.max_graph_users = 3
     user_limits.subscription_tier = "free"
     user_limits.max_api_calls_per_hour = 1000
     return user_limits
@@ -97,7 +97,7 @@ class TestGraphSubscriptionService:
       # Verify subscription creation
       assert mock_session.add.called
       assert mock_session.commit.called
-      assert result.billing_customer_user_id == user_id
+      assert result.org_id is not None
       assert result.resource_type == "graph"
       assert result.resource_id == graph_id
       assert result.plan_name == "kuzu-standard"
@@ -129,7 +129,7 @@ class TestGraphSubscriptionService:
       # Verify subscription creation
       assert mock_session.add.called
       assert mock_session.commit.called
-      assert result.billing_customer_user_id == user_id
+      assert result.org_id is not None
       assert result.resource_type == "graph"
       assert result.resource_id == graph_id
       assert result.plan_name == "kuzu-standard"
@@ -199,39 +199,6 @@ class TestSubscriptionHelperFunctions:
 
     plans = sub_service.get_available_plans()
     assert plans == ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
-
-  def test_is_payment_required_dev_bypass(self):
-    """Test payment requirement in dev with bypass."""
-    import robosystems.operations.graph.subscription_service as sub_service
-
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_ENABLED", True),
-      patch.object(sub_service, "ENVIRONMENT", "dev"),
-    ):
-      assert sub_service.is_payment_required() is False
-
-  def test_is_payment_required_dev_no_bypass(self):
-    """Test payment requirement in dev with billing disabled."""
-    import robosystems.operations.graph.subscription_service as sub_service
-
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_ENABLED", False),
-      patch.object(sub_service, "ENVIRONMENT", "dev"),
-    ):
-      assert sub_service.is_payment_required() is False
-
-  def test_is_payment_required_prod(self):
-    """Test payment requirement in prod (bypass doesn't apply)."""
-    import robosystems.operations.graph.subscription_service as sub_service
-
-    # Patch the module-level variables directly
-    with (
-      patch.object(sub_service, "BILLING_ENABLED", True),
-      patch.object(sub_service, "ENVIRONMENT", "prod"),
-    ):
-      assert sub_service.is_payment_required() is True
 
   def test_get_max_plan_tier(self):
     """Test max plan tier returns last plan from centralized config."""

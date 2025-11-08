@@ -5,7 +5,7 @@ Shared utilities for backup operations.
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, UserGraph
+from robosystems.models.iam import User, GraphUser
 from robosystems.operations.kuzu.backup_manager import create_backup_manager
 
 
@@ -33,7 +33,7 @@ def verify_graph_access(current_user: User, graph_id: str, db: Session) -> None:
   Raises:
       HTTPException: If user doesn't have access to the graph
   """
-  user_graphs = UserGraph.get_by_user_id(current_user.id, db)
+  user_graphs = GraphUser.get_by_user_id(current_user.id, db)
   user_graph_ids = [ug.graph_id for ug in user_graphs]
 
   if graph_id not in user_graph_ids:
@@ -42,7 +42,7 @@ def verify_graph_access(current_user: User, graph_id: str, db: Session) -> None:
     )
 
 
-def verify_admin_access(current_user: User, graph_id: str, db: Session) -> UserGraph:
+def verify_admin_access(current_user: User, graph_id: str, db: Session) -> GraphUser:
   """
   Verify user has admin access to the specified graph.
 
@@ -52,12 +52,12 @@ def verify_admin_access(current_user: User, graph_id: str, db: Session) -> UserG
       db: Database session
 
   Returns:
-      UserGraph object with admin role
+      GraphUser object with admin role
 
   Raises:
       HTTPException: If user doesn't have admin access to the graph
   """
-  user_graphs = UserGraph.get_by_user_id(current_user.id, db)
+  user_graphs = GraphUser.get_by_user_id(current_user.id, db)
   user_graph = next((ug for ug in user_graphs if ug.graph_id == graph_id), None)
 
   if not user_graph or user_graph.role != "admin":

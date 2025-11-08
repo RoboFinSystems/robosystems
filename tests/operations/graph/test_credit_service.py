@@ -13,7 +13,7 @@ from robosystems.models.iam import (
   User,
   GraphCredits,
 )
-from robosystems.models.iam.graph_credits import GraphTier
+from robosystems.config.graph_tier import GraphTier
 
 
 class TestCreditService:

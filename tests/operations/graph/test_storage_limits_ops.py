@@ -12,9 +12,10 @@ import pytest
 from decimal import Decimal
 from datetime import datetime, timezone
 
-from robosystems.models.iam.graph_credits import GraphCredits, GraphTier
-from robosystems.models.iam.graph_usage_tracking import (
-  GraphUsageTracking,
+from robosystems.config.graph_tier import GraphTier
+from robosystems.models.iam.graph_credits import GraphCredits
+from robosystems.models.iam.graph_usage import (
+  GraphUsage,
   UsageEventType,
 )
 from robosystems.operations.graph.credit_service import CreditService
@@ -94,7 +95,7 @@ class TestStorageLimitChecking:
     """Test storage check fetches latest usage data when not provided."""
     # Create usage tracking record
     now = datetime.now(timezone.utc)
-    usage_record = GraphUsageTracking(
+    usage_record = GraphUsage(
       id="usage_test_1",
       graph_id=sample_graph_credits.graph_id,
       user_id=sample_graph_credits.user_id,
@@ -225,14 +226,29 @@ class TestStorageViolationDetection:
     """Test violation detection with actual violations."""
     import uuid
 
-    # First create the graph
-    from robosystems.models.iam import Graph
+    # First create organization and add user to it
+    from robosystems.models.iam import Graph, Org, OrgUser, OrgType
 
+    org = Org.create(
+      name="Test Organization",
+      org_type=OrgType.PERSONAL,
+      session=db_session,
+    )
+
+    OrgUser.create(
+      org_id=org.id,
+      user_id=sample_user.id,
+      role="OWNER",
+      session=db_session,
+    )
+
+    # Then create the graph
     graph_id = f"violation_test_graph_{uuid.uuid4().hex[:8]}"
     Graph.create(
       graph_id=graph_id,
       graph_name="Test Graph",
       graph_type="generic",
+      org_id=org.id,
       session=db_session,
       graph_tier=GraphTier.KUZU_STANDARD,
     )
@@ -248,7 +264,7 @@ class TestStorageViolationDetection:
 
     # Create usage record that exceeds limit (120GB > 100GB limit)
     now = datetime.now(timezone.utc)
-    usage_record = GraphUsageTracking(
+    usage_record = GraphUsage(
       id="violation_usage_1",
       graph_id=credits.graph_id,
       user_id=sample_user.id,
@@ -284,14 +300,29 @@ class TestStorageViolationDetection:
     """Test violation detection for graphs approaching limits."""
     import uuid
 
-    # First create the graph
-    from robosystems.models.iam import Graph
+    # First create organization and add user to it
+    from robosystems.models.iam import Graph, Org, OrgUser, OrgType
 
+    org = Org.create(
+      name="Test Organization",
+      org_type=OrgType.PERSONAL,
+      session=db_session,
+    )
+
+    OrgUser.create(
+      org_id=org.id,
+      user_id=sample_user.id,
+      role="OWNER",
+      session=db_session,
+    )
+
+    # Then create the graph
     graph_id = f"approaching_test_graph_{uuid.uuid4().hex[:8]}"
     Graph.create(
       graph_id=graph_id,
       graph_name="Test Graph",
       graph_type="generic",
+      org_id=org.id,
       session=db_session,
       graph_tier=GraphTier.KUZU_STANDARD,
     )
@@ -307,7 +338,7 @@ class TestStorageViolationDetection:
 
     # Create usage record that approaches limit (90GB = 90% of 100GB)
     now = datetime.now(timezone.utc)
-    usage_record = GraphUsageTracking(
+    usage_record = GraphUsage(
       id="approaching_usage_1",
       graph_id=credits.graph_id,
       user_id=sample_user.id,
@@ -447,14 +478,29 @@ def sample_graph_credits(db_session, sample_user):
   """Create sample graph credits for testing."""
   import uuid
 
-  # First create the graph
-  from robosystems.models.iam import Graph
+  # First create organization and add user to it
+  from robosystems.models.iam import Graph, Org, OrgUser, OrgType
 
+  org = Org.create(
+    name="Test Organization",
+    org_type=OrgType.PERSONAL,
+    session=db_session,
+  )
+
+  OrgUser.create(
+    org_id=org.id,
+    user_id=sample_user.id,
+    role="OWNER",
+    session=db_session,
+  )
+
+  # Then create the graph
   graph_id = f"test_graph_{uuid.uuid4().hex[:8]}"
   Graph.create(
     graph_id=graph_id,
     graph_name="Test Graph",
     graph_type="generic",
+    org_id=org.id,
     session=db_session,
     graph_tier=GraphTier.KUZU_STANDARD,
   )

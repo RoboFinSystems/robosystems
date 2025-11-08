@@ -1,6 +1,12 @@
-"""UserGraph model for multitenant graph access control."""
+"""GraphUser model for graph access control.
 
-import secrets
+Access Control Model:
+- Graphs are owned by organizations (Graph.org_id)
+- Only users within the organization can be granted access
+- This model tracks which specific users have access to which graphs
+- Roles: admin (full control), member (read/write), viewer (read-only)
+"""
+
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
@@ -17,21 +23,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Model
+from ...utils.ulid import generate_prefixed_ulid
 
 
-class UserGraph(Model):
-  """UserGraph model for managing user access to graph databases."""
+class GraphUser(Model):
+  """GraphUser model for managing user access to graph databases."""
 
-  __tablename__ = "user_graphs"
+  __tablename__ = "graph_users"
   __table_args__ = (
-    UniqueConstraint("user_id", "graph_id", name="_user_graph_uc"),
-    Index("idx_user_graphs_user_graph_id", "user_id", "graph_id"),
-    Index("idx_user_graphs_user_selected", "user_id", "is_selected"),
+    UniqueConstraint("graph_id", "user_id", name="_graph_user_uc"),
+    Index("idx_graph_users_graph_user_id", "graph_id", "user_id"),
+    Index("idx_graph_users_user_selected", "user_id", "is_selected"),
   )
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"ug_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gu"))
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
   graph_id = Column(
     String, ForeignKey("graphs.graph_id"), nullable=False, index=True
@@ -49,12 +54,12 @@ class UserGraph(Model):
   )
 
   # Relationships
-  user = relationship("User", back_populates="user_graphs")
-  graph = relationship("Graph", back_populates="user_graphs")
+  user = relationship("User", back_populates="graph_users")
+  graph = relationship("Graph", back_populates="graph_users")
 
   def __repr__(self) -> str:
-    """String representation of the user graph relationship."""
-    return f"<UserGraph {self.id} user={self.user_id} graph={self.graph_id} role={self.role}>"
+    """String representation of the graph-user relationship."""
+    return f"<GraphUser {self.id} graph={self.graph_id} user={self.user_id} role={self.role}>"
 
   @classmethod
   def create(
@@ -64,41 +69,41 @@ class UserGraph(Model):
     role: str = "member",
     is_selected: bool = False,
     session: Optional[Session] = None,
-  ) -> "UserGraph":
-    """Create a new user-graph relationship."""
+  ) -> "GraphUser":
+    """Create a new graph-user access relationship."""
     if session is None:
-      raise ValueError("Session is required for UserGraph creation")
+      raise ValueError("Session is required for GraphUser creation")
 
-    user_graph = cls(
+    graph_user = cls(
       user_id=user_id,
       graph_id=graph_id,
       role=role,
       is_selected=is_selected,
     )
 
-    session.add(user_graph)
+    session.add(graph_user)
     try:
       session.commit()
-      session.refresh(user_graph)
+      session.refresh(graph_user)
     except SQLAlchemyError:
       session.rollback()
       raise
-    return user_graph
+    return graph_user
 
   @classmethod
-  def get_by_user_id(cls, user_id: str, session: Session) -> Sequence["UserGraph"]:
+  def get_by_user_id(cls, user_id: str, session: Session) -> Sequence["GraphUser"]:
     """Get all graph relationships for a user."""
     return session.query(cls).filter(cls.user_id == user_id).all()
 
   @classmethod
-  def get_by_graph_id(cls, graph_id: str, session: Session) -> Sequence["UserGraph"]:
+  def get_by_graph_id(cls, graph_id: str, session: Session) -> Sequence["GraphUser"]:
     """Get all user relationships for a graph."""
     return session.query(cls).filter(cls.graph_id == graph_id).all()
 
   @classmethod
   def get_by_user_and_graph(
     cls, user_id: str, graph_id: str, session: Session
-  ) -> Optional["UserGraph"]:
+  ) -> Optional["GraphUser"]:
     """Get a specific user-graph relationship."""
     return (
       session.query(cls)
@@ -107,7 +112,7 @@ class UserGraph(Model):
     )
 
   @classmethod
-  def get_selected_graph(cls, user_id: str, session: Session) -> Optional["UserGraph"]:
+  def get_selected_graph(cls, user_id: str, session: Session) -> Optional["GraphUser"]:
     """Get the currently selected graph for a user."""
     return session.query(cls).filter(cls.user_id == user_id, cls.is_selected).first()
 
@@ -115,13 +120,13 @@ class UserGraph(Model):
   def set_selected_graph(cls, user_id: str, graph_id: str, session: Session) -> bool:
     """Set a graph as the selected one for a user."""
     # Find the target graph first
-    user_graph = (
+    graph_user = (
       session.query(cls)
       .filter(cls.user_id == user_id, cls.graph_id == graph_id)
       .first()
     )
 
-    if not user_graph:
+    if not graph_user:
       return False
 
     try:
@@ -130,11 +135,11 @@ class UserGraph(Model):
       session.query(cls).filter(cls.user_id == user_id).update({"is_selected": False})
 
       # Then select the specific graph
-      user_graph.is_selected = True
-      user_graph.updated_at = datetime.now(timezone.utc)
+      graph_user.is_selected = True
+      graph_user.updated_at = datetime.now(timezone.utc)
 
       session.commit()
-      session.refresh(user_graph)
+      session.refresh(graph_user)
       return True
     except SQLAlchemyError:
       session.rollback()
@@ -153,13 +158,13 @@ class UserGraph(Model):
   @classmethod
   def user_has_admin_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
     """Check if a user has admin access to a specific graph."""
-    user_graph = (
+    graph_user = (
       session.query(cls)
       .filter(cls.user_id == user_id, cls.graph_id == graph_id)
       .first()
     )
 
-    return user_graph is not None and user_graph.role == "admin"
+    return graph_user is not None and graph_user.role == "admin"
 
   def update_role(self, role: str, session: Session) -> None:
     """Update the user's role for this graph."""

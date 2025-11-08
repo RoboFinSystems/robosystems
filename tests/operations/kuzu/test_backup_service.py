@@ -7,7 +7,7 @@ S3 backups with integrity checks and lifecycle management.
 
 import tempfile
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 import pytest
@@ -290,43 +290,6 @@ class TestKuzuGraphBackupService:
         assert "error" in result
 
   @pytest.mark.asyncio
-  @pytest.mark.skip(reason="Moto doesn't properly set LastModified on put_object")
-  async def test_cleanup_old_backups(self, backup_service, mock_s3_client):
-    """Test cleanup of old backups based on retention policy."""
-    graph_id = "kg1a2b3c4d5"
-
-    # Create old and new backups
-    old_date = datetime.now(timezone.utc) - timedelta(days=DEFAULT_RETENTION_DAYS + 5)
-    new_date = datetime.now(timezone.utc) - timedelta(days=5)
-
-    # Add old backup with LastModified metadata
-    mock_s3_client.put_object(
-      Bucket=DEFAULT_BACKUP_BUCKET,
-      Key=f"graph-databases/test/{graph_id}/{graph_id}_backup_{old_date.strftime('%Y%m%d')}.tar.gz",
-      Body=b"old backup",
-    )
-
-    # Add recent backup
-    mock_s3_client.put_object(
-      Bucket=DEFAULT_BACKUP_BUCKET,
-      Key=f"graph-databases/test/{graph_id}/{graph_id}_backup_{new_date.strftime('%Y%m%d')}.tar.gz",
-      Body=b"new backup",
-    )
-
-    # Run cleanup
-    deleted_count = await backup_service.cleanup_old_backups()
-
-    assert deleted_count >= 1
-
-    # Verify old backup is deleted
-    response = mock_s3_client.list_objects_v2(
-      Bucket=DEFAULT_BACKUP_BUCKET, Prefix=f"graph-databases/test/{graph_id}/"
-    )
-
-    remaining_keys = [obj["Key"] for obj in response.get("Contents", [])]
-    assert not any(old_date.strftime("%Y%m%d") in key for key in remaining_keys)
-
-  @pytest.mark.asyncio
   async def test_backup_with_allocation_manager_failure(
     self, backup_service, mock_allocation_manager
   ):
@@ -435,16 +398,6 @@ class TestBackupServiceFactory:
             assert service is not None
             assert service.base_path == Path(custom_path)
             assert service.environment == "test"
-
-  @pytest.mark.skip(reason="Factory doesn't support allocation_manager param")
-  def test_create_graph_backup_service_with_existing_manager(self):
-    """Test factory with pre-existing allocation manager."""
-    mock_manager = Mock()
-
-    service = create_graph_backup_service()
-
-    assert service is not None
-    assert service._allocation_manager == mock_manager
 
 
 class TestBackupIntegration:

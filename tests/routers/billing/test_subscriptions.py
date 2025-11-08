@@ -28,20 +28,34 @@ class TestListSubscriptions:
     return db
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
-  async def test_list_subscriptions_empty(self, mock_sub_class, mock_user, mock_db):
-    """Test listing subscriptions when user has none."""
-    mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.order_by.return_value.all.return_value = []
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_list_subscriptions_empty(self, mock_get_org_user, mock_user, mock_db):
+    """Test listing subscriptions when org has none."""
+    from robosystems.models.iam import OrgRole
 
-    result = await list_subscriptions(mock_user, mock_db, None)
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
+    mock_query = mock_db.query.return_value
+    mock_query.filter.return_value.order_by.return_value.all.return_value = []
+
+    result = await list_subscriptions("org_123", mock_user, mock_db, None)
 
     assert result == []
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
-  async def test_list_subscriptions_success(self, mock_sub_class, mock_user, mock_db):
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_list_subscriptions_success(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
     """Test successful subscription listing."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_sub1 = Mock(spec=BillingSubscription)
     mock_sub1.id = "sub_1"
     mock_sub1.resource_type = "graph"
@@ -71,12 +85,12 @@ class TestListSubscriptions:
     mock_sub2.created_at = datetime(2024, 12, 1)
 
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.order_by.return_value.all.return_value = [
+    mock_query.filter.return_value.order_by.return_value.all.return_value = [
       mock_sub1,
       mock_sub2,
     ]
 
-    result = await list_subscriptions(mock_user, mock_db, None)
+    result = await list_subscriptions("org_123", mock_user, mock_db, None)
 
     assert len(result) == 2
     assert result[0].id == "sub_1"
@@ -92,15 +106,15 @@ class TestListSubscriptions:
     assert result[1].canceled_at is not None
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_list_subscriptions_error_handling(
-    self, mock_sub_class, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in subscription listing."""
-    mock_db.query.side_effect = Exception("Database error")
+    mock_get_org_user.side_effect = Exception("Database error")
 
     with pytest.raises(HTTPException) as exc:
-      await list_subscriptions(mock_user, mock_db, None)
+      await list_subscriptions("org_123", mock_user, mock_db, None)
 
     assert exc.value.status_code == 500
     assert "Failed to retrieve subscriptions" in exc.value.detail
@@ -120,9 +134,15 @@ class TestGetSubscription:
     return Mock()
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
-  async def test_get_subscription_success(self, mock_sub_class, mock_user, mock_db):
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_get_subscription_success(self, mock_get_org_user, mock_user, mock_db):
     """Test successful subscription retrieval."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.id = "sub_123"
     mock_subscription.resource_type = "graph"
@@ -138,11 +158,9 @@ class TestGetSubscription:
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.first.return_value = (
-      mock_subscription
-    )
+    mock_query.filter.return_value.first.return_value = mock_subscription
 
-    result = await get_subscription("sub_123", mock_user, mock_db, None)
+    result = await get_subscription("org_123", "sub_123", mock_user, mock_db, None)
 
     assert result.id == "sub_123"
     assert result.resource_type == "graph"
@@ -151,24 +169,38 @@ class TestGetSubscription:
     assert result.status == "active"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
-  async def test_get_subscription_not_found(self, mock_sub_class, mock_user, mock_db):
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_get_subscription_not_found(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
     """Test getting subscription that doesn't exist."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.first.return_value = None
+    mock_query.filter.return_value.first.return_value = None
 
     with pytest.raises(HTTPException) as exc:
-      await get_subscription("sub_999", mock_user, mock_db, None)
+      await get_subscription("org_123", "sub_999", mock_user, mock_db, None)
 
     assert exc.value.status_code == 404
     assert "Subscription not found" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_get_subscription_null_resource_id(
-    self, mock_sub_class, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting subscription with null resource_id."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.id = "sub_123"
     mock_subscription.resource_type = "graph"
@@ -184,25 +216,23 @@ class TestGetSubscription:
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.first.return_value = (
-      mock_subscription
-    )
+    mock_query.filter.return_value.first.return_value = mock_subscription
 
-    result = await get_subscription("sub_123", mock_user, mock_db, None)
+    result = await get_subscription("org_123", "sub_123", mock_user, mock_db, None)
 
     assert result.resource_id == ""
     assert result.status == "pending_provisioning"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_get_subscription_error_handling(
-    self, mock_sub_class, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in subscription retrieval."""
-    mock_db.query.side_effect = Exception("Database error")
+    mock_get_org_user.side_effect = Exception("Database error")
 
     with pytest.raises(HTTPException) as exc:
-      await get_subscription("sub_123", mock_user, mock_db, None)
+      await get_subscription("org_123", "sub_123", mock_user, mock_db, None)
 
     assert exc.value.status_code == 500
     assert "Failed to retrieve subscription" in exc.value.detail
@@ -222,9 +252,17 @@ class TestCancelSubscription:
     return Mock()
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
-  async def test_cancel_subscription_success(self, mock_sub_class, mock_user, mock_db):
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_cancel_subscription_success(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
     """Test successful subscription cancellation."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.id = "sub_123"
     mock_subscription.resource_type = "graph"
@@ -240,80 +278,92 @@ class TestCancelSubscription:
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.first.return_value = (
-      mock_subscription
-    )
+    mock_query.filter.return_value.first.return_value = mock_subscription
 
-    result = await cancel_subscription("sub_123", mock_user, mock_db, None)
+    result = await cancel_subscription("org_123", "sub_123", mock_user, mock_db, None)
 
     mock_subscription.cancel.assert_called_once_with(mock_db, immediate=False)
     assert result.id == "sub_123"
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_not_found(
-    self, mock_sub_class, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test canceling subscription that doesn't exist."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.first.return_value = None
+    mock_query.filter.return_value.first.return_value = None
 
     with pytest.raises(HTTPException) as exc:
-      await cancel_subscription("sub_999", mock_user, mock_db, None)
+      await cancel_subscription("org_123", "sub_999", mock_user, mock_db, None)
 
     assert exc.value.status_code == 404
     assert "Subscription not found" in exc.value.detail
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_already_canceled(
-    self, mock_sub_class, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test canceling already canceled subscription."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.status = "canceled"
 
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.first.return_value = (
-      mock_subscription
-    )
+    mock_query.filter.return_value.first.return_value = mock_subscription
 
     with pytest.raises(HTTPException) as exc:
-      await cancel_subscription("sub_123", mock_user, mock_db, None)
+      await cancel_subscription("org_123", "sub_123", mock_user, mock_db, None)
 
     assert exc.value.status_code == 400
     assert "already canceled" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_canceling_status(
-    self, mock_sub_class, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test canceling subscription in canceling status."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.status = "canceling"
 
     mock_query = mock_db.query.return_value
-    mock_query.join.return_value.filter.return_value.first.return_value = (
-      mock_subscription
-    )
+    mock_query.filter.return_value.first.return_value = mock_subscription
 
     with pytest.raises(HTTPException) as exc:
-      await cancel_subscription("sub_123", mock_user, mock_db, None)
+      await cancel_subscription("org_123", "sub_123", mock_user, mock_db, None)
 
     assert exc.value.status_code == 400
     assert "already canceled" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.subscriptions.BillingSubscription")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_cancel_subscription_error_handling(
-    self, mock_sub_class, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in subscription cancellation."""
-    mock_db.query.side_effect = Exception("Database error")
+    mock_get_org_user.side_effect = Exception("Database error")
 
     with pytest.raises(HTTPException) as exc:
-      await cancel_subscription("sub_123", mock_user, mock_db, None)
+      await cancel_subscription("org_123", "sub_123", mock_user, mock_db, None)
 
     assert exc.value.status_code == 500
     assert "Failed to cancel subscription" in exc.value.detail

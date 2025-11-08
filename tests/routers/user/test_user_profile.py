@@ -353,7 +353,7 @@ class TestUserGraphs:
     # Cleanup
     app.dependency_overrides = {}
 
-  @patch("robosystems.models.iam.UserGraph.get_by_user_id")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_get_user_graphs_success(
     self, mock_get_by_user_id, client_with_graphs: TestClient
   ):
@@ -382,8 +382,8 @@ class TestUserGraphs:
     assert "isSelected" in graph
     assert "createdAt" in graph
 
-  @patch("robosystems.models.iam.UserGraph.set_selected_graph")
-  @patch("robosystems.models.iam.UserGraph.get_by_user_id")
+  @patch("robosystems.models.iam.GraphUser.set_selected_graph")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_select_user_graph_success(
     self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
   ):
@@ -407,7 +407,7 @@ class TestUserGraphs:
     # Verify the method was called with correct parameters
     mock_set_selected.assert_called_once()
 
-  @patch("robosystems.models.iam.UserGraph.get_by_user_id")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_select_user_graph_access_denied(
     self, mock_get_by_user_id, client_with_graphs: TestClient
   ):
@@ -423,8 +423,8 @@ class TestUserGraphs:
     # Handle structured error response
     assert "access denied" in data["detail"]["detail"].lower()
 
-  @patch("robosystems.models.iam.UserGraph.set_selected_graph")
-  @patch("robosystems.models.iam.UserGraph.get_by_user_id")
+  @patch("robosystems.models.iam.GraphUser.set_selected_graph")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_select_user_graph_not_found(
     self, mock_get_by_user_id, mock_set_selected, client_with_graphs: TestClient
   ):

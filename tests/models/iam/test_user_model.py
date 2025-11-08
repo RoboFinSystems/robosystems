@@ -167,9 +167,9 @@ class TestUserModel:
   def test_get_all_users(self, db_session):
     """Test getting all users."""
     # Clean up existing users to ensure test isolation
-    from robosystems.models.iam import UserGraph, Graph, GraphCredits
+    from robosystems.models.iam import GraphUser, Graph, GraphCredits
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
-    from robosystems.models.iam.graph_usage_tracking import GraphUsageTracking
+    from robosystems.models.iam.graph_usage import GraphUsage
 
     try:
       from robosystems.models.iam.graph_backup import GraphBackup as _GraphBackup
@@ -187,14 +187,8 @@ class TestUserModel:
     except ImportError:
       UserAPIKey = None  # type: ignore
       has_user_api_keys = False
-    try:
-      from robosystems.models.iam.user_limits import UserLimits as _UserLimits
-
-      UserLimits = _UserLimits
-      has_user_limits = True
-    except ImportError:
-      UserLimits = None  # type: ignore
-      has_user_limits = False
+    UserLimits = None  # type: ignore[assignment]
+    has_user_limits = False
     try:
       from robosystems.models.iam.graph_subscription import (  # type: ignore
         GraphSubscription as _GraphSubscription,
@@ -207,10 +201,10 @@ class TestUserModel:
       has_graph_subscription = False
 
     # Delete in dependency order
-    db_session.query(GraphUsageTracking).delete()
+    db_session.query(GraphUsage).delete()
     db_session.query(GraphCreditTransaction).delete()
     db_session.query(GraphCredits).delete()
-    db_session.query(UserGraph).delete()
+    db_session.query(GraphUser).delete()
     if has_graph_backup:
       db_session.query(GraphBackup).delete()  # type: ignore
     if has_user_api_keys:
@@ -236,6 +230,16 @@ class TestUserModel:
       db_session.query(BillingInvoice).delete()
       db_session.query(BillingSubscription).delete()
       db_session.query(BillingCustomer).delete()
+    except ImportError:
+      pass
+
+    # Delete org-related tables before deleting users
+    try:
+      from robosystems.models.iam import OrgUser, Org, OrgLimits
+
+      db_session.query(OrgUser).delete()
+      db_session.query(OrgLimits).delete()
+      db_session.query(Org).delete()
     except ImportError:
       pass
 
@@ -437,8 +441,8 @@ class TestUserModel:
 
     # Check relationship attributes exist
     assert hasattr(user, "user_api_keys")
-    assert hasattr(user, "user_graphs")
-    assert hasattr(user, "limits")
+    assert hasattr(user, "graph_users")  # Changed from user_graphs
+    # Note: limits no longer exists - now handled at org level
     assert hasattr(user, "user_repositories")
 
   @patch("robosystems.models.iam.user.Session")

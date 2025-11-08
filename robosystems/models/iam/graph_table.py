@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Base
-from ...utils import default_ulid
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class GraphTable(Base):
@@ -25,7 +25,7 @@ class GraphTable(Base):
     UniqueConstraint("graph_id", "table_name", name="unique_graph_table"),
   )
 
-  id = Column(String, primary_key=True, default=default_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gt"))
   graph_id = Column(
     String,
     ForeignKey("graphs.graph_id", ondelete="CASCADE"),

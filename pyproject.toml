@@ -129,7 +129,6 @@ dev = [
     "moto[s3]>=5.1.6,<6.0",
 
     # Development utilities
-    "flower>=2.0.0,<3.0",
     "jupyter>=1.1.0,<2.0",
     "rich>=14.0.0,<15.0"
 ]

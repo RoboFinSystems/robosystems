@@ -89,7 +89,7 @@ class TestSchemaManagementIntegration:
       # Create a proper mock database session
       mock_db = MagicMock()
 
-      # Mock UserGraph query
+      # Mock GraphUser query
       mock_user_graph_instance = MagicMock(graph_id="test_graph", user_id=test_user.id)
       mock_user_graph_query = MagicMock()
       mock_user_graph_query.filter_by.return_value.first.return_value = (
@@ -98,10 +98,10 @@ class TestSchemaManagementIntegration:
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import UserGraph
+        from robosystems.models.iam import GraphUser
 
-        if model == UserGraph or (
-          hasattr(model, "__name__") and model.__name__ == "UserGraph"
+        if model == GraphUser or (
+          hasattr(model, "__name__") and model.__name__ == "GraphUser"
         ):
           return mock_user_graph_query
         return MagicMock()
@@ -149,15 +149,15 @@ class TestSchemaManagementIntegration:
       patch(
         "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
       ) as mock_task,
-      patch("robosystems.models.iam.UserLimits.get_by_user_id") as mock_get_limits,
+      patch("robosystems.models.iam.OrgLimits.get_by_org_id") as mock_get_limits,
       patch(
         "robosystems.middleware.billing.enforcement.check_can_provision_graph",
         return_value=(True, None),
       ),
     ):
-      # Mock user limits to allow graph creation
+      # Mock org limits to allow graph creation
       mock_limits = MagicMock()
-      mock_limits.can_create_user_graph.return_value = (True, "")
+      mock_limits.can_create_graph.return_value = (True, "")
       mock_limits.subscription_tier = "standard"
       mock_get_limits.return_value = mock_limits
 
@@ -206,7 +206,7 @@ class TestSchemaManagementIntegration:
       # Create a proper mock database session
       mock_db = MagicMock()
 
-      # Mock UserGraph query
+      # Mock GraphUser query
       mock_user_graph_query = MagicMock()
       mock_user_graph_query.filter_by.return_value.first.return_value = test_user_graph
 
@@ -240,10 +240,10 @@ class TestSchemaManagementIntegration:
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import UserGraph, GraphSchema, Graph
+        from robosystems.models.iam import GraphUser, GraphSchema, Graph
 
-        if model == UserGraph or (
-          hasattr(model, "__name__") and model.__name__ == "UserGraph"
+        if model == GraphUser or (
+          hasattr(model, "__name__") and model.__name__ == "GraphUser"
         ):
           return mock_user_graph_query
         elif model == GraphSchema or (
@@ -368,16 +368,16 @@ class TestSchemaManagementIntegration:
       # Create a proper mock database session
       mock_db = MagicMock()
 
-      # Mock UserGraph query
+      # Mock GraphUser query
       mock_user_graph_query = MagicMock()
       mock_user_graph_query.filter_by.return_value.first.return_value = test_user_graph
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import UserGraph
+        from robosystems.models.iam import GraphUser
 
-        if model == UserGraph or (
-          hasattr(model, "__name__") and model.__name__ == "UserGraph"
+        if model == GraphUser or (
+          hasattr(model, "__name__") and model.__name__ == "GraphUser"
         ):
           return mock_user_graph_query
         return MagicMock()
@@ -480,16 +480,16 @@ relationships:
       # Create a proper mock database session
       mock_db = MagicMock()
 
-      # Mock UserGraph query
+      # Mock GraphUser query
       mock_user_graph_query = MagicMock()
       mock_user_graph_query.filter_by.return_value.first.return_value = test_user_graph
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import UserGraph
+        from robosystems.models.iam import GraphUser
 
-        if model == UserGraph or (
-          hasattr(model, "__name__") and model.__name__ == "UserGraph"
+        if model == GraphUser or (
+          hasattr(model, "__name__") and model.__name__ == "GraphUser"
         ):
           return mock_user_graph_query
         return MagicMock()

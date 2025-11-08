@@ -18,11 +18,11 @@ class PaymentMethod(BaseModel):
 
 
 class BillingCustomer(BaseModel):
-  """Billing customer information."""
+  """Billing customer information for an organization."""
 
-  user_id: str = Field(..., description="User ID")
+  org_id: str = Field(..., description="Organization ID")
   has_payment_method: bool = Field(
-    ..., description="Whether customer has a payment method on file"
+    ..., description="Whether organization has a payment method on file"
   )
   invoice_billing_enabled: bool = Field(
     ..., description="Whether invoice billing is enabled (enterprise customers)"

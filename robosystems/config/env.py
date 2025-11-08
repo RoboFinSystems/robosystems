@@ -266,6 +266,10 @@ class EnvConfig:
     bool(get_secret_value("CSP_TRUSTED_TYPES_ENABLED", "true").lower() == "true"),
   )
   MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
+  ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
+    "ORG_MEMBER_INVITATIONS_ENABLED",
+    bool(get_secret_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true"),
+  )
 
   # Connection Feature Flags
   CONNECTION_SEC_ENABLED = get_bool_env(
@@ -495,10 +499,10 @@ class EnvConfig:
   )
   NEO4J_MAX_CONNECTION_LIFETIME = get_int_env("NEO4J_MAX_CONNECTION_LIFETIME", 3600)
 
-  # User Graph Creation Limits (safety valve)
-  USER_GRAPHS_DEFAULT_LIMIT = get_int_env(
-    "USER_GRAPHS_DEFAULT_LIMIT",
-    int(get_secret_value("USER_GRAPHS_DEFAULT_LIMIT", "100")),
+  # Organization Graph Creation Limits (safety valve)
+  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env(
+    "ORG_GRAPHS_DEFAULT_LIMIT",
+    int(get_secret_value("ORG_GRAPHS_DEFAULT_LIMIT", "100")),
   )
 
   # Instance Metadata (applies to all backends)
@@ -681,6 +685,7 @@ class EnvConfig:
   STRIPE_SECRET_KEY = get_secret_value("STRIPE_SECRET_KEY", "")
   STRIPE_PUBLISHABLE_KEY = get_secret_value("STRIPE_PUBLISHABLE_KEY", "")
   STRIPE_WEBHOOK_SECRET = get_secret_value("STRIPE_WEBHOOK_SECRET", "")
+  STRIPE_API_VERSION = get_secret_value("STRIPE_API_VERSION", "2025-10-29.clover")
 
   # ==========================================================================
   # DATA PROCESSING CONFIGURATION
@@ -928,7 +933,7 @@ class EnvConfig:
     """
     # Try to load tier-specific config if available
     try:
-      from robosystems.config.tier_config import TierConfig
+      from robosystems.config.graph_tier import GraphTierConfig
 
       # Determine tier from environment
       # CLUSTER_TIER is set by CloudFormation to the actual tier (e.g., "kuzu-standard")
@@ -950,11 +955,11 @@ class EnvConfig:
 
       if tier:
         # Get instance config from kuzu.yml
-        instance_config = TierConfig.get_instance_config(tier)
+        instance_config = GraphTierConfig.get_instance_config(tier)
 
         if instance_config:
           # Get full tier config for additional settings
-          full_tier_config = TierConfig.get_tier_config(tier)
+          full_tier_config = GraphTierConfig.get_tier_config(tier)
 
           # Override with values from config file if present
           return {
@@ -997,7 +1002,7 @@ class EnvConfig:
             "max_subgraphs": full_tier_config.get("max_subgraphs", 0),
           }
     except ImportError:
-      pass  # TierConfig not available
+      pass  # GraphTierConfig not available
     except Exception:
       pass  # Any other error loading config
 

@@ -15,7 +15,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from ...models.iam import UserGraph, GraphFile, GraphTable
+from ...models.iam import GraphUser, GraphFile, GraphTable
 from ...adapters.s3 import S3Client
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ class StorageCalculator:
         Dict mapping graph_id to storage breakdown
     """
     user_graphs = (
-      self.session.query(UserGraph.graph_id).filter(UserGraph.user_id == user_id).all()
+      self.session.query(GraphUser.graph_id).filter(GraphUser.user_id == user_id).all()
     )
 
     results = {}

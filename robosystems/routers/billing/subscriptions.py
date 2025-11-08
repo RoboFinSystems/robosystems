@@ -17,25 +17,38 @@ router = APIRouter(prefix="/billing/subscriptions", tags=["Billing"])
 
 
 @router.get(
-  "",
+  "/{org_id}",
   response_model=list[GraphSubscriptionResponse],
-  summary="List All Subscriptions",
-  description="""List all active and past subscriptions for the user.
+  summary="List Organization Subscriptions",
+  description="""List all active and past subscriptions for an organization.
 
-Includes both graph and repository subscriptions with their status, pricing, and billing information.""",
-  operation_id="listSubscriptions",
+Includes both graph and repository subscriptions with their status, pricing, and billing information.
+
+**Requirements:**
+- User must be a member of the organization""",
+  operation_id="listOrgSubscriptions",
 )
 async def list_subscriptions(
+  org_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """List all subscriptions for the current user."""
+  """List all subscriptions for the organization."""
   try:
+    from ...models.iam import OrgUser
+
+    # Verify user is a member of the org
+    membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
+    if not membership:
+      raise HTTPException(
+        status_code=403,
+        detail="You are not a member of this organization",
+      )
+
     subscriptions = (
       db.query(BillingSubscription)
-      .join(BillingSubscription.billing_customer)
-      .filter(BillingSubscription.billing_customer.has(user_id=current_user.id))
+      .filter(BillingSubscription.org_id == org_id)
       .order_by(BillingSubscription.created_at.desc())
       .all()
     )
@@ -76,26 +89,39 @@ async def list_subscriptions(
 
 
 @router.get(
-  "/{subscription_id}",
+  "/{org_id}/subscription/{subscription_id}",
   response_model=GraphSubscriptionResponse,
-  summary="Get Subscription Details",
-  description="""Get detailed information about a specific subscription.""",
-  operation_id="getSubscription",
+  summary="Get Organization Subscription Details",
+  description="""Get detailed information about a specific subscription.
+
+**Requirements:**
+- User must be a member of the organization""",
+  operation_id="getOrgSubscription",
 )
 async def get_subscription(
+  org_id: str,
   subscription_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """Get subscription details."""
+  """Get subscription details for organization."""
   try:
+    from ...models.iam import OrgUser
+
+    # Verify user is a member of the org
+    membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
+    if not membership:
+      raise HTTPException(
+        status_code=403,
+        detail="You are not a member of this organization",
+      )
+
     subscription = (
       db.query(BillingSubscription)
-      .join(BillingSubscription.billing_customer)
       .filter(
         BillingSubscription.id == subscription_id,
-        BillingSubscription.billing_customer.has(user_id=current_user.id),
+        BillingSubscription.org_id == org_id,
       )
       .first()
     )
@@ -138,28 +164,47 @@ async def get_subscription(
 
 
 @router.post(
-  "/{subscription_id}/cancel",
+  "/{org_id}/subscription/{subscription_id}/cancel",
   response_model=GraphSubscriptionResponse,
-  summary="Cancel Subscription",
-  description="""Cancel a subscription.
+  summary="Cancel Organization Subscription",
+  description="""Cancel an organization subscription.
 
-The subscription will remain active until the end of the current billing period.""",
-  operation_id="cancelSubscription",
+The subscription will remain active until the end of the current billing period.
+
+**Requirements:**
+- User must be an OWNER of the organization""",
+  operation_id="cancelOrgSubscription",
 )
 async def cancel_subscription(
+  org_id: str,
   subscription_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """Cancel a subscription."""
+  """Cancel an organization subscription."""
   try:
+    from ...models.iam import OrgUser, OrgRole
+
+    # Verify user is an owner of the org
+    membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
+    if not membership:
+      raise HTTPException(
+        status_code=403,
+        detail="You are not a member of this organization",
+      )
+
+    if membership.role != OrgRole.OWNER:
+      raise HTTPException(
+        status_code=403,
+        detail="Only organization owners can cancel subscriptions",
+      )
+
     subscription = (
       db.query(BillingSubscription)
-      .join(BillingSubscription.billing_customer)
       .filter(
         BillingSubscription.id == subscription_id,
-        BillingSubscription.billing_customer.has(user_id=current_user.id),
+        BillingSubscription.org_id == org_id,
       )
       .first()
     )
@@ -173,8 +218,12 @@ async def cancel_subscription(
     subscription.cancel(db, immediate=False)
 
     logger.info(
-      f"Canceled subscription {subscription_id} for user {current_user.id}",
-      extra={"user_id": current_user.id, "subscription_id": subscription_id},
+      f"Canceled subscription {subscription_id} for org {org_id}",
+      extra={
+        "org_id": org_id,
+        "user_id": current_user.id,
+        "subscription_id": subscription_id,
+      },
     )
 
     return GraphSubscriptionResponse(

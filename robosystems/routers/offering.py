@@ -2,10 +2,10 @@
 Service offering API endpoint.
 
 Provides comprehensive information about all subscription offerings:
-- Graph database subscription tiers (standard, enterprise, premium)
+- Per-graph infrastructure subscriptions (kuzu-standard, kuzu-large, kuzu-xlarge)
 - Shared repository subscriptions (SEC, industry, economic data)
 - Operation costs and credit information
-- Features and capabilities for each tier
+- Features and capabilities for each infrastructure tier
 """
 
 import logging
@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends
 from ..middleware.rate_limits import public_api_rate_limit_dependency
 from ..models.api.common import ErrorResponse, ErrorCode, create_error_response
 from ..models.api import ServiceOfferingsResponse
-from ..config import BillingConfig
+from ..config import BillingConfig, env
 from ..config.billing import RepositoryBillingConfig
 from ..models.iam.user_repository import UserRepository
 
@@ -77,13 +77,13 @@ class OfferingFeatureGenerator:
       return base_features
 
   @staticmethod
-  def _get_industry_features(plan_type: str, plan_config: Dict[str, Any]) -> List[str]:
+  def _get_industry_features(_plan_type: str, plan_config: Dict[str, Any]) -> List[str]:
     """Get features for industry repository plans (placeholder for future implementation)."""
     # Currently uses default features, but can be customized in the future
     return OfferingFeatureGenerator._get_default_features(plan_config)
 
   @staticmethod
-  def _get_economic_features(plan_type: str, plan_config: Dict[str, Any]) -> List[str]:
+  def _get_economic_features(_plan_type: str, plan_config: Dict[str, Any]) -> List[str]:
     """Get features for economic repository plans (placeholder for future implementation)."""
     # Currently uses default features, but can be customized in the future
     return OfferingFeatureGenerator._get_default_features(plan_config)
@@ -117,9 +117,15 @@ This endpoint provides complete information about both graph database subscripti
 and shared repository subscriptions. This is the primary endpoint for frontend
 applications to display subscription options.
 
+**Pricing Model:**
+- Graph subscriptions are **per-graph** with infrastructure-based pricing
+- Each graph you create has its own monthly subscription
+- Organizations can have multiple graphs with different infrastructure tiers
+- Credits are allocated per-graph, not shared across organization
+
 Includes:
-- Graph subscription tiers (standard, enterprise, premium)
-- Shared repository subscriptions (SEC, industry, economic data)
+- Graph infrastructure tiers (kuzu-standard, kuzu-large, kuzu-xlarge) - per-graph pricing
+- Shared repository subscriptions (SEC, industry, economic data) - org-level
 - Operation costs and credit information
 - Features and capabilities for each tier
 - Enabled/disabled status for repositories
@@ -137,13 +143,15 @@ No authentication required - this is public service information.""",
             "graph_subscriptions": {
               "tiers": [
                 {
-                  "name": "standard",
-                  "display_name": "Standard",
+                  "name": "kuzu-standard",
+                  "display_name": "Kuzu Standard",
                   "monthly_price": 49.99,
-                  "monthly_credits": 100000,
+                  "monthly_credits": 10000,
+                  "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
                   "features": [
-                    "100k credits/month",
-                    "Standard graphs",
+                    "10k AI credits/month per graph",
+                    "100 GB storage included",
+                    "Multi-tenant infrastructure",
                     "30-day backup retention",
                   ],
                 }
@@ -183,45 +191,24 @@ async def get_service_offerings(
     graph_pricing = BillingConfig.get_all_pricing_info()
 
     # Get tier configurations from graph.yml for technical specs
-    from ..config.tier_config import TierConfig
+    from ..config.graph_tier import GraphTierConfig
 
-    tier_configs = TierConfig.get_available_tiers(include_disabled=False)
+    tier_configs = GraphTierConfig.get_available_tiers(include_disabled=False)
 
-    # Filter out internal-only and not-yet-available tiers
-    excluded_tiers = ["kuzu-shared", "neo4j-community-large", "neo4j-enterprise-xlarge"]
-    tier_configs = [
-      tier for tier in tier_configs if tier.get("tier") not in excluded_tiers
-    ]
+    # Filter to only customer-facing tiers (exclude internal/shared infrastructure)
+    customer_tiers = ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
+    tier_configs = [tier for tier in tier_configs if tier.get("tier") in customer_tiers]
 
-    # Create a mapping from old tier names to new tier names
-    tier_name_mapping = {
-      "standard": "kuzu-standard",
-      "enterprise": "kuzu-large",
-      "premium": "kuzu-xlarge",
-    }
-
-    # Convert graph subscription tiers
+    # Build graph subscription tiers from billing plans
     graph_tiers = []
     for tier_name, plan_data in graph_pricing["subscription_tiers"].items():
-      if not plan_data:
+      if not plan_data or tier_name not in customer_tiers:
         continue
 
-      # Map old tier name to new tier name
-      new_tier_name = tier_name_mapping.get(tier_name, tier_name)
+      # Find the corresponding tier config for technical specs
+      tier_config = next((t for t in tier_configs if t.get("tier") == tier_name), None)
 
-      # Find the corresponding tier config
-      tier_config = next(
-        (t for t in tier_configs if t.get("tier") == new_tier_name), None
-      )
-
-      # Graph tier restrictions (using new tier names)
-      allowed_graph_tiers = {
-        "standard": ["kuzu-standard"],
-        "enterprise": ["kuzu-standard", "kuzu-large"],
-        "premium": ["kuzu-standard", "kuzu-large", "kuzu-xlarge"],
-      }
-
-      # Get storage information for this tier
+      # Get storage information
       storage_included = (
         graph_pricing.get("storage_pricing", {})
         .get("included_per_tier", {})
@@ -233,64 +220,40 @@ async def get_service_offerings(
         .get(tier_name, 1.0)
       )
 
-      # Build features list - merge tier config features with billing features if available
-      if tier_config:
-        # Use features from tier config as the primary source
-        features = tier_config.get("features", [])
-        # Add pricing and support info from billing config
-        features.extend(
-          [
-            f"${plan_data.get('base_price_cents', 0) / 100:.2f}/month",
-            f"${storage_overage}/GB storage overage",
-            "Priority support"
-            if plan_data.get("priority_support", False)
-            else "Standard support",
-          ]
-        )
-      else:
-        # Fallback to original features if no tier config
-        features = [
-          f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per month",
-          f"${plan_data.get('base_price_cents', 0) / 100:.2f}/month",
-          f"{storage_included:,} GB storage included",
-          f"${storage_overage}/GB overage",
-          f"{plan_data.get('backup_retention_days', 0)} day backup retention",
-          "Priority support"
-          if plan_data.get("priority_support", False)
-          else "Standard support",
-        ]
+      # Build features list
+      features = [
+        f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per graph",
+        f"{storage_included:,} GB storage included",
+        f"${storage_overage:.2f}/GB storage overage",
+        plan_data.get("infrastructure", "Managed infrastructure"),
+        f"{plan_data.get('backup_retention_days', 0)}-day backup retention",
+        "Priority support"
+        if plan_data.get("priority_support", False)
+        else "Standard support",
+      ]
+
+      # Add subgraph support if available
+      if tier_config and tier_config.get("max_subgraphs", 0) > 0:
+        features.append(f"Up to {tier_config.get('max_subgraphs')} subgraphs")
 
       tier_info = {
         "name": tier_name,
-        "display_name": tier_config.get(
-          "display_name", plan_data.get("display_name", tier_name.title())
-        )
-        if tier_config
-        else plan_data.get("display_name", tier_name.title()),
-        "description": tier_config.get("description", plan_data.get("description", ""))
-        if tier_config
-        else plan_data.get("description", ""),
-        "monthly_price": plan_data.get("base_price_cents", 0) / 100.0,
-        "monthly_credits": tier_config.get(
-          "monthly_credits", plan_data.get("monthly_credit_allocation", 0)
-        )
-        if tier_config
-        else plan_data.get("monthly_credit_allocation", 0),
-        "storage_included_gb": tier_config.get("storage_limit_gb", storage_included)
-        if tier_config
-        else storage_included,
+        "display_name": plan_data.get("display_name", tier_name.title()),
+        "description": plan_data.get("description", ""),
+        "monthly_price_per_graph": plan_data.get("base_price_cents", 0) / 100.0,
+        "monthly_credits_per_graph": plan_data.get("monthly_credit_allocation", 0),
+        "storage_included_gb": storage_included,
         "storage_overage_per_gb": storage_overage,
-        "allowed_graph_tiers": allowed_graph_tiers.get(tier_name, ["kuzu-standard"]),
+        "infrastructure": plan_data.get("infrastructure", "Managed"),
         "features": features,
         "backup_retention_days": plan_data.get("backup_retention_days", 0),
         "priority_support": plan_data.get("priority_support", False),
         "max_queries_per_hour": plan_data.get("max_queries_per_hour"),
-        # Add technical specs from tier config if available
-        "max_subgraphs": tier_config.get("max_subgraphs") if tier_config else None,
-        "api_rate_multiplier": tier_config.get("api_rate_multiplier")
+        "max_subgraphs": tier_config.get("max_subgraphs", 0) if tier_config else 0,
+        "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0)
         if tier_config
         else 1.0,
-        "backend": tier_config.get("backend") if tier_config else "kuzu",
+        "backend": tier_config.get("backend", "kuzu") if tier_config else "kuzu",
         "instance_type": tier_config.get("instance", {}).get("type")
         if tier_config
         else None,
@@ -298,7 +261,7 @@ async def get_service_offerings(
       graph_tiers.append(tier_info)
 
     # Sort graph tiers by price
-    graph_tiers.sort(key=lambda x: x["monthly_price"])
+    graph_tiers.sort(key=lambda x: x["monthly_price_per_graph"])
 
     # Get repository subscription information from both sources
     all_repo_configs = UserRepository.get_all_repository_configs()
@@ -399,8 +362,10 @@ async def get_service_offerings(
     }
 
     return ServiceOfferingsResponse(
+      billing_enabled=env.BILLING_ENABLED,
       graph_subscriptions={
-        "description": "Entity-specific graph database subscriptions",
+        "description": "Per-graph infrastructure subscriptions - each graph has its own subscription",
+        "pricing_model": "per_graph",
         "tiers": graph_tiers,
         "storage": {
           "included_per_tier": graph_pricing.get("storage_pricing", {}).get(
@@ -411,32 +376,39 @@ async def get_service_offerings(
           ),
         },
         "notes": [
-          "Each company gets its own isolated graph database",
-          "Higher tiers provide better performance and more resources",
-          "Storage included in monthly subscription price",
-          "Additional storage billed per GB per month",
+          "Each graph database has its own subscription and monthly cost",
+          "Organizations can create multiple graphs with different infrastructure tiers",
+          "Credits are allocated per graph, not shared across the organization",
+          "Higher tiers provide dedicated infrastructure with better performance",
+          "Storage is included in each graph's subscription price",
+          "Additional storage is billed per GB per month per graph",
         ],
       },
       repository_subscriptions={
-        "description": "Shared data repository access subscriptions",
+        "description": "Organization-level shared repository access subscriptions",
+        "pricing_model": "per_organization",
         "repositories": repositories,
         "notes": [
-          "Repository subscriptions provide access to shared public data",
-          "Can be combined with any graph subscription tier",
-          "Repository queries do not consume credits",
+          "Repository subscriptions are purchased at the organization level",
+          "All organization members share access to subscribed repositories",
+          "Repository subscriptions are separate from graph subscriptions",
+          "Can be combined with any graph infrastructure tier",
+          "Repository queries do not consume AI credits",
           "Rate limits apply based on subscription plan",
         ],
       },
       operation_costs={
-        "description": "Credit costs for operations",
+        "description": "Credit costs for AI operations (per-graph credit allocation)",
         "ai_operations": base_costs,
         "token_pricing": token_pricing,
         "included_operations": no_credit_ops,
         "notes": [
+          "Credits are allocated per graph based on its infrastructure tier",
           "Only AI operations (agent calls, MCP AI tools, AI analysis) consume credits",
-          "All database operations are included (queries, imports, backups, etc.)",
+          "All database operations are included (queries, imports, backups, exports, etc.)",
           "Token-based pricing applies for actual AI API usage",
-          "1 credit = approximately $0.001 USD",
+          "Credits do not roll over between billing periods",
+          "1 credit ≈ $0.001 USD",
         ],
       },
       summary={

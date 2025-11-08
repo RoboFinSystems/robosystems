@@ -11,7 +11,8 @@ from robosystems.models.iam import (
   GraphCredits,
   GraphCreditTransaction,
 )
-from robosystems.models.iam.graph_credits import GraphTier, CreditTransactionType
+from robosystems.config.graph_tier import GraphTier
+from robosystems.models.iam.graph_credits import CreditTransactionType
 
 
 class TestCreditSystemIntegration:

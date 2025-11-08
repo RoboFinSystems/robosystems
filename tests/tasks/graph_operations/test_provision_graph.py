@@ -21,7 +21,7 @@ class TestProvisionGraphTask:
   def mock_subscription(self):
     sub = Mock(spec=BillingSubscription)
     sub.id = "sub_456"
-    sub.billing_customer_user_id = "user_123"
+    sub.org_id = "org_123"
     sub.resource_type = "graph"
     sub.plan_name = "standard"
     sub.status = "provisioning"
@@ -29,9 +29,9 @@ class TestProvisionGraphTask:
     return sub
 
   @patch("robosystems.tasks.graph_operations.provision_graph.get_db_session")
-  @patch("robosystems.tasks.graph_operations.provision_graph.GenericGraphServiceSync")
+  @patch("robosystems.tasks.graph_operations.create_graph.create_graph_task")
   def test_provision_graph_success(
-    self, mock_service_class, mock_get_db, mock_user, mock_subscription
+    self, mock_create_graph, mock_get_db, mock_user, mock_subscription
   ):
     """Test successful graph provisioning."""
     mock_session = Mock()
@@ -40,9 +40,7 @@ class TestProvisionGraphTask:
       mock_subscription
     )
 
-    mock_service = Mock()
-    mock_service_class.return_value = mock_service
-    mock_service.create_graph.return_value = {"graph_id": "kg_789"}
+    mock_create_graph.return_value = {"graph_id": "kg_789"}
 
     provision_graph_task(  # type: ignore[call-arg]
       user_id="user_123",
@@ -50,7 +48,7 @@ class TestProvisionGraphTask:
       graph_config={"tier": "standard"},
     )
 
-    mock_service.create_graph.assert_called_once()
+    mock_create_graph.assert_called_once()
     assert mock_subscription.resource_id == "kg_789"
     mock_subscription.activate.assert_called_once_with(mock_session)
 
@@ -67,9 +65,9 @@ class TestProvisionGraphTask:
       )
 
   @patch("robosystems.tasks.graph_operations.provision_graph.get_db_session")
-  @patch("robosystems.tasks.graph_operations.provision_graph.GenericGraphServiceSync")
+  @patch("robosystems.tasks.graph_operations.create_graph.create_graph_task")
   def test_provision_graph_failure_updates_subscription(
-    self, mock_service_class, mock_get_db, mock_user, mock_subscription
+    self, mock_create_graph, mock_get_db, mock_user, mock_subscription
   ):
     """Test that provisioning failure updates subscription."""
     mock_session = Mock()
@@ -78,9 +76,7 @@ class TestProvisionGraphTask:
       mock_subscription
     )
 
-    mock_service = Mock()
-    mock_service_class.return_value = mock_service
-    mock_service.create_graph.side_effect = Exception("Allocation failed")
+    mock_create_graph.side_effect = Exception("Allocation failed")
 
     with pytest.raises(Exception):
       provision_graph_task(  # type: ignore[call-arg]

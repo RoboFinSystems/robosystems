@@ -35,6 +35,7 @@ class TestCreateCheckoutSession:
     )
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -45,11 +46,19 @@ class TestCreateCheckoutSession:
     mock_create_sub,
     mock_get_plan,
     mock_get_customer,
+    mock_get_user_orgs,
     mock_user,
     mock_db,
     checkout_request,
   ):
     """Test successful checkout session creation."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.invoice_billing_enabled = False
     mock_customer.has_payment_method = False
@@ -83,11 +92,19 @@ class TestCreateCheckoutSession:
     assert mock_subscription.payment_provider == "stripe"
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   async def test_create_checkout_session_enterprise_customer_rejected(
-    self, mock_get_customer, mock_user, mock_db, checkout_request
+    self, mock_get_customer, mock_get_user_orgs, mock_user, mock_db, checkout_request
   ):
     """Test that enterprise customers cannot use checkout."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.invoice_billing_enabled = True
     mock_get_customer.return_value = mock_customer
@@ -99,11 +116,19 @@ class TestCreateCheckoutSession:
     assert "enterprise customers" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   async def test_create_checkout_session_payment_method_already_exists(
-    self, mock_get_customer, mock_user, mock_db, checkout_request
+    self, mock_get_customer, mock_get_user_orgs, mock_user, mock_db, checkout_request
   ):
     """Test that customers with payment method shouldn't use checkout."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.invoice_billing_enabled = False
     mock_customer.has_payment_method = True
@@ -116,12 +141,26 @@ class TestCreateCheckoutSession:
     assert "already on file" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   async def test_create_checkout_session_invalid_plan(
-    self, mock_get_plan, mock_get_customer, mock_user, mock_db, checkout_request
+    self,
+    mock_get_plan,
+    mock_get_customer,
+    mock_get_user_orgs,
+    mock_user,
+    mock_db,
+    checkout_request,
   ):
     """Test handling of invalid plan name."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.invoice_billing_enabled = False
     mock_customer.has_payment_method = False
@@ -136,6 +175,7 @@ class TestCreateCheckoutSession:
     assert "Invalid plan" in exc.value.detail
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -146,11 +186,19 @@ class TestCreateCheckoutSession:
     mock_create_sub,
     mock_get_plan,
     mock_get_customer,
+    mock_get_user_orgs,
     mock_user,
     mock_db,
     checkout_request,
   ):
     """Test that Stripe customer is created if not exists."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.invoice_billing_enabled = False
     mock_customer.has_payment_method = False
@@ -179,6 +227,7 @@ class TestCreateCheckoutSession:
     assert mock_customer.stripe_customer_id == "cus_new_123"
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -189,11 +238,19 @@ class TestCreateCheckoutSession:
     mock_create_sub,
     mock_get_plan,
     mock_get_customer,
+    mock_get_user_orgs,
     mock_user,
     mock_db,
     checkout_request,
   ):
     """Test handling of price creation errors."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.invoice_billing_enabled = False
     mock_customer.has_payment_method = False
@@ -218,6 +275,7 @@ class TestCreateCheckoutSession:
     assert "Payment configuration error" in exc.value.detail
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_repository_plan")
   @patch("robosystems.routers.billing.checkout.BillingSubscription.create_subscription")
@@ -228,10 +286,18 @@ class TestCreateCheckoutSession:
     mock_create_sub,
     mock_get_plan,
     mock_get_customer,
+    mock_get_user_orgs,
     mock_user,
     mock_db,
   ):
     """Test checkout session for repository subscriptions."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.org_id = "org_123"
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_user_orgs.return_value = [mock_org_user]
+
     repo_request = CreateCheckoutRequest(
       resource_type="repository",
       plan_name="starter",
@@ -286,7 +352,7 @@ class TestGetCheckoutStatus:
     """Test successful checkout status retrieval."""
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.id = "sub_456"
-    mock_subscription.billing_customer_user_id = "user_123"
+    mock_subscription.org_id = "org_123"
     mock_subscription.status = "provisioning"
     mock_subscription.resource_id = "kg_789"
     mock_subscription.subscription_metadata = {"operation_id": "op_123"}
@@ -314,16 +380,19 @@ class TestGetCheckoutStatus:
     assert "not found" in exc.value.detail.lower()
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch(
     "robosystems.routers.billing.checkout.BillingSubscription.get_by_provider_subscription_id"
   )
   async def test_get_checkout_status_unauthorized(
-    self, mock_get_sub, mock_user, mock_db
+    self, mock_get_sub, mock_get_org_user, mock_user, mock_db
   ):
     """Test checkout status authorization check."""
     mock_subscription = Mock(spec=BillingSubscription)
-    mock_subscription.billing_customer_user_id = "different_user"
+    mock_subscription.org_id = "different_org"
     mock_get_sub.return_value = mock_subscription
+
+    mock_get_org_user.return_value = None
 
     with pytest.raises(HTTPException) as exc:
       await get_checkout_status("cs_test", mock_user, mock_db, None)
@@ -339,7 +408,7 @@ class TestGetCheckoutStatus:
     """Test checkout status when subscription has error."""
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.id = "sub_456"
-    mock_subscription.billing_customer_user_id = "user_123"
+    mock_subscription.org_id = "org_123"
     mock_subscription.status = "failed"
     mock_subscription.resource_id = None
     mock_subscription.subscription_metadata = {
@@ -363,7 +432,7 @@ class TestGetCheckoutStatus:
     """Test checkout status for pending payment."""
     mock_subscription = Mock(spec=BillingSubscription)
     mock_subscription.id = "sub_456"
-    mock_subscription.billing_customer_user_id = "user_123"
+    mock_subscription.org_id = "org_123"
     mock_subscription.status = "pending_payment"
     mock_subscription.resource_id = None
     mock_subscription.subscription_metadata = {}

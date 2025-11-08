@@ -1,14 +1,14 @@
 """User authentication model."""
 
-import secrets
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
-from sqlalchemy import Column, String, DateTime, Boolean, func
+from sqlalchemy import Column, String, DateTime, Boolean
 from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Model
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class User(Model):
@@ -16,9 +16,7 @@ class User(Model):
 
   __tablename__ = "users"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"user_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("user"))
   email = Column(String, unique=True, nullable=False, index=True)
   name = Column(String, nullable=False)
   password_hash = Column(String, nullable=False)
@@ -38,11 +36,8 @@ class User(Model):
   user_api_keys = relationship(
     "UserAPIKey", back_populates="user", cascade="all, delete-orphan"
   )
-  user_graphs = relationship(
-    "UserGraph", back_populates="user", cascade="all, delete-orphan"
-  )
-  limits = relationship(
-    "UserLimits", back_populates="user", cascade="all, delete-orphan", uselist=False
+  graph_users = relationship(
+    "GraphUser", back_populates="user", cascade="all, delete-orphan"
   )
   user_repositories = relationship(
     "UserRepository",
@@ -62,15 +57,19 @@ class User(Model):
 
   @classmethod
   def get_by_email(cls, email: str, session: Session) -> Optional["User"]:
-    """Get a user by email (case-insensitive)."""
-    return session.query(cls).filter(func.lower(cls.email) == email.lower()).first()
+    """Get a user by email (case-insensitive).
+
+    Emails are stored in lowercase, so we normalize the input email
+    and can use a direct indexed lookup.
+    """
+    return session.query(cls).filter(cls.email == email.lower()).first()
 
   @classmethod
   def create(
     cls, email: str, name: str, password_hash: str, session: Session
   ) -> "User":
     """Create a new user."""
-    user = cls(email=email, name=name, password_hash=password_hash)
+    user = cls(email=email.lower(), name=name, password_hash=password_hash)
     session.add(user)
     try:
       session.commit()
@@ -95,7 +94,10 @@ class User(Model):
     """
     for key, value in kwargs.items():
       if hasattr(self, key):
-        setattr(self, key, value)
+        if key == "email" and isinstance(value, str):
+          setattr(self, key, value.lower())
+        else:
+          setattr(self, key, value)
     self.updated_at = datetime.now(timezone.utc)
 
     if auto_commit:

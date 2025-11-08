@@ -170,54 +170,6 @@ class TestMCPHandler:
       assert "timed out" in result["text"] or "Error" in result["text"]
 
   @pytest.mark.asyncio
-  async def test_validate_tool_call_missing_required(self, mcp_handler):
-    """Test validation fails for missing required arguments."""
-    if not hasattr(mcp_handler, "validate_tool_call"):
-      pytest.skip("validate_tool_call method not found")
-
-    tool_call = MCPToolCall(
-      name="read-graph-cypher",
-      arguments={},  # Missing required 'query' argument
-    )
-
-    with pytest.raises(ValueError, match="Missing required argument"):
-      mcp_handler.validate_tool_call(tool_call)
-
-  @pytest.mark.asyncio
-  async def test_validate_tool_call_unknown_tool(self, mcp_handler):
-    """Test validation fails for unknown tools."""
-    if not hasattr(mcp_handler, "validate_tool_call"):
-      pytest.skip("validate_tool_call method not found")
-
-    tool_call = MCPToolCall(name="unknown-tool", arguments={})
-
-    with pytest.raises(ValueError, match="Unknown tool"):
-      mcp_handler.validate_tool_call(tool_call)
-
-  @pytest.mark.asyncio
-  async def test_validate_tool_call_write_query_blocked(self, mcp_handler):
-    """Test that write queries are blocked."""
-    if not hasattr(mcp_handler, "validate_tool_call"):
-      pytest.skip("validate_tool_call method not found")
-
-    write_queries = [
-      "CREATE (n:Node)",
-      "MATCH (n) SET n.name = 'test'",
-      "MATCH (n) DELETE n",
-      "MERGE (n:Entity {id: 1})",
-    ]
-
-    for query in write_queries:
-      tool_call = MCPToolCall(name="read-graph-cypher", arguments={"query": query})
-
-      # Some implementations may not block write queries in validate_tool_call
-      # but rather in call_tool
-      try:
-        mcp_handler.validate_tool_call(tool_call)
-      except ValueError as e:
-        assert "read-only" in str(e).lower() or "write" in str(e).lower()
-
-  @pytest.mark.asyncio
   async def test_get_tools(self, mcp_handler):
     """Test getting list of available tools."""
     # Mock the get_tool_definitions_as_dict method
@@ -278,36 +230,6 @@ class TestMCPHandler:
       assert len(chunks) == 3
       assert chunks[0][0]["id"] == 1
       assert chunks[2][0]["id"] == 3
-    else:
-      pytest.skip("call_tool_streaming method not found")
-
-
-class TestMCPToolValidation:
-  """Test MCP tool validation."""
-
-  @pytest.mark.unit
-  def test_validate_cypher_tool_arguments(self, mcp_handler):
-    """Test validation of Cypher tool arguments."""
-    if not hasattr(mcp_handler, "validate_tool_call"):
-      pytest.skip("validate_tool_call method not found")
-
-    # Valid arguments
-    tool_call = MCPToolCall(
-      name="read-graph-cypher", arguments={"query": "MATCH (n) RETURN n"}
-    )
-    # Should not raise
-    assert mcp_handler.validate_tool_call(tool_call) is True
-
-  @pytest.mark.unit
-  def test_validate_schema_tool_arguments(self, mcp_handler):
-    """Test validation of schema tool arguments."""
-    if not hasattr(mcp_handler, "validate_tool_call"):
-      pytest.skip("validate_tool_call method not found")
-
-    # Schema tool needs no arguments
-    tool_call = MCPToolCall(name="get-graph-schema", arguments={})
-    # Should not raise
-    assert mcp_handler.validate_tool_call(tool_call) is True
 
 
 class TestMCPAccessValidation:

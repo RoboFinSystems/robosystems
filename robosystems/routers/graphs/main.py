@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from robosystems.logger import logger
-from robosystems.models.iam import User, UserLimits, UserGraph
+from robosystems.models.iam import User, OrgUser, OrgLimits, GraphUser
 from robosystems.models.api.graphs.core import CreateGraphRequest
 from robosystems.models.api.user import (
   GraphInfo,
@@ -198,7 +198,7 @@ async def get_graphs(
 
   try:
     # Get all user-graph relationships (user graphs)
-    user_graphs = UserGraph.get_by_user_id(current_user.id, session)
+    user_graphs = GraphUser.get_by_user_id(current_user.id, session)
 
     # Get all user-repository relationships (shared repositories)
     from robosystems.models.iam.user_repository import UserRepository
@@ -377,7 +377,7 @@ async def create_graph(
   """
   try:
     from robosystems.database import get_db_session
-    from robosystems.models.iam.graph_credits import GraphTier
+    from robosystems.config.graph_tier import GraphTier
     from robosystems.middleware.billing.enforcement import (
       check_can_provision_graph,
     )
@@ -386,17 +386,20 @@ async def create_graph(
     db = next(get_db_session())
 
     try:
-      # Check user's subscription tier and limits
-      user_limits = UserLimits.get_by_user_id(current_user.id, db)
-      if not user_limits:
+      # Check org's graph limits
+      user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+      if not user_orgs:
         _raise_http_exception(
-          status_code=status.HTTP_403_FORBIDDEN,
-          error_code="user_limits_not_found",
-          message="User limits not found. Please contact support.",
+          status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+          error_code="org_not_found",
+          message="User organization not found. Please contact support.",
         )
 
-      # Check if user can create more graphs
-      can_create, reason = user_limits.can_create_user_graph(db)
+      org_id = user_orgs[0].org_id
+      org_limits = OrgLimits.get_or_create_for_org(org_id, db)
+
+      # Check if org can create more graphs
+      can_create, reason = org_limits.can_create_graph(db)
       if not can_create:
         _raise_http_exception(
           status_code=status.HTTP_403_FORBIDDEN,
@@ -801,11 +804,11 @@ async def get_available_graph_tiers(
       include_disabled: Whether to include disabled/optional tiers (default: False)
   """
   try:
-    from robosystems.config.tier_config import TierConfig
+    from robosystems.config.graph_tier import GraphTierConfig
     from robosystems.config import BillingConfig
 
     # Get tier configurations from graph.yml
-    tiers = TierConfig.get_available_tiers(include_disabled=include_disabled)
+    tiers = GraphTierConfig.get_available_tiers(include_disabled=include_disabled)
 
     # Filter out internal-only and not-yet-available tiers
     excluded_tiers = ["kuzu-shared", "neo4j-community-large", "neo4j-enterprise-xlarge"]
@@ -933,7 +936,7 @@ async def select_graph(
   user_id = getattr(current_user, "id", None) if current_user else None
 
   try:
-    user_graphs = UserGraph.get_by_user_id(current_user.id, session)
+    user_graphs = GraphUser.get_by_user_id(current_user.id, session)
     user_graph_ids = [ug.graph_id for ug in user_graphs]
 
     if graph_id not in user_graph_ids:
@@ -957,7 +960,7 @@ async def select_graph(
       )
 
     # Set this graph as selected
-    success = UserGraph.set_selected_graph(current_user.id, graph_id, session)
+    success = GraphUser.set_selected_graph(current_user.id, graph_id, session)
 
     if not success:
       # Record business event for graph not found

@@ -108,10 +108,11 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_payment_failed")
   def test_webhook_payment_failed_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling invoice.payment_failed event."""
     mock_provider = Mock()
@@ -123,6 +124,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -133,10 +135,11 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_subscription_updated")
   def test_webhook_subscription_updated_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling customer.subscription.updated event."""
     mock_provider = Mock()
@@ -148,6 +151,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -158,10 +162,11 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_subscription_deleted")
   def test_webhook_subscription_deleted_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling customer.subscription.deleted event."""
     mock_provider = Mock()
@@ -173,6 +178,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -183,9 +189,10 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   def test_webhook_unhandled_event_type(
-    self, mock_get_provider, client, mock_db_session
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling unknown event type."""
     mock_provider = Mock()
@@ -196,6 +203,7 @@ class TestStripeWebhookEndpoint:
     }
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -238,18 +246,23 @@ class TestCheckoutCompletedHandler:
   ):
     """Test that checkout completion triggers graph provisioning."""
     from robosystems.routers.admin.webhooks import handle_checkout_completed
+    from robosystems.models.iam import OrgUser
 
     mock_customer = Mock()
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.has_payment_method = False
     mock_customer.stripe_customer_id = None
 
     mock_subscription = Mock()
     mock_subscription.id = "bsub_123"
-    mock_subscription.billing_customer_user_id = "user_123"
+    mock_subscription.org_id = "org_123"
     mock_subscription.resource_type = "graph"
     mock_subscription.subscription_metadata = {"resource_config": {}}
     mock_subscription.status = "pending_payment"
+    mock_subscription.plan_name = "kuzu-standard"
+
+    mock_org_user = Mock()
+    mock_org_user.user_id = "user_123"
 
     def query_side_effect(model):
       if model == BillingSubscription:
@@ -259,6 +272,10 @@ class TestCheckoutCompletedHandler:
       elif model == BillingCustomer:
         result = Mock()
         result.filter.return_value.first.return_value = mock_customer
+        return result
+      elif model == OrgUser:
+        result = Mock()
+        result.filter.return_value.first.return_value = mock_org_user
         return result
       return Mock()
 
@@ -282,6 +299,7 @@ class TestCheckoutCompletedHandler:
   ):
     """Test that checkout completion triggers repository provisioning."""
     from robosystems.routers.admin.webhooks import handle_checkout_completed
+    from robosystems.models.iam import OrgUser
 
     session_data = {
       "id": "cs_test123",
@@ -297,18 +315,21 @@ class TestCheckoutCompletedHandler:
     }
 
     mock_customer = Mock()
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.has_payment_method = False
     mock_customer.stripe_customer_id = None
 
     mock_subscription = Mock()
     mock_subscription.id = "bsub_456"
-    mock_subscription.billing_customer_user_id = "user_123"
+    mock_subscription.org_id = "org_123"
     mock_subscription.resource_type = "repository"
     mock_subscription.subscription_metadata = {
       "resource_config": {"repository_name": "sec"}
     }
     mock_subscription.status = "pending_payment"
+
+    mock_org_user = Mock()
+    mock_org_user.user_id = "user_123"
 
     def query_side_effect(model):
       if model == BillingSubscription:
@@ -318,6 +339,10 @@ class TestCheckoutCompletedHandler:
       elif model == BillingCustomer:
         result = Mock()
         result.filter.return_value.first.return_value = mock_customer
+        return result
+      elif model == OrgUser:
+        result = Mock()
+        result.filter.return_value.first.return_value = mock_org_user
         return result
       return Mock()
 
@@ -366,6 +391,7 @@ class TestPaymentSucceededHandler:
   ):
     """Test that payment success activates subscription."""
     from robosystems.routers.admin.webhooks import handle_payment_succeeded
+    from robosystems.models.iam import OrgUser
 
     invoice_data["customer"] = "cus_test123"
 
@@ -374,11 +400,15 @@ class TestPaymentSucceededHandler:
 
     mock_subscription = Mock()
     mock_subscription.id = "bsub_123"
-    mock_subscription.billing_customer_user_id = "user_123"
+    mock_subscription.org_id = "org_123"
     mock_subscription.status = "pending_payment"
     mock_subscription.resource_type = "graph"
     mock_subscription.subscription_metadata = {"resource_config": {}}
     mock_subscription.stripe_subscription_id = "sub_test456"
+    mock_subscription.plan_name = "kuzu-standard"
+
+    mock_org_user = Mock()
+    mock_org_user.user_id = "user_123"
 
     def query_side_effect(model):
       if model == BillingSubscription:
@@ -388,6 +418,10 @@ class TestPaymentSucceededHandler:
       elif model == BillingCustomer:
         result = Mock()
         result.filter.return_value.first.return_value = mock_customer
+        return result
+      elif model == OrgUser:
+        result = Mock()
+        result.filter.return_value.first.return_value = mock_org_user
         return result
       return Mock()
 

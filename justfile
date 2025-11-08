@@ -20,6 +20,7 @@ _local_env := ".env.local"
 default:
     @just --list
 
+
 ## Docker ##
 
 # Start service
@@ -63,6 +64,7 @@ logs-follow container="worker":
 logs-grep container="worker" pattern="ERROR" lines="100":
     docker logs {{container}} --tail {{lines}} | grep -E "{{pattern}}"
 
+
 ## Development Environment ##
 
 # Initialize complete development environment (run after bootstrap)
@@ -87,41 +89,20 @@ update:
     uv lock --upgrade
     uv sync --all-extras --dev
 
-## Demo Scripts ##
-
-# Setup SEC repository demo - loads data, grants access, updates config
-demo-sec ticker="NVDA" year="2025" skip_queries="false":
-    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
-
-# Run SEC demo preset queries
-demo-sec-query all="false":
-    uv run examples/sec_demo/query_examples.py {{ if all == "true" { "--all" } else { "" } }}
-
-# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-accounting flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
-
-# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
 
 ## Testing ##
 
 # Run all tests (excludes slow tests)
 test-all:
     @just test
-    @just lint-fix
+    @just lint fix
     @just lint
     @just format
     @just typecheck
 
 # Run tests (exclude integration and slow tests)
-test:
-    uv run pytest --ignore=tests/integration -m "not slow"
-
-# Run tests (exclude integration and slow tests)
-test-module module:
-    uv run pytest tests/{{module}}
+test module="":
+    uv run pytest {{ if module != "" { "tests/" + module } else { "" } }} --ignore=tests/integration -m "not slow"
 
 # Run ALL tests including slow ones
 test-full:
@@ -136,26 +117,22 @@ test-cov:
     uv run pytest --cov=robosystems tests/ --ignore=tests/integration
 
 # Run code quality checks
-test-code-quality:
+test-code:
     @just lint
     @just format
     @just typecheck
 
 # Run linting
-lint:
-    uv run ruff check .
-
-# Fix linting errors
-lint-fix:
-    uv run ruff check . --fix
+lint fix="":
+    uv run ruff check . {{ if fix != "" { "--fix" } else { "" } }}
 
 # Format code
 format:
     uv run ruff format .
 
 # Run type checking
-typecheck:
-    uv run basedpyright
+typecheck module="":
+    uv run basedpyright {{ if module != "" { "robosystems/" + module } else { "" } }}
 
 # CloudFormantion linting
 cf-lint template:
@@ -163,6 +140,7 @@ cf-lint template:
 
 cf-validate template:
     uv run aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml
+
 
 ## CI/CD ##
 
@@ -186,36 +164,36 @@ deploy environment="prod" ref="":
 bastion-tunnel environment service key:
     @bin/tools/tunnels.sh {{environment}} {{service}} --key ~/.ssh/{{key}}
 
-# AWS Secrets Manager - Initial Setup
-setup-aws:
-    @bin/setup/aws.sh
 
-# GitHub Repository - Initial Setup
-setup-gha:
-    @bin/setup/gha.sh
+## Demo Scripts ##
 
-# GitHub Actions Runner - Bootstrap infrastructure
-bootstrap branch="main":
-    gh workflow run gha-runner.yml --ref {{branch}}
+# Setup SEC repository demo - loads data, grants access, updates config
+demo-sec ticker="NVDA" year="2025" skip_queries="false":
+    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
 
-# Generate secure random key for secrets
-generate-key:
-    @echo "Generated secure 32-byte base64 key:"
-    @openssl rand -base64 32
+# Run SEC demo preset queries
+demo-sec-query all="false":
+    uv run examples/sec_demo/query_examples.py {{ if all == "true" { "--all" } else { "" } }}
 
-# Generate multiple secure keys for all secrets
-generate-keys:
-    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
-    @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
-    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-accounting flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
 
-## Apps ##
+# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
 
-# Install apps
-install-apps:
-    @test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
-    @test -d '../roboinvestor-app' || git clone https://github.com/RoboFinSystem/roboinvestor-app.git '../roboinvestor-app'
-    @test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
+
+## Admin CLI ##
+# Admin CLI for remote administration via admin API
+
+# Run admin CLI with any subcommand - passes all arguments through
+# Examples: just admin dev stats
+#           just admin dev customers list
+#           just admin dev subscriptions list --status active --tier kuzu-standard
+admin environment="dev" *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.admin.cli -e {{environment}} {{args}}
+
 
 ## Development Server ##
 
@@ -235,9 +213,9 @@ worker num_workers="1" queue="robosystems" env=_local_env:
 beat env=_local_env:
     UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
 
-# Start Flower (Celery monitoring web UI)
-flower env=_local_env:
-    UV_ENV_FILE={{env}} uv run celery -A robosystems flower --port=5555
+stripe-webhook env=_local_env:
+    UV_ENV_FILE={{env}} uv run stripe listen --forward-to localhost:8000/admin/v1/webhooks/stripe
+
 
 ## Database Operations ##
 
@@ -266,7 +244,7 @@ migrate-remote environment key:
     @just bastion-tunnel {{environment}} migrate {{key}}
 
 # Reset database (drop and recreate all auth tables)
-db-reset env=_local_env:
+migrate-reset env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic downgrade base
     UV_ENV_FILE={{env}} uv run alembic upgrade head
 
@@ -286,6 +264,7 @@ db-create-key email key_name env=_local_env:
 # Create test user (comma-separated modes: json,file,sec,industry,economic - e.g., 'json,sec,industry' for JSON output with multiple repository access)
 db-create-test-user mode="" base_url="http://localhost:8000" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode != "" { "--modes " + mode } else { "" } }}
+
 
 ## Graph API ##
 
@@ -329,7 +308,9 @@ kuzu-query-i graph_id env=_local_env:
 duckdb-query-i graph_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb
 
+
 ## SEC Local Pipeline - Testing and Development ##
+
 # SEC Local supports two ingestion approaches:
 #   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
 #   - "copy": Consolidation → COPY-based ingestion (emulates production pipeline, uses consolidated files)
@@ -348,6 +329,7 @@ sec-health verbose="" env=_local_env:
 # SEC Local - Reset database with proper schema
 sec-reset backend="kuzu" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
+
 
 ## SEC Production Pipeline - Large-scale orchestrated processing ##
 # Uses proven consolidation + COPY approach for large-scale data processing.
@@ -380,70 +362,8 @@ sec-status env=_local_env:
 sec-reset-remote confirm="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
-## Repository Access Management ##
-# Manage user access to shared repositories (SEC, industry data, etc.)
-
-# Grant repository access
-repo-grant-access user_id repository access_level="read" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}}
-
-# Grant repository access with expiration
-repo-grant-access-expire user_id repository access_level expires_days env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}} --expires-days {{expires_days}}
-
-# Revoke repository access
-repo-revoke-access user_id repository env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager revoke {{user_id}} {{repository}}
-
-# List all repository access
-repo-list-access env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list
-
-# List users with access to a specific repository
-repo-list-users repository env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list --repository {{repository}}
-
-# List all available repositories
-repo-list-repositories env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager repositories
-
-# Check user access to all repositories
-repo-check-access user_id env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}}
-
-# Check user access to a specific repository
-repo-check-repo user_id repository env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
-
-## Admin CLI ##
-# Admin CLI for remote administration via admin API
-
-# Show subscription and customer statistics
-admin-stats environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} stats
-
-# List all subscriptions
-admin-subscriptions-list environment="dev" status="" tier="" email="" include_canceled="" limit="100" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions list {{ if status != "" { "--status " + status } else { "" } }} {{ if tier != "" { "--tier " + tier } else { "" } }} {{ if email != "" { "--email " + email } else { "" } }} {{ if include_canceled == "true" { "--include-canceled" } else { "" } }} --limit {{limit}}
-
-# Get subscription details
-admin-subscription-get subscription_id environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions get {{subscription_id}}
-
-# List all customers
-admin-customers-list environment="dev" limit="100" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} customers list --limit {{limit}}
-
-# List invoices
-admin-invoices-list environment="dev" status="" user_id="" limit="100" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} invoices list {{ if status != "" { "--status " + status } else { "" } }} {{ if user_id != "" { "--user-id " + user_id } else { "" } }} --limit {{limit}}
-
-# Get invoice details
-admin-invoice-get invoice_id environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} invoices get {{invoice_id}}
 
 ## Credit Admin Tools ##
-# Monthly credit allocation is automated via Celery Beat - these commands are for manual operations only
 
 # Credit admin - add bonus credits to a user graph
 credit-bonus-graph graph_id amount description env=_local_env:
@@ -465,6 +385,7 @@ credit-force-allocate-user user_id confirm="" env=_local_env:
 credit-force-allocate-all confirm="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-all {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
+
 ## Valkey/Redis ##
 
 # Clear Valkey/Redis queues
@@ -478,6 +399,39 @@ valkey-clear-queue-all queue env=_local_env:
 # List Valkey/Redis queue contents without clearing
 valkey-list-queue queue env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
+
+
+## Setup ##
+
+# AWS Secrets Manager setup
+setup-aws:
+    @bin/setup/aws.sh
+
+# GitHub Repository setup
+setup-gha:
+    @bin/setup/gha.sh
+
+# GitHub Actions Runner bootstrap infrastructure
+bootstrap branch="main":
+    gh workflow run gha-runner.yml --ref {{branch}}
+
+# Generate secure random key for secrets
+generate-key:
+    @echo "Generated secure 32-byte base64 key:"
+    @openssl rand -base64 32
+
+# Generate multiple secure keys for all secrets
+generate-keys:
+    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
+    @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
+    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+
+# Install apps
+install-apps:
+    @test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
+    @test -d '../roboinvestor-app' || git clone https://github.com/RoboFinSystem/roboinvestor-app.git '../roboinvestor-app'
+    @test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
+
 
 ## Misc ##
 

@@ -103,9 +103,9 @@ class TestEntityGraphService:
       allocation_id="alloc-123",
     )
     mock_user_limits = mocker.MagicMock()
-    mock_user_limits.can_create_user_graph.return_value = (True, "Can create graph")
+    mock_user_limits.can_create_graph.return_value = (True, "Can create graph")
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.UserLimits.get_or_create_for_user",
+      "robosystems.operations.graph.entity_graph_service.OrgLimits.get_or_create_for_org",
       return_value=mock_user_limits,
     )
     mocker.patch(
@@ -165,9 +165,9 @@ class TestEntityGraphService:
       return_value=mock_credit_service,
     )
 
-    # Mock Graph and UserGraph for PostgreSQL metadata
+    # Mock Graph and GraphUser for PostgreSQL metadata
     mocker.patch("robosystems.models.iam.graph.Graph.create")
-    mocker.patch("robosystems.models.iam.user_graph.UserGraph.create")
+    mocker.patch("robosystems.models.iam.graph_user.GraphUser.create")
 
     # Mock controlled ingestion responses
     mock_kuzu_client.create_table.return_value = {"success": True}
@@ -216,9 +216,9 @@ class TestEntityGraphService:
       "No available instances"
     )
     mock_user_limits = mocker.MagicMock()
-    mock_user_limits.can_create_user_graph.return_value = (True, "Can create graph")
+    mock_user_limits.can_create_graph.return_value = (True, "Can create graph")
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.UserLimits.get_or_create_for_user",
+      "robosystems.operations.graph.entity_graph_service.OrgLimits.get_or_create_for_org",
       return_value=mock_user_limits,
     )
     mocker.patch(
@@ -321,17 +321,22 @@ class TestEntityGraphService:
 
   @pytest.mark.asyncio
   def test_generate_graph_id_consistency(self):
-    """Test that graph ID generation is consistent for same inputs."""
+    """Test that graph ID generation includes entity-specific component and is time-ordered."""
     service = EntityGraphService()
 
-    # Same entity name should generate same ID structure
+    # Same entity name produces same structure
     id1 = service._generate_graph_id("Test Entity")
     id2 = service._generate_graph_id("Test Entity")
 
-    # IDs should have same prefix and length but different UUIDs
+    # IDs should have same prefix and length
     assert id1[:2] == id2[:2] == "kg"
-    assert len(id1) == len(id2)
-    assert id1 != id2  # UUIDs should be different
+    assert len(id1) == len(id2) == 20  # 'kg' + 14 ULID chars + 4 entity hash chars
+
+    # Different entity names should have different hash suffixes
+    id3 = service._generate_graph_id("Different Entity")
+    assert id3[:2] == "kg"
+    assert len(id3) == 20
+    assert id1[-4:] != id3[-4:]  # Entity hash portion should differ
 
   @pytest.mark.asyncio
   async def test_cleanup_on_failure(self, mocker):
@@ -357,9 +362,9 @@ class TestEntityGraphService:
     mock_kuzu_client.create_database.return_value = {"success": True}
 
     mock_user_limits = mocker.MagicMock()
-    mock_user_limits.can_create_user_graph.return_value = (True, "Can create graph")
+    mock_user_limits.can_create_graph.return_value = (True, "Can create graph")
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.UserLimits.get_or_create_for_user",
+      "robosystems.operations.graph.entity_graph_service.OrgLimits.get_or_create_for_org",
       return_value=mock_user_limits,
     )
     mocker.patch(

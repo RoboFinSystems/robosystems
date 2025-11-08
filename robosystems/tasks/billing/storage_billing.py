@@ -30,8 +30,8 @@ from sqlalchemy.orm import Session
 
 from ...celery import celery_app
 from ...database import session as SessionLocal
-from ...models.iam import GraphUsageTracking
-from ...models.iam.graph_usage_tracking import UsageEventType
+from ...models.iam import GraphUsage
+from ...models.iam.graph_usage import UsageEventType
 from ...operations.graph.credit_service import CreditService
 
 logger = logging.getLogger(__name__)
@@ -182,21 +182,21 @@ def get_graphs_with_storage_usage(
   # Query for graphs with storage usage on the target date
   results = (
     session.query(
-      GraphUsageTracking.graph_id,
-      GraphUsageTracking.user_id,
-      GraphUsageTracking.graph_tier,
-      func.count(GraphUsageTracking.id).label("measurement_count"),
+      GraphUsage.graph_id,
+      GraphUsage.user_id,
+      GraphUsage.graph_tier,
+      func.count(GraphUsage.id).label("measurement_count"),
     )
     .filter(
-      GraphUsageTracking.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
-      GraphUsageTracking.billing_year == year,
-      GraphUsageTracking.billing_month == month,
-      GraphUsageTracking.billing_day == day,
+      GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
+      GraphUsage.billing_year == year,
+      GraphUsage.billing_month == month,
+      GraphUsage.billing_day == day,
     )
     .group_by(
-      GraphUsageTracking.graph_id,
-      GraphUsageTracking.user_id,
-      GraphUsageTracking.graph_tier,
+      GraphUsage.graph_id,
+      GraphUsage.user_id,
+      GraphUsage.graph_tier,
     )
     .all()
   )
@@ -220,13 +220,13 @@ def calculate_daily_average_storage(
 
   # Get all storage measurements for the day
   result = (
-    session.query(func.avg(GraphUsageTracking.storage_gb))
+    session.query(func.avg(GraphUsage.storage_gb))
     .filter(
-      GraphUsageTracking.graph_id == graph_id,
-      GraphUsageTracking.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
-      GraphUsageTracking.billing_year == year,
-      GraphUsageTracking.billing_month == month,
-      GraphUsageTracking.billing_day == day,
+      GraphUsage.graph_id == graph_id,
+      GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
+      GraphUsage.billing_year == year,
+      GraphUsage.billing_month == month,
+      GraphUsage.billing_day == day,
     )
     .scalar()
   )
@@ -239,9 +239,9 @@ def cleanup_old_storage_records(session: Session, days_to_keep: int = 90) -> Dic
   cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
 
   # Count records to be deleted
-  count_query = session.query(GraphUsageTracking).filter(
-    GraphUsageTracking.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
-    GraphUsageTracking.recorded_at < cutoff_date,
+  count_query = session.query(GraphUsage).filter(
+    GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
+    GraphUsage.recorded_at < cutoff_date,
   )
 
   total_count = count_query.count()
@@ -287,7 +287,7 @@ def monthly_storage_summary(
   session = get_celery_db_session()
   try:
     # Get monthly storage summary for all users
-    summaries = GraphUsageTracking.get_monthly_storage_summary(
+    summaries = GraphUsage.get_monthly_storage_summary(
       user_id=None,  # Get all users
       year=year,
       month=month,

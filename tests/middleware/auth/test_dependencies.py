@@ -717,8 +717,8 @@ class TestGetCurrentUserWithGraph:
     # Set authorization header on request
     self.mock_request.headers = {"authorization": f"Bearer {auth_token}"}
 
-    # Mock UserGraph access check
-    with patch("robosystems.models.iam.UserGraph") as mock_user_graph:
+    # Mock GraphUser access check
+    with patch("robosystems.models.iam.GraphUser") as mock_user_graph:
       mock_user_graph.user_has_access.return_value = True
 
       result = await get_current_user_with_graph(

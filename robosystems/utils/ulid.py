@@ -75,22 +75,21 @@ def get_timestamp_from_ulid(ulid_str: str) -> Optional[float]:
   return None
 
 
-# Default generator functions for SQLAlchemy column defaults
-def default_ulid() -> str:
-  """Default function for SQLAlchemy columns."""
-  return generate_ulid()
+def generate_ulid_hex(num_chars: int = 16) -> str:
+  """
+  Generate a ULID and convert it to hexadecimal format.
 
+  This is specifically useful for graph IDs where we want time-ordered
+  hex strings that prevent B-tree fragmentation.
 
-def default_transaction_ulid() -> str:
-  """Default function for transaction tables."""
-  return generate_prefixed_ulid("txn")
+  Args:
+      num_chars: Number of hex characters to return (default: 16)
 
-
-def default_usage_ulid() -> str:
-  """Default function for usage tracking tables."""
-  return generate_prefixed_ulid("usg")
-
-
-def default_credit_ulid() -> str:
-  """Default function for credit records."""
-  return generate_prefixed_ulid("crd")
+  Returns:
+      Lowercase hex string of specified length
+      Example: "018c5f9e8a2f4d1b"
+  """
+  ulid = ULID()
+  ulid_int = int.from_bytes(ulid.bytes, byteorder="big")
+  hex_str = hex(ulid_int)[2:]  # Remove '0x' prefix
+  return hex_str[:num_chars]

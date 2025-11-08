@@ -25,28 +25,42 @@ class TestListInvoices:
     return Mock()
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   async def test_list_invoices_no_stripe_customer(
-    self, mock_get_customer, mock_user, mock_db
+    self, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test listing invoices when no Stripe customer exists."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = None
     mock_get_customer.return_value = mock_customer
 
-    result = await list_invoices(10, mock_user, mock_db, None)
+    result = await list_invoices("org_123", 10, mock_user, mock_db, None)
 
     assert result.invoices == []
     assert result.total_count == 0
     assert result.has_more is False
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_list_invoices_success(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test successful invoice listing."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
@@ -97,7 +111,7 @@ class TestListInvoices:
     }
     mock_get_provider.return_value = mock_provider
 
-    result = await list_invoices(10, mock_user, mock_db, None)
+    result = await list_invoices("org_123", 10, mock_user, mock_db, None)
 
     assert len(result.invoices) == 2
     assert result.total_count == 2
@@ -118,12 +132,19 @@ class TestListInvoices:
     mock_provider.list_invoices.assert_called_once_with("cus_123", limit=10)
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_list_invoices_with_limit(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test invoice listing respects limit parameter."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
@@ -132,17 +153,24 @@ class TestListInvoices:
     mock_provider.list_invoices.return_value = {"invoices": [], "has_more": False}
     mock_get_provider.return_value = mock_provider
 
-    await list_invoices(25, mock_user, mock_db, None)
+    await list_invoices("org_123", 25, mock_user, mock_db, None)
 
     mock_provider.list_invoices.assert_called_once_with("cus_123", limit=25)
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_list_invoices_error_handling(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in invoice listing."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
@@ -152,7 +180,7 @@ class TestListInvoices:
     mock_get_provider.return_value = mock_provider
 
     with pytest.raises(HTTPException) as exc:
-      await list_invoices(10, mock_user, mock_db, None)
+      await list_invoices("org_123", 10, mock_user, mock_db, None)
 
     assert exc.value.status_code == 500
     assert "Failed to retrieve invoices" in exc.value.detail
@@ -172,26 +200,40 @@ class TestGetUpcomingInvoice:
     return Mock()
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   async def test_get_upcoming_invoice_no_stripe_customer(
-    self, mock_get_customer, mock_user, mock_db
+    self, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting upcoming invoice when no Stripe customer exists."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = None
     mock_get_customer.return_value = mock_customer
 
-    result = await get_upcoming_invoice(mock_user, mock_db, None)
+    result = await get_upcoming_invoice("org_123", mock_user, mock_db, None)
 
     assert result is None
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_none(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting upcoming invoice when none exists."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
@@ -200,17 +242,24 @@ class TestGetUpcomingInvoice:
     mock_provider.get_upcoming_invoice.return_value = None
     mock_get_provider.return_value = mock_provider
 
-    result = await get_upcoming_invoice(mock_user, mock_db, None)
+    result = await get_upcoming_invoice("org_123", mock_user, mock_db, None)
 
     assert result is None
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_success(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test successful upcoming invoice retrieval."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
@@ -235,7 +284,7 @@ class TestGetUpcomingInvoice:
     }
     mock_get_provider.return_value = mock_provider
 
-    result = await get_upcoming_invoice(mock_user, mock_db, None)
+    result = await get_upcoming_invoice("org_123", mock_user, mock_db, None)
 
     assert result is not None
     assert result.amount_due == 2999
@@ -246,12 +295,19 @@ class TestGetUpcomingInvoice:
     assert result.subscription_id == "sub_123"
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_with_multiple_line_items(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test upcoming invoice with multiple line items."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
@@ -283,7 +339,7 @@ class TestGetUpcomingInvoice:
     }
     mock_get_provider.return_value = mock_provider
 
-    result = await get_upcoming_invoice(mock_user, mock_db, None)
+    result = await get_upcoming_invoice("org_123", mock_user, mock_db, None)
 
     assert result is not None
     assert result.amount_due == 7998
@@ -292,12 +348,19 @@ class TestGetUpcomingInvoice:
     assert result.line_items[1].quantity == 100
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.invoices.get_payment_provider")
   async def test_get_upcoming_invoice_error_handling(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test error handling in upcoming invoice retrieval."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
@@ -307,7 +370,7 @@ class TestGetUpcomingInvoice:
     mock_get_provider.return_value = mock_provider
 
     with pytest.raises(HTTPException) as exc:
-      await get_upcoming_invoice(mock_user, mock_db, None)
+      await get_upcoming_invoice("org_123", mock_user, mock_db, None)
 
     assert exc.value.status_code == 500
     assert "Failed to retrieve upcoming invoice" in exc.value.detail

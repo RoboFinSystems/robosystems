@@ -330,16 +330,16 @@ export MIGRATION_TIMEOUT=1800
 
 if [ "\$DRY_RUN" = true ]; then
   print_warning "DRY RUN MODE - No changes will be applied"
-  
+
   # Show current status
   docker run --rm --entrypoint /usr/bin/env \
     -e DATABASE_URL="postgresql://\${DB_USER}:\${DB_PASSWORD}@\${RDS_ENDPOINT}:5432/\${DB_NAME}?sslmode=require" \
     -e ENVIRONMENT="\$ENVIRONMENT" \
     \$ECR_URI/robosystems:\$IMAGE_TAG \
     uv run alembic current
-  
+
   echo ""
-  
+
   # Show migration plan
   if [[ "\$COMMAND" == "upgrade"* ]]; then
     print_info "Pending migrations:"
@@ -349,7 +349,7 @@ if [ "\$DRY_RUN" = true ]; then
       \$ECR_URI/robosystems:\$IMAGE_TAG \
       uv run alembic history | head -20
   fi
-  
+
   print_success "DRY RUN completed - no changes were made"
 else
   # Run the actual migration with timeout
@@ -361,7 +361,7 @@ else
     print_error "Migration timed out after 30 minutes or failed"
     exit 1
   }
-  
+
   # Show new status
   echo ""
   print_info "New migration status:"
@@ -370,7 +370,7 @@ else
     -e ENVIRONMENT="\$ENVIRONMENT" \
     \$ECR_URI/robosystems:\$IMAGE_TAG \
     uv run alembic current
-  
+
   print_success "Migration completed successfully"
 fi
 
@@ -588,26 +588,6 @@ main() {
             ;;
         tables-query)
             run_in_docker "uv run python -m robosystems.scripts.tables_query $parameters"
-            ;;
-
-        ## Repository Access Management ##
-        repo-grant-access)
-            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager grant $parameters"
-            ;;
-        repo-revoke-access)
-            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager revoke $parameters"
-            ;;
-        repo-list-access)
-            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager list"
-            ;;
-        repo-list-users)
-            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager list $parameters"
-            ;;
-        repo-list-repositories)
-            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager repositories"
-            ;;
-        repo-check-access)
-            run_in_docker "uv run python -m robosystems.scripts.repository_access_manager check $parameters"
             ;;
 
         ## Credit Management ##
