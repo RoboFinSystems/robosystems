@@ -40,7 +40,11 @@ router = APIRouter()
   response_model=AuthResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Register New User",
-  description="Register a new user account with email and password. Security controls vary by environment: CAPTCHA and email verification are disabled in development for API testing, but required in production.",
+  description="""Register a new user account with email and password.
+
+**Organization Creation**: RoboSystems is an org-centric platform. When you register, a personal organization is automatically created for you. All resources (graphs, subscriptions, billing) belong to organizations, not individual users. You can later upgrade your personal org to a team or enterprise organization.
+
+**Security Controls**: CAPTCHA and email verification are disabled in development for API testing, but required in production.""",
   operation_id="registerUser",
   responses={
     409: {"model": ErrorResponse, "description": "Email already registered"},
@@ -61,6 +65,11 @@ async def register(
 ) -> AuthResponse:
   """
   Register a new user account with environment-based security controls.
+
+  RoboSystems is an org-centric platform where all resources belong to organizations.
+  During registration, a personal organization is automatically created for the user,
+  providing a foundation for resource management. Users can later upgrade their
+  personal org to a team or enterprise organization.
 
   Security controls vary by environment:
   - Development: CAPTCHA and email verification disabled for API testing convenience
@@ -274,12 +283,16 @@ async def register(
       logger.info(f"Email verification required for production user: {sanitized_email}")
 
     # Create personal organization for the user
-    org = Org.create_phantom_org_for_user(
+    # RoboSystems is org-centric: all resources belong to orgs, not users
+    org = Org.create_personal_org_for_user(
       user_id=user.id,
       user_name=sanitized_name,
       session=session,
     )
-    logger.info(f"Created personal org {org.id} for user {sanitized_email}")
+    logger.info(
+      f"Created personal org '{org.name}' ({org.id}) for user {sanitized_email}",
+      extra={"user_id": user.id, "org_id": org.id, "org_type": org.org_type.value},
+    )
 
     # Create default org limits (safety limits for resource provisioning)
     # Orgs can purchase subscriptions to increase limits
@@ -350,6 +363,11 @@ async def register(
       "id": user.id,
       "name": user.name,
       "email": user.email,
+    },
+    org={
+      "id": org.id,
+      "name": org.name,
+      "type": org.org_type.value,
     },
     message=message,
     token=jwt_token,

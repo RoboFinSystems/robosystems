@@ -72,10 +72,27 @@ class Org(Model):
     return org
 
   @classmethod
-  def create_phantom_org_for_user(
+  def create_personal_org_for_user(
     cls, user_id: str, user_name: str, session: Session
   ) -> "Org":
-    """Create a phantom personal organization for an individual user."""
+    """Create a personal organization for a new user.
+
+    RoboSystems is an org-centric platform - all resources (graphs, subscriptions,
+    billing) belong to organizations, not individual users. When a user registers,
+    we automatically create a personal organization for them as the foundation.
+
+    Users can later upgrade their personal org to a team or enterprise organization
+    by inviting members and changing the org type. This provides a smooth onboarding
+    experience while maintaining the org-centric architecture.
+
+    Args:
+        user_id: The user ID who will be the owner
+        user_name: User's name for workspace naming
+        session: Database session
+
+    Returns:
+        The created personal organization with the user as OWNER
+    """
     org = cls.create(
       name=f"{user_name}'s Workspace",
       org_type=OrgType.PERSONAL,

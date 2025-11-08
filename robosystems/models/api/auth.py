@@ -49,15 +49,20 @@ class AuthResponse(BaseModel):
   """Authentication response model."""
 
   user: dict[str, object] = Field(..., description="User information")
+  org: dict[str, object] | None = Field(
+    default=None,
+    description="Organization information (personal org created automatically on registration)",
+  )
   message: str = Field(..., description="Success message")
   token: str | None = Field(
-    None, description="JWT authentication token (optional for cookie-based auth)"
+    default=None,
+    description="JWT authentication token (optional for cookie-based auth)",
   )
   expires_in: int | None = Field(
-    None, description="Token expiry time in seconds from now"
+    default=None, description="Token expiry time in seconds from now"
   )
   refresh_threshold: int | None = Field(
-    None, description="Recommended refresh threshold in seconds before expiry"
+    default=None, description="Recommended refresh threshold in seconds before expiry"
   )
 
 

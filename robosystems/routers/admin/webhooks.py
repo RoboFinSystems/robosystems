@@ -140,293 +140,353 @@ async def handle_stripe_webhook(
 
 async def handle_checkout_completed(session_data: dict, db: Session):
   """Handle checkout.session.completed event."""
-  session_id = session_data.get("id")
-  customer_id = session_data.get("customer")
-  payment_status = session_data.get("payment_status")
-  stripe_subscription_id = session_data.get("subscription")
-  metadata = session_data.get("metadata", {})
+  try:
+    session_id = session_data.get("id")
+    customer_id = session_data.get("customer")
+    payment_status = session_data.get("payment_status")
+    stripe_subscription_id = session_data.get("subscription")
+    metadata = session_data.get("metadata", {})
 
-  logger.info(
-    f"Checkout completed: session_id={session_id}, payment_status={payment_status}"
-  )
+    logger.info(
+      f"Checkout completed: session_id={session_id}, payment_status={payment_status}"
+    )
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(session_id, db)
+    subscription = BillingSubscription.get_by_provider_subscription_id(session_id, db)
 
-  if not subscription and metadata.get("subscription_id"):
-    subscription = (
-      db.query(BillingSubscription)
-      .filter(BillingSubscription.id == metadata["subscription_id"])
+    if not subscription and metadata.get("subscription_id"):
+      subscription = (
+        db.query(BillingSubscription)
+        .filter(BillingSubscription.id == metadata["subscription_id"])
+        .first()
+      )
+
+    if not subscription:
+      logger.warning(f"Subscription not found for checkout session: {session_id}")
+      return
+
+    customer = (
+      db.query(BillingCustomer)
+      .filter(BillingCustomer.org_id == subscription.org_id)
       .first()
     )
 
-  if not subscription:
-    logger.warning(f"Subscription not found for checkout session: {session_id}")
-    return
+    if not customer:
+      logger.error(f"Customer not found for subscription: {subscription.id}")
+      return
 
-  customer = (
-    db.query(BillingCustomer)
-    .filter(BillingCustomer.org_id == subscription.org_id)
-    .first()
-  )
+    if payment_status == "paid":
+      customer.has_payment_method = True
 
-  if not customer:
-    logger.error(f"Customer not found for subscription: {subscription.id}")
-    return
+      if not customer.stripe_customer_id:
+        customer.stripe_customer_id = customer_id
 
-  if payment_status == "paid":
-    customer.has_payment_method = True
+      if stripe_subscription_id:
+        subscription.stripe_subscription_id = stripe_subscription_id
 
-    if not customer.stripe_customer_id:
-      customer.stripe_customer_id = customer_id
+      subscription.status = "provisioning"
+      subscription.provider_customer_id = customer_id
 
-    if stripe_subscription_id:
-      subscription.stripe_subscription_id = stripe_subscription_id
+      db.commit()
 
-    subscription.status = "provisioning"
-    subscription.provider_customer_id = customer_id
+      logger.info(
+        f"Payment method collected for org {customer.org_id}",
+        extra={
+          "subscription_id": subscription.id,
+          "session_id": session_id,
+          "stripe_subscription_id": stripe_subscription_id,
+          "org_id": customer.org_id,
+        },
+      )
 
-    db.commit()
+      await trigger_resource_provisioning(subscription, db)
 
-    logger.info(
-      f"Payment method collected for org {customer.org_id}",
-      extra={
-        "subscription_id": subscription.id,
-        "session_id": session_id,
-        "stripe_subscription_id": stripe_subscription_id,
-        "org_id": customer.org_id,
-      },
+    else:
+      logger.warning(f"Checkout completed but payment not paid: {payment_status}")
+
+  except Exception as e:
+    db.rollback()
+    logger.error(
+      f"Failed to process checkout completed webhook: {e}",
+      extra={"session_id": session_data.get("id")},
+      exc_info=True,
     )
-
-    await trigger_resource_provisioning(subscription, db)
-
-  else:
-    logger.warning(f"Checkout completed but payment not paid: {payment_status}")
+    raise
 
 
 async def handle_invoice_created(invoice_data: dict, db: Session):
   """Handle invoice.created event from Stripe."""
-  stripe_invoice_id = invoice_data.get("id")
-  subscription_id = invoice_data.get("subscription")
-  _customer_id = invoice_data.get("customer")
-  amount_cents = invoice_data.get("amount_due")
-  period_start = invoice_data.get("period_start")
-  period_end = invoice_data.get("period_end")
-  due_date = invoice_data.get("due_date")
+  try:
+    stripe_invoice_id = invoice_data.get("id")
+    subscription_id = invoice_data.get("subscription")
+    _customer_id = invoice_data.get("customer")
+    amount_cents = invoice_data.get("amount_due")
+    period_start = invoice_data.get("period_start")
+    period_end = invoice_data.get("period_end")
+    due_date = invoice_data.get("due_date")
 
-  if not subscription_id:
-    logger.info("Invoice created but no subscription ID")
-    return
+    if not subscription_id:
+      logger.info("Invoice created but no subscription ID")
+      return
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db
-  )
+    subscription = BillingSubscription.get_by_provider_subscription_id(
+      subscription_id, db
+    )
 
-  if not subscription:
-    logger.warning(f"Subscription not found for Stripe invoice: {subscription_id}")
-    return
+    if not subscription:
+      logger.warning(f"Subscription not found for Stripe invoice: {subscription_id}")
+      return
 
-  from ...models.billing import BillingInvoice
-  from datetime import datetime, timezone
+    from ...models.billing import BillingInvoice
+    from datetime import datetime, timezone
 
-  existing_invoice = (
-    db.query(BillingInvoice)
-    .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
-    .first()
-  )
+    existing_invoice = (
+      db.query(BillingInvoice)
+      .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+      .first()
+    )
 
-  if existing_invoice:
-    logger.info(f"Invoice already synced from Stripe: {stripe_invoice_id}")
-    return
+    if existing_invoice:
+      logger.info(f"Invoice already synced from Stripe: {stripe_invoice_id}")
+      return
 
-  invoice = BillingInvoice.create_invoice(
-    org_id=subscription.org_id,
-    period_start=datetime.fromtimestamp(period_start, tz=timezone.utc),
-    period_end=datetime.fromtimestamp(period_end, tz=timezone.utc),
-    payment_terms="immediate",
-    session=db,
-  )
+    invoice = BillingInvoice.create_invoice(
+      org_id=subscription.org_id,
+      period_start=datetime.fromtimestamp(period_start, tz=timezone.utc),
+      period_end=datetime.fromtimestamp(period_end, tz=timezone.utc),
+      payment_terms="immediate",
+      session=db,
+    )
 
-  invoice.stripe_invoice_id = stripe_invoice_id
-  invoice.status = "open"
+    invoice.stripe_invoice_id = stripe_invoice_id
+    invoice.status = "open"
 
-  if due_date:
-    invoice.due_date = datetime.fromtimestamp(due_date, tz=timezone.utc)
+    if due_date:
+      invoice.due_date = datetime.fromtimestamp(due_date, tz=timezone.utc)
 
-  invoice.add_line_item(
-    subscription_id=subscription.id,
-    resource_type=subscription.resource_type,
-    resource_id=subscription.resource_id,
-    description=f"Stripe Invoice - {subscription.plan_name}",
-    amount_cents=amount_cents,
-    session=db,
-  )
+    invoice.add_line_item(
+      subscription_id=subscription.id,
+      resource_type=subscription.resource_type,
+      resource_id=subscription.resource_id,
+      description=f"Stripe Invoice - {subscription.plan_name}",
+      amount_cents=amount_cents,
+      session=db,
+    )
 
-  invoice.finalize(db)
-  db.commit()
+    invoice.finalize(db)
+    db.commit()
 
-  logger.info(
-    f"Synced Stripe invoice {stripe_invoice_id} to database",
-    extra={
-      "stripe_invoice_id": stripe_invoice_id,
-      "invoice_id": invoice.id,
-      "subscription_id": subscription.id,
-      "amount_cents": amount_cents,
-    },
-  )
+    logger.info(
+      f"Synced Stripe invoice {stripe_invoice_id} to database",
+      extra={
+        "stripe_invoice_id": stripe_invoice_id,
+        "invoice_id": invoice.id,
+        "subscription_id": subscription.id,
+        "amount_cents": amount_cents,
+      },
+    )
+
+  except Exception as e:
+    db.rollback()
+    logger.error(
+      f"Failed to process invoice created webhook: {e}",
+      extra={"stripe_invoice_id": invoice_data.get("id")},
+      exc_info=True,
+    )
+    raise
 
 
 async def handle_payment_succeeded(invoice_data: dict, db: Session):
   """Handle invoice.payment_succeeded event."""
-  stripe_invoice_id = invoice_data.get("id")
-  subscription_id = invoice_data.get("subscription")
-  customer_id = invoice_data.get("customer")
+  try:
+    stripe_invoice_id = invoice_data.get("id")
+    subscription_id = invoice_data.get("subscription")
+    customer_id = invoice_data.get("customer")
 
-  if not subscription_id:
-    logger.info("Payment succeeded but no subscription ID in invoice")
-    return
+    if not subscription_id:
+      logger.info("Payment succeeded but no subscription ID in invoice")
+      return
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db
-  )
+    subscription = BillingSubscription.get_by_provider_subscription_id(
+      subscription_id, db
+    )
 
-  if not subscription:
-    logger.warning(f"Subscription not found for invoice: {subscription_id}")
-    return
+    if not subscription:
+      logger.warning(f"Subscription not found for invoice: {subscription_id}")
+      return
 
-  customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db)
+    customer = BillingCustomer.get_by_stripe_customer_id(customer_id, db)
 
-  if customer:
-    customer.has_payment_method = True
-    db.commit()
+    if customer:
+      customer.has_payment_method = True
+      db.commit()
 
-  from ...models.billing import BillingInvoice
-  from datetime import datetime, timezone
+    from ...models.billing import BillingInvoice
+    from datetime import datetime, timezone
 
-  invoice = (
-    db.query(BillingInvoice)
-    .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
-    .first()
-  )
+    invoice = (
+      db.query(BillingInvoice)
+      .filter(BillingInvoice.stripe_invoice_id == stripe_invoice_id)
+      .first()
+    )
 
-  if invoice:
-    invoice.status = "paid"
-    invoice.paid_at = datetime.now(timezone.utc)
-    invoice.payment_method = "stripe"
-    invoice.payment_reference = stripe_invoice_id
-    db.commit()
+    if invoice:
+      invoice.status = "paid"
+      invoice.paid_at = datetime.now(timezone.utc)
+      invoice.payment_method = "stripe"
+      invoice.payment_reference = stripe_invoice_id
+      db.commit()
+
+      logger.info(
+        f"Marked invoice {invoice.invoice_number} as paid",
+        extra={
+          "invoice_id": invoice.id,
+          "stripe_invoice_id": stripe_invoice_id,
+        },
+      )
+
+    if subscription.status in ["pending_payment", "provisioning"]:
+      await trigger_resource_provisioning(subscription, db)
 
     logger.info(
-      f"Marked invoice {invoice.invoice_number} as paid",
+      f"Payment succeeded for subscription {subscription.id}",
       extra={
-        "invoice_id": invoice.id,
-        "stripe_invoice_id": stripe_invoice_id,
+        "subscription_id": subscription.id,
+        "stripe_subscription_id": subscription_id,
       },
     )
 
-  if subscription.status in ["pending_payment", "provisioning"]:
-    await trigger_resource_provisioning(subscription, db)
-
-  logger.info(
-    f"Payment succeeded for subscription {subscription.id}",
-    extra={
-      "subscription_id": subscription.id,
-      "stripe_subscription_id": subscription_id,
-    },
-  )
+  except Exception as e:
+    db.rollback()
+    logger.error(
+      f"Failed to process payment succeeded webhook: {e}",
+      extra={"stripe_invoice_id": invoice_data.get("id")},
+      exc_info=True,
+    )
+    raise
 
 
 async def handle_payment_failed(invoice_data: dict, db: Session):
   """Handle invoice.payment_failed event."""
-  subscription_id = invoice_data.get("subscription")
+  try:
+    subscription_id = invoice_data.get("subscription")
 
-  if not subscription_id:
-    return
+    if not subscription_id:
+      return
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db
-  )
+    subscription = BillingSubscription.get_by_provider_subscription_id(
+      subscription_id, db
+    )
 
-  if not subscription:
-    logger.warning(f"Subscription not found for failed payment: {subscription_id}")
-    return
+    if not subscription:
+      logger.warning(f"Subscription not found for failed payment: {subscription_id}")
+      return
 
-  if subscription.status == "pending_payment":
-    subscription.status = "unpaid"
+    if subscription.status == "pending_payment":
+      subscription.status = "unpaid"
 
-    error_message = "Payment failed"
-    if subscription.subscription_metadata:
-      subscription.subscription_metadata["error"] = error_message  # type: ignore[index]
-    else:
-      subscription.subscription_metadata = {"error": error_message}
+      error_message = "Payment failed"
+      if subscription.subscription_metadata:
+        subscription.subscription_metadata["error"] = error_message  # type: ignore[index]
+      else:
+        subscription.subscription_metadata = {"error": error_message}
 
-    db.commit()
+      db.commit()
 
-  logger.warning(
-    f"Payment failed for subscription {subscription.id}",
-    extra={
-      "subscription_id": subscription.id,
-      "stripe_subscription_id": subscription_id,
-    },
-  )
+    logger.warning(
+      f"Payment failed for subscription {subscription.id}",
+      extra={
+        "subscription_id": subscription.id,
+        "stripe_subscription_id": subscription_id,
+      },
+    )
+
+  except Exception as e:
+    db.rollback()
+    logger.error(
+      f"Failed to process payment failed webhook: {e}",
+      extra={"subscription_id": invoice_data.get("subscription")},
+      exc_info=True,
+    )
+    raise
 
 
 async def handle_subscription_updated(subscription_data: dict, db: Session):
   """Handle customer.subscription.updated event."""
-  subscription_id = subscription_data.get("id")
-  status = subscription_data.get("status")
+  try:
+    subscription_id = subscription_data.get("id")
+    status = subscription_data.get("status")
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db
-  )
-
-  if not subscription:
-    logger.warning(f"Subscription not found for update: {subscription_id}")
-    return
-
-  status_mapping = {
-    "active": "active",
-    "past_due": "past_due",
-    "unpaid": "unpaid",
-    "canceled": "canceled",
-    "incomplete": "pending_payment",
-    "incomplete_expired": "canceled",
-    "trialing": "active",
-  }
-
-  new_status = status_mapping.get(status, subscription.status)  # type: ignore[arg-type]
-
-  if new_status != subscription.status:
-    subscription.status = new_status
-    db.commit()
-
-    logger.info(
-      f"Subscription status updated: {subscription.id} -> {new_status}",
-      extra={
-        "subscription_id": subscription.id,
-        "old_status": subscription.status,
-        "new_status": new_status,
-      },
+    subscription = BillingSubscription.get_by_provider_subscription_id(
+      subscription_id, db
     )
+
+    if not subscription:
+      logger.warning(f"Subscription not found for update: {subscription_id}")
+      return
+
+    status_mapping = {
+      "active": "active",
+      "past_due": "past_due",
+      "unpaid": "unpaid",
+      "canceled": "canceled",
+      "incomplete": "pending_payment",
+      "incomplete_expired": "canceled",
+      "trialing": "active",
+    }
+
+    new_status = status_mapping.get(status, subscription.status)  # type: ignore[arg-type]
+
+    if new_status != subscription.status:
+      subscription.status = new_status
+      db.commit()
+
+      logger.info(
+        f"Subscription status updated: {subscription.id} -> {new_status}",
+        extra={
+          "subscription_id": subscription.id,
+          "old_status": subscription.status,
+          "new_status": new_status,
+        },
+      )
+
+  except Exception as e:
+    db.rollback()
+    logger.error(
+      f"Failed to process subscription updated webhook: {e}",
+      extra={"subscription_id": subscription_data.get("id")},
+      exc_info=True,
+    )
+    raise
 
 
 async def handle_subscription_deleted(subscription_data: dict, db: Session):
   """Handle customer.subscription.deleted event."""
-  subscription_id = subscription_data.get("id")
+  try:
+    subscription_id = subscription_data.get("id")
 
-  subscription = BillingSubscription.get_by_provider_subscription_id(
-    subscription_id, db
-  )
+    subscription = BillingSubscription.get_by_provider_subscription_id(
+      subscription_id, db
+    )
 
-  if not subscription:
-    logger.warning(f"Subscription not found for deletion: {subscription_id}")
-    return
+    if not subscription:
+      logger.warning(f"Subscription not found for deletion: {subscription_id}")
+      return
 
-  subscription.cancel(db, immediate=True)
+    subscription.cancel(db, immediate=True)
 
-  logger.info(
-    f"Subscription canceled via Stripe: {subscription.id}",
-    extra={"subscription_id": subscription.id},
-  )
+    logger.info(
+      f"Subscription canceled via Stripe: {subscription.id}",
+      extra={"subscription_id": subscription.id},
+    )
+
+  except Exception as e:
+    db.rollback()
+    logger.error(
+      f"Failed to process subscription deleted webhook: {e}",
+      extra={"subscription_id": subscription_data.get("id")},
+      exc_info=True,
+    )
+    raise
 
 
 async def trigger_resource_provisioning(subscription: BillingSubscription, db: Session):

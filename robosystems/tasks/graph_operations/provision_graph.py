@@ -240,30 +240,36 @@ def provision_graph_task(
 
     try:
       session.rollback()
-    except Exception as rollback_error:
-      logger.error(f"Failed to rollback transaction: {rollback_error}")
 
-    try:
-      if "subscription" not in locals():
-        subscription = (
-          session.query(BillingSubscription)
-          .filter(BillingSubscription.id == subscription_id)
-          .first()
-        )
-        if not subscription:
-          raise Exception(f"Subscription {subscription_id} not found for status update")
-      else:
-        session.refresh(subscription)  # type: ignore[possibly-unbound]
+      subscription = (
+        session.query(BillingSubscription)
+        .filter(BillingSubscription.id == subscription_id)
+        .first()
+      )
 
-      if subscription:  # type: ignore[possibly-unbound]
+      if subscription:
         subscription.status = "failed"
         if subscription.subscription_metadata:
           subscription.subscription_metadata["error"] = str(e)  # type: ignore[index]
         else:
           subscription.subscription_metadata = {"error": str(e)}
         session.commit()
+
+        logger.info(
+          f"Marked subscription {subscription_id} as failed",
+          extra={"subscription_id": subscription_id, "error": str(e)},
+        )
+      else:
+        logger.error(
+          f"Subscription {subscription_id} not found for status update",
+          extra={"subscription_id": subscription_id},
+        )
+
     except Exception as update_error:
-      logger.error(f"Failed to update subscription status: {update_error}")
+      logger.error(
+        f"Failed to update subscription status: {update_error}",
+        extra={"subscription_id": subscription_id},
+      )
       try:
         session.rollback()
       except Exception:
