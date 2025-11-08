@@ -75,27 +75,6 @@ def get_timestamp_from_ulid(ulid_str: str) -> Optional[float]:
   return None
 
 
-# Default generator functions for SQLAlchemy column defaults
-def default_ulid() -> str:
-  """Default function for SQLAlchemy columns."""
-  return generate_ulid()
-
-
-def default_transaction_ulid() -> str:
-  """Default function for transaction tables."""
-  return generate_prefixed_ulid("txn")
-
-
-def default_usage_ulid() -> str:
-  """Default function for usage tracking tables."""
-  return generate_prefixed_ulid("usg")
-
-
-def default_credit_ulid() -> str:
-  """Default function for credit records."""
-  return generate_prefixed_ulid("crd")
-
-
 def generate_ulid_hex(num_chars: int = 16) -> str:
   """
   Generate a ULID and convert it to hexadecimal format.

@@ -27,7 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Base
-from ...utils import default_credit_ulid, default_transaction_ulid
+from ...utils.ulid import generate_prefixed_ulid
 from ...config.graph_tier import GraphTier
 from ...config.graph_tier import get_tier_storage_limit
 
@@ -61,7 +61,7 @@ class GraphCredits(Base):
 
   __tablename__ = "graph_credits"
 
-  id = Column(String, primary_key=True, default=default_credit_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("crd"))
   graph_id = Column(String, ForeignKey("graphs.graph_id"), nullable=False, unique=True)
   user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
@@ -157,7 +157,7 @@ class GraphCredits(Base):
     storage_limit_gb = get_tier_storage_limit(graph_tier.value)
 
     credits = cls(
-      id=default_credit_ulid(),
+      id=generate_prefixed_ulid("crd"),
       graph_id=graph_id,
       user_id=user_id,
       billing_admin_id=billing_admin_id,
@@ -472,7 +472,7 @@ class GraphCreditTransaction(Base):
 
   __tablename__ = "graph_credit_transactions"
 
-  id = Column(String, primary_key=True, default=default_transaction_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("txn"))
   graph_credits_id = Column(String, ForeignKey("graph_credits.id"), nullable=False)
 
   # Direct graph_id reference for easier querying
@@ -564,7 +564,6 @@ class GraphCreditTransaction(Base):
     """
     import json
     from sqlalchemy.exc import IntegrityError
-    from ...utils import default_transaction_ulid
 
     # If idempotency key provided, check for existing transaction
     if idempotency_key and session:
@@ -586,9 +585,7 @@ class GraphCreditTransaction(Base):
         graph_id = str(credits_record.graph_id)
 
     transaction = cls(
-      id=idempotency_key[:50]
-      if idempotency_key and len(idempotency_key) <= 50
-      else default_transaction_ulid(),
+      id=generate_prefixed_ulid("txn"),
       graph_credits_id=graph_credits_id,
       graph_id=graph_id or "unknown",
       transaction_type=transaction_type.value,

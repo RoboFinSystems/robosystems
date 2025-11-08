@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Base
-from ...utils import default_ulid
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class GraphSchema(Base):
@@ -26,7 +26,7 @@ class GraphSchema(Base):
     Index("idx_graph_schemas_type", "schema_type"),
   )
 
-  id = Column(String, primary_key=True, default=default_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gs"))
   graph_id = Column(
     String,
     ForeignKey("graphs.graph_id", ondelete="CASCADE"),

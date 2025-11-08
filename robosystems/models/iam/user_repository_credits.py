@@ -25,7 +25,7 @@ from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Base
-from ...utils import default_credit_ulid, default_transaction_ulid
+from ...utils.ulid import generate_prefixed_ulid
 from .user_repository import RepositoryType, RepositoryPlan
 
 import logging
@@ -70,7 +70,7 @@ class UserRepositoryCredits(Base):
 
   __tablename__ = "user_repository_credits"
 
-  id = Column(String, primary_key=True, default=default_credit_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("crd"))
 
   user_repository_id = Column(
     String, ForeignKey("user_repository.id"), nullable=False, unique=True
@@ -757,7 +757,7 @@ class UserRepositoryCreditTransaction(Base):
 
   __tablename__ = "user_repository_credit_transactions"
 
-  id = Column(String, primary_key=True, default=default_transaction_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("txn"))
 
   credit_pool_id = Column(
     String, ForeignKey("user_repository_credits.id"), nullable=False

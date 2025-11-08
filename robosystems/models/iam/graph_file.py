@@ -12,7 +12,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Base
-from ...utils import default_ulid
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class GraphFile(Base):
@@ -23,7 +23,7 @@ class GraphFile(Base):
     Index("idx_graph_files_status", "upload_status"),
   )
 
-  id = Column(String, primary_key=True, default=default_ulid)
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gf"))
   graph_id = Column(
     String,
     ForeignKey("graphs.graph_id", ondelete="CASCADE"),
