@@ -141,7 +141,7 @@
       "label": "Lint Fix",
       "type": "shell",
       "command": "just",
-      "args": ["lint-fix"],
+      "args": ["lint", "fix"],
       "problemMatcher": []
     },
     {

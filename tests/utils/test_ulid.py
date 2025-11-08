@@ -11,10 +11,6 @@ from robosystems.utils.ulid import (
   generate_prefixed_ulid,
   parse_ulid,
   get_timestamp_from_ulid,
-  default_ulid,
-  default_transaction_ulid,
-  default_usage_ulid,
-  default_credit_ulid,
 )
 from ulid import ULID
 
@@ -203,71 +199,61 @@ class TestGetTimestampFromUlid:
     assert timestamp1 == timestamp2
 
 
-class TestDefaultGenerators:
-  """Test default generator functions for SQLAlchemy."""
+class TestPrefixedGenerators:
+  """Test prefixed ULID generation for common use cases."""
 
-  def test_default_ulid(self):
-    """Test default ULID generator."""
-    ulid_str = default_ulid()
+  def test_unprefixed_ulid(self):
+    """Test unprefixed ULID generator."""
+    ulid_str = generate_ulid()
 
     assert isinstance(ulid_str, str)
     assert len(ulid_str) == 26
     assert parse_ulid(ulid_str) is not None
 
-  def test_default_transaction_ulid(self):
-    """Test default transaction ULID generator."""
-    txn_ulid = default_transaction_ulid()
+  def test_transaction_ulid(self):
+    """Test transaction ULID generator."""
+    txn_ulid = generate_prefixed_ulid("txn")
 
     assert txn_ulid.startswith("txn_")
     ulid_part = txn_ulid[4:]
     assert len(ulid_part) == 26
     assert parse_ulid(txn_ulid) is not None
 
-  def test_default_usage_ulid(self):
-    """Test default usage ULID generator."""
-    usage_ulid = default_usage_ulid()
+  def test_usage_ulid(self):
+    """Test usage ULID generator."""
+    usage_ulid = generate_prefixed_ulid("usg")
 
     assert usage_ulid.startswith("usg_")
     ulid_part = usage_ulid[4:]
     assert len(ulid_part) == 26
     assert parse_ulid(usage_ulid) is not None
 
-  def test_default_credit_ulid(self):
-    """Test default credit ULID generator."""
-    credit_ulid = default_credit_ulid()
+  def test_credit_ulid(self):
+    """Test credit ULID generator."""
+    credit_ulid = generate_prefixed_ulid("crd")
 
     assert credit_ulid.startswith("crd_")
     ulid_part = credit_ulid[4:]
     assert len(ulid_part) == 26
     assert parse_ulid(credit_ulid) is not None
 
-  def test_default_generators_uniqueness(self):
-    """Test that default generators produce unique values."""
-    # Test each generator multiple times
-    generators = [
-      default_ulid,
-      default_transaction_ulid,
-      default_usage_ulid,
-      default_credit_ulid,
-    ]
+  def test_prefixed_generators_uniqueness(self):
+    """Test that prefixed generators produce unique values."""
+    # Test common prefixes
+    prefixes = ["txn", "usg", "crd", "user"]
 
-    for generator in generators:
-      ulids = [generator() for _ in range(50)]
+    for prefix in prefixes:
+      ulids = [generate_prefixed_ulid(prefix) for _ in range(50)]
       assert len(set(ulids)) == 50  # All should be unique
 
-  def test_default_generators_ordering(self):
-    """Test that default generators produce time-ordered values."""
-    generators = [
-      default_ulid,
-      default_transaction_ulid,
-      default_usage_ulid,
-      default_credit_ulid,
-    ]
+  def test_prefixed_generators_ordering(self):
+    """Test that prefixed generators produce time-ordered values."""
+    prefixes = ["txn", "usg", "crd", "user"]
 
-    for generator in generators:
-      ulid1 = generator()
+    for prefix in prefixes:
+      ulid1 = generate_prefixed_ulid(prefix)
       time.sleep(0.001)  # Small delay
-      ulid2 = generator()
+      ulid2 = generate_prefixed_ulid(prefix)
 
       # Should be lexicographically ordered
       assert ulid1 < ulid2

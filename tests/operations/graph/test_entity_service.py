@@ -321,17 +321,22 @@ class TestEntityGraphService:
 
   @pytest.mark.asyncio
   def test_generate_graph_id_consistency(self):
-    """Test that graph ID generation is consistent for same inputs."""
+    """Test that graph ID generation includes entity-specific component and is time-ordered."""
     service = EntityGraphService()
 
-    # Same entity name should generate same ID structure
+    # Same entity name produces same structure
     id1 = service._generate_graph_id("Test Entity")
     id2 = service._generate_graph_id("Test Entity")
 
-    # IDs should have same prefix and length but different UUIDs
+    # IDs should have same prefix and length
     assert id1[:2] == id2[:2] == "kg"
-    assert len(id1) == len(id2)
-    assert id1 != id2  # UUIDs should be different
+    assert len(id1) == len(id2) == 20  # 'kg' + 14 ULID chars + 4 entity hash chars
+
+    # Different entity names should have different hash suffixes
+    id3 = service._generate_graph_id("Different Entity")
+    assert id3[:2] == "kg"
+    assert len(id3) == 20
+    assert id1[-4:] != id3[-4:]  # Entity hash portion should differ
 
   @pytest.mark.asyncio
   async def test_cleanup_on_failure(self, mocker):

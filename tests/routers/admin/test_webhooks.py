@@ -108,10 +108,11 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_payment_failed")
   def test_webhook_payment_failed_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling invoice.payment_failed event."""
     mock_provider = Mock()
@@ -123,6 +124,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -133,10 +135,11 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_subscription_updated")
   def test_webhook_subscription_updated_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling customer.subscription.updated event."""
     mock_provider = Mock()
@@ -148,6 +151,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -158,10 +162,11 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   @patch("robosystems.routers.admin.webhooks.handle_subscription_deleted")
   def test_webhook_subscription_deleted_event(
-    self, mock_handle, mock_get_provider, client, mock_db_session
+    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling customer.subscription.deleted event."""
     mock_provider = Mock()
@@ -173,6 +178,7 @@ class TestStripeWebhookEndpoint:
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
     mock_handle.return_value = AsyncMock()
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
@@ -183,9 +189,10 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 200
     mock_handle.assert_called_once()
 
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
   def test_webhook_unhandled_event_type(
-    self, mock_get_provider, client, mock_db_session
+    self, mock_get_provider, mock_audit_log, client, mock_db_session
   ):
     """Test handling unknown event type."""
     mock_provider = Mock()
@@ -196,6 +203,7 @@ class TestStripeWebhookEndpoint:
     }
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
+    mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
       "/admin/v1/webhooks/stripe",
