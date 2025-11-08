@@ -1,6 +1,5 @@
 """User authentication model."""
 
-import secrets
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
@@ -9,6 +8,7 @@ from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Model
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class User(Model):
@@ -16,9 +16,7 @@ class User(Model):
 
   __tablename__ = "users"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"user_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("user"))
   email = Column(String, unique=True, nullable=False, index=True)
   name = Column(String, nullable=False)
   password_hash = Column(String, nullable=False)

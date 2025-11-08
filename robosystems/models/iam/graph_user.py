@@ -7,7 +7,6 @@ Access Control Model:
 - Roles: admin (full control), member (read/write), viewer (read-only)
 """
 
-import secrets
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
@@ -24,6 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Model
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class GraphUser(Model):
@@ -36,9 +36,7 @@ class GraphUser(Model):
     Index("idx_graph_users_user_selected", "user_id", "is_selected"),
   )
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"gu_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gu"))
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
   graph_id = Column(
     String, ForeignKey("graphs.graph_id"), nullable=False, index=True

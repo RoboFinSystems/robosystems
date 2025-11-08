@@ -5,7 +5,6 @@ This model manages user access to repositories (formerly "shared repositories")
 including subscriptions, permissions, and billing information.
 """
 
-import secrets
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Dict, Any, Sequence, cast
@@ -28,6 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Model
 from ...config.graph_tier import GraphTier
+from ...utils.ulid import generate_prefixed_ulid
 import logging
 
 logger = logging.getLogger(__name__)
@@ -77,9 +77,7 @@ class UserRepository(Model):
 
   __tablename__ = "user_repository"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"usra_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("usra"))
 
   # User reference
   user_id = Column(String, ForeignKey("users.id"), nullable=False)

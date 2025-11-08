@@ -1,6 +1,5 @@
 """Organization model for multi-tenant billing and resource management."""
 
-import secrets
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Sequence
@@ -10,6 +9,7 @@ from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Model
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class OrgType(str, Enum):
@@ -23,9 +23,7 @@ class Org(Model):
 
   __tablename__ = "orgs"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"org_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("org"))
   name = Column(String, nullable=False)
   org_type = Column(SQLEnum(OrgType), nullable=False, default=OrgType.PERSONAL)
 
@@ -38,16 +36,37 @@ class Org(Model):
     onupdate=lambda: datetime.now(timezone.utc),
     nullable=False,
   )
+  deleted_at = Column(DateTime, nullable=True)
 
   users = relationship("OrgUser", back_populates="org", cascade="all, delete-orphan")
   graphs = relationship("Graph", back_populates="org", cascade="all, delete-orphan")
+
+  @property
+  def is_deleted(self) -> bool:
+    """Check if organization is soft-deleted."""
+    return self.deleted_at is not None
 
   def __repr__(self) -> str:
     return f"<Org {self.id} {self.name} ({self.org_type})>"
 
   @classmethod
-  def get_by_id(cls, org_id: str, session: Session) -> Optional["Org"]:
-    return session.query(cls).filter(cls.id == org_id).first()
+  def get_by_id(
+    cls, org_id: str, session: Session, include_deleted: bool = False
+  ) -> Optional["Org"]:
+    """Get organization by ID.
+
+    Args:
+        org_id: Organization ID
+        session: Database session
+        include_deleted: If True, include soft-deleted orgs (default: False)
+
+    Returns:
+        Organization if found and not deleted (unless include_deleted=True)
+    """
+    query = session.query(cls).filter(cls.id == org_id)
+    if not include_deleted:
+      query = query.filter(cls.deleted_at.is_(None))
+    return query.first()
 
   @classmethod
   def create(
@@ -120,8 +139,20 @@ class Org(Model):
     return org
 
   @classmethod
-  def get_all(cls, session: Session) -> Sequence["Org"]:
-    return session.query(cls).all()
+  def get_all(cls, session: Session, include_deleted: bool = False) -> Sequence["Org"]:
+    """Get all organizations.
+
+    Args:
+        session: Database session
+        include_deleted: If True, include soft-deleted orgs (default: False)
+
+    Returns:
+        List of organizations (excluding deleted unless include_deleted=True)
+    """
+    query = session.query(cls)
+    if not include_deleted:
+      query = query.filter(cls.deleted_at.is_(None))
+    return query.all()
 
   def update(self, session: Session, **kwargs) -> None:
     for key, value in kwargs.items():
@@ -136,7 +167,66 @@ class Org(Model):
       session.rollback()
       raise
 
+  def soft_delete(self, session: Session) -> None:
+    """Soft-delete the organization.
+
+    Marks the organization as deleted without removing data.
+    Safety checks prevent deletion of orgs with active subscriptions.
+
+    Raises:
+        ValueError: If organization has active subscriptions
+    """
+    from ..billing import BillingSubscription
+
+    if self.is_deleted:
+      return
+
+    active_subscriptions = (
+      session.query(BillingSubscription)
+      .filter(
+        BillingSubscription.org_id == self.id,
+        BillingSubscription.status.in_(["active", "pending", "provisioning"]),
+      )
+      .count()
+    )
+
+    if active_subscriptions > 0:
+      raise ValueError(
+        f"Cannot delete organization with {active_subscriptions} active subscriptions. "
+        "Cancel all subscriptions first."
+      )
+
+    self.deleted_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(timezone.utc)
+
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
+  def restore(self, session: Session) -> None:
+    """Restore a soft-deleted organization."""
+    if not self.is_deleted:
+      return
+
+    self.deleted_at = None
+    self.updated_at = datetime.now(timezone.utc)
+
+    try:
+      session.commit()
+      session.refresh(self)
+    except SQLAlchemyError:
+      session.rollback()
+      raise
+
   def delete(self, session: Session) -> None:
+    """Hard delete the organization (DANGEROUS - use soft_delete instead).
+
+    This permanently removes the organization and all related data.
+    Only use for testing or with extreme caution in production.
+    """
     session.delete(self)
     try:
       session.commit()

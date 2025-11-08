@@ -1,6 +1,5 @@
 """Billing subscription model - polymorphic subscriptions for any resource type."""
 
-import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from enum import Enum
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ...database import Base
 from ...logger import get_logger
+from ...utils.ulid import generate_prefixed_ulid
 
 logger = get_logger(__name__)
 
@@ -46,9 +46,7 @@ class BillingSubscription(Base):
 
   __tablename__ = "billing_subscriptions"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"bsub_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("bsub"))
 
   org_id = Column(String, ForeignKey("orgs.id"), nullable=False)
 

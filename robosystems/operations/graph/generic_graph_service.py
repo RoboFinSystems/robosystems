@@ -7,7 +7,6 @@ configurations including custom schemas and schema extensions.
 """
 
 import asyncio
-import uuid
 from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime, timezone
 from ...logger import logger
@@ -60,10 +59,11 @@ class GenericGraphService:
     """
     logger.info(f"Starting graph creation for user {user_id}")
 
-    # Always generate graph ID using the standard kg pattern
-    # This ensures security and consistency across all graph types
-    # Using UUID directly for simplicity and uniqueness
-    unique_id = str(uuid.uuid4()).replace("-", "")[:16]
+    # Generate time-ordered graph ID using ULID for optimal database performance
+    # ULID provides sequential IDs that prevent B-tree fragmentation at scale
+    from ...utils.ulid import generate_ulid_hex
+
+    unique_id = generate_ulid_hex(16)
     graph_id = f"kg{unique_id}"
 
     logger.info(f"Creating graph with ID: {graph_id}")

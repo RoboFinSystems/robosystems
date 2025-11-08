@@ -1,6 +1,5 @@
 """Organization-user junction table for managing user roles within organizations."""
 
-import secrets
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Sequence
@@ -17,6 +16,7 @@ from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Model
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class OrgRole(str, Enum):
@@ -34,7 +34,7 @@ class OrgUser(Model):
   id = Column(
     String,
     primary_key=True,
-    default=lambda: f"orgusr_{secrets.token_urlsafe(16)}",
+    default=lambda: generate_prefixed_ulid("orgusr"),
   )
   org_id = Column(String, ForeignKey("orgs.id"), nullable=False, index=True)
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)

@@ -94,3 +94,23 @@ def default_usage_ulid() -> str:
 def default_credit_ulid() -> str:
   """Default function for credit records."""
   return generate_prefixed_ulid("crd")
+
+
+def generate_ulid_hex(num_chars: int = 16) -> str:
+  """
+  Generate a ULID and convert it to hexadecimal format.
+
+  This is specifically useful for graph IDs where we want time-ordered
+  hex strings that prevent B-tree fragmentation.
+
+  Args:
+      num_chars: Number of hex characters to return (default: 16)
+
+  Returns:
+      Lowercase hex string of specified length
+      Example: "018c5f9e8a2f4d1b"
+  """
+  ulid = ULID()
+  ulid_int = int.from_bytes(ulid.bytes, byteorder="big")
+  hex_str = hex(ulid_int)[2:]  # Remove '0x' prefix
+  return hex_str[:num_chars]

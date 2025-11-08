@@ -413,22 +413,24 @@ class EntityGraphService:
       raise
 
   def _generate_graph_id(self, entity_name: str) -> str:
-    """Generate unique graph ID with high entropy to avoid collisions.
+    """Generate time-ordered graph ID with entity-specific entropy.
+
+    Uses ULID for sequential ordering (optimal B-tree performance) plus
+    entity name hash for additional uniqueness and traceability.
 
     The ID must be between 10-20 characters after the 'kg' prefix to match
     the API validation pattern: ^(kg[a-z0-9]{10,20}|sec|industry|economic)$
     """
-    import uuid
-    from datetime import datetime
+    from ...utils.ulid import generate_ulid_hex
 
-    # Use UUID for randomness (take first 12 chars for sufficient entropy)
-    base_uuid = uuid.uuid4().hex[:12]
-    # Add entity name entropy (4 chars)
+    # Generate time-ordered ULID (provides timestamp + randomness)
+    base_id = generate_ulid_hex(14)
+
+    # Add entity name entropy (4 chars) for traceability
     entity_hash = hashlib.sha256(entity_name.encode()).hexdigest()[:4]
-    # Add timestamp entropy (2 chars) for additional uniqueness
-    timestamp_hash = hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()[:2]
-    # Total: 12 + 4 + 2 = 18 chars after 'kg' prefix
-    graph_id = f"kg{base_uuid}{entity_hash}{timestamp_hash}"
+
+    # Total: 14 + 4 = 18 chars after 'kg' prefix
+    graph_id = f"kg{base_id}{entity_hash}"
     return graph_id
 
   async def _install_entity_schema_kuzu(

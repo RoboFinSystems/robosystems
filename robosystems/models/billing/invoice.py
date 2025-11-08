@@ -1,6 +1,5 @@
 """Billing invoice models - consolidated invoicing for all resources."""
 
-import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from enum import Enum
@@ -9,6 +8,7 @@ from sqlalchemy.orm import relationship, Session
 
 from ...database import Base
 from ...logger import get_logger
+from ...utils.ulid import generate_prefixed_ulid
 
 logger = get_logger(__name__)
 
@@ -32,9 +32,7 @@ class BillingInvoice(Base):
 
   __tablename__ = "billing_invoices"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"binv_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("binv"))
 
   org_id = Column(String, ForeignKey("orgs.id"), nullable=False)
 
@@ -261,9 +259,7 @@ class BillingInvoiceLineItem(Base):
 
   __tablename__ = "billing_invoice_line_items"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"bli_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("bli"))
 
   invoice_id = Column(String, ForeignKey("billing_invoices.id"), nullable=False)
 

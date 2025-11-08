@@ -1,6 +1,5 @@
 """Graph backup tracking model for PostgreSQL."""
 
-import secrets
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Sequence
 from enum import Enum
@@ -20,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, Session
 
 from ...database import Model
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class BackupStatus(str, Enum):
@@ -45,7 +45,7 @@ class GraphBackup(Model):
   __tablename__ = "graph_backups"
 
   id = Column(
-    String, primary_key=True, default=lambda: f"backup_{secrets.token_urlsafe(16)}"
+    String, primary_key=True, default=lambda: generate_prefixed_ulid("backup")
   )
 
   # Graph identification

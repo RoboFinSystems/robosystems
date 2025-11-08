@@ -1,6 +1,5 @@
 """Billing audit log - consolidated audit trail for all billing events."""
 
-import secrets
 from datetime import datetime, timezone
 from typing import Optional
 from enum import Enum
@@ -9,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ...database import Base
 from ...logger import get_logger
+from ...utils.ulid import generate_prefixed_ulid
 
 logger = get_logger(__name__)
 
@@ -59,9 +59,7 @@ class BillingAuditLog(Base):
 
   __tablename__ = "billing_audit_logs"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"baud_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("baud"))
 
   event_type = Column(String, nullable=False)
   event_timestamp = Column(
@@ -113,7 +111,20 @@ class BillingAuditLog(Base):
     actor_user_id: Optional[str] = None,
     actor_ip: Optional[str] = None,
   ) -> "BillingAuditLog":
-    """Create an audit log entry."""
+    """Create an audit log entry.
+
+    At least one entity reference (org_id, subscription_id, invoice_id, or actor_user_id)
+    must be provided to ensure the audit log is traceable.
+
+    Raises:
+        ValueError: If no entity reference is provided
+    """
+    if not any([org_id, subscription_id, invoice_id, actor_user_id]):
+      raise ValueError(
+        "Audit log must reference at least one entity: "
+        "org_id, subscription_id, invoice_id, or actor_user_id"
+      )
+
     event_type_str = (
       event_type.value if isinstance(event_type, BillingEventType) else event_type
     )

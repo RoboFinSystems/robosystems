@@ -13,6 +13,7 @@ from sqlalchemy.orm import relationship, Session
 from ...database import Model
 from ...logger import logger
 from ...security import SecurityAuditLogger, SecurityEventType
+from ...utils.ulid import generate_prefixed_ulid
 
 
 class UserAPIKey(Model):
@@ -20,9 +21,7 @@ class UserAPIKey(Model):
 
   __tablename__ = "user_api_keys"
 
-  id = Column(
-    String, primary_key=True, default=lambda: f"uak_{secrets.token_urlsafe(16)}"
-  )
+  id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("uak"))
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
   name = Column(String, nullable=False)  # User-friendly name for the key
   key_hash = Column(
