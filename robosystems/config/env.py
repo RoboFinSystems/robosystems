@@ -266,6 +266,10 @@ class EnvConfig:
     bool(get_secret_value("CSP_TRUSTED_TYPES_ENABLED", "true").lower() == "true"),
   )
   MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
+  ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
+    "ORG_MEMBER_INVITATIONS_ENABLED",
+    bool(get_secret_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true"),
+  )
 
   # Connection Feature Flags
   CONNECTION_SEC_ENABLED = get_bool_env(

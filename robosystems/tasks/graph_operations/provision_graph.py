@@ -81,6 +81,14 @@ def provision_graph_task(
     graph_type = graph_config.get("graph_type", "generic")
     tier = graph_config.get("tier", "kuzu-standard")
 
+    # Validate tier against subscription plan to prevent tier mismatch exploits
+    if tier != subscription.plan_name:
+      logger.warning(
+        f"Tier mismatch detected: requested tier '{tier}' doesn't match "
+        f"subscription plan '{subscription.plan_name}'. Using subscription plan tier."
+      )
+      tier = subscription.plan_name
+
     logger.info(f"Detected graph type: {graph_type}")
 
     # Check if this is an entity/company graph (has initial entity data)

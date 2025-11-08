@@ -136,7 +136,7 @@ test-cov:
     uv run pytest --cov=robosystems tests/ --ignore=tests/integration
 
 # Run code quality checks
-test-code-quality:
+test-code:
     @just lint
     @just format
     @just typecheck

@@ -7,6 +7,7 @@ from ...database import get_db_session
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
 from ...models.iam import User, OrgUser, OrgRole
+from ...config import env
 from ...models.api.orgs import (
   OrgMemberResponse,
   InviteMemberRequest,
@@ -14,6 +15,7 @@ from ...models.api.orgs import (
   OrgMemberListResponse,
 )
 from ...logger import get_logger
+from ..auth.utils import hash_password
 
 logger = get_logger(__name__)
 
@@ -81,7 +83,10 @@ async def list_org_members(
   response_model=OrgMemberResponse,
   status_code=status.HTTP_201_CREATED,
   summary="Invite Member",
-  description="Invite a user to join the organization. Requires admin or owner role.",
+  description="""Invite a user to join the organization. Requires admin or owner role.
+
+  **⚠️ FEATURE NOT READY**: This endpoint is disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false).
+  Returns 501 NOT IMPLEMENTED when disabled. See endpoint implementation for TODO list before enabling.""",
   operation_id="inviteOrgMember",
 )
 async def invite_member(
@@ -91,7 +96,23 @@ async def invite_member(
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ) -> OrgMemberResponse:
-  """Invite a member to the organization."""
+  """Invite a member to the organization.
+
+  WARNING: This feature is incomplete and disabled by default (ORG_MEMBER_INVITATIONS_ENABLED=false).
+
+  TODO before enabling:
+  - Implement email invitation system with secure token-based activation
+  - Add invitation expiration (e.g., 7 days)
+  - Add cleanup job for expired/abandoned invitations
+  - Consider whether to support inviting existing users vs current "new users only" model
+  - Add invitation tracking/audit logging
+  """
+  if not env.ORG_MEMBER_INVITATIONS_ENABLED:
+    raise HTTPException(
+      status_code=status.HTTP_501_NOT_IMPLEMENTED,
+      detail="Organization member invitations are not enabled",
+    )
+
   try:
     # Check if user is an admin or owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -127,11 +148,14 @@ async def invite_member(
     # Create a pending user account that will be part of this org
     import secrets
 
+    # Generate a secure temporary password and hash it properly
+    temp_password = f"pending_{secrets.token_urlsafe(32)}"
+
     invited_user = User(
       email=request.email,
       name=request.email.split("@")[0],  # Default name from email
-      password_hash=f"pending_{secrets.token_urlsafe(32)}",  # Temporary password
-      is_active=False,  # Inactive until they set password
+      password_hash=hash_password(temp_password),  # Properly hashed temporary password
+      is_active=False,  # Inactive until they activate via email link and set password
     )
     db.add(invited_user)
     db.flush()  # Get the user ID without committing
@@ -149,12 +173,22 @@ async def invite_member(
     db.refresh(new_membership)
     db.refresh(invited_user)
 
-    # TODO: Send invitation email when email system is configured
-    # send_org_invite_email(
-    #   to_email=invited_user.email,
-    #   org_name=org.name,
-    #   inviter_name=current_user.name,
-    #   is_new_user=True,  # Always a new user now
+    # TODO: Implement invitation email system before enabling this feature
+    # Required:
+    # 1. Generate secure activation token (e.g., JWT or random token stored in DB)
+    # 2. Create invitation email template with activation link
+    # 3. Send email via configured email provider (SES, SendGrid, etc.)
+    # 4. Add activation endpoint to handle token validation and password setup
+    # 5. Token should expire after 7 days
+    #
+    # Example flow:
+    # token = generate_invitation_token(invited_user.id, org_id)
+    # activation_link = f"{env.FRONTEND_URL}/activate?token={token}"
+    # send_email(
+    #   to=invited_user.email,
+    #   subject=f"You've been invited to {org.name}",
+    #   template="org_invitation",
+    #   data={"activation_link": activation_link, "inviter": current_user.name}
     # )
 
     return OrgMemberResponse(

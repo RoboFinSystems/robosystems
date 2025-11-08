@@ -120,7 +120,7 @@
       "label": "Test Code Quality",
       "type": "shell",
       "command": "just",
-      "args": ["test-code-quality"],
+      "args": ["test-code"],
       "problemMatcher": []
     },
     {

@@ -7,6 +7,7 @@ from ...database import get_db_session
 from ...models.billing import BillingCustomer, BillingSubscription, BillingAuditLog
 from ...operations.providers.payment_provider import get_payment_provider
 from ...logger import get_logger
+from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
 
 logger = get_logger(__name__)
 
@@ -43,6 +44,20 @@ async def handle_stripe_webhook(
     signature = request.headers.get("stripe-signature")
 
     if not signature:
+      # Log security event for missing signature
+      client_ip = request.client.host if request.client else "unknown"
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        user_id=None,
+        ip_address=client_ip,
+        endpoint="/admin/v1/webhooks/stripe",
+        details={
+          "reason": "missing_webhook_signature",
+          "payload_size_bytes": len(payload),
+        },
+        risk_level="high",
+      )
+
       raise HTTPException(status_code=400, detail="Missing stripe-signature header")
 
     provider = get_payment_provider("stripe")
@@ -51,6 +66,23 @@ async def handle_stripe_webhook(
       event = provider.verify_webhook(payload, signature)
     except ValueError as e:
       logger.error(f"Invalid webhook signature: {e}")
+
+      # Log security event for failed signature verification
+      client_ip = request.client.host if request.client else "unknown"
+      SecurityAuditLogger.log_security_event(
+        event_type=SecurityEventType.AUTHORIZATION_DENIED,
+        user_id=None,
+        ip_address=client_ip,
+        endpoint="/admin/v1/webhooks/stripe",
+        details={
+          "reason": "invalid_webhook_signature",
+          "error": str(e),
+          "signature_present": bool(signature),
+          "payload_size_bytes": len(payload),
+        },
+        risk_level="high",
+      )
+
       raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     event_type = event.get("type")

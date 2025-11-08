@@ -197,7 +197,9 @@ class GraphSubscriptionService:
         "Customer has payment method on file, creating Stripe subscription automatically",
         extra={
           "user_id": user_id,
-          "stripe_customer_id": customer.stripe_customer_id,
+          "stripe_customer_id": f"{customer.stripe_customer_id[:8]}***{customer.stripe_customer_id[-4:]}"
+          if customer.stripe_customer_id
+          else None,
           "plan_name": plan_name,
         },
       )
@@ -226,12 +228,17 @@ class GraphSubscriptionService:
         subscription.provider_customer_id = customer.stripe_customer_id
         subscription.payment_provider = "stripe"
 
+        redacted_stripe_id = (
+          f"{stripe_subscription_id[:8]}***{stripe_subscription_id[-4:]}"
+          if stripe_subscription_id
+          else None
+        )
         logger.info(
-          f"Created Stripe subscription {stripe_subscription_id} for graph {graph_id}",
+          f"Created Stripe subscription {redacted_stripe_id} for graph {graph_id}",
           extra={
             "user_id": user_id,
             "subscription_id": subscription.id,
-            "stripe_subscription_id": stripe_subscription_id,
+            "stripe_subscription_id": redacted_stripe_id,
           },
         )
 
@@ -269,11 +276,16 @@ class GraphSubscriptionService:
         session=self.session,
       )
     else:
+      redacted_stripe_sub_id = (
+        f"{subscription.stripe_subscription_id[:8]}***{subscription.stripe_subscription_id[-4:]}"
+        if subscription.stripe_subscription_id
+        else None
+      )
       logger.info(
         f"Stripe will create invoice for subscription {subscription.id}",
         extra={
           "subscription_id": subscription.id,
-          "stripe_subscription_id": subscription.stripe_subscription_id,
+          "stripe_subscription_id": redacted_stripe_sub_id,
         },
       )
 
