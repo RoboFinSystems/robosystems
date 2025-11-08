@@ -562,6 +562,134 @@ def update_customer(
     click.echo(f"   Billing Email: {customer.get('billing_email', 'N/A')}")
 
 
+@cli.group()
+def invoices():
+  """Manage customer invoices."""
+  pass
+
+
+@invoices.command("list")
+@click.option("--status", help="Filter by status (DRAFT, OPEN, PAID, VOID)")
+@click.option("--user-id", help="Filter by user ID")
+@click.option("--limit", default=100, help="Maximum number of results")
+@click.pass_obj
+def list_invoices(client, status, user_id, limit):
+  """List all invoices."""
+  params = {"limit": limit}
+  if status:
+    params["status"] = status
+  if user_id:
+    params["user_id"] = user_id
+
+  invoices = client._make_request("GET", "/admin/v1/invoices", params=params)
+
+  if not invoices:
+    console.print("\n[yellow]No invoices found.[/yellow]")
+    return
+
+  table = Table(title="Invoices", show_header=True, header_style="bold cyan")
+  table.add_column("Invoice #", no_wrap=True)
+  table.add_column("Customer", overflow="fold")
+  table.add_column("Status", overflow="fold")
+  table.add_column("Total", justify="right")
+  table.add_column("Due Date", overflow="fold")
+  table.add_column("Payment Terms", overflow="fold")
+  table.add_column("Created", overflow="fold")
+
+  for invoice in invoices:
+    table.add_row(
+      invoice["invoice_number"],
+      invoice.get("user_email", "N/A"),
+      invoice["status"],
+      f"${invoice['total_cents'] / 100:.2f}",
+      invoice["due_date"][:10] if invoice.get("due_date") else "N/A",
+      invoice["payment_terms"],
+      invoice["created_at"][:10],
+    )
+
+  console.print()
+  console.print(table)
+  console.print(f"\n[bold]Total:[/bold] {len(invoices):,} invoices")
+
+
+@invoices.command("get")
+@click.argument("invoice_id")
+@click.pass_obj
+def get_invoice(client, invoice_id):
+  """Get details of a specific invoice."""
+  invoice = client._make_request("GET", f"/admin/v1/invoices/{invoice_id}")
+
+  click.echo("\nINVOICE DETAILS")
+  click.echo("=" * 60)
+
+  click.echo(f"\nInvoice Number: {invoice['invoice_number']}")
+  click.echo(f"ID: {invoice['id']}")
+  click.echo(f"Status: {invoice['status']}")
+
+  click.echo("\nCUSTOMER")
+  click.echo(f"  Name: {invoice.get('user_name', 'N/A')}")
+  click.echo(f"  Email: {invoice.get('user_email', 'N/A')}")
+  click.echo(f"  User ID: {invoice['billing_customer_user_id']}")
+
+  click.echo("\nAMOUNTS")
+  click.echo(f"  Subtotal: ${invoice['subtotal_cents'] / 100:.2f}")
+  if invoice["tax_cents"] > 0:
+    click.echo(f"  Tax: ${invoice['tax_cents'] / 100:.2f}")
+  if invoice["discount_cents"] > 0:
+    click.echo(f"  Discount: -${invoice['discount_cents'] / 100:.2f}")
+  click.echo(f"  Total: ${invoice['total_cents'] / 100:.2f}")
+
+  click.echo("\nDATES")
+  click.echo(
+    f"  Period: {invoice['period_start'][:10]} to {invoice['period_end'][:10]}"
+  )
+  if invoice.get("due_date"):
+    click.echo(f"  Due Date: {invoice['due_date'][:10]}")
+  click.echo(f"  Payment Terms: {invoice['payment_terms']}")
+  if invoice.get("paid_at"):
+    click.echo(f"  Paid: {invoice['paid_at'][:10]}")
+
+  if invoice.get("payment_method"):
+    click.echo("\nPAYMENT")
+    click.echo(f"  Method: {invoice['payment_method']}")
+    if invoice.get("payment_reference"):
+      click.echo(f"  Reference: {invoice['payment_reference']}")
+
+  click.echo("\nLINE ITEMS")
+  for item in invoice["line_items"]:
+    click.echo(f"  - {item['description']}")
+    click.echo(
+      f"    Quantity: {item['quantity']} x ${item['unit_price_cents'] / 100:.2f} = ${item['amount_cents'] / 100:.2f}"
+    )
+    if item.get("subscription_id"):
+      click.echo(f"    Subscription: {item['subscription_id']}")
+
+
+@invoices.command("mark-paid")
+@click.argument("invoice_id")
+@click.option(
+  "--payment-method", required=True, help="Payment method (e.g., bank_transfer, check)"
+)
+@click.option("--payment-reference", help="Payment reference or transaction ID")
+@click.pass_obj
+def mark_invoice_paid(client, invoice_id, payment_method, payment_reference):
+  """Mark an invoice as paid."""
+  params = {"payment_method": payment_method}
+  if payment_reference:
+    params["payment_reference"] = payment_reference
+
+  invoice = client._make_request(
+    "PATCH", f"/admin/v1/invoices/{invoice_id}/mark-paid", params=params
+  )
+
+  click.echo(f"✅ Marked invoice {invoice['invoice_number']} as paid")
+  click.echo(f"   Customer: {invoice.get('user_email', 'N/A')}")
+  click.echo(f"   Amount: ${invoice['total_cents'] / 100:.2f}")
+  click.echo(f"   Payment Method: {invoice['payment_method']}")
+  if payment_reference:
+    click.echo(f"   Reference: {invoice['payment_reference']}")
+
+
 @cli.command()
 @click.pass_obj
 def stats(client):

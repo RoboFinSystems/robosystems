@@ -420,8 +420,8 @@ async def create_graph(
       )
       if not can_provision:
         _raise_http_exception(
-          status_code=status.HTTP_403_FORBIDDEN,
-          error_code="billing_required",
+          status_code=status.HTTP_402_PAYMENT_REQUIRED,
+          error_code="payment_required",
           message=billing_error or "Valid payment method required to create graphs.",
         )
 

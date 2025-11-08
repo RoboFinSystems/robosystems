@@ -44,6 +44,8 @@ class BillingEventType(str, Enum):
   INVOICE_BILLING_ENABLED = "invoice_billing_enabled"
   INVOICE_BILLING_DISABLED = "invoice_billing_disabled"
 
+  WEBHOOK_RECEIVED = "webhook_received"
+
   ADMIN_OVERRIDE = "admin_override"
   DISCOUNT_APPLIED = "discount_applied"
 
@@ -187,4 +189,67 @@ class BillingAuditLog(Base):
       .filter(cls.invoice_id == invoice_id)
       .order_by(cls.event_timestamp.desc())
       .all()
+    )
+
+  @classmethod
+  def is_webhook_processed(cls, event_id: str, provider: str, session: Session) -> bool:
+    """Check if a webhook event has already been processed.
+
+    Uses the audit log to track webhook events for idempotency.
+
+    Args:
+        event_id: The webhook event ID from the payment provider
+        provider: Payment provider name (e.g., 'stripe')
+        session: Database session
+
+    Returns:
+        True if event already processed, False otherwise
+    """
+    from sqlalchemy import and_
+
+    return (
+      session.query(cls)
+      .filter(
+        and_(
+          cls.event_type == BillingEventType.WEBHOOK_RECEIVED.value,
+          cls.event_data.op("->>")("provider") == provider,
+          cls.event_data.op("->>")("event_id") == event_id,
+        )
+      )
+      .first()
+      is not None
+    )
+
+  @classmethod
+  def mark_webhook_processed(
+    cls,
+    event_id: str,
+    provider: str,
+    event_type: str,
+    event_data: dict,
+    session: Session,
+  ) -> "BillingAuditLog":
+    """Mark a webhook event as processed in the audit log.
+
+    Args:
+        event_id: The webhook event ID from the payment provider
+        provider: Payment provider name (e.g., 'stripe')
+        event_type: The webhook event type (e.g., 'checkout.session.completed')
+        event_data: Full event data from the webhook
+        session: Database session
+
+    Returns:
+        The created audit log entry
+    """
+    return cls.log_event(
+      session=session,
+      event_type=BillingEventType.WEBHOOK_RECEIVED,
+      description=f"{provider} webhook: {event_type}",
+      actor_type=f"{provider}_webhook",
+      event_data={
+        "provider": provider,
+        "event_id": event_id,
+        "webhook_type": event_type,
+        "data": event_data,
+      },
     )

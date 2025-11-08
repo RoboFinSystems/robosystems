@@ -65,6 +65,15 @@ class BillingCustomer(Base):
     """Get billing customer by user ID."""
     return session.query(cls).filter(cls.user_id == user_id).first()
 
+  @classmethod
+  def get_by_stripe_customer_id(
+    cls, stripe_customer_id: str, session: Session
+  ) -> Optional["BillingCustomer"]:
+    """Get billing customer by Stripe customer ID."""
+    return (
+      session.query(cls).filter(cls.stripe_customer_id == stripe_customer_id).first()
+    )
+
   def can_provision_resources(
     self, environment: str, billing_enabled: bool
   ) -> tuple[bool, Optional[str]]:

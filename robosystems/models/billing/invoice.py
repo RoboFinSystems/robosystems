@@ -182,7 +182,7 @@ class BillingInvoice(Base):
     """Recalculate invoice totals from line items."""
     total = sum(item.amount_cents for item in self.line_items)
     self.subtotal_cents = total
-    self.total_cents = total + self.tax_cents - self.discount_cents
+    self.total_cents = total + (self.tax_cents or 0) - (self.discount_cents or 0)
     self.updated_at = datetime.now(timezone.utc)
     session.commit()
 

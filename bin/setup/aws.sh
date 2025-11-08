@@ -71,7 +71,6 @@ function create_production_secret() {
         --secret-string '{
         "ANTHROPIC_API_KEY": "sk-ant-api03-your_anthropic_api_key_here",
         "BILLING_ENABLED": "false",
-        "BILLING_PREMIUM_PLANS_ENABLED": "false",
         "CONNECTION_CREDENTIALS_KEY": "your_connection_creds_key_here_use_openssl_rand_base64_32",
         "CONNECTION_PLAID_ENABLED": "true",
         "CONNECTION_QUICKBOOKS_ENABLED": "true",
@@ -126,7 +125,6 @@ function create_staging_secret() {
         --secret-string '{
         "ANTHROPIC_API_KEY": "sk-ant-api03-your_anthropic_api_key_here",
         "BILLING_ENABLED": "false",
-        "BILLING_PREMIUM_PLANS_ENABLED": "false",
         "CONNECTION_CREDENTIALS_KEY": "dev-connection-creds-key-12345678901234567890abcdef",
         "CONNECTION_PLAID_ENABLED": "true",
         "CONNECTION_QUICKBOOKS_ENABLED": "true",

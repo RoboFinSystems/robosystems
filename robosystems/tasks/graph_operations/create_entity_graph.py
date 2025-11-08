@@ -2,7 +2,8 @@ import logging
 from typing import Dict, Any
 from ...celery import celery_app
 from ...operations.graph.entity_graph_service import EntityGraphServiceSync
-from ...database import session as db_session
+from ...operations.graph.subscription_service import GraphSubscriptionService
+from ...database import session as db_session, get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,37 @@ def create_entity_with_new_graph_task(
       user_id=user_id,
       cancellation_callback=check_cancellation,
     )
+
+    # Create billing subscription for the graph
+    try:
+      session = next(get_db_session())
+      try:
+        subscription_service = GraphSubscriptionService(session)
+        plan_name = entity_data_dict.get("graph_tier", "kuzu-standard")
+        graph_id = result.get("graph_id")
+
+        subscription = subscription_service.create_graph_subscription(
+          user_id=user_id,
+          graph_id=graph_id,
+          plan_name=plan_name,
+        )
+
+        logger.info(
+          f"Created billing subscription {subscription.id} for graph {graph_id}",
+          extra={
+            "user_id": user_id,
+            "graph_id": graph_id,
+            "subscription_id": subscription.id,
+            "plan_name": plan_name,
+          },
+        )
+      finally:
+        session.close()
+    except Exception as billing_error:
+      logger.error(
+        f"Failed to create billing subscription for graph {result.get('graph_id')}: {billing_error}",
+        extra={"user_id": user_id, "graph_id": result.get("graph_id")},
+      )
 
     logger.info(f"Entity creation task completed successfully for user {user_id}")
     return result
@@ -129,6 +161,38 @@ def create_entity_with_new_graph_sse_task(
       cancellation_callback=check_cancellation,
       progress_callback=progress_callback,
     )
+
+    # Create billing subscription for the graph
+    progress_tracker.emit_progress("Creating billing subscription...", 95)
+    try:
+      session = next(get_db_session())
+      try:
+        subscription_service = GraphSubscriptionService(session)
+        plan_name = entity_data_dict.get("graph_tier", "kuzu-standard")
+        graph_id = result.get("graph_id")
+
+        subscription = subscription_service.create_graph_subscription(
+          user_id=user_id,
+          graph_id=graph_id,
+          plan_name=plan_name,
+        )
+
+        logger.info(
+          f"Created billing subscription {subscription.id} for graph {graph_id}",
+          extra={
+            "user_id": user_id,
+            "graph_id": graph_id,
+            "subscription_id": subscription.id,
+            "plan_name": plan_name,
+          },
+        )
+      finally:
+        session.close()
+    except Exception as billing_error:
+      logger.error(
+        f"Failed to create billing subscription for graph {result.get('graph_id')}: {billing_error}",
+        extra={"user_id": user_id, "graph_id": result.get("graph_id")},
+      )
 
     # Emit completion event with entity-specific context
     progress_tracker.emit_completion(

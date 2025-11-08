@@ -24,7 +24,7 @@ class ValkeyDatabase(IntEnum):
 
   Current allocation:
   - 0-1: Celery task queue system
-  - 2-8: Application services (auth, SSE, locks, pipelines, credits, rate limiting, kuzu)
+  - 2-9: Application services (auth, SSE, locks, pipelines, credits, rate limiting, kuzu, billing)
   """
 
   # =========================================================================
@@ -34,7 +34,7 @@ class ValkeyDatabase(IntEnum):
   CELERY_RESULTS = 1  # Celery task results storage
 
   # =========================================================================
-  # APPLICATION DATABASES (2-8)
+  # APPLICATION DATABASES (2-9)
   # =========================================================================
   AUTH_CACHE = 2  # Authentication tokens, sessions, API keys
   SSE_EVENTS = 3  # Server-Sent Events pub/sub and queue
@@ -43,6 +43,7 @@ class ValkeyDatabase(IntEnum):
   CREDITS_CACHE = 6  # Credit balance and transaction caching
   RATE_LIMITING = 7  # Rate limiting counters and windows
   KUZU_CACHE = 8  # Kuzu client factory caching (URLs, health, locations)
+  BILLING_CACHE = 9  # Billing provider price mappings and checkout state
 
   @classmethod
   def get_next_available(cls) -> int:
@@ -372,6 +373,7 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
     ValkeyDatabase.CREDITS_CACHE: "Credit balance and transaction caching",
     ValkeyDatabase.RATE_LIMITING: "API rate limiting counters and time windows",
     ValkeyDatabase.KUZU_CACHE: "Kuzu client factory caching for URLs, health, and instance locations",
+    ValkeyDatabase.BILLING_CACHE: "Billing provider price mappings and checkout state cache",
   }
 
   return descriptions.get(

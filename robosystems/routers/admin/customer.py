@@ -130,6 +130,17 @@ async def update_customer(
     session.refresh(customer)
 
     if old_values:
+      sanitized_old_values = {
+        k: v for k, v in old_values.items() if k != "payment_terms"
+      }
+      sanitized_new_values = {
+        k: v for k, v in new_values.items() if k != "payment_terms"
+      }
+
+      if "payment_terms" in old_values:
+        sanitized_old_values["payment_terms"] = "[REDACTED]"
+        sanitized_new_values["payment_terms"] = "[REDACTED]"
+
       BillingAuditLog.log_event(
         session=session,
         event_type="customer.updated",
@@ -139,19 +150,23 @@ async def update_customer(
         event_data={
           "admin_key_id": request.state.admin_key_id,
           "admin_name": request.state.admin.get("name"),
-          "old_values": old_values,
-          "new_values": new_values,
+          "old_values": sanitized_old_values,
+          "new_values": sanitized_new_values,
         },
       )
 
     user = session.query(User).filter(User.id == user_id).first()
+
+    log_changes = {k: v for k, v in new_values.items() if k != "payment_terms"}
+    if "payment_terms" in new_values:
+      log_changes["payment_terms"] = "[REDACTED]"
 
     logger.info(
       f"Admin updated customer {user_id}",
       extra={
         "admin_key_id": request.state.admin_key_id,
         "user_id": user_id,
-        "changes": new_values,
+        "changes": log_changes,
       },
     )
 

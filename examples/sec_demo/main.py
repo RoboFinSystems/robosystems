@@ -5,7 +5,7 @@ SEC Repository Demo - Setup Script
 This script sets up access to the SEC shared repository:
 1. Creates or reuses demo user credentials
 2. Loads SEC data for a specific ticker and year
-3. Grants repository access to the user
+3. Creates repository subscription via API
 4. Updates credentials config to include SEC as a graph
 5. Runs example queries (unless --skip-queries is set)
 
@@ -27,6 +27,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from robosystems_client.client import AuthenticatedClient
+from robosystems_client.api.subscriptions.create_repository_subscription import (
+    sync_detailed as api_create_subscription,
+)
+from robosystems_client.models.create_repository_subscription_request import (
+    CreateRepositorySubscriptionRequest,
+)
 from examples.credentials.utils import (
     ensure_user_credentials,
     CredentialContext,
@@ -90,6 +97,45 @@ def update_credentials(data: dict):
 
 
 
+def create_sec_subscription(api_key: str, base_url: str, plan_name: str = "sec-starter"):
+    """Create SEC repository subscription via API."""
+    try:
+        client = AuthenticatedClient(
+            base_url=base_url,
+            token=api_key,
+            prefix="",
+            auth_header_name="X-API-Key",
+        )
+
+        request_body = CreateRepositorySubscriptionRequest(plan_name=plan_name)
+
+        print(f"   Creating subscription with plan: {plan_name}")
+        response = api_create_subscription(
+            graph_id="sec",
+            client=client,
+            body=request_body,
+        )
+
+        if response.status_code == 201:
+            print(f"   ✅ SEC subscription created successfully")
+            if response.parsed:
+                subscription_data = response.parsed.to_dict() if hasattr(response.parsed, 'to_dict') else response.parsed
+                print(f"   Subscription ID: {subscription_data.get('id', 'unknown')}")
+                print(f"   Plan: {subscription_data.get('plan_name', 'unknown')}")
+                print(f"   Status: {subscription_data.get('status', 'unknown')}")
+            return True
+        elif response.status_code == 409:
+            print(f"   ℹ️  Subscription already exists")
+            return True
+        else:
+            print(f"   ❌ Failed to create subscription: HTTP {response.status_code}")
+            return False
+
+    except Exception as e:
+        print(f"   ❌ Error creating subscription: {e}")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Setup SEC repository demo with data loading and access"
@@ -110,6 +156,11 @@ def main():
         default="http://localhost:8000",
         help="API base URL (default: http://localhost:8000)",
     )
+    parser.add_argument(
+        "--plan",
+        default="sec-starter",
+        help="SEC subscription plan (default: sec-starter)",
+    )
 
     args = parser.parse_args()
 
@@ -117,10 +168,17 @@ def main():
     print("=" * 70)
     print(f"Ticker: {args.ticker}")
     print(f"Year: {args.year}")
+    print(f"Plan: {args.plan}")
     print("=" * 70)
 
     # Load or create credentials
     credentials = load_or_create_credentials(args.base_url)
+
+    # Get api_key
+    api_key = credentials.get("api_key")
+    if not api_key:
+        print("❌ No API key found in credentials")
+        sys.exit(1)
 
     # Get user_id
     user_id = credentials.get("user_id") or credentials.get("user", {}).get("id")
@@ -137,9 +195,11 @@ def main():
     # Brief pause to let graph settle
     time.sleep(2)
 
-    # Step 2: Grant repository access
-    print("\n🔑 Step 2: Granting SEC repository access...")
-    run_just_command(f"repo-grant-access {user_id} sec read")
+    # Step 2: Create repository subscription via API
+    print("\n🔑 Step 2: Creating SEC repository subscription...")
+    if not create_sec_subscription(api_key, args.base_url, args.plan):
+        print("\n❌ Failed to create SEC subscription")
+        sys.exit(1)
 
     # Step 3: Update config.json to add sec graph
     print("\n💾 Step 3: Updating credentials config...")

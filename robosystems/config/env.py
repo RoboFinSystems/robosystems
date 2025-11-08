@@ -288,10 +288,6 @@ class EnvConfig:
     "BILLING_ENABLED",
     bool(get_secret_value("BILLING_ENABLED", "true").lower() == "true"),
   )
-  BILLING_PREMIUM_PLANS_ENABLED = get_bool_env(
-    "BILLING_PREMIUM_PLANS_ENABLED",
-    bool(get_secret_value("BILLING_PREMIUM_PLANS_ENABLED", "false").lower() == "true"),
-  )
 
   # Security Feature Flags
   SECURITY_AUDIT_ENABLED = get_bool_env(
@@ -680,6 +676,11 @@ class EnvConfig:
   OPENFIGI_RETRY_MAX_WAIT = get_int_env(
     "OPENFIGI_RETRY_MAX_WAIT", OPENFIGI_RETRY_MAX_WAIT
   )
+
+  # Stripe (payment processing)
+  STRIPE_SECRET_KEY = get_secret_value("STRIPE_SECRET_KEY", "")
+  STRIPE_PUBLISHABLE_KEY = get_secret_value("STRIPE_PUBLISHABLE_KEY", "")
+  STRIPE_WEBHOOK_SECRET = get_secret_value("STRIPE_WEBHOOK_SECRET", "")
 
   # ==========================================================================
   # DATA PROCESSING CONFIGURATION

@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from enum import Enum
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
 from ...database import Base
@@ -17,6 +18,8 @@ class SubscriptionStatus(str, Enum):
   """Subscription status states."""
 
   PENDING = "pending"
+  PENDING_PAYMENT = "pending_payment"
+  PROVISIONING = "provisioning"
   ACTIVE = "active"
   PAUSED = "paused"
   CANCELED = "canceled"
@@ -50,7 +53,7 @@ class BillingSubscription(Base):
   billing_customer_user_id = Column(String, ForeignKey("users.id"), nullable=False)
 
   resource_type = Column(String, nullable=False)
-  resource_id = Column(String, nullable=False)
+  resource_id = Column(String, nullable=True)
 
   plan_name = Column(String, nullable=False)
   billing_interval = Column(String, default="monthly", nullable=False)
@@ -60,6 +63,14 @@ class BillingSubscription(Base):
   stripe_subscription_id = Column(String, unique=True, nullable=True)
   stripe_product_id = Column(String, nullable=True)
   stripe_price_id = Column(String, nullable=True)
+
+  payment_provider = Column(String, default="invoice", nullable=False)
+  provider_subscription_id = Column(String, unique=True, nullable=True)
+  provider_customer_id = Column(String, nullable=True)
+
+  subscription_metadata = Column(
+    JSONB, default=dict, nullable=False, server_default="{}"
+  )
 
   status = Column(String, default="pending", nullable=False)
 
@@ -84,6 +95,7 @@ class BillingSubscription(Base):
     Index("idx_billing_sub_resource", "resource_type", "resource_id"),
     Index("idx_billing_sub_status", "status"),
     Index("idx_billing_sub_stripe", "stripe_subscription_id"),
+    Index("idx_billing_sub_provider", "provider_subscription_id"),
   )
 
   def __repr__(self) -> str:
@@ -172,6 +184,28 @@ class BillingSubscription(Base):
         cls.status == SubscriptionStatus.ACTIVE.value,
       )
       .all()
+    )
+
+  @classmethod
+  def get_by_provider_subscription_id(
+    cls, provider_subscription_id: str, session: Session
+  ) -> Optional["BillingSubscription"]:
+    """Get subscription by payment provider subscription ID (e.g., Stripe subscription ID)."""
+    return (
+      session.query(cls)
+      .filter(cls.provider_subscription_id == provider_subscription_id)
+      .first()
+    )
+
+  @classmethod
+  def get_by_stripe_subscription_id(
+    cls, stripe_subscription_id: str, session: Session
+  ) -> Optional["BillingSubscription"]:
+    """Get subscription by Stripe subscription ID (legacy support)."""
+    return (
+      session.query(cls)
+      .filter(cls.stripe_subscription_id == stripe_subscription_id)
+      .first()
     )
 
   def activate(self, session: Session) -> None:

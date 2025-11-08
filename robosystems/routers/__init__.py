@@ -22,12 +22,18 @@ from .graphs import (
   info_router,
   limits_router,
   subgraphs_router,
-  subscriptions_router,
+  subscriptions_router as graph_subscriptions_router,
   tables_router,
 )  # Removed allocation_router - too dangerous for public API
 from .graphs.mcp import router as mcp_router
 from .offering import offering_router
 from .operations import router as operations_router
+from .billing import (
+  checkout_router,
+  customer_router,
+  invoices_router,
+  subscriptions_router as billing_subscriptions_router,
+)
 
 # Graph-scoped routes that require an existing graph_id
 router = APIRouter(prefix="/v1/graphs/{graph_id}", tags=[])
@@ -46,7 +52,7 @@ router.include_router(info_router)  # No prefix - handles /info internally
 router.include_router(limits_router)  # No prefix - handles /limits internally
 router.include_router(subgraphs_router, prefix="/subgraphs")
 router.include_router(
-  subscriptions_router, prefix="/subscriptions"
+  graph_subscriptions_router, prefix="/subscriptions"
 )  # Unified subscription management
 router.include_router(
   tables_router
@@ -72,6 +78,13 @@ auth_router_v1.include_router(auth_router)
 status_router_v1 = APIRouter(prefix="/v1", tags=["Status"])
 status_router_v1.include_router(status_router)
 
+# Billing routes that don't require a graph_id
+billing_router_v1 = APIRouter(prefix="/v1")
+billing_router_v1.include_router(checkout_router)
+billing_router_v1.include_router(customer_router)
+billing_router_v1.include_router(invoices_router)
+billing_router_v1.include_router(billing_subscriptions_router)
+
 # Export routers for main application
 __all__ = [
   "router",
@@ -81,4 +94,5 @@ __all__ = [
   "graph_router",
   "offering_router_v1",
   "operations_router_v1",
+  "billing_router_v1",
 ]
