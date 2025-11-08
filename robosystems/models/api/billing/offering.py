@@ -8,27 +8,35 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 class GraphSubscriptionTier(BaseModel):
-  """Information about a graph subscription tier."""
+  """Information about a graph infrastructure tier.
 
-  name: str = Field(..., description="Tier name")
+  Each tier represents a per-graph subscription option with specific
+  infrastructure, performance, and pricing characteristics.
+  """
+
+  name: str = Field(
+    ..., description="Infrastructure tier identifier (e.g., kuzu-standard)"
+  )
   display_name: str = Field(..., description="Display name for UI")
   description: str = Field(..., description="Tier description")
-  monthly_price: float = Field(..., description="Monthly price in USD")
-  monthly_credits: int = Field(..., description="Monthly AI credits")
+  monthly_price_per_graph: float = Field(
+    ..., description="Monthly price in USD per graph"
+  )
+  monthly_credits_per_graph: int = Field(
+    ..., description="Monthly AI credits per graph"
+  )
   storage_included_gb: int = Field(..., description="Storage included in GB")
   storage_overage_per_gb: float = Field(
     ..., description="Overage cost per GB per month"
   )
-  allowed_graph_tiers: list[str] = Field(
-    ..., description="Allowed graph tier identifiers"
-  )
+  infrastructure: str = Field(..., description="Infrastructure description")
   features: list[str] = Field(..., description="List of features")
   backup_retention_days: int = Field(..., description="Backup retention in days")
   priority_support: bool = Field(
     ..., description="Whether priority support is included"
   )
   max_queries_per_hour: int | None = Field(None, description="Maximum queries per hour")
-  max_subgraphs: int | None = Field(None, description="Maximum subgraphs")
+  max_subgraphs: int = Field(0, description="Maximum subgraphs supported")
   api_rate_multiplier: float = Field(..., description="API rate multiplier")
   backend: str = Field(..., description="Database backend (kuzu or neo4j)")
   instance_type: str | None = Field(None, description="Instance type")
@@ -46,10 +54,20 @@ class StorageInfo(BaseModel):
 
 
 class GraphSubscriptions(BaseModel):
-  """Graph subscription offerings."""
+  """Graph subscription offerings.
+
+  Graph subscriptions are per-graph, not per-organization. Each graph
+  created by an organization has its own subscription with its own
+  infrastructure tier, pricing, and credit allocation.
+  """
 
   description: str = Field(..., description="Description of graph subscriptions")
-  tiers: list[GraphSubscriptionTier] = Field(..., description="Available tiers")
+  pricing_model: str = Field(
+    ..., description="Pricing model type (per_graph or per_organization)"
+  )
+  tiers: list[GraphSubscriptionTier] = Field(
+    ..., description="Available infrastructure tiers"
+  )
   storage: StorageInfo = Field(..., description="Storage information")
   notes: list[str] = Field(..., description="Important notes")
 
@@ -80,11 +98,18 @@ class RepositoryInfo(BaseModel):
 
 
 class RepositorySubscriptions(BaseModel):
-  """Repository subscription offerings."""
+  """Repository subscription offerings.
+
+  Repository subscriptions are per-organization, not per-graph. All members
+  of an organization share access to subscribed repositories.
+  """
 
   model_config = ConfigDict(json_schema_mode_override="serialization")
 
   description: str = Field(..., description="Description of repository subscriptions")
+  pricing_model: str = Field(
+    ..., description="Pricing model type (per_graph or per_organization)"
+  )
   repositories: list[RepositoryInfo] = Field(..., description="Available repositories")
   notes: list[str] = Field(..., description="Important notes")
 
@@ -126,6 +151,9 @@ class ServiceOfferingSummary(BaseModel):
 class ServiceOfferingsResponse(BaseModel):
   """Complete service offerings response."""
 
+  billing_enabled: bool = Field(
+    ..., description="Whether billing and payments are enabled"
+  )
   graph_subscriptions: GraphSubscriptions = Field(
     ..., description="Graph subscription offerings"
   )

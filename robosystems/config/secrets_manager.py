@@ -14,7 +14,7 @@ Secrets are organized in AWS Secrets Manager with the following structure:
             Feature flags: RATE_LIMIT_ENABLED, USER_REGISTRATION_ENABLED,
             CONNECTION_SEC_ENABLED, CONNECTION_QUICKBOOKS_ENABLED, CONNECTION_PLAID_ENABLED,
             SUBGRAPH_CREATION_ENABLED, BACKUP_CREATION_ENABLED,
-            Runtime configs: USER_GRAPHS_DEFAULT_LIMIT
+            Runtime configs: ORG_GRAPHS_DEFAULT_LIMIT
 
 - Extension secrets: `robosystems/{environment}/{type}`
   - `/postgres`: DATABASE_URL and other PostgreSQL configuration
@@ -376,7 +376,7 @@ SECRET_MAPPINGS = {
   "BACKUP_CREATION_ENABLED": (None, "BACKUP_CREATION_ENABLED"),
   "AGENT_POST_ENABLED": (None, "AGENT_POST_ENABLED"),
   # Runtime configuration
-  "USER_GRAPHS_DEFAULT_LIMIT": (None, "USER_GRAPHS_DEFAULT_LIMIT"),
+  "ORG_GRAPHS_DEFAULT_LIMIT": (None, "ORG_GRAPHS_DEFAULT_LIMIT"),
   # Admin API key (stored as raw string, wrapped in dict by get_secret)
   "ADMIN_API_KEY": ("admin", "ADMIN_API_KEY"),
 }

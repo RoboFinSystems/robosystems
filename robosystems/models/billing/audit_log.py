@@ -68,7 +68,7 @@ class BillingAuditLog(Base):
     DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
   )
 
-  billing_customer_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+  org_id = Column(String, ForeignKey("orgs.id"), nullable=True)
 
   subscription_id = Column(
     String, ForeignKey("billing_subscriptions.id"), nullable=True
@@ -88,7 +88,7 @@ class BillingAuditLog(Base):
   )
 
   __table_args__ = (
-    Index("idx_billing_audit_customer", "billing_customer_user_id"),
+    Index("idx_billing_audit_org", "org_id"),
     Index("idx_billing_audit_subscription", "subscription_id"),
     Index("idx_billing_audit_invoice", "invoice_id"),
     Index("idx_billing_audit_event_type", "event_type"),
@@ -106,7 +106,7 @@ class BillingAuditLog(Base):
     event_type: BillingEventType | str,
     description: str,
     actor_type: str = "system",
-    billing_customer_user_id: Optional[str] = None,
+    org_id: Optional[str] = None,
     subscription_id: Optional[str] = None,
     invoice_id: Optional[str] = None,
     event_data: Optional[dict] = None,
@@ -121,7 +121,7 @@ class BillingAuditLog(Base):
       event_type=event_type_str,
       description=description,
       actor_type=actor_type,
-      billing_customer_user_id=billing_customer_user_id,
+      org_id=org_id,
       subscription_id=subscription_id,
       invoice_id=invoice_id,
       event_data=event_data,
@@ -136,7 +136,7 @@ class BillingAuditLog(Base):
       f"Billing audit log: {event_type_str}",
       extra={
         "event_type": event_type_str,
-        "customer_user_id": billing_customer_user_id,
+        "org_id": org_id,
         "subscription_id": subscription_id,
         "invoice_id": invoice_id,
         "actor_type": actor_type,
@@ -146,20 +146,38 @@ class BillingAuditLog(Base):
     return audit_log
 
   @classmethod
-  def get_customer_history(
+  def get_org_history(
+    cls,
+    session: Session,
+    org_id: str,
+    event_type: Optional[BillingEventType] = None,
+    limit: int = 100,
+  ) -> list["BillingAuditLog"]:
+    """Get audit history for an organization."""
+    query = session.query(cls).filter(cls.org_id == org_id)
+
+    if event_type:
+      query = query.filter(cls.event_type == event_type.value)
+
+    return query.order_by(cls.event_timestamp.desc()).limit(limit).all()
+
+  @classmethod
+  def get_user_history(
     cls,
     session: Session,
     user_id: str,
     event_type: Optional[BillingEventType] = None,
     limit: int = 100,
   ) -> list["BillingAuditLog"]:
-    """Get audit history for a customer."""
-    query = session.query(cls).filter(cls.billing_customer_user_id == user_id)
+    """Get audit history for a user (looks up user's org first)."""
+    from ..iam import OrgUser
 
-    if event_type:
-      query = query.filter(cls.event_type == event_type.value)
+    org_user = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
 
-    return query.order_by(cls.event_timestamp.desc()).limit(limit).all()
+    if not org_user:
+      return []
+
+    return cls.get_org_history(session, org_user.org_id, event_type, limit)
 
   @classmethod
   def get_subscription_history(

@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from robosystems.operations.graph.subscription_service import GraphSubscriptionService
 from robosystems.models.billing import SubscriptionStatus
-from robosystems.models.iam import GraphUsageTracking
+from robosystems.models.iam import GraphUsage
 
 
 class TestSubscriptionEdgeCases:
@@ -75,7 +75,7 @@ class TestSubscriptionEdgeCases:
 
       result = subscription_service.create_graph_subscription(user_id, graph_id, "free")
 
-      assert result.billing_customer_user_id == user_id
+      assert result.org_id is not None
       assert result.resource_type == "graph"
       assert result.resource_id == graph_id
 
@@ -170,7 +170,7 @@ class TestSubscriptionEdgeCases:
   def test_usage_tracking_with_missing_data(self, mock_session):
     """Test usage tracking when some data is missing or corrupted."""
     # Create usage record with missing fields
-    usage_record = Mock(spec=GraphUsageTracking)
+    usage_record = Mock(spec=GraphUsage)
     usage_record.size_bytes = None  # Missing size
     usage_record.query_count = -1  # Invalid negative count
     usage_record.recorded_at = datetime.now(timezone.utc)

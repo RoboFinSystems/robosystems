@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from ...middleware.graph.router import get_universal_repository
 from ...middleware.graph.multitenant_utils import MultiTenantUtils
-from ...models.iam import UserGraph
+from ...models.iam import GraphUser
 from ...middleware.otel.metrics import get_endpoint_metrics
 from ...database import session
 
@@ -88,7 +88,7 @@ class GraphMetricsService:
     """
     try:
       # Get user's accessible graphs
-      user_graphs = UserGraph.get_by_user_id(user_id, session)
+      user_graphs = GraphUser.get_by_user_id(user_id, session)
       logger.info(
         f"collect_metrics_for_user: Found {len(user_graphs)} graphs for user {user_id}"
       )
@@ -142,7 +142,7 @@ class GraphMetricsService:
     try:
       if user_id:
         # User-specific summary
-        user_graphs = UserGraph.get_by_user_id(user_id, session)
+        user_graphs = GraphUser.get_by_user_id(user_id, session)
         graph_count = len(user_graphs)
         logger.info(
           f"Found {graph_count} graphs for user {user_id}: {[g.graph_id for g in user_graphs]}"
@@ -175,7 +175,7 @@ class GraphMetricsService:
         }
       else:
         # System-wide summary (admin only)
-        total_graphs = session.query(UserGraph).count()
+        total_graphs = session.query(GraphUser).count()
         return {
           "system_wide": True,
           "total_graphs": total_graphs,

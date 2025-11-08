@@ -515,12 +515,12 @@ class TestGraphOperationFeatureFlags:
 
     try:
       # Mock the environment configuration to disable subgraph creation
-      with patch("robosystems.routers.graphs.subgraphs.subgraph.env") as mock_env:
+      with patch("robosystems.routers.graphs.subgraphs.main.env") as mock_env:
         mock_env.SUBGRAPH_CREATION_ENABLED = False
 
         # Mock the circuit breaker check to pass
         with patch(
-          "robosystems.routers.graphs.subgraphs.subgraph.handle_circuit_breaker_check"
+          "robosystems.routers.graphs.subgraphs.main.handle_circuit_breaker_check"
         ):
           # Mock request data
           request_data = {
@@ -581,29 +581,27 @@ class TestGraphOperationFeatureFlags:
 
     try:
       # Mock the environment configuration to enable subgraph creation
-      with patch("robosystems.routers.graphs.subgraphs.subgraph.env") as mock_env:
+      with patch("robosystems.routers.graphs.subgraphs.main.env") as mock_env:
         mock_env.SUBGRAPH_CREATION_ENABLED = True
 
         # Mock all the verification functions to pass
         with (
           patch(
-            "robosystems.routers.graphs.subgraphs.subgraph.handle_circuit_breaker_check"
+            "robosystems.routers.graphs.subgraphs.main.handle_circuit_breaker_check"
           ),
           patch(
-            "robosystems.routers.graphs.subgraphs.subgraph.verify_parent_graph_access"
+            "robosystems.routers.graphs.subgraphs.main.verify_parent_graph_access"
           ) as mock_verify_access,
           patch(
-            "robosystems.routers.graphs.subgraphs.subgraph.verify_subgraph_tier_support"
+            "robosystems.routers.graphs.subgraphs.main.verify_subgraph_tier_support"
+          ),
+          patch("robosystems.routers.graphs.subgraphs.main.verify_parent_graph_active"),
+          patch("robosystems.routers.graphs.subgraphs.main.check_subgraph_quota"),
+          patch(
+            "robosystems.routers.graphs.subgraphs.main.validate_subgraph_name_unique"
           ),
           patch(
-            "robosystems.routers.graphs.subgraphs.subgraph.verify_parent_graph_active"
-          ),
-          patch("robosystems.routers.graphs.subgraphs.subgraph.check_subgraph_quota"),
-          patch(
-            "robosystems.routers.graphs.subgraphs.subgraph.validate_subgraph_name_unique"
-          ),
-          patch(
-            "robosystems.routers.graphs.subgraphs.subgraph.get_subgraph_service"
+            "robosystems.routers.graphs.subgraphs.main.get_subgraph_service"
           ) as mock_service,
         ):
           # Mock parent graph

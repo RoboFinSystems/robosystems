@@ -28,7 +28,8 @@ from sqlalchemy.orm import relationship, Session
 
 from ...database import Base
 from ...utils import default_credit_ulid, default_transaction_ulid
-from ...config.tier_config import get_tier_storage_limit
+from ...config.graph_tier import GraphTier
+from ...config.graph_tier import get_tier_storage_limit
 
 logger = logging.getLogger(__name__)
 
@@ -38,21 +39,6 @@ def safe_float(value: Any) -> float:
   if value is None:
     return 0.0
   return float(value)
-
-
-class GraphTier(str, Enum):
-  """Database tier types aligned with infrastructure."""
-
-  KUZU_STANDARD = "kuzu-standard"  # Multi-tenant Kuzu (scalable instance size)
-  KUZU_LARGE = "kuzu-large"  # r7g.large dedicated (10 subgraphs)
-  KUZU_XLARGE = "kuzu-xlarge"  # r7g.xlarge dedicated (25 subgraphs)
-  KUZU_SHARED = "kuzu-shared"  # Shared public repositories (SEC, industry, economic)
-  NEO4J_COMMUNITY_LARGE = (
-    "neo4j-community-large"  # r7g.large, Neo4j Community (0 subgraphs)
-  )
-  NEO4J_ENTERPRISE_XLARGE = (
-    "neo4j-enterprise-xlarge"  # r7g.xlarge, Neo4j Enterprise (25 subgraphs)
-  )
 
 
 class CreditTransactionType(str, Enum):

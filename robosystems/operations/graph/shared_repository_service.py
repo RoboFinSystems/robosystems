@@ -11,7 +11,7 @@ Follows the same pattern as EntityGraphService and GenericGraphService:
 3. Create Graph metadata record in PostgreSQL
 4. Persist schema DDL (GraphSchema)
 5. Auto-create DuckDB staging tables (TableService)
-6. No UserGraph (repositories use UserRepository for access control)
+6. No GraphUser (repositories use UserRepository for access control)
 7. No credit pool (repositories use UserRepositoryCredits per user)
 
 Key differences from user graphs:
@@ -24,7 +24,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 from ...logger import logger
-from ...models.iam.graph_credits import GraphTier
+from ...config.graph_tier import GraphTier
 
 
 class SharedRepositoryService:

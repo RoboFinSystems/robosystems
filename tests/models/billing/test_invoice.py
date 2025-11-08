@@ -15,8 +15,19 @@ from robosystems.models.iam import User
 
 @pytest.fixture
 def test_user(db_session: Session):
-  """Create a test user."""
+  """Create a test user with org."""
+  from robosystems.models.iam import Org, OrgUser, OrgRole, OrgType
+
   unique_id = str(uuid.uuid4())[:8]
+
+  org = Org(
+    id=f"test_org_{unique_id}",
+    name=f"Test Org {unique_id}",
+    org_type=OrgType.PERSONAL,
+  )
+  db_session.add(org)
+  db_session.flush()
+
   user = User(
     id=f"test_user_{unique_id}",
     email=f"test+{unique_id}@example.com",
@@ -24,15 +35,32 @@ def test_user(db_session: Session):
     password_hash="test_hash",
   )
   db_session.add(user)
+  db_session.flush()
+
+  org_user = OrgUser(
+    org_id=org.id,
+    user_id=user.id,
+    role=OrgRole.OWNER,
+  )
+  db_session.add(org_user)
   db_session.commit()
   return user
 
 
 @pytest.fixture
-def test_subscription(db_session: Session, test_user):
+def test_org(test_user, db_session: Session):
+  """Get org for test user."""
+  from robosystems.models.iam import OrgUser
+
+  org_users = OrgUser.get_user_orgs(test_user.id, db_session)
+  return org_users[0].org
+
+
+@pytest.fixture
+def test_subscription(db_session: Session, test_org):
   """Create a test subscription."""
   subscription = BillingSubscription.create_subscription(
-    user_id=test_user.id,
+    org_id=test_org.id,
     resource_type="graph",
     resource_id="kg123",
     plan_name="standard",
@@ -45,20 +73,20 @@ def test_subscription(db_session: Session, test_user):
 class TestBillingInvoiceCreation:
   """Tests for invoice creation."""
 
-  def test_create_invoice_basic(self, db_session: Session, test_user):
+  def test_create_invoice_basic(self, db_session: Session, test_user, test_org):
     """Test basic invoice creation."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
     )
 
     assert invoice.id.startswith("binv_")
-    assert invoice.billing_customer_user_id == test_user.id
+    assert invoice.org_id == test_org.id
     assert invoice.invoice_number.startswith("INV-")
     assert invoice.period_start == period_start.replace(tzinfo=None)
     assert invoice.period_end == period_end.replace(tzinfo=None)
@@ -67,14 +95,16 @@ class TestBillingInvoiceCreation:
     assert invoice.total_cents == 0
     assert invoice.due_date is not None
 
-  def test_create_invoice_with_net_15_terms(self, db_session: Session, test_user):
+  def test_create_invoice_with_net_15_terms(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test invoice creation with NET_15 payment terms."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
     before_creation = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       payment_terms="net_15",
@@ -85,14 +115,16 @@ class TestBillingInvoiceCreation:
     assert invoice.due_date >= expected_due - timedelta(seconds=5)
     assert invoice.due_date <= expected_due + timedelta(seconds=5)
 
-  def test_create_invoice_with_net_60_terms(self, db_session: Session, test_user):
+  def test_create_invoice_with_net_60_terms(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test invoice creation with NET_60 payment terms."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
     before_creation = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       payment_terms="net_60",
@@ -103,20 +135,22 @@ class TestBillingInvoiceCreation:
     assert invoice.due_date >= expected_due - timedelta(seconds=5)
     assert invoice.due_date <= expected_due + timedelta(seconds=5)
 
-  def test_invoice_number_generation_uniqueness(self, db_session: Session, test_user):
+  def test_invoice_number_generation_uniqueness(
+    self, db_session: Session, test_user, test_org
+  ):
     """Test that invoice numbers are unique and sequential."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice1 = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
     )
 
     invoice2 = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -130,13 +164,15 @@ class TestBillingInvoiceCreation:
 class TestBillingInvoiceLineItems:
   """Tests for invoice line item management."""
 
-  def test_add_line_item(self, db_session: Session, test_user, test_subscription):
+  def test_add_line_item(
+    self, db_session: Session, test_user, test_org, test_subscription
+  ):
     """Test adding a line item to an invoice."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -164,14 +200,14 @@ class TestBillingInvoiceLineItems:
     assert invoice.total_cents == 2999
 
   def test_add_multiple_line_items(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test adding multiple line items to an invoice."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -201,14 +237,14 @@ class TestBillingInvoiceLineItems:
     assert invoice.total_cents == 3499
 
   def test_add_line_item_with_quantity(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test adding line item with quantity greater than 1."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -232,14 +268,14 @@ class TestBillingInvoiceLineItems:
     assert invoice.subtotal_cents == 5000
 
   def test_add_line_item_with_metadata(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test adding line item with metadata."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -268,13 +304,15 @@ class TestBillingInvoiceLineItems:
 class TestBillingInvoiceLifecycle:
   """Tests for invoice lifecycle methods."""
 
-  def test_finalize_invoice(self, db_session: Session, test_user, test_subscription):
+  def test_finalize_invoice(
+    self, db_session: Session, test_user, test_org, test_subscription
+  ):
     """Test finalizing an invoice."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -294,13 +332,15 @@ class TestBillingInvoiceLifecycle:
     assert invoice.status == InvoiceStatus.OPEN.value
     assert invoice.sent_at is not None
 
-  def test_mark_invoice_paid(self, db_session: Session, test_user, test_subscription):
+  def test_mark_invoice_paid(
+    self, db_session: Session, test_user, test_org, test_subscription
+  ):
     """Test marking an invoice as paid."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -328,14 +368,14 @@ class TestBillingInvoiceLifecycle:
     assert invoice.payment_reference == "ch_1234567890"
 
   def test_mark_paid_without_payment_reference(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test marking invoice paid without payment reference."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -361,14 +401,14 @@ class TestBillingInvoiceTotalCalculations:
   """Tests for invoice total calculations."""
 
   def test_recalculate_totals_with_tax(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test total calculation with tax."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -395,14 +435,14 @@ class TestBillingInvoiceTotalCalculations:
     assert invoice.total_cents == 10800
 
   def test_recalculate_totals_with_discount(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test total calculation with discount."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -429,14 +469,14 @@ class TestBillingInvoiceTotalCalculations:
     assert invoice.total_cents == 8000
 
   def test_recalculate_totals_with_tax_and_discount(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test total calculation with both tax and discount."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -463,7 +503,7 @@ class TestBillingInvoiceTotalCalculations:
     assert invoice.total_cents == 8800
 
   def test_recalculate_totals_handles_none_values_gracefully(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test that _recalculate_totals handles None tax_cents and discount_cents.
 
@@ -477,7 +517,7 @@ class TestBillingInvoiceTotalCalculations:
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -502,7 +542,7 @@ class TestBillingInvoiceTotalCalculations:
     assert result == 10000
 
   def test_recalculate_totals_with_zero_defaults(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test that recalculation works correctly with zero tax and discount.
 
@@ -512,7 +552,7 @@ class TestBillingInvoiceTotalCalculations:
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -537,13 +577,15 @@ class TestBillingInvoiceTotalCalculations:
 class TestBillingInvoiceRepr:
   """Tests for invoice string representations."""
 
-  def test_invoice_repr_format(self, db_session: Session, test_user, test_subscription):
+  def test_invoice_repr_format(
+    self, db_session: Session, test_user, test_org, test_subscription
+  ):
     """Test invoice __repr__ format."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -566,14 +608,14 @@ class TestBillingInvoiceRepr:
     assert "$29.99" in repr_str
 
   def test_line_item_repr_format(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_user, test_org, test_subscription
   ):
     """Test line item __repr__ format."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -598,14 +640,14 @@ class TestBillingInvoiceRepr:
 class TestBillingInvoiceIndexes:
   """Tests to ensure database indexes work correctly."""
 
-  def test_query_by_customer_uses_index(self, db_session: Session, test_user):
+  def test_query_by_customer_uses_index(self, db_session: Session, test_user, test_org):
     """Test querying invoices by customer."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     for i in range(3):
       BillingInvoice.create_invoice(
-        user_id=test_user.id,
+        org_id=test_org.id,
         period_start=period_start,
         period_end=period_end,
         session=db_session,
@@ -613,20 +655,20 @@ class TestBillingInvoiceIndexes:
 
     invoices = (
       db_session.query(BillingInvoice)
-      .filter(BillingInvoice.billing_customer_user_id == test_user.id)
+      .filter(BillingInvoice.org_id == test_org.id)
       .all()
     )
 
     assert len(invoices) == 3
 
-  def test_query_by_status_uses_index(self, db_session: Session, test_user):
+  def test_query_by_status_uses_index(self, db_session: Session, test_user, test_org):
     """Test querying invoices by status."""
     period_start = datetime.now(timezone.utc) - timedelta(days=30)
     period_end = datetime.now(timezone.utc)
 
     for i in range(5):
       invoice = BillingInvoice.create_invoice(
-        user_id=test_user.id,
+        org_id=test_org.id,
         period_start=period_start,
         period_end=period_end,
         session=db_session,
@@ -638,7 +680,7 @@ class TestBillingInvoiceIndexes:
       db_session.query(BillingInvoice)
       .filter(
         BillingInvoice.status == InvoiceStatus.OPEN.value,
-        BillingInvoice.billing_customer_user_id == test_user.id,
+        BillingInvoice.org_id == test_org.id,
       )
       .all()
     )

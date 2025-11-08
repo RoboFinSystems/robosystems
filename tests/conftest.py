@@ -119,7 +119,7 @@ def client(test_db):
 
 
 @pytest.fixture(scope="function")  # Changed from module to function scope
-def client_with_mocked_auth(test_db):
+def client_with_mocked_auth(test_db, test_user):
   """Create a test client with mocked authentication for unit tests."""
   # Import the dependency directly
   from robosystems.middleware.auth.dependencies import (
@@ -139,22 +139,14 @@ def client_with_mocked_auth(test_db):
     general_api_rate_limit_dependency,
     subscription_aware_rate_limit_dependency,
   )
-  import uuid
 
-  # Create a mock user with unique identifiers
-  unique_id = str(uuid.uuid4())[:8]
+  # Use the test_user from the fixture (which has an org)
   mock_user = Mock()
-  mock_user.id = f"test-user-{unique_id}"
-  mock_user.name = "Test User"
-  mock_user.email = f"test+{unique_id}@example.com"
+  mock_user.id = test_user.id
+  mock_user.name = test_user.name
+  mock_user.email = test_user.email
+  mock_user.password_hash = test_user.password_hash
   mock_user.accounts = []
-  # Add password_hash for password update tests
-  import bcrypt
-
-  salt = bcrypt.gensalt()
-  mock_user.password_hash = bcrypt.hashpw(
-    "0r1g1n@lP@ssw0rd!".encode("utf-8"), salt
-  ).decode("utf-8")
 
   # Override the dependencies
   app.dependency_overrides[get_current_user] = lambda: mock_user
@@ -347,8 +339,8 @@ async def auth_integration_client(test_db):
 
 @pytest.fixture
 def test_user(test_db):
-  """Create a test user."""
-  from robosystems.models.iam import User
+  """Create a test user with associated org."""
+  from robosystems.models.iam import User, Org, OrgUser, OrgRole, OrgType
   import uuid
   import bcrypt
 
@@ -357,6 +349,14 @@ def test_user(test_db):
   salt = bcrypt.gensalt()
   password_hash = bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
+  org = Org(
+    id=f"test-org-{unique_id}",
+    name=f"Test Org {unique_id}",
+    org_type=OrgType.PERSONAL,
+  )
+  test_db.add(org)
+  test_db.flush()
+
   user = User(
     id=f"test-user-{unique_id}",
     email=f"test+{unique_id}@example.com",
@@ -364,15 +364,34 @@ def test_user(test_db):
     password_hash=password_hash,
   )
   test_db.add(user)
+  test_db.flush()
+
+  org_user = OrgUser(
+    org_id=org.id,
+    user_id=user.id,
+    role=OrgRole.OWNER,
+  )
+  test_db.add(org_user)
   test_db.commit()
   return user
 
 
 @pytest.fixture
-def sample_graph(test_db):
+def test_org(test_db, test_user):
+  """Get the org for the test user."""
+  from robosystems.models.iam import OrgUser
+
+  org_users = OrgUser.get_user_orgs(test_user.id, test_db)
+  if not org_users:
+    raise ValueError(f"Test user {test_user.id} has no organization")
+  return org_users[0].org
+
+
+@pytest.fixture
+def sample_graph(test_db, test_org):
   """Create a sample graph for testing."""
   from robosystems.models.iam import Graph
-  from robosystems.models.iam.graph_credits import GraphTier
+  from robosystems.config.graph_tier import GraphTier
   import uuid
 
   unique_id = str(uuid.uuid4())[:8]
@@ -380,6 +399,7 @@ def sample_graph(test_db):
     graph_id=f"test_graph_{unique_id}",
     graph_name="Test Graph Fixture",
     graph_type="entity",
+    org_id=test_org.id,
     session=test_db,
     base_schema="base",
     schema_extensions=["roboledger"],
@@ -396,10 +416,10 @@ def sample_graph(test_db):
 @pytest.fixture
 def test_user_graph(test_db, test_user, sample_graph):
   """Create a test user-graph relationship."""
-  from robosystems.models.iam import UserGraph
+  from robosystems.models.iam import GraphUser
 
-  # Create UserGraph relationship
-  user_graph = UserGraph.create(
+  # Create GraphUser relationship
+  user_graph = GraphUser.create(
     user_id=test_user.id,
     graph_id=sample_graph.graph_id,
     role="admin",
@@ -412,13 +432,13 @@ def test_user_graph(test_db, test_user, sample_graph):
 @pytest.fixture
 def test_graph_with_credits(test_db, test_user, sample_graph):
   """Create a graph with credits setup for testing."""
-  from robosystems.models.iam import UserGraph, GraphCredits
+  from robosystems.models.iam import GraphUser, GraphCredits
   from decimal import Decimal
   from datetime import datetime, timezone
   import uuid
 
-  # Create UserGraph relationship
-  user_graph = UserGraph.create(
+  # Create GraphUser relationship
+  user_graph = GraphUser.create(
     user_id=test_user.id,
     graph_id=sample_graph.graph_id,
     role="admin",
@@ -461,15 +481,25 @@ def setup_database(test_db):
   # Clean up all data after each test
   test_db.rollback()
   # Also clean any committed data by truncating tables
-  from robosystems.models.iam import User, UserAPIKey, UserGraph, GraphCredits, Graph
+  from robosystems.models.iam import (
+    User,
+    UserAPIKey,
+    GraphUser,
+    GraphCredits,
+    Graph,
+    Org,
+    OrgUser,
+  )
 
   try:
     # Delete in reverse dependency order to avoid foreign key constraints
     test_db.query(UserAPIKey).delete()
     test_db.query(GraphCredits).delete()
-    test_db.query(UserGraph).delete()
-    test_db.query(Graph).delete()  # Delete graphs before users
+    test_db.query(GraphUser).delete()
+    test_db.query(Graph).delete()  # Delete graphs before orgs
+    test_db.query(OrgUser).delete()  # Delete org memberships before users/orgs
     test_db.query(User).delete()
+    test_db.query(Org).delete()
     test_db.commit()
   except Exception:
     test_db.rollback()
@@ -822,19 +852,19 @@ def other_user(test_db):
 def test_user_token(test_user, sample_graph, test_db):
   """Create a JWT token for test_user with access to sample_graph."""
   from robosystems.middleware.auth.jwt import create_jwt_token
-  from robosystems.models.iam import UserGraph
+  from robosystems.models.iam import GraphUser
 
   # Ensure test_user has access to sample_graph
   existing_access = (
-    test_db.query(UserGraph)
+    test_db.query(GraphUser)
     .filter(
-      UserGraph.user_id == test_user.id, UserGraph.graph_id == sample_graph.graph_id
+      GraphUser.user_id == test_user.id, GraphUser.graph_id == sample_graph.graph_id
     )
     .first()
   )
 
   if not existing_access:
-    UserGraph.create(
+    GraphUser.create(
       user_id=test_user.id,
       graph_id=sample_graph.graph_id,
       role="admin",

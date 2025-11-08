@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import User, GraphUsageTracking
+from robosystems.models.iam import User, GraphUsage
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
@@ -265,7 +265,7 @@ async def get_graph_metrics(
   "/usage",
   response_model=GraphUsageResponse,
   summary="Get Graph Usage Analytics",
-  description="""Get comprehensive usage analytics tracked by the GraphUsageTracking model.
+  description="""Get comprehensive usage analytics tracked by the GraphUsage model.
 
 Provides temporal usage patterns including:
 - **Storage Analytics**: GB-hours for billing, breakdown by type (files, tables, graphs, subgraphs)
@@ -327,9 +327,9 @@ async def get_graph_usage_analytics(
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> GraphUsageResponse:
   """
-  Get comprehensive usage analytics from GraphUsageTracking model.
+  Get comprehensive usage analytics from GraphUsage model.
 
-  This endpoint queries the graph_usage_tracking table for:
+  This endpoint queries the graph_usage table for:
   - Storage usage summaries (GB-hours, breakdown by type)
   - Credit consumption analytics (operation breakdown, cached vs billable)
   - Performance insights (slow queries, optimization opportunities)
@@ -376,7 +376,7 @@ async def get_graph_usage_analytics(
 
     operation_logger.log_external_service_call(
       endpoint="/v1/graphs/{graph_id}/usage",
-      service_name="graph_usage_tracking",
+      service_name="graph_usage",
       operation="query_usage_analytics",
       duration_ms=0.0,
       status="processing",
@@ -397,7 +397,7 @@ async def get_graph_usage_analytics(
     recent_events = []
 
     if include_storage:
-      storage_data = GraphUsageTracking.get_monthly_storage_summary(
+      storage_data = GraphUsage.get_monthly_storage_summary(
         user_id=current_user.id,
         year=year,
         month=month,
@@ -416,7 +416,7 @@ async def get_graph_usage_analytics(
         )
 
     if include_credits:
-      credit_data = GraphUsageTracking.get_monthly_credit_summary(
+      credit_data = GraphUsage.get_monthly_credit_summary(
         user_id=current_user.id,
         year=year,
         month=month,
@@ -437,7 +437,7 @@ async def get_graph_usage_analytics(
 
     if include_performance:
       performance_days = _get_days_from_time_range(time_range)
-      perf_data = GraphUsageTracking.get_performance_insights(
+      perf_data = GraphUsage.get_performance_insights(
         user_id=current_user.id,
         graph_id=graph_id,
         session=db,
@@ -456,13 +456,13 @@ async def get_graph_usage_analytics(
     if include_events:
       cutoff_date = now - timedelta(days=_get_days_from_time_range(time_range))
       events = (
-        db.query(GraphUsageTracking)
+        db.query(GraphUsage)
         .filter(
-          GraphUsageTracking.user_id == current_user.id,
-          GraphUsageTracking.graph_id == graph_id,
-          GraphUsageTracking.recorded_at >= cutoff_date,
+          GraphUsage.user_id == current_user.id,
+          GraphUsage.graph_id == graph_id,
+          GraphUsage.recorded_at >= cutoff_date,
         )
-        .order_by(GraphUsageTracking.recorded_at.desc())
+        .order_by(GraphUsage.recorded_at.desc())
         .limit(50)
         .all()
       )

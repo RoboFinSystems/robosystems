@@ -18,9 +18,10 @@ from sqlalchemy.orm import Session
 from ...models.iam import (
   GraphCredits,
   GraphCreditTransaction,
-  UserGraph,
+  GraphUser,
 )
-from ...models.iam.graph_credits import GraphTier, CreditTransactionType
+from ...config.graph_tier import GraphTier
+from ...models.iam.graph_credits import CreditTransactionType
 from ...models.iam.user_repository_credits import UserRepositoryCredits
 from ...models.iam.user_repository import UserRepository, RepositoryType
 from ...config.credits import CreditConfig
@@ -647,7 +648,7 @@ class CreditService:
     """Get credit summaries for all graphs owned by a user."""
     # Get all graphs for the user
     user_graphs = (
-      self.session.query(UserGraph).filter(UserGraph.user_id == user_id).all()
+      self.session.query(GraphUser).filter(GraphUser.user_id == user_id).all()
     )
 
     summaries = []
@@ -855,16 +856,16 @@ class CreditService:
     # Get current storage if not provided
     if current_storage_gb is None:
       # Try to get latest storage usage from tracking
-      from ...models.iam.graph_usage_tracking import GraphUsageTracking, UsageEventType
+      from ...models.iam.graph_usage import GraphUsage, UsageEventType
       from sqlalchemy import desc
 
       latest_usage = (
-        self.session.query(GraphUsageTracking)
+        self.session.query(GraphUsage)
         .filter(
-          GraphUsageTracking.graph_id == graph_id,
-          GraphUsageTracking.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
+          GraphUsage.graph_id == graph_id,
+          GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
         )
-        .order_by(desc(GraphUsageTracking.recorded_at))
+        .order_by(desc(GraphUsage.recorded_at))
         .first()
       )
 
@@ -944,31 +945,31 @@ class CreditService:
 
   def get_storage_limit_violations(self) -> List[Dict[str, Any]]:
     """Get all graphs that are exceeding their storage limits."""
-    from ...models.iam.graph_usage_tracking import GraphUsageTracking, UsageEventType
+    from ...models.iam.graph_usage import GraphUsage, UsageEventType
     from sqlalchemy import func
 
     # Get latest storage usage for each graph
     latest_usage_subquery = (
       self.session.query(
-        GraphUsageTracking.graph_id,
-        func.max(GraphUsageTracking.recorded_at).label("latest_time"),
+        GraphUsage.graph_id,
+        func.max(GraphUsage.recorded_at).label("latest_time"),
       )
-      .filter(GraphUsageTracking.event_type == UsageEventType.STORAGE_SNAPSHOT.value)
-      .group_by(GraphUsageTracking.graph_id)
+      .filter(GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value)
+      .group_by(GraphUsage.graph_id)
       .subquery()
     )
 
     # Get graphs with current storage usage
     current_usage = (
       self.session.query(
-        GraphUsageTracking.graph_id,
-        GraphUsageTracking.storage_gb,
-        GraphUsageTracking.user_id,
+        GraphUsage.graph_id,
+        GraphUsage.storage_gb,
+        GraphUsage.user_id,
       )
       .join(
         latest_usage_subquery,
-        (GraphUsageTracking.graph_id == latest_usage_subquery.c.graph_id)
-        & (GraphUsageTracking.recorded_at == latest_usage_subquery.c.latest_time),
+        (GraphUsage.graph_id == latest_usage_subquery.c.graph_id)
+        & (GraphUsage.recorded_at == latest_usage_subquery.c.latest_time),
       )
       .all()
     )

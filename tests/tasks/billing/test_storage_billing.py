@@ -386,7 +386,7 @@ class TestDailyStorageBillingTask:
 class TestMonthlyStorageSummaryTask:
   """Test cases for monthly storage summary Celery task."""
 
-  @patch("robosystems.tasks.billing.storage_billing.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.storage_billing.GraphUsage")
   @patch("robosystems.tasks.billing.storage_billing.get_celery_db_session")
   def test_successful_summary(self, mock_get_session, mock_usage_tracking):
     """Test successful monthly summary generation."""
@@ -425,7 +425,7 @@ class TestMonthlyStorageSummaryTask:
     )
     mock_session.close.assert_called_once()
 
-  @patch("robosystems.tasks.billing.storage_billing.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.storage_billing.GraphUsage")
   @patch("robosystems.tasks.billing.storage_billing.get_celery_db_session")
   def test_default_to_last_month(self, mock_get_session, mock_usage_tracking):
     """Test that task defaults to last month if not specified."""
@@ -446,7 +446,7 @@ class TestMonthlyStorageSummaryTask:
 
     mock_session.close.assert_called_once()
 
-  @patch("robosystems.tasks.billing.storage_billing.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.storage_billing.GraphUsage")
   @patch("robosystems.tasks.billing.storage_billing.get_celery_db_session")
   def test_no_summaries(self, mock_get_session, mock_usage_tracking):
     """Test handling when no summaries exist."""
@@ -461,7 +461,7 @@ class TestMonthlyStorageSummaryTask:
     assert result["total_graphs"] == 0
     assert result["total_gb_hours"] == 0
 
-  @patch("robosystems.tasks.billing.storage_billing.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.storage_billing.GraphUsage")
   @patch("robosystems.tasks.billing.storage_billing.get_celery_db_session")
   def test_database_error(self, mock_get_session, mock_usage_tracking):
     """Test handling of database errors."""

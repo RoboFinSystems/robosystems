@@ -17,7 +17,7 @@ def mock_database_session(test_user_graph, schema_record=None):
   # Create a proper mock database session
   mock_db = MagicMock()
 
-  # Mock UserGraph query
+  # Mock GraphUser query
   mock_user_graph_query = MagicMock()
   mock_user_graph_query.filter_by.return_value.first.return_value = test_user_graph
 
@@ -36,10 +36,10 @@ def mock_database_session(test_user_graph, schema_record=None):
 
   # Configure db.query to return the right mock based on the model
   def mock_query(model):
-    from robosystems.models.iam import UserGraph, GraphSchema
+    from robosystems.models.iam import GraphUser, GraphSchema
 
-    if model == UserGraph or (
-      hasattr(model, "__name__") and model.__name__ == "UserGraph"
+    if model == GraphUser or (
+      hasattr(model, "__name__") and model.__name__ == "GraphUser"
     ):
       return mock_user_graph_query
     elif model == Graph or (hasattr(model, "__name__") and model.__name__ == "Graph"):

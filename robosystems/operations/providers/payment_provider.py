@@ -1,7 +1,7 @@
 """Payment provider abstraction layer for extensibility.
 
 This module provides an abstract interface for payment providers, making it easy
-to support multiple processors (Stripe, Crossmint, etc.) without changing business logic.
+to support multiple processors without changing business logic.
 """
 
 from abc import ABC, abstractmethod
@@ -49,7 +49,11 @@ class PaymentProvider(ABC):
 
   @abstractmethod
   def create_subscription(
-    self, customer_id: str, price_id: str, metadata: Dict[str, Any]
+    self,
+    customer_id: str,
+    price_id: str,
+    metadata: Dict[str, Any],
+    payment_method_id: Optional[str] = None,
   ) -> str:
     """Create subscription (for customers with payment method on file).
 
@@ -57,6 +61,7 @@ class PaymentProvider(ABC):
         customer_id: Provider customer ID
         price_id: Provider price/plan ID
         metadata: Custom metadata
+        payment_method_id: Optional payment method ID to use
 
     Returns:
         provider_subscription_id: Subscription ID in payment provider
@@ -140,7 +145,7 @@ class StripePaymentProvider(PaymentProvider):
     import stripe
 
     stripe.api_key = env.STRIPE_SECRET_KEY
-    stripe.api_version = "2024-11-20.acacia"
+    stripe.api_version = env.STRIPE_API_VERSION
     self.stripe = stripe
     self._redis_client = None
     logger.info("Initialized Stripe payment provider")
@@ -173,8 +178,8 @@ class StripePaymentProvider(PaymentProvider):
       customer=customer_id,
       mode="subscription",
       line_items=[{"price": price_id, "quantity": 1}],
-      success_url=f"{env.ROBOSYSTEMS_URL}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
-      cancel_url=f"{env.ROBOSYSTEMS_URL}/billing/cancel",
+      success_url=f"{env.ROBOSYSTEMS_URL}/checkout/{{CHECKOUT_SESSION_ID}}",
+      cancel_url=f"{env.ROBOSYSTEMS_URL}/billing",
       metadata=metadata,
       payment_method_types=["card"],
       billing_address_collection="auto",
@@ -192,11 +197,31 @@ class StripePaymentProvider(PaymentProvider):
     return {"checkout_url": session.url, "session_id": session.id}
 
   def create_subscription(
-    self, customer_id: str, price_id: str, metadata: Dict[str, Any]
+    self,
+    customer_id: str,
+    price_id: str,
+    metadata: Dict[str, Any],
+    payment_method_id: Optional[str] = None,
   ) -> str:
     """Create Stripe subscription (customer has payment method)."""
+    if not payment_method_id:
+      payment_methods = self.list_payment_methods(customer_id)
+      if not payment_methods:
+        raise ValueError(f"Customer {customer_id} has no payment methods attached")
+
+      default_pm = next((pm for pm in payment_methods if pm.get("is_default")), None)
+      payment_method_id = default_pm["id"] if default_pm else payment_methods[0]["id"]
+
+      logger.info(
+        f"Using payment method {payment_method_id} for subscription",
+        extra={"customer_id": customer_id, "payment_method_id": payment_method_id},
+      )
+
     subscription = self.stripe.Subscription.create(
-      customer=customer_id, items=[{"price": price_id}], metadata=metadata
+      customer=customer_id,
+      items=[{"price": price_id}],
+      default_payment_method=payment_method_id,
+      metadata=metadata,
     )
 
     logger.info(
@@ -204,6 +229,7 @@ class StripePaymentProvider(PaymentProvider):
       extra={
         "subscription_id": subscription.id,
         "customer_id": customer_id,
+        "payment_method_id": payment_method_id,
         "metadata": metadata,
       },
     )

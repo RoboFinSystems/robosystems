@@ -7,7 +7,7 @@ and endpoint categories.
 
 from enum import Enum
 from typing import Dict, Tuple, Optional
-from .tier_config import get_tier_api_rate_multiplier
+from .graph_tier import get_tier_api_rate_multiplier
 
 
 class RateLimitPeriod(str, Enum):

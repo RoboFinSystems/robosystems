@@ -15,7 +15,7 @@ from ...models.api.billing.invoice import (
   InvoicesResponse,
   UpcomingInvoice,
 )
-from ...operations.billing.payment_provider import get_payment_provider
+from ...operations.providers.payment_provider import get_payment_provider
 from ...logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,23 +24,45 @@ router = APIRouter(prefix="/billing/invoices", tags=["Billing"])
 
 
 @router.get(
-  "",
+  "/{org_id}",
   response_model=InvoicesResponse,
-  summary="List Invoices",
-  description="""List payment history and invoices.
+  summary="List Organization Invoices",
+  description="""List payment history and invoices for an organization.
 
-Returns past invoices with payment status, amounts, and line items.""",
-  operation_id="listInvoices",
+Returns past invoices with payment status, amounts, and line items.
+
+**Requirements:**
+- User must be a member of the organization
+- Full invoice details are only visible to owners and admins""",
+  operation_id="listOrgInvoices",
 )
 async def list_invoices(
+  org_id: str,
   limit: int = Query(10, ge=1, le=100, description="Number of invoices to return"),
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """List invoices for the current user."""
+  """List invoices for the organization."""
   try:
-    customer = BillingCustomer.get_or_create(current_user.id, db)
+    from ...models.iam import OrgUser, OrgRole
+
+    # Verify user is a member of the org
+    membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
+    if not membership:
+      raise HTTPException(
+        status_code=403,
+        detail="You are not a member of this organization",
+      )
+
+    # Only owners and admins can see invoices
+    if membership.role not in [OrgRole.OWNER, OrgRole.ADMIN]:
+      raise HTTPException(
+        status_code=403,
+        detail="Only owners and admins can view invoices",
+      )
+
+    customer = BillingCustomer.get_or_create(org_id, db)
 
     if not customer.stripe_customer_id:
       return InvoicesResponse(
@@ -109,22 +131,44 @@ async def list_invoices(
 
 
 @router.get(
-  "/upcoming",
+  "/{org_id}/upcoming",
   response_model=UpcomingInvoice | None,
-  summary="Get Upcoming Invoice",
-  description="""Get preview of the next invoice.
+  summary="Get Organization Upcoming Invoice",
+  description="""Get preview of the next invoice for an organization.
 
-Returns estimated charges for the next billing period.""",
-  operation_id="getUpcomingInvoice",
+Returns estimated charges for the next billing period.
+
+**Requirements:**
+- User must be a member of the organization
+- Full invoice details are only visible to owners and admins""",
+  operation_id="getOrgUpcomingInvoice",
 )
 async def get_upcoming_invoice(
+  org_id: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """Get upcoming invoice preview."""
+  """Get upcoming invoice preview for organization."""
   try:
-    customer = BillingCustomer.get_or_create(current_user.id, db)
+    from ...models.iam import OrgUser, OrgRole
+
+    # Verify user is a member of the org
+    membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
+    if not membership:
+      raise HTTPException(
+        status_code=403,
+        detail="You are not a member of this organization",
+      )
+
+    # Only owners and admins can see upcoming invoices
+    if membership.role not in [OrgRole.OWNER, OrgRole.ADMIN]:
+      raise HTTPException(
+        status_code=403,
+        detail="Only owners and admins can view upcoming invoices",
+      )
+
+    customer = BillingCustomer.get_or_create(org_id, db)
 
     if not customer.stripe_customer_id:
       return None

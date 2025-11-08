@@ -1,4 +1,4 @@
-"""Test GraphUsageTracking model functionality."""
+"""Test GraphUsage model functionality."""
 
 import pytest
 import json
@@ -7,12 +7,12 @@ from decimal import Decimal
 from unittest.mock import patch
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.models.iam import GraphUsageTracking
-from robosystems.models.iam.graph_usage_tracking import UsageEventType
+from robosystems.models.iam import GraphUsage
+from robosystems.models.iam.graph_usage import UsageEventType
 
 
-class TestGraphUsageTracking:
-  """Test cases for GraphUsageTracking model."""
+class TestGraphUsage:
+  """Test cases for GraphUsage model."""
 
   @pytest.fixture(autouse=True)
   def setup(self, db_session):
@@ -23,7 +23,7 @@ class TestGraphUsageTracking:
 
   def test_create_usage_tracking_entry(self):
     """Test creating a basic usage tracking entry."""
-    usage = GraphUsageTracking(
+    usage = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -77,7 +77,7 @@ class TestGraphUsageTracking:
     """Test recording storage usage."""
     storage_bytes = 5 * 1024**3  # 5 GB in bytes
 
-    usage = GraphUsageTracking.record_storage_usage(
+    usage = GraphUsage.record_storage_usage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="enterprise",
@@ -102,7 +102,7 @@ class TestGraphUsageTracking:
 
   def test_record_storage_usage_without_auto_commit(self):
     """Test recording storage usage without auto-commit."""
-    usage = GraphUsageTracking.record_storage_usage(
+    usage = GraphUsage.record_storage_usage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="standard",
@@ -116,14 +116,14 @@ class TestGraphUsageTracking:
     self.session.rollback()
 
     # After rollback, should not be in database
-    result = self.session.query(GraphUsageTracking).filter_by(id=usage.id).first()
+    result = self.session.query(GraphUsage).filter_by(id=usage.id).first()
     assert result is None
 
   def test_record_storage_usage_with_error(self):
     """Test recording storage usage with database error."""
     with patch.object(self.session, "commit", side_effect=SQLAlchemyError("DB error")):
       with pytest.raises(SQLAlchemyError):
-        GraphUsageTracking.record_storage_usage(
+        GraphUsage.record_storage_usage(
           user_id=self.test_user_id,
           graph_id=self.test_graph_id,
           graph_tier="standard",
@@ -133,7 +133,7 @@ class TestGraphUsageTracking:
 
   def test_record_credit_consumption(self):
     """Test recording credit consumption."""
-    usage = GraphUsageTracking.record_credit_consumption(
+    usage = GraphUsage.record_credit_consumption(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="premium",
@@ -159,7 +159,7 @@ class TestGraphUsageTracking:
 
   def test_record_credit_consumption_without_metadata(self):
     """Test recording credit consumption without metadata."""
-    usage = GraphUsageTracking.record_credit_consumption(
+    usage = GraphUsage.record_credit_consumption(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="standard",
@@ -173,7 +173,7 @@ class TestGraphUsageTracking:
 
   def test_record_api_usage(self):
     """Test recording API usage."""
-    usage = GraphUsageTracking.record_api_usage(
+    usage = GraphUsage.record_api_usage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="enterprise",
@@ -203,7 +203,7 @@ class TestGraphUsageTracking:
 
   def test_record_api_usage_with_error(self):
     """Test recording API usage with error information."""
-    usage = GraphUsageTracking.record_api_usage(
+    usage = GraphUsage.record_api_usage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="standard",
@@ -233,7 +233,7 @@ class TestGraphUsageTracking:
     }
 
     for operation, expected_event_type in operations_map.items():
-      usage = GraphUsageTracking.record_api_usage(
+      usage = GraphUsage.record_api_usage(
         user_id=self.test_user_id,
         graph_id=self.test_graph_id,
         graph_tier="standard",
@@ -247,7 +247,7 @@ class TestGraphUsageTracking:
     # Create storage snapshots
     for day in [1, 2, 3]:
       for hour in [0, 12]:
-        usage = GraphUsageTracking(
+        usage = GraphUsage(
           user_id=self.test_user_id,
           graph_id=self.test_graph_id,
           event_type=UsageEventType.STORAGE_SNAPSHOT.value,
@@ -265,7 +265,7 @@ class TestGraphUsageTracking:
     self.session.commit()
 
     # Get summary
-    summary = GraphUsageTracking.get_monthly_storage_summary(
+    summary = GraphUsage.get_monthly_storage_summary(
       user_id=self.test_user_id, year=2024, month=1, session=self.session
     )
 
@@ -284,7 +284,7 @@ class TestGraphUsageTracking:
     # Use a different user ID to avoid conflicts with other tests
     different_user = "no_data_user_999"
 
-    summary = GraphUsageTracking.get_monthly_storage_summary(
+    summary = GraphUsage.get_monthly_storage_summary(
       user_id=different_user, year=2024, month=1, session=self.session
     )
 
@@ -301,7 +301,7 @@ class TestGraphUsageTracking:
     ]
 
     for op_type, credits, base_cost, duration in operations:
-      usage = GraphUsageTracking(
+      usage = GraphUsage(
         user_id=self.test_user_id,
         graph_id=self.test_graph_id,
         event_type=UsageEventType.CREDIT_CONSUMPTION.value,
@@ -321,7 +321,7 @@ class TestGraphUsageTracking:
     self.session.commit()
 
     # Get summary
-    summary = GraphUsageTracking.get_monthly_credit_summary(
+    summary = GraphUsage.get_monthly_credit_summary(
       user_id=self.test_user_id, year=2024, month=1, session=self.session
     )
 
@@ -345,7 +345,7 @@ class TestGraphUsageTracking:
   def test_get_performance_insights(self):
     """Test getting performance insights."""
     # Clean up any existing usage records to ensure test isolation
-    self.session.query(GraphUsageTracking).delete()
+    self.session.query(GraphUsage).delete()
     self.session.commit()
 
     # Create various performance records
@@ -360,7 +360,7 @@ class TestGraphUsageTracking:
     ]
 
     for op_type, duration, status, credits in operations:
-      usage = GraphUsageTracking(
+      usage = GraphUsage(
         user_id=self.test_user_id,
         graph_id=self.test_graph_id,
         event_type=UsageEventType.API_CALL.value,
@@ -380,7 +380,7 @@ class TestGraphUsageTracking:
     self.session.commit()
 
     # Get insights
-    insights = GraphUsageTracking.get_performance_insights(
+    insights = GraphUsage.get_performance_insights(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       session=self.session,
@@ -405,10 +405,10 @@ class TestGraphUsageTracking:
   def test_performance_insights_no_data(self):
     """Test performance insights with no data."""
     # Clean up any existing usage records to ensure test isolation
-    self.session.query(GraphUsageTracking).delete()
+    self.session.query(GraphUsage).delete()
     self.session.commit()
 
-    insights = GraphUsageTracking.get_performance_insights(
+    insights = GraphUsage.get_performance_insights(
       user_id=self.test_user_id, graph_id=self.test_graph_id, session=self.session
     )
 
@@ -418,19 +418,19 @@ class TestGraphUsageTracking:
     """Test performance score calculation."""
     # Test various scenarios
     excellent_stats = {"query": {"count": 100, "avg_duration_ms": 50}}
-    score = GraphUsageTracking._calculate_performance_score(excellent_stats)
+    score = GraphUsage._calculate_performance_score(excellent_stats)
     assert score == 100
 
     good_stats = {"query": {"count": 100, "avg_duration_ms": 300}}
-    score = GraphUsageTracking._calculate_performance_score(good_stats)
+    score = GraphUsage._calculate_performance_score(good_stats)
     assert score == 90
 
     poor_stats = {"query": {"count": 100, "avg_duration_ms": 7000}}
-    score = GraphUsageTracking._calculate_performance_score(poor_stats)
+    score = GraphUsage._calculate_performance_score(poor_stats)
     assert score == 50
 
     empty_stats = {}
-    score = GraphUsageTracking._calculate_performance_score(empty_stats)
+    score = GraphUsage._calculate_performance_score(empty_stats)
     assert score == 100
 
   def test_cleanup_old_records(self):
@@ -440,7 +440,7 @@ class TestGraphUsageTracking:
     recent_date = now - timedelta(days=100)
 
     # Create old and recent records
-    old_record = GraphUsageTracking(
+    old_record = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -452,7 +452,7 @@ class TestGraphUsageTracking:
       billing_hour=old_date.hour,
     )
 
-    recent_record = GraphUsageTracking(
+    recent_record = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -469,15 +469,13 @@ class TestGraphUsageTracking:
     self.session.commit()
 
     # Clean up records older than 365 days
-    result = GraphUsageTracking.cleanup_old_records(
-      session=self.session, older_than_days=365
-    )
+    result = GraphUsage.cleanup_old_records(session=self.session, older_than_days=365)
 
     assert result["deleted_records"] == 1
     assert result["total_processed"] == 1
 
     # Verify old record is deleted, recent one remains
-    remaining = self.session.query(GraphUsageTracking).all()
+    remaining = self.session.query(GraphUsage).all()
     assert len(remaining) == 1
     # Compare without timezone since database may not preserve timezone info
     assert remaining[0].recorded_at.replace(tzinfo=None) == recent_date.replace(
@@ -489,7 +487,7 @@ class TestGraphUsageTracking:
     old_date = datetime.now(timezone.utc) - timedelta(days=400)
 
     # Create different types of old records
-    api_record = GraphUsageTracking(
+    api_record = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -501,7 +499,7 @@ class TestGraphUsageTracking:
       billing_hour=old_date.hour,
     )
 
-    storage_record = GraphUsageTracking(
+    storage_record = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.STORAGE_SNAPSHOT.value,
@@ -518,7 +516,7 @@ class TestGraphUsageTracking:
     self.session.commit()
 
     # Clean up with summary preservation
-    result = GraphUsageTracking.cleanup_old_records(
+    result = GraphUsage.cleanup_old_records(
       session=self.session, older_than_days=365, keep_monthly_summaries=True
     )
 
@@ -529,12 +527,12 @@ class TestGraphUsageTracking:
   def test_cleanup_without_auto_commit(self):
     """Test cleanup without auto-commit."""
     # Clean up any existing usage records to ensure test isolation
-    self.session.query(GraphUsageTracking).delete()
+    self.session.query(GraphUsage).delete()
     self.session.commit()
 
     old_date = datetime.now(timezone.utc) - timedelta(days=400)
 
-    old_record = GraphUsageTracking(
+    old_record = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -548,7 +546,7 @@ class TestGraphUsageTracking:
     self.session.add(old_record)
     self.session.commit()
 
-    result = GraphUsageTracking.cleanup_old_records(
+    result = GraphUsage.cleanup_old_records(
       session=self.session, older_than_days=365, auto_commit=False
     )
 
@@ -556,14 +554,14 @@ class TestGraphUsageTracking:
 
     # Rollback and verify record still exists
     self.session.rollback()
-    remaining = self.session.query(GraphUsageTracking).all()
+    remaining = self.session.query(GraphUsage).all()
     assert len(remaining) == 1
 
   def test_get_metadata(self):
     """Test metadata parsing."""
     metadata = {"key": "value", "nested": {"data": "test"}}
 
-    usage = GraphUsageTracking(
+    usage = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -580,7 +578,7 @@ class TestGraphUsageTracking:
 
   def test_get_metadata_empty(self):
     """Test metadata parsing with empty metadata."""
-    usage = GraphUsageTracking(
+    usage = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -597,7 +595,7 @@ class TestGraphUsageTracking:
 
   def test_get_metadata_invalid_json(self):
     """Test metadata parsing with invalid JSON."""
-    usage = GraphUsageTracking(
+    usage = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -615,13 +613,13 @@ class TestGraphUsageTracking:
   def test_to_dict(self):
     """Test conversion to dictionary."""
     # Clean up any existing usage records to ensure test isolation
-    self.session.query(GraphUsageTracking).delete()
+    self.session.query(GraphUsage).delete()
     self.session.commit()
 
     now = datetime.now(timezone.utc)
     metadata = {"test": "data"}
 
-    usage = GraphUsageTracking(
+    usage = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.CREDIT_CONSUMPTION.value,
@@ -665,7 +663,7 @@ class TestGraphUsageTracking:
 
   def test_repr_method(self):
     """Test string representation."""
-    usage = GraphUsageTracking(
+    usage = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.CREDIT_CONSUMPTION.value,
@@ -678,13 +676,13 @@ class TestGraphUsageTracking:
     )
 
     repr_str = repr(usage)
-    assert "<GraphUsageTracking credit_consumption" in repr_str
+    assert "<GraphUsage credit_consumption" in repr_str
     assert f"graph={self.test_graph_id}" in repr_str
     assert "credits=50.25" in repr_str
 
   def test_nullable_fields(self):
     """Test nullable fields can be None."""
-    usage = GraphUsageTracking(
+    usage = GraphUsage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
@@ -711,7 +709,7 @@ class TestGraphUsageTracking:
 
   def test_composite_indexes(self):
     """Test that composite indexes are created correctly."""
-    indexes = GraphUsageTracking.__table__.indexes
+    indexes = GraphUsage.__table__.indexes
     index_names = {idx.name for idx in indexes}
 
     expected_indexes = [
@@ -731,11 +729,11 @@ class TestGraphUsageTracking:
     """Test billing period fields are set correctly."""
     now = datetime(2024, 3, 15, 14, 30, 0, tzinfo=timezone.utc)
 
-    with patch("robosystems.models.iam.graph_usage_tracking.datetime") as mock_datetime:
+    with patch("robosystems.models.iam.graph_usage.datetime") as mock_datetime:
       mock_datetime.now.return_value = now
       mock_datetime.side_effect = datetime
 
-      usage = GraphUsageTracking.record_storage_usage(
+      usage = GraphUsage.record_storage_usage(
         user_id=self.test_user_id,
         graph_id=self.test_graph_id,
         graph_tier="standard",
@@ -752,7 +750,7 @@ class TestGraphUsageTracking:
     """Test handling very large storage values."""
     large_storage = 10 * 1024**4  # 10 TB in bytes
 
-    usage = GraphUsageTracking.record_storage_usage(
+    usage = GraphUsage.record_storage_usage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="premium",
@@ -765,7 +763,7 @@ class TestGraphUsageTracking:
 
   def test_edge_case_zero_credits(self):
     """Test handling zero credit consumption."""
-    usage = GraphUsageTracking.record_credit_consumption(
+    usage = GraphUsage.record_credit_consumption(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       graph_tier="standard",

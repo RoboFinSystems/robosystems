@@ -11,7 +11,7 @@ from ...models.billing import (
   BillingAuditLog,
 )
 from ...models.billing.audit_log import BillingEventType
-from ...models.iam.graph_credits import GraphTier
+from ...config.graph_tier import GraphTier
 from ...config import BillingConfig, env
 
 logger = logging.getLogger(__name__)
@@ -25,15 +25,6 @@ def get_available_plans() -> List[str]:
   from ...config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
 
   return [plan["name"] for plan in DEFAULT_GRAPH_BILLING_PLANS]
-
-
-def is_payment_required() -> bool:
-  """Check if payment authentication is required."""
-  if not BILLING_ENABLED:
-    return False
-  if ENVIRONMENT == "dev":
-    return False
-  return True
 
 
 def get_max_plan_tier() -> str:
@@ -67,7 +58,7 @@ def generate_subscription_invoice(
       BillingInvoice instance in OPEN status
   """
   invoice = BillingInvoice.create_invoice(
-    user_id=subscription.billing_customer_user_id,
+    org_id=subscription.org_id,
     period_start=subscription.current_period_start,
     period_end=subscription.current_period_end,
     payment_terms=customer.payment_terms,
@@ -88,7 +79,7 @@ def generate_subscription_invoice(
   BillingAuditLog.log_event(
     session=session,
     event_type=BillingEventType.INVOICE_GENERATED,
-    billing_customer_user_id=subscription.billing_customer_user_id,
+    org_id=subscription.org_id,
     subscription_id=subscription.id,
     invoice_id=invoice.id,
     description=f"Invoice {invoice.invoice_number} generated for subscription {subscription.id}",
@@ -110,7 +101,7 @@ def generate_subscription_invoice(
       "invoice_id": invoice.id,
       "invoice_number": invoice.invoice_number,
       "subscription_id": subscription.id,
-      "user_id": subscription.billing_customer_user_id,
+      "org_id": subscription.org_id,
       "amount_cents": subscription.base_price_cents,
       "due_date": invoice.due_date.isoformat() if invoice.due_date else None,
       "payment_terms": customer.payment_terms,
@@ -138,7 +129,7 @@ class GraphSubscriptionService:
     """Create a billing subscription for a graph database.
 
     Args:
-        user_id: User ID (billing owner)
+        user_id: User ID (authenticated user creating subscription)
         graph_id: Graph database ID
         plan_name: Billing plan name
         tier: Graph tier
@@ -146,6 +137,8 @@ class GraphSubscriptionService:
     Returns:
         BillingSubscription instance
     """
+    from ...models.iam import OrgUser
+
     available_plans = get_available_plans()
     if plan_name not in available_plans:
       max_tier = get_max_plan_tier()
@@ -156,18 +149,24 @@ class GraphSubscriptionService:
     if not plan_config:
       raise ValueError(f"Billing plan '{plan_name}' not found")
 
-    existing = BillingSubscription.get_by_resource(
-      resource_type="graph", resource_id=graph_id, session=self.session
+    user_orgs = OrgUser.get_user_orgs(user_id, self.session)
+    if not user_orgs:
+      raise ValueError(f"User {user_id} has no organization")
+
+    org_id = user_orgs[0].org_id
+    customer = BillingCustomer.get_or_create(org_id, self.session)
+    logger.info(f"Using billing customer for org {org_id}")
+
+    existing = BillingSubscription.get_by_resource_and_org(
+      resource_type="graph", resource_id=graph_id, org_id=org_id, session=self.session
     )
 
     if existing:
       logger.warning(f"Subscription already exists for graph {graph_id}")
       return existing
 
-    customer = BillingCustomer.get_or_create(user_id, self.session)
-
     subscription = BillingSubscription.create_subscription(
-      user_id=user_id,
+      org_id=org_id,
       resource_type="graph",
       resource_id=graph_id,
       plan_name=plan_name,
@@ -179,7 +178,7 @@ class GraphSubscriptionService:
     BillingAuditLog.log_event(
       session=self.session,
       event_type=BillingEventType.SUBSCRIPTION_CREATED,
-      billing_customer_user_id=user_id,
+      org_id=org_id,
       subscription_id=subscription.id,
       description=f"Created {plan_name} subscription for graph {graph_id}",
       actor_type="user",
@@ -193,12 +192,66 @@ class GraphSubscriptionService:
       },
     )
 
+    if BILLING_ENABLED and customer.has_payment_method and customer.stripe_customer_id:
+      logger.info(
+        "Customer has payment method on file, creating Stripe subscription automatically",
+        extra={
+          "user_id": user_id,
+          "stripe_customer_id": customer.stripe_customer_id,
+          "plan_name": plan_name,
+        },
+      )
+
+      try:
+        from ...operations.providers.payment_provider import get_payment_provider
+
+        provider = get_payment_provider("stripe")
+        stripe_price_id = provider.get_or_create_price(
+          plan_name=plan_name, resource_type="graph"
+        )
+
+        stripe_subscription_id = provider.create_subscription(
+          customer_id=customer.stripe_customer_id,
+          price_id=stripe_price_id,
+          metadata={
+            "subscription_id": str(subscription.id),
+            "user_id": user_id,
+            "resource_type": "graph",
+            "resource_id": graph_id,
+          },
+        )
+
+        subscription.stripe_subscription_id = stripe_subscription_id
+        subscription.provider_subscription_id = stripe_subscription_id
+        subscription.provider_customer_id = customer.stripe_customer_id
+        subscription.payment_provider = "stripe"
+
+        logger.info(
+          f"Created Stripe subscription {stripe_subscription_id} for graph {graph_id}",
+          extra={
+            "user_id": user_id,
+            "subscription_id": subscription.id,
+            "stripe_subscription_id": stripe_subscription_id,
+          },
+        )
+
+      except Exception as e:
+        logger.error(
+          f"Failed to create Stripe subscription for graph {graph_id}: {e}",
+          extra={
+            "user_id": user_id,
+            "subscription_id": subscription.id,
+            "plan_name": plan_name,
+          },
+          exc_info=True,
+        )
+
     subscription.activate(self.session)
 
     BillingAuditLog.log_event(
       session=self.session,
       event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
-      billing_customer_user_id=user_id,
+      org_id=org_id,
       subscription_id=subscription.id,
       description=f"Activated subscription for graph {graph_id}",
       actor_type="system",
@@ -208,12 +261,21 @@ class GraphSubscriptionService:
       },
     )
 
-    generate_subscription_invoice(
-      subscription=subscription,
-      customer=customer,
-      description=f"Graph Database Subscription - {plan_name}",
-      session=self.session,
-    )
+    if not subscription.stripe_subscription_id:
+      generate_subscription_invoice(
+        subscription=subscription,
+        customer=customer,
+        description=f"Graph Database Subscription - {plan_name}",
+        session=self.session,
+      )
+    else:
+      logger.info(
+        f"Stripe will create invoice for subscription {subscription.id}",
+        extra={
+          "subscription_id": subscription.id,
+          "stripe_subscription_id": subscription.stripe_subscription_id,
+        },
+      )
 
     logger.info(
       f"Created billing subscription for graph {graph_id} with plan {plan_name}",

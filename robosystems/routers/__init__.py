@@ -8,6 +8,7 @@ from .auth import router as auth_router
 
 # Removed entity router - using query endpoint for all Entity operations
 from .user import router as user_router
+from .orgs import router as orgs_router
 from .graphs.agent import router as agent_router
 from .graphs.connections import router as connections_router
 from .status import router as status_router
@@ -62,6 +63,10 @@ router.include_router(
 user_router_v1 = APIRouter(prefix="/v1", tags=[])
 user_router_v1.include_router(user_router, prefix="")
 
+# Organization routes
+orgs_router_v1 = APIRouter(prefix="/v1", tags=[])
+orgs_router_v1.include_router(orgs_router)
+
 # Include offering router (non-graph-scoped)
 offering_router_v1 = APIRouter(prefix="/v1")
 offering_router_v1.include_router(offering_router)  # Already has /offering prefix
@@ -80,15 +85,16 @@ status_router_v1.include_router(status_router)
 
 # Billing routes that don't require a graph_id
 billing_router_v1 = APIRouter(prefix="/v1")
-billing_router_v1.include_router(checkout_router)
 billing_router_v1.include_router(customer_router)
-billing_router_v1.include_router(invoices_router)
 billing_router_v1.include_router(billing_subscriptions_router)
+billing_router_v1.include_router(invoices_router)
+billing_router_v1.include_router(checkout_router)
 
 # Export routers for main application
 __all__ = [
   "router",
   "user_router_v1",
+  "orgs_router_v1",
   "auth_router_v1",
   "status_router_v1",
   "graph_router",

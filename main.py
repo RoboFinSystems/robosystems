@@ -16,6 +16,7 @@ from robosystems.routers import (
   router as v1_router,
   graph_router,
   user_router_v1,
+  orgs_router_v1,
   auth_router_v1,
   status_router_v1,
   offering_router_v1,
@@ -293,6 +294,7 @@ def create_app() -> FastAPI:
   app.include_router(auth_router_v1)
   app.include_router(status_router_v1)
   app.include_router(user_router_v1)
+  app.include_router(orgs_router_v1)
   app.include_router(
     v1_router
   )  # Now includes sync, agent, and schedule routers as graph-scoped

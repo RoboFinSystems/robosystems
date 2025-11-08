@@ -11,7 +11,7 @@ from fastapi import (
 )
 
 from ...config import env
-from ...models.iam import User, UserLimits
+from ...models.iam import User, OrgLimits, Org
 from ...models.api.auth import RegisterRequest, AuthResponse
 from ...models.api.common import ErrorResponse
 from ...database import get_async_db_session
@@ -273,9 +273,17 @@ async def register(
       # TODO: Send email verification email here
       logger.info(f"Email verification required for production user: {sanitized_email}")
 
-    # Create default user limits (just safety limits)
-    # Users can purchase graph or repository subscriptions after registration
-    UserLimits.create_default_limits(user.id, session)
+    # Create personal organization for the user
+    org = Org.create_phantom_org_for_user(
+      user_id=user.id,
+      user_name=sanitized_name,
+      session=session,
+    )
+    logger.info(f"Created personal org {org.id} for user {sanitized_email}")
+
+    # Create default org limits (safety limits for resource provisioning)
+    # Orgs can purchase subscriptions to increase limits
+    OrgLimits.create_default_limits(org.id, session)
 
     # Commit the transaction
     session.commit()

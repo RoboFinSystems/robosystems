@@ -10,9 +10,10 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, Mock
 
 from fastapi.testclient import TestClient
-from robosystems.models.iam.graph_credits import GraphCredits, GraphTier
-from robosystems.models.iam.graph_usage_tracking import (
-  GraphUsageTracking,
+from robosystems.config.graph_tier import GraphTier
+from robosystems.models.iam.graph_credits import GraphCredits
+from robosystems.models.iam.graph_usage import (
+  GraphUsage,
   UsageEventType,
 )
 
@@ -64,7 +65,7 @@ class TestStorageLimitsAPI:
     """Test successful storage limits retrieval."""
     # Create usage record (30GB = 30% of 100GB, below 80% threshold)
     now = datetime.now(timezone.utc)
-    usage_record = GraphUsageTracking(
+    usage_record = GraphUsage(
       id="api_usage_1",
       graph_id=sample_graph_credits.graph_id,
       user_id=sample_graph_credits.user_id,
@@ -103,7 +104,7 @@ class TestStorageLimitsAPI:
     """Test storage limits when approaching threshold."""
     # Create usage record at 90% (90GB of 100GB)
     now = datetime.now(timezone.utc)
-    usage_record = GraphUsageTracking(
+    usage_record = GraphUsage(
       id="api_usage_2",
       graph_id=sample_graph_credits.graph_id,
       user_id=sample_graph_credits.user_id,
@@ -141,7 +142,7 @@ class TestStorageLimitsAPI:
     """Test storage limits when exceeding limit."""
     # Create usage record that exceeds limit (120GB > 100GB)
     now = datetime.now(timezone.utc)
-    usage_record = GraphUsageTracking(
+    usage_record = GraphUsage(
       id="api_usage_3",
       graph_id=sample_graph_credits.graph_id,
       user_id=sample_graph_credits.user_id,
@@ -182,7 +183,7 @@ class TestStorageLimitsAPI:
 
     # Create usage record (120GB = 60% of 200GB override)
     now = datetime.now(timezone.utc)
-    usage_record = GraphUsageTracking(
+    usage_record = GraphUsage(
       id="api_usage_4",
       graph_id=sample_graph_credits.graph_id,
       user_id=sample_graph_credits.user_id,
@@ -279,7 +280,7 @@ class TestStorageUsageAPI:
     base_date = datetime.now(timezone.utc)
     for i in range(5):
       record_time = base_date - timedelta(days=i)
-      usage_record = GraphUsageTracking(
+      usage_record = GraphUsage(
         id=f"usage_api_{i}",
         graph_id=sample_graph_credits.graph_id,
         user_id=sample_graph_credits.user_id,
@@ -368,24 +369,25 @@ class TestStorageUsageAPI:
 
 
 @pytest.fixture
-def sample_graph_credits(db_session, test_user):
+def sample_graph_credits(db_session, test_user, test_org):
   """Create sample graph credits for API testing."""
   import uuid
 
   # First create the graph
-  from robosystems.models.iam import Graph, UserGraph
+  from robosystems.models.iam import Graph, GraphUser
 
   graph_id = f"api_test_graph_{uuid.uuid4().hex[:8]}"
   Graph.create(
     graph_id=graph_id,
+    org_id=test_org.id,
     graph_name="Test Graph",
     graph_type="generic",
     session=db_session,
     graph_tier=GraphTier.KUZU_STANDARD,
   )
 
-  # Create UserGraph to give the test user access
-  UserGraph.create(
+  # Create GraphUser to give the test user access
+  GraphUser.create(
     user_id=test_user.id,
     graph_id=graph_id,
     role="admin",

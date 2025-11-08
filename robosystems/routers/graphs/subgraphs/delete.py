@@ -14,7 +14,7 @@ from robosystems.models.api.graphs.subgraphs import (
   DeleteSubgraphResponse,
 )
 from robosystems.models.iam.user import User
-from robosystems.models.iam.user_graph import UserGraph
+from robosystems.models.iam.graph_user import GraphUser
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.logger import logger, api_logger, log_metric
@@ -91,10 +91,10 @@ async def delete_subgraph(
     subgraph = get_subgraph_by_name(graph_id, subgraph_id, session, current_user)
 
     user_graph = (
-      session.query(UserGraph)
+      session.query(GraphUser)
       .filter(
-        UserGraph.user_id == current_user.id,
-        UserGraph.graph_id == subgraph.parent_graph_id,
+        GraphUser.user_id == current_user.id,
+        GraphUser.graph_id == subgraph.parent_graph_id,
       )
       .first()
     )

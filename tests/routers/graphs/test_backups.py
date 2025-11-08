@@ -104,7 +104,7 @@ class TestBackupEndpoints:
   @patch(
     "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository"
   )
-  @patch("robosystems.models.iam.UserGraph.get_by_user_id")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_create_backup_endpoint(
     self,
     mock_get_by_user_id,
@@ -144,7 +144,7 @@ class TestBackupEndpoints:
       # Mock os.path.exists to return False (database doesn't exist yet, size will be 0)
       mock_path_exists.return_value = False
 
-      # Mock user graph access - create a mock UserGraph with the test graph_id and admin role
+      # Mock user graph access - create a mock GraphUser with the test graph_id and admin role
       mock_user_graph = MagicMock()
       mock_user_graph.graph_id = "test_graph_123"
       mock_user_graph.role = "admin"  # Admin role required for backup creation
@@ -196,7 +196,7 @@ class TestBackupEndpoints:
   @patch(
     "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository"
   )
-  @patch("robosystems.models.iam.UserGraph.get_by_user_id")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_list_backups_endpoint(
     self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
   ):
@@ -215,7 +215,7 @@ class TestBackupEndpoints:
       # Mock authorization checks
       mock_is_shared.return_value = False  # Not a shared repository
 
-      # Mock user graph access - create a mock UserGraph with the test graph_id and admin role
+      # Mock user graph access - create a mock GraphUser with the test graph_id and admin role
       mock_user_graph = MagicMock()
       mock_user_graph.graph_id = "test_graph_123"
       mock_user_graph.role = "admin"  # Admin role required for backup creation

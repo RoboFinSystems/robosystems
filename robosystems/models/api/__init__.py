@@ -96,8 +96,6 @@ from .user import (
   CreateAPIKeyResponse,
   APIKeysResponse,
   UpdateAPIKeyRequest,
-  UserLimitsResponse,
-  UserUsageResponse,
 )
 from .billing import (
   CreditSummaryResponse,
@@ -237,8 +235,6 @@ __all__ = [
   "CreateAPIKeyResponse",
   "APIKeysResponse",
   "UpdateAPIKeyRequest",
-  "UserLimitsResponse",
-  "UserUsageResponse",
   # Credit models
   "CreditSummaryResponse",
   "CreditTransactionResponse",

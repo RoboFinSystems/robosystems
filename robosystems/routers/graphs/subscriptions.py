@@ -136,6 +136,15 @@ async def get_subscription(
 ) -> GraphSubscriptionResponse:
   """Get subscription for a graph or repository."""
   try:
+    from ...models.iam import OrgUser
+
+    customer = BillingCustomer.get_by_user_id(current_user.id, db)
+    if not customer:
+      raise HTTPException(
+        status_code=404,
+        detail="No billing customer found for user",
+      )
+
     if is_shared_repository(graph_id):
       subscription = BillingSubscription.get_by_resource_and_user(
         resource_type="repository",
@@ -148,11 +157,17 @@ async def get_subscription(
         resource_type="graph", resource_id=graph_id, session=db
       )
 
-      if subscription and subscription.billing_customer_user_id != current_user.id:
-        raise HTTPException(
-          status_code=403,
-          detail="You do not have access to this graph subscription",
+      if subscription:
+        membership = OrgUser.get_by_org_and_user(
+          org_id=subscription.org_id,
+          user_id=current_user.id,
+          session=db,
         )
+        if not membership:
+          raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this graph subscription",
+          )
 
     if not subscription:
       raise HTTPException(
@@ -227,7 +242,18 @@ async def create_repository_subscription(
         detail=f"Invalid plan '{request.plan_name}' for repository '{graph_id}'",
       )
 
-    customer = BillingCustomer.get_or_create(current_user.id, db)
+    from ...models.iam import OrgUser
+
+    user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+    if not user_orgs:
+      raise HTTPException(
+        status_code=500,
+        detail="User organization not found. Please contact support.",
+      )
+
+    org_id = user_orgs[0].org_id
+
+    customer = BillingCustomer.get_or_create(org_id, db)
 
     can_provision, error_message = customer.can_provision_resources(
       environment=env.ENVIRONMENT, billing_enabled=env.BILLING_ENABLED
@@ -241,7 +267,7 @@ async def create_repository_subscription(
       )
 
     subscription = BillingSubscription.create_subscription(
-      user_id=current_user.id,
+      org_id=org_id,
       resource_type="repository",
       resource_id=graph_id,
       plan_name=request.plan_name,
@@ -253,7 +279,7 @@ async def create_repository_subscription(
     BillingAuditLog.log_event(
       session=db,
       event_type=BillingEventType.SUBSCRIPTION_CREATED,
-      billing_customer_user_id=current_user.id,
+      org_id=org_id,
       subscription_id=subscription.id,
       description=f"Created {request.plan_name} subscription for {graph_id} repository",
       actor_type="user",
@@ -271,7 +297,7 @@ async def create_repository_subscription(
     BillingAuditLog.log_event(
       session=db,
       event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
-      billing_customer_user_id=current_user.id,
+      org_id=org_id,
       subscription_id=subscription.id,
       description=f"Activated subscription for {graph_id} repository",
       actor_type="system",
@@ -358,6 +384,8 @@ async def upgrade_subscription(
 ) -> GraphSubscriptionResponse:
   """Upgrade subscription to a different plan."""
   try:
+    from ...models.iam import OrgUser
+
     if is_shared_repository(graph_id):
       subscription = BillingSubscription.get_by_resource_and_user(
         resource_type="repository",
@@ -371,11 +399,17 @@ async def upgrade_subscription(
         resource_type="graph", resource_id=graph_id, session=db
       )
 
-      if subscription and subscription.billing_customer_user_id != current_user.id:
-        raise HTTPException(
-          status_code=403,
-          detail="You do not have access to this graph subscription",
+      if subscription:
+        membership = OrgUser.get_by_org_and_user(
+          org_id=subscription.org_id,
+          user_id=current_user.id,
+          session=db,
         )
+        if not membership:
+          raise HTTPException(
+            status_code=403,
+            detail="You do not have access to this graph subscription",
+          )
 
       plan_config = BillingConfig.get_subscription_plan(request.new_plan_name)
 

@@ -60,9 +60,9 @@ async def validate_mcp_access(
       )
   else:
     # User graph - validate graph access
-    from robosystems.models.iam import UserGraph
+    from robosystems.models.iam import GraphUser
 
-    if not UserGraph.user_has_access(current_user.id, graph_id, db):
+    if not GraphUser.user_has_access(current_user.id, graph_id, db):
       raise HTTPException(status_code=403, detail=f"Access denied to graph {graph_id}")
 
 

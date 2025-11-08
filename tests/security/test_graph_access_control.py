@@ -10,7 +10,7 @@ from fastapi import status
 from unittest.mock import patch, MagicMock
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import UserGraph
+from robosystems.models.iam import GraphUser
 from robosystems.database import session
 
 
@@ -43,7 +43,7 @@ class TestGraphAccessControlDependency:
   ):
     """Test that users with valid graph access are authenticated."""
     # Create user-graph relationship
-    UserGraph.create(
+    GraphUser.create(
       user_id=test_user.id,
       graph_id=sample_graph.graph_id,
       role="member",
@@ -96,7 +96,7 @@ class TestGraphAccessControlDependency:
   ):
     """Test that API keys with graph access work."""
     # Create user-graph relationship
-    UserGraph.create(
+    GraphUser.create(
       user_id=test_user.id,
       graph_id=sample_graph.graph_id,
       role="member",
@@ -219,30 +219,30 @@ class TestGraphEndpointAccessControl:
 
 
 @pytest.mark.unit
-class TestUserGraphAccessValidation:
-  """Test UserGraph.user_has_access validation."""
+class TestGraphUserAccessValidation:
+  """Test GraphUser.user_has_access validation."""
 
   def test_user_has_access_returns_true_for_member(self, test_user, sample_graph):
     """Test user_has_access returns True when user is a member."""
-    UserGraph.create(
+    GraphUser.create(
       user_id=test_user.id,
       graph_id=sample_graph.graph_id,
       role="member",
       session=session,
     )
 
-    has_access = UserGraph.user_has_access(test_user.id, sample_graph.graph_id, session)
+    has_access = GraphUser.user_has_access(test_user.id, sample_graph.graph_id, session)
     assert has_access is True
 
   def test_user_has_access_returns_false_for_non_member(self, test_user, sample_graph):
     """Test user_has_access returns False when user is not a member."""
-    has_access = UserGraph.user_has_access(test_user.id, sample_graph.graph_id, session)
+    has_access = GraphUser.user_has_access(test_user.id, sample_graph.graph_id, session)
     assert has_access is False
 
   def test_user_has_admin_access_validates_role(self, test_user, sample_graph):
     """Test user_has_admin_access validates admin role."""
     # Create as member
-    UserGraph.create(
+    GraphUser.create(
       user_id=test_user.id,
       graph_id=sample_graph.graph_id,
       role="member",
@@ -250,19 +250,19 @@ class TestUserGraphAccessValidation:
     )
 
     # Should not have admin access
-    has_admin = UserGraph.user_has_admin_access(
+    has_admin = GraphUser.user_has_admin_access(
       test_user.id, sample_graph.graph_id, session
     )
     assert has_admin is False
 
     # Update to admin
-    user_graph = UserGraph.get_by_user_and_graph(
+    user_graph = GraphUser.get_by_user_and_graph(
       test_user.id, sample_graph.graph_id, session
     )
     user_graph.update_role("admin", session)
 
     # Now should have admin access
-    has_admin = UserGraph.user_has_admin_access(
+    has_admin = GraphUser.user_has_admin_access(
       test_user.id, sample_graph.graph_id, session
     )
     assert has_admin is True

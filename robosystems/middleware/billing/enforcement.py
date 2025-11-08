@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 
 from ...models.billing import BillingCustomer, BillingSubscription, SubscriptionStatus
-from ...models.iam import GraphTier
+from ...config.graph_tier import GraphTier
 from ...config import env
 from ...logger import get_logger
 

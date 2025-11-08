@@ -43,7 +43,7 @@ potentially storage overages need credit-based billing.
 
 from decimal import Decimal
 
-from .tier_config import get_tier_monthly_credits
+from .graph_tier import get_tier_monthly_credits
 
 
 class CreditConfig:

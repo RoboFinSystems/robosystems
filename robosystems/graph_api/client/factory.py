@@ -28,7 +28,7 @@ from robosystems.config import env
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.logger import logger
 from robosystems.middleware.graph.allocation_manager import KuzuAllocationManager
-from robosystems.models.iam.graph_credits import GraphTier
+from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
 
@@ -369,9 +369,9 @@ class GraphClientFactory:
         logger.info(f"Using backend from GRAPH_SHARED_REPOSITORY_BACKEND: {backend}")
       else:
         # Fall back to tier config (for consistency with AWS environments)
-        from robosystems.config.tier_config import TierConfig
+        from robosystems.config.graph_tier import GraphTierConfig
 
-        tier_config = TierConfig.get_tier_config("kuzu-shared", "staging")
+        tier_config = GraphTierConfig.get_tier_config("kuzu-shared", "staging")
         if tier_config.get("backend"):
           backend = tier_config.get("backend")
           logger.info(f"Using backend from graph.yml tier config: {backend}")

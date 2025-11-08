@@ -27,6 +27,7 @@ from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Model
+from ...config.graph_tier import GraphTier
 import logging
 
 logger = logging.getLogger(__name__)
@@ -466,10 +467,13 @@ class UserRepository(Model):
     Pulls infrastructure metadata from the Graph table via relationship.
     """
     if self.graph:
+      graph_tier = self.graph.graph_tier
+      if isinstance(graph_tier, str):
+        graph_tier = GraphTier(graph_tier)  # type: ignore[misc]
       return {
         "instance_id": self.graph.graph_instance_id,
         "cluster_region": self.graph.graph_cluster_region,
-        "instance_tier": self.graph.graph_tier,
+        "instance_tier": graph_tier,
         "repository_name": self.repository_name,
         "repository_type": self.repository_type.value,
       }
@@ -477,7 +481,7 @@ class UserRepository(Model):
     return {
       "instance_id": "kuzu-shared-prod",
       "cluster_region": None,
-      "instance_tier": "kuzu-shared",
+      "instance_tier": GraphTier.KUZU_SHARED,
       "repository_name": self.repository_name,
       "repository_type": self.repository_type.value,
     }

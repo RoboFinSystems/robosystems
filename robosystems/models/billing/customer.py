@@ -1,4 +1,4 @@
-"""Billing customer model - stores payment information for users."""
+"""Billing customer model - stores payment information for organizations."""
 
 from datetime import datetime, timezone
 from typing import Optional
@@ -12,15 +12,15 @@ logger = get_logger(__name__)
 
 
 class BillingCustomer(Base):
-  """Billing information for a user.
+  """Billing information for an organization.
 
-  Separated from IAM User model to isolate billing concerns.
+  Separated from IAM models to isolate billing concerns.
   Designed for eventual extraction to billing microservice.
   """
 
   __tablename__ = "billing_customers"
 
-  user_id = Column(String, ForeignKey("users.id"), primary_key=True)
+  org_id = Column(String, ForeignKey("orgs.id"), primary_key=True)
 
   stripe_customer_id = Column(String, unique=True, nullable=True)
   has_payment_method = Column(Boolean, default=False, nullable=False)
@@ -42,28 +42,40 @@ class BillingCustomer(Base):
   )
 
   def __repr__(self) -> str:
-    return f"<BillingCustomer user_id={self.user_id} invoice_enabled={self.invoice_billing_enabled}>"
+    return f"<BillingCustomer org_id={self.org_id} invoice_enabled={self.invoice_billing_enabled}>"
 
   @classmethod
-  def get_or_create(cls, user_id: str, session: Session) -> "BillingCustomer":
-    """Get or create billing customer for a user."""
-    customer = session.query(cls).filter(cls.user_id == user_id).first()
+  def get_or_create(cls, org_id: str, session: Session) -> "BillingCustomer":
+    """Get or create billing customer for an organization."""
+    customer = session.query(cls).filter(cls.org_id == org_id).first()
 
     if not customer:
-      customer = cls(user_id=user_id)
+      customer = cls(org_id=org_id)
       session.add(customer)
       session.commit()
       session.refresh(customer)
-      logger.info(f"Created billing customer for user {user_id}")
+      logger.info(f"Created billing customer for org {org_id}")
 
     return customer
+
+  @classmethod
+  def get_by_org_id(cls, org_id: str, session: Session) -> Optional["BillingCustomer"]:
+    """Get billing customer by organization ID."""
+    return session.query(cls).filter(cls.org_id == org_id).first()
 
   @classmethod
   def get_by_user_id(
     cls, user_id: str, session: Session
   ) -> Optional["BillingCustomer"]:
-    """Get billing customer by user ID."""
-    return session.query(cls).filter(cls.user_id == user_id).first()
+    """Get billing customer by user ID (looks up user's org first)."""
+    from ..iam import OrgUser
+
+    org_user = session.query(OrgUser).filter(OrgUser.user_id == user_id).first()
+
+    if not org_user:
+      return None
+
+    return cls.get_by_org_id(org_user.org_id, session)
 
   @classmethod
   def get_by_stripe_customer_id(
@@ -79,13 +91,13 @@ class BillingCustomer(Base):
   ) -> tuple[bool, Optional[str]]:
     """Check if customer can provision new resources.
 
+    If billing is disabled, allows all provisioning (testing mode).
+    If billing is enabled, requires either invoice billing or payment method.
+
     Returns:
         Tuple of (can_provision, error_message)
     """
     if not billing_enabled:
-      return (True, None)
-
-    if environment == "dev":
       return (True, None)
 
     if self.invoice_billing_enabled:
@@ -108,7 +120,7 @@ class BillingCustomer(Base):
     self.updated_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(self)
-    logger.info(f"Updated payment method for billing customer {self.user_id}")
+    logger.info(f"Updated payment method for billing customer {self.org_id}")
 
   def enable_invoice_billing(
     self,
@@ -125,4 +137,4 @@ class BillingCustomer(Base):
     self.updated_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(self)
-    logger.info(f"Enabled invoice billing for customer {self.user_id}")
+    logger.info(f"Enabled invoice billing for customer {self.org_id}")

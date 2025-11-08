@@ -17,7 +17,7 @@ from robosystems.middleware.auth.dependencies import (
 )
 from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 from robosystems.models.iam import User
-from robosystems.models.iam.user_graph import UserGraph
+from robosystems.models.iam.graph_user import GraphUser
 from robosystems.models.iam.user_repository import (
   RepositoryAccessLevel,
   UserRepository,
@@ -109,8 +109,8 @@ async def get_graph_database(
           )
 
     elif identity.is_user_graph:
-      # Check user graph access via UserGraph table
-      if not UserGraph.user_has_access(str(current_user.id), graph_id, db):
+      # Check user graph access via GraphUser table
+      if not GraphUser.user_has_access(str(current_user.id), graph_id, db):
         logger.warning(
           f"User {current_user.id} attempted access to user graph {graph_id} without permission"
         )
@@ -126,7 +126,7 @@ async def get_graph_database(
 
       # Check admin access if required
       if required_access == AccessPattern.READ_WRITE:
-        if not UserGraph.user_has_admin_access(str(current_user.id), graph_id, db):
+        if not GraphUser.user_has_admin_access(str(current_user.id), graph_id, db):
           raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Admin access required for graph {graph_id}",
@@ -211,7 +211,7 @@ async def get_user_graph_repository(
 
   Validates that:
   1. The graph is a user graph (not shared repository)
-  2. The user has access via UserGraph table
+  2. The user has access via GraphUser table
   3. The requested operation is allowed
 
   Args:
@@ -233,8 +233,8 @@ async def get_user_graph_repository(
       detail=f"Graph {graph_id} is not a user graph",
     )
 
-  # Check UserGraph table for permissions
-  if not UserGraph.user_has_access(str(current_user.id), graph_id, db):
+  # Check GraphUser table for permissions
+  if not GraphUser.user_has_access(str(current_user.id), graph_id, db):
     SecurityAuditLogger.log_authorization_denied(
       user_id=str(current_user.id),
       resource=f"user_graph:{graph_id}",
@@ -247,7 +247,7 @@ async def get_user_graph_repository(
 
   # Check admin access for write operations
   if operation_type == "write":
-    user_graph = UserGraph.get_by_user_and_graph(str(current_user.id), graph_id, db)
+    user_graph = GraphUser.get_by_user_and_graph(str(current_user.id), graph_id, db)
     if user_graph and user_graph.role not in ["admin", "member"]:
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -379,7 +379,7 @@ async def get_graph_repository_with_auth(
 
     elif identity.is_user_graph:
       # Check user graph access
-      if not UserGraph.user_has_access(str(current_user.id), graph_id, db):
+      if not GraphUser.user_has_access(str(current_user.id), graph_id, db):
         raise HTTPException(
           status_code=status.HTTP_403_FORBIDDEN,
           detail=f"Access denied to user graph {graph_id}",

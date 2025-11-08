@@ -240,9 +240,9 @@ class TestDisabledProviderHandling:
     assert any("provider" in str(error).lower() for error in response_json["detail"])
 
   @pytest.fixture
-  def auth_headers(self, test_user, test_db):
+  def auth_headers(self, test_user, test_org, test_db):
     """Create auth headers for test requests."""
-    from robosystems.models.iam import UserAPIKey, UserGraph, Graph
+    from robosystems.models.iam import UserAPIKey, GraphUser, Graph
 
     # Create the graph first (only if it doesn't exist)
     existing_graph = (
@@ -251,19 +251,20 @@ class TestDisabledProviderHandling:
     if not existing_graph:
       Graph.create(
         graph_id="kg1a2b3c4d5",
+        org_id=test_org.id,
         graph_name="Test Graph",
         graph_type="generic",
         session=test_db,
       )
 
-    # Create UserGraph relationship for the test graph (only if it doesn't exist)
+    # Create GraphUser relationship for the test graph (only if it doesn't exist)
     existing_user_graph = (
-      test_db.query(UserGraph)
-      .filter(UserGraph.user_id == test_user.id, UserGraph.graph_id == "kg1a2b3c4d5")
+      test_db.query(GraphUser)
+      .filter(GraphUser.user_id == test_user.id, GraphUser.graph_id == "kg1a2b3c4d5")
       .first()
     )
     if not existing_user_graph:
-      UserGraph.create(
+      GraphUser.create(
         user_id=test_user.id, graph_id="kg1a2b3c4d5", role="admin", session=test_db
       )
 

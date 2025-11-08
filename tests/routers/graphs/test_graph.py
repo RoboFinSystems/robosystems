@@ -15,7 +15,8 @@ from unittest.mock import Mock, patch, AsyncMock
 from httpx import AsyncClient
 from uuid import uuid4
 
-from robosystems.models.iam import UserLimits, GraphTier
+from robosystems.models.iam import OrgLimits
+from robosystems.config.graph_tier import GraphTier
 from robosystems.routers.graphs.main import (
   CreateGraphRequest,
   _create_error_response,
@@ -37,8 +38,8 @@ class TestGraphCreationEndpoint:
   @pytest.fixture
   def mock_user_limits(self):
     """Create mock user limits."""
-    limits = Mock(spec=UserLimits)
-    limits.can_create_user_graph.return_value = (True, None)
+    limits = Mock(spec=OrgLimits)
+    limits.can_create_graph.return_value = (True, None)
     return limits
 
   @pytest.fixture
@@ -86,107 +87,129 @@ class TestGraphCreationEndpoint:
   ):
     """Test successful graph creation without entity."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_user_limits):
-        with patch(
-          "robosystems.middleware.billing.enforcement.check_can_provision_graph",
-          return_value=(True, None),
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        with patch.object(
+          OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
           with patch(
-            "robosystems.routers.graphs.main.create_operation_response",
-            new_callable=AsyncMock,
-          ) as mock_create_op:
+            "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+            return_value=(True, None),
+          ):
             with patch(
-              "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
-            ) as mock_task:
-              # Setup mocks
-              mock_db = Mock()
-              mock_get_db.return_value = iter([mock_db])
+              "robosystems.routers.graphs.main.create_operation_response",
+              new_callable=AsyncMock,
+            ) as mock_create_op:
+              with patch(
+                "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
+              ) as mock_task:
+                # Setup mocks
+                mock_db = Mock()
+                mock_get_db.return_value = iter([mock_db])
 
-              operation_id = str(uuid4())
-              mock_create_op.return_value = {
-                "operation_id": operation_id,
-                "status": "pending",
-                "operation_type": "graph_creation",
-                "_links": {
-                  "stream": f"/v1/operations/{operation_id}/stream",
-                  "status": f"/v1/operations/{operation_id}/status",
-                },
-              }
+                # Mock OrgUser.get_user_orgs to return a list with an org
+                mock_org_user = Mock()
+                mock_org_user.org_id = "test-org-123"
+                mock_get_user_orgs.return_value = [mock_org_user]
 
-              mock_task.delay.return_value = Mock(id="task-123")
+                # Configure mock_user_limits.can_create_graph
+                mock_user_limits.can_create_graph.return_value = (True, None)
 
-              # Make request
-              response = await async_client.post(
-                "/v1/graphs",
-                json=sample_graph_request.model_dump(),
-              )
+                operation_id = str(uuid4())
+                mock_create_op.return_value = {
+                  "operation_id": operation_id,
+                  "status": "pending",
+                  "operation_type": "graph_creation",
+                  "_links": {
+                    "stream": f"/v1/operations/{operation_id}/stream",
+                    "status": f"/v1/operations/{operation_id}/status",
+                  },
+                }
 
-              # Assert response
-              assert response.status_code == 202
-              data = response.json()
-              assert data["operation_id"] == operation_id
-              assert data["status"] == "pending"
-              assert "_links" in data
+                mock_task.delay.return_value = Mock(id="task-123")
 
-              # Assert task was queued
-              mock_task.delay.assert_called_once()
-              task_data = mock_task.delay.call_args[0][0]
-              assert task_data["graph_id"] is None
-              assert task_data["schema_extensions"] == ["roboledger"]
-              assert task_data["tier"] == "kuzu-standard"
+                # Make request
+                response = await async_client.post(
+                  "/v1/graphs",
+                  json=sample_graph_request.model_dump(),
+                )
+
+                # Assert response
+                assert response.status_code == 202
+                data = response.json()
+                assert data["operation_id"] == operation_id
+                assert data["status"] == "pending"
+                assert "_links" in data
+
+                # Assert task was queued
+                mock_task.delay.assert_called_once()
+                task_data = mock_task.delay.call_args[0][0]
+                assert task_data["graph_id"] is None
+                assert task_data["schema_extensions"] == ["roboledger"]
+                assert task_data["tier"] == "kuzu-standard"
 
   async def test_create_entity_graph_success(
     self, async_client: AsyncClient, sample_entity_graph_request, mock_user_limits
   ):
     """Test successful entity graph creation."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_user_limits):
-        with patch(
-          "robosystems.middleware.billing.enforcement.check_can_provision_graph",
-          return_value=(True, None),
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        with patch.object(
+          OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
           with patch(
-            "robosystems.routers.graphs.main.create_operation_response",
-            new_callable=AsyncMock,
-          ) as mock_create_op:
+            "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+            return_value=(True, None),
+          ):
             with patch(
-              "robosystems.tasks.graph_operations.create_entity_graph.create_entity_with_new_graph_sse_task"
-            ) as mock_task:
-              # Setup mocks
-              mock_db = Mock()
-              mock_get_db.return_value = iter([mock_db])
+              "robosystems.routers.graphs.main.create_operation_response",
+              new_callable=AsyncMock,
+            ) as mock_create_op:
+              with patch(
+                "robosystems.tasks.graph_operations.create_entity_graph.create_entity_with_new_graph_sse_task"
+              ) as mock_task:
+                # Setup mocks
+                mock_db = Mock()
+                mock_get_db.return_value = iter([mock_db])
 
-              operation_id = str(uuid4())
-              mock_create_op.return_value = {
-                "operation_id": operation_id,
-                "status": "pending",
-                "operation_type": "entity_graph_creation",
-                "_links": {
-                  "stream": f"/v1/operations/{operation_id}/stream",
-                  "status": f"/v1/operations/{operation_id}/status",
-                },
-              }
+                # Mock OrgUser.get_user_orgs to return a list with an org
+                mock_org_user = Mock()
+                mock_org_user.org_id = "test-org-123"
+                mock_get_user_orgs.return_value = [mock_org_user]
 
-              mock_task.delay.return_value = Mock(id="task-456")
+                # Configure mock_user_limits.can_create_graph
+                mock_user_limits.can_create_graph.return_value = (True, None)
 
-              # Make request
-              response = await async_client.post(
-                "/v1/graphs",
-                json=sample_entity_graph_request.model_dump(),
-              )
+                operation_id = str(uuid4())
+                mock_create_op.return_value = {
+                  "operation_id": operation_id,
+                  "status": "pending",
+                  "operation_type": "entity_graph_creation",
+                  "_links": {
+                    "stream": f"/v1/operations/{operation_id}/stream",
+                    "status": f"/v1/operations/{operation_id}/status",
+                  },
+                }
 
-              # Assert response
-              assert response.status_code == 202
-              data = response.json()
-              assert data["operation_id"] == operation_id
-              assert data["operation_type"] == "entity_graph_creation"
+                mock_task.delay.return_value = Mock(id="task-456")
 
-              # Assert entity task was queued
-              mock_task.delay.assert_called_once()
-              entity_data = mock_task.delay.call_args[0][0]
-              assert entity_data["name"] == "Test Corp"
-              assert entity_data["cik"] == "0001234567"
-              assert entity_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
+                # Make request
+                response = await async_client.post(
+                  "/v1/graphs",
+                  json=sample_entity_graph_request.model_dump(),
+                )
+
+                # Assert response
+                assert response.status_code == 202
+                data = response.json()
+                assert data["operation_id"] == operation_id
+                assert data["operation_type"] == "entity_graph_creation"
+
+                # Assert entity task was queued
+                mock_task.delay.assert_called_once()
+                entity_data = mock_task.delay.call_args[0][0]
+                assert entity_data["name"] == "Test Corp"
+                assert entity_data["cik"] == "0001234567"
+                assert entity_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
 
   async def test_create_graph_with_custom_schema(
     self, async_client: AsyncClient, mock_user_limits
@@ -228,89 +251,109 @@ class TestGraphCreationEndpoint:
     )
 
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_user_limits):
-        with patch(
-          "robosystems.middleware.billing.enforcement.check_can_provision_graph",
-          return_value=(True, None),
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        with patch.object(
+          OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
           with patch(
-            "robosystems.routers.graphs.main.create_operation_response",
-            new_callable=AsyncMock,
-          ) as mock_create_op:
+            "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+            return_value=(True, None),
+          ):
             with patch(
-              "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
-            ) as mock_task:
-              # Setup mocks
-              mock_db = Mock()
-              mock_get_db.return_value = iter([mock_db])
+              "robosystems.routers.graphs.main.create_operation_response",
+              new_callable=AsyncMock,
+            ) as mock_create_op:
+              with patch(
+                "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
+              ) as mock_task:
+                # Setup mocks
+                mock_db = Mock()
+                mock_get_db.return_value = iter([mock_db])
 
-              operation_id = str(uuid4())
-              mock_create_op.return_value = {
-                "operation_id": operation_id,
-                "status": "pending",
-                "operation_type": "graph_creation",
-              }
+                # Mock OrgUser.get_user_orgs to return a list with an org
+                mock_org_user = Mock()
+                mock_org_user.org_id = "test-org-123"
+                mock_get_user_orgs.return_value = [mock_org_user]
 
-              mock_task.delay.return_value = Mock(id="task-789")
+                # Configure mock_user_limits.can_create_graph
+                mock_user_limits.can_create_graph.return_value = (True, None)
 
-              # Make request
-              response = await async_client.post(
-                "/v1/graphs",
-                json=request.model_dump(),
-              )
+                operation_id = str(uuid4())
+                mock_create_op.return_value = {
+                  "operation_id": operation_id,
+                  "status": "pending",
+                  "operation_type": "graph_creation",
+                }
 
-              # Assert response
-              assert response.status_code == 202
+                mock_task.delay.return_value = Mock(id="task-789")
 
-              # Assert custom schema was included
-              task_data = mock_task.delay.call_args[0][0]
-              assert task_data["custom_schema"] is not None
-              assert task_data["custom_schema"]["nodes"][0]["name"] == "CustomNode"
-              assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
+                # Make request
+                response = await async_client.post(
+                  "/v1/graphs",
+                  json=request.model_dump(),
+                )
+
+                # Assert response
+                assert response.status_code == 202
+
+                # Assert custom schema was included
+                task_data = mock_task.delay.call_args[0][0]
+                assert task_data["custom_schema"] is not None
+                assert task_data["custom_schema"]["nodes"][0]["name"] == "CustomNode"
+                assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
 
   async def test_create_graph_user_limits_not_found(
     self, async_client: AsyncClient, sample_graph_request
   ):
-    """Test graph creation when user limits not found."""
+    """Test graph creation when user has no organization."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=None):
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
         mock_db = Mock()
         mock_get_db.return_value = iter([mock_db])
+
+        # Mock OrgUser.get_user_orgs to return empty list (user has no org)
+        mock_get_user_orgs.return_value = []
 
         response = await async_client.post(
           "/v1/graphs",
           json=sample_graph_request.model_dump(),
         )
 
-        assert response.status_code == 403
+        assert response.status_code == 500
         data = response.json()
-        assert data["detail"]["error"]["code"] == "user_limits_not_found"
-        assert "User limits not found" in data["detail"]["error"]["message"]
+        assert data["detail"]["error"]["code"] == "org_not_found"
+        assert "User organization not found" in data["detail"]["error"]["message"]
 
   async def test_create_graph_limit_reached(
     self, async_client: AsyncClient, sample_graph_request
   ):
     """Test graph creation when user has reached their limit."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      mock_limits = Mock(spec=UserLimits)
-      mock_limits.can_create_user_graph.return_value = (
-        False,
-        "You have reached your maximum graph limit (3/3)",
-      )
-
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_limits):
-        mock_db = Mock()
-        mock_get_db.return_value = iter([mock_db])
-
-        response = await async_client.post(
-          "/v1/graphs",
-          json=sample_graph_request.model_dump(),
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        mock_limits = Mock(spec=OrgLimits)
+        mock_limits.can_create_graph.return_value = (
+          False,
+          "You have reached your maximum graph limit (3/3)",
         )
 
-        assert response.status_code == 403
-        data = response.json()
-        assert data["detail"]["error"]["code"] == "graph_limit_reached"
-        assert "maximum graph limit" in data["detail"]["error"]["message"]
+        with patch.object(OrgLimits, "get_or_create_for_org", return_value=mock_limits):
+          mock_db = Mock()
+          mock_get_db.return_value = iter([mock_db])
+
+          # Mock OrgUser.get_user_orgs to return a list with an org
+          mock_org_user = Mock()
+          mock_org_user.org_id = "test-org-123"
+          mock_get_user_orgs.return_value = [mock_org_user]
+
+          response = await async_client.post(
+            "/v1/graphs",
+            json=sample_graph_request.model_dump(),
+          )
+
+          assert response.status_code == 403
+          data = response.json()
+          assert data["detail"]["error"]["code"] == "graph_limit_reached"
+          assert "maximum graph limit" in data["detail"]["error"]["message"]
 
   async def test_create_graph_invalid_tier(self, async_client: AsyncClient):
     """Test graph creation with invalid instance tier."""
@@ -375,32 +418,48 @@ class TestGraphCreationEndpoint:
   ):
     """Test handling of task creation failure."""
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_user_limits):
-        with patch(
-          "robosystems.routers.graphs.main.create_operation_response",
-          new_callable=AsyncMock,
-        ) as mock_create_op:
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        with patch.object(
+          OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
+        ):
           with patch(
-            "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
-          ) as mock_task:
-            # Setup mocks
-            mock_db = Mock()
-            mock_get_db.return_value = iter([mock_db])
-            mock_create_op.return_value = {"operation_id": str(uuid4())}
+            "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+            return_value=(True, None),
+          ):
+            with patch(
+              "robosystems.routers.graphs.main.create_operation_response",
+              new_callable=AsyncMock,
+            ) as mock_create_op:
+              with patch(
+                "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
+              ) as mock_task:
+                # Setup mocks
+                mock_db = Mock()
+                mock_get_db.return_value = iter([mock_db])
 
-            # Simulate task failure
-            mock_task.delay.side_effect = Exception("Celery connection failed")
+                # Mock OrgUser.get_user_orgs to return a list with an org
+                mock_org_user = Mock()
+                mock_org_user.org_id = "test-org-123"
+                mock_get_user_orgs.return_value = [mock_org_user]
 
-            # Make request
-            response = await async_client.post(
-              "/v1/graphs",
-              json=sample_graph_request.model_dump(),
-            )
+                # Configure mock_user_limits.can_create_graph
+                mock_user_limits.can_create_graph.return_value = (True, None)
 
-            # Should handle the exception
-            assert response.status_code == 500
-            data = response.json()
-            assert "Failed to create graph creation operation" in data["detail"]
+                mock_create_op.return_value = {"operation_id": str(uuid4())}
+
+                # Simulate task failure
+                mock_task.delay.side_effect = Exception("Celery connection failed")
+
+                # Make request
+                response = await async_client.post(
+                  "/v1/graphs",
+                  json=sample_graph_request.model_dump(),
+                )
+
+                # Should handle the exception
+                assert response.status_code == 500
+                data = response.json()
+                assert "Failed to create graph creation operation" in data["detail"]
 
 
 @pytest.mark.asyncio
@@ -765,8 +824,8 @@ class TestTierMapping:
   @pytest.fixture
   def mock_user_limits(self):
     """Create mock user limits."""
-    limits = Mock(spec=UserLimits)
-    limits.can_create_user_graph.return_value = (True, None)
+    limits = Mock(spec=OrgLimits)
+    limits.can_create_graph.return_value = (True, None)
     return limits
 
   async def test_tier_mapping_standard(
@@ -786,39 +845,51 @@ class TestTierMapping:
     )
 
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_user_limits):
-        with patch(
-          "robosystems.middleware.billing.enforcement.check_can_provision_graph",
-          return_value=(True, None),
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        with patch.object(
+          OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
           with patch(
-            "robosystems.routers.graphs.main.create_operation_response",
-            new_callable=AsyncMock,
-          ) as mock_create_op:
+            "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+            return_value=(True, None),
+          ):
             with patch(
-              "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
-            ) as mock_task:
-              mock_db = Mock()
-              mock_get_db.return_value = iter([mock_db])
-              mock_task.delay.return_value = Mock(id="task-123")
+              "robosystems.routers.graphs.main.create_operation_response",
+              new_callable=AsyncMock,
+            ) as mock_create_op:
+              with patch(
+                "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
+              ) as mock_task:
+                mock_db = Mock()
+                mock_get_db.return_value = iter([mock_db])
 
-              mock_create_op.return_value = {
-                "operation_id": "op-123",
-                "status": "pending",
-                "operation_type": "graph_creation",
-                "_links": {
-                  "stream": "/v1/operations/op-123/stream",
-                  "status": "/v1/operations/op-123/status",
-                },
-              }
+                # Mock OrgUser.get_user_orgs to return a list with an org
+                mock_org_user = Mock()
+                mock_org_user.org_id = "test-org-123"
+                mock_get_user_orgs.return_value = [mock_org_user]
 
-              await async_client.post(
-                "/v1/graphs",
-                json=request.model_dump(),
-              )
+                # Configure mock_user_limits.can_create_graph
+                mock_user_limits.can_create_graph.return_value = (True, None)
 
-              task_data = mock_task.delay.call_args[0][0]
-              assert task_data["graph_tier"] == GraphTier.KUZU_STANDARD.value
+                mock_task.delay.return_value = Mock(id="task-123")
+
+                mock_create_op.return_value = {
+                  "operation_id": "op-123",
+                  "status": "pending",
+                  "operation_type": "graph_creation",
+                  "_links": {
+                    "stream": "/v1/operations/op-123/stream",
+                    "status": "/v1/operations/op-123/status",
+                  },
+                }
+
+                await async_client.post(
+                  "/v1/graphs",
+                  json=request.model_dump(),
+                )
+
+                task_data = mock_task.delay.call_args[0][0]
+                assert task_data["graph_tier"] == GraphTier.KUZU_STANDARD.value
 
   async def test_tier_mapping_enterprise(
     self, async_client: AsyncClient, mock_user_limits
@@ -837,39 +908,51 @@ class TestTierMapping:
     )
 
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_user_limits):
-        with patch(
-          "robosystems.middleware.billing.enforcement.check_can_provision_graph",
-          return_value=(True, None),
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        with patch.object(
+          OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
           with patch(
-            "robosystems.routers.graphs.main.create_operation_response",
-            new_callable=AsyncMock,
-          ) as mock_create_op:
+            "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+            return_value=(True, None),
+          ):
             with patch(
-              "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
-            ) as mock_task:
-              mock_db = Mock()
-              mock_get_db.return_value = iter([mock_db])
-              mock_task.delay.return_value = Mock(id="task-123")
+              "robosystems.routers.graphs.main.create_operation_response",
+              new_callable=AsyncMock,
+            ) as mock_create_op:
+              with patch(
+                "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
+              ) as mock_task:
+                mock_db = Mock()
+                mock_get_db.return_value = iter([mock_db])
 
-              mock_create_op.return_value = {
-                "operation_id": "op-124",
-                "status": "pending",
-                "operation_type": "graph_creation",
-                "_links": {
-                  "stream": "/v1/operations/op-124/stream",
-                  "status": "/v1/operations/op-124/status",
-                },
-              }
+                # Mock OrgUser.get_user_orgs to return a list with an org
+                mock_org_user = Mock()
+                mock_org_user.org_id = "test-org-123"
+                mock_get_user_orgs.return_value = [mock_org_user]
 
-              await async_client.post(
-                "/v1/graphs",
-                json=request.model_dump(),
-              )
+                # Configure mock_user_limits.can_create_graph
+                mock_user_limits.can_create_graph.return_value = (True, None)
 
-              task_data = mock_task.delay.call_args[0][0]
-              assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
+                mock_task.delay.return_value = Mock(id="task-123")
+
+                mock_create_op.return_value = {
+                  "operation_id": "op-124",
+                  "status": "pending",
+                  "operation_type": "graph_creation",
+                  "_links": {
+                    "stream": "/v1/operations/op-124/stream",
+                    "status": "/v1/operations/op-124/status",
+                  },
+                }
+
+                await async_client.post(
+                  "/v1/graphs",
+                  json=request.model_dump(),
+                )
+
+                task_data = mock_task.delay.call_args[0][0]
+                assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
 
   async def test_tier_mapping_premium(
     self, async_client: AsyncClient, mock_user_limits
@@ -888,36 +971,48 @@ class TestTierMapping:
     )
 
     with patch("robosystems.database.get_db_session") as mock_get_db:
-      with patch.object(UserLimits, "get_by_user_id", return_value=mock_user_limits):
-        with patch(
-          "robosystems.middleware.billing.enforcement.check_can_provision_graph",
-          return_value=(True, None),
+      with patch("robosystems.models.iam.OrgUser.get_user_orgs") as mock_get_user_orgs:
+        with patch.object(
+          OrgLimits, "get_or_create_for_org", return_value=mock_user_limits
         ):
           with patch(
-            "robosystems.routers.graphs.main.create_operation_response",
-            new_callable=AsyncMock,
-          ) as mock_create_op:
+            "robosystems.middleware.billing.enforcement.check_can_provision_graph",
+            return_value=(True, None),
+          ):
             with patch(
-              "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
-            ) as mock_task:
-              mock_db = Mock()
-              mock_get_db.return_value = iter([mock_db])
-              mock_task.delay.return_value = Mock(id="task-123")
+              "robosystems.routers.graphs.main.create_operation_response",
+              new_callable=AsyncMock,
+            ) as mock_create_op:
+              with patch(
+                "robosystems.tasks.graph_operations.create_graph.create_graph_sse_task"
+              ) as mock_task:
+                mock_db = Mock()
+                mock_get_db.return_value = iter([mock_db])
 
-              mock_create_op.return_value = {
-                "operation_id": "op-125",
-                "status": "pending",
-                "operation_type": "graph_creation",
-                "_links": {
-                  "stream": "/v1/operations/op-125/stream",
-                  "status": "/v1/operations/op-125/status",
-                },
-              }
+                # Mock OrgUser.get_user_orgs to return a list with an org
+                mock_org_user = Mock()
+                mock_org_user.org_id = "test-org-123"
+                mock_get_user_orgs.return_value = [mock_org_user]
 
-              await async_client.post(
-                "/v1/graphs",
-                json=request.model_dump(),
-              )
+                # Configure mock_user_limits.can_create_graph
+                mock_user_limits.can_create_graph.return_value = (True, None)
 
-              task_data = mock_task.delay.call_args[0][0]
-              assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value
+                mock_task.delay.return_value = Mock(id="task-123")
+
+                mock_create_op.return_value = {
+                  "operation_id": "op-125",
+                  "status": "pending",
+                  "operation_type": "graph_creation",
+                  "_links": {
+                    "stream": "/v1/operations/op-125/stream",
+                    "status": "/v1/operations/op-125/status",
+                  },
+                }
+
+                await async_client.post(
+                  "/v1/graphs",
+                  json=request.model_dump(),
+                )
+
+                task_data = mock_task.delay.call_args[0][0]
+                assert task_data["graph_tier"] == GraphTier.KUZU_XLARGE.value

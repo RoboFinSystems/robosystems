@@ -323,7 +323,7 @@ async def get_current_user_with_graph(
 
         if has_access is None:
           # Cache miss - check database and cache result
-          from ...models.iam import UserGraph
+          from ...models.iam import GraphUser
           from ..graph.multitenant_utils import MultiTenantUtils
 
           # Check if this is a shared repository or user graph
@@ -335,8 +335,8 @@ async def get_current_user_with_graph(
               "read",
             )
           else:
-            # Use UserGraph access validation for personal user graphs
-            has_access = UserGraph.user_has_access(user_id, graph_id, session())
+            # Use GraphUser access validation for personal user graphs
+            has_access = GraphUser.user_has_access(user_id, graph_id, session())
 
           api_key_cache.cache_jwt_graph_access(str(user_id), graph_id, has_access)
 

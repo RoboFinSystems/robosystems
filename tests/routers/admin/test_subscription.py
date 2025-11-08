@@ -13,7 +13,8 @@ from robosystems.models.billing import (
   BillingAuditLog,
   SubscriptionStatus,
 )
-from robosystems.models.iam import User, Graph
+from robosystems.models.iam import User, Graph, Org, OrgUser, OrgType
+from robosystems.config.graph_tier import GraphTier
 
 
 @pytest.fixture
@@ -66,32 +67,49 @@ def test_user(db_session: Session):
 
 
 @pytest.fixture
-def test_graph(db_session: Session, test_user):
+def test_org(db_session: Session, test_user):
+  """Create a test organization."""
+  org = Org.create(
+    name="Test Organization",
+    org_type=OrgType.PERSONAL,
+    session=db_session,
+  )
+  OrgUser.create(
+    org_id=org.id,
+    user_id=test_user.id,
+    role="OWNER",
+    session=db_session,
+  )
+  return org
+
+
+@pytest.fixture
+def test_graph(db_session: Session, test_org):
   """Create a test graph."""
   unique_id = str(uuid.uuid4())[:8]
-  graph = Graph(
+  graph = Graph.create(
     graph_id=f"kg_{unique_id}",
     graph_name="Test Graph",
     graph_type="entity",
+    org_id=test_org.id,
+    session=db_session,
+    graph_tier=GraphTier.KUZU_STANDARD,
   )
-  db_session.add(graph)
-  db_session.commit()
-  db_session.refresh(graph)
   return graph
 
 
 @pytest.fixture
-def test_customer(db_session: Session, test_user):
+def test_customer(db_session: Session, test_org):
   """Create a test billing customer."""
-  customer = BillingCustomer.get_or_create(user_id=test_user.id, session=db_session)
+  customer = BillingCustomer.get_or_create(org_id=test_org.id, session=db_session)
   return customer
 
 
 @pytest.fixture
-def test_subscription(db_session: Session, test_user, test_graph):
+def test_subscription(db_session: Session, test_org, test_graph):
   """Create a test subscription."""
   subscription = BillingSubscription.create_subscription(
-    user_id=test_user.id,
+    org_id=test_org.id,
     resource_type="graph",
     resource_id=test_graph.graph_id,
     plan_name="kuzu-standard",
@@ -203,21 +221,22 @@ class TestListSubscriptions:
     assert test_subscription.id in subscription_ids
 
   def test_list_subscriptions_pagination(
-    self, client, db_session, test_user, test_graph, mock_admin_auth
+    self, client, db_session, test_user, test_org, mock_admin_auth
   ):
     """Test pagination parameters."""
     for i in range(5):
       unique_id = str(uuid.uuid4())[:8]
-      graph = Graph(
+      graph = Graph.create(
         graph_id=f"kg_{unique_id}",
         graph_name=f"Test Graph {i}",
         graph_type="entity",
+        org_id=test_org.id,
+        session=db_session,
+        graph_tier=GraphTier.KUZU_STANDARD,
       )
-      db_session.add(graph)
-      db_session.commit()
 
       BillingSubscription.create_subscription(
-        user_id=test_user.id,
+        org_id=test_org.id,
         resource_type="graph",
         resource_id=graph.graph_id,
         plan_name="kuzu-standard",
@@ -404,17 +423,18 @@ class TestCreateSubscription:
     assert "Invalid plan name" in response.json()["detail"]
 
   def test_create_subscription_creates_audit_log(
-    self, client, db_session, test_user, mock_admin_auth
+    self, client, db_session, test_user, test_org, mock_admin_auth
   ):
     """Test that creating subscription creates an audit log entry."""
     unique_graph_id = f"kg_{str(uuid.uuid4())[:8]}"
-    graph = Graph(
+    Graph.create(
       graph_id=unique_graph_id,
       graph_name="New Graph",
       graph_type="entity",
+      org_id=test_org.id,
+      session=db_session,
+      graph_tier=GraphTier.KUZU_STANDARD,
     )
-    db_session.add(graph)
-    db_session.commit()
 
     payload = {
       "resource_type": "graph",
@@ -607,13 +627,13 @@ class TestGetSubscriptionAuditLog:
   """Tests for getting subscription audit log endpoint."""
 
   def test_get_audit_log_success(
-    self, client, db_session, test_subscription, test_user, mock_admin_auth
+    self, client, db_session, test_subscription, test_org, mock_admin_auth
   ):
     """Test successfully getting audit log."""
     BillingAuditLog.log_event(
       session=db_session,
       event_type="subscription.created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
       subscription_id=test_subscription.id,
       description="Test audit log",
     )
@@ -630,20 +650,20 @@ class TestGetSubscriptionAuditLog:
     assert data[0]["event_type"] == "subscription.created"
 
   def test_get_audit_log_with_event_type_filter(
-    self, client, db_session, test_subscription, test_user, mock_admin_auth
+    self, client, db_session, test_subscription, test_org, mock_admin_auth
   ):
     """Test getting audit log filtered by event type."""
     BillingAuditLog.log_event(
       session=db_session,
       event_type="subscription.created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
       subscription_id=test_subscription.id,
       description="Created",
     )
     BillingAuditLog.log_event(
       session=db_session,
       event_type="subscription.updated",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
       subscription_id=test_subscription.id,
       description="Updated",
     )
@@ -693,7 +713,7 @@ class TestListCustomers:
     assert test_user.id in user_ids
 
   def test_list_customers_with_payment_method_filter(
-    self, client, db_session, test_customer, mock_admin_auth
+    self, client, db_session, test_customer, test_user, mock_admin_auth
   ):
     """Test listing customers filtered by payment method."""
     test_customer.update_payment_method(
@@ -708,10 +728,10 @@ class TestListCustomers:
     assert response.status_code == 200
     data = response.json()
     user_ids = [customer["user_id"] for customer in data]
-    assert test_customer.user_id in user_ids
+    assert test_user.id in user_ids
 
   def test_list_customers_with_invoice_billing_filter(
-    self, client, db_session, test_customer, mock_admin_auth
+    self, client, db_session, test_customer, test_user, mock_admin_auth
   ):
     """Test listing customers filtered by invoice billing."""
     test_customer.enable_invoice_billing(
@@ -729,7 +749,7 @@ class TestListCustomers:
     assert response.status_code == 200
     data = response.json()
     user_ids = [customer["user_id"] for customer in data]
-    assert test_customer.user_id in user_ids
+    assert test_user.id in user_ids
 
   def test_list_customers_pagination(self, client, db_session, mock_admin_auth):
     """Test customer list pagination."""
@@ -743,7 +763,19 @@ class TestListCustomers:
       )
       db_session.add(user)
       db_session.commit()
-      BillingCustomer.get_or_create(user_id=user.id, session=db_session)
+
+      org = Org.create(
+        name=f"Test Org {i}",
+        org_type=OrgType.PERSONAL,
+        session=db_session,
+      )
+      OrgUser.create(
+        org_id=org.id,
+        user_id=user.id,
+        role="OWNER",
+        session=db_session,
+      )
+      BillingCustomer.get_or_create(org_id=org.id, session=db_session)
 
     response = client.get(
       "/admin/v1/customers?limit=2&offset=0",
@@ -764,7 +796,7 @@ class TestUpdateCustomer:
   """Tests for updating customer endpoint."""
 
   def test_update_customer_enable_invoice_billing(
-    self, client, db_session, test_customer, mock_admin_auth
+    self, client, db_session, test_customer, test_user, mock_admin_auth
   ):
     """Test enabling invoice billing for customer."""
     payload = {
@@ -775,7 +807,7 @@ class TestUpdateCustomer:
     }
 
     response = client.patch(
-      f"/admin/v1/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_user.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -787,13 +819,13 @@ class TestUpdateCustomer:
     assert data["payment_terms"] == "net_60"
 
   def test_update_customer_change_payment_terms(
-    self, client, db_session, test_customer, mock_admin_auth
+    self, client, db_session, test_customer, test_user, mock_admin_auth
   ):
     """Test changing customer payment terms."""
     payload = {"payment_terms": "net_90"}
 
     response = client.patch(
-      f"/admin/v1/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_user.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -803,11 +835,11 @@ class TestUpdateCustomer:
     assert data["payment_terms"] == "net_90"
 
   def test_update_customer_creates_if_not_exists(
-    self, client, db_session, test_user, mock_admin_auth
+    self, client, db_session, test_user, test_org, mock_admin_auth
   ):
     """Test that updating creates customer if doesn't exist."""
     db_session.query(BillingCustomer).filter(
-      BillingCustomer.user_id == test_user.id
+      BillingCustomer.org_id == test_org.id
     ).delete()
     db_session.commit()
 
@@ -824,13 +856,13 @@ class TestUpdateCustomer:
     assert data["user_id"] == test_user.id
 
   def test_update_customer_creates_audit_log(
-    self, client, db_session, test_customer, mock_admin_auth
+    self, client, db_session, test_customer, test_user, mock_admin_auth
   ):
     """Test that updating customer creates audit log."""
     payload = {"payment_terms": "net_60"}
 
     response = client.patch(
-      f"/admin/v1/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_user.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -840,7 +872,7 @@ class TestUpdateCustomer:
     audit_logs = (
       db_session.query(BillingAuditLog)
       .filter(
-        BillingAuditLog.billing_customer_user_id == test_customer.user_id,
+        BillingAuditLog.org_id == test_customer.org_id,
         BillingAuditLog.event_type == "customer.updated",
       )
       .all()
@@ -848,12 +880,12 @@ class TestUpdateCustomer:
 
     assert len(audit_logs) > 0
 
-  def test_update_customer_unauthorized(self, client, test_customer):
+  def test_update_customer_unauthorized(self, client, test_customer, test_user):
     """Test updating customer without authentication."""
     payload = {"payment_terms": "net_60"}
 
     response = client.patch(
-      f"/admin/v1/customers/{test_customer.user_id}",
+      f"/admin/v1/customers/{test_user.id}",
       params=payload,
     )
     assert response.status_code == 401

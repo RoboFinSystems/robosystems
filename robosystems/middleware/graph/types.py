@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 import re
 
-from ...models.iam.graph_credits import GraphTier
+from ...config.graph_tier import GraphTier
 from ...logger import get_logger
 
 logger = get_logger(__name__)

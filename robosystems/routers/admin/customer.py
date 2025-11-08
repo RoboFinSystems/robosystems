@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, HTTPException
 
 from ...database import get_db_session
 from ...models.billing import BillingCustomer, BillingAuditLog
@@ -28,9 +28,9 @@ async def list_customers(
   """List all billing customers."""
   session = next(get_db_session())
   try:
-    query = session.query(BillingCustomer).join(
-      User, BillingCustomer.user_id == User.id
-    )
+    from ...models.iam import OrgUser
+
+    query = session.query(BillingCustomer)
 
     if has_payment_method is not None:
       query = query.filter(BillingCustomer.has_payment_method == has_payment_method)
@@ -45,10 +45,18 @@ async def list_customers(
 
     results = []
     for customer in customers:
-      user = session.query(User).filter(User.id == customer.user_id).first()
+      org_user = (
+        session.query(OrgUser)
+        .join(User)
+        .filter(OrgUser.org_id == customer.org_id, OrgUser.role == "OWNER")
+        .first()
+      )
+
+      user = org_user.user if org_user else None
+
       results.append(
         CustomerResponse(
-          user_id=customer.user_id,
+          user_id=user.id if user else customer.org_id,
           user_email=user.email if user else None,
           user_name=user.name if user else None,
           stripe_customer_id=customer.stripe_customer_id,
@@ -89,12 +97,17 @@ async def update_customer(
   """Update billing customer settings."""
   session = next(get_db_session())
   try:
-    customer = (
-      session.query(BillingCustomer).filter(BillingCustomer.user_id == user_id).first()
-    )
+    from ...models.iam import OrgUser
 
-    if not customer:
-      customer = BillingCustomer.get_or_create(user_id, session)
+    user_orgs = OrgUser.get_user_orgs(user_id, session)
+    if not user_orgs:
+      raise HTTPException(
+        status_code=500,
+        detail=f"User {user_id} has no organization",
+      )
+
+    org_id = user_orgs[0].org_id
+    customer = BillingCustomer.get_or_create(org_id, session)
 
     old_values = {}
     new_values = {}
@@ -144,12 +157,13 @@ async def update_customer(
       BillingAuditLog.log_event(
         session=session,
         event_type="customer.updated",
-        billing_customer_user_id=user_id,
+        org_id=customer.org_id,
         actor_type="admin",
         description=f"Customer updated by admin {request.state.admin.get('name', 'unknown')}",
         event_data={
           "admin_key_id": request.state.admin_key_id,
           "admin_name": request.state.admin.get("name"),
+          "user_id": user_id,
           "old_values": sanitized_old_values,
           "new_values": sanitized_new_values,
         },
@@ -171,7 +185,7 @@ async def update_customer(
     )
 
     return CustomerResponse(
-      user_id=customer.user_id,
+      user_id=user_id,
       user_email=user.email if user else None,
       user_name=user.name if user else None,
       stripe_customer_id=customer.stripe_customer_id,

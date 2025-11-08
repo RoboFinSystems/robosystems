@@ -38,11 +38,8 @@ class User(Model):
   user_api_keys = relationship(
     "UserAPIKey", back_populates="user", cascade="all, delete-orphan"
   )
-  user_graphs = relationship(
-    "UserGraph", back_populates="user", cascade="all, delete-orphan"
-  )
-  limits = relationship(
-    "UserLimits", back_populates="user", cascade="all, delete-orphan", uselist=False
+  graph_users = relationship(
+    "GraphUser", back_populates="user", cascade="all, delete-orphan"
   )
   user_repositories = relationship(
     "UserRepository",

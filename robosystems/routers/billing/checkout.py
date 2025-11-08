@@ -13,8 +13,8 @@ from ...models.api.billing.checkout import (
   CheckoutResponse,
   CheckoutStatusResponse,
 )
-from ...operations.billing.payment_provider import get_payment_provider
-from ...config import BillingConfig
+from ...operations.providers.payment_provider import get_payment_provider
+from ...config import BillingConfig, env
 from ...logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,19 +29,21 @@ router = APIRouter(prefix="/billing", tags=["Billing"])
   summary="Create Payment Checkout Session",
   description="""Create a Stripe checkout session for collecting payment method.
 
-This endpoint is used when a user needs to add a payment method before
+This endpoint is used when an organization owner needs to add a payment method before
 provisioning resources. It creates a pending subscription and redirects
-the user to Stripe Checkout to collect payment details.
+to Stripe Checkout to collect payment details.
 
 **Flow:**
-1. User tries to create a graph but has no payment method
+1. Owner tries to create a graph but org has no payment method
 2. Frontend calls this endpoint with graph configuration
-3. Backend creates a subscription in PENDING_PAYMENT status
+3. Backend creates a subscription in PENDING_PAYMENT status for the user's org
 4. Returns Stripe Checkout URL
 5. User completes payment on Stripe
 6. Webhook activates subscription and provisions resource
 
-**Enterprise customers** (with invoice_billing_enabled) should not call this endpoint.""",
+**Requirements:**
+- User must be an OWNER of their organization
+- Enterprise customers (with invoice_billing_enabled) should not call this endpoint.""",
   operation_id="createCheckoutSession",
 )
 async def create_checkout_session(
@@ -51,8 +53,37 @@ async def create_checkout_session(
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
   """Create Stripe checkout session for payment collection."""
+  if not env.BILLING_ENABLED:
+    return CheckoutResponse(
+      checkout_url=None,
+      session_id=None,
+      subscription_id=None,
+      requires_checkout=False,
+      billing_disabled=True,
+    )
+
   try:
-    customer = BillingCustomer.get_or_create(current_user.id, db)
+    from ...models.iam import OrgUser, OrgRole
+
+    # Get user's org - they must be an OWNER
+    user_orgs = OrgUser.get_user_orgs(current_user.id, db)
+    if not user_orgs:
+      raise HTTPException(
+        status_code=403,
+        detail="You are not a member of any organization",
+      )
+
+    membership = user_orgs[0]
+    org_id = membership.org_id
+
+    if membership.role != OrgRole.OWNER:
+      raise HTTPException(
+        status_code=403,
+        detail="Only organization owners can manage billing",
+      )
+
+    customer = BillingCustomer.get_or_create(org_id, db)
+    logger.info(f"Using billing customer for org {org_id}")
 
     # Enterprise customers don't need checkout
     if customer.invoice_billing_enabled:
@@ -89,7 +120,7 @@ async def create_checkout_session(
 
     # Create subscription in PENDING_PAYMENT status
     subscription = BillingSubscription.create_subscription(
-      user_id=current_user.id,
+      org_id=org_id,
       resource_type=request.resource_type,
       resource_id=None,  # Will be set after provisioning
       plan_name=request.plan_name,
@@ -98,8 +129,11 @@ async def create_checkout_session(
       billing_interval="monthly",
     )
 
-    # Store resource configuration in metadata
-    subscription.subscription_metadata = {"resource_config": request.resource_config}
+    # Store resource configuration and user_id in metadata
+    subscription.subscription_metadata = {
+      "resource_config": request.resource_config,
+      "user_id": current_user.id,
+    }
     subscription.status = "pending_payment"
     subscription.payment_provider = "stripe"
     db.commit()
@@ -194,13 +228,20 @@ async def get_checkout_status(
 ):
   """Get status of a checkout session."""
   try:
+    from ...models.iam import OrgUser
+
     subscription = BillingSubscription.get_by_provider_subscription_id(session_id, db)
 
     if not subscription:
       raise HTTPException(status_code=404, detail="Checkout session not found")
 
-    # Security check: ensure user owns this subscription
-    if subscription.billing_customer_user_id != current_user.id:
+    # Security check: ensure user belongs to subscription's org
+    membership = OrgUser.get_by_org_and_user(
+      org_id=subscription.org_id,
+      user_id=current_user.id,
+      session=db,
+    )
+    if not membership:
       raise HTTPException(
         status_code=403, detail="Not authorized to access this checkout session"
       )

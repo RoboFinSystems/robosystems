@@ -186,36 +186,15 @@ deploy environment="prod" ref="":
 bastion-tunnel environment service key:
     @bin/tools/tunnels.sh {{environment}} {{service}} --key ~/.ssh/{{key}}
 
-# AWS Secrets Manager - Initial Setup
-setup-aws:
-    @bin/setup/aws.sh
+## Admin CLI ##
+# Admin CLI for remote administration via admin API
 
-# GitHub Repository - Initial Setup
-setup-gha:
-    @bin/setup/gha.sh
-
-# GitHub Actions Runner - Bootstrap infrastructure
-bootstrap branch="main":
-    gh workflow run gha-runner.yml --ref {{branch}}
-
-# Generate secure random key for secrets
-generate-key:
-    @echo "Generated secure 32-byte base64 key:"
-    @openssl rand -base64 32
-
-# Generate multiple secure keys for all secrets
-generate-keys:
-    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
-    @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
-    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
-
-## Apps ##
-
-# Install apps
-install-apps:
-    @test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
-    @test -d '../roboinvestor-app' || git clone https://github.com/RoboFinSystem/roboinvestor-app.git '../roboinvestor-app'
-    @test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
+# Run admin CLI with any subcommand - passes all arguments through
+# Examples: just admin dev stats
+#           just admin dev customers list
+#           just admin dev subscriptions list --status active --tier kuzu-standard
+admin environment="dev" *args="":
+    UV_ENV_FILE={{_local_env}} uv run python -m robosystems.admin.cli -e {{environment}} {{args}}
 
 ## Development Server ##
 
@@ -234,6 +213,9 @@ worker num_workers="1" queue="robosystems" env=_local_env:
 # Start beat worker (Celery scheduler)
 beat env=_local_env:
     UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
+
+stripe-webhook env=_local_env:
+    UV_ENV_FILE={{env}} uv run stripe listen --forward-to localhost:8000/admin/v1/webhooks/stripe
 
 # Start Flower (Celery monitoring web UI)
 flower env=_local_env:
@@ -380,68 +362,6 @@ sec-status env=_local_env:
 sec-reset-remote confirm="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
-## Repository Access Management ##
-# Manage user access to shared repositories (SEC, industry data, etc.)
-
-# Grant repository access
-repo-grant-access user_id repository access_level="read" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}}
-
-# Grant repository access with expiration
-repo-grant-access-expire user_id repository access_level expires_days env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager grant {{user_id}} {{repository}} {{access_level}} --expires-days {{expires_days}}
-
-# Revoke repository access
-repo-revoke-access user_id repository env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager revoke {{user_id}} {{repository}}
-
-# List all repository access
-repo-list-access env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list
-
-# List users with access to a specific repository
-repo-list-users repository env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager list --repository {{repository}}
-
-# List all available repositories
-repo-list-repositories env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager repositories
-
-# Check user access to all repositories
-repo-check-access user_id env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}}
-
-# Check user access to a specific repository
-repo-check-repo user_id repository env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.repository_access_manager check {{user_id}} --repository {{repository}}
-
-## Admin CLI ##
-# Admin CLI for remote administration via admin API
-
-# Show subscription and customer statistics
-admin-stats environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} stats
-
-# List all subscriptions
-admin-subscriptions-list environment="dev" status="" tier="" email="" include_canceled="" limit="100" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions list {{ if status != "" { "--status " + status } else { "" } }} {{ if tier != "" { "--tier " + tier } else { "" } }} {{ if email != "" { "--email " + email } else { "" } }} {{ if include_canceled == "true" { "--include-canceled" } else { "" } }} --limit {{limit}}
-
-# Get subscription details
-admin-subscription-get subscription_id environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} subscriptions get {{subscription_id}}
-
-# List all customers
-admin-customers-list environment="dev" limit="100" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} customers list --limit {{limit}}
-
-# List invoices
-admin-invoices-list environment="dev" status="" user_id="" limit="100" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} invoices list {{ if status != "" { "--status " + status } else { "" } }} {{ if user_id != "" { "--user-id " + user_id } else { "" } }} --limit {{limit}}
-
-# Get invoice details
-admin-invoice-get invoice_id environment="dev" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.admin.cli -e {{environment}} invoices get {{invoice_id}}
-
 ## Credit Admin Tools ##
 # Monthly credit allocation is automated via Celery Beat - these commands are for manual operations only
 
@@ -478,6 +398,37 @@ valkey-clear-queue-all queue env=_local_env:
 # List Valkey/Redis queue contents without clearing
 valkey-list-queue queue env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
+
+## Setup ##
+
+# AWS Secrets Manager setup
+setup-aws:
+    @bin/setup/aws.sh
+
+# GitHub Repository setup
+setup-gha:
+    @bin/setup/gha.sh
+
+# GitHub Actions Runner bootstrap infrastructure
+bootstrap branch="main":
+    gh workflow run gha-runner.yml --ref {{branch}}
+
+# Generate secure random key for secrets
+generate-key:
+    @echo "Generated secure 32-byte base64 key:"
+    @openssl rand -base64 32
+
+# Generate multiple secure keys for all secrets
+generate-keys:
+    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
+    @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
+    @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+
+# Install apps
+install-apps:
+    @test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
+    @test -d '../roboinvestor-app' || git clone https://github.com/RoboFinSystem/roboinvestor-app.git '../roboinvestor-app'
+    @test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
 
 ## Misc ##
 

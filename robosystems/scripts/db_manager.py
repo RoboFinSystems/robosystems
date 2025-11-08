@@ -4,7 +4,7 @@
 import argparse
 import bcrypt
 
-from robosystems.models.iam import User, UserAPIKey, UserGraph
+from robosystems.models.iam import User, UserAPIKey, GraphUser
 from robosystems.database import session, engine
 from robosystems.logger import logger
 
@@ -31,7 +31,7 @@ def list_users():
           logger.info(f"      - {key.name} ({key.prefix}...) - {status}")
 
       # Show graph access
-      user_graphs = UserGraph.get_by_user_id(user.id, session)
+      user_graphs = GraphUser.get_by_user_id(user.id, session)
       if user_graphs:
         logger.info(f"    Graph Access: {len(user_graphs)}")
         for ug in user_graphs:
@@ -109,13 +109,13 @@ def grant_graph_access(
       return False
 
     # Check if access already exists
-    existing_access = UserGraph.get_by_user_and_graph(user.id, graph_id, session)
+    existing_access = GraphUser.get_by_user_and_graph(user.id, graph_id, session)
     if existing_access:
       logger.error(f"❌ User already has access to graph {graph_id}")
       return False
 
     # Create graph access
-    UserGraph.create(
+    GraphUser.create(
       user_id=user.id,
       graph_id=graph_id,
       role=role,
@@ -140,7 +140,7 @@ def show_database_info():
     # Count records in each table
     user_count = session.query(User).count()
     api_key_count = session.query(UserAPIKey).count()
-    user_graph_count = session.query(UserGraph).count()
+    user_graph_count = session.query(GraphUser).count()
 
     logger.info(f"   Users: {user_count}")
     logger.info(f"   API Keys: {api_key_count}")

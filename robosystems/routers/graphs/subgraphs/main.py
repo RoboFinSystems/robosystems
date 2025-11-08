@@ -17,7 +17,7 @@ from robosystems.models.api.graphs.subgraphs import (
 )
 from robosystems.models.iam.graph import Graph
 from robosystems.models.iam.user import User
-from robosystems.models.iam.user_graph import UserGraph
+from robosystems.models.iam.graph_user import GraphUser
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.logger import logger, api_logger, log_metric
@@ -33,7 +33,7 @@ from .utils import (
   record_operation_metrics,
   handle_circuit_breaker_check,
 )
-from robosystems.config.tier_config import get_tier_max_subgraphs
+from robosystems.config.graph_tier import get_tier_max_subgraphs
 from robosystems.config import env
 
 router = APIRouter()
@@ -100,10 +100,10 @@ async def list_subgraphs(
 
     subgraph_summaries = []
     for subgraph in subgraphs:
-      # Get usage stats from UserGraph
+      # Get usage stats from GraphUser
       user_graph = (
-        db.query(UserGraph)
-        .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == subgraph.id)
+        db.query(GraphUser)
+        .filter(GraphUser.user_id == current_user.id, GraphUser.graph_id == subgraph.id)
         .first()
       )
 

@@ -4,6 +4,7 @@ Separated from IAM models to isolate billing concerns.
 Designed for eventual extraction to billing microservice.
 """
 
+from ..iam import Org, OrgType, OrgUser, OrgRole
 from .customer import BillingCustomer
 from .subscription import (
   BillingSubscription,
@@ -21,6 +22,10 @@ from .audit_log import (
 )
 
 __all__ = [
+  "Org",
+  "OrgType",
+  "OrgUser",
+  "OrgRole",
   "BillingCustomer",
   "BillingSubscription",
   "SubscriptionStatus",

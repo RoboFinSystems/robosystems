@@ -214,33 +214,3 @@ class UpdateAPIKeyRequest(BaseModel):
     None, min_length=1, max_length=100, description="New name for the API key"
   )
   description: str | None = Field(None, max_length=500, description="New description")
-
-
-class UserLimitsResponse(BaseModel):
-  """Response model for user limits information.
-
-  UserLimits is now a simple safety valve to prevent runaway graph creation.
-  Subscription tiers and rate limits are handled at the graph level.
-  """
-
-  id: str = Field(..., description="Unique limits identifier")
-  user_id: str = Field(..., description="Associated user ID")
-  max_user_graphs: int = Field(
-    ..., description="Maximum number of user graphs allowed (safety limit)"
-  )
-  created_at: str = Field(..., description="Limits creation timestamp")
-  updated_at: str = Field(..., description="Last update timestamp")
-
-
-class UserUsageResponse(BaseModel):
-  """Response model for user usage statistics.
-
-  Simplified to only show graph usage as UserLimits is now just a safety valve.
-  Other usage tracking (MCP, Agent calls) happens at the graph level.
-  """
-
-  user_id: str = Field(..., description="User identifier")
-  graphs: dict[str, object] = Field(
-    ..., description="Graph usage statistics (current/limit/remaining)"
-  )
-  limits: UserLimitsResponse = Field(..., description="Current user limits")

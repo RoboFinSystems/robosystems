@@ -11,7 +11,7 @@ from robosystems.models.billing import (
   BillingSubscription,
   BillingInvoice,
 )
-from robosystems.models.iam import User
+from robosystems.models.iam import User, Org, OrgType
 
 
 @pytest.fixture
@@ -30,6 +30,20 @@ def test_user(db_session: Session):
 
 
 @pytest.fixture
+def test_org(db_session: Session):
+  """Create a test organization."""
+  unique_id = str(uuid.uuid4())[:8]
+  org = Org(
+    id=f"test_org_{unique_id}",
+    name=f"Test Org {unique_id}",
+    org_type=OrgType.PERSONAL,
+  )
+  db_session.add(org)
+  db_session.commit()
+  return org
+
+
+@pytest.fixture
 def test_admin(db_session: Session):
   """Create a test admin user."""
   unique_id = str(uuid.uuid4())[:8]
@@ -45,10 +59,10 @@ def test_admin(db_session: Session):
 
 
 @pytest.fixture
-def test_subscription(db_session: Session, test_user):
+def test_subscription(db_session: Session, test_org):
   """Create a test subscription."""
   subscription = BillingSubscription.create_subscription(
-    user_id=test_user.id,
+    org_id=test_org.id,
     resource_type="graph",
     resource_id="kg123",
     plan_name="standard",
@@ -61,29 +75,29 @@ def test_subscription(db_session: Session, test_user):
 class TestBillingAuditLogCreation:
   """Tests for audit log entry creation."""
 
-  def test_log_event_basic(self, db_session: Session, test_user):
+  def test_log_event_basic(self, db_session: Session, test_org):
     """Test creating a basic audit log entry."""
     log_entry = BillingAuditLog.log_event(
       session=db_session,
       event_type=BillingEventType.CUSTOMER_CREATED,
       description="Customer account created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
     )
 
     assert log_entry.id.startswith("baud_")
     assert log_entry.event_type == BillingEventType.CUSTOMER_CREATED.value
     assert log_entry.description == "Customer account created"
-    assert log_entry.billing_customer_user_id == test_user.id
+    assert log_entry.org_id == test_org.id
     assert log_entry.actor_type == "system"
     assert log_entry.event_timestamp is not None
 
-  def test_log_event_with_admin_actor(self, db_session: Session, test_user, test_admin):
+  def test_log_event_with_admin_actor(self, db_session: Session, test_org, test_admin):
     """Test creating audit log with admin actor."""
     log_entry = BillingAuditLog.log_event(
       session=db_session,
       event_type=BillingEventType.ADMIN_OVERRIDE,
       description="Admin adjusted subscription",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
       actor_type="admin",
       actor_user_id=test_admin.id,
       actor_ip="192.168.1.1",
@@ -94,21 +108,21 @@ class TestBillingAuditLogCreation:
     assert log_entry.actor_ip == "192.168.1.1"
 
   def test_log_event_with_subscription_id(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test creating audit log with subscription reference."""
     log_entry = BillingAuditLog.log_event(
       session=db_session,
       event_type=BillingEventType.SUBSCRIPTION_CREATED,
       description="Subscription created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
       subscription_id=test_subscription.id,
     )
 
     assert log_entry.subscription_id == test_subscription.id
 
   def test_log_event_with_event_data(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test creating audit log with event metadata."""
     event_data = {
@@ -122,7 +136,7 @@ class TestBillingAuditLogCreation:
       session=db_session,
       event_type=BillingEventType.PLAN_UPGRADED,
       description="Plan upgraded from standard to large",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
       subscription_id=test_subscription.id,
       event_data=event_data,
     )
@@ -135,31 +149,29 @@ class TestBillingAuditLogCreation:
 class TestBillingAuditLogQueries:
   """Tests for audit log query methods."""
 
-  def test_get_customer_history(self, db_session: Session, test_user):
+  def test_get_org_history(self, db_session: Session, test_org):
     """Test retrieving customer audit history."""
     for i in range(5):
       BillingAuditLog.log_event(
         session=db_session,
         event_type=BillingEventType.CUSTOMER_CREATED,
         description=f"Event {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
       )
 
-    history = BillingAuditLog.get_customer_history(
-      session=db_session, user_id=test_user.id
-    )
+    history = BillingAuditLog.get_org_history(session=db_session, org_id=test_org.id)
 
     assert len(history) == 5
 
-  def test_get_customer_history_with_event_type_filter(
-    self, db_session: Session, test_user, test_subscription
+  def test_get_org_history_with_event_type_filter(
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test retrieving customer history filtered by event type."""
     BillingAuditLog.log_event(
       session=db_session,
       event_type=BillingEventType.CUSTOMER_CREATED,
       description="Customer created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
     )
 
     for i in range(3):
@@ -167,7 +179,7 @@ class TestBillingAuditLogQueries:
         session=db_session,
         event_type=BillingEventType.SUBSCRIPTION_CREATED,
         description=f"Subscription {i} created",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         subscription_id=test_subscription.id,
       )
 
@@ -175,12 +187,12 @@ class TestBillingAuditLogQueries:
       session=db_session,
       event_type=BillingEventType.PAYMENT_METHOD_ADDED,
       description="Payment method added",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
     )
 
-    sub_history = BillingAuditLog.get_customer_history(
+    sub_history = BillingAuditLog.get_org_history(
       session=db_session,
-      user_id=test_user.id,
+      org_id=test_org.id,
       event_type=BillingEventType.SUBSCRIPTION_CREATED,
     )
 
@@ -190,43 +202,39 @@ class TestBillingAuditLogQueries:
       for entry in sub_history
     )
 
-  def test_get_customer_history_with_limit(self, db_session: Session, test_user):
+  def test_get_org_history_with_limit(self, db_session: Session, test_org):
     """Test retrieving customer history with limit."""
     for i in range(20):
       BillingAuditLog.log_event(
         session=db_session,
         event_type=BillingEventType.CUSTOMER_CREATED,
         description=f"Event {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
       )
 
-    history = BillingAuditLog.get_customer_history(
-      session=db_session, user_id=test_user.id, limit=10
+    history = BillingAuditLog.get_org_history(
+      session=db_session, org_id=test_org.id, limit=10
     )
 
     assert len(history) == 10
 
-  def test_get_customer_history_ordered_by_timestamp(
-    self, db_session: Session, test_user
-  ):
+  def test_get_org_history_ordered_by_timestamp(self, db_session: Session, test_org):
     """Test that customer history is ordered by timestamp descending."""
     for i in range(5):
       BillingAuditLog.log_event(
         session=db_session,
         event_type=BillingEventType.CUSTOMER_CREATED,
         description=f"Event {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
       )
 
-    history = BillingAuditLog.get_customer_history(
-      session=db_session, user_id=test_user.id
-    )
+    history = BillingAuditLog.get_org_history(session=db_session, org_id=test_org.id)
 
     timestamps = [entry.event_timestamp for entry in history]
     assert timestamps == sorted(timestamps, reverse=True)
 
   def test_get_subscription_history(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test retrieving subscription audit history."""
     for event_type in [
@@ -238,7 +246,7 @@ class TestBillingAuditLogQueries:
         session=db_session,
         event_type=event_type,
         description=f"{event_type.value}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         subscription_id=test_subscription.id,
       )
 
@@ -249,7 +257,7 @@ class TestBillingAuditLogQueries:
     assert len(history) == 3
 
   def test_get_subscription_history_with_limit(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test retrieving subscription history with limit."""
     for i in range(10):
@@ -257,7 +265,7 @@ class TestBillingAuditLogQueries:
         session=db_session,
         event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
         description=f"Event {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         subscription_id=test_subscription.id,
       )
 
@@ -267,7 +275,7 @@ class TestBillingAuditLogQueries:
 
     assert len(history) == 5
 
-  def test_get_invoice_history(self, db_session: Session, test_user):
+  def test_get_invoice_history(self, db_session: Session, test_org):
     """Test retrieving invoice audit history."""
     from datetime import timedelta
 
@@ -275,7 +283,7 @@ class TestBillingAuditLogQueries:
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -290,7 +298,7 @@ class TestBillingAuditLogQueries:
         session=db_session,
         event_type=event_type,
         description=f"{event_type.value}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         invoice_id=invoice.id,
       )
 
@@ -304,7 +312,7 @@ class TestBillingAuditLogQueries:
 class TestBillingEventTypes:
   """Tests for billing event types enum."""
 
-  def test_all_customer_events(self, db_session: Session, test_user):
+  def test_all_customer_events(self, db_session: Session, test_org):
     """Test logging all customer-related events."""
     customer_events = [
       BillingEventType.CUSTOMER_CREATED,
@@ -318,12 +326,12 @@ class TestBillingEventTypes:
         session=db_session,
         event_type=event_type,
         description=f"Test {event_type.value}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
       )
       assert log_entry.event_type == event_type.value
 
   def test_all_subscription_events(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test logging all subscription-related events."""
     subscription_events = [
@@ -340,12 +348,12 @@ class TestBillingEventTypes:
         session=db_session,
         event_type=event_type,
         description=f"Test {event_type.value}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         subscription_id=test_subscription.id,
       )
       assert log_entry.event_type == event_type.value
 
-  def test_all_invoice_events(self, db_session: Session, test_user):
+  def test_all_invoice_events(self, db_session: Session, test_org):
     """Test logging all invoice-related events."""
     from datetime import timedelta
 
@@ -353,7 +361,7 @@ class TestBillingEventTypes:
     period_end = datetime.now(timezone.utc)
 
     invoice = BillingInvoice.create_invoice(
-      user_id=test_user.id,
+      org_id=test_org.id,
       period_start=period_start,
       period_end=period_end,
       session=db_session,
@@ -372,7 +380,7 @@ class TestBillingEventTypes:
         session=db_session,
         event_type=event_type,
         description=f"Test {event_type.value}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         invoice_id=invoice.id,
       )
       assert log_entry.event_type == event_type.value
@@ -381,13 +389,13 @@ class TestBillingEventTypes:
 class TestBillingAuditLogRepr:
   """Tests for audit log string representation."""
 
-  def test_repr_format(self, db_session: Session, test_user):
+  def test_repr_format(self, db_session: Session, test_org):
     """Test audit log __repr__ format."""
     log_entry = BillingAuditLog.log_event(
       session=db_session,
       event_type=BillingEventType.CUSTOMER_CREATED,
       description="Customer created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
     )
 
     repr_str = repr(log_entry)
@@ -399,26 +407,26 @@ class TestBillingAuditLogRepr:
 class TestBillingAuditLogIndexes:
   """Tests to ensure database indexes work correctly."""
 
-  def test_query_by_customer_uses_index(self, db_session: Session, test_user):
+  def test_query_by_customer_uses_index(self, db_session: Session, test_org):
     """Test querying audit logs by customer."""
     for i in range(5):
       BillingAuditLog.log_event(
         session=db_session,
         event_type=BillingEventType.CUSTOMER_CREATED,
         description=f"Event {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
       )
 
     logs = (
       db_session.query(BillingAuditLog)
-      .filter(BillingAuditLog.billing_customer_user_id == test_user.id)
+      .filter(BillingAuditLog.org_id == test_org.id)
       .all()
     )
 
     assert len(logs) == 5
 
   def test_query_by_subscription_uses_index(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test querying audit logs by subscription."""
     for i in range(3):
@@ -426,7 +434,7 @@ class TestBillingAuditLogIndexes:
         session=db_session,
         event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
         description=f"Event {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         subscription_id=test_subscription.id,
       )
 
@@ -438,13 +446,13 @@ class TestBillingAuditLogIndexes:
 
     assert len(logs) == 3
 
-  def test_query_by_event_type_uses_index(self, db_session: Session, test_user):
+  def test_query_by_event_type_uses_index(self, db_session: Session, test_org):
     """Test querying audit logs by event type."""
     BillingAuditLog.log_event(
       session=db_session,
       event_type=BillingEventType.CUSTOMER_CREATED,
       description="Customer created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
     )
 
     for i in range(3):
@@ -452,28 +460,28 @@ class TestBillingAuditLogIndexes:
         session=db_session,
         event_type=BillingEventType.PAYMENT_METHOD_ADDED,
         description=f"Payment method {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
       )
 
     payment_logs = (
       db_session.query(BillingAuditLog)
       .filter(
         BillingAuditLog.event_type == BillingEventType.PAYMENT_METHOD_ADDED.value,
-        BillingAuditLog.billing_customer_user_id == test_user.id,
+        BillingAuditLog.org_id == test_org.id,
       )
       .all()
     )
 
     assert len(payment_logs) == 3
 
-  def test_query_by_actor_uses_index(self, db_session: Session, test_user, test_admin):
+  def test_query_by_actor_uses_index(self, db_session: Session, test_org, test_admin):
     """Test querying audit logs by actor."""
     for i in range(4):
       BillingAuditLog.log_event(
         session=db_session,
         event_type=BillingEventType.ADMIN_OVERRIDE,
         description=f"Admin action {i}",
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         actor_type="admin",
         actor_user_id=test_admin.id,
       )
@@ -490,13 +498,13 @@ class TestBillingAuditLogIndexes:
 class TestBillingAuditLogCompliance:
   """Tests for audit log compliance and security features."""
 
-  def test_immutable_timestamps(self, db_session: Session, test_user):
+  def test_immutable_timestamps(self, db_session: Session, test_org):
     """Test that audit log timestamps cannot be modified."""
     log_entry = BillingAuditLog.log_event(
       session=db_session,
       event_type=BillingEventType.CUSTOMER_CREATED,
       description="Customer created",
-      billing_customer_user_id=test_user.id,
+      org_id=test_org.id,
     )
 
     original_timestamp = log_entry.event_timestamp
@@ -508,7 +516,7 @@ class TestBillingAuditLogCompliance:
     assert log_entry.event_timestamp != original_timestamp
 
   def test_complete_audit_trail_for_subscription_lifecycle(
-    self, db_session: Session, test_user, test_subscription
+    self, db_session: Session, test_org, test_subscription
   ):
     """Test complete audit trail for subscription lifecycle."""
     lifecycle_events = [
@@ -525,7 +533,7 @@ class TestBillingAuditLogCompliance:
         session=db_session,
         event_type=event_type,
         description=description,
-        billing_customer_user_id=test_user.id,
+        org_id=test_org.id,
         subscription_id=test_subscription.id,
       )
 

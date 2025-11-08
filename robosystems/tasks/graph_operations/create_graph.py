@@ -66,35 +66,41 @@ def create_graph_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
       cancellation_callback=check_cancellation,
     )
 
-    # Create billing subscription for the graph
-    try:
-      session = next(get_db_session())
+    # Create billing subscription for the graph (unless skipped for provision flow)
+    skip_billing = task_data.get("skip_billing", False)
+    if not skip_billing:
       try:
-        subscription_service = GraphSubscriptionService(session)
-        plan_name = task_data.get("tier", "kuzu-standard")
-        graph_id = result.get("graph_id")
+        session = next(get_db_session())
+        try:
+          subscription_service = GraphSubscriptionService(session)
+          plan_name = task_data.get("tier", "kuzu-standard")
+          graph_id = result.get("graph_id")
 
-        subscription = subscription_service.create_graph_subscription(
-          user_id=user_id,
-          graph_id=graph_id,
-          plan_name=plan_name,
-        )
+          subscription = subscription_service.create_graph_subscription(
+            user_id=user_id,
+            graph_id=graph_id,
+            plan_name=plan_name,
+          )
 
-        logger.info(
-          f"Created billing subscription {subscription.id} for graph {graph_id}",
-          extra={
-            "user_id": user_id,
-            "graph_id": graph_id,
-            "subscription_id": subscription.id,
-            "plan_name": plan_name,
-          },
+          logger.info(
+            f"Created billing subscription {subscription.id} for graph {graph_id}",
+            extra={
+              "user_id": user_id,
+              "graph_id": graph_id,
+              "subscription_id": subscription.id,
+              "plan_name": plan_name,
+            },
+          )
+        finally:
+          session.close()
+      except Exception as billing_error:
+        logger.error(
+          f"Failed to create billing subscription for graph {result.get('graph_id')}: {billing_error}",
+          extra={"user_id": user_id, "graph_id": result.get("graph_id")},
         )
-      finally:
-        session.close()
-    except Exception as billing_error:
-      logger.error(
-        f"Failed to create billing subscription for graph {result.get('graph_id')}: {billing_error}",
-        extra={"user_id": user_id, "graph_id": result.get("graph_id")},
+    else:
+      logger.info(
+        f"Skipping billing subscription creation for graph {result.get('graph_id')} (provision flow)"
       )
 
     logger.info(f"Graph creation task completed successfully for user {user_id}")

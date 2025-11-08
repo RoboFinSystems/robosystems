@@ -125,8 +125,8 @@ async def get_graph_limits(
     from robosystems.models.iam.graph import Graph
     from robosystems.models.iam.graph_credits import GraphCredits
     from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
-    from robosystems.config.tier_config import (
-      TierConfig,
+    from robosystems.config.graph_tier import (
+      GraphTierConfig,
       get_tier_copy_operation_limits,
       get_tier_backup_limits,
     )
@@ -149,7 +149,7 @@ async def get_graph_limits(
       graph_tier = "kuzu-standard"
 
     # Get storage information (based on graph tier)
-    max_storage_gb = TierConfig.get_storage_limit_gb(graph_tier)
+    max_storage_gb = GraphTierConfig.get_storage_limit_gb(graph_tier)
     storage_limits = {}
     try:
       graph_client = await _get_graph_client(graph_id)
@@ -178,8 +178,8 @@ async def get_graph_limits(
 
     # Define query limits based on graph tier
     query_limits = {
-      "max_timeout_seconds": TierConfig.get_query_timeout(graph_tier),
-      "chunk_size": TierConfig.get_chunk_size(graph_tier),
+      "max_timeout_seconds": GraphTierConfig.get_query_timeout(graph_tier),
+      "chunk_size": GraphTierConfig.get_chunk_size(graph_tier),
       # These are application-level limits not in YAML config
       "max_rows_per_query": 10000,  # TODO: Add to graph.yml if needed
       "concurrent_queries": 1,  # TODO: Add to graph.yml if needed
@@ -193,7 +193,7 @@ async def get_graph_limits(
     base_requests_per_hour = 1000
     base_burst_capacity = 10
 
-    multiplier = TierConfig.get_api_rate_multiplier(graph_tier)
+    multiplier = GraphTierConfig.get_api_rate_multiplier(graph_tier)
 
     rate_limits = {
       "requests_per_minute": int(base_requests_per_minute * multiplier)

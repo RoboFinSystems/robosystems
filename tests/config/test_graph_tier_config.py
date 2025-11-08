@@ -2,9 +2,9 @@ import io
 
 import pytest
 
-from robosystems.config import tier_config as tier_config_module
-from robosystems.config.tier_config import (
-  TierConfig,
+from robosystems.config import graph_tier as tier_config_module
+from robosystems.config.graph_tier import (
+  GraphTierConfig,
   get_tier_backup_limits,
   get_tier_copy_operation_limits,
   get_tier_max_subgraphs,
@@ -52,7 +52,7 @@ staging:
 
 @pytest.fixture(autouse=True)
 def reset_tier_config_caches():
-  TierConfig.clear_cache()
+  GraphTierConfig.clear_cache()
   get_tier_max_subgraphs.cache_clear()
   get_tier_storage_limit.cache_clear()
   get_tier_monthly_credits.cache_clear()
@@ -60,7 +60,7 @@ def reset_tier_config_caches():
   get_tier_copy_operation_limits.cache_clear()
   get_tier_backup_limits.cache_clear()
   yield
-  TierConfig.clear_cache()
+  GraphTierConfig.clear_cache()
   get_tier_max_subgraphs.cache_clear()
   get_tier_storage_limit.cache_clear()
   get_tier_monthly_credits.cache_clear()
@@ -94,26 +94,26 @@ def mock_graph_config(monkeypatch):
     return io.StringIO(GRAPH_CONFIG_YAML)
 
   monkeypatch.setattr(
-    "robosystems.config.tier_config.os.path.exists", fake_exists, raising=False
+    "robosystems.config.graph_tier.os.path.exists", fake_exists, raising=False
   )
   monkeypatch.setattr("builtins.open", fake_open)
-  monkeypatch.setattr("robosystems.config.tier_config.env.ENVIRONMENT", "prod")
+  monkeypatch.setattr("robosystems.config.graph_tier.env.ENVIRONMENT", "prod")
 
   return {"open_calls": open_calls, "dev_path": dev_path}
 
 
 def test_tier_config_loads_once_when_cached(mock_graph_config):
-  config = TierConfig.get_tier_config("kuzu-standard")
+  config = GraphTierConfig.get_tier_config("kuzu-standard")
   assert config["tier"] == "kuzu-standard"
   assert mock_graph_config["open_calls"] == [mock_graph_config["dev_path"]]
 
   # Cached result should not trigger additional loads
-  TierConfig.get_tier_config("kuzu-standard")
+  GraphTierConfig.get_tier_config("kuzu-standard")
   assert len(mock_graph_config["open_calls"]) == 1
 
   # Clearing cache should force reload
-  TierConfig.clear_cache()
-  TierConfig.get_tier_config("kuzu-standard")
+  GraphTierConfig.clear_cache()
+  GraphTierConfig.get_tier_config("kuzu-standard")
   assert len(mock_graph_config["open_calls"]) == 2
 
 
@@ -132,16 +132,16 @@ def test_accessors_return_configured_values(mock_graph_config):
   assert backup_limits["max_backup_size_gb"] == 20
   assert backup_limits["max_backups_per_day"] == 4
 
-  instance_config = TierConfig.get_instance_config("kuzu-standard")
+  instance_config = GraphTierConfig.get_instance_config("kuzu-standard")
   assert instance_config["memory_per_db_mb"] == 512
   assert instance_config["max_memory_mb"] == 4096
-  assert TierConfig.get_query_timeout("kuzu-standard") == 120
-  assert TierConfig.get_chunk_size("kuzu-standard") == 256
+  assert GraphTierConfig.get_query_timeout("kuzu-standard") == 120
+  assert GraphTierConfig.get_chunk_size("kuzu-standard") == 256
 
 
 def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
   # kuzu-large is missing storage limit/multiplier/copy settings so defaults apply
-  assert TierConfig.get_tier_config("unknown-tier") == {}
+  assert GraphTierConfig.get_tier_config("unknown-tier") == {}
   assert get_tier_storage_limit("kuzu-large") == 500
   assert get_tier_api_rate_multiplier("kuzu-large") == 1.0
 
@@ -155,9 +155,9 @@ def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
 
 
 def test_environment_default_switches_to_staging(monkeypatch, mock_graph_config):
-  monkeypatch.setattr("robosystems.config.tier_config.env.ENVIRONMENT", "dev")
-  TierConfig.clear_cache()
+  monkeypatch.setattr("robosystems.config.graph_tier.env.ENVIRONMENT", "dev")
+  GraphTierConfig.clear_cache()
 
-  staging_config = TierConfig.get_tier_config("kuzu-standard")
+  staging_config = GraphTierConfig.get_tier_config("kuzu-standard")
   assert staging_config["monthly_credits"] == 900
-  assert TierConfig.get_query_timeout("kuzu-standard") == 90
+  assert GraphTierConfig.get_query_timeout("kuzu-standard") == 90

@@ -4,7 +4,7 @@ import hashlib
 from typing import Optional
 from sqlalchemy.orm import Session
 
-from ...models.iam import UserAPIKey, User, UserGraph
+from ...models.iam import UserAPIKey, User, GraphUser
 from ...database import session
 from ...logger import logger
 from .cache import api_key_cache
@@ -200,7 +200,7 @@ def validate_api_key_with_graph(
       "read",
     )
   else:
-    has_access = UserGraph.user_has_access(key_record.user_id, graph_id, sess)
+    has_access = GraphUser.user_has_access(key_record.user_id, graph_id, sess)
   if not has_access:
     # Cache the API key validation (positive) but graph access (negative)
     try:

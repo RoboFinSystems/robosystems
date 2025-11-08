@@ -3,9 +3,54 @@
 import pytest
 from unittest.mock import MagicMock
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
-from robosystems.models.iam import Graph
-from robosystems.models.iam.graph_credits import GraphTier
+from robosystems.models.iam import Graph, User
+from robosystems.config.graph_tier import GraphTier
+
+
+@pytest.fixture
+def test_user(db_session: Session):
+  """Create a test user with org."""
+  from robosystems.models.iam import Org, OrgUser, OrgRole, OrgType
+  import uuid
+
+  unique_id = str(uuid.uuid4())[:8]
+
+  org = Org(
+    id=f"test_org_{unique_id}",
+    name=f"Test Org {unique_id}",
+    org_type=OrgType.PERSONAL,
+  )
+  db_session.add(org)
+  db_session.flush()
+
+  user = User(
+    id=f"test_user_{unique_id}",
+    email=f"test+{unique_id}@example.com",
+    name="Test User",
+    password_hash="test_hash",
+  )
+  db_session.add(user)
+  db_session.flush()
+
+  org_user = OrgUser(
+    org_id=org.id,
+    user_id=user.id,
+    role=OrgRole.OWNER,
+  )
+  db_session.add(org_user)
+  db_session.commit()
+  return user
+
+
+@pytest.fixture
+def test_org(test_user, db_session: Session):
+  """Get org for test user."""
+  from robosystems.models.iam import OrgUser
+
+  org_users = OrgUser.get_user_orgs(test_user.id, db_session)
+  return org_users[0].org
 
 
 class TestGraphModel:
@@ -167,12 +212,13 @@ class TestGraphModel:
     graph.schema_extensions = None
     assert graph.has_specific_extension("roboledger") is False
 
-  def test_create_entity_graph(self, db_session):
+  def test_create_entity_graph(self, test_org, db_session):
     """Test creating an entity graph."""
     graph = Graph.create(
       graph_id=f"kg_entity_test_{self.unique_id}",
       graph_name="Entity Graph",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       base_schema="base",
       schema_extensions=["roboledger", "roboinvestor"],
@@ -204,12 +250,13 @@ class TestGraphModel:
     assert db_graph is not None
     assert db_graph.graph_name == "Entity Graph"
 
-  def test_create_generic_graph(self, db_session):
+  def test_create_generic_graph(self, test_org, db_session):
     """Test creating a generic graph."""
     graph = Graph.create(
       graph_id="generic_123",
       graph_name="Generic Graph",
       graph_type="generic",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -220,18 +267,19 @@ class TestGraphModel:
     assert graph.schema_extensions == []
     assert graph.graph_tier == GraphTier.KUZU_STANDARD.value
 
-  def test_create_entity_graph_auto_base_schema(self, db_session):
+  def test_create_entity_graph_auto_base_schema(self, test_org, db_session):
     """Test that entity graphs automatically get base_schema if not provided."""
     graph = Graph.create(
       graph_id="kg_auto_base",
       graph_name="Auto Base",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
     assert graph.base_schema == "base"
 
-  def test_create_subgraph(self, db_session):
+  def test_create_subgraph(self, test_org, db_session):
     """Test creating a subgraph."""
     # First create parent graph
     Graph.create(
@@ -239,6 +287,7 @@ class TestGraphModel:
       graph_name="Parent Graph",
       graph_type="entity",
       graph_tier=GraphTier.KUZU_LARGE,
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -247,6 +296,7 @@ class TestGraphModel:
       graph_id="kg_sub1",
       graph_name="Subgraph 1",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       parent_graph_id="kg_parent",
       subgraph_index=1,
@@ -262,19 +312,20 @@ class TestGraphModel:
     assert subgraph.is_subgraph is True
     assert subgraph.subgraph_metadata == {"purpose": "year-end analysis"}
 
-  def test_create_subgraph_missing_params(self, db_session):
+  def test_create_subgraph_missing_params(self, test_org, db_session):
     """Test that creating subgraph without required params fails."""
     with pytest.raises(ValueError, match="Subgraphs require"):
       Graph.create(
         graph_id="kg_invalid_sub",
         graph_name="Invalid Subgraph",
         graph_type="entity",
+        org_id=test_org.id,
         session=db_session,
         is_subgraph=True,
         # Missing parent_graph_id, subgraph_index, subgraph_name
       )
 
-  def test_create_subgraph_invalid_name(self, db_session):
+  def test_create_subgraph_invalid_name(self, test_org, db_session):
     """Test that subgraph name validation works."""
     # Invalid characters
     with pytest.raises(ValueError, match="alphanumeric"):
@@ -282,6 +333,7 @@ class TestGraphModel:
         graph_id="kg_sub_bad",
         graph_name="Bad Subgraph",
         graph_type="entity",
+        org_id=test_org.id,
         session=db_session,
         parent_graph_id="kg_parent",
         subgraph_index=1,
@@ -295,6 +347,7 @@ class TestGraphModel:
         graph_id="kg_sub_long",
         graph_name="Long Subgraph",
         graph_type="entity",
+        org_id=test_org.id,
         session=db_session,
         parent_graph_id="kg_parent",
         subgraph_index=1,
@@ -302,13 +355,14 @@ class TestGraphModel:
         is_subgraph=True,
       )
 
-  def test_create_invalid_graph_type(self, db_session):
+  def test_create_invalid_graph_type(self, test_org, db_session):
     """Test that invalid graph_type raises error."""
     with pytest.raises(ValueError, match="graph_type must be"):
       Graph.create(
         graph_id="kg_invalid_type",
         graph_name="Invalid Type",
         graph_type="invalid",
+        org_id=test_org.id,
         session=db_session,
       )
 
@@ -322,18 +376,20 @@ class TestGraphModel:
         graph_id="kg_error",
         graph_name="Error Graph",
         graph_type="entity",
+        org_id="test-org-id",
         session=mock_session,
       )
 
     mock_session.rollback.assert_called_once()
 
-  def test_get_by_id(self, db_session):
+  def test_get_by_id(self, test_org, db_session):
     """Test getting graph by ID."""
     # Create a graph
     Graph.create(
       graph_id="kg_find_me",
       graph_name="Find Me",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -347,17 +403,17 @@ class TestGraphModel:
     not_found = Graph.get_by_id("nonexistent", db_session)
     assert not_found is None
 
-  def test_get_by_extension(self, db_session):
+  def test_get_by_extension(self, test_org, db_session):
     """Test getting graphs by schema extension."""
     # Clean up any existing graphs to ensure test isolation
     # Delete in correct order due to foreign key constraints
-    from robosystems.models.iam import UserGraph, GraphCredits
+    from robosystems.models.iam import GraphUser, GraphCredits
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
 
     # Delete in dependency order
     db_session.query(GraphCreditTransaction).delete()
     db_session.query(GraphCredits).delete()
-    db_session.query(UserGraph).delete()
+    db_session.query(GraphUser).delete()
     db_session.query(Graph).delete()
     db_session.commit()
 
@@ -367,6 +423,7 @@ class TestGraphModel:
       graph_name="RoboLedger 1",
       graph_type="entity",
       schema_extensions=["roboledger"],
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -375,6 +432,7 @@ class TestGraphModel:
       graph_name="RoboLedger 2",
       graph_type="entity",
       schema_extensions=["roboledger", "roboinvestor"],
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -383,6 +441,7 @@ class TestGraphModel:
       graph_name="RoboInvestor Only",
       graph_type="entity",
       schema_extensions=["roboinvestor"],
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -391,6 +450,7 @@ class TestGraphModel:
       graph_name="No Extensions",
       graph_type="generic",
       schema_extensions=[],
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -411,17 +471,17 @@ class TestGraphModel:
     none_graphs = Graph.get_by_extension("nonexistent", db_session)
     assert len(none_graphs) == 0
 
-  def test_get_by_type(self, db_session):
+  def test_get_by_type(self, test_org, db_session):
     """Test getting graphs by type."""
     # Clean up any existing graphs to ensure test isolation
     # Delete in correct order due to foreign key constraints
-    from robosystems.models.iam import UserGraph, GraphCredits
+    from robosystems.models.iam import GraphUser, GraphCredits
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
 
     # Delete in dependency order
     db_session.query(GraphCreditTransaction).delete()
     db_session.query(GraphCredits).delete()
-    db_session.query(UserGraph).delete()
+    db_session.query(GraphUser).delete()
     db_session.query(Graph).delete()
     db_session.commit()
 
@@ -430,6 +490,7 @@ class TestGraphModel:
       graph_id=f"kg_entity1_{self.unique_id}",
       graph_name="Entity 1",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -437,6 +498,7 @@ class TestGraphModel:
       graph_id=f"kg_entity2_{self.unique_id}",
       graph_name="Entity 2",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -444,6 +506,7 @@ class TestGraphModel:
       graph_id=f"generic1_{self.unique_id}",
       graph_name="Generic 1",
       graph_type="generic",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -458,7 +521,7 @@ class TestGraphModel:
     assert len(generic_graphs) == 1
     assert generic_graphs[0].graph_id == f"generic1_{self.unique_id}"
 
-  def test_update_extensions(self, db_session):
+  def test_update_extensions(self, test_org, db_session):
     """Test updating graph extensions."""
     # Create a graph
     graph = Graph.create(
@@ -466,6 +529,7 @@ class TestGraphModel:
       graph_name="Update Extensions",
       graph_type="entity",
       schema_extensions=["roboledger"],
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -497,13 +561,14 @@ class TestGraphModel:
 
     mock_session.rollback.assert_called_once()
 
-  def test_delete_graph(self, db_session):
+  def test_delete_graph(self, test_org, db_session):
     """Test deleting a graph."""
     # Create a graph
     graph = Graph.create(
       graph_id="kg_delete_me",
       graph_name="Delete Me",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -530,7 +595,7 @@ class TestGraphModel:
 
     mock_session.rollback.assert_called_once()
 
-  def test_get_subgraphs(self, db_session):
+  def test_get_subgraphs(self, test_org, db_session):
     """Test getting all subgraphs for a parent graph."""
     # Create parent graph
     Graph.create(
@@ -538,6 +603,7 @@ class TestGraphModel:
       graph_name="Parent",
       graph_type="entity",
       graph_tier=GraphTier.KUZU_LARGE,
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -546,6 +612,7 @@ class TestGraphModel:
       graph_id="kg_sub1",
       graph_name="Sub 1",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       parent_graph_id="kg_parent",
       subgraph_index=1,
@@ -557,6 +624,7 @@ class TestGraphModel:
       graph_id="kg_sub2",
       graph_name="Sub 2",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       parent_graph_id="kg_parent",
       subgraph_index=2,
@@ -569,6 +637,7 @@ class TestGraphModel:
       graph_id="kg_other_sub",
       graph_name="Other Sub",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       parent_graph_id="kg_other_parent",
       subgraph_index=1,
@@ -582,17 +651,17 @@ class TestGraphModel:
     assert subgraphs[0].graph_id == "kg_sub1"  # Ordered by index
     assert subgraphs[1].graph_id == "kg_sub2"
 
-  def test_get_next_subgraph_index(self, db_session):
+  def test_get_next_subgraph_index(self, test_org, db_session):
     """Test getting the next available subgraph index."""
     # Clean up any existing graphs to ensure test isolation
     # Delete in correct order due to foreign key constraints
-    from robosystems.models.iam import UserGraph, GraphCredits
+    from robosystems.models.iam import GraphUser, GraphCredits
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
 
     # Delete in dependency order
     db_session.query(GraphCreditTransaction).delete()
     db_session.query(GraphCredits).delete()
-    db_session.query(UserGraph).delete()
+    db_session.query(GraphUser).delete()
     db_session.query(Graph).delete()
     db_session.commit()
 
@@ -607,6 +676,7 @@ class TestGraphModel:
       graph_id=f"kg_parent_{self.unique_id}",
       graph_name="Parent",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -614,6 +684,7 @@ class TestGraphModel:
       graph_id=f"kg_sub1_{self.unique_id}",
       graph_name="Sub 1",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       parent_graph_id=f"kg_parent_{self.unique_id}",
       subgraph_index=1,
@@ -625,6 +696,7 @@ class TestGraphModel:
       graph_id=f"kg_sub2_{self.unique_id}",
       graph_name="Sub 2",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       parent_graph_id=f"kg_parent_{self.unique_id}",
       subgraph_index=3,  # Skip 2
@@ -664,9 +736,9 @@ class TestGraphModel:
     )
 
     # Check relationship attributes exist
-    assert hasattr(graph, "user_graphs")
+    assert hasattr(graph, "graph_users")
 
-  def test_graph_tier_enum_handling(self, db_session):
+  def test_graph_tier_enum_handling(self, test_org, db_session):
     """Test that GraphTier enum is properly handled."""
     # Create with enum
     graph1 = Graph.create(
@@ -674,6 +746,7 @@ class TestGraphModel:
       graph_name="Enum Test",
       graph_type="entity",
       graph_tier=GraphTier.KUZU_LARGE,
+      org_id=test_org.id,
       session=db_session,
     )
     assert graph1.graph_tier == "kuzu-large"
@@ -684,17 +757,19 @@ class TestGraphModel:
       graph_name="String Test",
       graph_type="entity",
       graph_tier="kuzu-xlarge",
+      org_id=test_org.id,
       session=db_session,
     )
     assert graph2.graph_tier == "kuzu-xlarge"
 
-  def test_graph_constraints(self, db_session):
+  def test_graph_constraints(self, test_org, db_session):
     """Test database constraints are enforced."""
     # Create a graph with subgraph
     Graph.create(
       graph_id="kg_parent",
       graph_name="Parent",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -702,6 +777,7 @@ class TestGraphModel:
       graph_id="kg_sub1",
       graph_name="Sub 1",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
       parent_graph_id="kg_parent",
       subgraph_index=1,
@@ -715,6 +791,7 @@ class TestGraphModel:
         graph_id="kg_sub2",
         graph_name="Sub 2",
         graph_type="entity",
+        org_id=test_org.id,
         session=db_session,
         parent_graph_id="kg_parent",
         subgraph_index=1,  # Same index as sub1
@@ -733,7 +810,7 @@ class TestGraphRepositoryFeatures:
 
     self.unique_id = str(uuid.uuid4())[:8]
 
-  def test_find_or_create_repository_new(self, db_session):
+  def test_find_or_create_repository_new(self, test_org, db_session):
     """Test creating a new repository when it doesn't exist."""
     result = Graph.find_or_create_repository(
       graph_id=f"sec_{self.unique_id}",
@@ -756,7 +833,7 @@ class TestGraphRepositoryFeatures:
     assert result.sync_status == "active"
     assert result.graph_tier == GraphTier.KUZU_SHARED.value
 
-  def test_find_or_create_repository_existing(self, db_session):
+  def test_find_or_create_repository_existing(self, test_org, db_session):
     """Test that existing repository is returned without creating new one."""
     repo_id = f"industry_{self.unique_id}"
 
@@ -783,7 +860,7 @@ class TestGraphRepositoryFeatures:
     all_repos = db_session.query(Graph).filter(Graph.graph_id == repo_id).all()
     assert len(all_repos) == 1
 
-  def test_repository_needs_sync_no_last_sync(self, db_session):
+  def test_repository_needs_sync_no_last_sync(self, test_org, db_session):
     """Test needs_sync when last_sync_at is None."""
     repo = Graph.find_or_create_repository(
       graph_id=f"economic_{self.unique_id}",
@@ -799,7 +876,7 @@ class TestGraphRepositoryFeatures:
 
     assert repo.needs_sync is True
 
-  def test_repository_needs_sync_recent(self, db_session):
+  def test_repository_needs_sync_recent(self, test_org, db_session):
     """Test needs_sync when sync is recent."""
     from datetime import datetime, timezone
 
@@ -818,7 +895,7 @@ class TestGraphRepositoryFeatures:
 
     assert repo.needs_sync is False
 
-  def test_repository_needs_sync_stale(self, db_session):
+  def test_repository_needs_sync_stale(self, test_org, db_session):
     """Test needs_sync when sync is stale."""
     from datetime import datetime, timezone, timedelta
 
@@ -836,7 +913,7 @@ class TestGraphRepositoryFeatures:
 
     assert repo.needs_sync is True
 
-  def test_repository_needs_sync_error_status(self, db_session):
+  def test_repository_needs_sync_error_status(self, test_org, db_session):
     """Test needs_sync when sync_status is error."""
     from datetime import datetime, timezone
 
@@ -854,7 +931,7 @@ class TestGraphRepositoryFeatures:
 
     assert repo.needs_sync is True
 
-  def test_get_all_repositories(self, db_session):
+  def test_get_all_repositories(self, test_org, db_session):
     """Test getting all shared repositories."""
     # Clean up existing repositories
     from robosystems.models.iam import UserRepository
@@ -883,6 +960,7 @@ class TestGraphRepositoryFeatures:
       graph_id=f"kg_user_{self.unique_id}",
       graph_name="User Graph",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -892,7 +970,7 @@ class TestGraphRepositoryFeatures:
     assert "sec" in repo_types
     assert "industry" in repo_types
 
-  def test_get_repository_by_type(self, db_session):
+  def test_get_repository_by_type(self, test_org, db_session):
     """Test getting a repository by its type."""
     Graph.find_or_create_repository(
       graph_id=f"sec_{self.unique_id}",
@@ -910,7 +988,7 @@ class TestGraphRepositoryFeatures:
     not_found = Graph.get_repository_by_type("nonexistent", db_session)
     assert not_found is None
 
-  def test_update_sync_status_success(self, db_session):
+  def test_update_sync_status_success(self, test_org, db_session):
     """Test updating sync status to active."""
     repo = Graph.find_or_create_repository(
       graph_id=f"sec_sync_{self.unique_id}",
@@ -929,7 +1007,7 @@ class TestGraphRepositoryFeatures:
     assert repo.last_sync_at is not None
     assert repo.sync_error_message is None
 
-  def test_update_sync_status_error(self, db_session):
+  def test_update_sync_status_error(self, test_org, db_session):
     """Test updating sync status to error."""
     repo = Graph.find_or_create_repository(
       graph_id=f"sec_error_{self.unique_id}",
@@ -945,12 +1023,13 @@ class TestGraphRepositoryFeatures:
     assert repo.sync_status == "error"
     assert repo.sync_error_message == "Connection timeout"
 
-  def test_update_sync_status_non_repository_fails(self, db_session):
+  def test_update_sync_status_non_repository_fails(self, test_org, db_session):
     """Test that update_sync_status fails for non-repository graphs."""
     graph = Graph.create(
       graph_id=f"kg_user_{self.unique_id}",
       graph_name="User Graph",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
 
@@ -959,13 +1038,14 @@ class TestGraphRepositoryFeatures:
     ):
       graph.update_sync_status("active", session=db_session)
 
-  def test_is_user_graph_property(self, db_session):
+  def test_is_user_graph_property(self, test_org, db_session):
     """Test is_user_graph property."""
     # User graph
     user_graph = Graph.create(
       graph_id=f"kg_user_{self.unique_id}",
       graph_name="User Graph",
       graph_type="entity",
+      org_id=test_org.id,
       session=db_session,
     )
     assert user_graph.is_user_graph is True
@@ -979,7 +1059,7 @@ class TestGraphRepositoryFeatures:
     )
     assert repo.is_user_graph is False
 
-  def test_repository_type_validation(self, db_session):
+  def test_repository_type_validation(self, test_org, db_session):
     """Test that repository graph type is set correctly."""
     repo = Graph.find_or_create_repository(
       graph_id=f"test_repo_{self.unique_id}",

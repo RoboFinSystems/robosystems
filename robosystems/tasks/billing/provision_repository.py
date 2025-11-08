@@ -114,7 +114,7 @@ def provision_repository_access_task(
     BillingAuditLog.log_event(
       session=session,
       event_type=BillingEventType.SUBSCRIPTION_ACTIVATED,
-      billing_customer_user_id=user_id,
+      org_id=customer.org_id,
       subscription_id=subscription.id,
       description=f"Activated subscription for {repository_name} repository",
       actor_type="system",

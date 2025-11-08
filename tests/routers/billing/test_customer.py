@@ -26,13 +26,20 @@ class TestGetCustomer:
     return Mock()
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   async def test_get_customer_no_payment_methods(
-    self, mock_get_customer, mock_user, mock_db
+    self, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting customer with no payment methods."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomerModel)
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.has_payment_method = False
     mock_customer.invoice_billing_enabled = False
     mock_customer.stripe_customer_id = None
@@ -40,22 +47,29 @@ class TestGetCustomer:
     mock_customer.created_at.isoformat.return_value = "2025-01-01T00:00:00"
     mock_get_customer.return_value = mock_customer
 
-    result = await get_customer(mock_user, mock_db, None)
+    result = await get_customer("org_123", mock_user, mock_db, None)
 
-    assert result.user_id == "user_123"
+    assert result.org_id == "org_123"
     assert result.has_payment_method is False
     assert result.invoice_billing_enabled is False
     assert len(result.payment_methods) == 0
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   @patch("robosystems.routers.billing.customer.get_payment_provider")
   async def test_get_customer_with_payment_methods(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting customer with payment methods."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomerModel)
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.has_payment_method = True
     mock_customer.invoice_billing_enabled = False
     mock_customer.stripe_customer_id = "cus_123"
@@ -85,9 +99,9 @@ class TestGetCustomer:
     ]
     mock_get_provider.return_value = mock_provider
 
-    result = await get_customer(mock_user, mock_db, None)
+    result = await get_customer("org_123", mock_user, mock_db, None)
 
-    assert result.user_id == "user_123"
+    assert result.org_id == "org_123"
     assert result.has_payment_method is True
     assert len(result.payment_methods) == 2
     assert result.payment_methods[0].id == "pm_1"
@@ -98,13 +112,20 @@ class TestGetCustomer:
     assert result.payment_methods[1].brand == "mastercard"
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   async def test_get_customer_invoice_billing_enabled(
-    self, mock_get_customer, mock_user, mock_db
+    self, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test getting enterprise customer with invoice billing."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomerModel)
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.has_payment_method = False
     mock_customer.invoice_billing_enabled = True
     mock_customer.stripe_customer_id = None
@@ -112,20 +133,27 @@ class TestGetCustomer:
     mock_customer.created_at.isoformat.return_value = "2025-01-01T00:00:00"
     mock_get_customer.return_value = mock_customer
 
-    result = await get_customer(mock_user, mock_db, None)
+    result = await get_customer("org_123", mock_user, mock_db, None)
 
     assert result.invoice_billing_enabled is True
     assert len(result.payment_methods) == 0
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   @patch("robosystems.routers.billing.customer.get_payment_provider")
   async def test_get_customer_payment_method_fetch_error(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test that payment method fetch errors are handled gracefully."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomerModel)
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.has_payment_method = True
     mock_customer.invoice_billing_enabled = False
     mock_customer.stripe_customer_id = "cus_123"
@@ -137,22 +165,22 @@ class TestGetCustomer:
     mock_provider.list_payment_methods.side_effect = Exception("Stripe API error")
     mock_get_provider.return_value = mock_provider
 
-    result = await get_customer(mock_user, mock_db, None)
+    result = await get_customer("org_123", mock_user, mock_db, None)
 
-    assert result.user_id == "user_123"
+    assert result.org_id == "org_123"
     assert result.has_payment_method is True
     assert len(result.payment_methods) == 0
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   async def test_get_customer_unexpected_error(
-    self, mock_get_customer, mock_user, mock_db
+    self, mock_get_org_user, mock_user, mock_db
   ):
     """Test handling of unexpected errors."""
-    mock_get_customer.side_effect = Exception("Database error")
+    mock_get_org_user.side_effect = Exception("Database error")
 
     with pytest.raises(HTTPException) as exc:
-      await get_customer(mock_user, mock_db, None)
+      await get_customer("org_123", mock_user, mock_db, None)
 
     assert exc.value.status_code == 500
     assert "Failed to retrieve customer information" in exc.value.detail
@@ -176,14 +204,27 @@ class TestUpdatePaymentMethod:
     return UpdatePaymentMethodRequest(payment_method_id="pm_new")
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   @patch("robosystems.routers.billing.customer.get_payment_provider")
   async def test_update_payment_method_success(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db, update_request
+    self,
+    mock_get_provider,
+    mock_get_customer,
+    mock_get_org_user,
+    mock_user,
+    mock_db,
+    update_request,
   ):
     """Test successful payment method update."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomerModel)
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
 
@@ -195,7 +236,9 @@ class TestUpdatePaymentMethod:
     }
     mock_get_provider.return_value = mock_provider
 
-    result = await update_payment_method(update_request, mock_user, mock_db, None)
+    result = await update_payment_method(
+      "org_123", update_request, mock_user, mock_db, None
+    )
 
     assert result.message == "Default payment method updated successfully"
     assert result.payment_method.id == "pm_new"
@@ -208,31 +251,51 @@ class TestUpdatePaymentMethod:
     )
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   async def test_update_payment_method_no_stripe_customer(
-    self, mock_get_customer, mock_user, mock_db, update_request
+    self, mock_get_customer, mock_get_org_user, mock_user, mock_db, update_request
   ):
     """Test update payment method when no Stripe customer exists."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomerModel)
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.stripe_customer_id = None
     mock_get_customer.return_value = mock_customer
 
     with pytest.raises(HTTPException) as exc:
-      await update_payment_method(update_request, mock_user, mock_db, None)
+      await update_payment_method("org_123", update_request, mock_user, mock_db, None)
 
     assert exc.value.status_code == 400
     assert "No Stripe customer ID found" in exc.value.detail
 
   @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
   @patch("robosystems.routers.billing.customer.get_payment_provider")
   async def test_update_payment_method_provider_error(
-    self, mock_get_provider, mock_get_customer, mock_user, mock_db, update_request
+    self,
+    mock_get_provider,
+    mock_get_customer,
+    mock_get_org_user,
+    mock_user,
+    mock_db,
+    update_request,
   ):
     """Test handling of payment provider errors."""
+    from robosystems.models.iam import OrgRole
+
+    mock_org_user = Mock()
+    mock_org_user.role = OrgRole.OWNER
+    mock_get_org_user.return_value = mock_org_user
+
     mock_customer = Mock(spec=BillingCustomerModel)
-    mock_customer.user_id = "user_123"
+    mock_customer.org_id = "org_123"
     mock_customer.stripe_customer_id = "cus_123"
     mock_get_customer.return_value = mock_customer
 
@@ -243,7 +306,7 @@ class TestUpdatePaymentMethod:
     mock_get_provider.return_value = mock_provider
 
     with pytest.raises(HTTPException) as exc:
-      await update_payment_method(update_request, mock_user, mock_db, None)
+      await update_payment_method("org_123", update_request, mock_user, mock_db, None)
 
     assert exc.value.status_code == 500
     assert "Failed to update payment method" in exc.value.detail

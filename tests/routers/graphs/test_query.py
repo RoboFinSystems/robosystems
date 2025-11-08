@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
 from robosystems.middleware.auth.jwt import create_jwt_token
-from robosystems.models.iam import User, UserGraph
+from robosystems.models.iam import User, GraphUser
 
 
 @pytest.fixture
@@ -232,7 +232,7 @@ async def test_cypher_query_timeout(
 
 
 @pytest.mark.asyncio
-async def test_cypher_query_unauthorized(test_user_graph: UserGraph, test_db):
+async def test_cypher_query_unauthorized(test_user_graph: GraphUser, test_db):
   """Test unauthorized access."""
   # Create a client without auth overrides
   from httpx import AsyncClient, ASGITransport

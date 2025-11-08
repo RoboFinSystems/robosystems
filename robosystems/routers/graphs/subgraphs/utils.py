@@ -7,9 +7,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam.graph import Graph
-from robosystems.models.iam.graph_credits import GraphTier
+from robosystems.config.graph_tier import GraphTier
 from robosystems.models.iam.user import User
-from robosystems.models.iam.user_graph import UserGraph
+from robosystems.models.iam.graph_user import GraphUser
 from robosystems.middleware.graph.subgraph_utils import (
   construct_subgraph_id,
   validate_subgraph_name,
@@ -17,7 +17,7 @@ from robosystems.middleware.graph.subgraph_utils import (
   generate_unique_subgraph_name,
 )
 from robosystems.middleware.graph.types import GraphTypeRegistry
-from robosystems.config.tier_config import get_tier_max_subgraphs
+from robosystems.config.graph_tier import get_tier_max_subgraphs
 from robosystems.logger import api_logger, log_metric
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.operations.graph.subgraph_service import SubgraphService
@@ -65,10 +65,10 @@ def verify_parent_graph_access(
       detail=f"Parent graph {graph_id} not found",
     )
 
-  # Get UserGraph for role checking
+  # Get GraphUser for role checking
   user_graph = (
-    session.query(UserGraph)
-    .filter(UserGraph.user_id == current_user.id, UserGraph.graph_id == graph_id)
+    session.query(GraphUser)
+    .filter(GraphUser.user_id == current_user.id, GraphUser.graph_id == graph_id)
     .first()
   )
 

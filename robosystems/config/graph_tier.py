@@ -1,7 +1,8 @@
-"""Tier configuration utilities.
+"""Graph tier configuration and utilities.
 
-This module provides utilities for loading and accessing tier-specific
-configuration values from the graph.yml configuration file.
+This module defines:
+- GraphTier: Enum of all available graph database tiers
+- GraphTierConfig: Utility class for accessing tier-specific configuration from graph.yml
 """
 
 import os
@@ -9,12 +10,32 @@ import yaml
 import warnings
 from typing import Dict, Any, Optional, List
 from functools import lru_cache
+from enum import Enum
 
 from robosystems.config import env
 
 
-class TierConfig:
-  """Utility class for accessing tier-specific configuration."""
+class GraphTier(str, Enum):
+  """Graph database tier definitions.
+
+  IMPORTANT: These values must stay in sync with .github/configs/graph.yml.
+  Update both when adding or removing tiers.
+  """
+
+  KUZU_STANDARD = "kuzu-standard"
+  KUZU_LARGE = "kuzu-large"
+  KUZU_XLARGE = "kuzu-xlarge"
+  KUZU_SHARED = "kuzu-shared"
+  NEO4J_COMMUNITY_LARGE = "neo4j-community-large"
+  NEO4J_ENTERPRISE_XLARGE = "neo4j-enterprise-xlarge"
+
+
+class GraphTierConfig:
+  """Utility class for accessing graph tier-specific configuration from graph.yml.
+
+  Provides methods to retrieve tier properties like storage limits, monthly credits,
+  instance configuration, backup limits, and more from the centralized graph.yml file.
+  """
 
   _config_cache: Optional[Dict[str, Any]] = None
 
@@ -452,7 +473,7 @@ def get_tier_max_subgraphs(
   Returns:
       Maximum subgraphs allowed, or None for unlimited
   """
-  return TierConfig.get_max_subgraphs(tier, environment)
+  return GraphTierConfig.get_max_subgraphs(tier, environment)
 
 
 @lru_cache(maxsize=32)
@@ -466,7 +487,7 @@ def get_tier_storage_limit(tier: str, environment: Optional[str] = None) -> int:
   Returns:
       Storage limit in GB
   """
-  return TierConfig.get_storage_limit_gb(tier, environment)
+  return GraphTierConfig.get_storage_limit_gb(tier, environment)
 
 
 @lru_cache(maxsize=32)
@@ -480,7 +501,7 @@ def get_tier_monthly_credits(tier: str, environment: Optional[str] = None) -> in
   Returns:
       Monthly credit allocation
   """
-  return TierConfig.get_monthly_credits(tier, environment)
+  return GraphTierConfig.get_monthly_credits(tier, environment)
 
 
 @lru_cache(maxsize=32)
@@ -494,7 +515,7 @@ def get_tier_api_rate_multiplier(tier: str, environment: Optional[str] = None) -
   Returns:
       Rate limit multiplier (1.0 = base limits)
   """
-  return TierConfig.get_api_rate_multiplier(tier, environment)
+  return GraphTierConfig.get_api_rate_multiplier(tier, environment)
 
 
 @lru_cache(maxsize=32)
@@ -510,7 +531,7 @@ def get_tier_copy_operation_limits(
   Returns:
       Copy operation limits dictionary
   """
-  return TierConfig.get_copy_operation_limits(tier, environment)
+  return GraphTierConfig.get_copy_operation_limits(tier, environment)
 
 
 @lru_cache(maxsize=32)
@@ -526,4 +547,4 @@ def get_tier_backup_limits(
   Returns:
       Backup limits dictionary
   """
-  return TierConfig.get_backup_limits(tier, environment)
+  return GraphTierConfig.get_backup_limits(tier, environment)

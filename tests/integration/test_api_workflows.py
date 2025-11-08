@@ -9,7 +9,7 @@ import pytest
 import os
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
-from robosystems.models.iam import UserGraph, UserAPIKey
+from robosystems.models.iam import GraphUser, UserAPIKey
 
 
 class TestUserRegistrationWorkflow:
@@ -23,7 +23,7 @@ class TestUserRegistrationWorkflow:
   )
   @patch.dict(os.environ, {"ENVIRONMENT": "dev"})
   def test_complete_user_onboarding_workflow(
-    self, mock_get_metrics, client: TestClient, test_db
+    self, mock_get_metrics, client: TestClient, test_db, test_org
   ):
     """Test complete user onboarding from registration to API usage."""
     mock_metrics_instance = MagicMock()
@@ -123,7 +123,7 @@ class TestEntityManagementWorkflow:
   """Test complete entity management workflow."""
 
   @pytest.fixture
-  def authenticated_user_with_graph(self, client: TestClient, test_db):
+  def authenticated_user_with_graph(self, client: TestClient, test_db, test_org):
     """Create authenticated user with graph access."""
     # Patch environment to ensure CAPTCHA is disabled
     with patch.dict(os.environ, {"ENVIRONMENT": "dev"}):
@@ -148,12 +148,13 @@ class TestEntityManagementWorkflow:
       graph_id="workflow-graph",
       graph_name="Workflow Test Graph",
       graph_type="entity",
+      org_id=test_org.id,  # type: ignore[attr-defined]
       schema_extensions=["roboledger"],
       session=test_db,
     )
 
     # Create user-graph relationship
-    UserGraph.create(
+    GraphUser.create(
       user_id=user_id,
       graph_id="workflow-graph",
       role="admin",

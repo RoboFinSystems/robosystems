@@ -19,12 +19,12 @@ import logging
 from typing import Dict, Any, Optional, Callable, Union
 from sqlalchemy.orm import Session, scoped_session
 
-from ...models.iam import UserGraph, UserLimits
+from ...models.iam import GraphUser, OrgUser, OrgLimits
 from ...config import env
 from ...models.api import EntityCreate, EntityResponse
 from ...graph_api.client import GraphClient, get_graph_client_for_instance
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
-from ...models.iam.graph_credits import GraphTier
+from ...config.graph_tier import GraphTier
 from ...exceptions import (
   InsufficientPermissionsError,
   GraphAllocationError,
@@ -104,21 +104,30 @@ class EntityGraphService:
       f"Entity data parsed: name='{entity_data.name}', uri='{entity_data.uri}'"
     )
 
-    # Check user limits before proceeding
-    logger.info("Checking user limits for entity graph creation...")
+    # Check org limits before proceeding
+    logger.info("Checking organization limits for entity graph creation...")
     if progress_callback:
-      progress_callback("Checking user limits and permissions...", 20)
+      progress_callback("Checking organization limits and permissions...", 20)
 
-    user_limits = UserLimits.get_or_create_for_user(user_id, self.session)
-    can_create, reason = user_limits.can_create_user_graph(self.session)
+    user_orgs = OrgUser.get_user_orgs(user_id, self.session)
+    if not user_orgs:
+      raise InsufficientPermissionsError(
+        required_permission="create_graph",
+        resource="user_graph",
+        user_id=user_id,
+      )
+
+    org_id = user_orgs[0].org_id
+    org_limits = OrgLimits.get_or_create_for_org(org_id, self.session)
+    can_create, reason = org_limits.can_create_graph(self.session)
 
     if not can_create:
-      logger.error(f"User {user_id} cannot create user graph: {reason}")
+      logger.error(f"Organization {org_id} cannot create graph: {reason}")
       raise InsufficientPermissionsError(
         required_permission="create_graph", resource="user_graph", user_id=user_id
       )
 
-    logger.info(f"User {user_id} can create user graph: {reason}")
+    logger.info(f"Organization {org_id} can create graph: {reason}")
 
     # Check for cancellation before proceeding
     if cancellation_callback:
@@ -206,6 +215,7 @@ class EntityGraphService:
         graph_id=graph_id,
         graph_name=entity_data.name,
         graph_type="entity",
+        org_id=org_id,
         session=self.session,
         base_schema="base",
         schema_extensions=schema_extensions,
@@ -271,7 +281,7 @@ class EntityGraphService:
           progress_callback("Creating entity node...", 70)
 
         entity_response = await self._create_entity_in_graph_kuzu(
-          kuzu_client, entity_data, graph_id, user_id
+          kuzu_client, entity_data, graph_id, user_id, org_id
         )
       else:
         logger.info("Skipping entity node creation (create_entity=False)")
@@ -281,13 +291,13 @@ class EntityGraphService:
       # This keeps the graph focused on business data only.
 
       # Create user-graph relationship in PostgreSQL
-      # Graph record was already created earlier, just need UserGraph
+      # Graph record was already created earlier, just need GraphUser
       if progress_callback:
         progress_callback("Setting up user access...", 80)
 
-      from ...models.iam.user_graph import UserGraph
+      from ...models.iam.graph_user import GraphUser
 
-      user_graph = UserGraph(
+      user_graph = GraphUser(
         user_id=user_id,
         graph_id=graph_id,
         role="admin",
@@ -295,8 +305,8 @@ class EntityGraphService:
       )
 
       # Deselect other graphs for this user
-      self.session.query(UserGraph).filter(
-        UserGraph.user_id == user_id, UserGraph.graph_id != graph_id
+      self.session.query(GraphUser).filter(
+        GraphUser.user_id == user_id, GraphUser.graph_id != graph_id
       ).update({"is_selected": False})
 
       self.session.add(user_graph)
@@ -690,6 +700,7 @@ class EntityGraphService:
     entity_data: EntityCreate,
     graph_id: str,
     user_id: str,
+    org_id: str,
   ) -> EntityResponse:
     """
     Create entity node using the controlled table → file → ingest pattern.
@@ -843,6 +854,7 @@ class EntityGraphService:
     graph_id: str,
     entity_name: str,
     cluster_id: str,
+    org_id: str,
     extensions: Optional[list] = None,
     graph_tier_str: str = "kuzu-standard",
   ) -> None:
@@ -852,7 +864,7 @@ class EntityGraphService:
     try:
       # First, create Graph entry to store metadata
       from ...models.iam.graph import Graph
-      from ...models.iam.graph_credits import GraphTier
+      from ...config.graph_tier import GraphTier
 
       # Use the provided extensions or default to empty list
       schema_extensions = extensions or []
@@ -866,6 +878,7 @@ class EntityGraphService:
         graph_id=graph_id,
         graph_name=entity_name,
         graph_type="entity",
+        org_id=org_id,
         session=self.session,
         base_schema="base",
         schema_extensions=schema_extensions,
@@ -880,8 +893,8 @@ class EntityGraphService:
 
       logger.info(f"Graph metadata created: {graph}")
 
-      # Create UserGraph entry
-      user_graph = UserGraph(
+      # Create GraphUser entry
+      user_graph = GraphUser(
         user_id=user_id,
         graph_id=graph_id,
         role="admin",  # Creator gets admin role
@@ -889,8 +902,8 @@ class EntityGraphService:
       )
 
       # Deselect other graphs for this user
-      self.session.query(UserGraph).filter(
-        UserGraph.user_id == user_id, UserGraph.graph_id != graph_id
+      self.session.query(GraphUser).filter(
+        GraphUser.user_id == user_id, GraphUser.graph_id != graph_id
       ).update({"is_selected": False})
 
       self.session.add(user_graph)

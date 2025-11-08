@@ -630,7 +630,7 @@ class TestUserRepository:
   def test_get_graph_connection_info(self):
     """Test getting graph connection information via Graph relationship."""
     from robosystems.models.iam.graph import Graph
-    from robosystems.models.iam.graph_credits import GraphTier
+    from robosystems.config.graph_tier import GraphTier
 
     # Create Graph record for SEC repository
     Graph.find_or_create_repository(

@@ -9,7 +9,6 @@ import logging
 from typing import Dict, Any
 from sqlalchemy.exc import OperationalError
 from ...celery import celery_app
-from ...operations.graph.generic_graph_service import GenericGraphServiceSync
 from ...database import get_db_session
 from ...models.billing import BillingSubscription
 
@@ -33,16 +32,21 @@ def provision_graph_task(
   This task is called by payment webhooks after a user has added a payment
   method. It creates the graph and updates the existing subscription.
 
+  The graph_config comes from the frontend checkout flow and contains:
+  - graph_type: 'entity', 'company', or 'generic'
+  - graph_name, description, tags, schema_extensions
+  - For entity graphs: entity_name, entity_identifier, entity_identifier_type
+  - For company graphs: company_name, company_identifier, company_identifier_type
+  - create_entity: whether to populate initial entity data
+  - tier: subscription tier (added by webhook handler)
+
+  This task transforms the flat config into the proper format expected by
+  the underlying Celery tasks (create_entity_with_new_graph_task or create_graph_task).
+
   Args:
       user_id: ID of the user who owns the graph
       subscription_id: ID of the existing subscription in PENDING_PAYMENT status
-      graph_config: Dictionary containing graph configuration:
-          - graph_id: Optional requested graph ID
-          - schema_extensions: List of schema extensions to install
-          - metadata: Graph metadata (name, description, type, tags)
-          - tier: Service tier (standard, enterprise, premium)
-          - initial_data: Optional initial data to populate
-          - custom_schema: Optional custom schema definition
+      graph_config: Dictionary containing graph configuration from checkout
 
   Returns:
       Dictionary containing graph_id and creation details
@@ -53,6 +57,7 @@ def provision_graph_task(
   logger.info(
     f"Starting graph provisioning for user {user_id}, subscription {subscription_id}"
   )
+  logger.info(f"Graph config received: {graph_config}")
 
   session = next(get_db_session())
 
@@ -72,33 +77,133 @@ def provision_graph_task(
         f"expected 'provisioning'"
       )
 
-    graph_service = GenericGraphServiceSync()
+    # Determine graph type and prepare appropriate task data
+    graph_type = graph_config.get("graph_type", "generic")
+    tier = graph_config.get("tier", "kuzu-standard")
 
-    def check_cancellation():
-      """Check if task has been cancelled."""
-      if self.request.called_directly is False:
-        result = celery_app.AsyncResult(self.request.id)
-        if result.state == "REVOKED":
-          logger.info(f"Task {self.request.id} was cancelled")
-          raise Exception("Task was cancelled")
+    logger.info(f"Detected graph type: {graph_type}")
 
-    check_cancellation()
-
-    result = graph_service.create_graph(
-      graph_id=graph_config.get("graph_id"),
-      schema_extensions=graph_config.get("schema_extensions", []),
-      metadata=graph_config.get("metadata", {}),
-      tier=graph_config.get("tier", "kuzu-standard"),
-      initial_data=graph_config.get("initial_data"),
-      user_id=user_id,
-      custom_schema=graph_config.get("custom_schema"),
-      cancellation_callback=check_cancellation,
+    # Check if this is an entity/company graph (has initial entity data)
+    has_entity = graph_type in ["entity", "company"] and (
+      graph_config.get("entity_name") or graph_config.get("company_name")
     )
+
+    if has_entity:
+      # Entity graph - use create_entity_with_new_graph_task
+      logger.info("Provisioning as entity graph")
+
+      from ...tasks.graph_operations.create_entity_graph import (
+        create_entity_with_new_graph_task,
+      )
+
+      # Build entity data in the format expected by create_entity_with_new_graph_task
+      entity_name = graph_config.get("entity_name") or graph_config.get("company_name")
+      entity_identifier = graph_config.get("entity_identifier") or graph_config.get(
+        "company_identifier"
+      )
+      entity_identifier_type = graph_config.get(
+        "entity_identifier_type"
+      ) or graph_config.get("company_identifier_type")
+
+      # Build initial entity data
+      initial_entity = {
+        "name": entity_name,
+        "uri": entity_name.lower().replace(" ", "-") if entity_name else "entity",
+      }
+
+      # Add identifier based on type
+      if entity_identifier and entity_identifier_type:
+        if entity_identifier_type == "ein":
+          initial_entity["ein"] = entity_identifier
+        elif entity_identifier_type == "cik":
+          initial_entity["cik"] = entity_identifier
+
+      # Build entity_data in format expected by task
+      entity_data = {
+        **initial_entity,
+        "graph_tier": tier,
+        "subscription_tier": "standard",
+        "extensions": graph_config.get("schema_extensions", []),
+        "graph_name": graph_config.get("graph_name"),
+        "graph_description": graph_config.get("description"),
+        "tags": graph_config.get("tags", []),
+        "create_entity": graph_config.get("create_entity", True),
+        "skip_billing": True,
+      }
+
+      logger.info(f"Entity data prepared: {entity_data}")
+
+      # Call entity graph task
+      result = create_entity_with_new_graph_task(self, entity_data, user_id)
+
+    else:
+      # Generic graph - use create_graph_task
+      logger.info("Provisioning as generic graph")
+
+      from ...tasks.graph_operations.create_graph import create_graph_task
+
+      # Build metadata object
+      metadata = {
+        "graph_name": graph_config.get("graph_name"),
+        "description": graph_config.get("description"),
+        "tags": graph_config.get("tags", []),
+        "schema_extensions": graph_config.get("schema_extensions", []),
+      }
+
+      # Build task_data in format expected by create_graph_task
+      task_data = {
+        "graph_id": None,  # Auto-generated
+        "schema_extensions": graph_config.get("schema_extensions", []),
+        "metadata": metadata,
+        "tier": tier,
+        "graph_tier": tier,
+        "initial_data": None,
+        "user_id": user_id,
+        "custom_schema": graph_config.get("custom_schema"),
+        "tags": graph_config.get("tags", []),
+        "skip_billing": True,
+      }
+
+      logger.info(f"Task data prepared: {task_data}")
+
+      # Call generic graph task
+      result = create_graph_task(self, task_data)
 
     graph_id = result.get("graph_id")
 
     subscription.resource_id = graph_id
     subscription.activate(session)
+
+    if not subscription.stripe_subscription_id:
+      from ...operations.graph.subscription_service import generate_subscription_invoice
+      from ...models.billing import BillingCustomer
+
+      customer = BillingCustomer.get_by_user_id(user_id, session)
+      if customer and customer.invoice_billing_enabled:
+        generate_subscription_invoice(
+          subscription=subscription,
+          customer=customer,
+          description=f"Graph Database Subscription - {subscription.plan_name}",
+          session=session,
+        )
+        logger.info(
+          f"Generated invoice for manual billing subscription {subscription_id}",
+          extra={"user_id": user_id, "subscription_id": subscription_id},
+        )
+      else:
+        logger.info(
+          f"Skipping invoice generation for Stripe-managed subscription {subscription_id}",
+          extra={"user_id": user_id, "subscription_id": subscription_id},
+        )
+    else:
+      logger.info(
+        f"Stripe will create invoice for subscription {subscription_id}",
+        extra={
+          "user_id": user_id,
+          "subscription_id": subscription_id,
+          "stripe_subscription_id": subscription.stripe_subscription_id,
+        },
+      )
 
     session.commit()
 
@@ -108,6 +213,7 @@ def provision_graph_task(
         "user_id": user_id,
         "subscription_id": subscription_id,
         "graph_id": graph_id,
+        "graph_type": graph_type,
       },
     )
 
@@ -119,261 +225,15 @@ def provision_graph_task(
       extra={
         "user_id": user_id,
         "subscription_id": subscription_id,
+        "graph_config": graph_config,
       },
+      exc_info=True,
     )
 
     try:
       session.rollback()
     except Exception as rollback_error:
       logger.error(f"Failed to rollback transaction: {rollback_error}")
-
-    cleanup_partial_resources = False
-    if hasattr(self.request, "retries") and self.request.retries >= 3:
-      cleanup_partial_resources = True
-    elif not hasattr(self.request, "retries"):
-      cleanup_partial_resources = True
-
-    if (
-      cleanup_partial_resources and "result" in locals() and "graph_service" in locals()
-    ):
-      try:
-        graph_id = result["graph_id"]  # type: ignore[possibly-unbound]
-        logger.warning(
-          f"Attempting cleanup of partially created graph {graph_id}",
-          extra={"graph_id": graph_id, "user_id": user_id},
-        )
-
-        graph_service.delete_graph(  # type: ignore[possibly-unbound]
-          graph_id=graph_id, user_id=user_id
-        )
-
-        logger.info(
-          f"Successfully cleaned up graph {graph_id}",
-          extra={"graph_id": graph_id, "user_id": user_id},
-        )
-      except Exception as cleanup_error:
-        logger.error(
-          f"Failed to cleanup graph {graph_id}: {cleanup_error}",  # type: ignore[possibly-unbound]
-          extra={"graph_id": graph_id, "cleanup_error": str(cleanup_error)},  # type: ignore[possibly-unbound]
-        )
-
-    try:
-      if "subscription" not in locals():
-        subscription = (
-          session.query(BillingSubscription)
-          .filter(BillingSubscription.id == subscription_id)
-          .first()
-        )
-        if not subscription:
-          raise Exception(f"Subscription {subscription_id} not found for status update")
-      else:
-        session.refresh(subscription)  # type: ignore[possibly-unbound]
-
-      if subscription:  # type: ignore[possibly-unbound]
-        subscription.status = "failed"
-        if subscription.subscription_metadata:
-          subscription.subscription_metadata["error"] = str(e)  # type: ignore[index]
-        else:
-          subscription.subscription_metadata = {"error": str(e)}
-        session.commit()
-    except Exception as update_error:
-      logger.error(f"Failed to update subscription status: {update_error}")
-      try:
-        session.rollback()
-      except Exception:
-        pass
-
-    raise
-
-  finally:
-    session.close()
-
-
-@celery_app.task(
-  bind=True,
-  name="provision_graph_sse",
-  autoretry_for=(ConnectionError, TimeoutError, OperationalError),
-  retry_kwargs={"max_retries": 3, "countdown": 60},
-  retry_backoff=True,
-  retry_backoff_max=600,
-)
-def provision_graph_sse_task(
-  self,
-  user_id: str,
-  subscription_id: str,
-  graph_config: Dict[str, Any],
-  operation_id: str,
-) -> Dict[str, Any]:
-  """
-  Provision a graph database with SSE progress tracking.
-
-  This SSE-compatible version emits real-time progress events through
-  the unified operation monitoring system.
-
-  Args:
-      user_id: ID of the user who owns the graph
-      subscription_id: ID of the existing subscription
-      graph_config: Dictionary containing graph configuration
-      operation_id: SSE operation ID for progress tracking
-
-  Returns:
-      Dictionary containing graph_id and creation details
-
-  Raises:
-      Exception: If any step of the process fails
-  """
-  logger.info(
-    f"Starting SSE graph provisioning for user {user_id}, "
-    f"subscription {subscription_id}, operation {operation_id}"
-  )
-
-  from robosystems.middleware.sse.task_progress import TaskSSEProgressTracker
-
-  progress_tracker = TaskSSEProgressTracker(operation_id)
-  session = next(get_db_session())
-
-  try:
-    progress_tracker.emit_progress("Starting graph provisioning...", 0)
-
-    subscription = (
-      session.query(BillingSubscription)
-      .filter(BillingSubscription.id == subscription_id)
-      .first()
-    )
-
-    if not subscription:
-      raise Exception(f"Subscription {subscription_id} not found")
-
-    if subscription.status != "provisioning":
-      logger.warning(
-        f"Subscription {subscription_id} is in status {subscription.status}, "
-        f"expected 'provisioning'"
-      )
-
-    graph_service = GenericGraphServiceSync()
-
-    def check_cancellation():
-      """Check if task has been cancelled."""
-      progress_tracker.check_cancellation(self.request)
-
-    def progress_callback(message: str, progress: int = None):
-      if progress is not None:
-        progress_tracker.emit_progress(message, progress)
-      else:
-        progress_tracker.emit_progress(message, 0)
-
-    check_cancellation()
-    progress_tracker.emit_progress("Validating graph configuration...", 10)
-
-    result = graph_service.create_graph(
-      graph_id=graph_config.get("graph_id"),
-      schema_extensions=graph_config.get("schema_extensions", []),
-      metadata=graph_config.get("metadata", {}),
-      tier=graph_config.get("tier", "kuzu-standard"),
-      initial_data=graph_config.get("initial_data"),
-      user_id=user_id,
-      custom_schema=graph_config.get("custom_schema"),
-      cancellation_callback=check_cancellation,
-      progress_callback=progress_callback,
-    )
-
-    graph_id = result.get("graph_id")
-
-    progress_tracker.emit_progress("Activating subscription...", 95)
-
-    subscription.resource_id = graph_id
-    subscription.activate(session)
-
-    session.commit()
-
-    progress_tracker.emit_completion(
-      result,
-      additional_context={
-        "graph_id": graph_id,
-        "subscription_id": subscription_id,
-        "graph_name": graph_config.get("metadata", {}).get("graph_name"),
-      },
-    )
-
-    logger.info(
-      "SSE graph provisioning completed successfully",
-      extra={
-        "user_id": user_id,
-        "subscription_id": subscription_id,
-        "graph_id": graph_id,
-        "operation_id": operation_id,
-      },
-    )
-
-    return result
-
-  except Exception as e:
-    progress_tracker.emit_error(
-      e,
-      additional_context={
-        "user_id": user_id,
-        "subscription_id": subscription_id,
-        "graph_name": graph_config.get("metadata", {}).get("graph_name"),
-      },
-    )
-
-    logger.error(
-      f"SSE graph provisioning failed: {type(e).__name__}: {str(e)}",
-      extra={
-        "user_id": user_id,
-        "subscription_id": subscription_id,
-        "operation_id": operation_id,
-      },
-    )
-
-    try:
-      session.rollback()
-    except Exception as rollback_error:
-      logger.error(f"Failed to rollback transaction: {rollback_error}")
-
-    cleanup_partial_resources = False
-    if hasattr(self.request, "retries") and self.request.retries >= 3:
-      cleanup_partial_resources = True
-    elif not hasattr(self.request, "retries"):
-      cleanup_partial_resources = True
-
-    if (
-      cleanup_partial_resources and "result" in locals() and "graph_service" in locals()
-    ):
-      try:
-        graph_id = result["graph_id"]  # type: ignore[possibly-unbound]
-        logger.warning(
-          f"Attempting cleanup of partially created graph {graph_id}",
-          extra={
-            "graph_id": graph_id,
-            "user_id": user_id,
-            "operation_id": operation_id,
-          },
-        )
-
-        graph_service.delete_graph(  # type: ignore[possibly-unbound]
-          graph_id=graph_id, user_id=user_id
-        )
-
-        progress_tracker.emit_progress(f"Cleaned up graph {graph_id}", 0)
-
-        logger.info(
-          f"Successfully cleaned up graph {graph_id}",
-          extra={
-            "graph_id": graph_id,
-            "user_id": user_id,
-            "operation_id": operation_id,
-          },
-        )
-      except Exception as cleanup_error:
-        logger.error(
-          f"Failed to cleanup graph {graph_id}: {cleanup_error}",  # type: ignore[possibly-unbound]
-          extra={
-            "graph_id": graph_id,  # type: ignore[possibly-unbound]
-            "cleanup_error": str(cleanup_error),
-            "operation_id": operation_id,
-          },
-        )
 
     try:
       if "subscription" not in locals():

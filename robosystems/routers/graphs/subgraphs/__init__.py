@@ -5,7 +5,7 @@ This module contains routers for subgraph operations including creation,
 listing, deletion, quota management, and detailed information.
 """
 
-from .subgraph import router as subgraph_router
+from .main import router as subgraph_router
 from .delete import router as delete_router
 from .quota import router as quota_router
 from .info import router as info_router

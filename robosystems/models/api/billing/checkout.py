@@ -17,11 +17,18 @@ class CreateCheckoutRequest(BaseModel):
 class CheckoutResponse(BaseModel):
   """Response from checkout session creation."""
 
-  checkout_url: str = Field(..., description="URL to redirect user to for payment")
-  session_id: str = Field(..., description="Checkout session ID for status polling")
-  subscription_id: str = Field(..., description="Internal subscription ID")
+  checkout_url: Optional[str] = Field(
+    None, description="URL to redirect user to for payment"
+  )
+  session_id: Optional[str] = Field(
+    None, description="Checkout session ID for status polling"
+  )
+  subscription_id: Optional[str] = Field(None, description="Internal subscription ID")
   requires_checkout: bool = Field(
     default=True, description="Whether checkout is required"
+  )
+  billing_disabled: bool = Field(
+    default=False, description="Whether billing is disabled on this instance"
   )
 
 

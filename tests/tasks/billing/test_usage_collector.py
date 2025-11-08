@@ -13,7 +13,7 @@ class TestGraphUsageCollectorTask:
   """Test cases for graph usage collection Celery task."""
 
   @patch("robosystems.tasks.billing.usage_collector.StorageCalculator")
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")
@@ -89,7 +89,7 @@ class TestGraphUsageCollectorTask:
     mock_db.commit.assert_called_once()
 
   @patch("robosystems.tasks.billing.usage_collector.StorageCalculator")
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")
@@ -121,7 +121,7 @@ class TestGraphUsageCollectorTask:
     mock_usage_tracking.record_storage_usage.assert_not_called()
 
   @patch("robosystems.tasks.billing.usage_collector.StorageCalculator")
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")
@@ -196,7 +196,7 @@ class TestGraphUsageCollectorTask:
     mock_get_graphs.assert_not_called()
 
   @patch("robosystems.tasks.billing.usage_collector.StorageCalculator")
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")
@@ -240,7 +240,7 @@ class TestGraphUsageCollectorTask:
     mock_db.rollback.assert_called_once()
 
   @patch("robosystems.tasks.billing.usage_collector.StorageCalculator")
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")
@@ -290,7 +290,7 @@ class TestGraphUsageCollectorTask:
     )
 
   @patch("robosystems.tasks.billing.usage_collector.StorageCalculator")
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")
@@ -316,7 +316,7 @@ class TestGraphUsageCollectorTask:
 
     mock_db.close.assert_called_once()
 
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")
@@ -340,7 +340,7 @@ class TestGraphUsageCollectorTask:
 
   @patch("robosystems.tasks.billing.usage_collector.logger")
   @patch("robosystems.tasks.billing.usage_collector.StorageCalculator")
-  @patch("robosystems.tasks.billing.usage_collector.GraphUsageTracking")
+  @patch("robosystems.tasks.billing.usage_collector.GraphUsage")
   @patch("robosystems.tasks.billing.usage_collector.asyncio")
   @patch("robosystems.tasks.billing.usage_collector.get_user_graphs_with_details")
   @patch("robosystems.database.session")

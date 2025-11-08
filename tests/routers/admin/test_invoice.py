@@ -59,13 +59,14 @@ class TestListInvoices:
     mock_get_db, mock_session = mock_get_db_session
 
     mock_user = Mock(spec=User)
+    mock_user.id = "user_123"
     mock_user.email = "test@example.com"
     mock_user.name = "Test User"
 
     mock_invoice = Mock(spec=BillingInvoice)
     mock_invoice.id = "inv_123"
     mock_invoice.invoice_number = "INV-001"
-    mock_invoice.billing_customer_user_id = "user_123"
+    mock_invoice.org_id = "org_123"
     mock_invoice.status = "DRAFT"
     mock_invoice.subtotal_cents = 2999
     mock_invoice.tax_cents = 300
@@ -99,10 +100,13 @@ class TestListInvoices:
       mock_invoice
     ]
 
-    mock_session.query.return_value.filter.return_value.first.side_effect = [
-      mock_user,
-      None,
-    ]
+    from robosystems.models.iam import OrgUser
+
+    mock_org_user = Mock(spec=OrgUser)
+    mock_org_user.user = mock_user
+    mock_org_user.org_id = "org_123"
+    mock_org_user.user_id = "user_123"
+    mock_org_user.role = "OWNER"
 
     def query_side_effect(model):
       if model == BillingInvoice:
@@ -111,10 +115,12 @@ class TestListInvoices:
         line_query = Mock()
         line_query.filter.return_value.all.return_value = [mock_line_item]
         return line_query
-      elif model == User:
-        user_query = Mock()
-        user_query.filter.return_value.first.return_value = mock_user
-        return user_query
+      elif model == OrgUser:
+        org_user_query = Mock()
+        org_user_query.join.return_value.filter.return_value.first.return_value = (
+          mock_org_user
+        )
+        return org_user_query
       return Mock()
 
     mock_session.query.side_effect = query_side_effect
@@ -160,6 +166,7 @@ class TestListInvoices:
     mock_get_db, mock_session = mock_get_db_session
 
     mock_query = mock_session.query.return_value
+    mock_query.join.return_value = mock_query
     mock_query.filter.return_value = mock_query
     mock_query.count.return_value = 0
     mock_query.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
@@ -167,6 +174,7 @@ class TestListInvoices:
     result = await list_invoices(mock_request, None, "user_123", 100, 0)
 
     assert result == []
+    mock_query.join.assert_called()
     mock_query.filter.assert_called()
 
   @pytest.mark.asyncio
@@ -209,17 +217,19 @@ class TestGetInvoice:
   async def test_get_invoice_success(self, mock_request, mock_get_db_session):
     """Test successful invoice retrieval."""
     from robosystems.routers.admin.invoice import get_invoice
+    from robosystems.models.iam import OrgUser
 
     mock_get_db, mock_session = mock_get_db_session
 
     mock_user = Mock(spec=User)
+    mock_user.id = "user_123"
     mock_user.email = "test@example.com"
     mock_user.name = "Test User"
 
     mock_invoice = Mock(spec=BillingInvoice)
     mock_invoice.id = "inv_123"
     mock_invoice.invoice_number = "INV-001"
-    mock_invoice.billing_customer_user_id = "user_123"
+    mock_invoice.org_id = "org_123"
     mock_invoice.status = "PAID"
     mock_invoice.subtotal_cents = 2999
     mock_invoice.tax_cents = 300
@@ -236,11 +246,19 @@ class TestGetInvoice:
     mock_invoice.voided_at = None
     mock_invoice.created_at = datetime(2025, 1, 1)
 
+    mock_org_user = Mock(spec=OrgUser)
+    mock_org_user.user = mock_user
+    mock_org_user.org_id = "org_123"
+    mock_org_user.user_id = "user_123"
+    mock_org_user.role = "OWNER"
+
     invoice_query = Mock()
     invoice_query.filter.return_value.first.return_value = mock_invoice
 
-    user_query = Mock()
-    user_query.filter.return_value.first.return_value = mock_user
+    org_user_query = Mock()
+    org_user_query.join.return_value.filter.return_value.first.return_value = (
+      mock_org_user
+    )
 
     line_item_query = Mock()
     line_item_query.filter.return_value.all.return_value = []
@@ -248,8 +266,8 @@ class TestGetInvoice:
     def query_side_effect(model):
       if model == BillingInvoice:
         return invoice_query
-      elif model == User:
-        return user_query
+      elif model == OrgUser:
+        return org_user_query
       elif model == BillingInvoiceLineItem:
         return line_item_query
       return Mock()
@@ -303,17 +321,19 @@ class TestMarkInvoicePaid:
   async def test_mark_invoice_paid_success(self, mock_request, mock_get_db_session):
     """Test successfully marking invoice as paid."""
     from robosystems.routers.admin.invoice import mark_invoice_paid
+    from robosystems.models.iam import OrgUser
 
     mock_get_db, mock_session = mock_get_db_session
 
     mock_user = Mock(spec=User)
+    mock_user.id = "user_123"
     mock_user.email = "test@example.com"
     mock_user.name = "Test User"
 
     mock_invoice = Mock(spec=BillingInvoice)
     mock_invoice.id = "inv_123"
     mock_invoice.invoice_number = "INV-001"
-    mock_invoice.billing_customer_user_id = "user_123"
+    mock_invoice.org_id = "org_123"
     mock_invoice.status = "SENT"
     mock_invoice.subtotal_cents = 2999
     mock_invoice.tax_cents = 300
@@ -330,11 +350,19 @@ class TestMarkInvoicePaid:
     mock_invoice.voided_at = None
     mock_invoice.created_at = datetime(2025, 1, 1)
 
+    mock_org_user = Mock(spec=OrgUser)
+    mock_org_user.user = mock_user
+    mock_org_user.org_id = "org_123"
+    mock_org_user.user_id = "user_123"
+    mock_org_user.role = "OWNER"
+
     invoice_query = Mock()
     invoice_query.filter.return_value.first.return_value = mock_invoice
 
-    user_query = Mock()
-    user_query.filter.return_value.first.return_value = mock_user
+    org_user_query = Mock()
+    org_user_query.join.return_value.filter.return_value.first.return_value = (
+      mock_org_user
+    )
 
     line_item_query = Mock()
     line_item_query.filter.return_value.all.return_value = []
@@ -342,8 +370,8 @@ class TestMarkInvoicePaid:
     def query_side_effect(model):
       if model == BillingInvoice:
         return invoice_query
-      elif model == User:
-        return user_query
+      elif model == OrgUser:
+        return org_user_query
       elif model == BillingInvoiceLineItem:
         return line_item_query
       return Mock()
@@ -406,10 +434,12 @@ class TestMarkInvoicePaid:
   ):
     """Test marking invoice as paid without payment reference."""
     from robosystems.routers.admin.invoice import mark_invoice_paid
+    from robosystems.models.iam import OrgUser
 
     mock_get_db, mock_session = mock_get_db_session
 
     mock_user = Mock(spec=User)
+    mock_user.id = "user_123"
     mock_user.email = "test@example.com"
     mock_user.name = "Test User"
 
@@ -417,7 +447,7 @@ class TestMarkInvoicePaid:
     mock_invoice.id = "inv_123"
     mock_invoice.status = "SENT"
     mock_invoice.invoice_number = "INV-001"
-    mock_invoice.billing_customer_user_id = "user_123"
+    mock_invoice.org_id = "org_123"
     mock_invoice.subtotal_cents = 2999
     mock_invoice.tax_cents = 300
     mock_invoice.discount_cents = 0
@@ -433,11 +463,19 @@ class TestMarkInvoicePaid:
     mock_invoice.voided_at = None
     mock_invoice.created_at = datetime(2025, 1, 1)
 
+    mock_org_user = Mock(spec=OrgUser)
+    mock_org_user.user = mock_user
+    mock_org_user.org_id = "org_123"
+    mock_org_user.user_id = "user_123"
+    mock_org_user.role = "OWNER"
+
     invoice_query = Mock()
     invoice_query.filter.return_value.first.return_value = mock_invoice
 
-    user_query = Mock()
-    user_query.filter.return_value.first.return_value = mock_user
+    org_user_query = Mock()
+    org_user_query.join.return_value.filter.return_value.first.return_value = (
+      mock_org_user
+    )
 
     line_item_query = Mock()
     line_item_query.filter.return_value.all.return_value = []
@@ -445,8 +483,8 @@ class TestMarkInvoicePaid:
     def query_side_effect(model):
       if model == BillingInvoice:
         return invoice_query
-      elif model == User:
-        return user_query
+      elif model == OrgUser:
+        return org_user_query
       elif model == BillingInvoiceLineItem:
         return line_item_query
       return Mock()
