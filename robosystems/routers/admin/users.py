@@ -156,7 +156,7 @@ async def get_user_graphs(request: Request, user_id: str):
         results.append(
           UserGraphAccessResponse(
             graph_id=graph.graph_id,
-            graph_name=graph.name,
+            graph_name=graph.graph_name,
             role=access.role,
             graph_tier=graph.graph_tier,
             storage_gb=float(latest_usage.storage_gb)

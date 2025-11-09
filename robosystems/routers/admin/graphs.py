@@ -19,10 +19,38 @@ from ...models.api.admin import (
 )
 from ...middleware.auth.admin import require_admin
 from ...logger import get_logger
+from ...config.graph_tier import GraphTierConfig
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin/v1/graphs", tags=["admin-graphs"])
+
+
+def _get_graph_backend(graph: Graph) -> str:
+  """Get the backend for a graph from its tier configuration.
+
+  Args:
+      graph: The graph model instance
+
+  Returns:
+      Backend type (e.g., "kuzu", "neo4j")
+  """
+  tier_config = GraphTierConfig.get_tier_config(graph.graph_tier)
+  return tier_config.get("backend", "kuzu")
+
+
+def _get_graph_status(graph: Graph) -> str:
+  """Get the operational status for a graph.
+
+  Args:
+      graph: The graph model instance
+
+  Returns:
+      Status string (e.g., "active", "syncing", "error")
+  """
+  if graph.is_repository and graph.sync_status:
+    return graph.sync_status
+  return "active"
 
 
 @router.get("", response_model=List[GraphResponse])
@@ -75,6 +103,8 @@ async def list_graphs(
         .scalar()
       )
 
+      tier_config = GraphTierConfig.get_tier_config(graph.graph_tier)
+
       results.append(
         GraphResponse(
           graph_id=graph.graph_id,
@@ -83,14 +113,14 @@ async def list_graphs(
           name=graph.graph_name,
           description=None,
           graph_tier=graph.graph_tier,
-          backend="kuzu",
-          status="active",
+          backend=_get_graph_backend(graph),
+          status=_get_graph_status(graph),
           storage_gb=float(latest_usage.storage_gb)
           if latest_usage and latest_usage.storage_gb
           else None,
-          storage_limit_gb=None,
+          storage_limit_gb=tier_config.get("storage_limit_gb"),
           subgraph_count=subgraph_count or 0,
-          subgraph_limit=None,
+          subgraph_limit=tier_config.get("max_subgraphs"),
           created_at=graph.created_at,
           updated_at=graph.updated_at,
         )
@@ -145,6 +175,8 @@ async def get_graph(request: Request, graph_id: str):
       .scalar()
     )
 
+    tier_config = GraphTierConfig.get_tier_config(graph.graph_tier)
+
     logger.info(
       f"Admin retrieved graph {graph_id}",
       extra={
@@ -160,14 +192,14 @@ async def get_graph(request: Request, graph_id: str):
       name=graph.graph_name,
       description=None,
       graph_tier=graph.graph_tier,
-      backend="kuzu",
-      status="active",
+      backend=_get_graph_backend(graph),
+      status=_get_graph_status(graph),
       storage_gb=float(latest_usage.storage_gb)
       if latest_usage and latest_usage.storage_gb
       else None,
-      storage_limit_gb=None,
+      storage_limit_gb=tier_config.get("storage_limit_gb"),
       subgraph_count=subgraph_count or 0,
-      subgraph_limit=None,
+      subgraph_limit=tier_config.get("max_subgraphs"),
       created_at=graph.created_at,
       updated_at=graph.updated_at,
     )
@@ -395,13 +427,18 @@ async def get_graph_analytics(
     total_graphs = len(all_graphs)
 
     by_tier = {}
+    by_backend = {}
+    by_status = {}
+
     for graph in all_graphs:
       tier_name = graph.graph_tier
       by_tier[tier_name] = by_tier.get(tier_name, 0) + 1
 
-    by_backend = {"kuzu": total_graphs}
+      backend = _get_graph_backend(graph)
+      by_backend[backend] = by_backend.get(backend, 0) + 1
 
-    by_status = {"active": total_graphs}
+      status = _get_graph_status(graph)
+      by_status[status] = by_status.get(status, 0) + 1
 
     storage_query = (
       session.query(
@@ -426,6 +463,19 @@ async def get_graph_analytics(
       reverse=True,
     )[:10]
 
+    most_recently_updated = sorted(
+      [
+        {
+          "graph_id": g.graph_id,
+          "name": g.graph_name,
+          "updated_at": g.updated_at.isoformat() if g.updated_at else None,
+        }
+        for g in all_graphs
+      ],
+      key=lambda x: x["updated_at"] or "",
+      reverse=True,
+    )[:10]
+
     logger.info(
       "Admin retrieved graph analytics",
       extra={
@@ -441,7 +491,7 @@ async def get_graph_analytics(
       by_status=by_status,
       total_storage_gb=total_storage_gb,
       largest_graphs=largest_graphs,
-      most_active_graphs=[],
+      most_active_graphs=most_recently_updated,
     )
   finally:
     session.close()

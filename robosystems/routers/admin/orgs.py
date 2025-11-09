@@ -18,6 +18,90 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/admin/v1/orgs", tags=["admin-orgs"])
 
 
+def _get_org_total_credits(org_id: str, session) -> float:
+  """Get total credits across all graphs for an organization.
+
+  Args:
+      org_id: Organization ID
+      session: Database session
+
+  Returns:
+      Total credits as float
+  """
+  total = (
+    session.query(func.sum(GraphCredits.current_balance))
+    .join(Graph, GraphCredits.graph_id == Graph.graph_id)
+    .filter(Graph.org_id == org_id)
+    .scalar()
+  ) or 0.0
+  return float(total)
+
+
+def _get_org_customer(org_id: str, session) -> Optional[BillingCustomer]:
+  """Get billing customer for an organization.
+
+  Args:
+      org_id: Organization ID
+      session: Database session
+
+  Returns:
+      BillingCustomer if found, None otherwise
+  """
+  return session.query(BillingCustomer).filter(BillingCustomer.org_id == org_id).first()
+
+
+def _get_org_users(org_id: str, session) -> List[OrgUserInfo]:
+  """Get user list for an organization.
+
+  Args:
+      org_id: Organization ID
+      session: Database session
+
+  Returns:
+      List of OrgUserInfo objects
+  """
+  org_users = (
+    session.query(OrgUser, User)
+    .join(User, OrgUser.user_id == User.id)
+    .filter(OrgUser.org_id == org_id)
+    .all()
+  )
+
+  return [
+    OrgUserInfo(
+      user_id=user.id,
+      email=user.email,
+      name=user.name,
+      role=org_user.role.value,
+      created_at=org_user.joined_at,
+    )
+    for org_user, user in org_users
+  ]
+
+
+def _get_org_graphs(org_id: str, session) -> List[OrgGraphInfo]:
+  """Get graph list for an organization.
+
+  Args:
+      org_id: Organization ID
+      session: Database session
+
+  Returns:
+      List of OrgGraphInfo objects
+  """
+  graphs = session.query(Graph).filter(Graph.org_id == org_id).all()
+
+  return [
+    OrgGraphInfo(
+      graph_id=g.graph_id,
+      name=g.graph_name,
+      tier=g.graph_tier,
+      created_at=g.created_at,
+    )
+    for g in graphs
+  ]
+
+
 @router.get("", response_model=List[OrgResponse])
 @require_admin(permissions=["orgs:read"])
 async def list_orgs(
@@ -37,17 +121,8 @@ async def list_orgs(
       user_count = session.query(OrgUser).filter(OrgUser.org_id == org.id).count()
       graph_count = session.query(Graph).filter(Graph.org_id == org.id).count()
 
-      total_credits_sum = (
-        session.query(func.sum(GraphCredits.current_balance))
-        .join(Graph, GraphCredits.graph_id == Graph.graph_id)
-        .filter(Graph.org_id == org.id)
-        .scalar()
-      ) or 0.0
-      total_credits_sum = float(total_credits_sum)
-
-      customer = (
-        session.query(BillingCustomer).filter(BillingCustomer.org_id == org.id).first()
-      )
+      total_credits_sum = _get_org_total_credits(org.id, session)
+      customer = _get_org_customer(org.id, session)
 
       results.append(
         OrgResponse(
@@ -102,47 +177,10 @@ async def get_org(request: Request, org_id: str):
         detail=f"Organization {org_id} not found",
       )
 
-    org_users = (
-      session.query(OrgUser, User)
-      .join(User, OrgUser.user_id == User.id)
-      .filter(OrgUser.org_id == org_id)
-      .all()
-    )
-
-    users = [
-      OrgUserInfo(
-        user_id=user.id,
-        email=user.email,
-        name=user.name,
-        role=org_user.role.value,
-        created_at=org_user.joined_at,
-      )
-      for org_user, user in org_users
-    ]
-
-    graphs = session.query(Graph).filter(Graph.org_id == org_id).all()
-
-    graph_infos = [
-      OrgGraphInfo(
-        graph_id=g.graph_id,
-        name=g.graph_name,
-        tier=g.graph_tier,
-        created_at=g.created_at,
-      )
-      for g in graphs
-    ]
-
-    total_credits_sum = (
-      session.query(func.sum(GraphCredits.current_balance))
-      .join(Graph, GraphCredits.graph_id == Graph.graph_id)
-      .filter(Graph.org_id == org_id)
-      .scalar()
-    ) or 0.0
-    total_credits_sum = float(total_credits_sum)
-
-    customer = (
-      session.query(BillingCustomer).filter(BillingCustomer.org_id == org_id).first()
-    )
+    users = _get_org_users(org_id, session)
+    graph_infos = _get_org_graphs(org_id, session)
+    total_credits_sum = _get_org_total_credits(org_id, session)
+    customer = _get_org_customer(org_id, session)
 
     logger.info(
       f"Admin retrieved org {org_id}",
@@ -259,43 +297,9 @@ async def update_org(
         },
       )
 
-    users = (
-      session.query(OrgUser, User)
-      .join(User, OrgUser.user_id == User.id)
-      .filter(OrgUser.org_id == org_id)
-      .all()
-    )
-
-    user_infos = [
-      OrgUserInfo(
-        user_id=user.id,
-        email=user.email,
-        name=user.name,
-        role=org_user.role.value,
-        created_at=org_user.joined_at,
-      )
-      for org_user, user in users
-    ]
-
-    graphs = session.query(Graph).filter(Graph.org_id == org_id).all()
-
-    graph_infos = [
-      OrgGraphInfo(
-        graph_id=g.graph_id,
-        name=g.graph_name,
-        tier=g.graph_tier,
-        created_at=g.created_at,
-      )
-      for g in graphs
-    ]
-
-    total_credits_sum = (
-      session.query(func.sum(GraphCredits.current_balance))
-      .join(Graph, GraphCredits.graph_id == Graph.graph_id)
-      .filter(Graph.org_id == org_id)
-      .scalar()
-    ) or 0.0
-    total_credits_sum = float(total_credits_sum)
+    user_infos = _get_org_users(org_id, session)
+    graph_infos = _get_org_graphs(org_id, session)
+    total_credits_sum = _get_org_total_credits(org_id, session)
 
     log_changes = {k: v for k, v in new_values.items() if k != "payment_terms"}
     if "payment_terms" in new_values:

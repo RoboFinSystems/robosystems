@@ -131,7 +131,7 @@ def ensure_user_credentials(
   existing = load_credentials(context.credentials_path)
   if existing and not context.force:
     print("\n⚠️  Reusing existing credentials")
-    user_id = existing.get('user_id') or existing.get('user', {}).get('id')
+    user_id = existing.get("user_id") or existing.get("user", {}).get("id")
     if user_id:
       print(f"   User ID: {user_id}")
     print(f"   User:  {existing.get('user', {}).get('name')}")
@@ -164,7 +164,6 @@ def ensure_user_credentials(
   print("\n📧 Creating user account...")
   print(f"   Name: {user_name}")
   print(f"   Email: {user_email}")
-  print(f"   Password: {user_password}")
 
   register_request = RegisterRequest(
     name=user_name, email=user_email, password=user_password
@@ -224,14 +223,16 @@ def ensure_user_credentials(
   print(f"\nUser ID: {user_id}")
   print(f"Name: {user_name}")
   print(f"Email: {user_email}")
-  print(f"API Key: {api_key}")
+  print(f"API Key: {api_key[:20]}...")
   print("=" * 70 + "\n")
 
   return credentials
 
 
 def grant_repository_access(
-  auth_client: AuthenticatedClient, repository_type: str, repository_plan: str = "unlimited"
+  auth_client: AuthenticatedClient,
+  repository_type: str,
+  repository_plan: str = "unlimited",
 ) -> bool:
   """
   Grant shared repository access to the authenticated user.
@@ -244,20 +245,26 @@ def grant_repository_access(
   Returns:
       True if successful, False otherwise
   """
-  print(f"\n🔄 Granting {repository_type.upper()} repository access ({repository_plan} tier)...")
+  print(
+    f"\n🔄 Granting {repository_type.upper()} repository access ({repository_plan} tier)..."
+  )
 
   plan_name = f"{repository_type}-{repository_plan}"
   request = CreateRepositorySubscriptionRequest(
     plan_name=plan_name,
   )
 
-  response = subscribe_repository(client=auth_client, graph_id=repository_type, body=request)
+  response = subscribe_repository(
+    client=auth_client, graph_id=repository_type, body=request
+  )
 
   if response.status_code in (200, 201):
     print(f"✅ {repository_type.upper()} repository access granted successfully")
     return True
   else:
-    print(f"⚠️  Failed to grant {repository_type.upper()} repository access: {response.status_code}")
+    print(
+      f"⚠️  Failed to grant {repository_type.upper()} repository access: {response.status_code}"
+    )
     if hasattr(response, "content"):
       print(f"   Response: {response.content}")
     return False

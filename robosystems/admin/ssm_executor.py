@@ -18,6 +18,7 @@ class SSMExecutor:
     environment: str,
     aws_profile: str = "robosystems",
     region: str = "us-east-1",
+    timeout: int = 300,
   ):
     """Initialize SSM executor.
 
@@ -25,10 +26,12 @@ class SSMExecutor:
         environment: Environment name (staging/prod)
         aws_profile: AWS CLI profile name
         region: AWS region
+        timeout: Command execution timeout in seconds (default: 300)
     """
     self.environment = environment
     self.aws_profile = aws_profile
     self.region = region
+    self.timeout = timeout
     self.instance_id: Optional[str] = None
 
   def _get_bastion_instance(self) -> str:
@@ -174,7 +177,9 @@ class SSMExecutor:
     command_id = result.stdout.strip()
 
     console.print(f"[dim]📋 Command ID: {command_id}[/dim]")
-    console.print("[yellow]⏳ Waiting for command to complete...[/yellow]")
+    console.print(
+      f"[yellow]⏳ Waiting for command to complete (timeout: {self.timeout}s)...[/yellow]"
+    )
 
     wait_cmd = [
       "aws",
@@ -191,7 +196,19 @@ class SSMExecutor:
       self.region,
     ]
 
-    subprocess.run(wait_cmd, capture_output=True, check=False)
+    try:
+      wait_result = subprocess.run(
+        wait_cmd, capture_output=True, check=False, timeout=self.timeout
+      )
+
+      if wait_result.returncode != 0:
+        console.print(
+          f"[yellow]⚠️  Command may have timed out (waited {self.timeout}s), fetching results...[/yellow]"
+        )
+    except subprocess.TimeoutExpired:
+      console.print(
+        f"[yellow]⚠️  Wait command timed out after {self.timeout}s, fetching results...[/yellow]"
+      )
 
     get_cmd = [
       "aws",
