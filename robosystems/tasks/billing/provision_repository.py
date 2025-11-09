@@ -44,7 +44,8 @@ def provision_repository_access_task(
   Args:
       user_id: ID of the user who will get access
       subscription_id: ID of the existing subscription in PENDING_PAYMENT status
-      repository_name: Name of the repository (e.g., 'sec', 'industry', 'economic')
+      repository_name: Repository graph_id/slug (e.g., 'sec', 'industry', 'economic').
+                      Note: This is the graph_id, not the display name.
 
   Returns:
       Dictionary containing repository_name and access details
@@ -97,14 +98,15 @@ def provision_repository_access_task(
 
     repo_service = RepositorySubscriptionService(session)
 
+    access_granted = repo_service.grant_access(
+      repository_type=repository_type,
+      user_id=user_id,
+      repository_plan=repository_plan,
+    )
+
     credits_allocated = repo_service.allocate_credits(
       repository_type=repository_type,
       repository_plan=repository_plan,
-      user_id=user_id,
-    )
-
-    access_granted = repo_service.grant_access(
-      repository_type=repository_type,
       user_id=user_id,
     )
 

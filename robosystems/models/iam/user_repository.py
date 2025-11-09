@@ -27,10 +27,20 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from ...database import Model
 from ...config.graph_tier import GraphTier
+from ...config.billing.repositories import (
+  SharedRepository,
+  RepositoryPlan as BillingRepositoryPlan,
+  RepositoryBillingConfig,
+)
 from ...utils.ulid import generate_prefixed_ulid
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# Backwards compatibility aliases
+RepositoryType = SharedRepository
+RepositoryPlan = BillingRepositoryPlan
 
 
 # Type-safe helpers for SQLAlchemy model attributes
@@ -44,14 +54,6 @@ def safe_bool(value: Any) -> bool:
   return bool(value) if value is not None else False
 
 
-class RepositoryType(str, Enum):
-  """Types of shared repositories."""
-
-  SEC = "sec"  # SEC public entity filings
-  INDUSTRY = "industry"  # Industry benchmarking data
-  ECONOMIC = "economic"  # Economic indicators and metrics
-
-
 class RepositoryAccessLevel(str, Enum):
   """Repository access levels."""
 
@@ -59,14 +61,6 @@ class RepositoryAccessLevel(str, Enum):
   READ = "read"  # Read-only access
   WRITE = "write"  # Read/write access (for data contributions)
   ADMIN = "admin"  # Full admin access including user management
-
-
-class RepositoryPlan(str, Enum):
-  """Repository access plans for shared data."""
-
-  STARTER = "starter"  # Limited credits, basic access
-  ADVANCED = "advanced"  # More credits, full access
-  UNLIMITED = "unlimited"  # High credits, priority access
 
 
 class UserRepository(Model):
@@ -84,6 +78,8 @@ class UserRepository(Model):
 
   # Repository identification
   repository_type = Column(SQLEnum(RepositoryType), nullable=False)
+  # NOTE: repository_name contains the graph_id (e.g., "sec") not the display name.
+  # This is the unique identifier/slug for the repository, stored in graphs.graph_id.
   repository_name = Column(
     String, ForeignKey("graphs.graph_id", ondelete="RESTRICT"), nullable=False
   )
@@ -488,136 +484,82 @@ class UserRepository(Model):
     """
     Get repository plan configuration for this repository type and plan.
 
-    Returns hardcoded plan configurations including pricing, credit allocations,
-    and access levels. These configurations define the feature set for each
-    repository subscription tier (STARTER, ADVANCED, UNLIMITED).
-
-    Note: These configurations are currently hardcoded in the model but should
-    ideally be moved to a configuration file or database table for easier
-    updates without code changes.
+    Pulls from centralized billing configuration in config/billing/repositories.py
+    which is the single source of truth for pricing, credits, and access levels.
 
     Returns:
         Dict containing plan configuration:
         - name: Human-readable plan name
         - monthly_credits: Credit allocation per month
         - price_monthly: Monthly subscription price in dollars
-        - access_level: RepositoryAccessLevel (READ, WRITE, or ADMIN)
+        - price_cents: Monthly price in cents
+        - access_level: RepositoryAccessLevel string (READ, WRITE, or ADMIN)
 
-        Empty dict if repository type or plan is not configured.
+        Empty dict if plan is not configured.
     """
-    configs = {
-      RepositoryType.SEC: {
-        "enabled": True,
-        "plans": {
-          RepositoryPlan.STARTER: {
-            "name": "SEC Data Starter",
-            "monthly_credits": 5000,
-            "price_monthly": 29.99,
-            "access_level": RepositoryAccessLevel.READ,
-          },
-          RepositoryPlan.ADVANCED: {
-            "name": "SEC Data Advanced",
-            "monthly_credits": 25000,
-            "price_monthly": 99.99,
-            "access_level": RepositoryAccessLevel.WRITE,
-          },
-          RepositoryPlan.UNLIMITED: {
-            "name": "SEC Data Unlimited",
-            "monthly_credits": 100000,
-            "price_monthly": 299.99,
-            "access_level": RepositoryAccessLevel.ADMIN,
-          },
-        },
-      },
-      RepositoryType.INDUSTRY: {
-        "enabled": False,
-        "coming_soon": True,
-        "plans": {
-          RepositoryPlan.STARTER: {
-            "name": "Industry Benchmarks Starter",
-            "monthly_credits": 3000,
-            "price_monthly": 19.99,
-            "access_level": RepositoryAccessLevel.READ,
-          },
-        },
-      },
-      RepositoryType.ECONOMIC: {
-        "enabled": False,
-        "coming_soon": True,
-        "plans": {
-          RepositoryPlan.STARTER: {
-            "name": "Economic Indicators Starter",
-            "monthly_credits": 2000,
-            "price_monthly": 14.99,
-            "access_level": RepositoryAccessLevel.READ,
-          },
-        },
-      },
-    }
+    plan_details = RepositoryBillingConfig.get_plan_details(
+      cast(RepositoryPlan, self.repository_plan)
+    )
+    if not plan_details:
+      return {}
 
-    repo_config = configs.get(cast(RepositoryType, self.repository_type), {})
-    if "plans" in repo_config:
-      return repo_config["plans"].get(cast(RepositoryPlan, self.repository_plan), {})
-    return {}
+    access_level_str = plan_details.get("access_level", "READ")
+    try:
+      access_level = RepositoryAccessLevel(access_level_str.lower())
+    except (ValueError, AttributeError):
+      access_level = RepositoryAccessLevel.READ
+
+    return {
+      "name": plan_details.get("name", ""),
+      "monthly_credits": plan_details.get("monthly_credits", 0),
+      "price_monthly": plan_details.get("price_monthly", 0.0),
+      "price_cents": plan_details.get("price_cents", 0),
+      "access_level": access_level,
+    }
 
   @classmethod
   def get_all_repository_configs(cls) -> Dict[str, Dict[str, Any]]:
-    """Get all repository configurations including enabled status."""
-    return {
-      RepositoryType.SEC: {
-        "enabled": True,
-        "plans": {
-          RepositoryPlan.STARTER: {
-            "name": "SEC Data Starter",
-            "monthly_credits": 5000,
-            "price_monthly": 29.99,
-            "access_level": RepositoryAccessLevel.READ,
-          },
-          RepositoryPlan.ADVANCED: {
-            "name": "SEC Data Advanced",
-            "monthly_credits": 25000,
-            "price_monthly": 99.99,
-            "access_level": RepositoryAccessLevel.WRITE,
-          },
-          RepositoryPlan.UNLIMITED: {
-            "name": "SEC Data Unlimited",
-            "monthly_credits": 100000,
-            "price_monthly": 299.99,
-            "access_level": RepositoryAccessLevel.ADMIN,
-          },
-        },
-      },
-      RepositoryType.INDUSTRY: {
-        "enabled": False,
-        "coming_soon": True,
-        "plans": {
-          RepositoryPlan.STARTER: {
-            "name": "Industry Benchmarks Starter",
-            "monthly_credits": 3000,
-            "price_monthly": 19.99,
-            "access_level": RepositoryAccessLevel.READ,
-          },
-        },
-      },
-      RepositoryType.ECONOMIC: {
-        "enabled": False,
-        "coming_soon": True,
-        "plans": {
-          RepositoryPlan.STARTER: {
-            "name": "Economic Indicators Starter",
-            "monthly_credits": 2000,
-            "price_monthly": 14.99,
-            "access_level": RepositoryAccessLevel.READ,
-          },
-        },
-      },
-    }
+    """
+    Get all repository configurations including enabled status.
+
+    Delegates to centralized billing config which is the single source of truth.
+    Converts access_level strings to RepositoryAccessLevel enums for backwards
+    compatibility.
+
+    Returns:
+        Dict mapping repository types to configs with enabled status and plan details
+    """
+    configs = RepositoryBillingConfig.get_all_repository_configs()
+
+    result = {}
+    for repo_type, repo_config in configs.items():
+      result[repo_type] = {
+        "enabled": repo_config.get("enabled", False),
+        "coming_soon": repo_config.get("coming_soon", False),
+        "plans": {},
+      }
+
+      for plan_type, plan_details in repo_config.get("plans", {}).items():
+        access_level_str = plan_details.get("access_level", "READ")
+        try:
+          access_level = RepositoryAccessLevel(access_level_str.lower())
+        except (ValueError, AttributeError):
+          access_level = RepositoryAccessLevel.READ
+
+        result[repo_type]["plans"][plan_type] = {
+          "name": plan_details.get("name", ""),
+          "monthly_credits": plan_details.get("monthly_credits", 0),
+          "price_monthly": plan_details.get("price_monthly", 0.0),
+          "price_cents": plan_details.get("price_cents", 0),
+          "access_level": access_level,
+        }
+
+    return result
 
   @classmethod
   def is_repository_enabled(cls, repository_type: RepositoryType) -> bool:
     """Check if a repository type is enabled for subscriptions."""
-    configs = cls.get_all_repository_configs()
-    return configs.get(repository_type, {}).get("enabled", False)
+    return RepositoryBillingConfig.is_repository_enabled(repository_type)
 
   def to_dict(self) -> Dict[str, Any]:
     """Convert to dictionary for API responses."""
