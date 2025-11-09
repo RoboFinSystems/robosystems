@@ -141,7 +141,7 @@ If you need to create additional users or manage access manually:
 
 ```bash
 # Create test user with SEC repository access
-just db-create-test-user sec
+just demo-user --repositories sec
 ```
 
 ## Accessing the Data
