@@ -55,6 +55,12 @@ on:
         type: string
         default: ""
 
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
     outputs:
       volume_registry_table:
         description: "DynamoDB table name for volume registry"
@@ -77,8 +83,6 @@ on:
         required: true
       AWS_SECRET_ACCESS_KEY:
         description: "AWS Secret Access Key for CloudFormation deployment"
-        required: true
-      AWS_SNS_ALERT_EMAIL:
         required: true
 
 jobs:
@@ -127,7 +131,7 @@ jobs:
           STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
-                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
                 ParameterKey=ServiceTag,ParameterValue=\"RoboSystems\" \
                 ParameterKey=ComponentTag,ParameterValue=\"GraphVolumeManager\""
 

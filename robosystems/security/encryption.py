@@ -5,7 +5,6 @@ This module provides secure encryption/decryption for sensitive data like backup
 Uses Fernet (symmetric encryption) from the cryptography library which provides:
 - AES 128-bit encryption in CBC mode
 - HMAC for authentication
-- Secure key derivation
 
 Note: The encryption key should be stored securely in AWS Secrets Manager
 or environment variables, never in code.
@@ -14,60 +13,39 @@ or environment variables, never in code.
 import base64
 from typing import Union
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from robosystems.logger import logger
 from robosystems.config import env
 
 
-def _get_or_create_encryption_key() -> bytes:
+def _get_encryption_key() -> bytes:
   """
-  Get or create the encryption key for backup operations.
+  Get the encryption key for backup operations.
 
   Uses GRAPH_BACKUP_ENCRYPTION_KEY from environment configuration.
-  For development, generates a key from a password if not set.
+  The key must be set in all environments (dev, staging, prod).
 
   Returns:
       bytes: The encryption key
+
+  Raises:
+      ValueError: If the key is not set or has invalid format
   """
-  # Try to get key from environment variable first
   encryption_key = env.GRAPH_BACKUP_ENCRYPTION_KEY
 
-  if encryption_key:
-    # Key is stored as base64 encoded string
-    try:
-      return base64.urlsafe_b64decode(encryption_key)
-    except Exception as e:
-      logger.error(f"Invalid encryption key format: {e}")
-      raise ValueError("Invalid GRAPH_BACKUP_ENCRYPTION_KEY format")
-
-  # In production, we must have the encryption key set
-  if env.ENVIRONMENT == "prod":
+  if not encryption_key:
     raise ValueError(
-      "GRAPH_BACKUP_ENCRYPTION_KEY must be set in production environment"
+      "GRAPH_BACKUP_ENCRYPTION_KEY must be set. "
+      "Generate a key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
     )
 
-  # For development/staging, derive a key from a password
-  # This is less secure but acceptable for non-production environments
-  # Use centralized config to get from Secrets Manager if available
-  password = env.GRAPH_BACKUP_ENCRYPTION_PASSWORD or "robosystems-dev-backup-key-2024"
-  salt = b"robosystems-kuzu-backup-salt-v1"  # Static salt for development consistency
-
-  kdf = PBKDF2HMAC(
-    algorithm=hashes.SHA256(),
-    length=32,
-    salt=salt,
-    iterations=100000,
-  )
-  key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
-
-  logger.warning(
-    f"Using derived encryption key for {env.ENVIRONMENT} environment. "
-    "Set GRAPH_BACKUP_ENCRYPTION_KEY for production use."
-  )
-
-  return key
+  try:
+    return base64.urlsafe_b64decode(encryption_key)
+  except Exception as e:
+    logger.error(f"Invalid encryption key format: {e}")
+    raise ValueError(
+      f"Invalid GRAPH_BACKUP_ENCRYPTION_KEY format. Key must be base64-encoded: {e}"
+    )
 
 
 def encrypt_data(data: Union[bytes, str]) -> bytes:
@@ -89,7 +67,7 @@ def encrypt_data(data: Union[bytes, str]) -> bytes:
       data = data.encode("utf-8")
 
     # Get encryption key
-    key = _get_or_create_encryption_key()
+    key = _get_encryption_key()
 
     # Create Fernet instance
     fernet = Fernet(key)
@@ -121,7 +99,7 @@ def decrypt_data(encrypted_data: bytes) -> bytes:
   """
   try:
     # Get encryption key
-    key = _get_or_create_encryption_key()
+    key = _get_encryption_key()
 
     # Create Fernet instance
     fernet = Fernet(key)

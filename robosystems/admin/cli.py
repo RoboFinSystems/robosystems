@@ -2,23 +2,24 @@
 
 This CLI provides remote access to admin operations without requiring bastion host access.
 It fetches the admin API key from AWS Secrets Manager using AWS CLI and provides commands
-for subscription management, customer management, and repository access control.
+for subscription management, customer management, credit management, graph management,
+and user management.
 
 Usage:
-    uv run python -m robosystems.scripts.admin_cli [command] [options]
+    uv run python -m robosystems.admin.cli [command] [options]
 
 Examples:
     # List all subscriptions
-    uv run python -m robosystems.scripts.admin_cli subscriptions list
+    uv run python -m robosystems.admin.cli subscriptions list
 
     # Get subscription details
-    uv run python -m robosystems.scripts.admin_cli subscriptions get <subscription-id>
+    uv run python -m robosystems.admin.cli subscriptions get <subscription-id>
 
-    # Update customer billing settings
-    uv run python -m robosystems.scripts.admin_cli customers update <user-id> --billing-email new@example.com
+    # Update org billing settings
+    uv run python -m robosystems.admin.cli orgs update <org-id> --billing-email new@example.com
 
     # Show statistics
-    uv run python -m robosystems.scripts.admin_cli stats
+    uv run python -m robosystems.admin.cli stats
 """
 
 import subprocess
@@ -31,6 +32,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ..logger import get_logger
+from .ssm_executor import SSMExecutor
 
 logger = get_logger(__name__)
 console = Console()
@@ -221,7 +223,7 @@ def cli(ctx, environment, api_url, aws_profile):
   """RoboSystems Admin CLI - Remote administration via admin API.
 
   This CLI provides access to subscription management, customer management,
-  and repository access control.
+  credit management, graph management, and user management.
 
   Environment selection:
     - dev: Uses localhost:8000 and ADMIN_API_KEY from .env.local
@@ -280,7 +282,7 @@ def list_subscriptions(client, status, tier, email, include_canceled, limit):
     table.add_row(
       sub["id"],
       sub["resource_id"],
-      sub.get("customer_email", "N/A"),
+      sub.get("owner_email", "N/A"),
       sub["status"],
       sub["plan_name"],
       sub.get("billing_interval", "N/A"),
@@ -307,9 +309,8 @@ def get_subscription(client, subscription_id):
 
   click.echo(f"\nID: {sub['id']}")
   click.echo(f"Resource: {sub['resource_type']} / {sub['resource_id']}")
-  click.echo(
-    f"Customer: {sub.get('customer_name', 'N/A')} ({sub.get('customer_email', 'N/A')})"
-  )
+  click.echo(f"Org: {sub.get('org_name', 'N/A')} ({sub['org_id']})")
+  click.echo(f"Owner: {sub.get('owner_name', 'N/A')} ({sub.get('owner_email', 'N/A')})")
   click.echo(f"Status: {sub['status']}")
 
   click.echo("\nBILLING")
@@ -344,7 +345,7 @@ def get_subscription(client, subscription_id):
 
 @subscriptions.command("create")
 @click.option("--resource-id", required=True, help="Resource ID (graph ID)")
-@click.option("--user-id", required=True, help="User ID")
+@click.option("--org-id", required=True, help="Organization ID")
 @click.option(
   "--plan-name",
   required=True,
@@ -365,7 +366,7 @@ def get_subscription(client, subscription_id):
 def create_subscription(
   client,
   resource_id,
-  user_id,
+  org_id,
   plan_name,
   resource_type,
   billing_interval,
@@ -374,7 +375,7 @@ def create_subscription(
   data = {
     "resource_type": resource_type,
     "resource_id": resource_id,
-    "user_id": user_id,
+    "org_id": org_id,
     "plan_name": plan_name,
     "billing_interval": billing_interval,
   }
@@ -383,7 +384,7 @@ def create_subscription(
 
   click.echo(f"✅ Created subscription {sub['id']}")
   click.echo(f"   Resource: {sub['resource_type']} / {sub['resource_id']}")
-  click.echo(f"   Customer: {sub.get('customer_email', user_id)}")
+  click.echo(f"   Org: {sub.get('org_name', org_id)}")
   click.echo(f"   Plan: {sub['plan_name']}")
   click.echo(f"   Status: {sub['status']}")
 
@@ -468,98 +469,6 @@ def subscription_audit(client, subscription_id, event_type, limit):
   console.print()
   console.print(table)
   console.print(f"\n[bold]Total:[/bold] {len(events):,} events")
-
-
-@cli.group()
-def customers():
-  """Manage customer billing settings."""
-  pass
-
-
-@customers.command("list")
-@click.option("--limit", default=100, help="Maximum number of results")
-@click.pass_obj
-def list_customers(client, limit):
-  """List all customers with their billing settings."""
-  params = {"limit": limit}
-  customers_data = client._make_request("GET", "/admin/v1/customers", params=params)
-
-  if not customers_data:
-    console.print("\n[yellow]No customers found.[/yellow]")
-    return
-
-  table = Table(title="Customers", show_header=True, header_style="bold cyan")
-  table.add_column("User ID", no_wrap=True)
-  table.add_column("Name", overflow="fold")
-  table.add_column("Email", overflow="fold")
-  table.add_column("Payment Method", overflow="fold")
-  table.add_column("Invoice Billing", overflow="fold")
-  table.add_column("Payment Terms", overflow="fold")
-  table.add_column("Billing Email", overflow="fold")
-
-  for customer in customers_data:
-    table.add_row(
-      customer["user_id"],
-      customer.get("user_name", "N/A"),
-      customer.get("user_email", "N/A"),
-      "Yes" if customer.get("has_payment_method") else "No",
-      "Yes" if customer.get("invoice_billing_enabled") else "No",
-      customer["payment_terms"],
-      customer.get("billing_email", "N/A"),
-    )
-
-  console.print()
-  console.print(table)
-  console.print(f"\n[bold]Total:[/bold] {len(customers_data):,} customers")
-
-
-@customers.command("update")
-@click.argument("user_id")
-@click.option(
-  "--invoice-billing/--no-invoice-billing",
-  default=None,
-  help="Enable/disable invoice billing",
-)
-@click.option("--billing-email", help="Billing email address")
-@click.option("--billing-contact-name", help="Billing contact name")
-@click.option("--payment-terms", help="Payment terms (e.g., net_30, net_60)")
-@click.pass_obj
-def update_customer(
-  client,
-  user_id,
-  invoice_billing,
-  billing_email,
-  billing_contact_name,
-  payment_terms,
-):
-  """Update customer billing settings."""
-  params = {}
-
-  if invoice_billing is not None:
-    params["invoice_billing_enabled"] = invoice_billing
-  if billing_email:
-    params["billing_email"] = billing_email
-  if billing_contact_name:
-    params["billing_contact_name"] = billing_contact_name
-  if payment_terms:
-    params["payment_terms"] = payment_terms
-
-  if not params:
-    click.echo("❌ No updates specified")
-    return
-
-  customer = client._make_request(
-    "PATCH", f"/admin/v1/customers/{user_id}", params=params
-  )
-
-  click.echo(f"✅ Updated customer {customer['user_id']}")
-  click.echo(f"   Name: {customer.get('user_name', 'N/A')}")
-  click.echo(
-    f"   Invoice Billing: {'Yes' if customer.get('invoice_billing_enabled') else 'No'}"
-  )
-  click.echo(f"   Payment Terms: {customer['payment_terms']}")
-  if billing_email:
-    click.echo(f"   Billing Email: {customer.get('billing_email', 'N/A')}")
 
 
 @cli.group()
@@ -744,6 +653,924 @@ def stats(client):
   console.print(
     f"\n[bold]MONTHLY REVENUE:[/bold] [green]${stats_data['revenue'] / 100:,.2f}[/green]"
   )
+
+
+@cli.group()
+def credits():
+  """Manage credit pools."""
+  pass
+
+
+@credits.command("list")
+@click.option("--user-email", help="Filter by user email")
+@click.option("--tier", help="Filter by tier")
+@click.option("--low-balance", is_flag=True, help="Only show low balance pools")
+@click.option("--limit", default=100, help="Maximum number of results")
+@click.pass_obj
+def list_credits(client, user_email, tier, low_balance, limit):
+  """List all graph credit pools."""
+  params = {
+    "limit": limit,
+    "low_balance_only": low_balance,
+  }
+  if user_email:
+    params["user_email"] = user_email
+  if tier:
+    params["tier"] = tier
+
+  pools = client._make_request("GET", "/admin/v1/credits/graphs", params=params)
+
+  if not pools:
+    console.print("\n[yellow]No credit pools found.[/yellow]")
+    return
+
+  table = Table(title="Credit Pools", show_header=True, header_style="bold cyan")
+  table.add_column("Graph ID", no_wrap=True)
+  table.add_column("User ID", overflow="fold")
+  table.add_column("Tier", overflow="fold")
+  table.add_column("Balance", justify="right")
+  table.add_column("Allocation", justify="right")
+  table.add_column("Multiplier", justify="right")
+
+  for pool in pools:
+    table.add_row(
+      pool["graph_id"],
+      pool.get("user_id", "N/A"),
+      pool["graph_tier"],
+      f"{pool['current_balance']:,.2f}",
+      f"{pool['monthly_allocation']:,.2f}",
+      f"{pool['credit_multiplier']:.2f}x",
+    )
+
+  console.print()
+  console.print(table)
+  console.print(f"\n[bold]Total:[/bold] {len(pools):,} credit pools")
+
+
+@credits.command("get")
+@click.argument("graph_id")
+@click.pass_obj
+def get_credits(client, graph_id):
+  """Get details of a specific credit pool."""
+  pool = client._make_request("GET", f"/admin/v1/credits/graphs/{graph_id}")
+
+  click.echo("\nCREDIT POOL DETAILS")
+  click.echo("=" * 60)
+
+  click.echo(f"\nGraph ID: {pool['graph_id']}")
+  click.echo(f"User ID: {pool.get('user_id', 'N/A')}")
+  click.echo(f"Tier: {pool['graph_tier']}")
+
+  click.echo("\nCREDITS")
+  click.echo(f"  Current Balance: {pool['current_balance']:,.2f}")
+  click.echo(f"  Monthly Allocation: {pool['monthly_allocation']:,.2f}")
+  click.echo(f"  Credit Multiplier: {pool['credit_multiplier']:.2f}x")
+
+  if pool.get("storage_limit_override_gb"):
+    click.echo(f"  Storage Limit Override: {pool['storage_limit_override_gb']:.2f} GB")
+
+
+@credits.command("bonus")
+@click.argument("graph_id")
+@click.option("--amount", type=float, required=True, help="Amount of credits to add")
+@click.option("--description", required=True, help="Reason for bonus credits")
+@click.pass_obj
+def add_bonus_credits(client, graph_id, amount, description):
+  """Add bonus credits to a graph."""
+  data = {
+    "amount": amount,
+    "description": description,
+  }
+
+  pool = client._make_request(
+    "POST", f"/admin/v1/credits/graphs/{graph_id}/bonus", data=data
+  )
+
+  click.echo(f"✅ Added {amount:,.2f} bonus credits to graph {graph_id}")
+  click.echo(f"   New balance: {pool['current_balance']:,.2f}")
+  click.echo(f"   Description: {description}")
+
+
+@credits.command("analytics")
+@click.option("--tier", help="Filter by tier")
+@click.pass_obj
+def credits_analytics(client, tier):
+  """Get system-wide credit analytics."""
+  params = {}
+  if tier:
+    params["tier"] = tier
+
+  analytics = client._make_request("GET", "/admin/v1/credits/analytics", params=params)
+
+  console.print()
+  console.print("[bold cyan]CREDIT ANALYTICS[/bold cyan]")
+  console.print("=" * 60)
+
+  console.print("\n[bold]OVERALL TOTALS:[/bold]")
+  console.print(f"  Total Pools: {analytics['total_pools']:,}")
+  console.print(
+    f"  Total Monthly Allocation: {analytics['total_allocated_monthly']:,.2f}"
+  )
+  console.print(f"  Total Current Balance: {analytics['total_current_balance']:,.2f}")
+  console.print(f"  Consumed This Month: {analytics['total_consumed_month']:,.2f}")
+
+  graph_credits = analytics.get("graph_credits", {})
+  if graph_credits:
+    console.print("\n[bold]GRAPH CREDITS:[/bold]")
+    console.print(f"  Pools: {graph_credits.get('total_pools', 0):,}")
+    console.print(
+      f"  Allocation: {graph_credits.get('total_allocated_monthly', 0):,.2f}"
+    )
+    console.print(f"  Balance: {graph_credits.get('total_current_balance', 0):,.2f}")
+    console.print(f"  Consumed: {graph_credits.get('total_consumed_month', 0):,.2f}")
+
+    if graph_credits.get("top_consumers"):
+      console.print("\n  [bold]Top Consumers:[/bold]")
+      for consumer in graph_credits["top_consumers"][:5]:
+        console.print(
+          f"    {consumer['graph_id'][:30]}: {consumer['consumed']:,.2f} credits ({consumer['tier']})"
+        )
+
+    if graph_credits.get("by_tier"):
+      console.print("\n  [bold]By Tier:[/bold]")
+      for tier_name, stats in sorted(graph_credits["by_tier"].items()):
+        console.print(
+          f"    {tier_name}: {stats['pool_count']:,} pools, {stats['total_current_balance']:,.2f} balance"
+        )
+
+  repo_credits = analytics.get("repository_credits", {})
+  if repo_credits:
+    console.print("\n[bold]REPOSITORY CREDITS:[/bold]")
+    console.print(f"  Pools: {repo_credits.get('total_pools', 0):,}")
+    console.print(
+      f"  Allocation: {repo_credits.get('total_allocated_monthly', 0):,.2f}"
+    )
+    console.print(f"  Balance: {repo_credits.get('total_current_balance', 0):,.2f}")
+    console.print(f"  Consumed: {repo_credits.get('total_consumed_month', 0):,.2f}")
+
+    if repo_credits.get("by_type"):
+      console.print("\n  [bold]By Type:[/bold]")
+      for repo_type, stats in sorted(repo_credits["by_type"].items()):
+        console.print(
+          f"    {repo_type}: {stats['pool_count']:,} pools, {stats['total_current_balance']:,.2f} balance"
+        )
+
+
+@credits.command("health")
+@click.pass_obj
+def credits_health(client):
+  """Check credit system health."""
+  health = client._make_request("GET", "/admin/v1/credits/health")
+
+  console.print()
+  console.print("[bold cyan]CREDIT SYSTEM HEALTH[/bold cyan]")
+  console.print("=" * 60)
+
+  status_color = (
+    "green"
+    if health["status"] == "healthy"
+    else "yellow"
+    if health["status"] == "warning"
+    else "red"
+  )
+  console.print(
+    f"\n[bold]Status:[/bold] [{status_color}]{health['status'].upper()}[/{status_color}]"
+  )
+  console.print(f"[bold]Total Pools:[/bold] {health['total_pools']:,}")
+  console.print(f"[bold]Pools with Issues:[/bold] {health['pools_with_issues']:,}")
+
+  graph_health = health.get("graph_health", {})
+  repo_health = health.get("repository_health", {})
+
+  console.print(
+    f"\n[bold]Graph Pools:[/bold] {graph_health.get('total_pools', 0):,} ({graph_health.get('pools_with_issues', 0):,} issues)"
+  )
+  console.print(
+    f"[bold]Repository Pools:[/bold] {repo_health.get('total_pools', 0):,} ({repo_health.get('pools_with_issues', 0):,} issues)"
+  )
+
+  if graph_health.get("negative_balance_pools"):
+    console.print(
+      f"\n[bold red]GRAPH NEGATIVE BALANCE POOLS ({len(graph_health['negative_balance_pools'])}):[/bold red]"
+    )
+    for pool in graph_health["negative_balance_pools"][:10]:
+      console.print(
+        f"  {pool['graph_id']}: {pool['balance']:,.2f} credits ({pool['tier']})"
+      )
+
+  if repo_health.get("negative_balance_pools"):
+    console.print(
+      f"\n[bold red]REPOSITORY NEGATIVE BALANCE POOLS ({len(repo_health['negative_balance_pools'])}):[/bold red]"
+    )
+    for pool in repo_health["negative_balance_pools"][:10]:
+      console.print(
+        f"  {pool['user_repository_id']}: {pool['balance']:,.2f} credits ({pool['repository_type']})"
+      )
+
+  if graph_health.get("low_balance_pools"):
+    console.print(
+      f"\n[bold yellow]GRAPH LOW BALANCE POOLS ({len(graph_health['low_balance_pools'])}):[/bold yellow]"
+    )
+    for pool in graph_health["low_balance_pools"][:10]:
+      console.print(
+        f"  {pool['graph_id']}: {pool['balance']:,.2f} / {pool['allocation']:,.2f} ({pool['tier']})"
+      )
+
+  if repo_health.get("low_balance_pools"):
+    console.print(
+      f"\n[bold yellow]REPOSITORY LOW BALANCE POOLS ({len(repo_health['low_balance_pools'])}):[/bold yellow]"
+    )
+    for pool in repo_health["low_balance_pools"][:10]:
+      console.print(
+        f"  {pool['user_repository_id']}: {pool['balance']:,.2f} / {pool['allocation']:,.2f} ({pool['repository_type']})"
+      )
+
+
+@credits.group("repos")
+def credits_repos():
+  """Manage repository credit pools."""
+  pass
+
+
+@credits_repos.command("list")
+@click.option("--user-email", help="Filter by user email")
+@click.option(
+  "--repository-type", help="Filter by repository type (sec, industry, economic)"
+)
+@click.option("--low-balance", is_flag=True, help="Only show low balance pools")
+@click.option("--limit", default=100, help="Maximum number of results")
+@click.pass_obj
+def list_repository_credits(client, user_email, repository_type, low_balance, limit):
+  """List all repository credit pools."""
+  params = {
+    "limit": limit,
+    "low_balance_only": low_balance,
+  }
+  if user_email:
+    params["user_email"] = user_email
+  if repository_type:
+    params["repository_type"] = repository_type
+
+  pools = client._make_request("GET", "/admin/v1/credits/repositories", params=params)
+
+  if not pools:
+    console.print("\n[yellow]No repository credit pools found.[/yellow]")
+    return
+
+  table = Table(
+    title="Repository Credit Pools", show_header=True, header_style="bold cyan"
+  )
+  table.add_column("User Repo ID", no_wrap=True)
+  table.add_column("User ID", overflow="fold")
+  table.add_column("Repository", overflow="fold")
+  table.add_column("Plan", overflow="fold")
+  table.add_column("Balance", justify="right")
+  table.add_column("Allocation", justify="right")
+  table.add_column("Active", justify="center")
+
+  for pool in pools:
+    table.add_row(
+      pool["user_repository_id"][:20] + "...",
+      pool.get("user_id", "N/A")[:20] + "...",
+      pool["repository_type"],
+      pool["repository_plan"],
+      f"{pool['current_balance']:,.2f}",
+      f"{pool['monthly_allocation']:,.2f}",
+      "✓" if pool["is_active"] else "✗",
+    )
+
+  console.print()
+  console.print(table)
+  console.print(f"\n[bold]Total:[/bold] {len(pools):,} repository credit pools")
+
+
+@credits_repos.command("get")
+@click.argument("user_repository_id")
+@click.pass_obj
+def get_repository_credits(client, user_repository_id):
+  """Get details of a specific repository credit pool."""
+  pool = client._make_request(
+    "GET", f"/admin/v1/credits/repositories/{user_repository_id}"
+  )
+
+  click.echo("\nREPOSITORY CREDIT POOL DETAILS")
+  click.echo("=" * 60)
+
+  click.echo(f"\nUser Repository ID: {pool['user_repository_id']}")
+  click.echo(f"User ID: {pool.get('user_id', 'N/A')}")
+  click.echo(f"Repository Type: {pool['repository_type']}")
+  click.echo(f"Repository Plan: {pool['repository_plan']}")
+  click.echo(f"Active: {'Yes' if pool['is_active'] else 'No'}")
+
+  click.echo("\nCREDITS")
+  click.echo(f"  Current Balance: {pool['current_balance']:,.2f}")
+  click.echo(f"  Monthly Allocation: {pool['monthly_allocation']:,.2f}")
+  click.echo(f"  Consumed This Month: {pool['consumed_this_month']:,.2f}")
+  click.echo(f"  Rollover Credits: {pool['rollover_credits']:,.2f}")
+  click.echo(f"  Allows Rollover: {'Yes' if pool['allows_rollover'] else 'No'}")
+
+
+@credits_repos.command("bonus")
+@click.argument("user_repository_id")
+@click.option("--amount", type=float, required=True, help="Amount of credits to add")
+@click.option("--description", required=True, help="Reason for bonus credits")
+@click.pass_obj
+def add_repository_bonus_credits(client, user_repository_id, amount, description):
+  """Add bonus credits to a repository credit pool."""
+  data = {
+    "amount": amount,
+    "description": description,
+  }
+
+  pool = client._make_request(
+    "POST", f"/admin/v1/credits/repositories/{user_repository_id}/bonus", data=data
+  )
+
+  click.echo(f"✅ Added {amount:,.2f} bonus credits to repository {user_repository_id}")
+  click.echo(f"   New balance: {pool['current_balance']:,.2f}")
+  click.echo(f"   Description: {description}")
+
+
+@cli.group()
+def graphs():
+  """Manage graphs."""
+  pass
+
+
+@graphs.command("list")
+@click.option("--user-email", help="Filter by owner email")
+@click.option("--tier", help="Filter by tier")
+@click.option("--backend", help="Filter by backend")
+@click.option("--limit", default=100, help="Maximum number of results")
+@click.pass_obj
+def list_graphs(client, user_email, tier, backend, limit):
+  """List all graphs."""
+  params = {"limit": limit}
+  if user_email:
+    params["user_email"] = user_email
+  if tier:
+    params["tier"] = tier
+  if backend:
+    params["backend"] = backend
+
+  graphs_list = client._make_request("GET", "/admin/v1/graphs", params=params)
+
+  if not graphs_list:
+    console.print("\n[yellow]No graphs found.[/yellow]")
+    return
+
+  table = Table(title="Graphs", show_header=True, header_style="bold cyan")
+  table.add_column("Graph ID", no_wrap=True)
+  table.add_column("Name", overflow="fold")
+  table.add_column("Tier", overflow="fold")
+  table.add_column("Backend", overflow="fold")
+  table.add_column("Status", overflow="fold")
+  table.add_column("Storage", justify="right")
+
+  for graph in graphs_list:
+    storage = f"{graph['storage_gb']:.2f} GB" if graph.get("storage_gb") else "N/A"
+    table.add_row(
+      graph["graph_id"],
+      graph["name"],
+      graph["graph_tier"],
+      graph["backend"],
+      graph["status"],
+      storage,
+    )
+
+  console.print()
+  console.print(table)
+  console.print(f"\n[bold]Total:[/bold] {len(graphs_list):,} graphs")
+
+
+@graphs.command("get")
+@click.argument("graph_id")
+@click.pass_obj
+def get_graph(client, graph_id):
+  """Get details of a specific graph."""
+  graph = client._make_request("GET", f"/admin/v1/graphs/{graph_id}")
+
+  click.echo("\nGRAPH DETAILS")
+  click.echo("=" * 60)
+
+  click.echo(f"\nGraph ID: {graph['graph_id']}")
+  click.echo(f"Name: {graph['name']}")
+  click.echo(f"Description: {graph.get('description', 'N/A')}")
+  click.echo(f"Owner: {graph['user_id']}")
+  click.echo(f"Organization: {graph['org_id']}")
+
+  click.echo("\nCONFIGURATION")
+  click.echo(f"  Tier: {graph['graph_tier']}")
+  click.echo(f"  Backend: {graph['backend']}")
+  click.echo(f"  Status: {graph['status']}")
+
+  click.echo("\nRESOURCES")
+  if graph.get("storage_gb"):
+    click.echo(f"  Storage: {graph['storage_gb']:.2f} GB")
+  if graph.get("storage_limit_gb"):
+    click.echo(f"  Storage Limit: {graph['storage_limit_gb']:.2f} GB")
+  if graph.get("subgraph_count") is not None:
+    click.echo(f"  Subgraphs: {graph['subgraph_count']}")
+  if graph.get("subgraph_limit"):
+    click.echo(f"  Subgraph Limit: {graph['subgraph_limit']}")
+
+
+@graphs.command("analytics")
+@click.option("--tier", help="Filter by tier")
+@click.pass_obj
+def graphs_analytics(client, tier):
+  """Get cross-graph analytics."""
+  params = {}
+  if tier:
+    params["tier"] = tier
+
+  analytics = client._make_request("GET", "/admin/v1/graphs/analytics", params=params)
+
+  console.print()
+  console.print("[bold cyan]GRAPH ANALYTICS[/bold cyan]")
+  console.print("=" * 60)
+
+  console.print(f"\n[bold]TOTAL GRAPHS:[/bold] {analytics['total_graphs']:,}")
+
+  console.print("\n[bold]BY TIER:[/bold]")
+  for tier_name, count in sorted(analytics["by_tier"].items()):
+    console.print(f"  {tier_name}: {count:,}")
+
+  console.print("\n[bold]BY BACKEND:[/bold]")
+  for backend, count in sorted(analytics["by_backend"].items()):
+    console.print(f"  {backend}: {count:,}")
+
+  console.print("\n[bold]BY STATUS:[/bold]")
+  for status_val, count in sorted(analytics["by_status"].items()):
+    console.print(f"  {status_val}: {count:,}")
+
+  console.print(
+    f"\n[bold]TOTAL STORAGE:[/bold] {analytics['total_storage_gb']:,.2f} GB"
+  )
+
+  if analytics.get("largest_graphs"):
+    console.print("\n[bold]LARGEST GRAPHS:[/bold]")
+    for graph in analytics["largest_graphs"][:10]:
+      console.print(f"  {graph['graph_id']}: {graph['storage_gb']:,.2f} GB")
+
+
+@cli.group()
+def users():
+  """Manage users."""
+  pass
+
+
+@users.command("list")
+@click.option("--email", help="Filter by email (partial match)")
+@click.option("--verified-only", is_flag=True, help="Only show verified users")
+@click.option("--limit", default=100, help="Maximum number of results")
+@click.pass_obj
+def list_users(client, email, verified_only, limit):
+  """List all users."""
+  params = {
+    "limit": limit,
+    "verified_only": verified_only,
+  }
+  if email:
+    params["email"] = email
+
+  users_list = client._make_request("GET", "/admin/v1/users", params=params)
+
+  if not users_list:
+    console.print("\n[yellow]No users found.[/yellow]")
+    return
+
+  table = Table(title="Users", show_header=True, header_style="bold cyan")
+  table.add_column("User ID", no_wrap=True)
+  table.add_column("Email", overflow="fold")
+  table.add_column("Name", overflow="fold")
+  table.add_column("Verified", overflow="fold")
+  table.add_column("Org Role", overflow="fold")
+  table.add_column("Created", overflow="fold")
+
+  for user in users_list:
+    verified = "Yes" if user["email_verified"] else "No"
+    table.add_row(
+      user["id"],
+      user["email"],
+      user.get("name", "N/A"),
+      verified,
+      user.get("org_role", "N/A"),
+      user["created_at"][:10],
+    )
+
+  console.print()
+  console.print(table)
+  console.print(f"\n[bold]Total:[/bold] {len(users_list):,} users")
+
+
+@users.command("get")
+@click.argument("user_id")
+@click.pass_obj
+def get_user(client, user_id):
+  """Get details of a specific user."""
+  user = client._make_request("GET", f"/admin/v1/users/{user_id}")
+
+  click.echo("\nUSER DETAILS")
+  click.echo("=" * 60)
+
+  click.echo(f"\nUser ID: {user['id']}")
+  click.echo(f"Email: {user['email']}")
+  click.echo(f"Name: {user.get('name', 'N/A')}")
+  click.echo(f"Email Verified: {'Yes' if user['email_verified'] else 'No'}")
+
+  click.echo("\nORGANIZATION")
+  click.echo(f"  Org ID: {user['org_id']}")
+  click.echo(f"  Role: {user['org_role']}")
+
+  click.echo("\nDATES")
+  click.echo(f"  Created: {user['created_at'][:10]}")
+  if user.get("last_login_at"):
+    click.echo(f"  Last Login: {user['last_login_at'][:10]}")
+
+
+@users.command("graphs")
+@click.argument("user_id")
+@click.pass_obj
+def user_graphs(client, user_id):
+  """Get all graphs accessible by a user."""
+  graphs_list = client._make_request("GET", f"/admin/v1/users/{user_id}/graphs")
+
+  if not graphs_list:
+    console.print("\n[yellow]User has no graph access.[/yellow]")
+    return
+
+  table = Table(title="User Graphs", show_header=True, header_style="bold cyan")
+  table.add_column("Graph ID", no_wrap=True)
+  table.add_column("Name", overflow="fold")
+  table.add_column("Role", overflow="fold")
+  table.add_column("Tier", overflow="fold")
+  table.add_column("Storage", justify="right")
+
+  for graph in graphs_list:
+    storage = f"{graph['storage_gb']:.2f} GB" if graph.get("storage_gb") else "N/A"
+    table.add_row(
+      graph["graph_id"],
+      graph["graph_name"],
+      graph["role"],
+      graph["graph_tier"],
+      storage,
+    )
+
+  console.print()
+  console.print(table)
+  console.print(f"\n[bold]Total:[/bold] {len(graphs_list):,} graphs")
+
+
+@users.command("activity")
+@click.argument("user_id")
+@click.pass_obj
+def user_activity(client, user_id):
+  """Get user's recent activity summary."""
+  activity = client._make_request("GET", f"/admin/v1/users/{user_id}/activity")
+
+  console.print()
+  console.print("[bold cyan]USER ACTIVITY[/bold cyan]")
+  console.print("=" * 60)
+
+  console.print(f"\nUser ID: {activity['user_id']}")
+
+  console.print("\n[bold]USAGE (This Month):[/bold]")
+  console.print(f"  Credit Usage: {activity['credit_usage_month']:,.2f}")
+  console.print(f"  Storage Usage: {activity['storage_usage_gb']:,.2f} GB")
+
+  console.print("\n[bold]ACCESS:[/bold]")
+  console.print(f"  Graphs: {len(activity['graphs_accessed']):,}")
+  console.print(f"  Repositories: {len(activity['repositories_accessed']):,}")
+
+  if activity.get("recent_logins"):
+    console.print("\n[bold]RECENT LOGINS:[/bold]")
+    for login in activity["recent_logins"][:5]:
+      console.print(f"  {login['timestamp'][:19]} ({login['type']})")
+
+
+@cli.group()
+def orgs():
+  """Manage organizations."""
+  pass
+
+
+@orgs.command("list")
+@click.option("--limit", default=100, help="Maximum number of results")
+@click.pass_obj
+def list_orgs(client, limit):
+  """List all organizations."""
+  params = {"limit": limit}
+  orgs_list = client._make_request("GET", "/admin/v1/orgs", params=params)
+
+  if not orgs_list:
+    console.print("\n[yellow]No organizations found.[/yellow]")
+    return
+
+  table = Table(title="Organizations", show_header=True, header_style="bold cyan")
+  table.add_column("Org ID", no_wrap=True)
+  table.add_column("Name", overflow="fold")
+  table.add_column("Type", overflow="fold")
+  table.add_column("Users", justify="right")
+  table.add_column("Graphs", justify="right")
+  table.add_column("Credits", justify="right")
+  table.add_column("Created", overflow="fold")
+
+  for org in orgs_list:
+    table.add_row(
+      org["org_id"],
+      org["name"],
+      org["org_type"],
+      str(org["user_count"]),
+      str(org["graph_count"]),
+      f"{org['total_credits']:.2f}",
+      org["created_at"][:10],
+    )
+
+  console.print()
+  console.print(table)
+  console.print(f"\n[bold]Total:[/bold] {len(orgs_list):,} organizations")
+
+
+@orgs.command("get")
+@click.argument("org_id")
+@click.pass_obj
+def get_org(client, org_id):
+  """Get details of a specific organization."""
+  org = client._make_request("GET", f"/admin/v1/orgs/{org_id}")
+
+  click.echo("\nORGANIZATION DETAILS")
+  click.echo("=" * 60)
+
+  click.echo(f"\nOrg ID: {org['org_id']}")
+  click.echo(f"Name: {org['name']}")
+  click.echo(f"Type: {org['org_type']}")
+
+  click.echo("\nSTATS")
+  click.echo(f"  Users: {org['user_count']}")
+  click.echo(f"  Graphs: {org['graph_count']}")
+  click.echo(f"  Total Credits: {org['total_credits']:.2f}")
+
+  click.echo("\nBILLING")
+  click.echo(f"  Payment Method: {'Yes' if org.get('has_payment_method') else 'No'}")
+  click.echo(
+    f"  Invoice Billing: {'Yes' if org.get('invoice_billing_enabled') else 'No'}"
+  )
+  click.echo(f"  Payment Terms: {org.get('payment_terms', 'N/A')}")
+  if org.get("billing_email"):
+    click.echo(f"  Billing Email: {org['billing_email']}")
+  if org.get("stripe_customer_id"):
+    click.echo(f"  Stripe Customer: {org['stripe_customer_id']}")
+
+  click.echo("\nDATES")
+  click.echo(f"  Created: {org['created_at'][:10]}")
+  click.echo(f"  Updated: {org['updated_at'][:10]}")
+
+  if org.get("users"):
+    click.echo("\nUSERS")
+    for user in org["users"]:
+      click.echo(f"  - {user['email']} ({user['role']}) - {user['name']}")
+
+  if org.get("graphs"):
+    click.echo("\nGRAPHS")
+    for graph in org["graphs"]:
+      click.echo(f"  - {graph['graph_id']}: {graph['name']} ({graph['tier']})")
+
+
+@orgs.command("update")
+@click.argument("org_id")
+@click.option(
+  "--invoice-billing/--no-invoice-billing",
+  default=None,
+  help="Enable/disable invoice billing",
+)
+@click.option("--billing-email", help="Billing email address")
+@click.option("--billing-contact-name", help="Billing contact name")
+@click.option("--payment-terms", help="Payment terms (e.g., net_30, net_60)")
+@click.pass_obj
+def update_org(
+  client,
+  org_id,
+  invoice_billing,
+  billing_email,
+  billing_contact_name,
+  payment_terms,
+):
+  """Update organization billing settings."""
+  params = {}
+
+  if invoice_billing is not None:
+    params["invoice_billing_enabled"] = invoice_billing
+  if billing_email:
+    params["billing_email"] = billing_email
+  if billing_contact_name:
+    params["billing_contact_name"] = billing_contact_name
+  if payment_terms:
+    params["payment_terms"] = payment_terms
+
+  if not params:
+    click.echo("❌ No updates specified")
+    return
+
+  org = client._make_request("PATCH", f"/admin/v1/orgs/{org_id}", params=params)
+
+  click.echo(f"✅ Updated org {org['org_id']}")
+  click.echo(f"   Name: {org.get('name', 'N/A')}")
+  click.echo(
+    f"   Invoice Billing: {'Yes' if org.get('invoice_billing_enabled') else 'No'}"
+  )
+  click.echo(f"   Payment Terms: {org.get('payment_terms', 'N/A')}")
+  if billing_email:
+    click.echo(f"   Billing Email: {org.get('billing_email', 'N/A')}")
+
+
+@cli.group()
+def migrations():
+  """Database migration operations."""
+  pass
+
+
+@migrations.command("up")
+@click.pass_obj
+def migrations_up(client):
+  """Run database migrations."""
+  if client.environment == "dev":
+    console.print("[blue]Running migrations locally...[/blue]")
+    result = subprocess.run(
+      ["uv", "run", "alembic", "upgrade", "head"],
+      capture_output=True,
+      text=True,
+    )
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("Migration failed")
+    console.print("[green]✓ Migrations completed[/green]")
+  else:
+    executor = SSMExecutor(client.environment)
+    stdout, _, _ = executor.execute(
+      "/usr/local/bin/run-migrations.sh --command 'upgrade head'"
+    )
+
+
+@migrations.command("down")
+@click.pass_obj
+def migrations_down(client):
+  """Rollback last migration."""
+  if client.environment == "dev":
+    console.print("[blue]Rolling back migration locally...[/blue]")
+    result = subprocess.run(
+      ["uv", "run", "alembic", "downgrade", "-1"],
+      capture_output=True,
+      text=True,
+    )
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("Rollback failed")
+    console.print("[green]✓ Rollback completed[/green]")
+  else:
+    executor = SSMExecutor(client.environment)
+    stdout, _, _ = executor.execute(
+      "/usr/local/bin/run-migrations.sh --command 'downgrade -1'"
+    )
+
+
+@migrations.command("current")
+@click.pass_obj
+def migrations_current(client):
+  """Show current migration version."""
+  if client.environment == "dev":
+    result = subprocess.run(
+      ["uv", "run", "alembic", "current"],
+      capture_output=True,
+      text=True,
+    )
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("Failed to get current version")
+  else:
+    executor = SSMExecutor(client.environment)
+    stdout, _, _ = executor.execute(
+      "/usr/local/bin/run-migrations.sh --command current"
+    )
+
+
+@cli.group()
+def sec():
+  """SEC database operations."""
+  pass
+
+
+@sec.command("load")
+@click.option("--ticker", required=True, help="Stock ticker symbol")
+@click.option("--year", help="Year to load (optional)")
+@click.pass_obj
+def sec_load(client, ticker, year):
+  """Load SEC data for a company."""
+  if client.environment == "dev":
+    console.print(f"[blue]Loading SEC data locally for {ticker}...[/blue]")
+    year_arg = f" {year}" if year else ""
+    command = f"just sec-load {ticker}{year_arg}"
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("SEC load failed")
+  else:
+    executor = SSMExecutor(client.environment)
+    year_arg = f" --year {year}" if year else ""
+    command = (
+      f"/usr/local/bin/run-bastion-operation.sh sec-load --ticker {ticker}{year_arg}"
+    )
+    stdout, _, _ = executor.execute(command)
+
+
+@sec.command("health")
+@click.pass_obj
+def sec_health(client):
+  """Check SEC database health."""
+  if client.environment == "dev":
+    command = "just sec-health"
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("SEC health check failed")
+  else:
+    executor = SSMExecutor(client.environment)
+    stdout, _, _ = executor.execute(
+      "/usr/local/bin/run-bastion-operation.sh sec-health"
+    )
+
+
+@sec.command("plan")
+@click.option("--start-year", required=True, type=int, help="Start year")
+@click.option("--end-year", required=True, type=int, help="End year")
+@click.option("--max-companies", default=50, help="Maximum number of companies")
+@click.pass_obj
+def sec_plan(client, start_year, end_year, max_companies):
+  """Create SEC orchestrator execution plan."""
+  if client.environment == "dev":
+    console.print("[blue]Creating SEC orchestrator plan...[/blue]")
+    command = f"uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {start_year} --end-year {end_year} --max-companies {max_companies}"
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("Plan creation failed")
+  else:
+    executor = SSMExecutor(client.environment)
+    command = f"/usr/local/bin/run-bastion-operation.sh sec-plan --start-year {start_year} --end-year {end_year} --max-companies {max_companies}"
+    stdout, _, _ = executor.execute(command)
+
+
+@sec.command("phase")
+@click.option(
+  "--phase",
+  required=True,
+  type=click.Choice(["download", "process", "consolidate", "ingest"]),
+  help="Phase to execute",
+)
+@click.option("--resume", is_flag=True, help="Resume from previous state")
+@click.pass_obj
+def sec_phase(client, phase, resume):
+  """Execute SEC orchestrator phase."""
+  if client.environment == "dev":
+    console.print(f"[blue]Executing SEC phase: {phase}...[/blue]")
+    resume_arg = " --resume" if resume else ""
+    command = f"uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {phase}{resume_arg}"
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("Phase execution failed")
+  else:
+    executor = SSMExecutor(client.environment)
+    resume_arg = " --resume" if resume else ""
+    command = (
+      f"/usr/local/bin/run-bastion-operation.sh sec-phase --phase {phase}{resume_arg}"
+    )
+    stdout, _, _ = executor.execute(command)
+
+
+@sec.command("status")
+@click.pass_obj
+def sec_status(client):
+  """Check SEC orchestrator status."""
+  if client.environment == "dev":
+    command = "uv run python -m robosystems.scripts.sec_orchestrator status"
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    console.print(result.stdout)
+    if result.returncode != 0:
+      console.print(f"[red]Error:[/red] {result.stderr}")
+      raise click.ClickException("Status check failed")
+  else:
+    executor = SSMExecutor(client.environment)
+    stdout, _, _ = executor.execute(
+      "/usr/local/bin/run-bastion-operation.sh sec-status"
+    )
 
 
 if __name__ == "__main__":

@@ -47,13 +47,6 @@
       "problemMatcher": []
     },
     {
-      "label": "RoboSystems Install Apps",
-      "type": "shell",
-      "command": "just",
-      "args": ["install-apps"],
-      "problemMatcher": []
-    },
-    {
       "label": "Docker Logs",
       "type": "shell",
       "command": "just",

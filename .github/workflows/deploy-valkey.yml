@@ -76,6 +76,12 @@ on:
         required: true
         type: string
 
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
     outputs:
       valkey_url:
         description: "Full Redis URL for Valkey ElastiCache"
@@ -93,8 +99,6 @@ on:
       AWS_ACCESS_KEY_ID:
         required: true
       AWS_SECRET_ACCESS_KEY:
-        required: true
-      AWS_SNS_ALERT_EMAIL:
         required: true
 
 jobs:
@@ -138,7 +142,7 @@ jobs:
                 ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
                 ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
                 ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
                 ParameterKey=NodeType,ParameterValue=${{ inputs.node_type }} \
                 ParameterKey=NumCacheNodes,ParameterValue=${{ inputs.num_cache_nodes }} \
                 ParameterKey=EnableEncryption,ParameterValue=${{ inputs.encryption_enabled }} \

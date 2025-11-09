@@ -57,6 +57,7 @@ just restart robosystems  # Restarts full stack
 The repository uses a dual `.env` pattern for Docker/localhost URL management:
 
 - **`.env`**: Container hostnames for Docker services (required by `compose.yaml`)
+
   - Example: `DATABASE_URL=postgresql://postgres:postgres@pg:5432/robosystems`
   - Used by containers running inside Docker network
 
@@ -181,8 +182,7 @@ just migrate-up
 just migrate-down
 
 # Database management
-just db-create-test-user           # Creates test user with JWT/API key
-just db-list-users                 # List all users
+just demo-user                     # Create/reuse demo user (shared across all demo scripts)
 ```
 
 ### Graph Database Infrastructure
@@ -295,8 +295,7 @@ just test-cov                      # Coverage report
 just lint                          # Ruff linting
 just format                        # Ruff formatting
 just typecheck                     # Pyright type checking
-just cf-lint template              # CloudFormation linting
-just cf-validate template          # CloudFormation validation
+just cf-lint template              # CloudFormation linting & validation
 ```
 
 **Standards:**
@@ -306,7 +305,7 @@ just cf-validate template          # CloudFormation validation
 - Type hints with basedpyright
 - **NO COMMENTS** unless explicitly requested
 - **Emoji Policy**:
-  - Interactive scripts (user-facing CLIs): Emojis allowed for better UX (e.g., `create_test_user.py`)
+  - Interactive scripts (user-facing CLIs): Emojis allowed for better UX (e.g., demo scripts in `examples/`)
   - Background/logging scripts: No emojis in log output (e.g., `arelle_cache_manager.py`)
   - Rationale: Interactive scripts benefit from visual feedback; logs should be machine-parseable
 
@@ -393,11 +392,6 @@ database_url = os.getenv("DATABASE_URL")  # ✗ Wrong
 # Logs and monitoring
 just logs api                      # API logs
 just logs-grep worker ERROR        # Search worker logs
-
-# Database debugging
-just db-info                       # Database status
-just graph-info graph_id           # Graph database info
-just credit-admin-health           # Credit system health
 ```
 
 ### Secret Management

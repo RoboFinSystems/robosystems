@@ -22,6 +22,12 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Public subnet IDs for ALB (comma-separated)
 
+  # Security & Access Configuration
+  AdminAllowedCidrBlocks:
+    Type: CommaDelimitedList
+    Description: "REQUIRED: Comma-separated list of CIDR blocks allowed to access Admin API (e.g., 203.0.113.0/24,198.51.100.0/24)"
+    ConstraintDescription: Must be comma-separated valid CIDR blocks
+
   # Container & Application Configuration
   ECRRepositoryUrl:
     Type: String
@@ -845,6 +851,46 @@ Resources:
       Protocol: HTTPS
       Certificates:
         - CertificateArn: !Ref ApiCertificate
+
+  # Admin API IP Whitelist Rule (Allow)
+  AdminApiAllowRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ListenerArn: !Ref ApiHttpsListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - "/admin/v1/*"
+        - Field: source-ip
+          SourceIpConfig:
+            Values: !Ref AdminAllowedCidrBlocks
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  # Admin API IP Deny Rule (Block unauthorized IPs)
+  AdminApiDenyRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ListenerArn: !Ref ApiHttpsListener
+      Priority: 2
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - "/admin/v1/*"
+      Actions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "403"
+            ContentType: "application/json"
+            MessageBody: '{"error": "Forbidden", "detail": "Admin API access restricted to authorized IP addresses"}'
 
   # HTTP Listener (redirect to HTTPS)
   ApiHttpListener:

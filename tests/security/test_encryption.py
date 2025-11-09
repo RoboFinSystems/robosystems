@@ -9,7 +9,6 @@ import pytest
 from unittest.mock import patch
 import base64
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
 
 from robosystems.security.encryption import (
   encrypt_data,
@@ -17,7 +16,7 @@ from robosystems.security.encryption import (
   generate_encryption_key,
   encrypt,
   decrypt,
-  _get_or_create_encryption_key,
+  _get_encryption_key,
 )
 
 
@@ -60,8 +59,8 @@ class TestEncryptionKeyGeneration:
     assert decrypted == test_data
 
 
-class TestGetOrCreateEncryptionKey:
-  """Test encryption key retrieval and creation logic."""
+class TestGetEncryptionKey:
+  """Test encryption key retrieval logic."""
 
   def test_get_key_from_environment_variable(self):
     """Test getting encryption key from environment variable."""
@@ -71,7 +70,7 @@ class TestGetOrCreateEncryptionKey:
     with patch("robosystems.security.encryption.env") as mock_env:
       mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = encoded_key
 
-      result = _get_or_create_encryption_key()
+      result = _get_encryption_key()
 
       assert result == test_key
 
@@ -83,84 +82,15 @@ class TestGetOrCreateEncryptionKey:
       with pytest.raises(
         ValueError, match="Invalid GRAPH_BACKUP_ENCRYPTION_KEY format"
       ):
-        _get_or_create_encryption_key()
+        _get_encryption_key()
 
-  def test_production_requires_encryption_key(self):
-    """Test that production environment requires explicit encryption key."""
+  def test_requires_encryption_key(self):
+    """Test that all environments require explicit encryption key."""
     with patch("robosystems.security.encryption.env") as mock_env:
       mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
-      mock_env.ENVIRONMENT = "prod"
 
-      with pytest.raises(
-        ValueError, match="GRAPH_BACKUP_ENCRYPTION_KEY must be set in production"
-      ):
-        _get_or_create_encryption_key()
-
-  def test_development_derives_key_from_password(self):
-    """Test key derivation for development environment."""
-    with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
-      mock_env.ENVIRONMENT = "dev"
-      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "test_password"
-
-      with patch("robosystems.security.encryption.logger") as mock_logger:
-        result = _get_or_create_encryption_key()
-
-        assert isinstance(result, bytes)
-        assert len(result) == 44  # Base64 encoded 32-byte key
-
-        # Should log warning about derived key
-        mock_logger.warning.assert_called_once()
-        assert "Using derived encryption key" in mock_logger.warning.call_args[0][0]
-
-  def test_development_key_deterministic(self):
-    """Test that development key derivation is deterministic."""
-    with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
-      mock_env.ENVIRONMENT = "dev"
-      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "same_password"
-
-      with patch("robosystems.security.encryption.logger"):
-        key1 = _get_or_create_encryption_key()
-        key2 = _get_or_create_encryption_key()
-
-        assert key1 == key2
-
-  def test_development_different_passwords_different_keys(self):
-    """Test that different passwords produce different keys."""
-    with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
-      mock_env.ENVIRONMENT = "dev"
-
-      with patch("robosystems.security.encryption.logger"):
-        mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "password1"
-        key1 = _get_or_create_encryption_key()
-
-        mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "password2"
-        key2 = _get_or_create_encryption_key()
-
-        assert key1 != key2
-
-  def test_pbkdf2_parameters(self):
-    """Test PBKDF2 parameters for security."""
-    with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
-      mock_env.ENVIRONMENT = "dev"
-      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "test_password"
-
-      with patch("robosystems.security.encryption.logger"):
-        with patch("robosystems.security.encryption.PBKDF2HMAC") as mock_kdf:
-          mock_kdf.return_value.derive.return_value = b"x" * 32
-
-          _get_or_create_encryption_key()
-
-          # Verify PBKDF2 was called with secure parameters
-          mock_kdf.assert_called_once()
-          call_kwargs = mock_kdf.call_args[1]
-          assert isinstance(call_kwargs["algorithm"], hashes.SHA256)
-          assert call_kwargs["length"] == 32
-          assert call_kwargs["iterations"] == 100000  # High iteration count
-          assert call_kwargs["salt"] == b"robosystems-kuzu-backup-salt-v1"
+      with pytest.raises(ValueError, match="GRAPH_BACKUP_ENCRYPTION_KEY must be set"):
+        _get_encryption_key()
 
 
 class TestEncryptData:
@@ -170,9 +100,7 @@ class TestEncryptData:
     """Test encrypting string data."""
     test_string = "Hello, World!"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       encrypted = encrypt_data(test_string)
@@ -184,9 +112,7 @@ class TestEncryptData:
     """Test encrypting bytes data."""
     test_bytes = b"Hello, World!"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       encrypted = encrypt_data(test_bytes)
@@ -196,9 +122,7 @@ class TestEncryptData:
 
   def test_encrypt_empty_data(self):
     """Test encrypting empty data."""
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       encrypted_str = encrypt_data("")
@@ -213,9 +137,7 @@ class TestEncryptData:
     """Test encrypting large data."""
     large_data = "x" * 10000  # 10KB string
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       encrypted = encrypt_data(large_data)
@@ -227,9 +149,7 @@ class TestEncryptData:
     """Test encrypting unicode data."""
     unicode_string = "Hello 🌍! 你好世界! مرحبا بالعالم!"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       encrypted = encrypt_data(unicode_string)
@@ -239,9 +159,7 @@ class TestEncryptData:
 
   def test_encrypt_key_derivation_failure(self):
     """Test encryption failure when key derivation fails."""
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.side_effect = ValueError("Key derivation failed")
 
       with pytest.raises(ValueError, match="Failed to encrypt data"):
@@ -249,9 +167,7 @@ class TestEncryptData:
 
   def test_encrypt_fernet_failure(self):
     """Test encryption failure when Fernet operations fail."""
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = b"invalid_key"  # Invalid Fernet key
 
       with pytest.raises(ValueError, match="Failed to encrypt data"):
@@ -261,9 +177,7 @@ class TestEncryptData:
     """Test encryption debug logging."""
     test_data = "test data"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       with patch("robosystems.security.encryption.logger") as mock_logger:
@@ -286,9 +200,7 @@ class TestDecryptData:
     fernet = Fernet(key)
     encrypted = fernet.encrypt(test_data)
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       decrypted = decrypt_data(encrypted)
@@ -300,9 +212,7 @@ class TestDecryptData:
     test_string = "Hello, World! 🌍"
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       encrypted = encrypt_data(test_string)
@@ -316,9 +226,7 @@ class TestDecryptData:
     test_bytes = b"Binary data \x00\x01\x02\xff"
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       encrypted = encrypt_data(test_bytes)
@@ -337,9 +245,7 @@ class TestDecryptData:
     encrypted = fernet1.encrypt(test_data)
 
     # Try to decrypt with key2
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key2
 
       with pytest.raises(ValueError, match="Failed to decrypt data"):
@@ -349,9 +255,7 @@ class TestDecryptData:
     """Test decryption with corrupted data."""
     corrupted_data = b"this is not encrypted data"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       with pytest.raises(ValueError, match="Failed to decrypt data"):
@@ -359,9 +263,7 @@ class TestDecryptData:
 
   def test_decrypt_empty_data(self):
     """Test decryption with empty data."""
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       with pytest.raises(ValueError, match="Failed to decrypt data"):
@@ -371,9 +273,7 @@ class TestDecryptData:
     """Test decryption failure when key derivation fails."""
     encrypted_data = b"some encrypted data"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.side_effect = ValueError("Key derivation failed")
 
       with pytest.raises(ValueError, match="Failed to decrypt data"):
@@ -386,9 +286,7 @@ class TestDecryptData:
     fernet = Fernet(key)
     encrypted = fernet.encrypt(test_data)
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       with patch("robosystems.security.encryption.logger") as mock_logger:
@@ -404,9 +302,7 @@ class TestDecryptData:
     """Test decryption error logging."""
     corrupted_data = b"corrupted"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       with patch("robosystems.security.encryption.logger") as mock_logger:
@@ -426,9 +322,7 @@ class TestBackwardCompatibility:
     """Test encrypt function alias."""
     test_data = "test data"
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       result1 = encrypt(test_data)
@@ -445,9 +339,7 @@ class TestBackwardCompatibility:
     fernet = Fernet(key)
     encrypted = fernet.encrypt(test_data)
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       result1 = decrypt(encrypted)
@@ -462,9 +354,7 @@ class TestBackwardCompatibility:
     test_string = "Hello, compatibility!"
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       # Encrypt with alias
@@ -484,9 +374,7 @@ class TestEncryptionSecurity:
     test_data = "same input data"
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       encrypted1 = encrypt_data(test_data)
@@ -512,9 +400,7 @@ class TestEncryptionSecurity:
     tampered[10] = (tampered[10] + 1) % 256  # Flip a bit
     tampered_bytes = bytes(tampered)
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       # Should detect tampering and fail
@@ -531,47 +417,8 @@ class TestEncryptionSecurity:
         valid_key
       ).decode()
 
-      retrieved_key = _get_or_create_encryption_key()
+      retrieved_key = _get_encryption_key()
       assert retrieved_key == valid_key
-
-  def test_salt_consistency(self):
-    """Test that salt is consistent for development key derivation."""
-    password = "test_password"
-
-    with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
-      mock_env.ENVIRONMENT = "dev"
-      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = password
-
-      with patch("robosystems.security.encryption.logger"):
-        key1 = _get_or_create_encryption_key()
-        key2 = _get_or_create_encryption_key()
-
-        # Same password and salt should produce same key
-        assert key1 == key2
-
-  def test_environment_isolation(self):
-    """Test that different environments can use different keys."""
-    # This is more of a documentation test to ensure environment isolation
-    with patch("robosystems.security.encryption.env") as mock_env:
-      mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = None
-
-      # Test dev environment
-      mock_env.ENVIRONMENT = "dev"
-      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "dev_password"
-      with patch("robosystems.security.encryption.logger"):
-        dev_key = _get_or_create_encryption_key()
-
-      # Test staging environment
-      mock_env.ENVIRONMENT = "staging"
-      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "staging_password"
-      with patch("robosystems.security.encryption.logger"):
-        staging_key = _get_or_create_encryption_key()
-
-      # Different environments should be able to have different keys
-      assert isinstance(dev_key, bytes)
-      assert isinstance(staging_key, bytes)
-      # Keys could be same or different depending on passwords
 
 
 class TestEncryptionPerformance:
@@ -583,9 +430,7 @@ class TestEncryptionPerformance:
     large_data = "x" * (1024 * 1024)
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       # Should complete without timeout
@@ -596,9 +441,7 @@ class TestEncryptionPerformance:
 
   def test_key_caching_behavior(self):
     """Test that key derivation is not unnecessarily repeated."""
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       # Multiple encryption calls
@@ -613,9 +456,7 @@ class TestEncryptionPerformance:
     """Test memory efficiency with various data sizes."""
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       # Test various sizes
@@ -640,9 +481,7 @@ class TestEncryptionEdgeCases:
 
   def test_none_input_handling(self):
     """Test handling of None inputs."""
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       with pytest.raises(
@@ -652,9 +491,7 @@ class TestEncryptionEdgeCases:
 
   def test_numeric_input_handling(self):
     """Test handling of numeric inputs."""
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = Fernet.generate_key()
 
       with pytest.raises(
@@ -667,9 +504,7 @@ class TestEncryptionEdgeCases:
     test_data = b"data\x00with\x00null\x00bytes"
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       encrypted = encrypt_data(test_data)
@@ -683,9 +518,7 @@ class TestEncryptionEdgeCases:
     very_long_string = "A" * 1000000  # 1 million characters
     key = Fernet.generate_key()
 
-    with patch(
-      "robosystems.security.encryption._get_or_create_encryption_key"
-    ) as mock_key:
+    with patch("robosystems.security.encryption._get_encryption_key") as mock_key:
       mock_key.return_value = key
 
       encrypted = encrypt_data(very_long_string)
@@ -696,15 +529,11 @@ class TestEncryptionEdgeCases:
   def test_environment_variable_edge_cases(self):
     """Test edge cases in environment variable handling."""
     with patch("robosystems.security.encryption.env") as mock_env:
-      # Test empty string
+      # Test empty string - should raise error
       mock_env.GRAPH_BACKUP_ENCRYPTION_KEY = ""
-      mock_env.ENVIRONMENT = "dev"
-      mock_env.GRAPH_BACKUP_ENCRYPTION_PASSWORD = "fallback_password"
 
-      with patch("robosystems.security.encryption.logger"):
-        # Should fall back to key derivation
-        key = _get_or_create_encryption_key()
-        assert isinstance(key, bytes)
+      with pytest.raises(ValueError, match="GRAPH_BACKUP_ENCRYPTION_KEY must be set"):
+        _get_encryption_key()
 
   def test_invalid_base64_key(self):
     """Test handling of invalid base64 encryption key."""

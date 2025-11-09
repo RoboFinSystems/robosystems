@@ -83,6 +83,12 @@ on:
         required: true
         type: string
 
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
     outputs:
       # Neo4j Writer Outputs
       security_group_id:
@@ -106,8 +112,6 @@ on:
         required: true
       AWS_SECRET_ACCESS_KEY:
         description: "AWS Secret Access Key for CloudFormation deployment"
-        required: true
-      AWS_SNS_ALERT_EMAIL:
         required: true
 
 jobs:
@@ -226,7 +230,7 @@ jobs:
           SUBNET_PARAM="${{ steps.az_selection.outputs.selected_subnet }}"
 
           NEO4J_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=VpcCidr,ParameterValue=\"10.0.0.0/16\" \
                 ParameterKey=SubnetIds,ParameterValue=\"$SUBNET_PARAM\" \

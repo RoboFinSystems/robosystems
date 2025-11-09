@@ -24,7 +24,7 @@ jobs:
 
           # Run cleanup for runners offline > 1 hour
           GITHUB_TOKEN="${{ secrets.ACTIONS_TOKEN }}" \
-          GITHUB_ORG="${{ secrets.RUNNER_GITHUB_ORG }}" \
+          GITHUB_ORG="${{ vars.RUNNER_GITHUB_ORG }}" \
           OFFLINE_HOURS_THRESHOLD=1 \
           ./bin/tools/gha/cleanup-offline-runners.sh
 
@@ -37,7 +37,7 @@ jobs:
 
           # Get current runner status
           RUNNERS_RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.ACTIONS_TOKEN }}" \
-            "https://api.github.com/orgs/${{ secrets.RUNNER_GITHUB_ORG }}/actions/runners")
+            "https://api.github.com/orgs/${{ vars.RUNNER_GITHUB_ORG }}/actions/runners")
 
           if echo "$RUNNERS_RESPONSE" | jq . >/dev/null 2>&1; then
             ONLINE_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | select(.status == "online") | .name' | wc -l)

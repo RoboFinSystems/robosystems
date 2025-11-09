@@ -422,11 +422,9 @@ This will:
 ### Testing CloudFormation Changes
 
 ```bash
-# Lint CloudFormation templates
+# Lint and validate CloudFormation templates
 just cf-lint api
-
-# Validate with AWS
-just cf-validate worker
+just cf-lint worker
 ```
 
 ## Questions and Support

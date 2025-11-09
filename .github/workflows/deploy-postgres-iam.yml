@@ -88,6 +88,12 @@ on:
         type: string
         default: ""
 
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
     outputs:
       postgres_secret_arn:
         description: "ARN of the PostgreSQL secret in Secrets Manager"
@@ -99,8 +105,6 @@ on:
       AWS_ACCESS_KEY_ID:
         required: true
       AWS_SECRET_ACCESS_KEY:
-        required: true
-      AWS_SNS_ALERT_EMAIL:
         required: true
 
 jobs:
@@ -147,7 +151,7 @@ jobs:
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
                 ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
-                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
                 ParameterKey=PostgresRotationDays,ParameterValue=${{ inputs.secrets_rotation_days }}"
 
           # Add Lambda bucket and fetch S3 keys from manifest if provided

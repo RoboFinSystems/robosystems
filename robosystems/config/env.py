@@ -408,9 +408,6 @@ class EnvConfig:
 
   # Graph Backup Configuration (applies to all backends)
   GRAPH_BACKUP_ENCRYPTION_KEY = get_secret_value("GRAPH_BACKUP_ENCRYPTION_KEY", "")
-  GRAPH_BACKUP_ENCRYPTION_PASSWORD = get_secret_value(
-    "GRAPH_BACKUP_ENCRYPTION_PASSWORD", ""
-  )
 
   # Graph Registry Tables (DynamoDB - applies to all backends)
   # These tables track graph allocations, instance health, and volume management

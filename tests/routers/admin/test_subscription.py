@@ -296,7 +296,7 @@ class TestCreateSubscription:
   """Tests for creating subscriptions endpoint."""
 
   def test_create_subscription_success(
-    self, client, db_session, test_user, test_graph, mock_admin_auth
+    self, client, db_session, test_user, test_org, test_graph, mock_admin_auth
   ):
     """Test successfully creating a subscription."""
     unique_graph_id = f"kg_{str(uuid.uuid4())[:8]}"
@@ -311,7 +311,7 @@ class TestCreateSubscription:
     payload = {
       "resource_type": "graph",
       "resource_id": unique_graph_id,
-      "user_id": test_user.id,
+      "org_id": test_org.id,
       "plan_name": "kuzu-standard",
       "billing_interval": "monthly",
     }
@@ -333,14 +333,12 @@ class TestCreateSubscription:
     assert data["plan_name"] == "kuzu-standard"
     assert data["status"] == SubscriptionStatus.ACTIVE.value
 
-  def test_create_subscription_user_not_found(
-    self, client, test_graph, mock_admin_auth
-  ):
-    """Test creating subscription for non-existent user."""
+  def test_create_subscription_org_not_found(self, client, test_graph, mock_admin_auth):
+    """Test creating subscription for non-existent organization."""
     payload = {
       "resource_type": "graph",
       "resource_id": test_graph.graph_id,
-      "user_id": "nonexistent_user",
+      "org_id": "org_nonexistent",
       "plan_name": "kuzu-standard",
     }
 
@@ -351,16 +349,14 @@ class TestCreateSubscription:
     )
 
     assert response.status_code == 404
-    assert "User" in response.json()["detail"]
+    assert "Organization" in response.json()["detail"]
 
-  def test_create_subscription_graph_not_found(
-    self, client, test_user, mock_admin_auth
-  ):
+  def test_create_subscription_graph_not_found(self, client, test_org, mock_admin_auth):
     """Test creating subscription for non-existent graph."""
     payload = {
       "resource_type": "graph",
       "resource_id": "kg_nonexistent",
-      "user_id": test_user.id,
+      "org_id": test_org.id,
       "plan_name": "kuzu-standard",
     }
 
@@ -374,13 +370,13 @@ class TestCreateSubscription:
     assert "Graph" in response.json()["detail"]
 
   def test_create_subscription_already_exists(
-    self, client, test_subscription, test_user, test_graph, mock_admin_auth
+    self, client, test_subscription, test_org, test_graph, mock_admin_auth
   ):
     """Test creating subscription when one already exists."""
     payload = {
       "resource_type": "graph",
       "resource_id": test_graph.graph_id,
-      "user_id": test_user.id,
+      "org_id": test_org.id,
       "plan_name": "kuzu-standard",
     }
 
@@ -394,7 +390,7 @@ class TestCreateSubscription:
     assert "already exists" in response.json()["detail"].lower()
 
   def test_create_subscription_invalid_plan(
-    self, client, db_session, test_user, mock_admin_auth
+    self, client, db_session, test_org, mock_admin_auth
   ):
     """Test creating subscription with invalid plan name."""
     unique_graph_id = f"kg_{str(uuid.uuid4())[:8]}"
@@ -409,7 +405,7 @@ class TestCreateSubscription:
     payload = {
       "resource_type": "graph",
       "resource_id": unique_graph_id,
-      "user_id": test_user.id,
+      "org_id": test_org.id,
       "plan_name": "invalid_plan",
     }
 
@@ -439,7 +435,7 @@ class TestCreateSubscription:
     payload = {
       "resource_type": "graph",
       "resource_id": unique_graph_id,
-      "user_id": test_user.id,
+      "org_id": test_org.id,
       "plan_name": "kuzu-standard",
     }
 
@@ -461,12 +457,12 @@ class TestCreateSubscription:
     assert len(audit_logs) > 0
     assert any(log.event_type == "subscription.created" for log in audit_logs)
 
-  def test_create_subscription_unauthorized(self, client, test_user, test_graph):
+  def test_create_subscription_unauthorized(self, client, test_org, test_graph):
     """Test creating subscription without authentication."""
     payload = {
       "resource_type": "graph",
       "resource_id": test_graph.graph_id,
-      "user_id": test_user.id,
+      "org_id": test_org.id,
       "plan_name": "kuzu-standard",
     }
 
@@ -692,15 +688,15 @@ class TestGetSubscriptionAuditLog:
     assert response.status_code == 401
 
 
-class TestListCustomers:
-  """Tests for listing customers endpoint."""
+class TestListOrgs:
+  """Tests for listing organizations endpoint."""
 
-  def test_list_customers_success(
-    self, client, db_session, test_customer, test_user, mock_admin_auth
+  def test_list_orgs_success(
+    self, client, db_session, test_customer, test_org, mock_admin_auth
   ):
-    """Test successfully listing customers."""
+    """Test successfully listing organizations."""
     response = client.get(
-      "/admin/v1/customers",
+      "/admin/v1/orgs",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -709,50 +705,11 @@ class TestListCustomers:
     assert isinstance(data, list)
     assert len(data) >= 1
 
-    user_ids = [customer["user_id"] for customer in data]
-    assert test_user.id in user_ids
+    org_ids = [org["org_id"] for org in data]
+    assert test_org.id in org_ids
 
-  def test_list_customers_with_payment_method_filter(
-    self, client, db_session, test_customer, test_user, mock_admin_auth
-  ):
-    """Test listing customers filtered by payment method."""
-    test_customer.update_payment_method(
-      stripe_payment_method_id="pm_test", session=db_session
-    )
-
-    response = client.get(
-      "/admin/v1/customers?has_payment_method=true",
-      headers={"Authorization": "Bearer test-admin-key"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    user_ids = [customer["user_id"] for customer in data]
-    assert test_user.id in user_ids
-
-  def test_list_customers_with_invoice_billing_filter(
-    self, client, db_session, test_customer, test_user, mock_admin_auth
-  ):
-    """Test listing customers filtered by invoice billing."""
-    test_customer.enable_invoice_billing(
-      billing_email="billing@example.com",
-      billing_contact_name="Finance",
-      payment_terms="net_30",
-      session=db_session,
-    )
-
-    response = client.get(
-      "/admin/v1/customers?invoice_billing_enabled=true",
-      headers={"Authorization": "Bearer test-admin-key"},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    user_ids = [customer["user_id"] for customer in data]
-    assert test_user.id in user_ids
-
-  def test_list_customers_pagination(self, client, db_session, mock_admin_auth):
-    """Test customer list pagination."""
+  def test_list_orgs_pagination(self, client, db_session, mock_admin_auth):
+    """Test org list pagination."""
     for i in range(5):
       unique_id = str(uuid.uuid4())[:8]
       user = User(
@@ -778,7 +735,7 @@ class TestListCustomers:
       BillingCustomer.get_or_create(org_id=org.id, session=db_session)
 
     response = client.get(
-      "/admin/v1/customers?limit=2&offset=0",
+      "/admin/v1/orgs?limit=2&offset=0",
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
@@ -786,19 +743,19 @@ class TestListCustomers:
     data = response.json()
     assert len(data) == 2
 
-  def test_list_customers_unauthorized(self, client):
-    """Test listing customers without authentication."""
-    response = client.get("/admin/v1/customers")
+  def test_list_orgs_unauthorized(self, client):
+    """Test listing orgs without authentication."""
+    response = client.get("/admin/v1/orgs")
     assert response.status_code == 401
 
 
-class TestUpdateCustomer:
-  """Tests for updating customer endpoint."""
+class TestUpdateOrg:
+  """Tests for updating organization billing endpoint."""
 
-  def test_update_customer_enable_invoice_billing(
-    self, client, db_session, test_customer, test_user, mock_admin_auth
+  def test_update_org_enable_invoice_billing(
+    self, client, db_session, test_customer, test_org, mock_admin_auth
   ):
-    """Test enabling invoice billing for customer."""
+    """Test enabling invoice billing for organization."""
     payload = {
       "invoice_billing_enabled": True,
       "billing_email": "billing@enterprise.com",
@@ -807,7 +764,7 @@ class TestUpdateCustomer:
     }
 
     response = client.patch(
-      f"/admin/v1/customers/{test_user.id}",
+      f"/admin/v1/orgs/{test_org.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -818,14 +775,14 @@ class TestUpdateCustomer:
     assert data["billing_email"] == "billing@enterprise.com"
     assert data["payment_terms"] == "net_60"
 
-  def test_update_customer_change_payment_terms(
-    self, client, db_session, test_customer, test_user, mock_admin_auth
+  def test_update_org_change_payment_terms(
+    self, client, db_session, test_customer, test_org, mock_admin_auth
   ):
-    """Test changing customer payment terms."""
+    """Test changing organization payment terms."""
     payload = {"payment_terms": "net_90"}
 
     response = client.patch(
-      f"/admin/v1/customers/{test_user.id}",
+      f"/admin/v1/orgs/{test_org.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -834,10 +791,10 @@ class TestUpdateCustomer:
     data = response.json()
     assert data["payment_terms"] == "net_90"
 
-  def test_update_customer_creates_if_not_exists(
-    self, client, db_session, test_user, test_org, mock_admin_auth
+  def test_update_org_creates_customer_if_not_exists(
+    self, client, db_session, test_org, mock_admin_auth
   ):
-    """Test that updating creates customer if doesn't exist."""
+    """Test that updating creates billing customer if doesn't exist."""
     db_session.query(BillingCustomer).filter(
       BillingCustomer.org_id == test_org.id
     ).delete()
@@ -846,23 +803,24 @@ class TestUpdateCustomer:
     payload = {"payment_terms": "net_30"}
 
     response = client.patch(
-      f"/admin/v1/customers/{test_user.id}",
+      f"/admin/v1/orgs/{test_org.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["user_id"] == test_user.id
+    assert data["org_id"] == test_org.id
+    assert data["payment_terms"] == "net_30"
 
-  def test_update_customer_creates_audit_log(
-    self, client, db_session, test_customer, test_user, mock_admin_auth
+  def test_update_org_creates_audit_log(
+    self, client, db_session, test_customer, test_org, mock_admin_auth
   ):
-    """Test that updating customer creates audit log."""
+    """Test that updating organization creates audit log."""
     payload = {"payment_terms": "net_60"}
 
     response = client.patch(
-      f"/admin/v1/customers/{test_user.id}",
+      f"/admin/v1/orgs/{test_org.id}",
       params=payload,
       headers={"Authorization": "Bearer test-admin-key"},
     )
@@ -880,12 +838,12 @@ class TestUpdateCustomer:
 
     assert len(audit_logs) > 0
 
-  def test_update_customer_unauthorized(self, client, test_customer, test_user):
-    """Test updating customer without authentication."""
+  def test_update_org_unauthorized(self, client, test_org):
+    """Test updating org without authentication."""
     payload = {"payment_terms": "net_60"}
 
     response = client.patch(
-      f"/admin/v1/customers/{test_user.id}",
+      f"/admin/v1/orgs/{test_org.id}",
       params=payload,
     )
     assert response.status_code == 401

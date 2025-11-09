@@ -25,9 +25,12 @@ from robosystems.routers import (
 )
 from robosystems.routers.admin import (
   subscription_router as admin_subscription_router,
-  customer_router as admin_customer_router,
   invoice_router as admin_invoice_router,
   webhooks_router as admin_webhooks_router,
+  credits_router as admin_credits_router,
+  graphs_router as admin_graphs_router,
+  users_router as admin_users_router,
+  orgs_router as admin_orgs_router,
 )
 from robosystems.middleware.otel import setup_telemetry
 from robosystems.middleware.database import DatabaseSessionMiddleware
@@ -306,9 +309,12 @@ def create_app() -> FastAPI:
   # Include admin routers (hidden from public docs)
   # The admin routers will not appear in the auto-generated docs
   app.include_router(admin_subscription_router, include_in_schema=False)
-  app.include_router(admin_customer_router, include_in_schema=False)
   app.include_router(admin_invoice_router, include_in_schema=False)
   app.include_router(admin_webhooks_router, include_in_schema=False)
+  app.include_router(admin_credits_router, include_in_schema=False)
+  app.include_router(admin_graphs_router, include_in_schema=False)
+  app.include_router(admin_users_router, include_in_schema=False)
+  app.include_router(admin_orgs_router, include_in_schema=False)
 
   # Custom OpenAPI schema
   def custom_openapi():
