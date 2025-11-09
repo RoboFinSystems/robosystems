@@ -35,6 +35,15 @@ from .billing import (
   invoices_router,
   subscriptions_router as billing_subscriptions_router,
 )
+from .admin import (
+  subscription_router as admin_subscription_router,
+  invoice_router as admin_invoice_router,
+  webhooks_router as admin_webhooks_router,
+  credits_router as admin_credits_router,
+  graphs_router as admin_graphs_router,
+  users_router as admin_users_router,
+  orgs_router as admin_orgs_router,
+)
 
 # Graph-scoped routes that require an existing graph_id
 router = APIRouter(prefix="/v1/graphs/{graph_id}", tags=[])
@@ -90,6 +99,16 @@ billing_router_v1.include_router(billing_subscriptions_router)
 billing_router_v1.include_router(invoices_router)
 billing_router_v1.include_router(checkout_router)
 
+# Admin routes that don't require a graph_id
+admin_router_v1 = APIRouter(prefix="")
+admin_router_v1.include_router(admin_subscription_router)
+admin_router_v1.include_router(admin_invoice_router)
+admin_router_v1.include_router(admin_webhooks_router)
+admin_router_v1.include_router(admin_credits_router)
+admin_router_v1.include_router(admin_graphs_router)
+admin_router_v1.include_router(admin_users_router)
+admin_router_v1.include_router(admin_orgs_router)
+
 # Export routers for main application
 __all__ = [
   "router",
@@ -101,4 +120,5 @@ __all__ = [
   "offering_router_v1",
   "operations_router_v1",
   "billing_router_v1",
+  "admin_router_v1",
 ]

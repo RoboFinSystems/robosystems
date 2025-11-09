@@ -160,14 +160,18 @@ on:
         type: string
         default: "false"
 
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
     secrets:
       ACTIONS_TOKEN:
         required: true
       AWS_ACCESS_KEY_ID:
         required: true
       AWS_SECRET_ACCESS_KEY:
-        required: true
-      AWS_SNS_ALERT_EMAIL:
         required: true
 
 jobs:
@@ -285,7 +289,7 @@ jobs:
           WORKER_NAME="worker-${{ inputs.worker_queue }}"
 
           WORKER_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-                ParameterKey=SNSAlertEmail,ParameterValue=${{ secrets.AWS_SNS_ALERT_EMAIL }} \
+                ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
                 ParameterKey=ECRRepositoryUrl,ParameterValue=${{ inputs.ecr_repository_url }} \

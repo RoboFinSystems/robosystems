@@ -142,8 +142,8 @@ function setup_minimum_config() {
     REPOSITORY_NAME="${GITHUB_ORG}/${REPO_NAME}"
     read -p "AWS Account ID [123456789012]: " AWS_ACCOUNT_ID
     AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID:-"123456789012"}
-    read -p "AWS EC2 Key Name [your-ec2-key-name]: " AWS_EC2_KEY_NAME
-    AWS_EC2_KEY_NAME=${AWS_EC2_KEY_NAME:-"your-ec2-key-name"}
+    read -p "Bastion EC2 Key Pair Name [your-key-pair-name]: " BASTION_KEY_PAIR_NAME
+    BASTION_KEY_PAIR_NAME=${BASTION_KEY_PAIR_NAME:-"your-key-pair-name"}
     read -p "AWS SNS Alert Email [alerts@example.com]: " AWS_SNS_ALERT_EMAIL
     AWS_SNS_ALERT_EMAIL=${AWS_SNS_ALERT_EMAIL:-"alerts@example.com"}
     read -p "ECR Repository Name [robosystems]: " ECR_REPOSITORY
@@ -284,21 +284,15 @@ function setup_minimum_config() {
     gh variable set RUNNER_MAX_INSTANCES --body "6"
     gh variable set RUNNER_DESIRED_INSTANCES --body "1"
     gh variable set RUNNER_ENVIRONMENT --body "ci"
+    gh variable set RUNNER_GITHUB_ORG --body "$GITHUB_ORG"
 
-    # Sensitive secrets
-    gh secret set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
-    gh secret set RUNNER_GITHUB_ORG --body "$GITHUB_ORG"
-    gh secret set AWS_EC2_KEY_NAME --body "$AWS_EC2_KEY_NAME"
+    # Notification Configuration
+    gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
 
-    # Set SSH keys if provided (as secret)
-    if [[ -n "$BASTION_SSH_KEYS" ]]; then
-        gh secret set BASTION_ADDITIONAL_SSH_KEYS --body "$BASTION_SSH_KEYS"
-        echo "✅ SSH keys configured"
-    else
-        gh secret set BASTION_ADDITIONAL_SSH_KEYS --body "# No additional SSH keys configured"
-    fi
+    # Bastion Configuration
+    gh variable set BASTION_KEY_PAIR_NAME --body "$BASTION_KEY_PAIR_NAME"
 
-    # Bastion Access Configuration (uses placeholder IP by default - as secret)
+    # Bastion Access Configuration (uses placeholder IP by default - as variable)
     gh secret set BASTION_ALLOWED_CIDR_BLOCK --body "0.0.0.0/32"
 
     # Features Configuration
@@ -311,7 +305,6 @@ function setup_minimum_config() {
     gh variable set WAF_RATE_LIMIT_PER_IP --body "10000"
     gh variable set WAF_GEO_BLOCKING_ENABLED --body "false"
     gh variable set WAF_AWS_MANAGED_RULES_ENABLED --body "true"
-    gh secret set WAF_ALLOWED_IPS --body "0.0.0.0/32"
 
     # Worker Configuration
     gh variable set WORKER_CRITICAL_ENABLED_PROD --body "false"
@@ -336,7 +329,7 @@ function setup_minimum_config() {
     echo "📋 Variables set:"
     echo "  🌐 Root Domain: $ROOT_DOMAIN"
     echo "  📦 Repository: $REPOSITORY_NAME"
-    echo "  🔑 EC2 Key: $AWS_EC2_KEY_NAME"
+    echo "  🔑 Bastion Key Pair: $BASTION_KEY_PAIR_NAME"
     echo "  🐳 ECR Repository: $ECR_REPOSITORY"
     echo "  📊 Observability: Enabled for both prod & staging"
     echo "  🛡️ WAF Protection: Ready to enable (currently disabled)"
@@ -381,7 +374,7 @@ function setup_full_config() {
     REPO_NAME=${REPO_NAME:-"robosystems-service"}
     REPOSITORY_NAME="${GITHUB_ORG}/${REPO_NAME}"
     read -p "Enter AWS Account ID: " AWS_ACCOUNT_ID
-    read -p "Enter AWS EC2 Key Name: " AWS_EC2_KEY_NAME
+    read -p "Enter Bastion EC2 Key Pair Name: " BASTION_KEY_PAIR_NAME
     read -p "Enter AWS SNS Alert Email: " AWS_SNS_ALERT_EMAIL
     read -p "Enter ECR Repository Name [robosystems]: " ECR_REPOSITORY
     ECR_REPOSITORY=${ECR_REPOSITORY:-"robosystems"}
@@ -408,10 +401,8 @@ function setup_full_config() {
     gh variable set ROBOSYSTEMS_APP_URL_PROD --body "https://$ROOT_DOMAIN"
     gh variable set ROBOSYSTEMS_APP_URL_STAGING --body "https://staging.$ROOT_DOMAIN"
 
-    # Sensitive infrastructure secrets
-    gh secret set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
-    gh secret set AWS_EC2_KEY_NAME --body "$AWS_EC2_KEY_NAME"
-    gh secret set RUNNER_GITHUB_ORG --body "$GITHUB_ORG"
+    # Bastion Configuration
+    gh variable set BASTION_KEY_PAIR_NAME --body "$BASTION_KEY_PAIR_NAME"
 
     # API Scaling Configuration
     gh variable set API_MIN_CAPACITY_PROD --body "1"
@@ -509,6 +500,10 @@ function setup_full_config() {
     gh variable set RUNNER_MAX_INSTANCES --body "6"
     gh variable set RUNNER_DESIRED_INSTANCES --body "1"
     gh variable set RUNNER_ENVIRONMENT --body "ci"
+    gh variable set RUNNER_GITHUB_ORG --body "$GITHUB_ORG"
+
+    # Notification Configuration
+    gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
 
     # Features Configuration
     gh variable set OBSERVABILITY_ENABLED_PROD --body "true"
@@ -520,7 +515,6 @@ function setup_full_config() {
     gh variable set WAF_RATE_LIMIT_PER_IP --body "10000"
     gh variable set WAF_GEO_BLOCKING_ENABLED --body "false"
     gh variable set WAF_AWS_MANAGED_RULES_ENABLED --body "true"
-    gh secret set WAF_ALLOWED_IPS --body "0.0.0.0/32"
 
     # Worker Configuration
     gh variable set WORKER_CRITICAL_ENABLED_PROD --body "false"
@@ -555,27 +549,6 @@ function setup_full_config() {
         read -p "RoboInvestor domain (e.g., roboinvestor.ai): " ROBOINVESTOR_DOMAIN
         gh variable set ROBOINVESTOR_APP_URL_PROD --body "https://$ROBOINVESTOR_DOMAIN"
         gh variable set ROBOINVESTOR_APP_URL_STAGING --body "https://staging.$ROBOINVESTOR_DOMAIN"
-    fi
-
-    # Bastion SSH Keys
-    echo ""
-    echo "Enter SSH public keys for bastion access (one per line, press Ctrl+D when done):"
-    BASTION_SSH_KEYS=""
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            if [[ -n "$BASTION_SSH_KEYS" ]]; then
-                BASTION_SSH_KEYS="$BASTION_SSH_KEYS"$'\n'"$line"
-            else
-                BASTION_SSH_KEYS="$line"
-            fi
-        fi
-    done
-
-    if [[ -n "$BASTION_SSH_KEYS" ]]; then
-        gh secret set BASTION_ADDITIONAL_SSH_KEYS --body "$BASTION_SSH_KEYS"
-        echo "✅ SSH keys configured"
-    else
-        gh secret set BASTION_ADDITIONAL_SSH_KEYS --body "# No additional SSH keys configured"
     fi
 
     # Bastion Access Configuration (uses placeholder IP by default - as secret)

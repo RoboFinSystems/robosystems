@@ -109,14 +109,19 @@ on:
         type: string
         description: Shared tier maximum instances
         default: ""
+
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
     secrets:
       ACTIONS_TOKEN:
         required: true
       AWS_ACCESS_KEY_ID:
         required: true
       AWS_SECRET_ACCESS_KEY:
-        required: true
-      AWS_SNS_ALERT_EMAIL:
         required: true
 
 jobs:
@@ -335,11 +340,11 @@ jobs:
       ecr_image_tag: ${{ inputs.ecr_image_tag }}
       volume_detachment_topic_arn: ${{ inputs.volume_detachment_topic_arn }}
       volume_manager_function_arn: ${{ inputs.volume_manager_function_arn }}
+      aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   # Step 2b: Deploy Neo4j Writers
   deploy-neo4j-writers:
@@ -373,8 +378,8 @@ jobs:
       # Volume Management
       volume_detachment_topic_arn: ${{ inputs.volume_detachment_topic_arn }}
       volume_manager_function_arn: ${{ inputs.volume_manager_function_arn }}
+      aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}

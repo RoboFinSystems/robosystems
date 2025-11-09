@@ -137,7 +137,7 @@ jobs:
                 ParameterKey=VpcId,ParameterValue=${{ steps.default-vpc.outputs.vpc_id }} \
                 ParameterKey=PublicSubnetIds,ParameterValue=\"${{ steps.default-vpc.outputs.subnet_ids }}\" \
                 ParameterKey=AmiId,ParameterValue=${{ steps.ami.outputs.ami-id }} \
-                ParameterKey=GitHubOrg,ParameterValue=${{ secrets.RUNNER_GITHUB_ORG }} \
+                ParameterKey=GitHubOrg,ParameterValue=${{ vars.RUNNER_GITHUB_ORG }} \
                 ParameterKey=GitHubToken,ParameterValue=${{ secrets.RUNNER_GITHUB_TOKEN }} \
                 ParameterKey=StorageSize,ParameterValue=${{ vars.RUNNER_STORAGE_SIZE || '30' }} \
                 ParameterKey=MinInstances,ParameterValue=${{ vars.RUNNER_MIN_INSTANCES || '1' }} \
@@ -231,7 +231,7 @@ jobs:
 
           while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
             RUNNERS_RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.RUNNER_GITHUB_TOKEN }}" \
-              "https://api.github.com/orgs/${{ secrets.RUNNER_GITHUB_ORG }}/actions/runners")
+              "https://api.github.com/orgs/${{ vars.RUNNER_GITHUB_ORG }}/actions/runners")
 
             if echo "$RUNNERS_RESPONSE" | jq . >/dev/null 2>&1; then
               # Count runners that:

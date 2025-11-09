@@ -33,6 +33,14 @@ on:
         description: "Public subnet IDs for bastion host (comma-separated)"
         required: true
         type: string
+      bastion_allowed_cidr:
+        description: "CIDR block for SSH access (e.g., 203.0.113.0/24 or VPN endpoint IP)"
+        required: true
+        type: string
+      bastion_key_pair_name:
+        description: "EC2 Key Pair name for SSH access to bastion host"
+        required: true
+        type: string
 
       # Security Groups
       valkey_sg_id:
@@ -61,12 +69,6 @@ on:
         required: true
       AWS_SECRET_ACCESS_KEY:
         required: true
-      AWS_EC2_KEY_NAME:
-        required: true
-      BASTION_ALLOWED_CIDR_BLOCK:
-        required: true
-      BASTION_ADDITIONAL_SSH_KEYS:
-        required: false
 
 jobs:
   action:
@@ -116,19 +118,13 @@ jobs:
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=PublicSubnetId,ParameterValue=$PUBLIC_SUBNET_ID \
                 ParameterKey=AmiId,ParameterValue=${{ steps.ami.outputs.ami-id }} \
-                ParameterKey=KeyPairName,ParameterValue=${{ secrets.AWS_EC2_KEY_NAME }} \
-                ParameterKey=AllowedCidrBlock,ParameterValue=${{ secrets.BASTION_ALLOWED_CIDR_BLOCK }}"
+                ParameterKey=KeyPairName,ParameterValue=${{ inputs.bastion_key_pair_name }} \
+                ParameterKey=AllowedCidrBlock,ParameterValue=${{ inputs.bastion_allowed_cidr }}"
 
           # Add Valkey client security group if provided
           if [ -n "${{ inputs.valkey_sg_id }}" ] && [ "${{ inputs.valkey_sg_id }}" != "" ]; then
             BASTION_PARAMS="$BASTION_PARAMS ParameterKey=ValkeySecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }}"
             echo "Adding Valkey client security group: ${{ inputs.valkey_sg_id }}"
-          fi
-
-          # Add additional SSH keys if provided
-          if [ -n "${{ secrets.BASTION_ADDITIONAL_SSH_KEYS }}" ] && [ "${{ secrets.BASTION_ADDITIONAL_SSH_KEYS }}" != "" ]; then
-            BASTION_PARAMS="$BASTION_PARAMS ParameterKey=AdditionalSSHKeys,ParameterValue=\"${{ secrets.BASTION_ADDITIONAL_SSH_KEYS }}\""
-            echo "Adding additional SSH keys"
           fi
 
           # Add UserData script configuration if provided

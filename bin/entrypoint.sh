@@ -69,8 +69,6 @@ case $DOCKER_PROFILE in
       --proxy-headers
     ;;
   "worker")
-    echo "Starting Celery worker with embedded Beat scheduler..."
-
     # Run EDGAR init for development environment
     if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
         uv run python /app/robosystems/scripts/arelle_cache_manager.py dev-init || echo "Warning: EDGAR init failed"
@@ -102,16 +100,37 @@ case $DOCKER_PROFILE in
       echo "Worker listening to queues: ${QUEUES}"
     fi
 
-    exec uv run celery -A robosystems.celery worker -B \
-      --loglevel=info \
-      --concurrency=${WORKER_AUTOSCALE:-1} \
-      --prefetch-multiplier=${WORKER_PREFETCH_MULTIPLIER:-0} \
-      -Q ${QUEUES} \
-      --without-gossip \
-      --without-heartbeat
+    # Only embed beat scheduler in dev (no separate beat container)
+    # In prod/staging, beat runs as separate ECS service
+    if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
+      echo "Starting Celery worker with embedded Beat scheduler..."
+      exec uv run celery -A robosystems.celery worker -B \
+        --loglevel=info \
+        --concurrency=${WORKER_AUTOSCALE:-1} \
+        --prefetch-multiplier=${WORKER_PREFETCH_MULTIPLIER:-0} \
+        -Q ${QUEUES} \
+        --without-gossip \
+        --without-heartbeat
+    else
+      echo "Starting Celery worker (beat scheduler runs separately)..."
+      exec uv run celery -A robosystems.celery worker \
+        --loglevel=info \
+        --concurrency=${WORKER_AUTOSCALE:-1} \
+        --prefetch-multiplier=${WORKER_PREFETCH_MULTIPLIER:-0} \
+        -Q ${QUEUES} \
+        --without-gossip \
+        --without-heartbeat
+    fi
     ;;
   "beat")
     echo "Starting Celery Beat scheduler..."
+
+    # Run migrations on beat startup in staging/prod
+    # Beat is singleton (DesiredCount: 1) so safe for migrations
+    if [[ "${RUN_MIGRATIONS:-}" == "true" ]]; then
+      run_db_init || echo "Database initialization failed, but continuing..."
+    fi
+
     exec uv run celery -A robosystems.celery beat \
       --loglevel=info \
       -s /tmp/celerybeat-schedule \

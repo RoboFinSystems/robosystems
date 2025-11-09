@@ -264,13 +264,14 @@ jobs:
       multi_az_enabled: ${{ vars.DATABASE_MULTI_AZ_ENABLED_STAGING || 'false' }}
       # Secret Rotation Configuration
       secrets_rotation_days: ${{ vars.DATABASE_SECRETS_ROTATION_DAYS || '90' }}
-      # Other Configuration
+      # Lambda Configuration
       lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
+      # Other Configuration
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   deploy-valkey:
     needs:
@@ -303,11 +304,12 @@ jobs:
       snapshot_retention_days: ${{ vars.VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING || '0' }}
       # Lambda Configuration
       lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
+      # Other Configuration
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   deploy-prometheus:
     if: vars.OBSERVABILITY_ENABLED_STAGING != 'false'
@@ -349,10 +351,9 @@ jobs:
         runner,
         create-deployment,
         stack-config,
-        package-lambda-functions,
         deploy-vpc,
-        deploy-valkey,
         deploy-postgres-iam,
+        deploy-valkey,
       ]
     uses: ./.github/workflows/deploy-bastion.yml
     with:
@@ -365,15 +366,14 @@ jobs:
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       vpc_id: ${{ needs.deploy-vpc.outputs.vpc_id }}
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
+      bastion_allowed_cidr: ${{ vars.BASTION_ALLOWED_CIDR }}
+      bastion_key_pair_name: ${{ vars.BASTION_KEY_PAIR_NAME }}
       # Security Groups
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_EC2_KEY_NAME: ${{ secrets.AWS_EC2_KEY_NAME }}
-      BASTION_ALLOWED_CIDR_BLOCK: ${{ secrets.BASTION_ALLOWED_CIDR_BLOCK }}
-      BASTION_ADDITIONAL_SSH_KEYS: ${{ secrets.BASTION_ADDITIONAL_SSH_KEYS }}
 
   # Graph Infrastructure - Step 1: Deploy DynamoDB, Secrets, Lambda monitoring
   deploy-graph-infra:
@@ -399,11 +399,12 @@ jobs:
       rotation_schedule_days: ${{ vars.GRAPH_API_KEY_ROTATION_DAYS || '90' }}
       # Lambda Configuration
       lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
+      # Other Configuration
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   # Graph Infrastructure - Step 2: Deploy EBS volume management
   deploy-graph-volumes:
@@ -425,11 +426,12 @@ jobs:
       lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
       # Secrets Configuration
       graph_api_secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
+      # Other Configuration
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   deploy-graph:
     needs:
@@ -475,11 +477,12 @@ jobs:
       kuzu_large_max_instances: ${{ vars.KUZU_LARGE_MAX_INSTANCES_STAGING }}
       kuzu_shared_min_instances: ${{ vars.KUZU_SHARED_MIN_INSTANCES_STAGING }}
       kuzu_shared_max_instances: ${{ vars.KUZU_SHARED_MAX_INSTANCES_STAGING }}
+      # Other Configuration
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   graph-container-refresh:
     needs: [runner, create-deployment, build, deploy-graph]
@@ -549,21 +552,21 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
-      # Other Configuration
-      prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
-      refresh_ecs_service: ${{ vars.API_ASG_REFRESH_STAGING || 'true' }}
+      admin_allowed_cidrs: ${{ vars.ADMIN_ALLOWED_CIDRS }}
       # WAF Configuration (environment-specific)
       waf_enabled: ${{ vars.WAF_ENABLED_STAGING || 'true' }}
       waf_stack_name: ${{ needs.stack-config.outputs.waf_stack }}
       waf_rate_limit_per_ip: ${{ vars.WAF_RATE_LIMIT_PER_IP || '10000' }}
       waf_enable_geo_blocking: ${{ vars.WAF_GEO_BLOCKING_ENABLED || 'false' }}
       waf_enable_aws_managed_rules: ${{ vars.WAF_AWS_MANAGED_RULES_ENABLED || 'true' }}
+      # Other Configuration
+      prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
+      refresh_ecs_service: ${{ vars.API_ASG_REFRESH_STAGING || 'true' }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      WAF_ALLOWED_IPS: ${{ secrets.WAF_ALLOWED_IPS }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   deploy-workers-matrix:
     needs:
@@ -595,18 +598,18 @@ jobs:
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
-      # Other Configuration
-      refresh_ecs_service: ${{ vars.WORKER_ASG_REFRESH_STAGING || 'true' }}
       # Worker Enable/Disable Configuration
       worker_critical_enabled: ${{ vars.WORKER_CRITICAL_ENABLED_STAGING }}
       worker_extraction_enabled: ${{ vars.WORKER_EXTRACTION_ENABLED_STAGING }}
       worker_shared_enabled: ${{ vars.WORKER_SHARED_ENABLED_STAGING }}
       worker_ingestion_enabled: ${{ vars.WORKER_INGESTION_ENABLED_STAGING }}
+      # Other Configuration
+      aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
+      refresh_ecs_service: ${{ vars.WORKER_ASG_REFRESH_STAGING || 'true' }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SNS_ALERT_EMAIL: ${{ secrets.AWS_SNS_ALERT_EMAIL }}
 
   deployment-successful:
     needs:
@@ -627,6 +630,7 @@ jobs:
       ]
     if: |
       always() &&
+      needs.runner.result == 'success' &&
       needs.create-deployment.result == 'success' &&
       needs.deploy-vpc.result == 'success' &&
       needs.deploy-graph.result == 'success' &&
@@ -636,8 +640,8 @@ jobs:
       (needs.deploy-grafana.result == 'success' || needs.deploy-grafana.result == 'skipped') &&
       (needs.deploy-prometheus.result == 'success' || needs.deploy-prometheus.result == 'skipped') &&
       needs.deploy-bastion.result == 'success' &&
-      (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped') &&
-      (needs.deploy-workers-matrix.result == 'success' || needs.deploy-workers-matrix.result == 'skipped') &&
+      needs.deploy-api.result == 'success' &&
+      needs.deploy-workers-matrix.result == 'success' &&
       (needs.graph-container-refresh.result == 'success' || needs.graph-container-refresh.result == 'skipped')
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
     outputs:

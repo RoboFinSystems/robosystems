@@ -66,7 +66,7 @@ WAF protects web applications from common exploits.
 - `WAF_GEO_BLOCKING_ENABLED`: Enable geographic restrictions ("true"/"false", default: "false")
 - `WAF_AWS_MANAGED_RULES_ENABLED`: Enable AWS managed rule sets ("true"/"false", default: "true")
 - `WAF_RATE_LIMIT_PER_IP`: Rate limit per IP (requests per 5 minutes, default: 10000)
-- `WAF_ALLOWED_IPS`: Comma-separated IP addresses/CIDRs to allowlist (default: "0.0.0.0/32")
+- `ADMIN_ALLOWED_CIDRS`: Admin API and WAF allowlist - IPs that can access admin endpoints and bypass all WAF rules
 
 ### 4. Enhanced Monitoring
 
@@ -86,7 +86,7 @@ gh variable set CLOUDTRAIL_ENABLED --body "true"
 gh variable set VPC_FLOW_LOGS_ENABLED --body "true"
 gh variable set WAF_ENABLED_PROD --body "true"
 gh variable set OBSERVABILITY_ENABLED_PROD --body "true"
-gh variable set AWS_SNS_ALERT_EMAIL --body "security@robosystems.ai"
+gh variable set AWS_SNS_ALERT_EMAIL --body "email@example.com"
 ```
 
 ## Deployment

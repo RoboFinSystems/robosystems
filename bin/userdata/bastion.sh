@@ -146,19 +146,6 @@ EOF
 chown ec2-user:ec2-user /home/ec2-user/.ssh/config
 chmod 600 /home/ec2-user/.ssh/config
 
-# Add additional SSH public keys if provided
-if [ -n "${AdditionalSSHKeys}" ]; then
-  echo "Adding additional SSH public keys..."
-  cat >> /home/ec2-user/.ssh/authorized_keys << EOF
-${AdditionalSSHKeys}
-EOF
-
-  # Ensure proper ownership and permissions
-  chown ec2-user:ec2-user /home/ec2-user/.ssh/authorized_keys
-  chmod 600 /home/ec2-user/.ssh/authorized_keys
-  echo "Additional SSH keys added successfully"
-fi
-
 # Send success signal to CloudFormation
 echo "Sending CloudFormation signal..."
 /opt/aws/bin/cfn-signal --exit-code $? --stack "${AWS_STACK_NAME}" --resource BastionHostEC2Instance --region "${AWS_REGION}"
@@ -381,9 +368,9 @@ SCRIPT_EOF
 chmod +x /usr/local/bin/run-migrations.sh
 chown root:root /usr/local/bin/run-migrations.sh
 
-# Note: Admin operations will use the Docker image from ECR
+# Note: Infrastructure operations will use the Docker image from ECR
 # This ensures consistency with deployed code and eliminates git clone authentication issues
-echo "Admin operations configured to use Docker image from ECR"
+echo "Infrastructure operations configured to use Docker image from ECR"
 
 # Create directory for RoboSystems configuration
 mkdir -p /etc/robosystems
@@ -395,18 +382,18 @@ AWS_REGION=${AWS_REGION}
 AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
 
 # Database configuration (populated at runtime)
-# DATABASE_URL will be set by admin scripts when needed
-# CELERY_BROKER_URL will be set by admin scripts when needed
+# DATABASE_URL will be set by infrastructure scripts when needed
+# CELERY_BROKER_URL will be set by infrastructure scripts when needed
 ENV_EOF
 
 chmod 600 /etc/robosystems/.env
 chown ec2-user:ec2-user /etc/robosystems/.env
 
-# Create the admin operations script
-cat > /usr/local/bin/run-admin-operation.sh << 'ADMIN_SCRIPT_EOF'
+# Create the infrastructure operations script
+cat > /usr/local/bin/run-bastion-operation.sh << 'BASTION_SCRIPT_EOF'
 #!/bin/bash
-# Admin Operations Script for Bastion Host
-# Runs admin operations using Docker image from ECR (same pattern as migrations)
+# Infrastructure Operations Script for Bastion Host
+# Runs infrastructure operations using Docker image from ECR (same pattern as migrations)
 
 set -e
 
@@ -425,7 +412,7 @@ print_warning() { echo -e "${YELLOW}Warning: $1${NC}"; }
 # Configuration
 ENV_FILE="/etc/robosystems/.env"
 LOG_DIR="/var/log/robosystems"
-AUDIT_LOG="$LOG_DIR/admin-operations.log"
+AUDIT_LOG="$LOG_DIR/bastion-operations.log"
 
 # Function to log operations
 log_operation() {
@@ -530,7 +517,7 @@ main() {
     local parameters="$@"
 
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}🛠️  RoboSystems Admin Operations${NC}"
+    echo -e "${BLUE}🛠️  RoboSystems Infrastructure Operations${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
 
@@ -576,51 +563,6 @@ main() {
             run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator status"
             ;;
 
-        ## Graph Operations ##
-        graph-query)
-            run_in_docker "uv run python -m robosystems.scripts.graph_query $parameters"
-            ;;
-        graph-health)
-            run_in_docker "uv run python -m robosystems.scripts.graph_query --command health $parameters"
-            ;;
-        graph-info)
-            run_in_docker "uv run python -m robosystems.scripts.graph_query --command info $parameters"
-            ;;
-        tables-query)
-            run_in_docker "uv run python -m robosystems.scripts.tables_query $parameters"
-            ;;
-
-        ## Credit Management ##
-        credit-health)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin health"
-            ;;
-        credit-bonus-graph)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin bonus-graph $parameters"
-            ;;
-        credit-bonus-repository)
-            run_in_docker "uv run python -m robosystems.scripts.credit_admin bonus-repository $parameters"
-            ;;
-        credit-force-allocate-user)
-            print_warning "WARNING: Manual credit allocation (bypasses normal schedule)"
-            read -p "Type 'CONFIRM' to proceed: " confirmation
-            if [ "$confirmation" == "CONFIRM" ]; then
-                run_in_docker "uv run python -m robosystems.scripts.credit_admin force-allocate-user $parameters --confirm"
-            else
-                print_error "Operation cancelled"
-                exit 1
-            fi
-            ;;
-        credit-force-allocate-all)
-            print_warning "WARNING: Manual credit allocation for ALL users!"
-            read -p "Type 'CONFIRM' to proceed: " confirmation
-            if [ "$confirmation" == "CONFIRM" ]; then
-                run_in_docker "uv run python -m robosystems.scripts.credit_admin force-allocate-all --confirm"
-            else
-                print_error "Operation cancelled"
-                exit 1
-            fi
-            ;;
-
         ## Valkey/Queue Management ##
         valkey-clear-queue)
             print_warning "WARNING: This will clear Valkey queue!"
@@ -634,25 +576,6 @@ main() {
             ;;
         valkey-list-queue)
             run_in_docker "uv run python -m robosystems.scripts.clear_valkey_queues --list-only $parameters"
-            ;;
-
-        ## Database Operations ##
-        db-info)
-            run_in_docker "uv run python -m robosystems.scripts.db_manager info"
-            ;;
-        db-list-users)
-            run_in_docker "uv run python -m robosystems.scripts.db_manager list-users"
-            ;;
-        db-create-user)
-            run_in_docker "uv run python -m robosystems.scripts.db_manager create-user $parameters"
-            ;;
-        db-create-key)
-            run_in_docker "uv run python -m robosystems.scripts.db_manager create-key $parameters"
-            ;;
-
-        ## User Management ##
-        create-user)
-            run_in_docker "uv run python -m robosystems.scripts.create_test_user $parameters"
             ;;
 
         ## Generic Script Runner ##
@@ -672,7 +595,7 @@ main() {
             cat << 'HELP_EOF'
 
 ======================================================================
-RoboSystems Admin Operations - Production/Staging Infrastructure
+RoboSystems Infrastructure Operations - Production/Staging Bastion Commands
 ======================================================================
 
 SEC Operations:
@@ -683,23 +606,7 @@ SEC Operations:
   sec-phase --phase [download|process|consolidate|ingest] [--resume] [--retry-failed]
   sec-status
 
-Graph Operations:
-  graph-query --graph-id ID --query 'CYPHER' [--format table|json]
-  graph-health [--url URL]
-  graph-info --graph-id ID [--url URL]
-  tables-query --graph-id ID --query 'SQL' [--format table|json]
-
-Repository Access Management:
-  repo-grant-access USER_ID REPOSITORY ACCESS_LEVEL
-  repo-revoke-access USER_ID REPOSITORY
-  repo-list-access
-  repo-list-users --repository REPO
-  repo-list-repositories
-  repo-check-access USER_ID [--repository REPO]
-
-Credit Management:
-  credit-health
-  credit-bonus-graph GRAPH_ID --amount N --description "TEXT"
+Credit Management (sensitive operations):
   credit-bonus-repository USER_ID REPO --amount N --description "TEXT"
   credit-force-allocate-user USER_ID (requires CONFIRM)
   credit-force-allocate-all (requires CONFIRM)
@@ -707,15 +614,6 @@ Credit Management:
 Valkey/Queue Management:
   valkey-clear-queue QUEUE_NAME (requires CONFIRM)
   valkey-list-queue QUEUE_NAME
-
-Database Operations:
-  db-info
-  db-list-users
-  db-create-user EMAIL NAME PASSWORD
-  db-create-key EMAIL KEY_NAME
-
-User Management:
-  create-user [--email EMAIL] [--with-sec-access] [--json]
 
 Generic Runner (for any other script):
   run <uv-command> [args...]
@@ -725,25 +623,19 @@ Examples:
 ======================================================================
 
 # Load SEC data for NVIDIA 2024
-admin sec-load --ticker NVDA --year 2024
+bastion sec-load --ticker NVDA --year 2024
 
 # Check SEC database health
-admin sec-health --verbose
+bastion sec-health --verbose
 
-# Query a graph
-admin graph-query --graph-id kg123abc --query 'MATCH (e:Entity {ticker: "NVDA"}) RETURN e'
+# Force credit allocation (DANGEROUS)
+bastion dlq-stats
 
-# Grant repository access
-admin repo-grant-access user_xyz sec admin
-
-# Check credit system health
-admin credit-health
-
-# Create test user with SEC access
-admin create-user --email test@example.com --with-sec-access --json
+# Add bonus credits to repository
+bastion valkey-list-queue celery
 
 # Run custom script
-admin run python -m robosystems.scripts.custom_script --help
+bastion run python -m robosystems.scripts.custom_script --help
 
 HELP_EOF
             ;;
@@ -773,26 +665,25 @@ HELP_EOF
 
 # Run main function
 main "$@"
-ADMIN_SCRIPT_EOF
+BASTION_SCRIPT_EOF
 
-chmod +x /usr/local/bin/run-admin-operation.sh
-chown root:root /usr/local/bin/run-admin-operation.sh
-echo "Admin operations script installed successfully"
+chmod +x /usr/local/bin/run-bastion-operation.sh
+chown root:root /usr/local/bin/run-bastion-operation.sh
+echo "Infrastructure operations script installed successfully"
 
 # Create convenient aliases for ec2-user
-echo 'alias admin="sudo /usr/local/bin/run-admin-operation.sh"' >> /home/ec2-user/.bashrc
-echo 'alias radmin="cd /home/ec2-user/robosystems-service && git pull && sudo /usr/local/bin/run-admin-operation.sh"' >> /home/ec2-user/.bashrc
+echo 'alias bastion="sudo /usr/local/bin/run-bastion-operation.sh"' >> /home/ec2-user/.bashrc
 
-# Create log directory for admin operations
+# Create log directory for infrastructure operations
 mkdir -p /var/log/robosystems
 chown ec2-user:ec2-user /var/log/robosystems
 
-# Add CloudWatch log monitoring for admin operations using jq to properly merge JSON
+# Add CloudWatch log monitoring for infrastructure operations using jq to properly merge JSON
 jq --arg env "$Environment" --arg instance "$INSTANCE_ID" \
   '.logs.logs_collected.files.collect_list += [{
-    "file_path": "/var/log/robosystems/admin-operations.log",
+    "file_path": "/var/log/robosystems/bastion-operations.log",
     "log_group_name": ("/robosystems/" + $env + "/bastion-host"),
-    "log_stream_name": ($instance + "/admin-operations"),
+    "log_stream_name": ($instance + "/bastion-operations"),
     "timezone": "UTC"
   }]' /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /tmp/cw-config.json
 

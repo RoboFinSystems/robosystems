@@ -23,9 +23,15 @@ from robosystems_client.api.auth.register_user import sync_detailed as register
 from robosystems_client.api.user.create_user_api_key import (
   sync_detailed as create_api_key,
 )
+from robosystems_client.api.subscriptions.create_repository_subscription import (
+  sync_detailed as subscribe_repository,
+)
 from robosystems_client.models.create_api_key_request import CreateAPIKeyRequest
 from robosystems_client.models.login_request import LoginRequest
 from robosystems_client.models.register_request import RegisterRequest
+from robosystems_client.models.create_repository_subscription_request import (
+  CreateRepositorySubscriptionRequest,
+)
 
 
 @dataclass
@@ -222,3 +228,36 @@ def ensure_user_credentials(
   print("=" * 70 + "\n")
 
   return credentials
+
+
+def grant_repository_access(
+  auth_client: AuthenticatedClient, repository_type: str, repository_plan: str = "unlimited"
+) -> bool:
+  """
+  Grant shared repository access to the authenticated user.
+
+  Args:
+      auth_client: Authenticated client with JWT token
+      repository_type: Type of repository (sec, industry, economic, etc.)
+      repository_plan: Plan tier (unlimited, standard, etc.)
+
+  Returns:
+      True if successful, False otherwise
+  """
+  print(f"\n🔄 Granting {repository_type.upper()} repository access ({repository_plan} tier)...")
+
+  plan_name = f"{repository_type}-{repository_plan}"
+  request = CreateRepositorySubscriptionRequest(
+    plan_name=plan_name,
+  )
+
+  response = subscribe_repository(client=auth_client, graph_id=repository_type, body=request)
+
+  if response.status_code in (200, 201):
+    print(f"✅ {repository_type.upper()} repository access granted successfully")
+    return True
+  else:
+    print(f"⚠️  Failed to grant {repository_type.upper()} repository access: {response.status_code}")
+    if hasattr(response, "content"):
+      print(f"   Response: {response.content}")
+    return False

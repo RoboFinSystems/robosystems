@@ -12,7 +12,7 @@ class SubscriptionCreateRequest(BaseModel):
 
   resource_type: str = "graph"
   resource_id: str
-  user_id: str
+  org_id: str
   plan_name: str
   billing_interval: str = "monthly"
 
@@ -30,9 +30,10 @@ class SubscriptionResponse(BaseModel):
   """Response with subscription details."""
 
   id: str
-  billing_customer_user_id: str
-  customer_email: Optional[str]
-  customer_name: Optional[str]
+  org_id: str
+  org_name: Optional[str]
+  owner_email: Optional[str]
+  owner_name: Optional[str]
   has_payment_method: bool
   invoice_billing_enabled: bool
   resource_type: str

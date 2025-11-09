@@ -360,6 +360,8 @@ Resources:
               Value: INFO
             - Name: DOCKER_PROFILE
               Value: beat
+            - Name: RUN_MIGRATIONS
+              Value: "true"
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             - Name: VALKEY_URL

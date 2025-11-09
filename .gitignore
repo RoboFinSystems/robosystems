@@ -137,3 +137,7 @@ GEMINI.md
 robosystems/arelle/EDGAR/
 # Arelle schema cache - downloaded during build
 robosystems/arelle/cache/
+
+# Example credentials (local development)
+examples/credentials/config.json
+examples/data/

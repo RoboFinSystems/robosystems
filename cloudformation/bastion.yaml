@@ -41,17 +41,13 @@ Parameters:
   # Security & Access Configuration
   AllowedCidrBlock:
     Type: String
-    Description: "REQUIRED: Specific office IP or VPN endpoint CIDR for SSH access (e.g., 203.0.113.0/24)"
+    Description: "REQUIRED: CIDR block for SSH access (e.g., 203.0.113.0/24 or VPN endpoint IP)"
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\/([0-9]|[1-2][0-9]|3[0-2])$
     ConstraintDescription: Must be a valid CIDR block (e.g., 203.0.113.0/24)
   KeyPairName:
     Type: String
     Description: EC2 Key Pair name for SSH access
     ConstraintDescription: Must be an existing EC2 Key Pair
-  AdditionalSSHKeys:
-    Type: String
-    Description: Additional SSH public keys (one per line, separated by newlines)
-    Default: ""
 
   # Script Configuration
   DeploymentBucket:
@@ -84,14 +80,14 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      GroupDescription: Security group for bastion host - SSH access from allowed IPs
+      GroupDescription: Security group for bastion host - SSH access from allowed IP
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref AllowedCidrBlock
-          Description: SSH access from specified CIDR block
+          Description: SSH access from authorized CIDR block
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -303,7 +299,6 @@ Resources:
 
           # Export all CloudFormation parameters as environment variables
           export Environment="${Environment}"
-          export AdditionalSSHKeys="${AdditionalSSHKeys}"
           export AWS_REGION="${AWS::Region}"
           export AWS_STACK_NAME="${AWS::StackName}"
           export AWS_ACCOUNT_ID="${AWS::AccountId}"

@@ -1,6 +1,6 @@
 # RoboSystems Admin CLI
 
-Remote administration tool for managing subscriptions, customers, and invoices via the admin API.
+Remote administration tool for managing subscriptions, customers, invoices, credits, graphs, users, and infrastructure operations via the admin API.
 
 ## Quick Start
 
@@ -10,21 +10,73 @@ The admin CLI is available through the `just admin` wrapper command:
 just admin dev <command> <args>
 ```
 
+## Security & IP Whitelisting
+
+**IMPORTANT**: The Admin API is protected by IP whitelisting at the infrastructure level (Application Load Balancer).
+
+### Access Control
+
+- **Admin API** (`/admin/v1/*`): Restricted to whitelisted IP addresses only
+- **Regular API** (`/v1/*`): Open to internet (protected by JWT/API keys)
+
+### IP Whitelist Configuration
+
+Access is controlled via GitHub variables for bastion SSH and Admin API:
+
+**Bastion SSH Access** (`BASTION_ALLOWED_CIDR`):
+- Single CIDR block for SSH access to bastion host
+- Typically your office IP or corporate VPN endpoint
+
+**Admin API Access** (`ADMIN_ALLOWED_CIDRS`):
+- Comma-separated CIDR blocks for Admin API endpoints
+- Can specify multiple IPs/networks
+
+**Format:**
+```bash
+# Bastion (single CIDR)
+203.0.113.42/32
+
+# Admin API (single or multiple CIDRs)
+203.0.113.42/32
+# OR
+203.0.113.0/24,198.51.100.0/24,10.0.1.0/24
+```
+
+**Setting the variables:**
+```bash
+# Bastion SSH access (single CIDR)
+gh variable set BASTION_ALLOWED_CIDR --body "YOUR.IP.ADDRESS/32"
+
+# Admin API access (can be single or comma-separated)
+gh variable set ADMIN_ALLOWED_CIDRS --body "YOUR.IP.ADDRESS/32"
+# OR for multiple IPs
+gh variable set ADMIN_ALLOWED_CIDRS --body "203.0.113.0/24,198.51.100.0/24"
+```
+
+**Note:** These are stored as variables (not secrets) since IP addresses aren't truly secret, and visibility helps with troubleshooting.
+
+### Security Features
+
+- ✅ **Infrastructure-level blocking**: ALB denies requests before reaching application
+- ✅ **Defense in depth**: IP whitelist + API key authentication
+- ✅ **Fail-secure**: Returns 403 Forbidden for unauthorized IPs
+- ✅ **Audit logging**: All admin operations logged via CloudWatch and audit trail
+
 ## Environment Targeting
 
 The admin CLI can target three environments:
 
-| Environment | API URL | Authentication |
-|------------|---------|----------------|
-| `dev` | http://localhost:8000 | `ADMIN_API_KEY` from `.env.local` |
-| `staging` | https://api.staging.robosystems.ai | AWS Secrets Manager |
-| `prod` | https://api.robosystems.ai | AWS Secrets Manager |
+| Environment | API URL | Authentication | IP Restriction |
+|------------|---------|----------------|----------------|
+| `dev` | http://localhost:8000 | `ADMIN_API_KEY` from `.env.local` | None (localhost) |
+| `staging` | https://api.staging.robosystems.ai | AWS Secrets Manager | Whitelisted IPs only |
+| `prod` | https://api.robosystems.ai | AWS Secrets Manager | Whitelisted IPs only |
 
 **Examples:**
 ```bash
 just admin dev customers list        # Local development
-just admin staging customers list    # Staging environment
-just admin prod stats                # Production environment
+just admin staging customers list    # Staging environment (requires whitelisted IP)
+just admin prod stats                # Production environment (requires whitelisted IP)
 ```
 
 ## Available Commands
@@ -258,6 +310,312 @@ just admin dev invoices mark-paid INVOICE_ID \
 
 ---
 
+### Credit Management
+
+#### List Credit Pools
+
+Display all graph credit pools with optional filters.
+
+```bash
+# List all credit pools
+just admin dev credits list
+
+# Filter by user email
+just admin dev credits list --user-email user@example.com
+
+# Filter by tier
+just admin dev credits list --tier kuzu-standard
+
+# Show only low balance pools (< 10% remaining)
+just admin dev credits list --low-balance
+
+# Limit results
+just admin dev credits list --limit 50
+```
+
+**Output columns:**
+- Graph ID
+- User ID
+- Tier
+- Current Balance
+- Monthly Allocation
+- Credit Multiplier
+
+#### Get Credit Pool
+
+Retrieve detailed information about a specific credit pool.
+
+```bash
+just admin dev credits get GRAPH_ID
+```
+
+**Output includes:**
+- Graph ID and user ID
+- Tier configuration
+- Current balance and monthly allocation
+- Credit multiplier
+- Storage limit override (if any)
+
+#### Add Bonus Credits
+
+Grant bonus credits to a graph (one-time allocation).
+
+```bash
+just admin dev credits bonus GRAPH_ID \
+  --amount 10000 \
+  --description "Customer retention - Q1 bonus"
+```
+
+**Use cases:**
+- Customer retention incentives
+- Service recovery compensation
+- Promotional credits
+- Special project allocations
+
+#### Credit Analytics
+
+View system-wide credit usage analytics.
+
+```bash
+# Overall analytics
+just admin dev credits analytics
+
+# Filter by tier
+just admin dev credits analytics --tier kuzu-enterprise
+```
+
+**Output includes:**
+- Total pools and allocations
+- Total consumed this month
+- Top consumers
+- Breakdown by tier
+
+#### Credit Health Check
+
+Monitor credit system health and identify issues.
+
+```bash
+just admin dev credits health
+```
+
+**Output includes:**
+- System status (healthy/warning/critical)
+- Pools with negative balances
+- Pools with low balances
+- Total pools with issues
+
+---
+
+### Graph Management
+
+#### List Graphs
+
+Display all graphs with optional filters.
+
+```bash
+# List all graphs
+just admin dev graphs list
+
+# Filter by owner email
+just admin dev graphs list --user-email user@example.com
+
+# Filter by tier
+just admin dev graphs list --tier kuzu-large
+
+# Filter by backend
+just admin dev graphs list --backend kuzu
+
+# Limit results
+just admin dev graphs list --limit 50
+```
+
+**Output columns:**
+- Graph ID
+- Name
+- Tier
+- Backend
+- Status
+- Storage
+
+#### Get Graph
+
+Retrieve detailed information about a specific graph.
+
+```bash
+just admin dev graphs get GRAPH_ID
+```
+
+**Output includes:**
+- Graph ID, name, description
+- Owner and organization
+- Tier and backend configuration
+- Storage usage and limits
+- Subgraph count and limits
+
+#### Graph Analytics
+
+View cross-graph analytics and statistics.
+
+```bash
+# Overall analytics
+just admin dev graphs analytics
+
+# Filter by tier
+just admin dev graphs analytics --tier kuzu-standard
+```
+
+**Output includes:**
+- Total graphs
+- Breakdown by tier, backend, status
+- Total storage usage
+- Largest graphs
+
+---
+
+### User Management
+
+#### List Users
+
+Display all users with optional filters.
+
+```bash
+# List all users
+just admin dev users list
+
+# Filter by email (partial match)
+just admin dev users list --email example.com
+
+# Show only verified users
+just admin dev users list --verified-only
+
+# Limit results
+just admin dev users list --limit 50
+```
+
+**Output columns:**
+- User ID
+- Email
+- Name
+- Verified (Yes/No)
+- Org Role
+- Created Date
+
+#### Get User
+
+Retrieve detailed information about a specific user.
+
+```bash
+just admin dev users get USER_ID
+```
+
+**Output includes:**
+- User ID, email, name
+- Email verification status
+- Organization ID and role
+- Creation date and last login
+
+#### User Graphs
+
+List all graphs owned by a user.
+
+```bash
+just admin dev users graphs USER_ID
+```
+
+**Output includes:**
+- Graph ID and name
+- Access level (owner/admin/write/read)
+- Created date
+
+#### User Activity
+
+View recent user activity and operations.
+
+```bash
+# Recent activity (last 7 days)
+just admin dev users activity USER_ID
+
+# Extended period
+just admin dev users activity USER_ID --days 30
+
+# Limit results
+just admin dev users activity USER_ID --limit 50
+```
+
+**Output includes:**
+- Recent API calls
+- Graph operations
+- Login activity
+- Subscription changes
+
+---
+
+### Remote Infrastructure Operations
+
+The admin CLI can execute infrastructure operations on the bastion host via AWS Systems Manager (SSM).
+
+#### Database Migrations
+
+Execute Alembic database migrations remotely on staging/production.
+
+```bash
+# Run pending migrations
+just admin staging migrations up
+just admin prod migrations up
+
+# Rollback last migration
+just admin staging migrations down
+just admin prod migrations down
+
+# Show current migration version
+just admin staging migrations current
+just admin prod migrations current
+```
+
+**Environment behavior:**
+- `dev`: Runs locally via subprocess
+- `staging/prod`: Executes via SSM on bastion host
+
+**Security:**
+- Requires AWS IAM authentication
+- Requires admin API key from Secrets Manager
+- All operations logged to CloudWatch
+
+#### SEC Operations
+
+Manage SEC filings database operations remotely.
+
+```bash
+# Load company data
+just admin prod sec load --ticker NVDA
+just admin prod sec load --ticker AAPL --year 2024
+
+# Check SEC database health
+just admin prod sec health
+
+# Plan batch import
+just admin prod sec plan --start-year 2020 --end-year 2024
+
+# Execute pipeline phase
+just admin prod sec phase --phase download
+just admin prod sec phase --phase process --resume
+
+# Check pipeline status
+just admin prod sec status
+```
+
+**Available phases:**
+- `download` - Download XBRL filings from SEC
+- `process` - Parse and validate filings
+- `consolidate` - Prepare for bulk import
+- `ingest` - Load into graph database
+
+**Environment behavior:**
+- `dev`: Runs locally against local SEC database
+- `staging/prod`: Executes via SSM on bastion host
+
+---
+
 ## Common Use Cases
 
 ### Enable Enterprise Billing
@@ -318,11 +676,17 @@ just admin dev subscriptions update SUBSCRIPTION_ID --status active
 
 ### Review System Health
 
-Get overview of the billing system:
+Get comprehensive overview of the system:
 
 ```bash
-# System statistics
+# Billing statistics
 just admin dev stats
+
+# Credit system health
+just admin dev credits health
+
+# Graph analytics
+just admin dev graphs analytics
 
 # Recent invoices
 just admin dev invoices list --limit 20
@@ -330,7 +694,47 @@ just admin dev invoices list --limit 20
 # Subscriptions needing attention
 just admin dev subscriptions list --status pending_payment
 just admin dev subscriptions list --status unpaid
+
+# Low balance credit pools
+just admin dev credits list --low-balance
 ```
+
+### Monitor Credit Usage
+
+Track and manage credit consumption:
+
+```bash
+# 1. Check overall credit health
+just admin prod credits health
+
+# 2. View top consumers
+just admin prod credits analytics
+
+# 3. Identify low balance pools
+just admin prod credits list --low-balance
+
+# 4. Grant bonus credits if needed
+just admin prod credits bonus GRAPH_ID \
+  --amount 5000 \
+  --description "Q1 performance bonus"
+```
+
+### Remote Database Migrations
+
+Execute database migrations on production:
+
+```bash
+# 1. Check current migration version
+just admin prod migrations current
+
+# 2. Run pending migrations
+just admin prod migrations up
+
+# 3. Verify migration success
+just admin prod migrations current
+```
+
+**Note:** Migrations execute remotely on the bastion host via SSM.
 
 ## Authentication
 
@@ -431,11 +835,47 @@ just admin dev subscriptions list
 
 ## Security Notes
 
-- Admin API key grants full administrative access
+### Access Control
+
+- **IP Whitelisting**: Admin API is restricted to whitelisted IP addresses at ALB level
+- **API Key Authentication**: Requires valid admin API key from AWS Secrets Manager
+- **Defense in Depth**: Both IP and API key validation required for staging/production
+
+### Best Practices
+
 - Never commit `.env.local` to git
-- Rotate production admin keys regularly
-- Audit admin actions via subscription audit logs
+- Rotate production admin keys regularly via AWS Secrets Manager
+- Update IP whitelist when office/VPN IP changes
+- Audit admin actions via subscription audit logs and CloudWatch
 - Use staging environment for testing administrative operations
+- Test migrations on staging before running on production
+
+### IP Whitelist Management
+
+The IP whitelists are managed via GitHub variables (not secrets, for visibility):
+
+```bash
+# Update bastion SSH whitelist (single CIDR)
+gh variable set BASTION_ALLOWED_CIDR --body "203.0.113.0/24"
+
+# Update Admin API whitelist (can be comma-separated)
+gh variable set ADMIN_ALLOWED_CIDRS --body "203.0.113.0/24,198.51.100.0/24"
+
+# View current values
+gh variable list | grep ALLOWED
+
+# After updating, redeploy stacks for changes to take effect:
+# - Bastion stack: gh workflow run staging.yml (or prod.yml)
+# - API stack: gh workflow run staging.yml (or prod.yml)
+```
+
+### Remote Operations Security
+
+Remote bastion operations (migrations, SEC) use AWS Systems Manager:
+- Requires valid AWS IAM credentials
+- Commands logged to CloudWatch Logs
+- Instance auto-starts if stopped
+- No SSH key required (uses SSM Session Manager)
 
 ## Related Documentation
 

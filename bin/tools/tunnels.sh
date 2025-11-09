@@ -3,7 +3,7 @@
 # RoboSystems Bastion Host SSH Tunnels
 # Usage: ./bin/tunnels.sh [environment] [service]
 # Environments: prod, staging, dev
-# Services: postgres, kuzu, valkey, all
+# Services: postgres, valkey, all
 
 set -euo pipefail
 
@@ -14,9 +14,7 @@ SSH_KEY="~/.ssh/id_rsa"
 # Dynamic configuration (populated by discover_infrastructure)
 BASTION_HOST=""
 POSTGRES_ENDPOINT=""
-KUZU_ENDPOINT=""
 VALKEY_ENDPOINT=""
-KUZU_INSTANCES_JSON=""  # JSON array of all Kuzu instances
 
 # Validate dependencies
 check_dependencies() {
@@ -84,7 +82,7 @@ print_usage() {
     echo "  dev      - Development environment"
     echo ""
     echo -e "${GREEN}======================================================================"
-    echo "Admin Operations - Run commands against infrastructure"
+    echo "Bastion Operations - Run infrastructure commands via bastion host"
     echo "======================================================================${NC}"
     echo "  <operation> [args...]"
     echo ""
@@ -92,27 +90,19 @@ print_usage() {
     echo "  $0 prod sec-load --ticker NVDA --year 2024"
     echo "  $0 prod sec-health"
     echo "  $0 prod graph-query --graph-id kg123 --query 'MATCH (e) RETURN e LIMIT 5'"
-    echo "  $0 prod credit-health"
     echo "  $0 prod dlq-stats"
-    echo "  $0 prod help                # Show all available commands"
+    echo "  $0 prod help                # Show all available bastion commands"
     echo ""
     echo -e "${GREEN}======================================================================"
     echo "INFRASTRUCTURE: Port Forwarding & Direct Access"
     echo "======================================================================${NC}"
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
-    echo "  kuzu          - Graph API tunnel to default instance (localhost:8001)"
-    echo "  kuzu-select   - Select specific Kuzu instance to tunnel"
-    echo "  kuzu-forward  - Port forward ALL Kuzu instances (8001, 8002, ...)"
-    echo "  kuzu-direct   - Direct SSH access to Kuzu instance filesystem"
-    echo "  kuzu-list     - List all available Kuzu instances"
-    echo "  kuzu-master   - Tunnel to shared master (port 8002)"
-    echo "  kuzu-replica  - Tunnel to shared replica (port 8002)"
     echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
     echo "  migrate       - Run database migrations via bastion"
-    echo "  help          - Show admin command examples"
+    echo "  help          - Show bastion operation examples"
     echo "  all           - All services (default)"
     echo ""
-    echo "  <operation>   - Run admin operation (sec-load, credit-health, etc.)"
+    echo "  <operation>   - Run bastion operation (sec-load, graph-query, etc.)"
     echo ""
     echo -e "${YELLOW}SSH Key Options:${NC}"
     echo "  --key, -k <path>  - Path to SSH private key"
@@ -163,14 +153,12 @@ discover_infrastructure() {
     fi
 
     # Discover PostgreSQL endpoint
-    # Stack names vary by environment - production uses Prod suffix, others use Staging
     local postgres_stack=""
     if [[ "$environment" == "prod" ]]; then
         postgres_stack="RoboSystemsPostgresIAMProd"
     elif [[ "$environment" == "staging" ]]; then
         postgres_stack="RoboSystemsPostgresIAMStaging"
     else
-        # Dev environment would use local postgres
         echo -e "${YELLOW}Skipping postgres discovery for dev environment${NC}"
         POSTGRES_ENDPOINT="NOT_FOUND"
         return
@@ -188,44 +176,6 @@ discover_infrastructure() {
         POSTGRES_ENDPOINT="NOT_FOUND"
     fi
 
-    # Discover Kuzu endpoints from DynamoDB registry
-    echo -e "${YELLOW}Looking for Kuzu instances from registry...${NC}"
-
-    # Get all active Kuzu instances from DynamoDB
-    local instance_registry_table="robosystems-kuzu-${environment}-instance-registry"
-
-    # Query DynamoDB for all healthy instances
-    local kuzu_instances=$(aws dynamodb scan \
-        --table-name "$instance_registry_table" \
-        --filter-expression "#status = :healthy" \
-        --expression-attribute-names '{"#status": "status"}' \
-        --expression-attribute-values '{":healthy": {"S": "healthy"}}' \
-        --query 'Items[*].[instance_id.S, private_ip.S, node_type.S, repository_type.S, database_count.N]' \
-        --output json 2>/dev/null || echo "[]")
-
-    if [[ "$kuzu_instances" == "[]" || -z "$kuzu_instances" ]]; then
-        echo -e "${YELLOW}Warning: Could not find any Kuzu instances in registry${NC}"
-        # Fallback to EC2 tag-based discovery
-        KUZU_ENDPOINT=$(aws ec2 describe-instances \
-            --filters "Name=tag:Service,Values=RoboSystems" \
-                      "Name=tag:Component,Values=Kuzu" \
-                      "Name=tag:Environment,Values=$environment" \
-                      "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].PrivateIpAddress' \
-            --output text 2>/dev/null || echo "")
-
-        if [[ -z "$KUZU_ENDPOINT" || "$KUZU_ENDPOINT" == "None" ]]; then
-            KUZU_ENDPOINT="NOT_FOUND"
-        fi
-    else
-        # Store all instances for later selection
-        KUZU_INSTANCES_JSON="$kuzu_instances"
-        # Use first instance as default
-        KUZU_ENDPOINT=$(echo "$kuzu_instances" | jq -r '.[0][1] // "NOT_FOUND"')
-        local instance_count=$(echo "$kuzu_instances" | jq '. | length')
-        echo -e "${GREEN}Found $instance_count Kuzu instance(s) in registry${NC}"
-    fi
-
     # Discover Valkey ElastiCache endpoint
     echo -e "${YELLOW}Looking for Valkey ElastiCache cluster...${NC}"
 
@@ -240,12 +190,10 @@ discover_infrastructure() {
         VALKEY_ENDPOINT="NOT_FOUND"
     fi
 
-
     # Show discovered endpoints
     echo -e "${GREEN}✓ Infrastructure discovered:${NC}"
     echo -e "  Bastion Host: ${GREEN}$BASTION_HOST${NC}"
     echo -e "  PostgreSQL:   ${GREEN}$POSTGRES_ENDPOINT${NC}"
-    echo -e "  Kuzu:         ${GREEN}$KUZU_ENDPOINT${NC}"
     echo -e "  Valkey:       ${GREEN}$VALKEY_ENDPOINT${NC}"
     echo ""
 }
@@ -360,31 +308,6 @@ setup_postgres_tunnel() {
     ssh -i $SSH_KEY -N -L 5432:$POSTGRES_ENDPOINT:5432 ec2-user@$BASTION_HOST
 }
 
-setup_kuzu_tunnel() {
-    if [[ "$KUZU_ENDPOINT" == "NOT_FOUND" ]]; then
-        echo -e "${RED}Error: Kuzu endpoint not found${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}Setting up Graph API tunnel...${NC}"
-    echo -e "${BLUE}Local: localhost:8001 -> Remote: $KUZU_ENDPOINT:8001${NC}"
-    echo ""
-    echo -e "${YELLOW}Access Graph API:${NC}"
-    echo "  API Docs:    http://localhost:8001/docs"
-    echo "  OpenAPI:     http://localhost:8001/openapi.json"
-    echo "  Health:      http://localhost:8001/health"
-    echo ""
-    echo -e "${YELLOW}Example query:${NC}"
-    echo "  curl -X POST http://localhost:8001/v1/kg1a2b3c/query \\"
-    echo "    -H 'Content-Type: application/json' \\"
-    echo "    -d '{\"query\": \"MATCH (e:Entity) RETURN e LIMIT 5\"}'"
-    echo ""
-    echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
-    echo ""
-
-    ssh -i $SSH_KEY -N -L 8001:$KUZU_ENDPOINT:8001 ec2-user@$BASTION_HOST
-}
-
 setup_valkey_tunnel() {
     if [[ "$VALKEY_ENDPOINT" == "NOT_FOUND" ]]; then
         echo -e "${RED}Error: Valkey endpoint not found${NC}"
@@ -401,433 +324,6 @@ setup_valkey_tunnel() {
     echo ""
 
     ssh -i $SSH_KEY -N -L 6379:$VALKEY_ENDPOINT:6379 ec2-user@$BASTION_HOST
-}
-
-setup_kuzu_direct() {
-    # Check if we have multiple instances
-    if [[ -n "$KUZU_INSTANCES_JSON" && "$KUZU_INSTANCES_JSON" != "[]" ]]; then
-        local instance_count=$(echo "$KUZU_INSTANCES_JSON" | jq '. | length')
-        if [[ "$instance_count" -gt 1 ]]; then
-            echo -e "${YELLOW}Multiple Kuzu instances found. Please select one:${NC}"
-            setup_kuzu_select_direct
-            return
-        fi
-    fi
-
-    if [[ "$KUZU_ENDPOINT" == "NOT_FOUND" ]]; then
-        echo -e "${RED}Error: Kuzu endpoint not found${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}Connecting to Kuzu instance via AWS Systems Manager...${NC}"
-    echo ""
-
-    # Try to get instance ID from registry if available
-    local selected_instance_id=""
-    if [[ -n "$KUZU_INSTANCES_JSON" && "$KUZU_INSTANCES_JSON" != "[]" ]]; then
-        selected_instance_id=$(echo "$KUZU_INSTANCES_JSON" | jq -r --arg ip "$KUZU_ENDPOINT" '.[] | select(.[1] == $ip) | .[0]')
-    fi
-
-    # If not found in registry, try SSM
-    if [[ -z "$selected_instance_id" ]]; then
-        echo -e "${YELLOW}Finding Kuzu instance ID via SSM...${NC}"
-        selected_instance_id=$(aws ssm describe-instance-information \
-            --filters "Key=tag:Service,Values=RoboSystems" \
-                      "Key=tag:Component,Values=Kuzu" \
-            --query 'InstanceInformationList[0].InstanceId' \
-            --output text 2>/dev/null)
-    fi
-
-    if [[ -z "$selected_instance_id" || "$selected_instance_id" == "None" ]]; then
-        echo -e "${YELLOW}SSM not available, falling back to SSH via bastion...${NC}"
-        echo ""
-
-        # Fallback to SSH method
-        echo -e "${GREEN}Setting up SSH to Kuzu instance via bastion...${NC}"
-        echo -e "${BLUE}Bastion: $BASTION_HOST -> Kuzu: $KUZU_ENDPOINT${NC}"
-        echo ""
-
-        # Add key to SSH agent
-        ssh-add $SSH_KEY 2>/dev/null || {
-            echo -e "${RED}Failed to add SSH key to agent. Make sure ssh-agent is running:${NC}"
-            echo "eval \$(ssh-agent)"
-            echo "ssh-add $SSH_KEY"
-            exit 1
-        }
-
-        echo -e "${GREEN}✓ SSH key added to agent${NC}"
-        echo -e "${BLUE}Connecting to Kuzu instance via bastion with SSH...${NC}"
-        echo ""
-
-        # Connect with agent forwarding, then SSH to Kuzu instance
-        ssh -A -i $SSH_KEY ec2-user@$BASTION_HOST -t "ssh -o StrictHostKeyChecking=no ec2-user@$KUZU_ENDPOINT"
-        return
-    fi
-
-    echo -e "${GREEN}✓ Found Kuzu instance: $selected_instance_id${NC}"
-    echo -e "${BLUE}Starting Systems Manager session...${NC}"
-    echo ""
-    echo -e "${YELLOW}You'll have shell access to the Kuzu instance filesystem.${NC}"
-    echo -e "${YELLOW}Useful commands:${NC}"
-    echo "  docker ps                          # List running containers"
-    echo "  docker logs kuzu-writer -f         # View Kuzu logs"
-    echo "  curl localhost:8001/health         # Check API health"
-    echo "  ls -la /mnt/kuzu-data/databases/   # List databases"
-    echo "  df -h /mnt/kuzu-data/              # Check disk usage"
-    echo "  du -sh /mnt/kuzu-data/databases/*  # Check database sizes"
-    echo ""
-    echo -e "${YELLOW}Database file access:${NC}"
-    echo "  cd /mnt/kuzu-data/databases/kg1a2b3c45  # Enter database directory"
-    echo "  ls -la                                      # List database files"
-    echo ""
-
-    # Connect via SSM
-    aws ssm start-session --target "$selected_instance_id" --document-name "AWS-StartInteractiveCommand" --parameters "command=sudo -u ec2-user -i bash"
-}
-
-
-list_kuzu_instances() {
-    echo -e "${GREEN}Available Kuzu Instances:${NC}"
-    echo ""
-
-    if [[ -z "$KUZU_INSTANCES_JSON" || "$KUZU_INSTANCES_JSON" == "[]" ]]; then
-        echo -e "${YELLOW}No Kuzu instances found in registry${NC}"
-        return
-    fi
-
-    # Parse and display instances
-    local index=1
-    echo "$KUZU_INSTANCES_JSON" | jq -r '.[] | @tsv' | while IFS=$'\t' read -r instance_id private_ip node_type repo_type db_count; do
-        local instance_name=""
-        if [[ "$node_type" == "shared_master" ]]; then
-            instance_name="$(echo $repo_type | tr '[:lower:]' '[:upper:]') Repository Master"
-        elif [[ "$node_type" == "shared_replica" ]]; then
-            instance_name="$(echo $repo_type | tr '[:lower:]' '[:upper:]') Repository Replica"
-        else
-            instance_name="Entity Writer (${db_count} DBs)"
-        fi
-
-        echo -e "${BLUE}$index)${NC} $instance_name"
-        echo "   Instance ID: $instance_id"
-        echo "   Private IP:  $private_ip"
-        echo "   Type:        $node_type"
-        if [[ "$node_type" == "shared_master" ]] || [[ "$node_type" == "shared_replica" ]]; then
-            echo "   Repository:  $repo_type"
-        fi
-        echo ""
-        ((index++))
-    done
-}
-
-setup_kuzu_master_tunnel() {
-    if [[ -z "$KUZU_INSTANCES_JSON" || "$KUZU_INSTANCES_JSON" == "[]" ]]; then
-        echo -e "${RED}No Kuzu instances available${NC}"
-        exit 1
-    fi
-
-    # Find shared master instance
-    local master_instance=$(echo "$KUZU_INSTANCES_JSON" | jq -r '.[] | select(.[2] == "shared_master")')
-
-    if [[ -z "$master_instance" ]]; then
-        echo -e "${RED}No shared master instance found${NC}"
-        echo -e "${YELLOW}Make sure Kuzu shared writers are deployed${NC}"
-        exit 1
-    fi
-
-    local master_ip=$(echo "$master_instance" | jq -r '.[1]')
-    local instance_id=$(echo "$master_instance" | jq -r '.[0]')
-    local repo_type=$(echo "$master_instance" | jq -r '.[3]')
-
-    echo -e "${GREEN}Connecting to shared master instance:${NC}"
-    echo "  Instance ID: $instance_id"
-    echo "  Repository:  $repo_type"
-    echo "  Endpoint:    $master_ip:8002"
-    echo ""
-    echo -e "${YELLOW}Setting up SSH tunnel...${NC}"
-    echo -e "${BLUE}Shared Master: localhost:8002 -> $master_ip:8002${NC}"
-    echo ""
-    echo -e "${YELLOW}Connection commands:${NC}"
-    echo "  curl http://localhost:8002/status"
-    echo "  curl http://localhost:8002/health"
-    echo ""
-    echo -e "${YELLOW}Press Ctrl+C to close the tunnel${NC}"
-    echo ""
-
-    # Create tunnel on port 8002
-    ssh -i "$SSH_KEY" \
-        -o "StrictHostKeyChecking=no" \
-        -o "UserKnownHostsFile=/dev/null" \
-        -N -L 8002:$master_ip:8002 \
-        ec2-user@$BASTION_HOST
-}
-
-setup_kuzu_replica_tunnel() {
-    if [[ -z "$KUZU_INSTANCES_JSON" || "$KUZU_INSTANCES_JSON" == "[]" ]]; then
-        echo -e "${RED}No Kuzu instances available${NC}"
-        exit 1
-    fi
-
-    # Find shared replica instances
-    local replica_instances=$(echo "$KUZU_INSTANCES_JSON" | jq -r '.[] | select(.[2] == "shared_replica")')
-
-    if [[ -z "$replica_instances" ]]; then
-        echo -e "${RED}No shared replica instances found${NC}"
-        echo -e "${YELLOW}Make sure Kuzu shared writers with replicas are deployed${NC}"
-        exit 1
-    fi
-
-    # Count replicas
-    local replica_count=$(echo "$KUZU_INSTANCES_JSON" | jq '[.[] | select(.[2] == "shared_replica")] | length')
-
-    if [[ "$replica_count" -gt 1 ]]; then
-        # Multiple replicas - let user select
-        echo -e "${GREEN}Available Shared Replica Instances:${NC}"
-        echo ""
-
-        local index=1
-        echo "$KUZU_INSTANCES_JSON" | jq -r '.[] | select(.[2] == "shared_replica") | @tsv' | while IFS=$'\t' read -r instance_id private_ip node_type repo_type db_count; do
-            echo -e "${BLUE}$index)${NC} $(echo $repo_type | tr '[:lower:]' '[:upper:]') Repository Replica"
-            echo "   Instance ID: $instance_id"
-            echo "   Private IP:  $private_ip"
-            echo ""
-            ((index++))
-        done
-
-        echo -e "${BLUE}Select replica (1-$replica_count): ${NC}"
-        read -r selection
-
-        if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "$replica_count" ]; then
-            echo -e "${RED}Invalid selection${NC}"
-            exit 1
-        fi
-
-        # Get selected replica
-        local selected_replica=$(echo "$KUZU_INSTANCES_JSON" | jq -r "[.[] | select(.[2] == \"shared_replica\")][$((selection-1))]")
-        local replica_ip=$(echo "$selected_replica" | jq -r '.[1]')
-        local instance_id=$(echo "$selected_replica" | jq -r '.[0]')
-        local repo_type=$(echo "$selected_replica" | jq -r '.[3]')
-    else
-        # Single replica
-        local replica_ip=$(echo "$replica_instances" | jq -r '.[1]')
-        local instance_id=$(echo "$replica_instances" | jq -r '.[0]')
-        local repo_type=$(echo "$replica_instances" | jq -r '.[3]')
-    fi
-
-    echo -e "${GREEN}Connecting to shared replica instance:${NC}"
-    echo "  Instance ID: $instance_id"
-    echo "  Repository:  $repo_type"
-    echo "  Endpoint:    $replica_ip:8002"
-    echo ""
-    echo -e "${YELLOW}Setting up SSH tunnel...${NC}"
-    echo -e "${BLUE}Shared Replica: localhost:8002 -> $replica_ip:8002${NC}"
-    echo ""
-    echo -e "${YELLOW}Connection commands:${NC}"
-    echo "  curl http://localhost:8002/status"
-    echo "  curl http://localhost:8002/health"
-    echo ""
-    echo -e "${YELLOW}Press Ctrl+C to close the tunnel${NC}"
-    echo ""
-
-    # Create tunnel on port 8002
-    ssh -i "$SSH_KEY" \
-        -o "StrictHostKeyChecking=no" \
-        -o "UserKnownHostsFile=/dev/null" \
-        -N -L 8002:$replica_ip:8002 \
-        ec2-user@$BASTION_HOST
-}
-
-select_kuzu_instance() {
-    if [[ -z "$KUZU_INSTANCES_JSON" || "$KUZU_INSTANCES_JSON" == "[]" ]]; then
-        echo -e "${RED}No Kuzu instances available to select${NC}"
-        exit 1
-    fi
-
-    list_kuzu_instances
-
-    local instance_count=$(echo "$KUZU_INSTANCES_JSON" | jq '. | length')
-    echo -e "${BLUE}Select instance (1-$instance_count): ${NC}"
-    read -r selection
-
-    if ! [[ "$selection" =~ ^[0-9]+$ ]] || [ "$selection" -lt 1 ] || [ "$selection" -gt "$instance_count" ]; then
-        echo -e "${RED}Invalid selection${NC}"
-        exit 1
-    fi
-
-    # Get selected instance (array is 0-indexed)
-    local selected_index=$((selection - 1))
-    local selected_instance=$(echo "$KUZU_INSTANCES_JSON" | jq -r ".[$selected_index]")
-
-    KUZU_ENDPOINT=$(echo "$selected_instance" | jq -r '.[1]')
-    local instance_id=$(echo "$selected_instance" | jq -r '.[0]')
-    local node_type=$(echo "$selected_instance" | jq -r '.[2]')
-    local repo_type=$(echo "$selected_instance" | jq -r '.[3]')
-
-    echo ""
-    echo -e "${GREEN}Selected instance:${NC}"
-    echo "  Instance ID: $instance_id"
-    echo "  Endpoint:    $KUZU_ENDPOINT"
-    if [[ "$node_type" == "shared_master" ]] || [[ "$node_type" == "shared_replica" ]]; then
-        echo "  Repository:  $repo_type"
-    fi
-    echo ""
-
-    return 0
-}
-
-setup_kuzu_select_tunnel() {
-    if [[ -z "$KUZU_INSTANCES_JSON" || "$KUZU_INSTANCES_JSON" == "[]" ]]; then
-        echo -e "${RED}No Kuzu instances available${NC}"
-        echo -e "${YELLOW}Make sure Kuzu writers are deployed and healthy${NC}"
-        exit 1
-    fi
-
-    select_kuzu_instance
-    setup_kuzu_tunnel
-}
-
-setup_kuzu_forward() {
-    if [[ -z "$KUZU_INSTANCES_JSON" || "$KUZU_INSTANCES_JSON" == "[]" ]]; then
-        echo -e "${RED}No Kuzu instances available${NC}"
-        echo -e "${YELLOW}Make sure Kuzu writers are deployed and healthy${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}Setting up port forwarding for Kuzu instances...${NC}"
-    echo ""
-
-    # Find available ports starting from 8001
-    local port_base=8001
-    local tunnel_commands=""
-    local instance_info=""
-
-    # Build tunnel commands and display info
-    local index=1
-    while IFS=$'\t' read -r instance_id private_ip node_type repo_type db_count; do
-        local port=$((port_base + index - 1))
-
-        # Check if port is available
-        while lsof -i :$port >/dev/null 2>&1; do
-            ((port++))
-        done
-
-        local instance_name=""
-        local remote_port=8001
-        if [[ "$node_type" == "shared_master" ]]; then
-            instance_name="${repo_type^^} Repository Master"
-            remote_port=8002
-        elif [[ "$node_type" == "shared_replica" ]]; then
-            instance_name="${repo_type^^} Repository Replica"
-            remote_port=8002
-        else
-            instance_name="Entity Writer (${db_count} DBs)"
-        fi
-
-        instance_info="${instance_info}${BLUE}Instance $index:${NC} $instance_name\n"
-        instance_info="${instance_info}  Instance ID: $instance_id\n"
-        instance_info="${instance_info}  Local port:  localhost:$port\n"
-        instance_info="${instance_info}  Remote:      $private_ip:$remote_port\n"
-        instance_info="${instance_info}  API Docs:    http://localhost:$port/docs\n"
-        instance_info="${instance_info}  OpenAPI:     http://localhost:$port/openapi.json\n"
-        instance_info="${instance_info}\n"
-
-        tunnel_commands="$tunnel_commands -L $port:$private_ip:$remote_port"
-        ((index++))
-    done < <(echo "$KUZU_INSTANCES_JSON" | jq -r '.[] | @tsv')
-
-    # Display all instance info
-    echo -e "$instance_info"
-
-    echo -e "${YELLOW}Example queries:${NC}"
-    echo "  # Query entity database on port 8001"
-    echo "  curl -X POST http://localhost:8001/v1/kg1a2b3c/query \\"
-    echo "    -H 'Content-Type: application/json' \\"
-    echo "    -d '{\"query\": \"MATCH (e:Entity) RETURN e LIMIT 5\"}'"
-    echo ""
-    echo "  # Query SEC repository on port 8002 (if available)"
-    echo "  curl -X POST http://localhost:8002/v1/sec/query \\"
-    echo "    -H 'Content-Type: application/json' \\"
-    echo "    -d '{\"query\": \"MATCH (e:Entity) WHERE e.ein = '\\''12-3456789'\\'' RETURN e\"}'"
-    echo ""
-
-    echo -e "${YELLOW}Starting all tunnels...${NC}"
-    echo -e "${YELLOW}Press Ctrl+C to stop all tunnels${NC}"
-    echo ""
-
-    # Start SSH with all port forwards
-    ssh -i $SSH_KEY -N $tunnel_commands ec2-user@$BASTION_HOST
-}
-
-setup_kuzu_select_direct() {
-    if [[ -z "$KUZU_INSTANCES_JSON" || "$KUZU_INSTANCES_JSON" == "[]" ]]; then
-        echo -e "${RED}No Kuzu instances available${NC}"
-        echo -e "${YELLOW}Make sure Kuzu writers are deployed and healthy${NC}"
-        exit 1
-    fi
-
-    select_kuzu_instance
-
-    # Get instance ID for selected endpoint using jq
-    local selected_instance_id=$(echo "$KUZU_INSTANCES_JSON" | jq -r --arg ip "$KUZU_ENDPOINT" '.[] | select(.[1] == $ip) | .[0]')
-
-    if [[ -z "$selected_instance_id" ]]; then
-        echo -e "${RED}Could not find instance ID for selected endpoint${NC}"
-        exit 1
-    fi
-
-    echo -e "${GREEN}Connecting to Kuzu instance $selected_instance_id via AWS Systems Manager...${NC}"
-    echo ""
-
-    # Check if instance has SSM agent
-    local ssm_instance=$(aws ssm describe-instance-information \
-        --filters "Key=InstanceIds,Values=$selected_instance_id" \
-        --query 'InstanceInformationList[0].InstanceId' \
-        --output text 2>/dev/null)
-
-    if [[ -z "$ssm_instance" || "$ssm_instance" == "None" ]]; then
-        echo -e "${YELLOW}SSM not available, falling back to SSH via bastion...${NC}"
-        echo ""
-
-        # Fallback to SSH method
-        echo -e "${GREEN}Setting up SSH to Kuzu instance via bastion...${NC}"
-        echo -e "${BLUE}Bastion: $BASTION_HOST -> Kuzu: $KUZU_ENDPOINT${NC}"
-        echo ""
-
-        # Add key to SSH agent
-        ssh-add $SSH_KEY 2>/dev/null || {
-            echo -e "${RED}Failed to add SSH key to agent. Make sure ssh-agent is running:${NC}"
-            echo "eval \$(ssh-agent)"
-            echo "ssh-add $SSH_KEY"
-            exit 1
-        }
-
-        echo -e "${GREEN}✓ SSH key added to agent${NC}"
-        echo -e "${BLUE}Connecting to Kuzu instance via bastion with SSH...${NC}"
-        echo ""
-
-        # Connect with agent forwarding, then SSH to Kuzu instance
-        ssh -A -i $SSH_KEY ec2-user@$BASTION_HOST -t "ssh -o StrictHostKeyChecking=no ec2-user@$KUZU_ENDPOINT"
-        return
-    fi
-
-    echo -e "${GREEN}✓ Found Kuzu instance: $selected_instance_id${NC}"
-    echo -e "${BLUE}Starting Systems Manager session...${NC}"
-    echo ""
-    echo -e "${YELLOW}You'll have shell access to the Kuzu instance filesystem.${NC}"
-    echo -e "${YELLOW}Useful commands:${NC}"
-    echo "  docker ps                          # List running containers"
-    echo "  docker logs kuzu-writer -f         # View Kuzu logs"
-    echo "  curl localhost:8001/health         # Check API health"
-    echo "  ls -la /mnt/kuzu-data/databases/   # List databases"
-    echo "  df -h /mnt/kuzu-data/              # Check disk usage"
-    echo "  du -sh /mnt/kuzu-data/databases/*  # Check database sizes"
-    echo ""
-    echo -e "${YELLOW}Database file access:${NC}"
-    echo "  cd /mnt/kuzu-data/databases/kg1a2b3c45  # Enter database directory"
-    echo "  ls -la                                      # List database files"
-    echo ""
-
-    # Connect via SSM
-    aws ssm start-session --target "$selected_instance_id" --document-name "AWS-StartInteractiveCommand" --parameters "command=sudo -u ec2-user -i bash"
 }
 
 run_database_migration() {
@@ -917,46 +413,46 @@ run_database_migration() {
     fi
 }
 
-run_admin_operation() {
+run_bastion_operation() {
     local environment=$1
     shift  # Remove environment from arguments
-    local admin_args="$@"
+    local operation_args="$@"
 
-    echo -e "${GREEN}Running admin operations on $environment environment...${NC}"
+    echo -e "${GREEN}Running bastion operation on $environment environment...${NC}"
     echo ""
 
     # If no arguments provided, show help
-    if [[ -z "$admin_args" ]]; then
-        admin_args="help"
+    if [[ -z "$operation_args" ]]; then
+        operation_args="help"
     fi
 
-    echo -e "${BLUE}Executing admin operation: $admin_args${NC}"
+    echo -e "${BLUE}Executing bastion operation: $operation_args${NC}"
     echo "----------------------------------------"
 
-    # Execute the admin command via SSH
+    # Execute the operation via SSH to bastion
     ssh -i "$SSH_KEY" \
         -o "StrictHostKeyChecking=no" \
         -o "UserKnownHostsFile=/dev/null" \
         -t ec2-user@$BASTION_HOST \
-        "sudo /usr/local/bin/run-admin-operation.sh $admin_args"
+        "sudo /usr/local/bin/run-bastion-operation.sh $operation_args"
 
     local exit_code=$?
 
     echo "----------------------------------------"
 
     if [[ "$exit_code" == "0" ]]; then
-        echo -e "${GREEN}✓ Admin operation completed successfully${NC}"
+        echo -e "${GREEN}✓ Bastion operation completed successfully${NC}"
     else
-        echo -e "${RED}✗ Admin operation failed with exit code: $exit_code${NC}"
+        echo -e "${RED}✗ Bastion operation failed with exit code: $exit_code${NC}"
         exit 1
     fi
 }
 
-show_admin_help() {
+show_bastion_help() {
     cat << 'HELP_EOF'
 
 ======================================================================
-RoboSystems Admin Operations - Run Commands on Infrastructure
+RoboSystems Bastion Operations - Infrastructure Commands
 ======================================================================
 
 Usage:
@@ -964,32 +460,25 @@ Usage:
 
 Quick Examples:
 
-  SEC Operations:
+  SEC Data Operations:
     ./bin/tools/tunnels.sh prod sec-load --ticker NVDA --year 2024
     ./bin/tools/tunnels.sh prod sec-health --verbose
     ./bin/tools/tunnels.sh prod sec-status
 
-  Graph Operations:
-    ./bin/tools/tunnels.sh prod graph-query --graph-id kg123 --query 'MATCH (e:Entity) RETURN e'
-    ./bin/tools/tunnels.sh prod graph-health
+  Graph Database Queries:
+    ./bin/tools/tunnels.sh prod graph-query --graph-id kg123 --query 'MATCH (e) RETURN e LIMIT 5'
 
-  Credit Management:
-    ./bin/tools/tunnels.sh prod credit-health
-    ./bin/tools/tunnels.sh prod credit-bonus-graph kg123 --amount 1000 --description "Bonus"
-
-  Repository Access:
-    ./bin/tools/tunnels.sh prod repo-grant-access user_xyz sec admin
-    ./bin/tools/tunnels.sh prod repo-check-access user_xyz
-
-  Database Operations:
-    ./bin/tools/tunnels.sh prod db-info
-    ./bin/tools/tunnels.sh prod db-list-users
-
-  User Management:
-    ./bin/tools/tunnels.sh prod create-user --email test@example.com --with-sec-access
+  Queue Management:
+    ./bin/tools/tunnels.sh prod valkey-list-queue celery
+    ./bin/tools/tunnels.sh prod valkey-clear-queue celery
+    ./bin/tools/tunnels.sh prod dlq-stats
 
 Show All Commands:
   ./bin/tools/tunnels.sh prod help
+
+Note: For user/subscription management, use the Admin CLI instead:
+  just admin dev credits health
+  just admin dev users list
 
 ======================================================================
 
@@ -1005,11 +494,6 @@ setup_all_tunnels() {
     if [[ "$POSTGRES_ENDPOINT" != "NOT_FOUND" ]]; then
         available_services+=("PostgreSQL")
         tunnel_args="$tunnel_args -L 5432:$POSTGRES_ENDPOINT:5432"
-    fi
-
-    if [[ "$KUZU_ENDPOINT" != "NOT_FOUND" ]]; then
-        available_services+=("Kuzu")
-        tunnel_args="$tunnel_args -L 8001:$KUZU_ENDPOINT:8001"
     fi
 
     if [[ "$VALKEY_ENDPOINT" != "NOT_FOUND" ]]; then
@@ -1028,19 +512,6 @@ setup_all_tunnels() {
         echo -e "${BLUE}PostgreSQL: localhost:5432 -> $POSTGRES_ENDPOINT:5432${NC}"
     fi
 
-    if [[ "$KUZU_ENDPOINT" != "NOT_FOUND" ]]; then
-        local kuzu_instance_count=1
-        if [[ -n "$KUZU_INSTANCES_JSON" && "$KUZU_INSTANCES_JSON" != "[]" ]]; then
-            kuzu_instance_count=$(echo "$KUZU_INSTANCES_JSON" | jq '. | length')
-        fi
-
-        if [[ "$kuzu_instance_count" -gt 1 ]]; then
-            echo -e "${BLUE}Kuzu:       localhost:8001 -> $KUZU_ENDPOINT:8001 (1 of $kuzu_instance_count instances)${NC}"
-        else
-            echo -e "${BLUE}Kuzu:       localhost:8001 -> $KUZU_ENDPOINT:8001${NC}"
-        fi
-    fi
-
     if [[ "$VALKEY_ENDPOINT" != "NOT_FOUND" ]]; then
         echo -e "${BLUE}Valkey:     localhost:6379 -> $VALKEY_ENDPOINT:6379${NC}"
     fi
@@ -1052,18 +523,6 @@ setup_all_tunnels() {
         echo "PostgreSQL: psql -h localhost -p 5432 -U postgres -d robosystems"
     fi
 
-    if [[ "$KUZU_ENDPOINT" != "NOT_FOUND" ]]; then
-        echo "Kuzu:       curl http://localhost:8001/health"
-        if [[ -n "$KUZU_INSTANCES_JSON" && "$KUZU_INSTANCES_JSON" != "[]" ]]; then
-            local kuzu_instance_count=$(echo "$KUZU_INSTANCES_JSON" | jq '. | length')
-            if [[ "$kuzu_instance_count" -gt 1 ]]; then
-                echo "            For other instances: ./bin/tunnels.sh $environment kuzu-select"
-                echo "            List all instances:  ./bin/tunnels.sh $environment kuzu-list"
-            fi
-        fi
-        echo "            Direct SSH access:   ./bin/tunnels.sh $environment kuzu-direct"
-    fi
-
     if [[ "$VALKEY_ENDPOINT" != "NOT_FOUND" ]]; then
         echo "Valkey:     redis-cli -h localhost -p 6379"
         echo "            Note: Valkey uses AUTH. Get token with:"
@@ -1071,58 +530,9 @@ setup_all_tunnels() {
         echo "            Then connect: redis-cli -h localhost -p 6379 -a <AUTH_TOKEN> --tls"
     fi
 
-
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop all tunnels${NC}"
     echo ""
-
-    # Ask user if they want direct access instead of tunnels
-    local has_direct_options=false
-    if [[ "$KUZU_ENDPOINT" != "NOT_FOUND" ]]; then
-        has_direct_options=true
-
-        # Clear any pending input and ensure clean terminal state
-        while read -r -t 1 -n 1; do :; done
-
-        # Force output to terminal
-        exec < /dev/tty
-
-        echo -e "${BLUE}Direct access options available:${NC}"
-        echo "1) Kuzu instance (file system access via AWS SSM)"
-        echo "2) Just use tunnels (default)"
-        echo ""
-        echo -e -n "${BLUE}Choose option (1-2, default=2, timeout 30s): ${NC}"
-
-        # Read from terminal directly with timeout
-        read -r -t 30 direct_choice < /dev/tty || direct_choice="2"
-        echo ""
-
-        case $direct_choice in
-            1)
-                if [[ "$KUZU_ENDPOINT" != "NOT_FOUND" ]]; then
-                    echo -e "${GREEN}Switching to direct Kuzu access...${NC}"
-                    # Check if multiple instances exist
-                    if [[ -n "$KUZU_INSTANCES_JSON" && "$KUZU_INSTANCES_JSON" != "[]" ]]; then
-                        local kuzu_instance_count=$(echo "$KUZU_INSTANCES_JSON" | jq '. | length')
-                        if [[ "$kuzu_instance_count" -gt 1 ]]; then
-                            setup_kuzu_select_direct
-                        else
-                            setup_kuzu_direct
-                        fi
-                    else
-                        setup_kuzu_direct
-                    fi
-                    return
-                else
-                    echo -e "${YELLOW}Kuzu not available, continuing with tunnels...${NC}"
-                fi
-                ;;
-            *)
-                echo -e "${GREEN}Using tunnels...${NC}"
-                ;;
-        esac
-        echo ""
-    fi
 
     # Execute SSH with dynamic tunnel arguments
     ssh -i $SSH_KEY -N $tunnel_args ec2-user@$BASTION_HOST
@@ -1176,7 +586,7 @@ main() {
                 fi
                 shift
                 ;;
-            postgres|kuzu|kuzu-select|kuzu-forward|kuzu-direct|kuzu-list|kuzu-master|kuzu-replica|valkey|migrate|help|all)
+            postgres|valkey|migrate|help|all)
                 if [[ -z "$service" ]]; then
                     service="$1"
                 else
@@ -1186,11 +596,11 @@ main() {
                 fi
                 shift
                 ;;
-            # Admin operations - catch all other commands
+            # Bastion operations - catch all other commands
             *)
                 if [[ -z "$service" && "$1" != -* ]]; then
-                    service="admin"
-                    # Capture all arguments for admin operation
+                    service="bastion"
+                    # Capture all arguments for bastion operation
                     additional_args=("$@")
                     break
                 else
@@ -1246,39 +656,18 @@ main() {
         postgres)
             setup_postgres_tunnel
             ;;
-        kuzu)
-            setup_kuzu_tunnel
-            ;;
-        kuzu-select)
-            setup_kuzu_select_tunnel
-            ;;
-        kuzu-forward)
-            setup_kuzu_forward
-            ;;
-        kuzu-direct)
-            setup_kuzu_direct
-            ;;
-        kuzu-list)
-            list_kuzu_instances
-            ;;
-        kuzu-master)
-            setup_kuzu_master_tunnel
-            ;;
-        kuzu-replica)
-            setup_kuzu_replica_tunnel
-            ;;
         valkey)
             setup_valkey_tunnel
             ;;
         migrate)
             run_database_migration "$environment"
             ;;
-        admin)
-            # Run admin operation with all captured arguments
-            run_admin_operation "$environment" "${additional_args[@]}"
+        bastion)
+            # Run bastion operation with all captured arguments
+            run_bastion_operation "$environment" "${additional_args[@]}"
             ;;
         help)
-            show_admin_help
+            show_bastion_help
             ;;
         all|"")
             setup_all_tunnels "$environment"

@@ -66,6 +66,10 @@ async def list_subscriptions(
 
     results = []
     for sub in subscriptions:
+      from ...models.iam import Org
+
+      org = session.query(Org).filter(Org.id == sub.org_id).first()
+
       customer = (
         session.query(BillingCustomer)
         .filter(BillingCustomer.org_id == sub.org_id)
@@ -87,9 +91,10 @@ async def list_subscriptions(
       results.append(
         SubscriptionResponse(
           id=sub.id,
-          billing_customer_user_id=user.id if user else sub.org_id,
-          customer_email=user.email if user else None,
-          customer_name=user.name if user else None,
+          org_id=sub.org_id,
+          org_name=org.name if org else None,
+          owner_email=user.email if user else None,
+          owner_name=user.name if user else None,
           has_payment_method=customer.has_payment_method if customer else False,
           invoice_billing_enabled=customer.invoice_billing_enabled
           if customer
@@ -147,7 +152,9 @@ async def get_subscription(request: Request, subscription_id: str):
         detail=f"Subscription {subscription_id} not found",
       )
 
-    from ...models.iam import OrgUser
+    from ...models.iam import OrgUser, Org
+
+    org = session.query(Org).filter(Org.id == subscription.org_id).first()
 
     customer = (
       session.query(BillingCustomer)
@@ -177,9 +184,10 @@ async def get_subscription(request: Request, subscription_id: str):
 
     return SubscriptionResponse(
       id=subscription.id,
-      billing_customer_user_id=user.id if user else subscription.org_id,
-      customer_email=user.email if user else None,
-      customer_name=user.name if user else None,
+      org_id=subscription.org_id,
+      org_name=org.name if org else None,
+      owner_email=user.email if user else None,
+      owner_name=user.name if user else None,
       has_payment_method=customer.has_payment_method if customer else False,
       invoice_billing_enabled=customer.invoice_billing_enabled if customer else False,
       resource_type=subscription.resource_type,
@@ -209,10 +217,13 @@ async def create_subscription(request: Request, data: SubscriptionCreateRequest)
   """Create a new subscription for any resource type."""
   session = next(get_db_session())
   try:
-    user = session.query(User).filter(User.id == data.user_id).first()
-    if not user:
+    from ...models.iam import Org
+
+    org = Org.get_by_id(data.org_id, session)
+    if not org:
       raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND, detail=f"User {data.user_id} not found"
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Organization {data.org_id} not found",
       )
 
     if data.resource_type == "graph":
@@ -239,20 +250,10 @@ async def create_subscription(request: Request, data: SubscriptionCreateRequest)
         detail=f"Invalid plan name: {data.plan_name}",
       )
 
-    from ...models.iam import OrgUser
-
-    user_orgs = OrgUser.get_user_orgs(data.user_id, session)
-    if not user_orgs:
-      raise HTTPException(
-        status_code=500,
-        detail=f"User {data.user_id} has no organization",
-      )
-
-    org_id = user_orgs[0].org_id
-    customer = BillingCustomer.get_or_create(org_id, session)
+    customer = BillingCustomer.get_or_create(data.org_id, session)
 
     subscription = BillingSubscription.create_subscription(
-      org_id=org_id,
+      org_id=data.org_id,
       resource_type=data.resource_type,
       resource_id=data.resource_id,
       plan_name=data.plan_name,
@@ -263,13 +264,27 @@ async def create_subscription(request: Request, data: SubscriptionCreateRequest)
 
     subscription.activate(session)
 
+    from ...models.iam import OrgUser
+
+    owner = (
+      session.query(OrgUser)
+      .join(User, OrgUser.user_id == User.id)
+      .filter(
+        OrgUser.org_id == data.org_id,
+        OrgUser.role == "OWNER",
+      )
+      .first()
+    )
+
+    user = owner.user if owner else None
+
     BillingAuditLog.log_event(
       session=session,
       event_type="subscription.created",
-      org_id=org_id,
+      org_id=data.org_id,
       subscription_id=subscription.id,
       actor_type="admin",
-      actor_user_id=data.user_id,
+      actor_user_id=user.id if user else None,
       description=f"Subscription created by admin {request.state.admin.get('name', 'unknown')}",
       event_data={
         "admin_key_id": request.state.admin_key_id,
@@ -277,7 +292,7 @@ async def create_subscription(request: Request, data: SubscriptionCreateRequest)
         "resource_type": data.resource_type,
         "resource_id": data.resource_id,
         "plan_name": data.plan_name,
-        "user_id": data.user_id,
+        "org_id": data.org_id,
       },
     )
 
@@ -288,16 +303,16 @@ async def create_subscription(request: Request, data: SubscriptionCreateRequest)
         "subscription_id": subscription.id,
         "resource_type": data.resource_type,
         "resource_id": data.resource_id,
-        "user_id": data.user_id,
-        "org_id": org_id,
+        "org_id": data.org_id,
       },
     )
 
     return SubscriptionResponse(
       id=subscription.id,
-      billing_customer_user_id=data.user_id,
-      customer_email=user.email,
-      customer_name=user.name,
+      org_id=data.org_id,
+      org_name=org.name if org else None,
+      owner_email=user.email if user else None,
+      owner_name=user.name if user else None,
       has_payment_method=customer.has_payment_method,
       invoice_billing_enabled=customer.invoice_billing_enabled,
       resource_type=subscription.resource_type,
@@ -395,7 +410,9 @@ async def update_subscription(
         },
       )
 
-    from ...models.iam import OrgUser
+    from ...models.iam import OrgUser, Org
+
+    org = session.query(Org).filter(Org.id == subscription.org_id).first()
 
     customer = (
       session.query(BillingCustomer)
@@ -426,9 +443,10 @@ async def update_subscription(
 
     return SubscriptionResponse(
       id=subscription.id,
-      billing_customer_user_id=user.id if user else subscription.org_id,
-      customer_email=user.email if user else None,
-      customer_name=user.name if user else None,
+      org_id=subscription.org_id,
+      org_name=org.name if org else None,
+      owner_email=user.email if user else None,
+      owner_name=user.name if user else None,
       has_payment_method=customer.has_payment_method if customer else False,
       invoice_billing_enabled=customer.invoice_billing_enabled if customer else False,
       resource_type=subscription.resource_type,

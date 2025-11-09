@@ -90,6 +90,29 @@ update:
     uv sync --all-extras --dev
 
 
+## Demo Scripts ##
+
+# Create or reuse demo user (uses shared examples/credentials/config.json)
+demo-user *args="":
+    uv run examples/credentials/main.py {{args}}
+
+# Setup SEC repository demo - loads data, grants access, updates config
+demo-sec ticker="NVDA" year="2025" skip_queries="false":
+    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
+
+# Run SEC demo preset queries
+demo-sec-query all="false":
+    uv run examples/sec_demo/query_examples.py {{ if all == "true" { "--all" } else { "" } }}
+
+# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-accounting flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
+# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
+demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
+
 ## Testing ##
 
 # Run all tests (excludes slow tests)
@@ -134,12 +157,10 @@ format:
 typecheck module="":
     uv run basedpyright {{ if module != "" { "robosystems/" + module } else { "" } }}
 
-# CloudFormantion linting
+# CloudFormation linting and validation
 cf-lint template:
-    uv run cfn-lint -t cloudformation/{{template}}.yaml
-
-cf-validate template:
-    uv run aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml
+    @uv run cfn-lint -t cloudformation/{{template}}.yaml
+    @uv run aws cloudformation validate-template --template-body file://cloudformation/{{template}}.yaml > /dev/null
 
 
 ## CI/CD ##
@@ -165,29 +186,9 @@ bastion-tunnel environment service key:
     @bin/tools/tunnels.sh {{environment}} {{service}} --key ~/.ssh/{{key}}
 
 
-## Demo Scripts ##
-
-# Setup SEC repository demo - loads data, grants access, updates config
-demo-sec ticker="NVDA" year="2025" skip_queries="false":
-    uv run examples/sec_demo/main.py --ticker {{ticker}} --year {{year}} {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
-
-# Run SEC demo preset queries
-demo-sec-query all="false":
-    uv run examples/sec_demo/query_examples.py {{ if all == "true" { "--all" } else { "" } }}
-
-# Run accounting demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-accounting flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/accounting_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
-
-# Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
-demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
-    uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
-
-
 ## Admin CLI ##
-# Admin CLI for remote administration via admin API
 
-# Run admin CLI with any subcommand - passes all arguments through
+# Admin CLI for remote administration via admin API
 # Examples: just admin dev stats
 #           just admin dev customers list
 #           just admin dev subscriptions list --status active --tier kuzu-standard
@@ -247,23 +248,6 @@ migrate-remote environment key:
 migrate-reset env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic downgrade base
     UV_ENV_FILE={{env}} uv run alembic upgrade head
-
-# Database management commands
-db-info env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager info
-
-db-list-users env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager list-users
-
-db-create-user email name password env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-user {{email}} "{{name}}" {{password}}
-
-db-create-key email key_name env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.db_manager create-key {{email}} "{{key_name}}"
-
-# Create test user (comma-separated modes: json,file,sec,industry,economic - e.g., 'json,sec,industry' for JSON output with multiple repository access)
-db-create-test-user mode="" base_url="http://localhost:8000" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.create_test_user --base-url "{{base_url}}" {{ if mode != "" { "--modes " + mode } else { "" } }}
 
 
 ## Graph API ##
@@ -332,6 +316,7 @@ sec-reset backend="kuzu" env=_local_env:
 
 
 ## SEC Production Pipeline - Large-scale orchestrated processing ##
+
 # Uses proven consolidation + COPY approach for large-scale data processing.
 # Pipeline phases: download → process → consolidate → ingest (COPY-based)
 # Examples:
@@ -361,29 +346,6 @@ sec-status env=_local_env:
 # SEC Production - Reset database (requires confirmation)
 sec-reset-remote confirm="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
-
-
-## Credit Admin Tools ##
-
-# Credit admin - add bonus credits to a user graph
-credit-bonus-graph graph_id amount description env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin bonus-graph {{graph_id}} --amount {{amount}} --description "{{description}}"
-
-# Credit admin - add bonus credits to a user's repository subscription
-credit-bonus-repository user_id repository_name amount description env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin bonus-repository {{user_id}} {{repository_name}} --amount {{amount}} --description "{{description}}"
-
-# Credit admin - check credit system health
-credit-health env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin health
-
-# Credit admin - manual allocation for specific user (DANGEROUS - requires confirm="yes")
-credit-force-allocate-user user_id confirm="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-user {{user_id}} {{ if confirm == "yes" { "--confirm" } else { "" } }}
-
-# Credit admin - manual allocation for ALL users (DANGEROUS - requires confirm="yes")
-credit-force-allocate-all confirm="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.credit_admin force-allocate-all {{ if confirm == "yes" { "--confirm" } else { "" } }}
 
 
 ## Valkey/Redis ##
@@ -422,15 +384,10 @@ generate-key:
 
 # Generate multiple secure keys for all secrets
 generate-keys:
-    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
     @echo "CONNECTION_CREDENTIALS_KEY=$(openssl rand -base64 32)"
     @echo "GRAPH_BACKUP_ENCRYPTION_KEY=$(openssl rand -base64 32)"
-
-# Install apps
-install-apps:
-    @test -d '../roboledger-app' || git clone https://github.com/RoboFinSystems/roboledger-app.git '../roboledger-app'
-    @test -d '../roboinvestor-app' || git clone https://github.com/RoboFinSystem/roboinvestor-app.git '../roboinvestor-app'
-    @test -d '../robosystems-app' || git clone https://github.com/RoboFinSystem/robosystems-app.git '../robosystems-app'
+    @echo "JWT_SECRET_KEY=$(openssl rand -base64 32)"
+    @echo "ADMIN_API_KEY=$(openssl rand -base64 32)"
 
 
 ## Misc ##
@@ -454,7 +411,6 @@ clean-data:
     rm -rf ./data/localstack
     rm -rf ./data/postgres
     rm -rf ./data/valkey
-    rm -rf ./local/creds
     rm -f ./examples/credentials/config.json
 
 # Show help
