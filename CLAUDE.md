@@ -382,7 +382,7 @@ database_url = os.getenv("DATABASE_URL")  # ✗ Wrong
    - Check CloudFormation stack status in AWS Console
 
 5. **Celery Tasks**
-   - Monitor worker logs with `just logs worker`
+   - Monitor worker logs with `just logs robosystems-worker`
    - Check Valkey queue status
    - Use DLQ management commands: `just dlq-stats`
 
@@ -390,8 +390,8 @@ database_url = os.getenv("DATABASE_URL")  # ✗ Wrong
 
 ```bash
 # Logs and monitoring
-just logs api                      # API logs
-just logs-grep worker ERROR        # Search worker logs
+just logs robosystems-api                      # API logs
+just logs-grep robosystems-worker ERROR        # Search worker logs
 ```
 
 ### Secret Management

@@ -169,7 +169,7 @@ async def get_credit_summary(
   """
   try:
     credit_service = CreditService(db)
-    summary = credit_service.get_credit_summary(graph_id)
+    summary = credit_service.get_credit_summary(graph_id, user_id=str(current_user.id))
 
     if "error" in summary:
       raise create_error_response(
@@ -251,46 +251,88 @@ async def get_credit_transactions(
     description="Number of transactions to skip",
   ),
   current_user: User = Depends(get_current_user_with_graph),
+  user_graph: GraphUser = Depends(get_graph_access),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> DetailedTransactionsResponse:
   """
-  Get detailed credit transaction history for a graph.
+  Get detailed credit transaction history for a graph or repository.
 
   Retrieves a comprehensive list of credit transactions with filtering
   and summary capabilities to help analyze credit consumption patterns.
+
+  Works for both user graphs and shared repositories.
   """
   from datetime import datetime
   from sqlalchemy import func
   from ...models.iam.graph_credits import GraphCreditTransaction
+  from ...models.iam.user_repository_credits import (
+    UserRepositoryCreditTransaction,
+    UserRepositoryCredits,
+  )
+  from ...middleware.graph.multitenant_utils import MultiTenantUtils
 
   try:
-    # Build base query
-    query = db.query(GraphCreditTransaction).filter(
-      GraphCreditTransaction.graph_id == graph_id
-    )
+    # Determine if this is a repository or user graph
+    identity = MultiTenantUtils.get_graph_identity(graph_id)
+    user_repo_credits = None
+
+    if identity.is_shared_repository:
+      # Query repository credit transactions
+      # Find the user's repository credit pool
+      user_repo_credits = UserRepositoryCredits.get_user_repository_credits(
+        str(current_user.id), graph_id, db
+      )
+
+      if not user_repo_credits:
+        # No credit pool found for this user/repository
+        return DetailedTransactionsResponse(
+          transactions=[],
+          summary={},
+          total_count=0,
+          filtered_count=0,
+          date_range={"start": start_date or "all", "end": end_date or "all"},
+        )
+
+      # Build query for repository transactions
+      query = db.query(UserRepositoryCreditTransaction).filter(
+        UserRepositoryCreditTransaction.credit_pool_id == user_repo_credits.id
+      )
+    else:
+      # Build query for user graph transactions
+      query = db.query(GraphCreditTransaction).filter(
+        GraphCreditTransaction.graph_id == graph_id
+      )
 
     # Apply filters
     start_dt = None
     end_dt = None
 
+    # Get the transaction model class for filtering
+    TransactionModel = (
+      UserRepositoryCreditTransaction
+      if identity.is_shared_repository
+      else GraphCreditTransaction
+    )
+
     if transaction_type:
-      query = query.filter(GraphCreditTransaction.transaction_type == transaction_type)
+      query = query.filter(TransactionModel.transaction_type == transaction_type)
 
     if start_date:
       start_dt = datetime.fromisoformat(start_date)
-      query = query.filter(GraphCreditTransaction.created_at >= start_dt)
+      query = query.filter(TransactionModel.created_at >= start_dt)
 
     if end_date:
       end_dt = datetime.fromisoformat(end_date)
-      query = query.filter(GraphCreditTransaction.created_at <= end_dt)
+      query = query.filter(TransactionModel.created_at <= end_dt)
 
     # Filter by operation type if specified
     if operation_type:
+      from sqlalchemy import cast
+      from sqlalchemy.dialects.postgresql import JSONB
+
       query = query.filter(
-        func.json_extract_path_text(
-          GraphCreditTransaction.transaction_metadata, "operation_type"
-        )
+        cast(TransactionModel.transaction_metadata, JSONB)["operation_type"].astext
         == operation_type
       )
 
@@ -299,46 +341,89 @@ async def get_credit_transactions(
 
     # Apply pagination and ordering
     transactions = (
-      query.order_by(GraphCreditTransaction.created_at.desc())
+      query.order_by(TransactionModel.created_at.desc())
       .offset(offset)
       .limit(limit)
       .all()
     )
 
     # Get summary by operation type
-    summary_query = db.query(
-      func.json_extract_path_text(
-        GraphCreditTransaction.transaction_metadata, "operation_type"
-      ).label("operation_type"),
-      func.sum(GraphCreditTransaction.amount).label("total_amount"),
-      func.count(GraphCreditTransaction.id).label("transaction_count"),
-      func.avg(GraphCreditTransaction.amount).label("average_amount"),
-      func.min(GraphCreditTransaction.created_at).label("first_transaction"),
-      func.max(GraphCreditTransaction.created_at).label("last_transaction"),
-    ).filter(
-      GraphCreditTransaction.graph_id == graph_id,
-      GraphCreditTransaction.transaction_type
-      == CreditTransactionType.CONSUMPTION.value,
-    )
+    from sqlalchemy import cast
+    from sqlalchemy.dialects.postgresql import JSONB
 
-    # Apply same date filters to summary
-    if start_dt is not None:
-      summary_query = summary_query.filter(
-        GraphCreditTransaction.created_at >= start_dt
+    if identity.is_shared_repository:
+      # For repositories, use repository credit transactions
+      from ...models.iam.user_repository_credits import (
+        UserRepositoryCreditTransactionType,
       )
-    if end_dt is not None:
-      summary_query = summary_query.filter(GraphCreditTransaction.created_at <= end_dt)
 
-    summary_results = summary_query.group_by(
-      func.json_extract_path_text(
-        GraphCreditTransaction.transaction_metadata, "operation_type"
+      assert user_repo_credits is not None
+
+      operation_type_expr = cast(
+        UserRepositoryCreditTransaction.transaction_metadata, JSONB
+      )["operation_type"].astext
+
+      summary_query = db.query(
+        operation_type_expr.label("operation_type"),
+        func.sum(UserRepositoryCreditTransaction.amount).label("total_amount"),
+        func.count(UserRepositoryCreditTransaction.id).label("transaction_count"),
+        func.avg(UserRepositoryCreditTransaction.amount).label("average_amount"),
+        func.min(UserRepositoryCreditTransaction.created_at).label("first_transaction"),
+        func.max(UserRepositoryCreditTransaction.created_at).label("last_transaction"),
+      ).filter(
+        UserRepositoryCreditTransaction.credit_pool_id == user_repo_credits.id,
+        UserRepositoryCreditTransaction.transaction_type
+        == UserRepositoryCreditTransactionType.CONSUMPTION.value,
       )
-    ).all()
+
+      # Apply same date filters to summary
+      if start_dt is not None:
+        summary_query = summary_query.filter(
+          UserRepositoryCreditTransaction.created_at >= start_dt
+        )
+      if end_dt is not None:
+        summary_query = summary_query.filter(
+          UserRepositoryCreditTransaction.created_at <= end_dt
+        )
+
+      summary_results = summary_query.group_by(operation_type_expr).all()
+    else:
+      # For user graphs, use graph credit transactions
+      operation_type_expr = cast(GraphCreditTransaction.transaction_metadata, JSONB)[
+        "operation_type"
+      ].astext
+
+      summary_query = db.query(
+        operation_type_expr.label("operation_type"),
+        func.sum(GraphCreditTransaction.amount).label("total_amount"),
+        func.count(GraphCreditTransaction.id).label("transaction_count"),
+        func.avg(GraphCreditTransaction.amount).label("average_amount"),
+        func.min(GraphCreditTransaction.created_at).label("first_transaction"),
+        func.max(GraphCreditTransaction.created_at).label("last_transaction"),
+      ).filter(
+        GraphCreditTransaction.graph_id == graph_id,
+        GraphCreditTransaction.transaction_type
+        == CreditTransactionType.CONSUMPTION.value,
+      )
+
+      # Apply same date filters to summary
+      if start_dt is not None:
+        summary_query = summary_query.filter(
+          GraphCreditTransaction.created_at >= start_dt
+        )
+      if end_dt is not None:
+        summary_query = summary_query.filter(
+          GraphCreditTransaction.created_at <= end_dt
+        )
+
+      summary_results = summary_query.group_by(operation_type_expr).all()
 
     # Build response
     transaction_list = []
     for txn in transactions:
       metadata = txn.get_metadata()
+
+      # Repository transactions don't have these fields, use None as default
       transaction_list.append(
         EnhancedCreditTransactionResponse(
           id=txn.id,
@@ -347,10 +432,10 @@ async def get_credit_transactions(
           description=txn.description,
           metadata=metadata,
           created_at=txn.created_at.isoformat(),
-          operation_id=txn.operation_id,
-          idempotency_key=txn.idempotency_key,
-          request_id=txn.request_id,
-          user_id=txn.user_id,
+          operation_id=getattr(txn, "operation_id", None),
+          idempotency_key=getattr(txn, "idempotency_key", None),
+          request_id=getattr(txn, "request_id", None),
+          user_id=getattr(txn, "user_id", None),
         )
       )
 
