@@ -43,7 +43,15 @@ potentially storage overages need credit-based billing.
 
 from decimal import Decimal
 
-from .graph_tier import get_tier_monthly_credits
+
+# SINGLE SOURCE OF TRUTH: Tier Credit Allocations
+# These are the monthly AI credit allocations for each subscription tier
+# Updated 2025-11-09: Reduced to sustainable levels (99% reduction from original)
+TIER_CREDIT_ALLOCATIONS = {
+  "kuzu-standard": 100,  # 100 credits/month = 333 complex queries (~11/day)
+  "kuzu-large": 300,  # 300 credits/month = 1,000 complex queries (~33/day)
+  "kuzu-xlarge": 800,  # 800 credits/month = 2,667 complex queries (~89/day)
+}
 
 
 class CreditConfig:
@@ -84,12 +92,12 @@ class CreditConfig:
     "database_write": Decimal("0"),  # Write operations - included
   }
 
-  # Monthly AI credit allocations by subscription tier (aligned with GraphTier)
-  # Now sourced from centralized tier configuration with fallback
+  # Monthly AI credit allocations by subscription tier
+  # Sourced from TIER_CREDIT_ALLOCATIONS in billing/core.py (single source of truth)
   MONTHLY_ALLOCATIONS = {
-    "kuzu-standard": get_tier_monthly_credits("kuzu-standard"),
-    "kuzu-large": get_tier_monthly_credits("kuzu-large"),
-    "kuzu-xlarge": get_tier_monthly_credits("kuzu-xlarge"),
+    "kuzu-standard": TIER_CREDIT_ALLOCATIONS.get("kuzu-standard", 100),
+    "kuzu-large": TIER_CREDIT_ALLOCATIONS.get("kuzu-large", 300),
+    "kuzu-xlarge": TIER_CREDIT_ALLOCATIONS.get("kuzu-xlarge", 800),
   }
 
   # Credit balance thresholds for alerts

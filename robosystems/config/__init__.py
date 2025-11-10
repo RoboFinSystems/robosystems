@@ -26,6 +26,13 @@ from .constants import URIConstants, PrefixConstants, XBRLConstants
 from .external_services import ExternalServicesConfig
 from .query_queue import QueryQueueConfig
 from .validation import EnvValidator
+from .agents import (
+  AgentConfig,
+  BedrockModel,
+  AgentExecutionMode,
+  ExecutionProfile,
+  ModelConfig,
+)
 
 __all__ = [
   # Billing exports
@@ -55,4 +62,10 @@ __all__ = [
   # Environment exports
   "EnvConfig",
   "env",
+  # Agent exports
+  "AgentConfig",
+  "BedrockModel",
+  "AgentExecutionMode",
+  "ExecutionProfile",
+  "ModelConfig",
 ]

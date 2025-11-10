@@ -195,34 +195,6 @@ class GraphTierConfig:
     return tier_config.get("instance", {})
 
   @classmethod
-  def get_storage_limit_gb(cls, tier: str, environment: Optional[str] = None) -> int:
-    """Get storage limit for a tier.
-
-    Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Storage limit in GB
-    """
-    tier_config = cls.get_tier_config(tier, environment)
-    return tier_config.get("storage_limit_gb", 500)
-
-  @classmethod
-  def get_monthly_credits(cls, tier: str, environment: Optional[str] = None) -> int:
-    """Get monthly credit allocation for a tier.
-
-    Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
-        environment: Environment (defaults to current env)
-
-    Returns:
-        Monthly credit allocation
-    """
-    tier_config = cls.get_tier_config(tier, environment)
-    return tier_config.get("monthly_credits", 10000)
-
-  @classmethod
   def get_api_rate_multiplier(
     cls, tier: str, environment: Optional[str] = None
   ) -> float:
@@ -474,34 +446,6 @@ def get_tier_max_subgraphs(
       Maximum subgraphs allowed, or None for unlimited
   """
   return GraphTierConfig.get_max_subgraphs(tier, environment)
-
-
-@lru_cache(maxsize=32)
-def get_tier_storage_limit(tier: str, environment: Optional[str] = None) -> int:
-  """Cached function to get storage limit for a tier.
-
-  Args:
-      tier: The tier name (standard, enterprise, premium)
-      environment: Environment (defaults to current env)
-
-  Returns:
-      Storage limit in GB
-  """
-  return GraphTierConfig.get_storage_limit_gb(tier, environment)
-
-
-@lru_cache(maxsize=32)
-def get_tier_monthly_credits(tier: str, environment: Optional[str] = None) -> int:
-  """Cached function to get monthly credit allocation for a tier.
-
-  Args:
-      tier: The tier name (standard, enterprise, premium)
-      environment: Environment (defaults to current env)
-
-  Returns:
-      Monthly credit allocation
-  """
-  return GraphTierConfig.get_monthly_credits(tier, environment)
 
 
 @lru_cache(maxsize=32)

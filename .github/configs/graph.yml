@@ -28,8 +28,6 @@ production:
       max_subgraphs: 0 # Single database only, no subgraph support
 
       # Resource limits
-      storage_limit_gb: 500 # 500 GB storage limit per database
-      monthly_credits: 10000 # 10K AI credits per month
       api_rate_multiplier: 1.0 # Base rate limits (1x)
 
       # Copy operation limits
@@ -62,11 +60,6 @@ production:
         ingestion_batch_size: 1000 # Batch size for data ingestion
         connection_pool_size: 10 # Max concurrent connections per database
 
-      # Auto-scaling configuration
-      scaling:
-        min: 1 # Always maintain 1 instance (standard tier must be available)
-        max: 10 # Scale up to 10 instances for customer growth
-
       # Deployment configuration
       deployment:
         enable_var: KUZU_STANDARD_ENABLED_PROD
@@ -86,8 +79,6 @@ production:
       max_subgraphs: 10 # Support up to 10 subgraphs (1 parent + 10 children = 11 databases total)
 
       # Resource limits
-      storage_limit_gb: 2000 # 2 TB total storage across all databases (parent + subgraphs)
-      monthly_credits: 50000 # 50K AI credits per month (5x standard)
       api_rate_multiplier: 2.5 # 2.5x rate limits for team usage
 
       # Copy operation limits
@@ -121,11 +112,6 @@ production:
         ingestion_batch_size: 2500 # Faster ingestion with dedicated resources
         connection_pool_size: 25 # Higher concurrency for team usage
 
-      # Auto-scaling configuration
-      scaling:
-        min: 0 # Can scale to zero when no professional customers
-        max: 20 # Support up to 20 professional customers (20 dedicated instances)
-
       # Deployment configuration
       deployment:
         enable_var: KUZU_LARGE_ENABLED_PROD
@@ -145,8 +131,6 @@ production:
       # Note: 1 parent + 25 subgraphs = 26 databases total on xlarge instance
 
       # Resource limits
-      storage_limit_gb: 10000 # 10 TB total storage across all databases
-      monthly_credits: 200000 # 200K AI credits per month (20x standard)
       api_rate_multiplier: 5.0 # 5x rate limits for enterprise usage
 
       # Copy operation limits
@@ -180,11 +164,6 @@ production:
         ingestion_batch_size: 5000 # Fast bulk ingestion
         connection_pool_size: 50 # High concurrency for enterprise applications
 
-      # Auto-scaling configuration
-      scaling:
-        min: 0 # Can scale to zero when no enterprise customers
-        max: 10 # Support up to 10 enterprise customers (costly xlarge instances)
-
       # Deployment configuration
       deployment:
         enable_var: KUZU_XLARGE_ENABLED_PROD
@@ -204,8 +183,6 @@ production:
       max_subgraphs: null # N/A - repositories don't use subgraphs
 
       # Resource limits
-      storage_limit_gb: 5000 # 5 TB total for all shared repositories (SEC alone may be 2-3TB)
-      monthly_credits: null # No credit limits - platform managed
       api_rate_multiplier: null # Separate rate limiting for public access
 
       # Copy operation limits (for platform data loading)
@@ -239,11 +216,6 @@ production:
         ingestion_batch_size: 10000 # Fast bulk loading for public data updates
         connection_pool_size: 100 # High concurrency - many users accessing public data
 
-      # Auto-scaling configuration
-      scaling:
-        min: 1 # Always maintain at least 1 instance (SEC repository always available)
-        max: 3 # Scale to 3 instances (one per major repository if needed)
-
       # Deployment configuration
       deployment:
         enable_var: KUZU_SHARED_ENABLED_PROD
@@ -262,8 +234,6 @@ production:
       max_subgraphs: 0 # Neo4j Community restricted to 1 database (default graph only)
 
       # Resource limits
-      storage_limit_gb: 2000 # 2 TB storage limit
-      monthly_credits: 75000 # 75K AI credits per month
       api_rate_multiplier: 3.0 # 3x rate limits
 
       # Copy operation limits
@@ -295,11 +265,6 @@ production:
         ingestion_batch_size: 5000
         connection_pool_size: 50
 
-      # Auto-scaling configuration
-      scaling:
-        min: 0 # Can scale to zero (disabled by default)
-        max: 5 # Support up to 5 Neo4j Community customers
-
       # Deployment configuration
       deployment:
         enable_var: NEO4J_COMMUNITY_LARGE_ENABLED_PROD
@@ -319,8 +284,6 @@ production:
       max_subgraphs: 25 # Neo4j Enterprise supports more databases
 
       # Resource limits
-      storage_limit_gb: 10000 # 10 TB storage limit
-      monthly_credits: 250000 # 250K AI credits per month
       api_rate_multiplier: 6.0 # 6x rate limits
 
       # Copy operation limits
@@ -353,11 +316,6 @@ production:
         ingestion_batch_size: 10000
         connection_pool_size: 100
 
-      # Auto-scaling configuration
-      scaling:
-        min: 0 # Can scale to zero (disabled by default)
-        max: 3 # Support up to 3 Neo4j Enterprise customers (expensive)
-
       # Deployment configuration
       deployment:
         enable_var: NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD
@@ -379,8 +337,6 @@ staging:
       tier: kuzu-standard
 
       max_subgraphs: 0
-      storage_limit_gb: 100 # Reduced for staging
-      monthly_credits: 5000 # Reduced for staging
       api_rate_multiplier: 1.0
 
       # Copy operation limits
@@ -408,10 +364,6 @@ staging:
         ingestion_batch_size: 750
         connection_pool_size: 10
 
-      scaling:
-        min: 1
-        max: 5
-
       deployment:
         enable_var: KUZU_STANDARD_ENABLED_STAGING
         enabled_default: true
@@ -427,8 +379,6 @@ staging:
       tier: kuzu-large
 
       max_subgraphs: 10
-      storage_limit_gb: 500 # Reduced for staging
-      monthly_credits: 10000 # Reduced for staging
       api_rate_multiplier: 2.5
 
       copy_operations:
@@ -454,10 +404,6 @@ staging:
         ingestion_batch_size: 1500
         connection_pool_size: 15
 
-      scaling:
-        min: 0
-        max: 5
-
       deployment:
         enable_var: KUZU_LARGE_ENABLED_STAGING
         enabled_default: false
@@ -473,8 +419,6 @@ staging:
 
       shared_repositories: "sec" # Only SEC in staging for testing
       max_subgraphs: null
-      storage_limit_gb: 1000 # Smaller dataset in staging
-      monthly_credits: null
       api_rate_multiplier: null
 
       copy_operations:
@@ -500,10 +444,6 @@ staging:
         ingestion_batch_size: 5000
         connection_pool_size: 50
 
-      scaling:
-        min: 1
-        max: 2
-
       deployment:
         enable_var: KUZU_SHARED_ENABLED_STAGING
         enabled_default: true
@@ -518,8 +458,6 @@ staging:
       tier: neo4j-community-large
 
       max_subgraphs: 0 # Neo4j Community restricted to 1 database
-      storage_limit_gb: 500 # Reduced for staging
-      monthly_credits: 15000 # Reduced for staging
       api_rate_multiplier: 3.0
 
       copy_operations:
@@ -546,10 +484,6 @@ staging:
         ingestion_batch_size: 2500
         connection_pool_size: 25
 
-      scaling:
-        min: 0
-        max: 2
-
       deployment:
         enable_var: NEO4J_COMMUNITY_LARGE_ENABLED_STAGING
         enabled_default: false # DISABLED
@@ -565,8 +499,6 @@ staging:
       tier: neo4j-enterprise-xlarge
 
       max_subgraphs: 25
-      storage_limit_gb: 1000 # Reduced for staging
-      monthly_credits: 25000 # Reduced for staging
       api_rate_multiplier: 6.0
 
       copy_operations:
@@ -593,10 +525,6 @@ staging:
         max_query_length: 100000
         ingestion_batch_size: 5000
         connection_pool_size: 50
-
-      scaling:
-        min: 0
-        max: 1
 
       deployment:
         enable_var: NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING

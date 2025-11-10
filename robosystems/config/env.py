@@ -585,6 +585,14 @@ class EnvConfig:
   AWS_REGION = get_str_env("AWS_REGION", AWS_DEFAULT_REGION)
   AWS_ENDPOINT_URL = get_str_env("AWS_ENDPOINT_URL", "")  # For LocalStack
 
+  # AWS Bedrock configuration (for AI agent features)
+  # DEV ONLY: Explicit credentials for local development
+  # PROD/STAGING: Uses IAM role credentials (ECS task role / EC2 instance profile)
+  # NOT stored in Secrets Manager - these are dev-only overrides in .env
+  AWS_BEDROCK_REGION = get_str_env("AWS_BEDROCK_REGION", "us-east-1")
+  AWS_BEDROCK_ACCESS_KEY_ID = get_str_env("AWS_BEDROCK_ACCESS_KEY_ID", "")
+  AWS_BEDROCK_SECRET_ACCESS_KEY = get_str_env("AWS_BEDROCK_SECRET_ACCESS_KEY", "")
+
   # S3 configuration
   AWS_S3_PREFIX = get_str_env("AWS_S3_PREFIX", "robosystems")
 
@@ -664,10 +672,6 @@ class EnvConfig:
   SEC_PIPELINE_MAX_RETRIES = get_int_env(
     "SEC_PIPELINE_MAX_RETRIES", SEC_PIPELINE_MAX_RETRIES
   )
-
-  # Anthropic (Claude AI)
-  ANTHROPIC_API_KEY = get_secret_value("ANTHROPIC_API_KEY", "")
-  ANTHROPIC_MODEL = get_str_env("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")

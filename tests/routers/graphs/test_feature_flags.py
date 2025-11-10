@@ -730,7 +730,7 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.env") as mock_env:
+      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
         mock_env.AGENT_POST_ENABLED = False
 
         # Mock request data
@@ -761,7 +761,7 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.env") as mock_env:
+      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
         mock_env.AGENT_POST_ENABLED = False
 
         # Mock request data
@@ -794,7 +794,7 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.env") as mock_env:
+      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
         mock_env.AGENT_POST_ENABLED = False
 
         # Mock request data
@@ -846,7 +846,7 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.env") as mock_env:
+      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
         mock_env.AGENT_POST_ENABLED = False
 
         # Mock request data
@@ -874,16 +874,16 @@ class TestAgentPostFeatureFlags:
 
     try:
       # Mock the environment configuration to disable agent POST
-      with patch("robosystems.routers.graphs.agent.env") as mock_env:
+      with patch("robosystems.routers.graphs.agent.execute.env") as mock_env:
         mock_env.AGENT_POST_ENABLED = False
 
         # Test list agents endpoint (GET)
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/agent/list")
+        response = client.get("/v1/graphs/kg1a2b3c4d5e/agent")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
 
         # Test agent metadata endpoint (GET)
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/agent/financial/metadata")
+        response = client.get("/v1/graphs/kg1a2b3c4d5e/agent/financial")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
     finally:

@@ -774,7 +774,7 @@ class CreditService:
       return {
         "success": True,
         "credits_consumed": float(base_cost),
-        "remaining_balance": float(credits.current_balance),
+        "remaining_balance": float(shared_credits.current_balance),
         "cached": False,
         "addon_type": shared_credits.user_repository.repository_type.value,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
@@ -1106,16 +1106,21 @@ class CreditService:
     pricing = AIBillingConfig.TOKEN_PRICING.get(pricing_key)
 
     if not pricing:
-      logger.warning(f"No pricing found for model {model}, using default")
+      logger.warning(
+        f"No pricing found for model {model}, using default Sonnet pricing"
+      )
       pricing = {
-        "input": Decimal("0.003"),
-        "output": Decimal("0.015"),
+        "input": Decimal("0.01"),  # Default to Sonnet 4 with 3.33x markup
+        "output": Decimal("0.05"),
       }
 
     # Calculate actual cost based on tokens
     input_cost = (Decimal(input_tokens) / 1000) * pricing["input"]
     output_cost = (Decimal(output_tokens) / 1000) * pricing["output"]
-    total_cost = input_cost + output_cost
+    raw_cost = input_cost + output_cost
+
+    # Apply minimum charge (rounds up to at least 0.01)
+    total_cost = AIBillingConfig.apply_minimum_charge(raw_cost)
 
     # Build metadata
     token_metadata = {
@@ -1125,12 +1130,14 @@ class CreditService:
       "model": model,
       "input_cost": str(input_cost),
       "output_cost": str(output_cost),
+      "raw_cost": str(raw_cost),
       "total_cost": str(total_cost),
+      "minimum_charge_applied": total_cost > raw_cost,
     }
     if metadata:
       token_metadata.update(metadata)
 
-    # Use existing consume_credits with exact cost
+    # Use existing consume_credits with minimum-applied cost
     return self.consume_credits(
       graph_id=graph_id,
       operation_type="ai_tokens",

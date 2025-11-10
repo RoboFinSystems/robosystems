@@ -9,7 +9,7 @@ This test suite covers:
 """
 
 import pytest
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 from httpx import AsyncClient
 from datetime import datetime
 
@@ -42,25 +42,22 @@ class TestStatusEndpoint:
 
   async def test_status_endpoint_version(self, async_client: AsyncClient):
     """Test version information in status response."""
-    mock_pyproject = """
-[project]
-name = "robosystems"
-version = "1.2.3"
-description = "Test service"
-"""
+    with patch("robosystems.routers.status.version", return_value="1.2.3"):
+      response = await async_client.get("/v1/status")
 
-    with patch("builtins.open", mock_open(read_data=mock_pyproject.encode())):
-      with patch("pathlib.Path.exists", return_value=True):
-        response = await async_client.get("/v1/status")
+      assert response.status_code == 200
+      data = response.json()
 
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["details"]["version"] == "1.2.3"
+      assert data["details"]["version"] == "1.2.3"
 
   async def test_status_endpoint_version_unknown(self, async_client: AsyncClient):
     """Test status when version cannot be determined."""
-    with patch("pathlib.Path.exists", return_value=False):
+    from importlib.metadata import PackageNotFoundError
+
+    with patch(
+      "robosystems.routers.status.version",
+      side_effect=PackageNotFoundError("robosystems"),
+    ):
       response = await async_client.get("/v1/status")
 
       assert response.status_code == 200
@@ -70,7 +67,12 @@ description = "Test service"
 
   async def test_status_endpoint_version_error(self, async_client: AsyncClient):
     """Test status when reading version throws error."""
-    with patch("builtins.open", side_effect=Exception("File error")):
+    from importlib.metadata import PackageNotFoundError
+
+    with patch(
+      "robosystems.routers.status.version",
+      side_effect=PackageNotFoundError("robosystems"),
+    ):
       response = await async_client.get("/v1/status")
 
       assert response.status_code == 200

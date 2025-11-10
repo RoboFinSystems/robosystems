@@ -29,7 +29,7 @@ from sqlalchemy.orm import relationship, Session
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
 from ...config.graph_tier import GraphTier
-from ...config.graph_tier import get_tier_storage_limit
+from ...config.billing.storage import StorageBillingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +153,8 @@ class GraphCredits(Base):
     # In simplified model, no multipliers are used
     # All tiers have 1.0 multiplier
 
-    # Get storage limit from centralized tier configuration
-    storage_limit_gb = get_tier_storage_limit(graph_tier.value)
+    # Get storage limit from billing configuration
+    storage_limit_gb = StorageBillingConfig.STORAGE_INCLUDED.get(graph_tier.value, 100)
 
     credits = cls(
       id=generate_prefixed_ulid("crd"),

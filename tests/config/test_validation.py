@@ -313,7 +313,6 @@ class TestEnvValidator:
     assert summary["debug"] is False
     assert summary["features"]["quickbooks"] is True
     assert summary["features"]["plaid"] is True
-    assert summary["features"]["anthropic"] is True
     assert summary["features"]["sec"] is True
     assert summary["database"]["type"] == "postgresql"
     assert summary["database"]["configured"] is True

@@ -39,9 +39,8 @@ compose-up profile="robosystems" build="--build" detached="--detach" env=_env:
 compose-down profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
 
-# Rebuild containers (full rebuild with new images)
+# Rebuild containers (rebuilds images and restarts - for package/env changes)
 rebuild profile="robosystems":
-    @just compose-down {{profile}}
     @just compose-up {{profile}} --build --detach
 
 # Quick restart containers to pick up code changes via volume mounts (no rebuild)
@@ -49,7 +48,7 @@ restart profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} restart
 
 # Restart specific service(s) without stopping everything
-restart-service container="worker":
+restart-container container="worker":
     docker compose -f compose.yaml restart robosystems-{{container}}
 
 # Docker logs (without follow to prevent hanging)
@@ -91,6 +90,12 @@ update:
 
 
 ## Demo Scripts ##
+
+# Run all demos
+demo-all:
+    @just demo-accounting
+    @just demo-custom-graph
+    @just demo-sec
 
 # Create or reuse demo user (uses shared examples/credentials/config.json)
 demo-user *args="":

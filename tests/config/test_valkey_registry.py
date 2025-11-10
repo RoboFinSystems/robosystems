@@ -1,7 +1,7 @@
 """Tests for Valkey/Redis registry and URL builder."""
 
 import os
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,
@@ -99,7 +99,9 @@ class TestValkeyURLBuilder:
     assert url == "redis://localhost:6379"
 
   @patch.dict(os.environ, {"ENVIRONMENT": "prod"})
-  @patch("robosystems.config.aws.get_valkey_url_from_cloudformation")
+  @patch(
+    "robosystems.config.valkey_registry.ValkeyURLBuilder._get_valkey_url_from_cloudformation"
+  )
   def test_get_base_url_prod_cloudformation(self, mock_get_cf):
     """Test getting URL from CloudFormation in production."""
     mock_get_cf.return_value = "redis://prod-valkey.cache.amazonaws.com:6379"
@@ -109,7 +111,9 @@ class TestValkeyURLBuilder:
     mock_get_cf.assert_called_once()
 
   @patch.dict(os.environ, {"ENVIRONMENT": "staging"})
-  @patch("robosystems.config.aws.get_valkey_url_from_cloudformation")
+  @patch(
+    "robosystems.config.valkey_registry.ValkeyURLBuilder._get_valkey_url_from_cloudformation"
+  )
   def test_get_base_url_staging_cloudformation(self, mock_get_cf):
     """Test getting URL from CloudFormation in staging."""
     mock_get_cf.return_value = "redis://staging-valkey.cache.amazonaws.com:6379"
@@ -120,19 +124,20 @@ class TestValkeyURLBuilder:
   @patch.dict(
     os.environ, {"ENVIRONMENT": "prod", "VALKEY_URL": "redis://fallback:6379"}
   )
-  def test_get_base_url_cloudformation_import_error(self):
-    """Test fallback when CloudFormation module not available."""
-    # Mock the import to raise ImportError
-    import sys
+  @patch(
+    "robosystems.config.valkey_registry.ValkeyURLBuilder._get_valkey_url_from_cloudformation"
+  )
+  def test_get_base_url_cloudformation_error(self, mock_get_cf):
+    """Test fallback when CloudFormation is not available."""
+    mock_get_cf.return_value = None  # Simulates CloudFormation failure
 
-    mock_module = Mock()
-    mock_module.get_valkey_url_from_cloudformation.side_effect = ImportError
-    with patch.dict(sys.modules, {"robosystems.config.aws": mock_module}):
-      url = ValkeyURLBuilder.get_base_url()
-      assert url == "redis://fallback:6379"
+    url = ValkeyURLBuilder.get_base_url()
+    assert url == "redis://fallback:6379"
 
   @patch.dict(os.environ, {"ENVIRONMENT": "prod"})
-  @patch("robosystems.config.aws.get_valkey_url_from_cloudformation")
+  @patch(
+    "robosystems.config.valkey_registry.ValkeyURLBuilder._get_valkey_url_from_cloudformation"
+  )
   def test_get_base_url_caching(self, mock_get_cf):
     """Test that base URL is cached properly."""
     mock_get_cf.return_value = "redis://prod-valkey.cache.amazonaws.com:6379"
@@ -308,7 +313,9 @@ class TestIntegration:
     url = ValkeyDatabase.get_url(ValkeyDatabase.RATE_LIMITING, "redis://myserver:6379")
     assert url == "redis://myserver:6379/7"
 
-  @patch("robosystems.config.aws.get_valkey_url_from_cloudformation")
+  @patch(
+    "robosystems.config.valkey_registry.ValkeyURLBuilder._get_valkey_url_from_cloudformation"
+  )
   def test_production_like_setup(self, mock_cf):
     """Test production-like configuration flow."""
     # Reset cache

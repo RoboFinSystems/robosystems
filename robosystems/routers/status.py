@@ -11,8 +11,7 @@ from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
 )
 from robosystems.models.api.common import HealthStatus
-import tomllib
-from pathlib import Path
+from importlib.metadata import version, PackageNotFoundError
 
 # Create router without authentication requirements
 router = APIRouter()
@@ -21,19 +20,10 @@ router = APIRouter()
 
 
 def get_app_version() -> str:
-  """Get the application version from pyproject.toml."""
+  """Get the application version from installed package metadata."""
   try:
-    # Find pyproject.toml in parent directories
-    current_path = Path(__file__).resolve()
-    for parent in current_path.parents:
-      pyproject_path = parent / "pyproject.toml"
-      if pyproject_path.exists():
-        with open(pyproject_path, "rb") as f:
-          data = tomllib.load(f)
-          return data.get("project", {}).get("version", "unknown")
-    return "unknown"
-  except Exception:
-    # If we can't read the version, return unknown
+    return version("robosystems")
+  except PackageNotFoundError:
     return "unknown"
 
 

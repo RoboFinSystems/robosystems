@@ -9,7 +9,7 @@ rather than relying on environment variables passed through userdata scripts.
 Secrets are organized in AWS Secrets Manager with the following structure:
 - Base secret: `robosystems/{environment}` (e.g., robosystems/prod, robosystems/staging)
   Contains: JWT_SECRET_KEY, CONNECTION_CREDENTIALS_KEY, GRAPH_BACKUP_ENCRYPTION_KEY,
-            ANTHROPIC_API_KEY, INTUIT_*, PLAID_*, SEC_GOV_USER_AGENT, TURNSTILE_*,
+            INTUIT_*, PLAID_*, SEC_GOV_USER_AGENT, TURNSTILE_*,
             STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET,
             Feature flags: RATE_LIMIT_ENABLED, USER_REGISTRATION_ENABLED,
             CONNECTION_SEC_ENABLED, CONNECTION_QUICKBOOKS_ENABLED, CONNECTION_PLAID_ENABLED,
@@ -343,7 +343,6 @@ SECRET_MAPPINGS = {
   "CONNECTION_CREDENTIALS_KEY": (None, "CONNECTION_CREDENTIALS_KEY"),
   "JWT_SECRET_KEY": (None, "JWT_SECRET_KEY"),
   "GRAPH_BACKUP_ENCRYPTION_KEY": (None, "GRAPH_BACKUP_ENCRYPTION_KEY"),
-  "ANTHROPIC_API_KEY": (None, "ANTHROPIC_API_KEY"),
   "INTUIT_REDIRECT_URI": (None, "INTUIT_REDIRECT_URI"),
   "INTUIT_CLIENT_ID": (None, "INTUIT_CLIENT_ID"),
   "INTUIT_CLIENT_SECRET": (None, "INTUIT_CLIENT_SECRET"),

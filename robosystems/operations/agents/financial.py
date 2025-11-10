@@ -6,7 +6,6 @@ Specializes in financial analysis, SEC filings, and accounting data.
 
 import json
 from typing import Dict, List, Optional, Any
-from anthropic import Anthropic
 
 from robosystems.operations.agents.base import (
   BaseAgent,
@@ -14,10 +13,11 @@ from robosystems.operations.agents.base import (
   AgentCapability,
   AgentMetadata,
   AgentResponse,
+  ExecutionProfile,
 )
 from robosystems.operations.agents.registry import AgentRegistry
+from robosystems.operations.agents.ai_client import AIClient, AIMessage
 from robosystems.logger import logger
-from robosystems.config import env
 
 
 @AgentRegistry.register("financial")
@@ -47,17 +47,25 @@ class FinancialAgent(BaseAgent):
       ],
       author="RoboSystems",
       tags=["finance", "sec", "quickbooks", "analysis"],
+      execution_profile={
+        AgentMode.QUICK: ExecutionProfile(
+          min_time=2, max_time=5, avg_time=3, tool_calls=2
+        ),
+        AgentMode.STANDARD: ExecutionProfile(
+          min_time=8, max_time=20, avg_time=12, tool_calls=5
+        ),
+        AgentMode.EXTENDED: ExecutionProfile(
+          min_time=45, max_time=120, avg_time=75, tool_calls=25
+        ),
+      },
     )
 
   def __init__(self, graph_id: str, user, db_session=None):
     """Initialize financial agent."""
     super().__init__(graph_id, user, db_session)
 
-    # Initialize Anthropic if available
-    self.anthropic = None
-    if env.ANTHROPIC_API_KEY:
-      self.anthropic = Anthropic(api_key=env.ANTHROPIC_API_KEY)
-      self.model = env.ANTHROPIC_MODEL or "claude-3-sonnet-20240229"
+    # Initialize AI client (uses AWS Bedrock)
+    self.ai_client = AIClient()
 
   async def analyze(
     self,
@@ -137,6 +145,7 @@ class FinancialAgent(BaseAgent):
         content=f"Financial analysis failed: {str(e)}",
         agent_name=self.metadata.name,
         mode_used=mode,
+        tokens_used=self.total_tokens_used,
         error_details={
           "code": "ANALYSIS_ERROR",
           "message": str(e),
@@ -276,8 +285,8 @@ class FinancialAgent(BaseAgent):
         except Exception as e:
           logger.error(f"Query failed: {str(e)}")
 
-    # Use AI if available
-    if self.anthropic and results:
+    # Use AI for analysis
+    if results:
       return await self._ai_financial_analysis(query, results, history)
 
     return self._format_financial_response(query, results, "standard")
@@ -432,42 +441,38 @@ class FinancialAgent(BaseAgent):
     self, query: str, data: List[Any], history: Optional[List[Dict]]
   ) -> str:
     """Use AI to analyze financial data."""
-    if not self.anthropic:
-      return self._format_financial_response(query, data, "standard")
-
     try:
       # Prepare messages
       messages = []
       if history:
-        messages.extend(history)
+        for msg in history:
+          messages.append(
+            AIMessage(role=msg.get("role", "user"), content=msg.get("content", ""))
+          )
 
       messages.append(
-        {
-          "role": "user",
-          "content": f"Analyze this financial data for the query: {query}\n\nData: {json.dumps(data[:5], indent=2)[:2000]}",
-        }
+        AIMessage(
+          role="user",
+          content=f"Analyze this financial data for the query: {query}\n\nData: {json.dumps(data[:5], indent=2)[:2000]}",
+        )
       )
 
-      # Call AI
-      response = self.anthropic.messages.create(
-        model=self.model,
-        max_tokens=2000,
+      # Call AI via Bedrock
+      response = await self.ai_client.create_message(
         messages=messages,
+        max_tokens=2000,
         system="You are a financial analyst. Provide clear, concise financial analysis.",
+        temperature=0.5,
       )
 
       # Track tokens and consume credits
-      credit_result = None
-      if hasattr(response, "usage"):
-        self.track_tokens(response.usage.input_tokens, response.usage.output_tokens)
-        credit_result = await self.consume_credits(
-          response.usage.input_tokens,
-          response.usage.output_tokens,
-          self.model,
-          "Financial analysis",
-        )
-
-      content = response.content[0].text if response.content else "Analysis failed"
+      self.track_tokens(response.input_tokens, response.output_tokens)
+      credit_result = await self.consume_credits(
+        response.input_tokens,
+        response.output_tokens,
+        response.model,
+        "Financial analysis",
+      )
 
       # Add credit consumption info to response if available
       if credit_result and credit_result.get("success"):
@@ -476,7 +481,7 @@ class FinancialAgent(BaseAgent):
           "remaining_balance": credit_result.get("remaining_balance", 0),
         }
 
-      return content
+      return response.content
 
     except Exception as e:
       logger.error(f"AI analysis failed: {str(e)}")
@@ -486,20 +491,20 @@ class FinancialAgent(BaseAgent):
     self, query: str, data: List[Any], history: Optional[List[Dict]]
   ) -> str:
     """Perform deep AI analysis of financial data."""
-    if not self.anthropic:
-      return self._format_financial_response(query, data, "extended")
-
     try:
       # Prepare comprehensive messages for deep analysis
       messages = []
       if history:
-        messages.extend(history)
+        for msg in history:
+          messages.append(
+            AIMessage(role=msg.get("role", "user"), content=msg.get("content", ""))
+          )
 
       # More detailed prompt for extended analysis
       messages.append(
-        {
-          "role": "user",
-          "content": f"""Perform a comprehensive financial analysis for: {query}
+        AIMessage(
+          role="user",
+          content=f"""Perform a comprehensive financial analysis for: {query}
 
           Available data (sample): {json.dumps(data[:10], indent=2)[:5000]}
 
@@ -509,31 +514,27 @@ class FinancialAgent(BaseAgent):
           3. Risk factors and opportunities
           4. Strategic recommendations
           5. Data quality assessment""",
-        }
+        )
       )
 
-      # Call AI with larger token limit for extended analysis
-      response = self.anthropic.messages.create(
-        model=self.model,
-        max_tokens=4000,
+      # Call AI via Bedrock with larger token limit for extended analysis
+      response = await self.ai_client.create_message(
         messages=messages,
+        max_tokens=4000,
         system="""You are an expert financial analyst specializing in SEC filings
         and corporate financial analysis. Provide detailed, actionable insights
         based on the data provided. Focus on material findings and strategic implications.""",
+        temperature=0.5,
       )
 
       # Track tokens and consume credits
-      credit_result = None
-      if hasattr(response, "usage"):
-        self.track_tokens(response.usage.input_tokens, response.usage.output_tokens)
-        credit_result = await self.consume_credits(
-          response.usage.input_tokens,
-          response.usage.output_tokens,
-          self.model,
-          "Extended financial analysis",
-        )
-
-      content = response.content[0].text if response.content else "Analysis failed"
+      self.track_tokens(response.input_tokens, response.output_tokens)
+      credit_result = await self.consume_credits(
+        response.input_tokens,
+        response.output_tokens,
+        response.model,
+        "Extended financial analysis",
+      )
 
       # Add credit consumption info to response if available
       if credit_result and credit_result.get("success"):
@@ -542,7 +543,7 @@ class FinancialAgent(BaseAgent):
           "remaining_balance": credit_result.get("remaining_balance", 0),
         }
 
-      return content
+      return response.content
 
     except Exception as e:
       logger.error(f"Deep AI analysis failed: {str(e)}")

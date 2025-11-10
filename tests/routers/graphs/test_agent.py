@@ -21,7 +21,7 @@ async def test_agent_router_basic(
   """Test basic agent endpoint."""
   with (
     patch(
-      "robosystems.routers.graphs.agent.AgentOrchestrator"
+      "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
@@ -71,7 +71,7 @@ async def test_agent_endpoint_with_history(
 
   with (
     patch(
-      "robosystems.routers.graphs.agent.AgentOrchestrator"
+      "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
@@ -121,7 +121,7 @@ async def test_agent_endpoint_with_context(
   """Test the agent endpoint with additional context."""
   with (
     patch(
-      "robosystems.routers.graphs.agent.AgentOrchestrator"
+      "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
@@ -171,7 +171,7 @@ async def test_agent_error_handling(
   """Test agent error handling."""
   with (
     patch(
-      "robosystems.routers.graphs.agent.AgentOrchestrator"
+      "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
     ) as mock_orchestrator_class,
     patch(
       "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"
@@ -254,7 +254,7 @@ class TestGraphIdValidation:
     """Test that path parameter validation works."""
     with (
       patch(
-        "robosystems.routers.graphs.agent.AgentOrchestrator"
+        "robosystems.routers.graphs.agent.handlers.AgentOrchestrator"
       ) as mock_orchestrator_class,
       patch(
         "robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id"

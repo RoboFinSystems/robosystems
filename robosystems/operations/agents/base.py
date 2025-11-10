@@ -36,6 +36,16 @@ class AgentMode(Enum):
 
 
 @dataclass
+class ExecutionProfile:
+  """Execution time profile for an agent mode."""
+
+  min_time: int
+  max_time: int
+  avg_time: int
+  tool_calls: int = 0
+
+
+@dataclass
 class AgentMetadata:
   """Metadata describing an agent's capabilities and configuration."""
 
@@ -56,6 +66,19 @@ class AgentMetadata:
   requires_credits: bool = True
   author: Optional[str] = None
   tags: List[str] = field(default_factory=list)
+  execution_profile: Dict[AgentMode, ExecutionProfile] = field(
+    default_factory=lambda: {
+      AgentMode.QUICK: ExecutionProfile(
+        min_time=2, max_time=5, avg_time=3, tool_calls=2
+      ),
+      AgentMode.STANDARD: ExecutionProfile(
+        min_time=5, max_time=15, avg_time=10, tool_calls=5
+      ),
+      AgentMode.EXTENDED: ExecutionProfile(
+        min_time=30, max_time=120, avg_time=60, tool_calls=20
+      ),
+    }
+  )
 
 
 @dataclass
@@ -266,33 +289,9 @@ class BaseAgent(ABC):
     Returns:
         Dict with limits like max_tools, timeout, etc.
     """
-    limits = {
-      AgentMode.QUICK: {
-        "max_tools": 2,
-        "timeout": 30,
-        "max_input_tokens": 50000,
-        "max_output_tokens": 2000,
-      },
-      AgentMode.STANDARD: {
-        "max_tools": 5,
-        "timeout": 60,
-        "max_input_tokens": 100000,
-        "max_output_tokens": 4000,
-      },
-      AgentMode.EXTENDED: {
-        "max_tools": 12,
-        "timeout": 300,
-        "max_input_tokens": 150000,
-        "max_output_tokens": 8000,
-      },
-      AgentMode.STREAMING: {
-        "max_tools": 8,
-        "timeout": 120,
-        "max_input_tokens": 100000,
-        "max_output_tokens": 8000,
-      },
-    }
-    return limits.get(mode, limits[AgentMode.STANDARD])
+    from robosystems.config import AgentConfig
+
+    return AgentConfig.get_mode_limits(mode.value)
 
   async def prepare_context(
     self,

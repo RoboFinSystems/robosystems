@@ -71,11 +71,11 @@ class RepositoryBillingConfig:
       "price_cents": 2900,  # $29/month
       "price_monthly": 29.0,  # For display/calculations
       "price_display": "$29/month",
-      "monthly_credits": 1000,  # Credits for AI agent operations
+      "monthly_credits": 50,  # 50 AI agent credits per month (167 complex queries/month = 5.5/day)
       "access_level": "READ",  # Read-only access
       "description": "Basic access for individuals and small teams",
       "features": [
-        "1,000 AI agent credits per month",
+        "50 AI agent credits per month",
         "500 queries per hour (included)",
         "200 MCP queries per hour (included)",
         "Basic rate limits",
@@ -88,11 +88,11 @@ class RepositoryBillingConfig:
       "price_cents": 9900,  # $99/month
       "price_monthly": 99.0,
       "price_display": "$99/month",
-      "monthly_credits": 5000,  # Credits for AI agent operations
+      "monthly_credits": 200,  # 200 AI agent credits per month (667 complex queries/month = 22/day)
       "access_level": "WRITE",  # Write access for contributions
       "description": "Professional access for analysts and researchers",
       "features": [
-        "5,000 AI agent credits per month",
+        "200 AI agent credits per month",
         "2,000 queries per hour (included)",
         "1,000 MCP queries per hour (included)",
         "Professional rate limits",
@@ -106,11 +106,11 @@ class RepositoryBillingConfig:
       "price_cents": 49900,  # $499/month
       "price_monthly": 499.0,
       "price_display": "$499/month",
-      "monthly_credits": 50000,  # Very high AI agent credits
+      "monthly_credits": 1000,  # 1,000 AI agent credits per month (3,333 complex queries/month = 111/day)
       "access_level": "ADMIN",  # Full admin access
       "description": "Enterprise access with no limits",
       "features": [
-        "50,000 AI agent credits per month",
+        "1,000 AI agent credits per month",
         "Unlimited queries (included)",
         "Unlimited MCP queries (included)",
         "No daily rate limits",

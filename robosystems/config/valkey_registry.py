@@ -10,9 +10,14 @@ and use the next available database number.
 
 import os
 import ssl
+import yaml
+import logging
+from pathlib import Path
 from enum import IntEnum
 from typing import Any, Dict, Optional
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 
 class ValkeyDatabase(IntEnum):
@@ -88,6 +93,57 @@ class ValkeyURLBuilder:
   _auth_token_environment: Optional[str] = None
 
   @staticmethod
+  def _get_valkey_url_from_cloudformation() -> Optional[str]:
+    """
+    Get Valkey URL from CloudFormation stack outputs.
+
+    Returns:
+        Valkey URL from CloudFormation or None if not available
+    """
+    try:
+      import boto3
+
+      # Load stacks.yml to get stack name
+      config_paths = [
+        Path("/app/configs/stacks.yml"),
+        Path(__file__).parent.parent.parent / ".github/configs/stacks.yml",
+      ]
+
+      stack_name = None
+      for config_path in config_paths:
+        if config_path.exists():
+          try:
+            with open(config_path, "r") as f:
+              config = yaml.safe_load(f)
+              env_key = os.getenv("ENVIRONMENT", "dev").lower()
+              if env_key in config and "valkey" in config[env_key]:
+                stack_name = config[env_key]["valkey"].get("stack_name")
+                break
+          except Exception as e:
+            logger.debug(f"Failed to load stack config from {config_path}: {e}")
+
+      if not stack_name:
+        return None
+
+      # Fetch from CloudFormation
+      region = os.getenv("AWS_REGION", "us-east-1")
+      cf_client = boto3.client("cloudformation", region_name=region)
+      response = cf_client.describe_stacks(StackName=stack_name)
+
+      if "Stacks" in response and len(response["Stacks"]) > 0:
+        stack = response["Stacks"][0]
+        if "Outputs" in stack:
+          for output in stack["Outputs"]:
+            if output.get("OutputKey") == "ValkeyUrl":
+              return output.get("OutputValue")
+
+      return None
+
+    except (ImportError, Exception) as e:
+      logger.debug(f"Could not fetch Valkey URL from CloudFormation: {e}")
+      return None
+
+  @staticmethod
   def get_base_url() -> str:
     """
     Get the base Valkey URL for the current environment.
@@ -111,17 +167,11 @@ class ValkeyURLBuilder:
 
     # Try to get from CloudFormation for prod/staging
     if current_env in ["prod", "staging"]:
-      try:
-        from robosystems.config.aws import get_valkey_url_from_cloudformation
-
-        url = get_valkey_url_from_cloudformation()
-        if url:
-          ValkeyURLBuilder._cached_base_url = url
-          ValkeyURLBuilder._cache_environment = current_env
-          return url
-      except ImportError:
-        # CloudFormation config not available, fall back to env var
-        pass
+      url = ValkeyURLBuilder._get_valkey_url_from_cloudformation()
+      if url:
+        ValkeyURLBuilder._cached_base_url = url
+        ValkeyURLBuilder._cache_environment = current_env
+        return url
 
     # Fall back to environment variable
     url = os.getenv("VALKEY_URL", "redis://localhost:6379")
