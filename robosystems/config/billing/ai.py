@@ -48,22 +48,6 @@ class AIBillingConfig:
   # Anthropic base: $3/M input, $15/M output
   # RoboSystems: $10/M input, $50/M output
   TOKEN_PRICING = {
-    "anthropic_claude_4_opus": {
-      "input": Decimal(
-        "0.05"
-      ),  # Credits per 1K input tokens ($50/M tokens, 3.33x markup)
-      "output": Decimal(
-        "0.25"
-      ),  # Credits per 1K output tokens ($250/M tokens, 3.33x markup)
-    },
-    "anthropic_claude_4.1_opus": {
-      "input": Decimal(
-        "0.05"
-      ),  # Credits per 1K input tokens ($50/M tokens, 3.33x markup)
-      "output": Decimal(
-        "0.25"
-      ),  # Credits per 1K output tokens ($250/M tokens, 3.33x markup)
-    },
     "anthropic_claude_4_sonnet": {
       "input": Decimal(
         "0.01"
@@ -72,15 +56,6 @@ class AIBillingConfig:
         "0.05"
       ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
     },
-    # Legacy Claude 3 models (for backwards compatibility)
-    "anthropic_claude_3_opus": {
-      "input": Decimal(
-        "0.05"
-      ),  # Credits per 1K input tokens ($50/M tokens, 3.33x markup)
-      "output": Decimal(
-        "0.25"
-      ),  # Credits per 1K output tokens ($250/M tokens, 3.33x markup)
-    },
     "anthropic_claude_3_sonnet": {
       "input": Decimal(
         "0.01"
@@ -88,22 +63,6 @@ class AIBillingConfig:
       "output": Decimal(
         "0.05"
       ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
-    },
-    "openai_gpt4": {
-      "input": Decimal(
-        "0.10"
-      ),  # Credits per 1K input tokens ($100/M tokens, 3.33x markup)
-      "output": Decimal(
-        "0.20"
-      ),  # Credits per 1K output tokens ($200/M tokens, 3.33x markup)
-    },
-    "openai_gpt35": {
-      "input": Decimal(
-        "0.005"
-      ),  # Credits per 1K input tokens ($5/M tokens, 3.33x markup)
-      "output": Decimal(
-        "0.007"
-      ),  # Credits per 1K output tokens ($7/M tokens, 3.33x markup)
     },
   }
 
