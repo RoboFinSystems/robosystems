@@ -30,10 +30,11 @@ from .context import (
   DocumentChunk,
   SearchResult,
 )
+from .ai_client import AIClient
 
 # Import concrete agents to register them
+from . import cypher_agent
 from . import financial
-from . import rag
 
 __all__ = [
   # Base
@@ -58,7 +59,9 @@ __all__ = [
   "EmbeddingProvider",
   "DocumentChunk",
   "SearchResult",
+  # AI Client
+  "AIClient",
   # Modules (for registration)
+  "cypher_agent",
   "financial",
-  "rag",
 ]

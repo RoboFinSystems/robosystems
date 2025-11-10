@@ -278,7 +278,6 @@ class TestSecretMappingsConfiguration:
       "SEC_RAW_BUCKET",
       "SEC_PROCESSED_BUCKET",
       "GRAPH_API_KEY",
-      "ANTHROPIC_API_KEY",
     ]
 
     for secret in critical_secrets:

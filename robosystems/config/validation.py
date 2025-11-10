@@ -104,8 +104,6 @@ class EnvValidator:
       # Plaid integration
       "PLAID_CLIENT_ID": "Plaid bank connections",
       "PLAID_CLIENT_SECRET": "Plaid bank connections",
-      # Anthropic/Claude
-      "ANTHROPIC_API_KEY": "Claude AI agent",
       # Kuzu database
       "KUZU_DATABASE_PATH": "Kuzu database storage",
     }
@@ -264,13 +262,16 @@ class EnvValidator:
     Returns:
         Dict with configuration summary
     """
+    from robosystems.config import AgentConfig
+
+    agent_validation = AgentConfig.validate_configuration()
+
     return {
       "environment": env_config.ENVIRONMENT,
       "debug": env_config.DEBUG,
       "features": {
         "quickbooks": bool(env_config.INTUIT_CLIENT_ID),
         "plaid": bool(env_config.PLAID_CLIENT_ID),
-        "anthropic": bool(env_config.ANTHROPIC_API_KEY),
         "sec": True,  # Always available
       },
       "database": {
@@ -288,5 +289,12 @@ class EnvValidator:
       },
       "workers": {
         "autoscale": env_config.WORKER_AUTOSCALE,
+      },
+      "agents": {
+        "config_valid": agent_validation["valid"],
+        "default_model": AgentConfig.DEFAULT_MODEL_CONFIG.default_model.value,
+        "fallback_agent": AgentConfig.ORCHESTRATOR_CONFIG["fallback_agent"],
+        "available_models": len(AgentConfig.BEDROCK_MODELS),
+        "execution_modes": len(AgentConfig.EXECUTION_PROFILES),
       },
     }

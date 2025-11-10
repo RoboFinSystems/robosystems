@@ -83,19 +83,6 @@ class ExternalServicesConfig:
     },
   }
 
-  # Anthropic Claude API Configuration
-  ANTHROPIC_CONFIG = {
-    "base_url": "https://api.anthropic.com",
-    "api_version": "2023-06-01",
-    "default_model": "claude-3-opus-20240229",
-    "max_tokens": 4096,
-    "temperature": 0.7,
-    "timeout": 120,  # seconds
-    "retry_attempts": 3,
-    "retry_delay": 1,  # seconds
-    "rate_limit": 50,  # requests per minute
-  }
-
   # Stripe Payment Configuration
   STRIPE_CONFIG = {
     "api_version": "2023-10-16",

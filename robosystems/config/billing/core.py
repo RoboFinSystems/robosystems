@@ -7,8 +7,7 @@ and core billing functionality.
 
 from typing import Dict, Any, Optional, List
 from decimal import Decimal
-from ..credits import CreditConfig
-from ..graph_tier import get_tier_monthly_credits
+from ..credits import CreditConfig, TIER_CREDIT_ALLOCATIONS
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Unified billing plans configuration (aligned with GraphTier infrastructure)
 # NOTE: Stripe prices are auto-created from this config on first checkout
+# NOTE: monthly_credit_allocation comes from TIER_CREDIT_ALLOCATIONS (single source of truth)
 DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
   {
     "name": "kuzu-standard",
@@ -24,7 +24,6 @@ DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
     "base_price_cents": 4999,  # $49.99
     "included_gb": 100,  # 100 GB storage included
     "overage_price_cents_per_gb": 100,  # $1.00 per GB overage
-    "monthly_credit_allocation": 10000,  # 10k AI credits per month (100 agent calls)
     "max_queries_per_hour": 10000,
     "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
     "backup_retention_days": 30,
@@ -37,7 +36,6 @@ DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
     "base_price_cents": 19999,  # $199.99
     "included_gb": 500,  # 500 GB storage included
     "overage_price_cents_per_gb": 50,  # $0.50 per GB overage
-    "monthly_credit_allocation": 50000,  # 50k AI credits per month (500 agent calls)
     "max_queries_per_hour": 50000,
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
     "backup_retention_days": 90,
@@ -50,7 +48,6 @@ DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
     "base_price_cents": 49999,  # $499.99
     "included_gb": 2000,  # 2 TB storage included
     "overage_price_cents_per_gb": 25,  # $0.25 per GB overage
-    "monthly_credit_allocation": 200000,  # 200k AI credits per month (2000 agent calls)
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
     "backup_retention_days": 365,
@@ -87,8 +84,8 @@ class BillingConfig:
       if plan["name"] == tier:
         return {
           **plan,
-          # Use centralized tier configuration for credit allocations
-          "monthly_credit_allocation": get_tier_monthly_credits(tier),
+          # Add monthly credit allocation from TIER_CREDIT_ALLOCATIONS
+          "monthly_credit_allocation": TIER_CREDIT_ALLOCATIONS.get(tier, 0),
         }
 
     return None
@@ -98,15 +95,13 @@ class BillingConfig:
     """
     Get monthly credit allocation for a subscription tier.
 
-    Uses centralized tier configuration as the authoritative source.
-
     Args:
         tier: Subscription tier name
 
     Returns:
         Monthly credit allocation
     """
-    return get_tier_monthly_credits(tier)
+    return TIER_CREDIT_ALLOCATIONS.get(tier, 0)
 
   @classmethod
   def get_operation_cost(

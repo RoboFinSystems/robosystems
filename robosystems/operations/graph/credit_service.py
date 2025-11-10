@@ -244,8 +244,56 @@ class CreditService:
         "available_credits": consumption_result.get("available_credits", 0),
       }
 
-  def get_credit_summary(self, graph_id: str) -> Dict[str, Any]:
-    """Get comprehensive credit summary for a graph."""
+  def get_credit_summary(
+    self, graph_id: str, user_id: Optional[str] = None
+  ) -> Dict[str, Any]:
+    """Get comprehensive credit summary for a graph or shared repository.
+
+    For user graphs: Returns credit summary from GraphCredits table (graph-specific).
+    For shared repositories: Returns credit summary from UserRepositoryCredits table (user-specific).
+
+    Args:
+        graph_id: Graph or repository identifier
+        user_id: User ID (required for shared repositories)
+
+    Returns:
+        Dict with credit summary information
+    """
+    # Check if this is a shared repository
+    if self._is_shared_repository(graph_id):
+      # For shared repositories, we need user_id to fetch user-specific credits
+      if not user_id:
+        return {"error": "User ID required for shared repository credit summary"}
+
+      # Get user's repository credits
+      user_repo_credits = UserRepositoryCredits.get_user_repository_credits(
+        user_id=user_id,
+        repository_type=graph_id,  # repository_type is the graph_id for shared repos
+        session=self.session,
+      )
+
+      if not user_repo_credits:
+        return {
+          "error": f"No repository credit pool found for user {user_id} and repository {graph_id}"
+        }
+
+      # Get the repository credit summary
+      repo_summary = user_repo_credits.get_summary()
+
+      # Transform to match CreditSummaryResponse format
+      # Repository credits use a different tier system, but we map to graph_tier for consistency
+      return {
+        "graph_id": graph_id,
+        "graph_tier": f"{graph_id}-repository",  # e.g., "sec-repository"
+        "current_balance": repo_summary["current_balance"],
+        "monthly_allocation": repo_summary["monthly_allocation"],
+        "consumed_this_month": repo_summary["consumed_this_month"],
+        "transaction_count": 0,  # Repository transactions tracked separately
+        "usage_percentage": repo_summary["usage_percentage"],
+        "last_allocation_date": repo_summary["last_allocation_date"],
+      }
+
+    # For user graphs, use the existing logic
     # Try cache first
     from ...middleware.billing.cache import credit_cache
 
@@ -726,7 +774,7 @@ class CreditService:
       return {
         "success": True,
         "credits_consumed": float(base_cost),
-        "remaining_balance": float(credits.current_balance),
+        "remaining_balance": float(shared_credits.current_balance),
         "cached": False,
         "addon_type": shared_credits.user_repository.repository_type.value,
         "addon_tier": shared_credits.user_repository.repository_plan.value,
@@ -841,6 +889,9 @@ class CreditService:
     """
     Check storage limits for a graph and provide recommendations.
 
+    Note: Storage limits only apply to user graphs, not shared repositories.
+    Shared repositories are managed internally and don't expose storage to users.
+
     Args:
         graph_id: Graph identifier
         current_storage_gb: Current storage usage (fetched if not provided)
@@ -848,6 +899,10 @@ class CreditService:
     Returns:
         Dict with storage limit information and status
     """
+    # Shared repositories don't have user-facing storage limits
+    if self._is_shared_repository(graph_id):
+      return {"error": "Storage limits not applicable for shared repositories"}
+
     # Get credit record
     credits = GraphCredits.get_by_graph_id(graph_id, self.session)
     if not credits:
@@ -1051,16 +1106,21 @@ class CreditService:
     pricing = AIBillingConfig.TOKEN_PRICING.get(pricing_key)
 
     if not pricing:
-      logger.warning(f"No pricing found for model {model}, using default")
+      logger.warning(
+        f"No pricing found for model {model}, using default Sonnet pricing"
+      )
       pricing = {
-        "input": Decimal("0.003"),
-        "output": Decimal("0.015"),
+        "input": Decimal("0.01"),  # Default to Sonnet 4 with 3.33x markup
+        "output": Decimal("0.05"),
       }
 
     # Calculate actual cost based on tokens
     input_cost = (Decimal(input_tokens) / 1000) * pricing["input"]
     output_cost = (Decimal(output_tokens) / 1000) * pricing["output"]
-    total_cost = input_cost + output_cost
+    raw_cost = input_cost + output_cost
+
+    # Apply minimum charge (rounds up to at least 0.01)
+    total_cost = AIBillingConfig.apply_minimum_charge(raw_cost)
 
     # Build metadata
     token_metadata = {
@@ -1070,12 +1130,14 @@ class CreditService:
       "model": model,
       "input_cost": str(input_cost),
       "output_cost": str(output_cost),
+      "raw_cost": str(raw_cost),
       "total_cost": str(total_cost),
+      "minimum_charge_applied": total_cost > raw_cost,
     }
     if metadata:
       token_metadata.update(metadata)
 
-    # Use existing consume_credits with exact cost
+    # Use existing consume_credits with minimum-applied cost
     return self.consume_credits(
       graph_id=graph_id,
       operation_type="ai_tokens",

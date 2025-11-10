@@ -130,6 +130,7 @@ async def get_graph_limits(
       get_tier_copy_operation_limits,
       get_tier_backup_limits,
     )
+    from robosystems.config.billing.storage import StorageBillingConfig
 
     # Get user's subscription tier
     user_tier = getattr(current_user, "subscription_tier", "standard")
@@ -142,14 +143,14 @@ async def get_graph_limits(
     # - Shared repositories: Use kuzu-shared tier
     # - Fallback: kuzu-standard (shouldn't happen in practice)
     if graph:
-      graph_tier = graph.graph_tier
+      graph_tier = str(graph.graph_tier)
     elif MultiTenantUtils.is_shared_repository(graph_id):
       graph_tier = "kuzu-shared"
     else:
       graph_tier = "kuzu-standard"
 
-    # Get storage information (based on graph tier)
-    max_storage_gb = GraphTierConfig.get_storage_limit_gb(graph_tier)
+    # Get storage information (based on graph tier from billing config)
+    max_storage_gb = StorageBillingConfig.STORAGE_INCLUDED.get(graph_tier, 100)
     storage_limits = {}
     try:
       graph_client = await _get_graph_client(graph_id)

@@ -507,6 +507,29 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # AWS Bedrock permissions for Claude AI agent operations
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/global.anthropic.claude-*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - bedrock:GetFoundationModel
+                  - bedrock:ListFoundationModels
+                  - bedrock:ListInferenceProfiles
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:ViewSubscriptions
+                Resource: "*"
         # Amazon Managed Prometheus permissions (only if observability stack is configured)
         - !If
           - HasObservabilityStack

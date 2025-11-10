@@ -104,6 +104,7 @@ async def create_checkout_session(
     if request.resource_type == "graph":
       plan_config = BillingConfig.get_subscription_plan(request.plan_name)
     elif request.resource_type == "repository":
+      # NOTE: repository_name contains the graph_id (e.g., "sec"), not display name
       repo_name = request.resource_config.get("repository_name")
       if repo_name:
         plan_config = BillingConfig.get_repository_plan(repo_name, request.plan_name)

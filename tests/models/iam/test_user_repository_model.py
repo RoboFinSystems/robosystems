@@ -674,9 +674,9 @@ class TestUserRepository:
 
     config = access.get_repository_plan_config()
 
-    assert config["name"] == "SEC Data Starter"
-    assert config["monthly_credits"] == 5000
-    assert config["price_monthly"] == 29.99
+    assert config["name"] == "Starter"
+    assert config["monthly_credits"] == 50
+    assert config["price_monthly"] == 29.0
     assert config["access_level"] == RepositoryAccessLevel.READ
 
   def test_is_repository_enabled(self):

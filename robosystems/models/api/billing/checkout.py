@@ -10,7 +10,9 @@ class CreateCheckoutRequest(BaseModel):
   plan_name: str = Field(..., description="Billing plan name (e.g., 'kuzu-standard')")
   resource_type: str = Field(..., description="Resource type ('graph' or 'repository')")
   resource_config: Dict[str, Any] = Field(
-    ..., description="Configuration for the resource to be provisioned"
+    ...,
+    description="Configuration for the resource to be provisioned. "
+    "For repositories: {'repository_name': 'graph_id'} where graph_id is the repository slug (e.g., 'sec')",
   )
 
 
@@ -41,7 +43,9 @@ class CheckoutStatusResponse(BaseModel):
   )
   subscription_id: str = Field(..., description="Internal subscription ID")
   resource_id: Optional[str] = Field(
-    None, description="Resource ID (graph_id or repository name) once provisioned"
+    None,
+    description="Resource ID (graph_id for both graphs and repositories) once provisioned. "
+    "For repositories, this is the repository slug (e.g., 'sec')",
   )
   operation_id: Optional[str] = Field(
     None, description="SSE operation ID for monitoring provisioning progress"

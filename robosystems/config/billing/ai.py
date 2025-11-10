@@ -40,39 +40,46 @@ class AIOperationType(Enum):
 class AIBillingConfig:
   """Configuration for AI-specific billing."""
 
+  # Minimum credit charge per operation (rounds up to this minimum)
+  MINIMUM_CHARGE = Decimal("0.01")
+
   # Token-based pricing (for dynamic cost calculation)
-  # Based on actual Anthropic API pricing for Claude 4/4.1 models
+  # 3.33x markup over Anthropic API costs for SaaS margins
+  # Anthropic base: $3/M input, $15/M output
+  # RoboSystems: $10/M input, $50/M output
   TOKEN_PRICING = {
-    "anthropic_claude_4_opus": {
-      "input": Decimal("0.015"),  # Credits per 1K input tokens (~$15/M tokens)
-      "output": Decimal("0.075"),  # Credits per 1K output tokens (~$75/M tokens)
-    },
-    "anthropic_claude_4.1_opus": {
-      "input": Decimal("0.015"),  # Credits per 1K input tokens
-      "output": Decimal("0.075"),  # Credits per 1K output tokens
-    },
     "anthropic_claude_4_sonnet": {
-      "input": Decimal("0.003"),  # Credits per 1K input tokens (~$3/M tokens)
-      "output": Decimal("0.015"),  # Credits per 1K output tokens (~$15/M tokens)
-    },
-    # Legacy Claude 3 models (for backwards compatibility)
-    "anthropic_claude_3_opus": {
-      "input": Decimal("0.015"),  # Credits per 1K input tokens
-      "output": Decimal("0.075"),  # Credits per 1K output tokens
+      "input": Decimal(
+        "0.01"
+      ),  # Credits per 1K input tokens ($10/M tokens, 3.33x markup)
+      "output": Decimal(
+        "0.05"
+      ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
     },
     "anthropic_claude_3_sonnet": {
-      "input": Decimal("0.003"),  # Credits per 1K input tokens
-      "output": Decimal("0.015"),  # Credits per 1K output tokens
-    },
-    "openai_gpt4": {
-      "input": Decimal("0.03"),  # Credits per 1K input tokens
-      "output": Decimal("0.06"),  # Credits per 1K output tokens
-    },
-    "openai_gpt35": {
-      "input": Decimal("0.0015"),  # Credits per 1K input tokens
-      "output": Decimal("0.002"),  # Credits per 1K output tokens
+      "input": Decimal(
+        "0.01"
+      ),  # Credits per 1K input tokens ($10/M tokens, 3.33x markup)
+      "output": Decimal(
+        "0.05"
+      ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
     },
   }
+
+  @classmethod
+  def apply_minimum_charge(cls, cost: Decimal) -> Decimal:
+    """
+    Apply minimum charge, rounding up to at least MINIMUM_CHARGE.
+
+    Args:
+        cost: Calculated cost in credits
+
+    Returns:
+        Cost rounded up to minimum charge
+    """
+    if cost <= 0:
+      return Decimal("0")
+    return max(cost, cls.MINIMUM_CHARGE)
 
   # Note: The following methods and attributes are currently unused but kept for potential future use:
   # - calculate_ai_cost(): Could be used for fixed-cost AI operations

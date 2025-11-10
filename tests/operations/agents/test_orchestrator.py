@@ -88,10 +88,10 @@ class TestOrchestratorConfig:
     config = OrchestratorConfig()
 
     assert config.routing_strategy == RoutingStrategy.BEST_MATCH
-    assert config.enable_rag is True
+    assert config.enable_rag is False
     assert config.enable_caching is False
     assert config.enable_fallback is True
-    assert config.fallback_agent == "rag"
+    assert config.fallback_agent == "cypher"
 
 
 class MockAgent(BaseAgent):
@@ -204,7 +204,8 @@ class TestAgentOrchestrator:
   @pytest.fixture
   def orchestrator(self, mock_user, mock_registry, mock_context_enricher):
     """Create an orchestrator instance."""
-    return AgentOrchestrator("test_graph", mock_user)
+    config = OrchestratorConfig(fallback_agent="rag", enable_rag=True)
+    return AgentOrchestrator("test_graph", mock_user, config=config)
 
   def test_orchestrator_initialization(self, mock_user):
     """Test orchestrator initialization."""

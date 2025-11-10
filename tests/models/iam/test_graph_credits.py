@@ -113,11 +113,12 @@ class TestGraphCredits:
     result = GraphCredits.get_by_graph_id("non_existent", self.session)
     assert result is None
 
-  @patch("robosystems.models.iam.graph_credits.get_tier_storage_limit")
-  def test_create_for_graph(self, mock_get_tier_limit):
+  @patch(
+    "robosystems.models.iam.graph_credits.StorageBillingConfig.STORAGE_INCLUDED",
+    {"kuzu-large": 500},
+  )
+  def test_create_for_graph(self):
     """Test creating credits for a new graph."""
-    mock_get_tier_limit.return_value = 500
-
     # Create another graph with unique ID
     import uuid
 

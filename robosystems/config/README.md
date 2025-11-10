@@ -22,6 +22,7 @@ config/
 ├── billing.py               # Billing plans and pricing
 ├── rate_limits.py           # Burst-focused rate limiting
 ├── credits.py               # Credit costs and allocations
+├── agents.py                # Agent/AI configuration
 ├── external_services.py     # External API configurations
 ├── validation.py            # Startup validation
 └── repositories.py          # Repository configuration
@@ -275,6 +276,125 @@ validator.validate_all()  # Raises on critical errors
 # Manual validation
 if not validator.validate_database():
     setup_fallback_database()
+```
+
+### 6. Agent Configuration (`agents.py`)
+
+Centralized configuration for the multi-agent AI system.
+
+**Features:**
+
+- **Model Selection**: AWS Bedrock Claude model configuration
+- **Execution Profiles**: Time/token limits per agent mode
+- **Orchestrator Config**: Routing strategy and fallback settings
+- **Token Costs**: Credit billing for AI operations
+- **Agent-Specific Overrides**: Per-agent model customization
+
+**Available Models:**
+
+```python
+from robosystems.config import BedrockModel
+
+# Claude 4.5 (latest/default) - Regional inference profile
+BedrockModel.SONNET_4_5  # us.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+# Claude 4 (fallback) - Regional inference profile
+BedrockModel.SONNET_4    # us.anthropic.claude-sonnet-4-20250514-v1:0
+
+# Claude 3.5 v2 (last resort) - Regional inference profile
+BedrockModel.SONNET_3_5_V2  # us.anthropic.claude-3-5-sonnet-20241022-v2:0
+```
+
+**Note:** All models use regional inference profiles (`us.*`) for on-demand access without marketplace subscriptions.
+
+**Pricing:** All Sonnet models use the same pricing tier:
+- Input: $3 per million tokens ($0.003 per 1k tokens = 3.0 credits)
+- Output: $15 per million tokens ($0.015 per 1k tokens = 15.0 credits)
+
+**Execution Modes:**
+
+```python
+from robosystems.config import AgentExecutionMode
+
+# Quick: 2-5 seconds, 2 tool calls, 50k input tokens
+AgentExecutionMode.QUICK
+
+# Standard: 5-15 seconds, 5 tool calls, 100k input tokens
+AgentExecutionMode.STANDARD
+
+# Extended: 30-120 seconds, 12 tool calls, 150k input tokens
+AgentExecutionMode.EXTENDED
+
+# Streaming: 5-60 seconds, 8 tool calls, SSE responses
+AgentExecutionMode.STREAMING
+```
+
+**Usage:**
+
+```python
+from robosystems.config import AgentConfig, BedrockModel
+
+# Get default model ID
+model_id = AgentConfig.get_bedrock_model_id()
+
+# Get model for specific agent with override
+model_id = AgentConfig.get_bedrock_model_id(
+    model=BedrockModel.SONNET_4_5,
+    agent_type="financial"
+)
+
+# Get execution profile
+from robosystems.config import AgentExecutionMode
+profile = AgentConfig.get_execution_profile(AgentExecutionMode.STANDARD)
+# profile.max_tool_calls = 5
+# profile.timeout_seconds = 60
+# profile.max_input_tokens = 100000
+
+# Get mode limits (backward compatible)
+limits = AgentConfig.get_mode_limits("standard")
+# limits = {"max_tools": 5, "timeout": 60, ...}
+
+# Calculate token cost
+cost = AgentConfig.get_token_cost(
+    model=BedrockModel.SONNET_3_5_V2,
+    input_tokens=1000,
+    output_tokens=500
+)
+
+# Get orchestrator config
+fallback_agent = AgentConfig.ORCHESTRATOR_CONFIG["fallback_agent"]  # "cypher"
+enable_rag = AgentConfig.ORCHESTRATOR_CONFIG["enable_rag"]  # False
+
+# Validate configuration
+validation = AgentConfig.validate_configuration()
+if not validation["valid"]:
+    print(f"Issues: {validation['issues']}")
+```
+
+**Customizing Agent Models:**
+
+To use a different model for a specific agent, update `AGENT_MODEL_OVERRIDES`:
+
+```python
+# In robosystems/config/agents.py
+AGENT_MODEL_OVERRIDES: Dict[str, BedrockModel] = {
+    "financial": BedrockModel.SONNET_4_5,  # Use latest model for financial analysis
+    "cypher": BedrockModel.SONNET_4,      # Use Sonnet 4 for Cypher queries
+}
+```
+
+**Changing Default Model:**
+
+To change the default model globally:
+
+```python
+# In robosystems/config/agents.py
+DEFAULT_MODEL_CONFIG = ModelConfig(
+    default_model=BedrockModel.SONNET_4_5,  # Current default: Sonnet 4.5
+    fallback_model=BedrockModel.SONNET_4,   # Current fallback: Sonnet 4
+    region=env.AWS_BEDROCK_REGION,
+    temperature=0.7,
+)
 ```
 
 ## Configuration Philosophy

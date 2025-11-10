@@ -52,6 +52,72 @@ class RepositorySubscriptionService:
     """Initialize repository subscription service with database session."""
     self.session = session
 
+  def ensure_repository_graph_exists(self, repository_type: RepositoryType) -> None:
+    """
+    Ensure the shared repository graph exists in the database.
+
+    In production, the repository graph is created by the data loading pipeline
+    (e.g., SEC data loader). However, for development and testing, we need to
+    create the graph entry on-demand when subscriptions are triggered.
+
+    This method is idempotent - it only creates the graph if it doesn't exist.
+
+    Args:
+        repository_type: Type of repository (SEC, industry, economic)
+
+    Raises:
+        ValueError: If repository type is invalid or not configured
+    """
+    from ...models.iam.graph import Graph
+    from ...config.billing.repositories import RepositoryBillingConfig
+
+    graph_id = repository_type.value
+    existing = self.session.query(Graph).filter(Graph.graph_id == graph_id).first()
+
+    if existing:
+      logger.debug(f"Repository graph '{graph_id}' already exists")
+      return
+
+    config = RepositoryBillingConfig.get_repository_metadata(repository_type)
+    if not config:
+      raise ValueError(
+        f"No configuration found for repository type {repository_type.value}"
+      )
+
+    repository_graph = Graph(
+      graph_id=graph_id,
+      graph_name=config["name"],
+      graph_type="repository",
+      graph_tier=config["graph_tier"],
+      graph_instance_id=config["graph_instance_id"],
+      graph_cluster_region="us-east-1",
+      is_repository=True,
+      repository_type=repository_type.value,
+      data_source_type=config["data_source_type"],
+      data_source_url=config["data_source_url"],
+      sync_status="active",
+      sync_frequency=config["sync_frequency"],
+      org_id=None,
+      base_schema=None,
+      schema_extensions=[],
+      is_subgraph=False,
+      parent_graph_id=None,
+      created_at=datetime.now(timezone.utc),
+      updated_at=datetime.now(timezone.utc),
+    )
+
+    self.session.add(repository_graph)
+    self.session.commit()
+
+    logger.info(
+      f"Auto-created repository graph '{graph_id}' for subscription workflow",
+      extra={
+        "graph_id": graph_id,
+        "repository_type": repository_type.value,
+        "note": "Graph will be populated by data loading pipeline",
+      },
+    )
+
   def create_repository_subscription(
     self,
     user_id: str,
@@ -285,3 +351,195 @@ class RepositorySubscriptionService:
           summary["total_credits"] += credit_info["current_balance"]
 
       return summary
+
+  def allocate_credits(
+    self,
+    repository_type: RepositoryType,
+    repository_plan: RepositoryPlan,
+    user_id: str,
+  ) -> int:
+    """
+    Allocate monthly credits to user for repository access.
+
+    This method is called during provisioning to set up the initial credit allocation
+    for a user's repository subscription. It retrieves the plan configuration to
+    determine credit amounts and creates/updates the credit pool.
+
+    Args:
+        repository_type: Type of repository (SEC, industry, etc.)
+        repository_plan: Repository plan tier (starter, advanced, unlimited)
+        user_id: User ID to allocate credits to
+
+    Returns:
+        Number of credits allocated
+
+    Raises:
+        ValueError: If repository or plan configuration is invalid
+        SQLAlchemyError: If database operation fails
+    """
+    repo_config = UserRepository.get_all_repository_configs().get(repository_type)
+    if not repo_config or "plans" not in repo_config:
+      raise ValueError(f"Repository {repository_type.value} configuration not found")
+
+    plan_config = repo_config["plans"].get(repository_plan)
+    if not plan_config:
+      raise ValueError(
+        f"Plan {repository_plan.value} not available for repository {repository_type.value}"
+      )
+
+    monthly_credits = plan_config["monthly_credits"]
+
+    access_record = UserRepository.get_by_user_and_repository(
+      user_id=user_id, repository_name=repository_type.value, session=self.session
+    )
+
+    if not access_record:
+      logger.warning(
+        f"Access record not found for user {user_id}, repository {repository_type.value}. "
+        f"Credits will be allocated when access is granted."
+      )
+      return monthly_credits
+
+    if access_record.user_credits:
+      access_record.user_credits.update_monthly_allocation(
+        new_allocation=monthly_credits, session=self.session
+      )
+    else:
+      UserRepositoryCredits.create_for_access(
+        access_id=str(access_record.id),
+        repository_type=repository_type,
+        repository_plan=repository_plan,
+        monthly_allocation=monthly_credits,
+        session=self.session,
+      )
+
+    logger.info(
+      f"Allocated {monthly_credits} credits for user {user_id}, "
+      f"repository {repository_type.value}, plan {repository_plan.value}"
+    )
+
+    return monthly_credits
+
+  def grant_access(
+    self,
+    repository_type: RepositoryType,
+    user_id: str,
+    repository_plan: Optional[RepositoryPlan] = None,
+  ) -> bool:
+    """
+    Grant repository access to a user.
+
+    This method creates a UserRepository access record for the user if one doesn't
+    already exist. It's called during provisioning after payment is confirmed.
+
+    This method will auto-create the repository graph entry if it doesn't exist,
+    which is necessary for dev/testing. In production, the data loading pipeline
+    should create the graph entry.
+
+    Args:
+        repository_type: Type of repository to grant access to
+        user_id: User ID to grant access to
+        repository_plan: Optional plan tier (if not provided, uses STARTER)
+
+    Returns:
+        True if access was granted or already exists
+
+    Raises:
+        ValueError: If repository configuration is invalid
+        SQLAlchemyError: If database operation fails
+    """
+    self.ensure_repository_graph_exists(repository_type)
+
+    existing = UserRepository.get_by_user_and_repository(
+      user_id=user_id, repository_name=repository_type.value, session=self.session
+    )
+
+    if existing:
+      logger.info(
+        f"Access already exists for user {user_id}, repository {repository_type.value}"
+      )
+      if not existing.is_active:
+        existing.is_active = True
+        existing.updated_at = datetime.now(timezone.utc)
+        self.session.commit()
+        logger.info(f"Reactivated access for user {user_id}")
+      return True
+
+    if repository_plan is None:
+      repository_plan = RepositoryPlan.STARTER
+
+    from ...config.billing.repositories import RepositoryBillingConfig
+    from ...models.iam.user_repository import RepositoryAccessLevel
+
+    plan_config = RepositoryBillingConfig.get_plan_details(repository_plan)
+    if not plan_config:
+      raise ValueError(
+        f"Plan {repository_plan.value} not available for repository {repository_type.value}"
+      )
+
+    access_level_str = plan_config.get("access_level", "READ")
+    try:
+      access_level = RepositoryAccessLevel(access_level_str.lower())
+    except (ValueError, AttributeError):
+      access_level = RepositoryAccessLevel.READ
+
+    UserRepository.create_access(
+      user_id=user_id,
+      repository_type=repository_type,
+      repository_name=repository_type.value,
+      access_level=access_level,
+      repository_plan=repository_plan,
+      session=self.session,
+      monthly_price_cents=plan_config["price_cents"],
+      monthly_credits=plan_config["monthly_credits"],
+      metadata={
+        "granted_at": datetime.now(timezone.utc).isoformat(),
+        "granted_via": "provisioning",
+      },
+    )
+
+    logger.info(
+      f"Granted access for user {user_id}, repository {repository_type.value}, "
+      f"plan {repository_plan.value}"
+    )
+
+    return True
+
+  def revoke_access(
+    self,
+    repository_type: RepositoryType,
+    user_id: str,
+  ) -> bool:
+    """
+    Revoke repository access for a user.
+
+    This is a helper method used during error cleanup in provisioning tasks.
+
+    Args:
+        repository_type: Type of repository
+        user_id: User ID
+
+    Returns:
+        True if access was revoked
+
+    Raises:
+        ValueError: If access record doesn't exist
+        SQLAlchemyError: If database operation fails
+    """
+    access_record = UserRepository.get_by_user_and_repository(
+      user_id=user_id, repository_name=repository_type.value, session=self.session
+    )
+
+    if not access_record:
+      logger.warning(
+        f"No access record to revoke for user {user_id}, repository {repository_type.value}"
+      )
+      return False
+
+    access_record.revoke_access(session=self.session)
+
+    logger.info(
+      f"Revoked access for user {user_id}, repository {repository_type.value}"
+    )
+
+    return True

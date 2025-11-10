@@ -48,13 +48,22 @@ class OrchestratorConfig:
   """Configuration for the agent orchestrator."""
 
   routing_strategy: RoutingStrategy = RoutingStrategy.BEST_MATCH
-  enable_rag: bool = True
+  enable_rag: bool = False
   enable_caching: bool = False
   enable_fallback: bool = True
-  fallback_agent: str = "rag"
+  fallback_agent: Optional[str] = None
   max_retries: int = 2
   timeout: float = 60.0
   ensemble_size: int = 3
+
+  def __post_init__(self):
+    """Set defaults from AgentConfig if not specified."""
+    from robosystems.config import AgentConfig
+
+    if self.fallback_agent is None:
+      self.fallback_agent = AgentConfig.ORCHESTRATOR_CONFIG["fallback_agent"]
+    if self.enable_rag is None:
+      self.enable_rag = AgentConfig.ORCHESTRATOR_CONFIG["enable_rag"]
 
 
 class AgentOrchestrator:

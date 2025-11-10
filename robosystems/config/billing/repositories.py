@@ -10,7 +10,7 @@ from enum import Enum
 
 
 class SharedRepository(str, Enum):
-  """Available shared repositories."""
+  """Available shared repositories (system-wide shared data sources)."""
 
   SEC = "sec"  # SEC financial filings
   INDUSTRY = "industry"  # Industry data (coming soon)
@@ -28,17 +28,54 @@ class RepositoryPlan(str, Enum):
 class RepositoryBillingConfig:
   """Configuration for shared repository billing and rate limits."""
 
+  # Repository metadata (infrastructure and data source information)
+  REPOSITORY_METADATA = {
+    SharedRepository.SEC: {
+      "name": "SEC Public Filings Repository",
+      "description": "Shared repository for SEC public company filings and financial data",
+      "data_source_type": "sec_edgar",
+      "data_source_url": "https://www.sec.gov/cgi-bin/browse-edgar",
+      "sync_frequency": "daily",
+      "status": "available",
+      "graph_tier": "kuzu-shared",
+      "graph_instance_id": "kuzu-shared-prod",
+    },
+    SharedRepository.INDUSTRY: {
+      "name": "Industry Benchmarks Repository",
+      "description": "Shared repository for industry benchmarking and comparative analysis",
+      "data_source_type": "bls_api",
+      "data_source_url": "https://api.bls.gov/publicAPI/v2/",
+      "sync_frequency": "monthly",
+      "status": "coming_soon",
+      "graph_tier": "kuzu-shared",
+      "graph_instance_id": "kuzu-shared-prod",
+    },
+    SharedRepository.ECONOMIC: {
+      "name": "Economic Indicators Repository",
+      "description": "Shared repository for economic indicators and macroeconomic metrics",
+      "data_source_type": "fred_api",
+      "data_source_url": "https://api.stlouisfed.org/fred/",
+      "sync_frequency": "daily",
+      "status": "coming_soon",
+      "graph_tier": "kuzu-shared",
+      "graph_instance_id": "kuzu-shared-prod",
+    },
+  }
+
   # Repository subscription tiers (monthly pricing)
   # NOTE: Stripe prices are auto-created from this config on first checkout
+  # This is the SINGLE SOURCE OF TRUTH for repository pricing and credits
   REPOSITORY_PLANS = {
     RepositoryPlan.STARTER: {
       "name": "Starter",
       "price_cents": 2900,  # $29/month
+      "price_monthly": 29.0,  # For display/calculations
       "price_display": "$29/month",
-      "monthly_credits": 1000,  # Credits for AI agent operations
+      "monthly_credits": 50,  # 50 AI agent credits per month (167 complex queries/month = 5.5/day)
+      "access_level": "READ",  # Read-only access
       "description": "Basic access for individuals and small teams",
       "features": [
-        "1,000 AI agent credits per month",
+        "50 AI agent credits per month",
         "500 queries per hour (included)",
         "200 MCP queries per hour (included)",
         "Basic rate limits",
@@ -49,11 +86,13 @@ class RepositoryBillingConfig:
     RepositoryPlan.ADVANCED: {
       "name": "Advanced",
       "price_cents": 9900,  # $99/month
+      "price_monthly": 99.0,
       "price_display": "$99/month",
-      "monthly_credits": 5000,  # Credits for AI agent operations
+      "monthly_credits": 200,  # 200 AI agent credits per month (667 complex queries/month = 22/day)
+      "access_level": "WRITE",  # Write access for contributions
       "description": "Professional access for analysts and researchers",
       "features": [
-        "5,000 AI agent credits per month",
+        "200 AI agent credits per month",
         "2,000 queries per hour (included)",
         "1,000 MCP queries per hour (included)",
         "Professional rate limits",
@@ -65,11 +104,13 @@ class RepositoryBillingConfig:
     RepositoryPlan.UNLIMITED: {
       "name": "Unlimited",
       "price_cents": 49900,  # $499/month
+      "price_monthly": 499.0,
       "price_display": "$499/month",
-      "monthly_credits": 50000,  # Very high AI agent credits
+      "monthly_credits": 1000,  # 1,000 AI agent credits per month (3,333 complex queries/month = 111/day)
+      "access_level": "ADMIN",  # Full admin access
       "description": "Enterprise access with no limits",
       "features": [
-        "50,000 AI agent credits per month",
+        "1,000 AI agent credits per month",
         "Unlimited queries (included)",
         "Unlimited MCP queries (included)",
         "No daily rate limits",
@@ -160,9 +201,52 @@ class RepositoryBillingConfig:
   ]
 
   @classmethod
+  def get_repository_metadata(cls, repository: SharedRepository) -> Optional[Dict]:
+    """Get metadata for a shared repository."""
+    return cls.REPOSITORY_METADATA.get(repository)
+
+  @classmethod
   def get_plan_details(cls, plan: RepositoryPlan) -> Optional[Dict]:
     """Get details for a repository plan."""
     return cls.REPOSITORY_PLANS.get(plan)
+
+  @classmethod
+  def get_all_repository_configs(cls) -> Dict:
+    """
+    Get all repository configurations including enabled status and plans.
+
+    This is used by the API and subscription services to get complete
+    repository information.
+
+    Returns:
+        Dict mapping repository types to their config including enabled status and plans
+    """
+    configs = {}
+
+    for repo_type in SharedRepository:
+      metadata = cls.get_repository_metadata(repo_type)
+      if not metadata:
+        continue
+
+      configs[repo_type] = {
+        "enabled": metadata.get("status") == "available",
+        "coming_soon": metadata.get("status") == "coming_soon",
+        "plans": {
+          plan_type: {
+            **plan_details,
+            "access_level": plan_details.get("access_level", "READ"),
+          }
+          for plan_type, plan_details in cls.REPOSITORY_PLANS.items()
+        },
+      }
+
+    return configs
+
+  @classmethod
+  def is_repository_enabled(cls, repository: SharedRepository) -> bool:
+    """Check if a repository is enabled for subscriptions."""
+    metadata = cls.get_repository_metadata(repository)
+    return metadata.get("status") == "available" if metadata else False
 
   @classmethod
   def get_rate_limits(

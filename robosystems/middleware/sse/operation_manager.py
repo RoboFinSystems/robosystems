@@ -326,6 +326,73 @@ def get_operation_manager() -> OperationManager:
   return _operation_manager
 
 
+def emit_sse_event(
+  operation_id: str,
+  status: OperationStatus,
+  data: Optional[Dict[str, Any]] = None,
+  message: Optional[str] = None,
+  progress_percentage: Optional[float] = None,
+):
+  """
+  Compatibility wrapper for emitting SSE events.
+
+  This function provides backward compatibility for code that uses the old
+  emit_sse_event interface. It maps OperationStatus to EventType and
+  calls emit_event_to_operation.
+
+  Args:
+      operation_id: Operation identifier
+      status: Operation status (mapped to event type)
+      data: Event data dictionary
+      message: Optional message
+      progress_percentage: Optional progress percentage
+  """
+  from robosystems.middleware.sse.streaming import emit_event_to_operation
+
+  # Map OperationStatus to EventType
+  status_to_event_type = {
+    OperationStatus.PENDING: EventType.OPERATION_STARTED,
+    OperationStatus.IN_PROGRESS: EventType.OPERATION_PROGRESS,
+    OperationStatus.COMPLETED: EventType.OPERATION_COMPLETED,
+    OperationStatus.FAILED: EventType.OPERATION_ERROR,
+    OperationStatus.ERROR: EventType.OPERATION_ERROR,
+    OperationStatus.CANCELLED: EventType.OPERATION_CANCELLED,
+  }
+
+  event_type = status_to_event_type.get(status, EventType.OPERATION_PROGRESS)
+
+  # Merge message and progress_percentage into data
+  event_data = data.copy() if data else {}
+  if message:
+    event_data["message"] = message
+  if progress_percentage is not None:
+    event_data["progress_percentage"] = progress_percentage
+
+  # Call emit_event_to_operation - handle both async and sync contexts
+  try:
+    # Try to get existing event loop
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+      # We're in an async context, schedule as task
+      asyncio.create_task(emit_event_to_operation(operation_id, event_type, event_data))
+    else:
+      # Run in the existing loop
+      loop.run_until_complete(
+        emit_event_to_operation(operation_id, event_type, event_data)
+      )
+  except RuntimeError:
+    # No event loop, create a new one (sync context)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+      loop.run_until_complete(
+        emit_event_to_operation(operation_id, event_type, event_data)
+      )
+    finally:
+      loop.close()
+      asyncio.set_event_loop(None)
+
+
 async def create_operation_response(
   operation_type: str,
   user_id: str,

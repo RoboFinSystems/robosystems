@@ -1,7 +1,7 @@
 services:
   # Robosystems API
   api:
-    container_name: api
+    container_name: robosystems-api
     build:
       context: .
       dockerfile: Dockerfile
@@ -18,7 +18,7 @@ services:
     volumes:
       - ./robosystems:/app/robosystems # Mount code for hot reload
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://api:8000/v1/status"]
+      test: ["CMD", "curl", "-f", "http://robosystems-api:8000/v1/status"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -28,7 +28,7 @@ services:
 
   # Kuzu Graph API - Graph API with Kuzu Backend
   graph-api-kuzu:
-    container_name: graph-api-kuzu
+    container_name: robosystems-graph-api-kuzu
     build:
       context: .
       dockerfile: Dockerfile
@@ -61,7 +61,7 @@ services:
 
   # Neo4j Graph API - Graph API with Neo4j Backend
   graph-api-neo4j:
-    container_name: graph-api-neo4j
+    container_name: robosystems-graph-api-neo4j
     build:
       context: .
       dockerfile: Dockerfile
@@ -96,7 +96,7 @@ services:
 
   # Robosystems Worker
   worker:
-    container_name: worker
+    container_name: robosystems-worker
     build:
       context: .
       dockerfile: Dockerfile
@@ -116,7 +116,7 @@ services:
 
   # Postgres - Database for RoboSystems (IAM)
   pg-iam:
-    container_name: pg-iam
+    container_name: robosystems-pg-iam
     image: postgres:14
     environment:
       - POSTGRES_USER=postgres
@@ -139,7 +139,7 @@ services:
 
   # Valkey - Cache for RoboSystems
   valkey:
-    container_name: valkey
+    container_name: robosystems-valkey
     image: valkey/valkey:8.0-alpine
     ports:
       - 6379:6379
@@ -162,7 +162,7 @@ services:
 
   # Neo4j Database - Graph Database Backend
   neo4j-db:
-    container_name: neo4j-db
+    container_name: robosystems-neo4j-db
     image: neo4j:5.25-community
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD-neo4jpassword}
@@ -198,7 +198,7 @@ services:
 
   # LocalStack - AWS services for RoboSystems
   localstack:
-    container_name: localstack
+    container_name: robosystems-localstack
     image: localstack/localstack:3.0
     ports:
       - "4566:4566" # LocalStack edge port
@@ -232,7 +232,7 @@ services:
   # OpenTelemetry Collector - Metrics and Tracing
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.106.0
-    container_name: otel-collector
+    container_name: robosystems-otel-collector
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
       - ./robosystems/middleware/otel/config/otel-collector-config.yaml:/etc/otel/config.yaml
@@ -245,7 +245,7 @@ services:
   # Prometheus - Metrics and Tracing
   prometheus:
     image: prom/prometheus:v2.53.1
-    container_name: prometheus
+    container_name: robosystems-prometheus
     volumes:
       - ./robosystems/middleware/otel/config/prometheus.yaml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -257,7 +257,7 @@ services:
   # Grafana - Dashboard for Prometheus and OpenTelemetry
   grafana:
     image: grafana/grafana:11.2.1
-    container_name: grafana
+    container_name: robosystems-grafana
     ports:
       - "4000:3000"
     volumes:

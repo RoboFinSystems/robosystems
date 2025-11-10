@@ -8,9 +8,7 @@ from robosystems.config.graph_tier import (
   get_tier_backup_limits,
   get_tier_copy_operation_limits,
   get_tier_max_subgraphs,
-  get_tier_monthly_credits,
   get_tier_api_rate_multiplier,
-  get_tier_storage_limit,
 )
 
 
@@ -54,16 +52,12 @@ staging:
 def reset_tier_config_caches():
   GraphTierConfig.clear_cache()
   get_tier_max_subgraphs.cache_clear()
-  get_tier_storage_limit.cache_clear()
-  get_tier_monthly_credits.cache_clear()
   get_tier_api_rate_multiplier.cache_clear()
   get_tier_copy_operation_limits.cache_clear()
   get_tier_backup_limits.cache_clear()
   yield
   GraphTierConfig.clear_cache()
   get_tier_max_subgraphs.cache_clear()
-  get_tier_storage_limit.cache_clear()
-  get_tier_monthly_credits.cache_clear()
   get_tier_api_rate_multiplier.cache_clear()
   get_tier_copy_operation_limits.cache_clear()
   get_tier_backup_limits.cache_clear()
@@ -119,8 +113,6 @@ def test_tier_config_loads_once_when_cached(mock_graph_config):
 
 def test_accessors_return_configured_values(mock_graph_config):
   assert get_tier_max_subgraphs("kuzu-standard") == 5
-  assert get_tier_storage_limit("kuzu-standard") == 250
-  assert get_tier_monthly_credits("kuzu-standard") == 1500
   assert get_tier_api_rate_multiplier("kuzu-standard") == 1.5
 
   copy_limits = get_tier_copy_operation_limits("kuzu-standard")
@@ -140,9 +132,8 @@ def test_accessors_return_configured_values(mock_graph_config):
 
 
 def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
-  # kuzu-large is missing storage limit/multiplier/copy settings so defaults apply
+  # kuzu-large is missing multiplier/copy settings so defaults apply
   assert GraphTierConfig.get_tier_config("unknown-tier") == {}
-  assert get_tier_storage_limit("kuzu-large") == 500
   assert get_tier_api_rate_multiplier("kuzu-large") == 1.0
 
   default_copy = get_tier_copy_operation_limits("kuzu-large")

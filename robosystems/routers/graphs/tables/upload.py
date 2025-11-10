@@ -86,7 +86,7 @@ from robosystems.config.constants import (
   FALLBACK_BYTES_PER_ROW_CSV,
   FALLBACK_BYTES_PER_ROW_JSON,
 )
-from robosystems.config.graph_tier import get_tier_storage_limit
+from robosystems.config.billing.storage import StorageBillingConfig
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.graph.types import (
   GraphTypeRegistry,
@@ -646,7 +646,9 @@ async def update_file_status(
 
     graph = Graph.get_by_id(graph_id, db)
     if graph:
-      storage_limit_gb = get_tier_storage_limit(graph.graph_tier)
+      storage_limit_gb = StorageBillingConfig.STORAGE_INCLUDED.get(
+        str(graph.graph_tier), 100
+      )
       storage_limit_bytes = storage_limit_gb * 1024 * 1024 * 1024
 
       all_tables = GraphTable.get_all_for_graph(graph_id, db)
@@ -665,13 +667,14 @@ async def update_file_status(
       file_obj = s3_client.s3_client.get_object(Bucket=bucket, Key=graph_file.s3_key)
       file_content = file_obj["Body"].read()
 
-      if graph_file.file_format == "parquet":
+      file_format = str(graph_file.file_format)
+      if file_format == "parquet":
         import pyarrow.parquet as pq
         from io import BytesIO
 
         parquet_file = pq.read_table(BytesIO(file_content))
         actual_row_count = parquet_file.num_rows
-      elif graph_file.file_format == "csv":
+      elif file_format == "csv":
         import csv
         from io import StringIO
 

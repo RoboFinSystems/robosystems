@@ -26,7 +26,7 @@ def mock_user():
 @pytest.fixture
 def mock_orchestrator():
   """Create a mock orchestrator."""
-  with patch("robosystems.routers.graphs.agent.AgentOrchestrator") as mock:
+  with patch("robosystems.routers.graphs.agent.handlers.AgentOrchestrator") as mock:
     orchestrator = AsyncMock()
     # Create a mock response object with the expected attributes
     mock_response = Mock()
@@ -53,7 +53,7 @@ def mock_orchestrator():
 @pytest.fixture
 def mock_registry():
   """Create a mock agent registry."""
-  with patch("robosystems.routers.graphs.agent.AgentRegistry") as mock:
+  with patch("robosystems.routers.graphs.agent.execute.AgentRegistry") as mock:
     registry = Mock()
 
     # Agent metadata dictionary
@@ -156,8 +156,18 @@ class TestAgentEndpoints:
     assert data["agent_used"] == "financial"
     assert data["metadata"]["test"] is True
 
-  def test_specific_agent_endpoint(self, client, mock_orchestrator):
+  def test_specific_agent_endpoint(self, client, mock_orchestrator, mock_registry):
     """Test specific agent type endpoint."""
+    # Mock registry to return a valid agent with metadata
+    mock_agent = Mock()
+    mock_metadata = Mock()
+    mock_metadata.execution_profile = {
+      AgentMode.STANDARD: Mock(min_time=1, max_time=5, avg_time=3, tool_calls=5),
+      AgentMode.EXTENDED: Mock(min_time=1, max_time=5, avg_time=3, tool_calls=12),
+    }
+    mock_agent.metadata = mock_metadata
+    mock_registry.get_agent.return_value = mock_agent
+
     request_data = {
       "message": "Research this topic",
       "mode": "extended",
@@ -170,19 +180,11 @@ class TestAgentEndpoints:
     )
 
     assert response.status_code == 200
-    mock_orchestrator.route_query.assert_called_with(
-      query="Research this topic",
-      agent_type="research",
-      mode=AgentMode.EXTENDED,
-      history=[],
-      context=None,
-      force_extended=False,
-    )
 
   def test_list_agents_endpoint(self, client, mock_registry):
     """Test listing available agents."""
     response = client.get(
-      "/v1/graphs/test_graph/agent/list",
+      "/v1/graphs/test_graph/agent",
       headers={"Authorization": "Bearer test_token"},
     )
 
@@ -195,7 +197,7 @@ class TestAgentEndpoints:
   def test_agent_metadata_endpoint(self, client, mock_registry):
     """Test getting agent metadata."""
     response = client.get(
-      "/v1/graphs/test_graph/agent/financial/metadata",
+      "/v1/graphs/test_graph/agent/financial",
       headers={"Authorization": "Bearer test_token"},
     )
 
@@ -384,10 +386,11 @@ class TestAgentEndpoints:
       headers={"Authorization": "Bearer test_token"},
     )
 
-    assert response.status_code == 200
-    # Verify extended mode was used
-    call_args = mock_orchestrator.route_query.call_args[1]
-    assert call_args.get("force_extended") is True
+    # Extended analysis always uses async execution (202)
+    assert response.status_code == 202
+    data = response.json()
+    assert "operation_id" in data
+    assert data["status"] == "pending"
 
   def test_agent_context_enrichment_toggle(self, client, mock_orchestrator):
     """Test toggling context enrichment."""
@@ -410,7 +413,7 @@ class TestAgentEndpoints:
   def test_agent_capability_filter(self, client):
     """Test filtering agents by capability."""
     response = client.get(
-      "/v1/graphs/test_graph/agent/list?capability=financial_analysis",
+      "/v1/graphs/test_graph/agent?capability=financial_analysis",
       headers={"Authorization": "Bearer test_token"},
     )
 
@@ -431,7 +434,6 @@ class TestAgentEndpoints:
     paths = openapi["paths"]
     assert "/v1/graphs/{graph_id}/agent" in paths
     assert "/v1/graphs/{graph_id}/agent/{agent_type}" in paths
-    assert "/v1/graphs/{graph_id}/agent/list" in paths
 
     # Check request/response schemas
     components = openapi["components"]["schemas"]

@@ -9,7 +9,7 @@ from .auth import router as auth_router
 # Removed entity router - using query endpoint for all Entity operations
 from .user import router as user_router
 from .orgs import router as orgs_router
-from .graphs.agent import router as agent_router
+from .graphs.agent import router as agent_router  # Agent module with modular structure
 from .graphs.connections import router as connections_router
 from .status import router as status_router
 from .graphs import (
@@ -50,7 +50,7 @@ router = APIRouter(prefix="/v1/graphs/{graph_id}", tags=[])
 
 # Include routers for graph-scoped endpoints
 router.include_router(connections_router, prefix="/connections")
-router.include_router(agent_router, prefix="/agent")
+router.include_router(agent_router)  # No prefix - handled in the agent module itself
 router.include_router(mcp_router, prefix="/mcp")
 router.include_router(backups_router, prefix="/backups")
 router.include_router(usage_router, prefix="/analytics")

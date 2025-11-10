@@ -231,21 +231,27 @@ jobs:
               # Get tier name for variable lookup (e.g., "kuzu-standard" → "KUZU_STANDARD")
               TIER_NAME=$(echo "$writer" | jq -r '.tier | ascii_upcase | gsub("-"; "_")')
 
-              # Get default values from config
-              CONFIG_MIN=$(echo "$writer" | jq -r '.scaling.min')
-              CONFIG_MAX=$(echo "$writer" | jq -r '.scaling.max')
-
               # Build GitHub variable names based on environment
               MIN_VAR_NAME="${TIER_NAME}_MIN_INSTANCES_${ENV_SUFFIX}"
               MAX_VAR_NAME="${TIER_NAME}_MAX_INSTANCES_${ENV_SUFFIX}"
 
-              # Get GitHub variable values (with fallback to config)
-              MIN_INSTANCES="${!MIN_VAR_NAME:-$CONFIG_MIN}"
-              MAX_INSTANCES="${!MAX_VAR_NAME:-$CONFIG_MAX}"
+              # Get GitHub variable values - REQUIRED (no fallback)
+              MIN_INSTANCES="${!MIN_VAR_NAME}"
+              MAX_INSTANCES="${!MAX_VAR_NAME}"
+
+              # Validate that scaling variables are set
+              if [ -z "$MIN_INSTANCES" ] || [ -z "$MAX_INSTANCES" ]; then
+                echo "❌ ERROR: Scaling variables must be set in GitHub Actions variables"
+                echo "   Missing: $MIN_VAR_NAME and/or $MAX_VAR_NAME"
+                echo "   Tier: ${WRITER_NAME}"
+                echo ""
+                echo "   Set these variables at: https://github.com/${{ github.repository }}/settings/variables/actions"
+                exit 1
+              fi
 
               echo "  📊 Scaling for ${WRITER_NAME}: min=$MIN_INSTANCES, max=$MAX_INSTANCES"
-              echo "     (MIN_VAR: $MIN_VAR_NAME=${!MIN_VAR_NAME:-[using config: $CONFIG_MIN]})"
-              echo "     (MAX_VAR: $MAX_VAR_NAME=${!MAX_VAR_NAME:-[using config: $CONFIG_MAX]})"
+              echo "     (MIN_VAR: $MIN_VAR_NAME=$MIN_INSTANCES)"
+              echo "     (MAX_VAR: $MAX_VAR_NAME=$MAX_INSTANCES)"
 
               # Build the matrix entry from writer config with nested instance specs
               # Include backend field for routing to correct workflow (kuzu vs neo4j)

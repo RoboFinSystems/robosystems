@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from robosystems.config.billing import core
 from robosystems.config.billing.core import BillingConfig, DEFAULT_GRAPH_BILLING_PLANS
+from robosystems.config import credits as credits_module
 from robosystems.config.credits import CreditConfig
 
 
@@ -11,11 +12,9 @@ def test_get_subscription_plan_injects_latest_credit_allocation(monkeypatch):
     "kuzu-large": 4321,
     "kuzu-xlarge": 9999,
   }
-  monkeypatch.setattr(
-    core,
-    "get_tier_monthly_credits",
-    lambda tier, environment=None: credits[tier],
-  )
+  # Patch in both modules since core imports it at module load time
+  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
+  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
 
   plan = BillingConfig.get_subscription_plan("kuzu-standard")
 
@@ -29,12 +28,15 @@ def test_get_subscription_plan_returns_none_for_unknown_tier():
   assert BillingConfig.get_subscription_plan("does-not-exist") is None
 
 
-def test_get_monthly_credits_delegates_to_tier_config(monkeypatch):
-  monkeypatch.setattr(
-    core,
-    "get_tier_monthly_credits",
-    lambda tier, environment=None: 777 if tier == "kuzu-large" else 0,
-  )
+def test_get_monthly_credits_returns_from_tier_allocations(monkeypatch):
+  credits = {
+    "kuzu-standard": 100,
+    "kuzu-large": 777,
+    "kuzu-xlarge": 800,
+  }
+  # Patch in both modules since core imports it at module load time
+  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
+  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
 
   assert BillingConfig.get_monthly_credits("kuzu-large") == 777
 
@@ -51,11 +53,6 @@ def test_get_operation_cost_uses_credit_config(monkeypatch):
 
 
 def test_validate_configuration_reports_missing_plan(monkeypatch):
-  monkeypatch.setattr(
-    core,
-    "get_tier_monthly_credits",
-    lambda tier, environment=None: {"kuzu-standard": 500}.get(tier, 0),
-  )
   monkeypatch.setattr(
     CreditConfig,
     "MONTHLY_ALLOCATIONS",
@@ -77,11 +74,9 @@ def test_validate_configuration_reports_missing_plan(monkeypatch):
 
 
 def test_validate_configuration_passes_when_allocations_match(monkeypatch):
-  monkeypatch.setattr(
-    core,
-    "get_tier_monthly_credits",
-    lambda tier, environment=None: 111 if tier == "kuzu-standard" else 0,
-  )
+  credits = {"kuzu-standard": 111}
+  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
+  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
   monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"kuzu-standard": 111})
   monkeypatch.setattr(
     CreditConfig,
@@ -103,15 +98,13 @@ def test_validate_configuration_passes_when_allocations_match(monkeypatch):
 
 
 def test_get_all_pricing_info_returns_expected_structure(monkeypatch):
-  monkeypatch.setattr(
-    core,
-    "get_tier_monthly_credits",
-    lambda tier, environment=None: {
-      "kuzu-standard": 100,
-      "kuzu-large": 200,
-      "kuzu-xlarge": 300,
-    }[tier],
-  )
+  credits = {
+    "kuzu-standard": 100,
+    "kuzu-large": 200,
+    "kuzu-xlarge": 300,
+  }
+  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
+  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
   monkeypatch.setattr(
     CreditConfig,
     "OPERATION_COSTS",

@@ -31,19 +31,6 @@ start profile="robosystems" build="--build" detached="--detach":
 stop profile="robosystems":
     @just compose-down {{profile}}
 
-# Quick restart containers to pick up code changes via volume mounts (no rebuild)
-restart profile="robosystems":
-    docker compose -f compose.yaml --profile {{profile}} restart
-
-# Restart specific service(s) without stopping everything
-restart-service service:
-    docker compose -f compose.yaml restart {{service}}
-
-# Rebuild containers (full rebuild with new images)
-rebuild profile="robosystems":
-    @just compose-down {{profile}}
-    @just compose-up {{profile}} --build --detach
-
 # Docker commands
 compose-up profile="robosystems" build="--build" detached="--detach" env=_env:
     @test -f {{env}} || cp .env.example {{env}}
@@ -52,17 +39,29 @@ compose-up profile="robosystems" build="--build" detached="--detach" env=_env:
 compose-down profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
 
+# Rebuild containers (rebuilds images and restarts - for package/env changes)
+rebuild profile="robosystems":
+    @just compose-up {{profile}} --build --detach
+
+# Quick restart containers to pick up code changes via volume mounts (no rebuild)
+restart profile="robosystems":
+    docker compose -f compose.yaml --profile {{profile}} restart
+
+# Restart specific service(s) without stopping everything
+restart-container container="worker":
+    docker compose -f compose.yaml restart robosystems-{{container}}
+
 # Docker logs (without follow to prevent hanging)
 logs container="worker" lines="100":
-    docker logs {{container}} --tail {{lines}}
+    docker logs robosystems-{{container}} --tail {{lines}}
 
 # Docker logs with follow (tail -f style)
 logs-follow container="worker":
-    docker logs -f {{container}}
+    docker logs -f robosystems-{{container}}
 
 # Docker logs with grep filter
 logs-grep container="worker" pattern="ERROR" lines="100":
-    docker logs {{container}} --tail {{lines}} | grep -E "{{pattern}}"
+    docker logs robosystems-{{container}} --tail {{lines}} | grep -E "{{pattern}}"
 
 
 ## Development Environment ##
@@ -91,6 +90,12 @@ update:
 
 
 ## Demo Scripts ##
+
+# Run all demos
+demo-all:
+    @just demo-accounting
+    @just demo-custom-graph
+    @just demo-sec
 
 # Create or reuse demo user (uses shared examples/credentials/config.json)
 demo-user *args="":
