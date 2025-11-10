@@ -1,6 +1,6 @@
 [project]
 name = "robosystems"
-version = "1.1.7"
+version = "1.1.8"
 description = "RoboSystems"
 requires-python = ">=3.12.10"
 authors = [
