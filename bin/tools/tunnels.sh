@@ -253,14 +253,15 @@ check_bastion_status() {
         # Mark that we started the bastion
         BASTION_WAS_STARTED="true"
 
-        echo -e "${BLUE}Waiting 30 seconds for bastion to boot...${NC}"
-        sleep 30
-
         # Wait for instance to be running
         echo -e "${BLUE}Waiting for instance to reach running state...${NC}"
         aws ec2 wait instance-running --instance-ids "$BASTION_INSTANCE_ID"
 
         echo -e "${GREEN}✓ Bastion instance is now running${NC}"
+
+        # Wait additional time for SSH service to start
+        echo -e "${BLUE}Waiting 30 seconds for SSH service to initialize...${NC}"
+        sleep 30
 
         # Update the bastion host IP after starting
         echo -e "${BLUE}Updating bastion host IP address...${NC}"
@@ -282,7 +283,7 @@ check_bastion_status() {
 
 test_connectivity() {
     echo -e "${BLUE}Testing connection to bastion host...${NC}"
-    if ! nc -z -w5 $BASTION_HOST 22 2>/dev/null; then
+    if ! nc -z -w30 $BASTION_HOST 22 2>/dev/null; then
         echo -e "${RED}Error: Cannot connect to bastion host $BASTION_HOST:22${NC}"
         echo "Check your internet connection and bastion host status."
         exit 1

@@ -285,16 +285,11 @@
       "id": "tunnelService",
       "type": "pickString",
       "description": "Choose service to tunnel:",
-      "default": "all",
+      "default": "postgres",
       "options": [
         "all",
         "postgres",
-        "kuzu",
-        "kuzu-direct",
-        "valkey",
-        "migrate",
-        "runner",
-        "runner-direct"
+        "valkey"
       ]
     },
     {
