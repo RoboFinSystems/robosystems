@@ -240,7 +240,7 @@ Resources:
   BastionHostEC2Instance:
     Type: AWS::EC2::Instance
     DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
+    UpdateReplacePolicy: Delete
     Properties:
       ImageId: !Ref AmiId
       InstanceType: !Ref InstanceType
