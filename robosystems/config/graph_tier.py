@@ -351,6 +351,8 @@ class GraphTierConfig:
     env_config = config.get(environment, {})
     writers = env_config.get("writers", [])
 
+    from .billing import BillingConfig
+
     available_tiers = []
     for writer in writers:
       # Check if tier is enabled
@@ -380,15 +382,23 @@ class GraphTierConfig:
         else instance_config.get("max_memory_mb")
       )
 
+      tier_name = writer.get("tier")
+      billing_plan = BillingConfig.get_subscription_plan(tier_name)
+
+      storage_limit_gb = billing_plan.get("included_gb") if billing_plan else 0
+      monthly_credits = (
+        billing_plan.get("monthly_credit_allocation") if billing_plan else 0
+      )
+
       tier_info = {
-        "tier": writer.get("tier"),
+        "tier": tier_name,
         "name": writer.get("name"),
         "description": writer.get("description"),
         "backend": writer.get("backend"),
         "enabled": is_enabled,
         "max_subgraphs": writer.get("max_subgraphs"),
-        "storage_limit_gb": writer.get("storage_limit_gb"),
-        "monthly_credits": writer.get("monthly_credits"),
+        "storage_limit_gb": storage_limit_gb,
+        "monthly_credits": monthly_credits,
         "api_rate_multiplier": writer.get("api_rate_multiplier", 1.0),
         "features": cls._generate_tier_features(writer),
         "instance": {
@@ -398,8 +408,8 @@ class GraphTierConfig:
           "is_multitenant": is_multitenant,
         },
         "limits": {
-          "storage_gb": writer.get("storage_limit_gb"),
-          "monthly_credits": writer.get("monthly_credits"),
+          "storage_gb": storage_limit_gb,
+          "monthly_credits": monthly_credits,
           "max_subgraphs": writer.get("max_subgraphs"),
           "copy_operations": writer.get("copy_operations", {}),
           "backup": writer.get("backup_limits", {}),
@@ -415,9 +425,7 @@ class GraphTierConfig:
         "neo4j-community-large": "Neo4j Community",
         "neo4j-enterprise-xlarge": "Neo4j Enterprise",
       }
-      tier_info["display_name"] = display_names.get(
-        writer.get("tier"), writer.get("name")
-      )
+      tier_info["display_name"] = display_names.get(tier_name, writer.get("name"))
 
       # Add pricing placeholder (to be filled from billing config if needed)
       tier_info["monthly_price"] = None  # This should come from billing config
