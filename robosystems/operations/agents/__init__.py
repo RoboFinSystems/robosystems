@@ -34,6 +34,7 @@ from .ai_client import AIClient
 
 # Import concrete agents to register them
 from . import cypher_agent
+from . import financial
 
 __all__ = [
   # Base
@@ -62,4 +63,5 @@ __all__ = [
   "AIClient",
   # Modules (for registration)
   "cypher_agent",
+  "financial",
 ]

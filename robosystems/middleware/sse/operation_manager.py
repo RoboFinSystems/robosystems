@@ -390,6 +390,7 @@ def emit_sse_event(
       )
     finally:
       loop.close()
+      asyncio.set_event_loop(None)
 
 
 async def create_operation_response(
