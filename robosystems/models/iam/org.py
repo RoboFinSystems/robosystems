@@ -113,7 +113,7 @@ class Org(Model):
         The created personal organization with the user as OWNER
     """
     org = cls.create(
-      name=f"{user_name}'s Workspace",
+      name="My Organization",
       org_type=OrgType.PERSONAL,
       session=session,
       auto_commit=False,
