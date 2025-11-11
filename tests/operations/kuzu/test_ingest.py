@@ -8,6 +8,15 @@ from robosystems.operations.kuzu.ingest import (
   ingest_from_s3,
   ingest_from_local_files,
   _schema_adapter_cache,
+  _categorize_files_schema_driven,
+  _parse_filename_schema_driven,
+  _ingest_node_schema_driven,
+  _ingest_relationship_schema_driven,
+  _is_valid_identifier,
+  _sanitize_parameter_name,
+  _is_global_relationship_schema_driven,
+  _is_global_entity_schema_driven,
+  _map_arrow_to_kuzu_type,
 )
 
 
@@ -246,3 +255,305 @@ class TestIngestFromLocalFiles:
 
     # Assertions
     assert result is False
+
+
+class TestUtilityFunctions:
+  """Test utility functions for ingestion."""
+
+  def test_is_valid_identifier(self):
+    """Test identifier validation."""
+    # Valid identifiers
+    assert _is_valid_identifier("valid_name") is True
+    assert _is_valid_identifier("name123") is True
+    assert _is_valid_identifier("_underscore") is True
+    assert _is_valid_identifier("camelCase") is True
+
+    # Invalid identifiers
+    assert _is_valid_identifier("") is False
+    assert _is_valid_identifier("123starts_with_number") is False
+    assert _is_valid_identifier("has spaces") is False
+    assert _is_valid_identifier("has-dashes") is False
+    assert _is_valid_identifier("has.dots") is False
+    assert _is_valid_identifier("has@symbols") is False
+
+  def test_sanitize_parameter_name(self):
+    """Test parameter name sanitization."""
+    assert _sanitize_parameter_name("valid_name") == "valid_name"
+    assert _sanitize_parameter_name("name with spaces") == "name_with_spaces"
+    assert _sanitize_parameter_name("name-with-dashes") == "name_with_dashes"
+    assert _sanitize_parameter_name("name.with.dots") == "name_with_dots"
+    assert _sanitize_parameter_name("123starts_with_number") == "_123starts_with_number"
+
+  def test_is_global_relationship_schema_driven(self):
+    """Test global relationship detection."""
+    # Global relationships (defined in BASE_RELATIONSHIPS)
+    assert _is_global_relationship_schema_driven("ENTITY_EVOLVED_FROM") is True
+    assert _is_global_relationship_schema_driven("ENTITY_OWNS_ENTITY") is True
+    assert _is_global_relationship_schema_driven("ELEMENT_HAS_LABEL") is True
+
+    # Non-global relationships
+    assert _is_global_relationship_schema_driven("EMPLOYS") is False
+    assert _is_global_relationship_schema_driven("entity_facts") is False
+    assert _is_global_relationship_schema_driven("custom_relationship") is False
+
+  def test_is_global_entity_schema_driven(self):
+    """Test global entity detection."""
+    # Global entities (defined in BASE_NODES)
+    assert _is_global_entity_schema_driven("Entity") is True
+    assert _is_global_entity_schema_driven("Period") is True
+    assert _is_global_entity_schema_driven("Unit") is True
+    assert _is_global_entity_schema_driven("Element") is True
+
+    # Non-global entities
+    assert _is_global_entity_schema_driven("Person") is False
+    assert _is_global_entity_schema_driven("entity_facts") is False
+    assert _is_global_entity_schema_driven("custom_table") is False
+
+  def test_map_arrow_to_kuzu_type(self):
+    """Test Arrow to Kuzu type mapping."""
+    # Basic types
+    assert _map_arrow_to_kuzu_type("int64") == "INT64"
+    assert _map_arrow_to_kuzu_type("float64") == "DOUBLE"
+    assert _map_arrow_to_kuzu_type("string") == "STRING"
+    assert _map_arrow_to_kuzu_type("bool") == "BOOLEAN"
+    assert _map_arrow_to_kuzu_type("date32[day]") == "DATE"
+    assert _map_arrow_to_kuzu_type("timestamp[ms]") == "TIMESTAMP"
+
+    # Complex types (currently mapped to basic types)
+    assert (
+      _map_arrow_to_kuzu_type("list<int64>") == "INT64"
+    )  # Lists not fully supported, maps to base type
+    assert (
+      _map_arrow_to_kuzu_type("struct<name:string,age:int64>") == "STRING"
+    )  # Structs default to STRING
+
+    # Unknown type
+    assert _map_arrow_to_kuzu_type("unknown_type") == "STRING"
+
+
+class TestSchemaDrivenIngestion:
+  """Test schema-driven ingestion functions."""
+
+  @patch("robosystems.operations.kuzu.ingest._get_cached_schema_adapter")
+  def test_categorize_files_schema_driven(self, mock_get_adapter):
+    """Test file categorization."""
+    # Setup mock adapter
+    mock_adapter = MagicMock()
+    # Mock is_relationship_file to return True for EMPLOYS.parquet
+    mock_adapter.is_relationship_file.side_effect = (
+      lambda path: "EMPLOYS.parquet" in path
+    )
+    mock_get_adapter.return_value = mock_adapter
+
+    test_files = [
+      "/tmp/Entity.parquet",
+      "/tmp/Person.parquet",
+      "/tmp/EMPLOYS.parquet",
+      "/tmp/unknown.parquet",
+    ]
+
+    node_files, relationship_files = _categorize_files_schema_driven(
+      test_files, mock_adapter
+    )
+
+    assert len(node_files) == 3  # Entity, Person, unknown
+    assert len(relationship_files) == 1  # EMPLOYS
+    assert any("EMPLOYS.parquet" in f for f in relationship_files)
+
+  @patch("robosystems.operations.kuzu.ingest._get_cached_schema_adapter")
+  def test_parse_filename_schema_driven(self, mock_get_adapter):
+    """Test filename parsing."""
+    # Setup mock adapter
+    mock_adapter = MagicMock()
+    mock_adapter.get_table_name_from_file.return_value = "Entity"
+
+    # Mock table info object with attributes
+    mock_table_info = MagicMock()
+    mock_table_info.is_relationship = False
+    mock_table_info.column_types = {"id": "STRING", "name": "STRING"}
+    mock_adapter.get_table_info.return_value = mock_table_info
+
+    mock_get_adapter.return_value = mock_adapter
+
+    result = _parse_filename_schema_driven("Entity_2024.parquet", mock_adapter)
+
+    assert result is not None
+    assert result["table_name"] == "Entity"
+    assert result["is_relationship"] is False
+    mock_adapter.get_table_name_from_file.assert_called_once_with("Entity_2024.parquet")
+    mock_adapter.get_table_info.assert_called_once_with("Entity")
+
+  @patch("robosystems.operations.kuzu.ingest._get_cached_schema_adapter")
+  @patch("robosystems.operations.kuzu.ingest._copy_node_data_schema_driven")
+  def test_ingest_node_schema_driven(self, mock_copy_data, mock_get_adapter):
+    """Test node ingestion."""
+    # Setup mocks
+    mock_engine = MagicMock()
+    mock_adapter = MagicMock()
+    mock_table_info = {
+      "table_name": "Entity",
+      "table_info": {
+        "column_types": {"id": "STRING", "name": "STRING"},
+        "primary_key": "id",
+      },
+    }
+
+    mock_get_adapter.return_value = mock_adapter
+    mock_copy_data.return_value = True
+
+    # Mock table creation
+    with patch(
+      "robosystems.operations.kuzu.ingest._create_table_from_schema", return_value=True
+    ) as mock_create_table:
+      result = _ingest_node_schema_driven(
+        mock_engine, "/tmp/Entity.parquet", mock_table_info, mock_adapter
+      )
+
+      assert result is True
+      # Verify the functions were called (focus on coverage, not exact parameters)
+      mock_create_table.assert_called_once()
+      mock_copy_data.assert_called_once()
+
+  @patch("robosystems.operations.kuzu.ingest._get_cached_schema_adapter")
+  @patch("robosystems.operations.kuzu.ingest._copy_relationship_data_schema_driven")
+  def test_ingest_relationship_schema_driven(self, mock_copy_data, mock_get_adapter):
+    """Test relationship ingestion."""
+    # Setup mocks
+    mock_engine = MagicMock()
+    mock_adapter = MagicMock()
+    mock_table_info = {
+      "table_name": "EMPLOYS",
+      "table_info": {"column_types": {"from_id": "STRING", "to_id": "STRING"}},
+    }
+
+    mock_get_adapter.return_value = mock_adapter
+    mock_copy_data.return_value = True
+
+    # Mock table creation
+    with patch(
+      "robosystems.operations.kuzu.ingest._create_relationship_table_from_schema",
+      return_value=True,
+    ) as mock_create_table:
+      result = _ingest_relationship_schema_driven(
+        mock_engine, "/tmp/EMPLOYS.parquet", mock_table_info, mock_adapter
+      )
+
+      assert result is True
+      # Verify the functions were called (focus on coverage, not exact parameters)
+      mock_create_table.assert_called_once()
+      mock_copy_data.assert_called_once()
+
+
+class TestS3IngestionEdgeCases:
+  """Test edge cases for S3 ingestion."""
+
+  @patch("boto3.client")
+  def test_ingest_from_s3_authentication_error(self, mock_boto3_client):
+    """Test S3 ingestion with authentication error."""
+    mock_boto3_client.side_effect = Exception("Authentication failed")
+
+    result = ingest_from_s3(bucket="test-bucket", db_name="test_db")
+
+    assert result is False
+
+  @patch("boto3.client")
+  @patch("robosystems.operations.kuzu.ingest.tempfile.mkdtemp")
+  def test_ingest_from_s3_partial_download_failure(
+    self, mock_mkdtemp, mock_boto3_client
+  ):
+    """Test S3 ingestion with partial download failure."""
+    # Setup mocks
+    mock_s3 = MagicMock()
+    mock_boto3_client.return_value = mock_s3
+
+    # Mock S3 list with multiple files
+    mock_s3.list_objects_v2.return_value = {
+      "Contents": [
+        {"Key": "processed/file1.parquet"},
+        {"Key": "processed/file2.parquet"},
+        {"Key": "processed/file3.parquet"},
+      ]
+    }
+
+    # Mock temp directory
+    temp_dir = "/tmp/test_ingest"
+    mock_mkdtemp.return_value = temp_dir
+
+    # Mock download to fail on second file
+    def download_side_effect(*args, **kwargs):
+      if "file2.parquet" in args[1]:
+        raise Exception("Download failed for file2")
+      return None
+
+    mock_s3.download_file.side_effect = download_side_effect
+
+    result = ingest_from_s3(bucket="test-bucket", db_name="test_db")
+
+    assert result is False
+
+
+class TestIngestionErrorHandling:
+  """Test error handling in ingestion operations."""
+
+  @patch("robosystems.middleware.graph.engine.Engine")
+  @patch("robosystems.operations.kuzu.schema_setup.ensure_schema")
+  @patch("robosystems.operations.kuzu.path_utils.get_kuzu_database_path")
+  def test_ingest_from_local_files_schema_error(
+    self, mock_get_path, mock_ensure_schema, mock_engine_class
+  ):
+    """Test ingestion with schema processing error."""
+    # Setup mocks
+    mock_get_path.return_value = Path("/tmp/test.kuzu")
+    mock_ensure_schema.return_value = False
+    mock_engine = MagicMock()
+    mock_engine_class.return_value = mock_engine
+
+    with patch(
+      "robosystems.operations.kuzu.ingest._get_cached_schema_adapter",
+      side_effect=Exception("Schema error"),
+    ):
+      result = ingest_from_local_files(
+        file_paths=["/tmp/test.parquet"], db_name="test_db"
+      )
+
+      assert result is False
+
+  @patch("robosystems.middleware.graph.engine.Engine")
+  @patch("robosystems.operations.kuzu.schema_setup.ensure_schema")
+  @patch("robosystems.operations.kuzu.path_utils.get_kuzu_database_path")
+  @patch("robosystems.operations.kuzu.ingest._get_cached_schema_adapter")
+  def test_ingest_from_local_files_table_creation_failure(
+    self, mock_get_adapter, mock_get_path, mock_ensure_schema, mock_engine_class
+  ):
+    """Test ingestion with table creation failure."""
+    # Setup mocks
+    mock_get_path.return_value = Path("/tmp/test.kuzu")
+    mock_ensure_schema.return_value = False
+    mock_engine = MagicMock()
+    mock_engine_class.return_value = mock_engine
+
+    mock_adapter = MagicMock()
+    mock_get_adapter.return_value = mock_adapter
+
+    # Mock categorization and parsing
+    with (
+      patch(
+        "robosystems.operations.kuzu.ingest._categorize_files_schema_driven",
+        return_value=(["/tmp/test.parquet"], []),
+      ),
+      patch(
+        "robosystems.operations.kuzu.ingest._parse_filename_schema_driven"
+      ) as mock_parse,
+      patch(
+        "robosystems.operations.kuzu.ingest._create_table_from_schema",
+        side_effect=Exception("Table creation failed"),
+      ),
+    ):
+      mock_table_info = MagicMock()
+      mock_parse.return_value = mock_table_info
+
+      result = ingest_from_local_files(
+        file_paths=["/tmp/test.parquet"], db_name="test_db"
+      )
+
+      assert result is False

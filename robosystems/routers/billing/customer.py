@@ -91,6 +91,8 @@ async def get_customer(
       created_at=customer.created_at.isoformat(),
     )
 
+  except HTTPException:
+    raise
   except Exception as e:
     logger.error(f"Failed to get customer info: {e}", exc_info=True)
     raise HTTPException(

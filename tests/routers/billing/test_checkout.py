@@ -142,6 +142,39 @@ class TestCreateCheckoutSession:
 
   @pytest.mark.asyncio
   @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  async def test_create_checkout_session_requires_membership(
+    self, mock_get_user_orgs, mock_user, mock_db, checkout_request
+  ):
+    """Users without an org should receive 403."""
+    mock_get_user_orgs.return_value = []
+
+    with pytest.raises(HTTPException) as exc:
+      await create_checkout_session(checkout_request, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You are not a member of any organization"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
+  async def test_create_checkout_session_requires_owner_role(
+    self, mock_get_user_orgs, mock_user, mock_db, checkout_request
+  ):
+    """Non-owner members should be rejected."""
+    from robosystems.models.iam import OrgRole
+
+    membership = Mock()
+    membership.role = OrgRole.MEMBER
+    membership.org_id = "org_123"
+    mock_get_user_orgs.return_value = [membership]
+
+    with pytest.raises(HTTPException) as exc:
+      await create_checkout_session(checkout_request, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only organization owners can manage billing"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_user_orgs")
   @patch("robosystems.routers.billing.checkout.BillingCustomer.get_or_create")
   @patch("robosystems.routers.billing.checkout.BillingConfig.get_subscription_plan")
   async def test_create_checkout_session_invalid_plan(

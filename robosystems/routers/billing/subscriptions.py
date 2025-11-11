@@ -83,6 +83,8 @@ async def list_subscriptions(
 
     return result
 
+  except HTTPException:
+    raise
   except Exception as e:
     logger.error(f"Failed to list subscriptions: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail="Failed to retrieve subscriptions")

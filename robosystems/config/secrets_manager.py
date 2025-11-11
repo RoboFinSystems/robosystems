@@ -325,8 +325,10 @@ def get_s3_bucket_name(purpose: str) -> str:
 # Secret mapping configuration
 # This could be externalized to a YAML/JSON file if it grows too large
 SECRET_MAPPINGS = {
-  # Database secrets (postgres)
+  # Database secrets
   "DATABASE_URL": ("postgres", "DATABASE_URL"),
+  # Valkey secrets
+  "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
   # S3 secrets
   "AWS_S3_ACCESS_KEY_ID": ("s3", "AWS_S3_ACCESS_KEY_ID"),
   "AWS_S3_SECRET_ACCESS_KEY": ("s3", "AWS_S3_SECRET_ACCESS_KEY"),
@@ -335,11 +337,11 @@ SECRET_MAPPINGS = {
   "SEC_PROCESSED_BUCKET": ("s3", "SEC_PROCESSED_BUCKET"),
   "PUBLIC_DATA_BUCKET": ("s3", "PUBLIC_DATA_BUCKET"),
   "PUBLIC_DATA_CDN_URL": ("s3", "PUBLIC_DATA_CDN_URL"),
-  # Graph API secrets (unified for all backends: Kuzu, Neo4j)
+  # Admin API key
+  "ADMIN_API_KEY": ("admin", "ADMIN_API_KEY"),
+  # Graph API secrets
   "GRAPH_API_KEY": ("graph-api", "GRAPH_API_KEY"),
-  # Valkey secrets
-  "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
-  # Base secrets (robosystems/{env})
+  # Base secrets
   "CONNECTION_CREDENTIALS_KEY": (None, "CONNECTION_CREDENTIALS_KEY"),
   "JWT_SECRET_KEY": (None, "JWT_SECRET_KEY"),
   "GRAPH_BACKUP_ENCRYPTION_KEY": (None, "GRAPH_BACKUP_ENCRYPTION_KEY"),
@@ -374,10 +376,8 @@ SECRET_MAPPINGS = {
   "BACKUP_CREATION_ENABLED": (None, "BACKUP_CREATION_ENABLED"),
   "AGENT_POST_ENABLED": (None, "AGENT_POST_ENABLED"),
   "ORG_MEMBER_INVITATIONS_ENABLED": (None, "ORG_MEMBER_INVITATIONS_ENABLED"),
-  # Runtime configuration
+  # Default configuration
   "ORG_GRAPHS_DEFAULT_LIMIT": (None, "ORG_GRAPHS_DEFAULT_LIMIT"),
-  # Admin API key (stored as raw string, wrapped in dict by get_secret)
-  "ADMIN_API_KEY": ("admin", "ADMIN_API_KEY"),
 }
 
 

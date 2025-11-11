@@ -337,7 +337,14 @@ async def remove_member(
         detail="You are not a member of this organization",
       )
 
-    if membership.role not in [OrgRole.ADMIN, OrgRole.OWNER]:
+    is_self_member_removal = (
+      user_id == current_user.id and membership.role == OrgRole.MEMBER
+    )
+
+    if not is_self_member_removal and membership.role not in [
+      OrgRole.ADMIN,
+      OrgRole.OWNER,
+    ]:
       raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Only admins and owners can remove members",

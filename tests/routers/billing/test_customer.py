@@ -185,6 +185,59 @@ class TestGetCustomer:
     assert exc.value.status_code == 500
     assert "Failed to retrieve customer information" in exc.value.detail
 
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_get_customer_requires_membership(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Users outside the org should receive 403."""
+    mock_get_org_user.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+      await get_customer("org_123", mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You are not a member of this organization"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  @patch("robosystems.routers.billing.customer.BillingCustomerModel.get_or_create")
+  @patch("robosystems.routers.billing.customer.get_payment_provider")
+  async def test_get_customer_non_owner_hides_payment_details(
+    self, mock_get_provider, mock_get_customer, mock_get_org_user, mock_user, mock_db
+  ):
+    """Admins should see limited data with payment methods hidden."""
+    from robosystems.models.iam import OrgRole
+
+    membership = Mock()
+    membership.role = OrgRole.ADMIN
+    mock_get_org_user.return_value = membership
+
+    mock_customer = Mock(spec=BillingCustomerModel)
+    mock_customer.org_id = "org_123"
+    mock_customer.has_payment_method = True
+    mock_customer.invoice_billing_enabled = True
+    mock_customer.stripe_customer_id = "cus_123"
+    mock_customer.created_at = Mock()
+    mock_customer.created_at.isoformat.return_value = "2025-01-01T00:00:00"
+    mock_get_customer.return_value = mock_customer
+
+    provider = Mock()
+    provider.list_payment_methods.return_value = [
+      {
+        "id": "pm_1",
+        "type": "card",
+        "card": {"brand": "visa", "last4": "1111", "exp_month": 1, "exp_year": 2030},
+        "is_default": True,
+      }
+    ]
+    mock_get_provider.return_value = provider
+
+    result = await get_customer("org_123", mock_user, mock_db, None)
+
+    assert result.payment_methods == []
+    assert result.stripe_customer_id is None
+
 
 class TestUpdatePaymentMethod:
   """Tests for update_payment_method endpoint."""
@@ -310,3 +363,35 @@ class TestUpdatePaymentMethod:
 
     assert exc.value.status_code == 500
     assert "Failed to update payment method" in exc.value.detail
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_update_payment_method_requires_membership(
+    self, mock_get_org_user, mock_user, mock_db, update_request
+  ):
+    """Non-members should receive 403."""
+    mock_get_org_user.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+      await update_payment_method("org_123", update_request, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You are not a member of this organization"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_update_payment_method_requires_owner_role(
+    self, mock_get_org_user, mock_user, mock_db, update_request
+  ):
+    """Admins should not be allowed to update payment methods."""
+    from robosystems.models.iam import OrgRole
+
+    membership = Mock()
+    membership.role = OrgRole.ADMIN
+    mock_get_org_user.return_value = membership
+
+    with pytest.raises(HTTPException) as exc:
+      await update_payment_method("org_123", update_request, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only organization owners can update payment methods"
