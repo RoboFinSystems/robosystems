@@ -98,7 +98,7 @@ async def list_invoices(
         )
       return InvoicesResponse(
         invoices=invoices,
-        total_count=len(invoices),
+        total_count=len(local_invoices),
         has_more=len(local_invoices) > limit,
       )
 

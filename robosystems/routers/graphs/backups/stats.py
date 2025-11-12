@@ -21,6 +21,9 @@ from robosystems.models.iam import User
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.logger import logger
 
+# Constants
+PERCENTAGE_MULTIPLIER = 100.0
+
 # Create router
 router = APIRouter()
 
@@ -75,7 +78,9 @@ async def get_backup_stats(
       1 for backup in backup_records if backup.status == BackupStatus.FAILED
     )
     success_rate = (
-      (successful_backups / total_backups * 100) if total_backups > 0 else 0.0
+      (successful_backups / total_backups * PERCENTAGE_MULTIPLIER)
+      if total_backups > 0
+      else 0.0
     )
 
     # Calculate storage metrics
@@ -90,7 +95,11 @@ async def get_backup_stats(
     # Calculate average compression ratio
     compression_ratios = []
     for backup in backup_records:
-      if backup.original_size_bytes and backup.original_size_bytes > 0:
+      if (
+        backup.original_size_bytes
+        and backup.original_size_bytes > 0
+        and backup.compressed_size_bytes is not None
+      ):
         compression_ratios.append(
           backup.compressed_size_bytes / backup.original_size_bytes
         )

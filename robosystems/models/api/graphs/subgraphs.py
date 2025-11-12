@@ -45,7 +45,7 @@ class CreateSubgraphRequest(BaseModel):
     examples=["Development environment for testing new features"],
   )
 
-  schema_extensions: list[str] | None = Field(
+  schema_extensions: list[str] = Field(
     default_factory=list,
     description="Schema extensions to include (inherits from parent by default)",
     examples=[["roboledger", "roboinvestor"]],

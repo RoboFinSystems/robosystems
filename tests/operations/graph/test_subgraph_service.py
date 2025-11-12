@@ -493,9 +493,8 @@ class TestSubgraphService:
 
     result = await service._create_backup(mock_kuzu_client, "test_db", "i-123456")
 
-    # Should return the S3 path even when backup not implemented
-    assert "s3://robosystems-backups/i-123456/test_db_" in result
-    assert ".backup" in result
+    # Should return None when backup not implemented
+    assert result is None
 
   @pytest.mark.asyncio
   async def test_private_get_database_stats(self, service, mock_kuzu_client):

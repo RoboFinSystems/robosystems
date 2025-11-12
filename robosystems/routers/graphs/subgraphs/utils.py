@@ -72,6 +72,12 @@ def verify_parent_graph_access(
     .first()
   )
 
+  if not user_graph:
+    raise HTTPException(
+      status_code=status.HTTP_403_FORBIDDEN,
+      detail=f"Access denied to graph {graph_id}",
+    )
+
   # Check role requirements
   if required_role == "admin" and user_graph.role != "admin":
     raise HTTPException(
@@ -227,7 +233,7 @@ def get_subgraph_by_name(
   return subgraph
 
 
-def record_operation_start():
+def record_operation_start() -> datetime:
   """Record operation start time for metrics."""
   return datetime.now(timezone.utc)
 
@@ -236,8 +242,8 @@ def record_operation_metrics(
   start_time: datetime,
   operation_name: str,
   parent_graph_id: str,
-  additional_tags: dict = None,
-):
+  additional_tags: dict | None = None,
+) -> None:
   """
   Record operation completion metrics.
 
@@ -257,7 +263,7 @@ def record_operation_metrics(
   log_metric(f"subgraph_{operation_name}_duration", duration_ms, tags)
 
 
-def handle_circuit_breaker_check(graph_id: str, operation: str):
+def handle_circuit_breaker_check(graph_id: str, operation: str) -> None:
   """
   Check circuit breaker for an operation.
 

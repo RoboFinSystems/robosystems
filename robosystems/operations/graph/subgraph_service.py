@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 if TYPE_CHECKING:
   from ...models.iam import Graph, User
+  from ...graph_api.client.client import GraphClient
 
 from ...config import env
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
@@ -486,7 +487,7 @@ class SubgraphService:
 
   async def _install_schema_with_extensions(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
     extensions: List[str],
   ) -> None:
@@ -511,7 +512,7 @@ class SubgraphService:
 
   async def _install_base_schema(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
   ) -> None:
     """Install base schema only."""
@@ -527,7 +528,7 @@ class SubgraphService:
 
   async def _check_database_has_data(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
   ) -> bool:
     """Check if a database contains any data."""
@@ -551,17 +552,22 @@ class SubgraphService:
 
   async def _create_backup(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
     instance_id: str,
-  ) -> str:
-    """Create a backup of the database."""
-    backup_location = ""  # Initialize to avoid unbound variable error
+  ) -> Optional[str]:
+    """Create a backup of the database.
 
+    Returns:
+        Backup location if successful, None if backup is not implemented.
+
+    Raises:
+        Exception if backup fails unexpectedly.
+    """
     try:
       timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
       backup_location = (
-        f"s3://robosystems-backups/{instance_id}/{database_name}_{timestamp}.backup"
+        f"s3://{env.KUZU_S3_BUCKET}/{instance_id}/{database_name}_{timestamp}.backup"
       )
 
       # Use the backup endpoint if available
@@ -574,14 +580,14 @@ class SubgraphService:
     except AttributeError:
       # Backup method may not be implemented yet
       logger.warning(f"Backup not yet implemented for {database_name}")
-      return backup_location
+      return None
     except Exception as e:
       logger.error(f"Failed to create backup for {database_name}: {e}")
       raise
 
   async def _get_database_stats(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
   ) -> Dict[str, Any]:
     """Get statistics for a database."""
