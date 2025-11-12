@@ -332,12 +332,12 @@ Resources:
             LaunchTemplateId: !Ref GHARunnerLaunchTemplate
             Version: !GetAtt GHARunnerLaunchTemplate.LatestVersionNumber
           Overrides:
-            - InstanceType: t3a.medium
-            - InstanceType: t3.medium
+            - InstanceType: t3a.large
             - InstanceType: c6a.large
             - InstanceType: c6i.large
             - InstanceType: c7a.large
             - InstanceType: c7i.large
+            - InstanceType: t3.large
         InstancesDistribution:
           OnDemandBaseCapacity: 1
           OnDemandPercentageAboveBaseCapacity: 0
