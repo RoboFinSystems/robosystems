@@ -8,7 +8,7 @@ from ...database import get_db_session
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
 from ...models.iam import User
-from ...models.billing import BillingCustomer
+from ...models.billing import BillingCustomer, BillingInvoice
 from ...models.api.billing.invoice import (
   Invoice,
   InvoiceLineItem,
@@ -65,10 +65,41 @@ async def list_invoices(
     customer = BillingCustomer.get_or_create(org_id, db)
 
     if not customer.stripe_customer_id:
+      local_invoices = BillingInvoice.get_by_org_id(org_id, db)
+      invoices = []
+      for inv in local_invoices[:limit]:
+        invoices.append(
+          Invoice(
+            id=inv.id,
+            number=inv.invoice_number,
+            status=inv.status,
+            amount_due=inv.total_cents,
+            amount_paid=inv.total_cents if inv.status == "paid" else 0,
+            currency="usd",
+            created=inv.created_at.isoformat(),
+            due_date=inv.due_date.isoformat() if inv.due_date else None,
+            paid_at=inv.paid_at.isoformat() if inv.paid_at else None,
+            invoice_pdf=None,
+            hosted_invoice_url=None,
+            line_items=[
+              InvoiceLineItem(
+                description=line.description,
+                amount=line.amount_cents,
+                quantity=line.quantity,
+                period_start=line.period_start.isoformat()
+                if line.period_start
+                else None,
+                period_end=line.period_end.isoformat() if line.period_end else None,
+              )
+              for line in inv.line_items
+            ],
+            subscription_id=None,
+          )
+        )
       return InvoicesResponse(
-        invoices=[],
-        total_count=0,
-        has_more=False,
+        invoices=invoices,
+        total_count=len(invoices),
+        has_more=len(local_invoices) > limit,
       )
 
     provider = get_payment_provider("stripe")

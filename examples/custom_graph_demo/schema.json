@@ -2,7 +2,6 @@
   "name": "custom_graph_demo",
   "version": "1.0.0",
   "description": "People, companies, and projects schema for the custom graph demo",
-  "extends": "base",
   "nodes": [
     {
       "name": "Company",

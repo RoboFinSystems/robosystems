@@ -65,7 +65,7 @@ async def list_subgraphs(
   graph_id: str = Path(
     ...,
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
-    pattern="^(kg[a-f0-9]{10}|sec)$",
+    pattern="^(kg[a-f0-9]{16}|sec)$",
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
@@ -78,7 +78,7 @@ async def list_subgraphs(
     handle_circuit_breaker_check(graph_id, "list_subgraphs")
 
     # Verify access to parent graph
-    parent_graph = verify_parent_graph_access(db, current_user, graph_id, "read")
+    parent_graph = verify_parent_graph_access(graph_id, current_user, db, "read")
 
     # Log access event
     api_logger.info(
@@ -93,7 +93,7 @@ async def list_subgraphs(
     # Get all subgraphs for the parent graph
     subgraphs = (
       db.query(Graph)
-      .filter(Graph.parent_id == parent_graph.id, ~Graph.is_deleted)
+      .filter(Graph.parent_graph_id == parent_graph.graph_id)
       .order_by(Graph.created_at.desc())
       .all()
     )
@@ -103,19 +103,21 @@ async def list_subgraphs(
       # Get usage stats from GraphUser
       user_graph = (
         db.query(GraphUser)
-        .filter(GraphUser.user_id == current_user.id, GraphUser.graph_id == subgraph.id)
+        .filter(
+          GraphUser.user_id == current_user.id, GraphUser.graph_id == subgraph.graph_id
+        )
         .first()
       )
 
       subgraph_summaries.append(
         SubgraphSummary(
           graph_id=subgraph.graph_id,
-          subgraph_name=subgraph.name,
-          display_name=subgraph.description or subgraph.name,
-          subgraph_type=SubgraphType(subgraph.graph_type),
-          status=subgraph.status,
+          subgraph_name=subgraph.subgraph_name or subgraph.graph_name,
+          display_name=subgraph.graph_name,
+          subgraph_type=SubgraphType.STATIC,
+          status="active",
           created_at=subgraph.created_at,
-          size_mb=None,  # Not available in current model
+          size_mb=None,
           last_accessed=user_graph.last_accessed if user_graph else None,
         )
       )
@@ -138,13 +140,17 @@ async def list_subgraphs(
       },
     )
 
+    max_subgraphs = get_tier_max_subgraphs(parent_graph.graph_tier)
+    subgraphs_enabled = max_subgraphs is None or max_subgraphs > 0
+
     return ListSubgraphsResponse(
       parent_graph_id=graph_id,
-      parent_graph_name=parent_graph.name,
+      parent_graph_name=parent_graph.graph_name,
       parent_graph_tier=parent_graph.graph_tier,
+      subgraphs_enabled=subgraphs_enabled,
       subgraphs=subgraph_summaries,
       subgraph_count=len(subgraph_summaries),
-      max_subgraphs=get_tier_max_subgraphs(parent_graph.graph_tier),
+      max_subgraphs=max_subgraphs,
       total_size_mb=None,  # Not calculated yet
     )
 
@@ -193,7 +199,7 @@ async def list_subgraphs(
 - Valid authentication
 - Parent graph must exist and be accessible to the user
 - User must have 'admin' permission on the parent graph
-- Parent graph tier must support subgraphs (Enterprise or Premium only)
+- Parent graph tier must support subgraphs (Kuzu Large/XLarge or Neo4j Enterprise XLarge)
 - Must be within subgraph quota limits
 - Subgraph name must be unique within the parent graph
 
@@ -211,7 +217,7 @@ async def create_subgraph(
   graph_id: str = Path(
     ...,
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
-    pattern="^(kg[a-f0-9]{10}|sec)$",
+    pattern="^(kg[a-f0-9]{16}|sec)$",
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
@@ -235,7 +241,7 @@ async def create_subgraph(
       )
 
     # 1. Verify parent graph access (requires admin)
-    parent_graph = verify_parent_graph_access(db, current_user, graph_id, "admin")
+    parent_graph = verify_parent_graph_access(graph_id, current_user, db, "admin")
 
     # 2. Verify tier supports subgraphs
     verify_subgraph_tier_support(parent_graph)
@@ -244,10 +250,12 @@ async def create_subgraph(
     verify_parent_graph_active(parent_graph)
 
     # 4. Check subgraph quota
-    check_subgraph_quota(db, parent_graph)
+    current_count, max_subgraphs, existing_subgraphs = check_subgraph_quota(
+      parent_graph, db
+    )
 
     # 5. Validate name uniqueness
-    validate_subgraph_name_unique(db, parent_graph, request.name)
+    validate_subgraph_name_unique(request.name, existing_subgraphs, graph_id)
 
     # Log creation attempt
     api_logger.info(
@@ -266,8 +274,8 @@ async def create_subgraph(
       parent_graph=parent_graph,
       user=current_user,
       name=request.name,
-      description=request.description,
-      subgraph_type=request.type.value if request.type else "time_series",
+      description=request.display_name,
+      subgraph_type=request.subgraph_type.value if request.subgraph_type else "static",
       metadata=request.metadata,
     )
 
@@ -279,7 +287,9 @@ async def create_subgraph(
         "resource_id": subgraph_result["graph_id"],
         "parent_graph_id": graph_id,
         "subgraph_name": request.name,
-        "subgraph_type": request.type.value if request.type else "time_series",
+        "subgraph_type": request.subgraph_type.value
+        if request.subgraph_type
+        else "static",
       },
     )
 
@@ -311,17 +321,15 @@ async def create_subgraph(
       parent_graph_id=graph_id,
       subgraph_index=subgraph_result.get("subgraph_index", 1),
       subgraph_name=request.name,
-      display_name=request.description or request.name,
+      display_name=request.display_name,
       description=request.description,
-      subgraph_type=SubgraphType(
-        subgraph_result.get("graph_type", request.type or SubgraphType.TIME_SERIES)
-      ),
+      subgraph_type=request.subgraph_type or SubgraphType.STATIC,
       status=subgraph_result.get("status", "active"),
       created_at=subgraph_result.get("created_at"),
       updated_at=subgraph_result.get("updated_at", subgraph_result.get("created_at")),
-      size_mb=None,  # Not available yet
-      node_count=None,  # Not available yet
-      edge_count=None,  # Not available yet
+      size_mb=None,
+      node_count=None,
+      edge_count=None,
       last_accessed=None,
       metadata=request.metadata,
     )

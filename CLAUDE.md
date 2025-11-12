@@ -29,8 +29,10 @@ just start
 # Development workflow
 just venv && just install          # Setup environment
 just compose-up robosystems        # Start services (use 'robosystems' not 'api' or 'worker')
-just restart                       # IMPORTANT: Run after ANY code changes
-just rebuild                       # For larger changes (packages, env vars)
+
+# Code changes workflow
+just restart                       # QUICK: Restart containers (picks up Python code changes)
+just rebuild                       # FULL: Rebuild images AND restart containers
 
 # Testing
 just test                          # Run tests
@@ -40,6 +42,25 @@ just lint && just format          # Code quality
 # For long-running tests that may exceed default timeout:
 # Use the timeout parameter with Bash tool: timeout=300000 (5 minutes) or timeout=600000 (10 minutes)
 ```
+
+**When to use `just restart` vs `just rebuild`:**
+
+- **`just restart`** - Fast container restart (5-10 seconds)
+  - Use for: Python code changes in `/robosystems` directory
+  - Does NOT rebuild Docker images, just restarts existing containers
+  - Code changes are picked up because `/robosystems` is mounted as a volume
+  - ⚠️ **Does NOT work for:** Changes to dependencies, Dockerfile, or environment variables
+
+- **`just rebuild`** - Full rebuild + restart (1-3 minutes)
+  - Use for: Package changes (`pyproject.toml`, `uv.lock`), Dockerfile changes, environment variable changes
+  - Rebuilds Docker images from scratch, then recreates containers
+  - Required when you modify: dependencies, Docker configuration, build-time settings
+  - Always safe to use, but slower than `just restart`
+
+**Quick decision:**
+- Changed Python files? → `just restart`
+- Changed `pyproject.toml` or added packages? → `just rebuild`
+- Not sure? → `just rebuild` (always works, just slower)
 
 ## Development Environment
 

@@ -172,6 +172,11 @@ class ListSubgraphsResponse(BaseModel):
     ..., description="Parent graph tier", examples=["kuzu-large", "kuzu-xlarge"]
   )
 
+  subgraphs_enabled: bool = Field(
+    ...,
+    description="Whether subgraphs are enabled for this tier (requires Kuzu Large/XLarge or Neo4j Enterprise XLarge)",
+  )
+
   subgraph_count: int = Field(..., description="Total number of subgraphs", ge=0)
 
   max_subgraphs: int | None = Field(

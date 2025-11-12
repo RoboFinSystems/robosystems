@@ -18,7 +18,7 @@ from robosystems.middleware.graph.subgraph_utils import (
 )
 from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.config.graph_tier import get_tier_max_subgraphs
-from robosystems.logger import api_logger, log_metric
+from robosystems.logger import log_metric
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.operations.graph.subgraph_service import SubgraphService
 
@@ -268,9 +268,4 @@ def handle_circuit_breaker_check(graph_id: str, operation: str):
   Raises:
       HTTPException: If circuit breaker is open
   """
-  if circuit_breaker.is_open(graph_id, operation):
-    api_logger.warning(f"Circuit breaker open for {operation} on {graph_id}")
-    raise HTTPException(
-      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail="Service temporarily unavailable due to recent failures",
-    )
+  circuit_breaker.check_circuit(graph_id, operation)

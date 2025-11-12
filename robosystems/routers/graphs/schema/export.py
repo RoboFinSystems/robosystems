@@ -182,6 +182,64 @@ async def export_graph_schema(
           schema_def["version"] = schema_version  # type: ignore[index]
         if "type" not in schema_def:
           schema_def["type"] = schema_type  # type: ignore[index]
+
+        # For extension-based schemas, reconstruct full schema from Python definitions
+        if schema_type == "extensions" and "nodes" not in schema_def:
+          from robosystems.schemas.loader import get_schema_loader
+
+          # Get extensions list from schema_json
+          extensions_list = schema_def.get("extensions", [])
+          base_schema = schema_def.get("base", "entity")
+
+          # Load the combined schema (base + extensions)
+          loader = get_schema_loader(extensions=extensions_list)
+
+          # Convert to reusable format
+          nodes = []
+          for node in loader.nodes.values():
+            node_dict = {
+              "name": node.name,
+              "properties": [
+                {
+                  "name": prop.name,
+                  "type": prop.type,
+                  "is_primary_key": prop.is_primary_key,
+                }
+                for prop in node.properties
+              ],
+            }
+            # Add is_required flag if property is not nullable
+            for i, prop in enumerate(node.properties):
+              if not prop.nullable and not prop.is_primary_key:
+                node_dict["properties"][i]["is_required"] = True
+
+            nodes.append(node_dict)
+
+          relationships = []
+          for rel in loader.relationships.values():
+            rel_dict = {
+              "name": rel.name,
+              "from_node": rel.from_node,
+              "to_node": rel.to_node,
+              "properties": [
+                {
+                  "name": prop.name,
+                  "type": prop.type,
+                }
+                for prop in rel.properties
+              ]
+              if rel.properties
+              else [],
+            }
+            relationships.append(rel_dict)
+
+          # Update schema_def with full details
+          schema_def["nodes"] = nodes  # type: ignore[index]
+          schema_def["relationships"] = relationships  # type: ignore[index]
+          schema_def["extends"] = base_schema  # type: ignore[index]
+          # Remove internal 'base' field, use 'extends' instead
+          if "base" in schema_def:
+            del schema_def["base"]  # type: ignore[index]
       else:
         # Construct from DDL if JSON not available
         schema_def = {
