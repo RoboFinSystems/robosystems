@@ -191,7 +191,7 @@ Resources:
   GHARunnerLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
+    UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: /robosystems/ci/gha-runner
       RetentionInDays: 14
