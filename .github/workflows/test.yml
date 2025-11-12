@@ -240,7 +240,7 @@ jobs:
         run: |
           echo "🔍 Starting type checking with basedpyright..."
           export NODE_OPTIONS="--max-old-space-size=2048"
-          timeout 180 uv run basedpyright --stats || {
+          timeout 180 uv run basedpyright || {
             echo "::error::Type checking timed out after 3 minutes"
             exit 1
           }

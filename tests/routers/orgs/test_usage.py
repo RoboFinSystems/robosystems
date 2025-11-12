@@ -193,7 +193,7 @@ class TestOrgUsageEndpoints:
     test_db.flush()
 
     class FakeGraphCredits:
-      available_credits = 90.0
+      current_balance = 90.0
       monthly_allocation = 120.0
 
     with patch(

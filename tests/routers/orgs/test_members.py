@@ -111,8 +111,8 @@ class TestOrgMembersRouter:
       json={"role": OrgRole.MEMBER.value},
     )
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Only owners can manage owner roles"
+    assert response.status_code == 400
+    assert "Cannot change owner role through this endpoint" in response.json()["detail"]
 
   async def test_update_member_role_owner_cannot_leave_org_without_successor(
     self, async_client, test_db, test_user
@@ -133,7 +133,7 @@ class TestOrgMembersRouter:
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Organization must have at least one owner"
+    assert "Cannot change owner role through this endpoint" in response.json()["detail"]
 
   async def test_remove_member_blocks_non_privileged_users(
     self, async_client, test_db, test_user

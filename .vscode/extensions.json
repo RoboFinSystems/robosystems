@@ -17,6 +17,7 @@
     "ms-python.vscode-pylance",
     "nefrob.vscode-just-syntax",
     "rvest.vs-code-prettier-eslint",
+    "vitest.explorer",
     "vscode.git",
     "vscode.json-language-features",
     "vscode.npm",

@@ -223,11 +223,9 @@ jobs:
         run: |
           echo "🔄 Waiting for runners to register..."
 
-          # Get deployment start time (5 minutes ago to account for any delays)
-          DEPLOYMENT_START=$(date -u -d '5 minutes ago' '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -v-5M '+%Y-%m-%dT%H:%M:%SZ')
-
           MAX_ATTEMPTS=20
           ATTEMPT=1
+          DESIRED_RUNNERS=${{ vars.RUNNER_DESIRED_INSTANCES || '1' }}
 
           while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
             RUNNERS_RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.RUNNER_GITHUB_TOKEN }}" \
@@ -236,23 +234,32 @@ jobs:
             if echo "$RUNNERS_RESPONSE" | jq . >/dev/null 2>&1; then
               # Count runners that:
               # 1. Are online
-              # 2. Have labels matching our deployment (AL2023, ci)
-              # 3. Were registered recently (after deployment start)
-              NEW_ONLINE_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r --arg start "$DEPLOYMENT_START" \
+              # 2. Have labels matching our deployment (AL2023 and ci)
+              ONLINE_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r \
                 '.runners[] |
                 select(.status == "online") |
-                select(.labels[]?.name | contains("AL2023") or contains("ci")) |
-                select(.created_at >= $start) |
+                select((.labels[]?.name == "AL2023") and (.labels[]?.name == "ci")) |
                 .name' | wc -l)
 
-              if [ "$NEW_ONLINE_RUNNERS" -ge 1 ]; then
-                echo "✅ $NEW_ONLINE_RUNNERS newly deployed runner(s) online and ready"
+              echo "📊 Found $ONLINE_RUNNERS online AL2023 CI runner(s) (need $DESIRED_RUNNERS)"
+
+              if [ "$ONLINE_RUNNERS" -ge "$DESIRED_RUNNERS" ]; then
+                echo "✅ $ONLINE_RUNNERS runner(s) online and ready"
+
+                # List runner names for verification
+                echo "$RUNNERS_RESPONSE" | jq -r \
+                  '.runners[] |
+                  select(.status == "online") |
+                  select((.labels[]?.name == "AL2023") and (.labels[]?.name == "ci")) |
+                  "  - " + .name'
                 break
               fi
+            else
+              echo "⚠️ Failed to parse GitHub API response, attempt $ATTEMPT/$MAX_ATTEMPTS"
             fi
 
             if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-              echo "❌ Timeout: No newly deployed runners became available after 10 minutes"
+              echo "❌ Timeout: Only $ONLINE_RUNNERS/$DESIRED_RUNNERS runner(s) became available after 10 minutes"
               exit 1
             fi
 

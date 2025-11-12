@@ -27,8 +27,9 @@ class TestListInvoices:
   @pytest.mark.asyncio
   @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
   @patch("robosystems.routers.billing.invoices.BillingCustomer.get_or_create")
+  @patch("robosystems.routers.billing.invoices.BillingInvoice.get_by_org_id")
   async def test_list_invoices_no_stripe_customer(
-    self, mock_get_customer, mock_get_org_user, mock_user, mock_db
+    self, mock_get_invoices, mock_get_customer, mock_get_org_user, mock_user, mock_db
   ):
     """Test listing invoices when no Stripe customer exists."""
     from robosystems.models.iam import OrgRole
@@ -40,6 +41,8 @@ class TestListInvoices:
     mock_customer = Mock(spec=BillingCustomer)
     mock_customer.stripe_customer_id = None
     mock_get_customer.return_value = mock_customer
+
+    mock_get_invoices.return_value = []
 
     result = await list_invoices("org_123", 10, mock_user, mock_db, None)
 

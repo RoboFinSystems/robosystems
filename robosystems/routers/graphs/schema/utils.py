@@ -71,7 +71,8 @@ async def get_schema_info(repository: Any) -> Dict[str, Any]:
 
     # For node properties, we need to query each table individually
     # This is a limitation of Kuzu compared to Neo4j
-    for node_label in node_tables[:10]:  # Limit to first 10 to avoid timeout
+    # CALL TABLE_INFO is a catalog query (metadata only), so it's fast even for many tables
+    for node_label in node_tables:
       try:
         # Get table info for each node type
         table_info_query = f"CALL TABLE_INFO('{node_label}') RETURN *"

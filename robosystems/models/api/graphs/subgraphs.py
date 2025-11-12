@@ -45,7 +45,7 @@ class CreateSubgraphRequest(BaseModel):
     examples=["Development environment for testing new features"],
   )
 
-  schema_extensions: list[str] | None = Field(
+  schema_extensions: list[str] = Field(
     default_factory=list,
     description="Schema extensions to include (inherits from parent by default)",
     examples=[["roboledger", "roboinvestor"]],
@@ -170,6 +170,11 @@ class ListSubgraphsResponse(BaseModel):
 
   parent_graph_tier: str = Field(
     ..., description="Parent graph tier", examples=["kuzu-large", "kuzu-xlarge"]
+  )
+
+  subgraphs_enabled: bool = Field(
+    ...,
+    description="Whether subgraphs are enabled for this tier (requires Kuzu Large/XLarge or Neo4j Enterprise XLarge)",
   )
 
   subgraph_count: int = Field(..., description="Total number of subgraphs", ge=0)

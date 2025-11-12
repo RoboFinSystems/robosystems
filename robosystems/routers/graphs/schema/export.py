@@ -143,6 +143,9 @@ async def export_graph_schema(
 
     if not schema_record:
       # Try to reconstruct from Graph metadata if no schema record exists
+      logger.info(
+        f"No GraphSchema record found for {graph_id}, falling back to Graph metadata"
+      )
       graph = Graph.get_by_id(graph_id, db)
       if not graph:
         raise HTTPException(
@@ -151,6 +154,10 @@ async def export_graph_schema(
         )
 
       # Use graph metadata as fallback
+      logger.debug(
+        f"Reconstructing schema from Graph metadata for {graph_id}: "
+        f"type={graph.graph_type}, extensions={graph.schema_extensions}"
+      )
       schema_name = f"{graph.graph_name}_schema"
       schema_version = "1.0.0"
       schema_type = "extensions" if graph.schema_extensions else "base"
@@ -182,8 +189,76 @@ async def export_graph_schema(
           schema_def["version"] = schema_version  # type: ignore[index]
         if "type" not in schema_def:
           schema_def["type"] = schema_type  # type: ignore[index]
+
+        # For extension-based schemas, reconstruct full schema from Python definitions
+        if schema_type == "extensions" and "nodes" not in schema_def:
+          logger.info(
+            f"Extension-based schema for {graph_id} missing nodes, "
+            "reconstructing from Python definitions"
+          )
+          from robosystems.schemas.loader import get_schema_loader
+
+          # Get extensions list from schema_json
+          extensions_list = schema_def.get("extensions", [])
+          logger.debug(f"Loading schema extensions for {graph_id}: {extensions_list}")
+          base_schema = schema_def.get("base", "entity")
+
+          # Load the combined schema (base + extensions)
+          loader = get_schema_loader(extensions=extensions_list)
+
+          # Convert to reusable format
+          nodes = []
+          for node in loader.nodes.values():
+            node_dict = {
+              "name": node.name,
+              "properties": [
+                {
+                  "name": prop.name,
+                  "type": prop.type,
+                  "is_primary_key": prop.is_primary_key,
+                }
+                for prop in node.properties
+              ],
+            }
+            # Add is_required flag if property is not nullable
+            for i, prop in enumerate(node.properties):
+              if not prop.nullable and not prop.is_primary_key:
+                node_dict["properties"][i]["is_required"] = True
+
+            nodes.append(node_dict)
+
+          relationships = []
+          for rel in loader.relationships.values():
+            rel_dict = {
+              "name": rel.name,
+              "from_node": rel.from_node,
+              "to_node": rel.to_node,
+              "properties": [
+                {
+                  "name": prop.name,
+                  "type": prop.type,
+                }
+                for prop in rel.properties
+              ]
+              if rel.properties
+              else [],
+            }
+            relationships.append(rel_dict)
+
+          # Update schema_def with full details
+          schema_def["nodes"] = nodes  # type: ignore[index]
+          schema_def["relationships"] = relationships  # type: ignore[index]
+          schema_def["extends"] = base_schema  # type: ignore[index]
+          # Remove internal 'base' field, use 'extends' instead
+          if "base" in schema_def:
+            del schema_def["base"]  # type: ignore[index]
       else:
         # Construct from DDL if JSON not available
+        logger.info(f"No schema_json found for {graph_id}, falling back to DDL export")
+        logger.debug(
+          f"Exporting DDL schema for {graph_id}: "
+          f"type={schema_type}, version={schema_version}"
+        )
         schema_def = {
           "name": schema_name,
           "version": schema_version,

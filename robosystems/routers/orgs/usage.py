@@ -174,7 +174,7 @@ async def get_org_usage(
           "ai_operations": graph_ai_ops,
           "storage_gb": float(graph_storage),
           "api_calls": graph_api_calls,
-          "credits_available": float(credits.available_credits) if credits else 0,
+          "credits_available": float(credits.current_balance) if credits else 0,
           "credits_allocated": float(credits.monthly_allocation) if credits else 0,
         }
       )

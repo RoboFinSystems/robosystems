@@ -529,7 +529,9 @@ class TestGraphOperationFeatureFlags:
             "description": "Test subgraph",
           }
 
-          response = client.post("/v1/graphs/kg1a2b3c4d5e/subgraphs", json=request_data)
+          response = client.post(
+            "/v1/graphs/kg1234567890abcdef/subgraphs", json=request_data
+          )
 
         assert response.status_code == 403
         data = response.json()

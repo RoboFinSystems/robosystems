@@ -41,7 +41,8 @@ compose-down profile="robosystems":
 
 # Rebuild containers (rebuilds images and restarts - for package/env changes)
 rebuild profile="robosystems":
-    @just compose-up {{profile}} --build --detach
+    @test -f {{_env}} || cp .env.example {{_env}}
+    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up --build --force-recreate --detach
 
 # Quick restart containers to pick up code changes via volume mounts (no rebuild)
 restart profile="robosystems":

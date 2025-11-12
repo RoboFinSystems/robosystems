@@ -13,8 +13,12 @@ Key features:
 - Access control validation
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 from datetime import datetime, timezone
+
+if TYPE_CHECKING:
+  from ...models.iam import Graph, User
+  from ...graph_api.client.client import GraphClient
 
 from ...config import env
 from ...middleware.graph.allocation_manager import KuzuAllocationManager
@@ -165,6 +169,107 @@ class SubgraphService:
     except Exception as e:
       logger.error(f"Failed to create subgraph database {subgraph_id}: {e}")
       raise GraphAllocationError(f"Failed to create subgraph: {str(e)}")
+
+  def create_subgraph(
+    self,
+    parent_graph: "Graph",
+    user: "User",
+    name: str,
+    description: str | None = None,
+    subgraph_type: str = "static",
+    metadata: dict | None = None,
+  ) -> Dict[str, Any]:
+    """
+    Create a subgraph including both the database and PostgreSQL metadata.
+
+    This is a synchronous wrapper that creates the PostgreSQL records.
+    The actual Kuzu database creation happens asynchronously.
+
+    Args:
+        parent_graph: Parent graph model
+        user: User creating the subgraph
+        name: Alphanumeric subgraph name
+        description: Optional description
+        subgraph_type: Type of subgraph (default: "static")
+        metadata: Optional metadata dict
+
+    Returns:
+        Dictionary with created subgraph details
+    """
+    from ...models.iam.graph import Graph
+    from ...models.iam.graph_user import GraphUser
+    from ...database import get_db_session
+
+    subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
+
+    db = next(get_db_session())
+    try:
+      existing_subgraphs = (
+        db.query(Graph)
+        .filter(Graph.parent_graph_id == parent_graph.graph_id)
+        .order_by(Graph.subgraph_index.desc())
+        .all()
+      )
+      next_index = (
+        (existing_subgraphs[0].subgraph_index + 1) if existing_subgraphs else 1
+      )
+
+      now = datetime.now(timezone.utc)
+
+      subgraph = Graph(
+        graph_id=subgraph_id,
+        org_id=parent_graph.org_id,
+        graph_name=description or name,
+        graph_type=parent_graph.graph_type,
+        base_schema=parent_graph.base_schema,
+        schema_extensions=parent_graph.schema_extensions or [],
+        graph_instance_id=parent_graph.graph_instance_id,
+        graph_cluster_region=parent_graph.graph_cluster_region,
+        graph_tier=parent_graph.graph_tier,
+        parent_graph_id=parent_graph.graph_id,
+        subgraph_index=next_index,
+        subgraph_name=name,
+        is_subgraph=True,
+        subgraph_metadata=metadata or {},
+        is_repository=False,
+        repository_type=None,
+        data_source_type=None,
+        created_at=now,
+        updated_at=now,
+      )
+      db.add(subgraph)
+
+      graph_user = GraphUser(
+        user_id=user.id,
+        graph_id=subgraph_id,
+        role="admin",
+        created_at=now,
+        updated_at=now,
+      )
+      db.add(graph_user)
+
+      db.commit()
+      db.refresh(subgraph)
+
+      logger.info(
+        f"Created subgraph {subgraph_id} (index {next_index}) for parent {parent_graph.graph_id}"
+      )
+
+      return {
+        "graph_id": subgraph.graph_id,
+        "subgraph_index": subgraph.subgraph_index,
+        "graph_type": subgraph.graph_type,
+        "status": "active",
+        "created_at": subgraph.created_at,
+        "updated_at": subgraph.updated_at,
+      }
+
+    except Exception as e:
+      db.rollback()
+      logger.error(f"Failed to create subgraph metadata: {e}")
+      raise
+    finally:
+      db.close()
 
   async def delete_subgraph_database(
     self,
@@ -382,7 +487,7 @@ class SubgraphService:
 
   async def _install_schema_with_extensions(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
     extensions: List[str],
   ) -> None:
@@ -407,7 +512,7 @@ class SubgraphService:
 
   async def _install_base_schema(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
   ) -> None:
     """Install base schema only."""
@@ -423,7 +528,7 @@ class SubgraphService:
 
   async def _check_database_has_data(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
   ) -> bool:
     """Check if a database contains any data."""
@@ -447,17 +552,22 @@ class SubgraphService:
 
   async def _create_backup(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
     instance_id: str,
-  ) -> str:
-    """Create a backup of the database."""
-    backup_location = ""  # Initialize to avoid unbound variable error
+  ) -> Optional[str]:
+    """Create a backup of the database.
 
+    Returns:
+        Backup location if successful, None if backup is not implemented.
+
+    Raises:
+        Exception if backup fails unexpectedly.
+    """
     try:
       timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
       backup_location = (
-        f"s3://robosystems-backups/{instance_id}/{database_name}_{timestamp}.backup"
+        f"s3://{env.KUZU_S3_BUCKET}/{instance_id}/{database_name}_{timestamp}.backup"
       )
 
       # Use the backup endpoint if available
@@ -470,14 +580,14 @@ class SubgraphService:
     except AttributeError:
       # Backup method may not be implemented yet
       logger.warning(f"Backup not yet implemented for {database_name}")
-      return backup_location
+      return None
     except Exception as e:
       logger.error(f"Failed to create backup for {database_name}: {e}")
       raise
 
   async def _get_database_stats(
     self,
-    client,
+    client: "GraphClient",
     database_name: str,
   ) -> Dict[str, Any]:
     """Get statistics for a database."""

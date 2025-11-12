@@ -257,16 +257,28 @@ async def update_member_role(
         detail="User is not a member of this organization",
       )
 
-    # Only owners can change other owners or promote to owner
-    if (
-      target_membership.role == OrgRole.OWNER or request.role == OrgRole.OWNER
-    ) and membership.role != OrgRole.OWNER:
+    # Prevent any owner role changes - requires dedicated ownership transfer workflow
+    if target_membership.role == OrgRole.OWNER:
       raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Only owners can manage owner roles",
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+          "Cannot change owner role through this endpoint. "
+          "Transferring ownership requires a dedicated workflow to ensure "
+          "proper handoff and prevent accidental loss of org access."
+        ),
       )
 
-    # Ensure at least one owner remains
+    # Prevent promoting anyone to owner - requires dedicated ownership transfer workflow
+    if request.role == OrgRole.OWNER:
+      raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+          "Cannot promote to owner through this endpoint. "
+          "Granting ownership requires a dedicated workflow."
+        ),
+      )
+
+    # Ensure at least one owner remains (redundant now, but keep for safety)
     if target_membership.role == OrgRole.OWNER and request.role != OrgRole.OWNER:
       owner_count = (
         db.query(OrgUser)
