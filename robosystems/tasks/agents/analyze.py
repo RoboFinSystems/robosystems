@@ -134,17 +134,28 @@ def analyze_agent_task_impl(
         )
 
       # Run async analysis in sync context
+      # Check if we're already in an async context (running loop)
+      running_loop = None
       try:
-        loop = asyncio.get_running_loop()
+        running_loop = asyncio.get_running_loop()
       except RuntimeError:
-        try:
-          loop = asyncio.get_event_loop()
-          if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        except RuntimeError:
+        pass
+
+      if running_loop is not None:
+        raise RuntimeError(
+          "Cannot run analyze_agent_task_impl from async context. "
+          "Use the Celery task instead of calling the implementation directly."
+        )
+
+      # Create or get an event loop for running the coroutine
+      try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
           loop = asyncio.new_event_loop()
           asyncio.set_event_loop(loop)
+      except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
       created_loop = False
       if loop.is_closed():
