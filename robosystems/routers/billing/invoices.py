@@ -125,6 +125,8 @@ async def list_invoices(
       has_more=result["has_more"],
     )
 
+  except HTTPException:
+    raise
   except Exception as e:
     logger.error(f"Failed to list invoices: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail="Failed to retrieve invoices")
@@ -205,6 +207,8 @@ async def get_upcoming_invoice(
       subscription_id=upcoming["subscription"],
     )
 
+  except HTTPException:
+    raise
   except Exception as e:
     logger.error(f"Failed to get upcoming invoice: {e}", exc_info=True)
     raise HTTPException(status_code=500, detail="Failed to retrieve upcoming invoice")

@@ -492,6 +492,8 @@ class XBRLGraphProcessor:
 
   def make_dts(self):
     logger.info("Processing Document Type System (DTS)")
+    if not self.arelle_cntlr:
+      return
     for _, v in self.arelle_cntlr.namespaceDocs.items():
       if not v:
         continue
@@ -1031,6 +1033,9 @@ class XBRLGraphProcessor:
 
   def make_concept(self, fact_data, xfact):
     logger.debug("Processing concept for fact")
+    if xfact.concept is None:
+      logger.debug("Fact has no concept, skipping")
+      return None
     concept_ns = xfact.concept.document.targetNamespace
     concept_uri = f"{concept_ns}#{xfact.concept.name}"
     logger.debug(f"Processing concept: {concept_uri}")
@@ -1039,15 +1044,18 @@ class XBRLGraphProcessor:
     if element_data:
       logger.debug(f"Created element for concept: {concept_uri}")
 
-      # Create fact-element relationship (fact uses element)
-      fact_element_rel = {
-        "from": fact_data["identifier"],  # Fact HAS element
-        "to": element_data["identifier"],
-      }
-      new_fact_element_df = pd.DataFrame([fact_element_rel])
-      self.fact_elements_df = self.safe_concat(
-        self.fact_elements_df, new_fact_element_df
-      )
+      if fact_data and "identifier" in fact_data:
+        # Create fact-element relationship (fact uses element)
+        fact_element_rel = {
+          "from": fact_data["identifier"],  # Fact HAS element
+          "to": element_data["identifier"],
+        }
+        new_fact_element_df = pd.DataFrame([fact_element_rel])
+        self.fact_elements_df = self.safe_concat(
+          self.fact_elements_df, new_fact_element_df
+        )
+
+      return element_data
 
   def make_period(self, fact_data, xfact):
     logger.debug("Processing period for fact")
@@ -1265,11 +1273,11 @@ class XBRLGraphProcessor:
       self.fact_periods_df = self.safe_concat(self.fact_periods_df, new_fact_period_df)
 
   def make_taxonomy(self):
-    logger.debug(f"Creating taxonomy for URI: {self.taxonomy_uri}")
-
     if not hasattr(self, "taxonomy_uri") or not self.taxonomy_uri:
       logger.error("No taxonomy URI available")
       return
+
+    logger.debug(f"Creating taxonomy for URI: {self.taxonomy_uri}")
 
     taxonomy_identifier = create_taxonomy_id(self.taxonomy_uri)
 
@@ -1306,9 +1314,9 @@ class XBRLGraphProcessor:
       else:
         self.report_uses_taxonomy_df = new_report_taxonomy_df
 
-    # taxonomy_data is already set above
     self.make_structures()
     logger.debug("Taxonomy creation completed")
+    return self.taxonomy_data
 
   def make_structures(self):
     logger.info("Processing taxonomy structures")
@@ -1486,6 +1494,9 @@ class XBRLGraphProcessor:
         )
 
   def make_element(self, xconcept):
+    if xconcept.qname is None:
+      logger.debug("Concept has no qname, skipping element creation")
+      return None
     concept_ns = xconcept.document.targetNamespace
     concept_uri = f"{concept_ns}#{xconcept.name}"
     logger.debug(f"Processing element: {concept_uri}")

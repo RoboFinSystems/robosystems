@@ -109,13 +109,9 @@ class TestCreateEntityWithNewGraphTask:
       "tax_id": "11-1111111",  # Duplicate
     }
 
-    # Run task
-    result = create_entity_with_new_graph_task.apply(args=[entity_data, "user-789"])  # type: ignore[attr-defined]
-
-    # Assertions
-    assert result.failed()
+    # Run task - in eager mode, exceptions are raised immediately
     with pytest.raises(ValueError, match="Duplicate tax ID found"):
-      result.get()
+      create_entity_with_new_graph_task.apply(args=[entity_data, "user-789"]).get()  # type: ignore[attr-defined]
 
   @patch("robosystems.tasks.graph_operations.create_entity_graph.db_session")
   @patch(
@@ -256,15 +252,11 @@ class TestCreateEntityWithNewGraphSSETask:
 
     entity_data = {"name": "Error Test Corp", "type": "company", "tax_id": "99-9999999"}
 
-    # Run task
-    result = create_entity_with_new_graph_sse_task.apply(  # type: ignore[attr-defined]
-      args=[entity_data, "user-error", "operation-error"]
-    )
-
-    # Assertions
-    assert result.failed()
+    # Run task - in eager mode, exceptions are raised immediately
     with pytest.raises(RuntimeError, match="Database connection failed"):
-      result.get()
+      create_entity_with_new_graph_sse_task.apply(  # type: ignore[attr-defined]
+        args=[entity_data, "user-error", "operation-error"]
+      ).get()
 
     # Verify error was emitted to SSE
     mock_tracker.emit_error.assert_called_once()

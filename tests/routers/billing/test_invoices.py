@@ -185,6 +185,38 @@ class TestListInvoices:
     assert exc.value.status_code == 500
     assert "Failed to retrieve invoices" in exc.value.detail
 
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_list_invoices_requires_membership(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Non-members should receive 403."""
+    mock_get_org_user.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+      await list_invoices("org_123", 10, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You are not a member of this organization"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_list_invoices_requires_admin_or_owner(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Members without elevated roles should be blocked."""
+    from robosystems.models.iam import OrgRole
+
+    membership = Mock()
+    membership.role = OrgRole.MEMBER
+    mock_get_org_user.return_value = membership
+
+    with pytest.raises(HTTPException) as exc:
+      await list_invoices("org_123", 10, mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only owners and admins can view invoices"
+
 
 class TestGetUpcomingInvoice:
   """Tests for get_upcoming_invoice endpoint."""
@@ -374,3 +406,35 @@ class TestGetUpcomingInvoice:
 
     assert exc.value.status_code == 500
     assert "Failed to retrieve upcoming invoice" in exc.value.detail
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_get_upcoming_invoice_requires_membership(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Non-members cannot view upcoming invoices."""
+    mock_get_org_user.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+      await get_upcoming_invoice("org_123", mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You are not a member of this organization"
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_get_upcoming_invoice_requires_admin_or_owner(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Members without admin role should be denied."""
+    from robosystems.models.iam import OrgRole
+
+    membership = Mock()
+    membership.role = OrgRole.MEMBER
+    mock_get_org_user.return_value = membership
+
+    with pytest.raises(HTTPException) as exc:
+      await get_upcoming_invoice("org_123", mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only owners and admins can view upcoming invoices"

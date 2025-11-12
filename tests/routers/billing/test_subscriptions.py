@@ -119,6 +119,20 @@ class TestListSubscriptions:
     assert exc.value.status_code == 500
     assert "Failed to retrieve subscriptions" in exc.value.detail
 
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_list_subscriptions_requires_membership(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Non-members should receive 403."""
+    mock_get_org_user.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+      await list_subscriptions("org_123", mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You are not a member of this organization"
+
 
 class TestGetSubscription:
   """Tests for get_subscription endpoint."""
@@ -236,6 +250,20 @@ class TestGetSubscription:
 
     assert exc.value.status_code == 500
     assert "Failed to retrieve subscription" in exc.value.detail
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_get_subscription_requires_membership(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Users outside the org should be blocked."""
+    mock_get_org_user.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+      await get_subscription("org_123", "sub_1", mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "You are not a member of this organization"
 
 
 class TestCancelSubscription:
@@ -367,3 +395,21 @@ class TestCancelSubscription:
 
     assert exc.value.status_code == 500
     assert "Failed to cancel subscription" in exc.value.detail
+
+  @pytest.mark.asyncio
+  @patch("robosystems.models.iam.OrgUser.get_by_org_and_user")
+  async def test_cancel_subscription_requires_owner_role(
+    self, mock_get_org_user, mock_user, mock_db
+  ):
+    """Admins should not be able to cancel subscriptions."""
+    from robosystems.models.iam import OrgRole
+
+    mock_membership = Mock()
+    mock_membership.role = OrgRole.ADMIN
+    mock_get_org_user.return_value = mock_membership
+
+    with pytest.raises(HTTPException) as exc:
+      await cancel_subscription("org_123", "sub_123", mock_user, mock_db, None)
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Only organization owners can cancel subscriptions"

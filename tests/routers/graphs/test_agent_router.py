@@ -375,22 +375,26 @@ class TestAgentEndpoints:
 
   def test_agent_force_extended_analysis(self, client, mock_orchestrator):
     """Test forcing extended analysis mode."""
-    request_data = {
-      "message": "Simple query",
-      "force_extended_analysis": True,
-    }
+    with patch("robosystems.tasks.agents.analyze.analyze_agent_task") as mock_task:
+      # Mock the celery task
+      mock_task.delay = Mock(return_value=Mock(id="test-task-id"))
 
-    response = client.post(
-      "/v1/graphs/test_graph/agent",
-      json=request_data,
-      headers={"Authorization": "Bearer test_token"},
-    )
+      request_data = {
+        "message": "Simple query",
+        "force_extended_analysis": True,
+      }
 
-    # Extended analysis always uses async execution (202)
-    assert response.status_code == 202
-    data = response.json()
-    assert "operation_id" in data
-    assert data["status"] == "pending"
+      response = client.post(
+        "/v1/graphs/test_graph/agent",
+        json=request_data,
+        headers={"Authorization": "Bearer test_token"},
+      )
+
+      # Extended analysis always uses async execution (202)
+      assert response.status_code == 202
+      data = response.json()
+      assert "operation_id" in data
+      assert data["status"] == "pending"
 
   def test_agent_context_enrichment_toggle(self, client, mock_orchestrator):
     """Test toggling context enrichment."""

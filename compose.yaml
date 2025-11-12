@@ -24,6 +24,14 @@ services:
       retries: 3
       start_period: 10s
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1"
+        reservations:
+          memory: 512m
+          cpus: "0.5"
     profiles: ["api", "robosystems", "all"]
 
   # Kuzu Graph API - Graph API with Kuzu Backend
@@ -57,6 +65,14 @@ services:
       retries: 3
       start_period: 30s
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "1.5"
+        reservations:
+          memory: 1g
+          cpus: "1"
     profiles: ["kuzu", "graph-dbs", "robosystems", "all"]
 
   # Neo4j Graph API - Graph API with Neo4j Backend
@@ -92,6 +108,14 @@ services:
       neo4j-db:
         condition: service_healthy
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1.5g
+          cpus: "1"
+        reservations:
+          memory: 768m
+          cpus: "0.5"
     profiles: ["neo4j", "graph-dbs", "all"]
 
   # Robosystems Worker
@@ -112,6 +136,14 @@ services:
       - ./robosystems:/app/robosystems # Mount code for hot reload
       - ./data/arelle:/app/robosystems/arelle # Writable Arelle cache directory
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "2"
+        reservations:
+          memory: 1g
+          cpus: "1"
     profiles: ["worker", "robosystems", "all"]
 
   # Postgres - Database for RoboSystems (IAM)
@@ -135,6 +167,14 @@ services:
       timeout: 5s
       retries: 10
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1"
+        reservations:
+          memory: 512m
+          cpus: "0.5"
     profiles: ["pg", "robosystems", "all"]
 
   # Valkey - Cache for RoboSystems
@@ -158,6 +198,14 @@ services:
       timeout: 3s
       retries: 5
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+          cpus: "0.5"
+        reservations:
+          memory: 512m
+          cpus: "0.25"
     profiles: ["valkey", "robosystems", "all"]
 
   # Neo4j Database - Graph Database Backend
@@ -194,6 +242,14 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+          cpus: "2"
+        reservations:
+          memory: 2g
+          cpus: "1"
     profiles: ["neo4j", "graph-dbs", "all"]
 
   # LocalStack - AWS services for RoboSystems
@@ -227,6 +283,14 @@ services:
       timeout: 5s
       retries: 5
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: "1"
+        reservations:
+          memory: 1g
+          cpus: "0.5"
     profiles: ["localstack", "robosystems", "all"]
 
   # OpenTelemetry Collector - Metrics and Tracing
@@ -292,6 +356,14 @@ services:
       - ../robosystems-app/public:/app/public:ro # Mount public assets
       - ../robosystems-app/package.json:/app/package.json:ro # Mount package.json
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+        reservations:
+          memory: 256m
+          cpus: "0.25"
     profiles: ["robosystems-app", "apps", "all"]
 
   # RoboLedger App Frontend
@@ -315,6 +387,14 @@ services:
       - ../roboledger-app/public:/app/public:ro # Mount public assets
       - ../roboledger-app/package.json:/app/package.json:ro # Mount package.json
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+        reservations:
+          memory: 256m
+          cpus: "0.25"
     profiles: ["roboledger-app", "apps", "all"]
 
   # RoboInvestor App Frontend
@@ -338,6 +418,14 @@ services:
       - ../roboinvestor-app/public:/app/public:ro # Mount public assets
       - ../roboinvestor-app/package.json:/app/package.json:ro # Mount package.json
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+        reservations:
+          memory: 256m
+          cpus: "0.25"
     profiles: ["roboinvestor-app", "apps", "all"]
 
 volumes:
