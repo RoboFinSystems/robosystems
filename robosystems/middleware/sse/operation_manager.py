@@ -352,10 +352,9 @@ def emit_sse_event(
   # Map OperationStatus to EventType
   status_to_event_type = {
     OperationStatus.PENDING: EventType.OPERATION_STARTED,
-    OperationStatus.IN_PROGRESS: EventType.OPERATION_PROGRESS,
+    OperationStatus.RUNNING: EventType.OPERATION_PROGRESS,
     OperationStatus.COMPLETED: EventType.OPERATION_COMPLETED,
     OperationStatus.FAILED: EventType.OPERATION_ERROR,
-    OperationStatus.ERROR: EventType.OPERATION_ERROR,
     OperationStatus.CANCELLED: EventType.OPERATION_CANCELLED,
   }
 

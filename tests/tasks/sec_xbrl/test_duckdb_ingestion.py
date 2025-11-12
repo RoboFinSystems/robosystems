@@ -121,54 +121,58 @@ class TestIngestViaDuckDBErrorHandling:
   @patch("asyncio.run")
   def test_processor_initialization_error(self, mock_asyncio_run, mock_processor_class):
     """Test handling of processor initialization errors."""
+    from celery.exceptions import Retry
+
     mock_processor_class.side_effect = RuntimeError("Processor init failed")
 
-    with pytest.raises(RuntimeError) as exc_info:
+    # In eager mode, retry raises a Retry exception instead of the original error
+    with pytest.raises(Retry):
       ingest_via_duckdb.apply(args=(), kwargs={}).get()  # type: ignore[attr-defined]
-
-    assert "Processor init failed" in str(exc_info.value)
 
   @patch("robosystems.tasks.sec_xbrl.duckdb_ingestion.XBRLDuckDBGraphProcessor")
   @patch("asyncio.run")
   def test_asyncio_run_error(self, mock_asyncio_run, mock_processor_class):
     """Test handling of asyncio execution errors."""
+    from celery.exceptions import Retry
+
     mock_processor = MagicMock()
     mock_processor_class.return_value = mock_processor
 
     mock_asyncio_run.side_effect = RuntimeError("Async processing failed")
 
-    with pytest.raises(RuntimeError) as exc_info:
+    # In eager mode, retry raises a Retry exception instead of the original error
+    with pytest.raises(Retry):
       ingest_via_duckdb.apply(args=(), kwargs={}).get()  # type: ignore[attr-defined]
-
-    assert "Async processing failed" in str(exc_info.value)
 
   @patch("robosystems.tasks.sec_xbrl.duckdb_ingestion.XBRLDuckDBGraphProcessor")
   @patch("asyncio.run")
   def test_process_files_error(self, mock_asyncio_run, mock_processor_class):
     """Test handling of process_files method errors."""
+    from celery.exceptions import Retry
+
     mock_processor = MagicMock()
     mock_processor_class.return_value = mock_processor
 
     mock_asyncio_run.side_effect = ValueError("Invalid file format")
 
-    with pytest.raises(ValueError) as exc_info:
+    # In eager mode, retry raises a Retry exception instead of the original error
+    with pytest.raises(Retry):
       ingest_via_duckdb.apply(args=(), kwargs={}).get()  # type: ignore[attr-defined]
-
-    assert "Invalid file format" in str(exc_info.value)
 
   @patch("robosystems.tasks.sec_xbrl.duckdb_ingestion.XBRLDuckDBGraphProcessor")
   @patch("asyncio.run")
   def test_graph_connection_error(self, mock_asyncio_run, mock_processor_class):
     """Test handling of graph connection errors."""
+    from celery.exceptions import Retry
+
     mock_processor = MagicMock()
     mock_processor_class.return_value = mock_processor
 
     mock_asyncio_run.side_effect = ConnectionError("Graph API unreachable")
 
-    with pytest.raises(ConnectionError) as exc_info:
+    # In eager mode, retry raises a Retry exception instead of the original error
+    with pytest.raises(Retry):
       ingest_via_duckdb.apply(args=(), kwargs={}).get()  # type: ignore[attr-defined]
-
-    assert "Graph API unreachable" in str(exc_info.value)
 
 
 class TestIngestViaDuckDBResultStructure:

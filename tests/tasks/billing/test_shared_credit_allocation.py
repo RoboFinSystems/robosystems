@@ -77,7 +77,7 @@ class TestAllocateMonthlySharedCreditsTask:
     "robosystems.tasks.billing.shared_credit_allocation.deactivate_canceled_subscription_credits"
   )
   def test_commit_failure_returns_error(self, mock_deactivate, mock_get_session):
-    """Test that commit failures return error status."""
+    """Test that commit failures return error status and trigger retry."""
     mock_session = MagicMock()
     mock_get_session.return_value = mock_session
     mock_deactivate.return_value = 0
@@ -87,13 +87,17 @@ class TestAllocateMonthlySharedCreditsTask:
     mock_session.query.return_value = mock_query
 
     from sqlalchemy.exc import SQLAlchemyError
+    from celery.exceptions import Retry
 
     mock_session.commit.side_effect = SQLAlchemyError("Commit failed")
 
-    result = allocate_monthly_shared_credits.apply(kwargs={}).get()  # type: ignore[misc]
+    with patch.object(allocate_monthly_shared_credits, "retry") as mock_retry:
+      mock_retry.return_value = Retry("Retrying due to commit failure")
 
-    assert result["success"] is False
-    assert "error" in result
+      with pytest.raises(Retry):
+        allocate_monthly_shared_credits.apply(kwargs={}).get()  # type: ignore[misc]
+
+      mock_retry.assert_called_once()
 
 
 class TestAllocateSharedCreditsForUserTask:

@@ -23,7 +23,7 @@ class AgentAnalysisTask(Task):
     if operation_id:
       emit_sse_event(
         operation_id=operation_id,
-        status=OperationStatus.ERROR,
+        status=OperationStatus.FAILED,
         data={
           "error": str(exc),
           "error_type": type(exc).__name__,
@@ -65,7 +65,7 @@ def analyze_agent_task_impl(
     # Emit started event
     emit_sse_event(
       operation_id=operation_id,
-      status=OperationStatus.IN_PROGRESS,
+      status=OperationStatus.RUNNING,
       data={"agent_type": agent_type, "graph_id": graph_id},
       message=f"Starting {agent_type} agent analysis",
       progress_percentage=0,
@@ -90,7 +90,7 @@ def analyze_agent_task_impl(
       # Emit initialization complete
       emit_sse_event(
         operation_id=operation_id,
-        status=OperationStatus.IN_PROGRESS,
+        status=OperationStatus.RUNNING,
         data={"agent_name": agent.metadata.name},
         message="Agent initialized, starting analysis",
         progress_percentage=10,
@@ -114,7 +114,7 @@ def analyze_agent_task_impl(
         """Emit progress events during analysis."""
         emit_sse_event(
           operation_id=operation_id,
-          status=OperationStatus.IN_PROGRESS,
+          status=OperationStatus.RUNNING,
           data={"stage": stage, "message": message},
           message=message,
           progress_percentage=min(10 + int(percentage * 0.8), 90),
@@ -134,12 +134,29 @@ def analyze_agent_task_impl(
         )
 
       # Run async analysis in sync context
-      loop = asyncio.new_event_loop()
-      asyncio.set_event_loop(loop)
+      try:
+        loop = asyncio.get_running_loop()
+      except RuntimeError:
+        try:
+          loop = asyncio.get_event_loop()
+          if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        except RuntimeError:
+          loop = asyncio.new_event_loop()
+          asyncio.set_event_loop(loop)
+
+      created_loop = False
+      if loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        created_loop = True
+
       try:
         response = loop.run_until_complete(run_analysis())
       finally:
-        loop.close()
+        if created_loop:
+          loop.close()
 
       # Calculate execution time
       execution_time = time.time() - start_time
@@ -181,7 +198,7 @@ def analyze_agent_task_impl(
     # Emit error event
     emit_sse_event(
       operation_id=operation_id,
-      status=OperationStatus.ERROR,
+      status=OperationStatus.FAILED,
       data={"error": str(e), "error_type": type(e).__name__},
       message=f"Agent analysis failed: {str(e)}",
     )
