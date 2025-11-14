@@ -220,8 +220,8 @@ worker num_workers="1" queue="robosystems" env=_local_env:
 beat env=_local_env:
     UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
 
-stripe-webhook env=_local_env:
-    UV_ENV_FILE={{env}} uv run stripe listen --forward-to localhost:8000/admin/v1/webhooks/stripe
+stripe-webhook url="http://localhost:8000" env=_local_env:
+    UV_ENV_FILE={{env}} uv run stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe
 
 
 ## Database Operations ##
@@ -245,10 +245,6 @@ migrate-history env=_local_env:
 # Show current migration
 migrate-current env=_local_env:
     UV_ENV_FILE={{env}} uv run alembic current
-
-# Run migrations on remote environment via bastion
-migrate-remote environment key:
-    @just bastion-tunnel {{environment}} migrate {{key}}
 
 # Reset database (drop and recreate all auth tables)
 migrate-reset env=_local_env:

@@ -74,8 +74,9 @@ def create_graph_backup(
     database_name = MultiTenantUtils.get_database_name(graph_id)
 
     # Create backup record in PostgreSQL
-    # Note: We handle encryption in this task, so disable S3 adapter's encryption to avoid double encryption
-    s3_adapter = S3BackupAdapter(enable_compression=compression)
+    # Note: We handle compression and encryption in this task
+    # Disable S3 adapter's compression since we already compressed the data
+    s3_adapter = S3BackupAdapter(enable_compression=False)
     s3_bucket = s3_adapter.bucket_name
 
     # Generate S3 key path
@@ -87,9 +88,9 @@ def create_graph_backup(
       "csv": ".csv.zip",
       "json": ".json.zip",
       "parquet": ".parquet.zip",
-      "full_dump": ".db.zip",
+      "full_dump": ".kuzu.zip",
     }
-    extension = format_extensions.get(backup_format.lower(), ".db.zip")
+    extension = format_extensions.get(backup_format.lower(), ".kuzu.zip")
 
     if compression:
       extension += ".gz"
@@ -120,15 +121,27 @@ def create_graph_backup(
     # Call Graph API to create the backup
     logger.info(f"Calling Graph API to create backup for graph '{graph_id}'")
 
+    # Helper function to safely run async code in sync context
+    def run_async(coro):
+      try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+          loop = asyncio.new_event_loop()
+          asyncio.set_event_loop(loop)
+      except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+      return loop.run_until_complete(coro)
+
     # Get properly routed Graph client
-    client = asyncio.run(
+    client = run_async(
       GraphClientFactory.create_client(graph_id=graph_id, operation_type="read")
     )
 
     try:
       # First, download the backup from Kuzu
       logger.info(f"Downloading backup from Kuzu instance for graph '{graph_id}'")
-      backup_result = asyncio.run(client.download_backup(graph_id=graph_id))
+      backup_result = run_async(client.download_backup(graph_id=graph_id))
       backup_data = backup_result.get("backup_data")
 
       if not backup_data:
@@ -162,7 +175,7 @@ def create_graph_backup(
         encrypted_size = len(backup_data)
 
     finally:
-      asyncio.run(client.close())
+      run_async(client.close())
 
     # Calculate some basic metadata
     backup_metadata = {
@@ -202,6 +215,7 @@ def create_graph_backup(
         backup_type="full",
         metadata=upload_metadata,
         timestamp=timestamp,
+        file_extension=extension,
       )
     )
 
@@ -209,6 +223,10 @@ def create_graph_backup(
     backup_metadata["checksum"] = s3_metadata.checksum
     backup_metadata["compressed_size"] = s3_metadata.compressed_size
     backup_metadata["compression_ratio"] = s3_metadata.compression_ratio
+
+    # Update backup record's S3 key with the actual key used by S3 adapter
+    actual_s3_key = s3_metadata.s3_key
+    backup_record.s3_key = actual_s3_key
 
     # Update backup record with results
     backup_record.complete_backup(
@@ -232,7 +250,7 @@ def create_graph_backup(
       "backup_id": backup_record.id,
       "graph_id": graph_id,
       "status": "completed",
-      "s3_key": s3_key,
+      "s3_key": actual_s3_key,
       "original_size": backup_metadata["original_size"],
       "compressed_size": backup_metadata["compressed_size"],
       "compression_ratio": backup_metadata["compression_ratio"],
@@ -881,9 +899,9 @@ def create_graph_backup_sse(
       "csv": ".csv.zip",
       "json": ".json.zip",
       "parquet": ".parquet.zip",
-      "full_dump": ".db.zip",
+      "full_dump": ".kuzu.zip",
     }
-    extension = format_extensions.get(backup_format.lower(), ".db.zip")
+    extension = format_extensions.get(backup_format.lower(), ".kuzu.zip")
 
     if compression:
       extension += ".gz"
@@ -943,6 +961,7 @@ def create_graph_backup_sse(
       retention_days=retention_days,
       compression=compression,
       encryption=encryption,
+      allow_export=not encryption,
     )
     backup_info = asyncio.run(backup_manager.create_backup(backup_job))
 
@@ -950,14 +969,19 @@ def create_graph_backup_sse(
     progress_tracker.emit_progress("Finalizing backup metadata...", 85)
     backup_record.complete_backup(
       session=session,
-      original_size=backup_info.get("original_size", 0),
-      compressed_size=backup_info.get("compressed_size", 0),
-      encrypted_size=backup_info.get("encrypted_size", 0),
-      checksum=backup_info.get("checksum", ""),
-      node_count=backup_info.get("node_count", 0),
-      relationship_count=backup_info.get("relationship_count", 0),
-      backup_duration=backup_info.get("backup_duration", 0.0),
-      metadata=backup_info.get("metadata", {}),
+      original_size=backup_info.original_size,
+      compressed_size=backup_info.compressed_size,
+      encrypted_size=backup_info.compressed_size,
+      checksum=backup_info.checksum,
+      node_count=backup_info.node_count,
+      relationship_count=backup_info.relationship_count,
+      backup_duration=backup_info.backup_duration_seconds,
+      metadata={
+        "backup_format": backup_info.backup_format,
+        "compression_ratio": backup_info.compression_ratio,
+        "is_encrypted": backup_info.is_encrypted,
+        "encryption_method": backup_info.encryption_method,
+      },
     )
 
     # Emit completion
@@ -967,8 +991,8 @@ def create_graph_backup_sse(
       {
         "backup_id": str(backup_record.id),
         "graph_id": graph_id,
-        "backup_size": backup_info.get("encrypted_size", 0),
-        "compression_ratio": backup_info.get("compression_ratio", 1.0),
+        "backup_size": backup_info.compressed_size,
+        "compression_ratio": backup_info.compression_ratio,
       },
     )
 
@@ -977,7 +1001,7 @@ def create_graph_backup_sse(
       {
         "backup_id": str(backup_record.id),
         "s3_key": s3_key,
-        "size_bytes": backup_info.get("encrypted_size", 0),
+        "size_bytes": backup_info.compressed_size,
       },
       additional_context={
         "graph_id": graph_id,
@@ -995,7 +1019,7 @@ def create_graph_backup_sse(
       "backup_format": backup_format,
       "s3_bucket": s3_bucket,
       "s3_key": s3_key,
-      "size_bytes": backup_info.get("encrypted_size", 0),
+      "size_bytes": backup_info.compressed_size,
       "created_at": timestamp.isoformat(),
     }
 
@@ -1088,13 +1112,15 @@ def restore_graph_backup_sse(
           graph_id=graph_id,
           backup_type=BackupType.FULL,
           backup_format=BackupFormat.FULL_DUMP,
+          encryption=True,
+          allow_export=False,
         )
         system_backup = asyncio.run(backup_manager.create_backup(system_backup_job))
 
         progress_tracker.emit_progress(
           "System backup created",
           30,
-          {"system_backup_id": system_backup.get("backup_id")},
+          {"system_backup_s3_key": system_backup.s3_key},
         )
       except Exception as e:
         logger.warning(f"Failed to create system backup: {e}")
@@ -1127,30 +1153,33 @@ def restore_graph_backup_sse(
         "Restoring database from backup...", 50, {"status": "restoring"}
       )
 
-      # TODO: Fix restore_backup API call - the current client.restore_backup method
-      # expects (graph_id: str, backup_data: bytes, ...) but this code is trying to call
-      # it with backup_key and encrypted parameters that don't exist in the current API.
-      # This needs to be refactored to either:
-      # 1. Download backup data from S3 first, then call restore_backup with the data
-      # 2. Use a different API endpoint that accepts S3 key-based restoration
-
-      # For now, skip the restore call to prevent runtime errors
-      # _restore_result = asyncio.run(
-      #   client.restore_backup(
-      #     graph_id=graph_id,
-      #     backup_data=b"",  # Would need actual backup data from S3
-      #   )
-      # )
-
-      logger.warning(
-        f"Restore functionality is currently disabled due to API mismatch. "
-        f"Backup {backup_record.s3_key} needs manual restoration."
+      # Call Graph API to restore from S3
+      # Graph API will download, decrypt, decompress, and restore the database
+      logger.info(
+        f"Calling Graph API to restore from S3: {backup_record.s3_bucket}/{backup_record.s3_key}"
       )
+      restore_result = asyncio.run(
+        client.restore_backup(
+          graph_id=graph_id,
+          s3_bucket=backup_record.s3_bucket,
+          s3_key=backup_record.s3_key,
+          create_system_backup=create_system_backup,
+          force_overwrite=True,
+          encrypted=backup_record.encryption_enabled,
+          compressed=backup_record.compression_enabled,
+        )
+      )
+      logger.info(f"Restore result: {restore_result}")
 
       progress_tracker.emit_progress("Database restored", 80)
 
     finally:
-      asyncio.run(client.close())
+      # Try to close client, but don't fail if event loop is already closed
+      try:
+        asyncio.run(client.close())
+      except RuntimeError:
+        # Event loop already closed - client will be garbage collected
+        pass
 
     # Verify restore if requested
     verification_status = "not_verified"

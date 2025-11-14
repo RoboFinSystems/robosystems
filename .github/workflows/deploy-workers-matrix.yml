@@ -55,6 +55,11 @@ on:
         type: boolean
         description: Deploy beat worker (Celery scheduler)
         default: true
+      run_migrations:
+        required: false
+        type: string
+        description: Whether to run database migrations on Beat startup
+        default: "true"
       refresh_ecs_service:
         required: false
         type: string
@@ -351,6 +356,8 @@ jobs:
       valkey_cluster_id: robosystems-${{ inputs.environment }}-valkey
       # Lambda Configuration
       lambda_code_bucket: robosystems-${{ inputs.environment }}-deployment
+      # Application Configuration
+      run_migrations: ${{ inputs.run_migrations }}
       # Other Configuration
       refresh_ecs_service: ${{ inputs.refresh_ecs_service }}
     secrets:

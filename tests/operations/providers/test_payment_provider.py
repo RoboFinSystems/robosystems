@@ -339,29 +339,6 @@ class TestStripePaymentMethods:
 
     assert result == []
 
-  def test_update_default_payment_method_success(self, stripe_provider):
-    """Test updating default payment method."""
-    mock_payment_method = Mock()
-    mock_payment_method.id = "pm_456"
-    mock_payment_method.type = "card"
-    mock_card = Mock()
-    mock_card.to_dict.return_value = {"brand": "visa", "last4": "4242"}
-    mock_payment_method.card = mock_card
-
-    stripe_provider.stripe.Customer.modify.return_value = Mock()
-    stripe_provider.stripe.PaymentMethod.retrieve.return_value = mock_payment_method
-
-    result = stripe_provider.update_default_payment_method("cus_123", "pm_456")
-
-    assert result["id"] == "pm_456"
-    assert result["type"] == "card"
-    assert result["card"]["brand"] == "visa"
-    assert result["is_default"] is True
-    stripe_provider.stripe.Customer.modify.assert_called_once_with(
-      "cus_123", invoice_settings={"default_payment_method": "pm_456"}
-    )
-    stripe_provider.stripe.PaymentMethod.retrieve.assert_called_once_with("pm_456")
-
 
 class TestStripeInvoiceOperations:
   """Tests for Stripe invoice operations."""

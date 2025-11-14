@@ -99,6 +99,16 @@ Parameters:
     Default: 7
     Description: CloudWatch log retention in days for Worker Monitor
 
+  # Application Configuration
+  RunMigrations:
+    Type: String
+    Default: "true"
+    Description: Whether to run database migrations on Beat startup
+    AllowedValues:
+      - "true"
+      - "false"
+    ConstraintDescription: Must be true or false
+
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -361,7 +371,7 @@ Resources:
             - Name: DOCKER_PROFILE
               Value: beat
             - Name: RUN_MIGRATIONS
-              Value: "true"
+              Value: !Ref RunMigrations
             - Name: AWS_REGION
               Value: !Ref AWS::Region
             - Name: VALKEY_URL

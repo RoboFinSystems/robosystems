@@ -68,6 +68,7 @@ class TestListSubscriptions:
     mock_sub1.current_period_end = datetime(2025, 2, 1)
     mock_sub1.started_at = datetime(2025, 1, 1)
     mock_sub1.canceled_at = None
+    mock_sub1.ends_at = None
     mock_sub1.created_at = datetime(2025, 1, 1)
 
     mock_sub2 = Mock(spec=BillingSubscription)
@@ -82,6 +83,7 @@ class TestListSubscriptions:
     mock_sub2.current_period_end = None
     mock_sub2.started_at = datetime(2024, 12, 1)
     mock_sub2.canceled_at = datetime(2025, 1, 15)
+    mock_sub2.ends_at = datetime(2025, 2, 1)
     mock_sub2.created_at = datetime(2024, 12, 1)
 
     mock_query = mock_db.query.return_value
@@ -169,6 +171,7 @@ class TestGetSubscription:
     mock_subscription.current_period_end = datetime(2025, 2, 1)
     mock_subscription.started_at = datetime(2025, 1, 1)
     mock_subscription.canceled_at = None
+    mock_subscription.ends_at = None
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value
@@ -227,6 +230,7 @@ class TestGetSubscription:
     mock_subscription.current_period_end = None
     mock_subscription.started_at = None
     mock_subscription.canceled_at = None
+    mock_subscription.ends_at = None
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value
@@ -303,6 +307,7 @@ class TestCancelSubscription:
     mock_subscription.current_period_end = datetime(2025, 2, 1)
     mock_subscription.started_at = datetime(2025, 1, 1)
     mock_subscription.canceled_at = None
+    mock_subscription.ends_at = None
     mock_subscription.created_at = datetime(2025, 1, 1)
 
     mock_query = mock_db.query.return_value

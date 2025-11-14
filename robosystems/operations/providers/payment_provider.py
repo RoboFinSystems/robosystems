@@ -97,21 +97,6 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
-  def update_default_payment_method(
-    self, customer_id: str, payment_method_id: str
-  ) -> Dict[str, Any]:
-    """Update the default payment method for a customer.
-
-    Args:
-        customer_id: Provider customer ID
-        payment_method_id: Payment method ID to set as default
-
-    Returns:
-        Updated payment method details
-    """
-    pass
-
-  @abstractmethod
   def list_invoices(self, customer_id: str, limit: int = 10) -> Dict[str, Any]:
     """List invoices for a customer.
 
@@ -133,6 +118,19 @@ class PaymentProvider(ABC):
 
     Returns:
         Upcoming invoice details or None if no upcoming invoice
+    """
+    pass
+
+  @abstractmethod
+  def create_portal_session(self, customer_id: str, return_url: str) -> str:
+    """Create a customer portal session for managing payment methods.
+
+    Args:
+        customer_id: Provider customer ID
+        return_url: URL to redirect customer after portal session
+
+    Returns:
+        Portal session URL where customer can manage payment methods
     """
     pass
 
@@ -411,34 +409,6 @@ class StripePaymentProvider(PaymentProvider):
       logger.error(f"Failed to list payment methods: {e}", exc_info=True)
       raise
 
-  def update_default_payment_method(
-    self, customer_id: str, payment_method_id: str
-  ) -> Dict[str, Any]:
-    """Update the default payment method for a Stripe customer."""
-    try:
-      self.stripe.Customer.modify(
-        customer_id,
-        invoice_settings={"default_payment_method": payment_method_id},
-      )
-
-      payment_method = self.stripe.PaymentMethod.retrieve(payment_method_id)
-
-      logger.info(
-        f"Updated default payment method for customer {customer_id}",
-        extra={"customer_id": customer_id, "payment_method_id": payment_method_id},
-      )
-
-      return {
-        "id": payment_method.id,
-        "type": payment_method.type,
-        "card": payment_method.card.to_dict() if payment_method.card else {},
-        "is_default": True,
-      }
-
-    except Exception as e:
-      logger.error(f"Failed to update payment method: {e}", exc_info=True)
-      raise
-
   def list_invoices(self, customer_id: str, limit: int = 10) -> Dict[str, Any]:
     """List invoices for a Stripe customer."""
     try:
@@ -520,6 +490,25 @@ class StripePaymentProvider(PaymentProvider):
       raise
     except Exception as e:
       logger.error(f"Failed to get upcoming invoice: {e}", exc_info=True)
+      raise
+
+  def create_portal_session(self, customer_id: str, return_url: str) -> str:
+    """Create a Stripe Customer Portal session for payment management."""
+    try:
+      session = self.stripe.billing_portal.Session.create(
+        customer=customer_id,
+        return_url=return_url,
+      )
+
+      logger.info(
+        f"Created Stripe portal session for customer {customer_id}",
+        extra={"customer_id": customer_id, "session_id": session.id},
+      )
+
+      return session.url
+
+    except Exception as e:
+      logger.error(f"Failed to create portal session: {e}", exc_info=True)
       raise
 
 

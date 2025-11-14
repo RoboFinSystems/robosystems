@@ -21,7 +21,6 @@ from .subscription import (
   RepositoryCreditsResponse,
   AllocationResult,
   AllocationResponse,
-  CancellationResponse,
 )
 from .credits import (
   CreditSummaryResponse,
@@ -64,7 +63,6 @@ __all__ = [
   "RepositoryCreditsResponse",
   "AllocationResult",
   "AllocationResponse",
-  "CancellationResponse",
   "CreditSummaryResponse",
   "CreditTransactionResponse",
   "CreditCheckRequest",

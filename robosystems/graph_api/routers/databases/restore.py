@@ -12,8 +12,6 @@ from fastapi import (
   HTTPException,
   Path,
   Form,
-  File,
-  UploadFile,
 )
 from fastapi import status as http_status
 
@@ -28,19 +26,24 @@ router = APIRouter(prefix="/databases", tags=["Backup"])
 
 @router.post("/{graph_id}/restore", response_model=RestoreResponse)
 async def restore_database(
-  backup_data: UploadFile = File(..., description="Encrypted backup data to restore"),
+  s3_bucket: str = Form(..., description="S3 bucket containing the backup"),
+  s3_key: str = Form(..., description="S3 key path to the backup"),
   graph_id: str = Path(..., description="Graph database identifier"),
   create_system_backup: bool = Form(
     True, description="Create system backup before restore"
   ),
   force_overwrite: bool = Form(False, description="Force overwrite existing database"),
+  encrypted: bool = Form(True, description="Whether the backup is encrypted"),
+  compressed: bool = Form(True, description="Whether the backup is compressed"),
   cluster_service=Depends(get_cluster_service),
 ) -> RestoreResponse:
   """
-  Restore a database from an encrypted backup.
+  Restore a database from S3 backup.
 
-  This endpoint restores a complete Kuzu database from backup data:
-  - Only accepts encrypted backup data for security
+  This endpoint restores a complete Kuzu database from S3:
+  - Downloads backup from S3
+  - Decrypts if encrypted
+  - Decompresses if compressed
   - Creates a system backup of existing database before restore
   - Runs asynchronously with progress tracking
 
@@ -65,22 +68,20 @@ async def restore_database(
       detail=f"Database {graph_id} already exists. Use force_overwrite=true to replace it.",
     )
 
-  # Read the uploaded file
-  backup_bytes = await backup_data.read()
-
   # Create task in task manager
   task_id = await restore_task_manager.create_task(
     task_type="restore",
     metadata={
       "database": graph_id,
-      "backup_size": len(backup_bytes),
+      "s3_bucket": s3_bucket,
+      "s3_key": s3_key,
       "create_system_backup": create_system_backup and database_exists,
       "force_overwrite": force_overwrite,
+      "encrypted": encrypted,
+      "compressed": compressed,
     },
   )
 
-  # Add restore task to background tasks (when implemented)
-  # For now, just mark as failed since it's not implemented
   await restore_task_manager.fail_task(
     task_id, "Restore functionality not yet implemented"
   )

@@ -91,7 +91,6 @@ class TestBackupManager:
       patch(
         "robosystems.operations.kuzu.backup_manager.get_universal_repository"
       ) as mock_get_repo,
-      patch("builtins.open", create=True) as mock_open,
       patch("os.path.exists", return_value=True),
       patch("os.unlink"),
       patch("shutil.copy2"),
@@ -126,16 +125,22 @@ class TestBackupManager:
       mock_repo.__aenter__ = AsyncMock(return_value=mock_repo)
       mock_repo.__aexit__ = AsyncMock(return_value=None)
 
-      # Mock get_graph_repository to return an awaitable that resolves to mock_repo
+      # Mock get_universal_repository to return an awaitable that resolves to mock_repo
       async def mock_get_graph_repository(*args, **kwargs):
         return mock_repo
 
       mock_get_repo.side_effect = mock_get_graph_repository
 
-      # Mock file operations for APOC export
-      mock_file = MagicMock()
-      mock_file.read.return_value = sample_cypher_data
-      mock_open.return_value.__enter__.return_value = mock_file
+      # Mock graph_router.get_repository to return mock_repo
+      backup_manager.graph_router.get_repository = AsyncMock(return_value=mock_repo)
+
+      # Mock download_backup for full dump export
+      mock_repo.download_backup = AsyncMock(
+        return_value={
+          "backup_data": sample_cypher_data.encode("utf-8"),
+          "size_bytes": len(sample_cypher_data.encode("utf-8")),
+        }
+      )
 
       # Mock export data
       mock_repo.export_database_to_cypher.return_value = sample_cypher_data
@@ -482,37 +487,50 @@ class TestBackupManager:
     graph_id = "test_graph"
     backup_id = "backup_123"
 
-    # Mock backup metadata
-    mock_metadata = {
-      "backup_format": "full_dump",
-      "encryption_enabled": False,
-    }
-    backup_manager.s3_adapter.get_backup_metadata = AsyncMock(
-      return_value=mock_metadata
-    )
-    backup_manager.s3_adapter.generate_download_url = AsyncMock(
-      return_value="https://presigned-url.com"
-    )
+    # Mock GraphBackup database record
+    mock_backup = MagicMock()
+    mock_backup.is_completed = True
+    mock_backup.encryption_enabled = False
+    mock_backup.s3_bucket = "test-bucket"
+    mock_backup.s3_key = "test-key"
 
-    # Test get_backup_download_url
-    url = await backup_manager.get_backup_download_url(
-      graph_id, backup_id, expires_in=3600
-    )
-    assert url == "https://presigned-url.com"
-    backup_manager.s3_adapter.generate_download_url.assert_called_once_with(
-      graph_id, backup_id, 3600
-    )
+    # Mock S3 client
+    mock_s3_client = MagicMock()
+    mock_s3_client.generate_presigned_url.return_value = "https://presigned-url.com"
+    backup_manager.s3_adapter.s3_client = mock_s3_client
 
-    # Test encrypted backup download (should fail)
-    mock_metadata["encryption_enabled"] = True
-    url = await backup_manager.get_backup_download_url(graph_id, backup_id)
-    assert url is None
+    with (
+      patch("robosystems.database.session") as mock_session_local,
+      patch("robosystems.models.iam.graph_backup.GraphBackup") as mock_graph_backup,
+    ):
+      mock_session = MagicMock()
+      mock_session_local.return_value = mock_session
+      mock_graph_backup.get_by_id.return_value = mock_backup
+
+      # Test get_backup_download_url
+      url = await backup_manager.get_backup_download_url(
+        graph_id, backup_id, expires_in=3600
+      )
+      assert url == "https://presigned-url.com"
+      mock_graph_backup.get_by_id.assert_called_once_with(backup_id, mock_session)
+
+      # Test encrypted backup download (should return None)
+      mock_backup.encryption_enabled = True
+      mock_graph_backup.get_by_id.reset_mock()
+
+      url = await backup_manager.get_backup_download_url(graph_id, backup_id)
+      assert url is None
 
     # Test download_backup
+    backup_manager.s3_adapter.get_backup_metadata = AsyncMock(
+      return_value={
+        "encryption_enabled": False,
+        "backup_format": "full_dump",
+      }
+    )
     backup_manager.s3_adapter.download_backup = AsyncMock(
       return_value=b"backup_content"
     )
-    mock_metadata["encryption_enabled"] = False
 
     data, content_type, filename = await backup_manager.download_backup(
       graph_id, backup_id

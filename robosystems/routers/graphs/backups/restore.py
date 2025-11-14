@@ -205,7 +205,7 @@ async def restore_backup(
         "verify_after_restore": request.verify_after_restore,
         "operation_id": sse_response["operation_id"],  # Pass SSE operation ID
       },
-      queue="kuzu",  # Run on kuzu queue since it needs access to database files
+      queue="default",
     )
 
     task_id = task.id

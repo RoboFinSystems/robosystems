@@ -36,14 +36,9 @@ class BillingCustomer(BaseModel):
   created_at: str = Field(..., description="Customer creation timestamp (ISO format)")
 
 
-class UpdatePaymentMethodRequest(BaseModel):
-  """Request to update default payment method."""
+class PortalSessionResponse(BaseModel):
+  """Response for customer portal session creation."""
 
-  payment_method_id: str = Field(..., description="Payment method ID to set as default")
-
-
-class UpdatePaymentMethodResponse(BaseModel):
-  """Response for payment method update."""
-
-  message: str = Field(..., description="Success message")
-  payment_method: PaymentMethod = Field(..., description="Updated payment method")
+  portal_url: str = Field(
+    ..., description="Stripe Customer Portal URL where user can manage payment methods"
+  )

@@ -125,8 +125,12 @@ def test_restore_rejects_existing_database_without_force(restore_client):
 
   response = client.post(
     "/databases/graph1/restore",
-    data={"create_system_backup": "true", "force_overwrite": "false"},
-    files={"backup_data": ("backup.zip", b"contents", "application/octet-stream")},
+    data={
+      "s3_bucket": "test-bucket",
+      "s3_key": "backups/graph1.zip",
+      "create_system_backup": "true",
+      "force_overwrite": "false",
+    },
   )
 
   assert response.status_code == 409
@@ -140,8 +144,12 @@ def test_restore_initiates_task_with_metadata(restore_client):
 
   response = client.post(
     "/databases/graph1/restore",
-    data={"create_system_backup": "true", "force_overwrite": "true"},
-    files={"backup_data": ("backup.zip", b"contents", "application/octet-stream")},
+    data={
+      "s3_bucket": "test-bucket",
+      "s3_key": "backups/graph1.zip",
+      "create_system_backup": "true",
+      "force_overwrite": "true",
+    },
   )
 
   assert response.status_code == 200
@@ -155,7 +163,8 @@ def test_restore_initiates_task_with_metadata(restore_client):
   _, kwargs = client.task_manager.create_task.await_args
   assert kwargs["task_type"] == "restore"
   assert kwargs["metadata"]["database"] == "graph1"
-  assert kwargs["metadata"]["backup_size"] == len(b"contents")
+  assert kwargs["metadata"]["s3_bucket"] == "test-bucket"
+  assert kwargs["metadata"]["s3_key"] == "backups/graph1.zip"
   assert kwargs["metadata"]["create_system_backup"] is True
   assert kwargs["metadata"]["force_overwrite"] is True
 

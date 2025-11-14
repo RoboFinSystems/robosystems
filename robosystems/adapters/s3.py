@@ -573,15 +573,15 @@ class S3BackupAdapter:
     """Generate S3 key path for backup file."""
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
-    # Use provided extension or default to .kuzu
+    # Use provided extension or default to .kuzu with optional compression
     if file_extension:
+      # Extension explicitly provided - use as-is
       extension = file_extension
     else:
+      # No extension provided - generate default with compression if enabled
       extension = ".kuzu"
-
-    # Add compression suffix if needed (encryption is handled by backup task)
-    if self.enable_compression and not extension.endswith(".gz"):
-      extension += ".gz"
+      if self.enable_compression:
+        extension += ".gz"
 
     return f"graph-backups/databases/{graph_id}/{backup_type}/backup-{timestamp_str}{extension}"
 
@@ -845,6 +845,8 @@ class S3BackupAdapter:
         backup_duration_seconds=metadata.get("backup_duration_seconds", 0.0),
         database_version=metadata.get("database_version")
         or metadata.get("kuzu_version"),
+        backup_format="full_dump",
+        s3_key=backup_path,
         is_encrypted=metadata.get("is_encrypted", False),
         encryption_method=metadata.get("encryption_method"),
       )
