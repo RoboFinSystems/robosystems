@@ -1256,13 +1256,19 @@ class BackupManager:
           if success:
             logger.info("System backup created successfully")
           else:
-            logger.warning(
-              f"Failed to upload system backup to S3 for graph '{graph_id}'"
+            error_msg = f"Failed to upload system backup to S3 for graph '{graph_id}'"
+            logger.error(error_msg)
+            raise RuntimeError(
+              f"System backup failed for graph '{graph_id}' - aborting restore for safety. "
+              "Set create_system_backup=False to skip backup and force restore."
             )
 
       except Exception as e:
         logger.error(f"Error creating system backup for graph '{graph_id}': {str(e)}")
-        # Continue with restore even if backup fails
+        raise RuntimeError(
+          f"Failed to create system backup before restore: {str(e)}. "
+          "Aborting restore for safety. Set create_system_backup=False to skip backup and force restore."
+        ) from e
 
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)

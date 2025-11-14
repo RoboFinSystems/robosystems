@@ -942,17 +942,6 @@ def create_graph_backup_sse(
 
     backup_manager = create_backup_manager()
 
-    # Progress callback for backup operations
-    def backup_progress_callback(progress: float, message: str = None):
-      # Map backup progress from 40% to 80%
-      mapped_progress = 40 + (progress * 0.4)
-      progress_tracker.emit_progress(
-        message or "Backing up database...", mapped_progress
-      )
-
-    # TODO: Pass callback to backup_manager.create_backup when it supports progress callbacks
-    _ = backup_progress_callback  # Mark as intentionally unused for now
-
     # Create the backup with progress tracking
     backup_job = BackupJob(
       graph_id=graph_id,
@@ -1177,9 +1166,8 @@ def restore_graph_backup_sse(
       # Try to close client, but don't fail if event loop is already closed
       try:
         asyncio.run(client.close())
-      except RuntimeError:
-        # Event loop already closed - client will be garbage collected
-        pass
+      except RuntimeError as e:
+        logger.debug(f"Event loop already closed during client cleanup: {e}")
 
     # Verify restore if requested
     verification_status = "not_verified"

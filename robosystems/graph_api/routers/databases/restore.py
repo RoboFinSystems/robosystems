@@ -82,10 +82,6 @@ async def restore_database(
     },
   )
 
-  await restore_task_manager.fail_task(
-    task_id, "Restore functionality not yet implemented"
-  )
-
   logger.info(f"Restore initiated for database {graph_id} with task ID: {task_id}")
 
   return RestoreResponse(

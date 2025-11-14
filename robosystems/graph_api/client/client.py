@@ -267,7 +267,7 @@ class GraphClient(BaseGraphClient):
 
     # For true streaming, use the streaming endpoint
     # This allows the graph database instance to do the chunking
-    async def stream_chunks():
+    async def stream_chunks() -> AsyncGenerator[Dict[str, Any], None]:
       """Stream NDJSON chunks from Graph API server."""
       async with self.client.stream(
         "POST",

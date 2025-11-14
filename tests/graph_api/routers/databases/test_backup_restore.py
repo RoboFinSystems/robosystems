@@ -168,9 +168,7 @@ def test_restore_initiates_task_with_metadata(restore_client):
   assert kwargs["metadata"]["create_system_backup"] is True
   assert kwargs["metadata"]["force_overwrite"] is True
 
-  client.task_manager.fail_task.assert_awaited_once_with(
-    "task-456", "Restore functionality not yet implemented"
-  )
+  client.task_manager.fail_task.assert_not_awaited()
 
 
 @pytest.mark.asyncio

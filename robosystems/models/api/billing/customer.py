@@ -9,9 +9,11 @@ class PaymentMethod(BaseModel):
   id: str = Field(..., description="Payment method ID")
   type: str = Field(..., description="Payment method type (card, bank_account, etc.)")
   brand: str | None = Field(None, description="Card brand (visa, mastercard, etc.)")
-  last4: str | None = Field(None, description="Last 4 digits")
-  exp_month: int | None = Field(None, description="Expiration month")
-  exp_year: int | None = Field(None, description="Expiration year")
+  last4: str | None = Field(
+    None, description="Last 4 digits of the card or account number"
+  )
+  exp_month: int | None = Field(None, description="Expiration month of the card")
+  exp_year: int | None = Field(None, description="Expiration year of the card")
   is_default: bool = Field(
     ..., description="Whether this is the default payment method"
   )
