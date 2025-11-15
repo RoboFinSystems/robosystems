@@ -37,13 +37,20 @@ def backup_client(monkeypatch):
   task_manager = SimpleNamespace(
     create_task=AsyncMock(return_value="task-123"),
     fail_task=AsyncMock(),
+    update_task=AsyncMock(),
+    complete_task=AsyncMock(),
   )
   monkeypatch.setattr(backup_module, "backup_task_manager", task_manager)
+
+  # Mock the background task function so it doesn't actually execute
+  perform_backup_mock = AsyncMock()
+  monkeypatch.setattr(backup_module, "perform_backup", perform_backup_mock)
 
   def _factory(cluster_service):
     app.dependency_overrides[get_cluster_service] = lambda: cluster_service
     client = TestClient(app)
     client.task_manager = task_manager  # attach for assertions
+    client.perform_backup_mock = perform_backup_mock  # attach for assertions
     return client
 
   return _factory
@@ -58,13 +65,20 @@ def restore_client(monkeypatch):
   task_manager = SimpleNamespace(
     create_task=AsyncMock(return_value="task-456"),
     fail_task=AsyncMock(),
+    update_task=AsyncMock(),
+    complete_task=AsyncMock(),
   )
   monkeypatch.setattr(restore_module, "restore_task_manager", task_manager)
+
+  # Mock the background task function so it doesn't actually execute
+  perform_restore_mock = AsyncMock()
+  monkeypatch.setattr(restore_module, "perform_restore", perform_restore_mock)
 
   def _factory(cluster_service):
     app.dependency_overrides[get_cluster_service] = lambda: cluster_service
     client = TestClient(app)
     client.task_manager = task_manager
+    client.perform_restore_mock = perform_restore_mock
     return client
 
   return _factory
@@ -114,9 +128,8 @@ def test_create_backup_initiates_task(backup_client):
   assert kwargs["task_type"] == "backup"
   assert kwargs["metadata"]["database"] == "graph1"
 
-  client.task_manager.fail_task.assert_awaited_once_with(
-    "task-123", "Backup functionality not yet implemented"
-  )
+  # Backup is now processed in background task, not immediately failed
+  # Note: Background task execution is not tested here (would need async test)
 
 
 def test_restore_rejects_existing_database_without_force(restore_client):

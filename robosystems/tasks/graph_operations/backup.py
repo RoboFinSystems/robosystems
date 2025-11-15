@@ -1117,38 +1117,25 @@ def restore_graph_backup_sse(
           "Warning: System backup failed, continuing with restore...", 30
         )
 
-    # Perform the restore
-    progress_tracker.emit_progress("Downloading backup from storage...", 40)
+    # Perform the restore using Graph API with SSE monitoring
+    progress_tracker.emit_progress("Initiating restore via Graph API...", 40)
 
-    # Use Graph API client for restoration
-
+    # Create Graph API client
     client = asyncio.run(
       GraphClientFactory.create_client(graph_id, operation_type="write")
     )
 
     try:
-      # Progress callback for restore operations
-      def restore_progress_callback(progress: float, message: str = None):
-        # Map restore progress from 40% to 80%
-        mapped_progress = 40 + (progress * 0.4)
-        progress_tracker.emit_progress(
-          message or "Restoring database...", mapped_progress
-        )
-
-      # TODO: Pass callback to restore operations when they support progress callbacks
-      _ = restore_progress_callback  # Mark as intentionally unused for now
-
       progress_tracker.emit_progress(
-        "Restoring database from backup...", 50, {"status": "restoring"}
+        "Starting restore and monitoring progress...", 50, {"status": "restoring"}
       )
 
-      # Call Graph API to restore from S3
-      # Graph API will download, decrypt, decompress, and restore the database
+      # Call Graph API to restore and monitor via SSE
       logger.info(
-        f"Calling Graph API to restore from S3: {backup_record.s3_bucket}/{backup_record.s3_key}"
+        f"Starting restore from S3: {backup_record.s3_bucket}/{backup_record.s3_key}"
       )
       restore_result = asyncio.run(
-        client.restore_backup(
+        client.restore_with_sse(
           graph_id=graph_id,
           s3_bucket=backup_record.s3_bucket,
           s3_key=backup_record.s3_key,
@@ -1156,11 +1143,22 @@ def restore_graph_backup_sse(
           force_overwrite=True,
           encrypted=backup_record.encryption_enabled,
           compressed=backup_record.compression_enabled,
+          timeout=3600,  # 1 hour timeout
         )
       )
-      logger.info(f"Restore result: {restore_result}")
 
-      progress_tracker.emit_progress("Database restored", 80)
+      # Check result status
+      if restore_result.get("status") == "completed":
+        logger.info("Restore completed successfully")
+        progress_tracker.emit_progress("Database restored successfully", 80)
+        verification_status = "verified"
+      elif restore_result.get("status") == "failed":
+        error_msg = restore_result.get("error", "Unknown error")
+        logger.error(f"Restore failed: {error_msg}")
+        raise RuntimeError(f"Restore failed: {error_msg}")
+      else:
+        logger.warning(f"Unexpected restore status: {restore_result.get('status')}")
+        verification_status = "not_verified"
 
     finally:
       # Try to close client, but don't fail if event loop is already closed
@@ -1168,30 +1166,6 @@ def restore_graph_backup_sse(
         asyncio.run(client.close())
       except RuntimeError as e:
         logger.debug(f"Event loop already closed during client cleanup: {e}")
-
-    # Verify restore if requested
-    verification_status = "not_verified"
-    if verify_after_restore:
-      progress_tracker.emit_progress("Verifying restored database...", 85)
-
-      try:
-        client = asyncio.run(
-          GraphClientFactory.create_client(graph_id, operation_type="read")
-        )
-
-        # Try to get database info to verify it exists and is accessible
-        db_info = asyncio.run(client.get_database_info(graph_id=graph_id))
-        asyncio.run(client.close())
-
-        if db_info.get("database_name") == graph_id:
-          verification_status = "verified"
-          progress_tracker.emit_progress("Restore verification successful", 95)
-        else:
-          verification_status = "failed"
-          progress_tracker.emit_progress("Warning: Restore verification failed", 95)
-      except Exception as e:
-        verification_status = "error"
-        progress_tracker.emit_progress(f"Warning: Verification error - {str(e)}", 95)
 
     # Update backup record
     if hasattr(backup_record, "last_restored_at"):

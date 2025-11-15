@@ -1042,19 +1042,28 @@ class GraphClient(BaseGraphClient):
   async def restore_with_sse(
     self,
     graph_id: str,
-    backup_data: bytes,
+    s3_bucket: str,
+    s3_key: str,
     create_system_backup: bool = True,
     force_overwrite: bool = False,
+    encrypted: bool = True,
+    compressed: bool = True,
     timeout: int = 3600,  # 1 hour default
   ) -> Dict[str, Any]:
     """
-    Restore a database from backup and monitor via SSE.
+    Restore a database from S3 backup and monitor via SSE.
+
+    This method is designed for long-running restore tasks. It uses
+    Server-Sent Events to receive real-time progress updates.
 
     Args:
         graph_id: Graph database identifier
-        backup_data: Backup data to restore
+        s3_bucket: S3 bucket containing the backup
+        s3_key: S3 key path to the backup
         create_system_backup: Create system backup before restore
         force_overwrite: Force overwrite existing database
+        encrypted: Whether the backup is encrypted
+        compressed: Whether the backup is compressed
         timeout: Maximum time to wait for completion (seconds)
 
     Returns:
@@ -1064,14 +1073,27 @@ class GraphClient(BaseGraphClient):
         - error: Error message (if failed)
     """
     try:
-      # Start the restore task
-      logger.info(f"Starting restore for database {graph_id}")
+      # Step 1: Start the restore task
+      logger.info(f"Starting restore for database {graph_id} from {s3_bucket}/{s3_key}")
 
-      # TODO: Upload backup_data to S3 first, then pass s3_bucket and s3_key
-      # For now, this is not implemented as restore functionality is pending
-      raise NotImplementedError(
-        "Restore from backup data not yet implemented. "
-        "Backup data must be uploaded to S3 first."
+      restore_response = await self.restore_backup(
+        graph_id=graph_id,
+        s3_bucket=s3_bucket,
+        s3_key=s3_key,
+        create_system_backup=create_system_backup,
+        force_overwrite=force_overwrite,
+        encrypted=encrypted,
+        compressed=compressed,
+      )
+
+      task_id = restore_response["task_id"]
+      monitor_url = restore_response.get("monitor_url", f"/tasks/{task_id}/monitor")
+
+      logger.info(f"Started restore task {task_id}, monitoring via SSE...")
+
+      # Step 2: Monitor via SSE
+      return await self._monitor_task_sse(
+        sse_path=monitor_url, task_id=task_id, task_type="restore", timeout=timeout
       )
 
     except Exception as e:

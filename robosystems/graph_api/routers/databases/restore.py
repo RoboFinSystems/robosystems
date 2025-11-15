@@ -5,9 +5,11 @@ This module provides endpoints for restoring Kuzu databases
 from encrypted backups.
 """
 
+from datetime import datetime, timezone
 from typing import Dict, Any
 from fastapi import (
   APIRouter,
+  BackgroundTasks,
   Depends,
   HTTPException,
   Path,
@@ -20,12 +22,101 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.task_manager import restore_task_manager
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
+from robosystems.operations.kuzu.backup_manager import (
+  create_backup_manager,
+  RestoreJob,
+  BackupFormat,
+)
+from robosystems.adapters.s3 import BackupMetadata
 
 router = APIRouter(prefix="/databases", tags=["Backup"])
 
 
+async def perform_restore(
+  task_id: str,
+  graph_id: str,
+  s3_bucket: str,
+  s3_key: str,
+  create_system_backup: bool,
+  force_overwrite: bool,
+  encrypted: bool,
+  compressed: bool,
+) -> None:
+  """
+  Perform the actual restore in the background.
+  Updates task status for monitoring.
+  """
+  try:
+    # Update task status to running
+    await restore_task_manager.update_task(
+      task_id,
+      status="running",
+      metadata={"started_at": datetime.now(timezone.utc).isoformat()},
+    )
+
+    logger.info(
+      f"[Task {task_id}] Starting restore for database '{graph_id}' from {s3_bucket}/{s3_key}"
+    )
+
+    # Create backup manager
+    backup_manager = create_backup_manager()
+
+    # Construct backup metadata
+    # TODO: In the future, download actual metadata from S3
+    backup_metadata = BackupMetadata(
+      graph_id=graph_id,
+      backup_type="full",
+      timestamp=datetime.now(timezone.utc),
+      original_size=0,
+      compressed_size=0,
+      checksum="",
+      compression_ratio=0.0,
+      node_count=0,
+      relationship_count=0,
+      backup_duration_seconds=0.0,
+      backup_format="full",
+      s3_key=s3_key,
+      is_encrypted=encrypted,
+      encryption_method="fernet" if encrypted else None,
+    )
+
+    # Create restore job
+    restore_job = RestoreJob(
+      graph_id=graph_id,
+      backup_metadata=backup_metadata,
+      backup_format=BackupFormat.FULL_DUMP,
+      create_new_database=not force_overwrite,
+      drop_existing=force_overwrite,
+      verify_after_restore=True,
+      progress_tracker=None,
+    )
+
+    # Run restore (this is async)
+    success = await backup_manager.restore_backup(restore_job)
+
+    if not success:
+      raise RuntimeError("Restore verification failed")
+
+    # Mark task as completed
+    await restore_task_manager.complete_task(
+      task_id,
+      result={
+        "graph_id": graph_id,
+        "s3_key": s3_key,
+        "restored_at": datetime.now(timezone.utc).isoformat(),
+      },
+    )
+
+    logger.info(f"[Task {task_id}] Restore completed successfully")
+
+  except Exception as e:
+    logger.error(f"[Task {task_id}] Restore failed: {str(e)}")
+    await restore_task_manager.fail_task(task_id, str(e))
+
+
 @router.post("/{graph_id}/restore", response_model=RestoreResponse)
 async def restore_database(
+  background_tasks: BackgroundTasks,
   s3_bucket: str = Form(..., description="S3 bucket containing the backup"),
   s3_key: str = Form(..., description="S3 key path to the backup"),
   graph_id: str = Path(..., description="Graph database identifier"),
@@ -80,6 +171,19 @@ async def restore_database(
       "encrypted": encrypted,
       "compressed": compressed,
     },
+  )
+
+  # Add restore task to FastAPI background tasks
+  background_tasks.add_task(
+    perform_restore,
+    task_id=task_id,
+    graph_id=graph_id,
+    s3_bucket=s3_bucket,
+    s3_key=s3_key,
+    create_system_backup=create_system_backup and database_exists,
+    force_overwrite=force_overwrite,
+    encrypted=encrypted,
+    compressed=compressed,
   )
 
   logger.info(f"Restore initiated for database {graph_id} with task ID: {task_id}")
