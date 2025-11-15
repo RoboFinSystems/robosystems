@@ -243,7 +243,7 @@ class EntityGraphService:
 
       GraphSchema.create(
         graph_id=graph_id,
-        schema_type="entity" if not entity_data.extensions else "extensions",
+        schema_type="entity",
         schema_ddl=schema_ddl,
         schema_json={
           "base": "entity",

@@ -119,7 +119,6 @@ from .billing import (
   RepositoryCreditsResponse,
   AllocationResult,
   AllocationResponse,
-  CancellationResponse,
   UpgradeSubscriptionRequest,
   GraphSubscriptionTier,
   StorageInfo,
@@ -258,7 +257,6 @@ __all__ = [
   "RepositoryCreditsResponse",
   "AllocationResult",
   "AllocationResponse",
-  "CancellationResponse",
   # Tier models
   "GraphTierCopyOperations",
   "GraphTierBackup",

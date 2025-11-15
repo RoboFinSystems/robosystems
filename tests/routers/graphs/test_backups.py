@@ -96,7 +96,7 @@ class TestBackupEndpoints:
       )
 
   @patch("robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id")
-  @patch("robosystems.tasks.graph_operations.backup.create_graph_backup_sse")
+  @patch("robosystems.tasks.graph_operations.backup.create_graph_backup")
   @patch("os.path.exists")
   @patch(
     "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.get_database_path_for_graph"

@@ -114,14 +114,17 @@ class BackupManager:
   def __init__(
     self,
     s3_adapter: Optional[S3BackupAdapter] = None,
+    graph_router=None,
   ):
     """
     Initialize backup manager.
 
     Args:
         s3_adapter: S3 adapter for backup storage
+        graph_router: Graph router for API communication
     """
     self._s3_adapter = s3_adapter
+    self._graph_router = graph_router
     logger.info("BackupManager initialized")
 
   @property
@@ -130,6 +133,15 @@ class BackupManager:
     if self._s3_adapter is None:
       self._s3_adapter = S3BackupAdapter()
     return self._s3_adapter
+
+  @property
+  def graph_router(self):
+    """Lazy initialization of graph router."""
+    if self._graph_router is None:
+      from robosystems.middleware.graph.router import get_graph_router
+
+      self._graph_router = get_graph_router()
+    return self._graph_router
 
   async def get_backup_download_url(
     self, graph_id: str, backup_id: str, expires_in: int = 3600
@@ -146,25 +158,62 @@ class BackupManager:
         Temporary download URL or None if backup not found
     """
     try:
-      # Get backup metadata
-      backup_metadata = await self.s3_adapter.get_backup_metadata(graph_id, backup_id)
+      from robosystems.database import session as SessionLocal
+      from robosystems.models.iam.graph_backup import GraphBackup
 
-      if not backup_metadata:
-        return None
+      # Get backup record from database
+      db_session = SessionLocal()
+      try:
+        backup = GraphBackup.get_by_id(backup_id, db_session)
 
-      # Check if backup is exportable (not encrypted)
-      if backup_metadata.get("encryption_enabled", False):
-        raise ValueError("Encrypted backups cannot be downloaded")
+        if not backup:
+          logger.warning(f"Backup {backup_id} not found in database")
+          return None
 
-      # Generate presigned URL for download
-      download_url = await self.s3_adapter.generate_download_url(
-        graph_id, backup_id, expires_in
-      )
+        # Check if backup is completed
+        if not backup.is_completed:
+          logger.warning(
+            f"Backup {backup_id} is not completed (status: {backup.status})"
+          )
+          return None
 
-      logger.info(
-        f"Generated download URL for backup {backup_id} (expires in {expires_in}s)"
-      )
-      return download_url
+        # Check if backup is exportable (not encrypted)
+        if backup.encryption_enabled:
+          raise ValueError("Encrypted backups cannot be downloaded")
+
+        # Format timestamp for filename (aligned with created_at shown in frontend)
+        timestamp_str = backup.created_at.strftime("%Y%m%d_%H%M%S")
+        filename = f"{graph_id}_{timestamp_str}.zip"
+
+        # Generate presigned URL using the S3 key from the backup record
+        import asyncio
+
+        url = await asyncio.get_event_loop().run_in_executor(
+          None,
+          lambda: self.s3_adapter.s3_client.generate_presigned_url(
+            "get_object",
+            Params={
+              "Bucket": backup.s3_bucket,
+              "Key": backup.s3_key,
+              "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            },
+            ExpiresIn=expires_in,
+          ),
+        )
+
+        # Replace container hostname with localhost for development (LocalStack)
+        if "localstack:" in url:
+          url = url.replace("localstack:4566", "localhost:4566")
+          logger.info(
+            "Replaced LocalStack container hostname with localhost in presigned URL"
+          )
+
+        logger.info(
+          f"Generated download URL for backup {backup_id} (expires in {expires_in}s)"
+        )
+        return url
+      finally:
+        SessionLocal.remove()
 
     except Exception as e:
       logger.error(f"Failed to generate download URL for backup {backup_id}: {e}")
@@ -931,43 +980,34 @@ class BackupManager:
   async def _export_full_dump(
     self, graph_id: str, backup_type: BackupType
   ) -> Tuple[bytes, str]:
-    """Export full database dump (copy database files)."""
-    logger.info(f"Creating full dump for graph '{graph_id}'")
+    """Export full database dump via Graph API."""
+    logger.info(f"Creating full dump for graph '{graph_id}' via Graph API")
 
-    # Get database file path
-    db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
+    # Use Graph API to get the database backup
+    # This works across containers (worker -> graph-api)
+    graph_client = await self.graph_router.get_repository(
+      graph_id=graph_id,
+      operation_type="read",
+    )
 
-    if not os.path.exists(db_path):
-      raise FileNotFoundError(f"Database file not found: {db_path}")
+    try:
+      # Call Graph API backup endpoint
+      response = await graph_client.download_backup(graph_id=graph_id)
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-      temp_path = Path(temp_dir)
+      if not response or "backup_data" not in response:
+        raise RuntimeError(f"Failed to get backup from Graph API for {graph_id}")
 
-      # Copy database files
-      if os.path.isfile(db_path):
-        # Single file database
-        shutil.copy2(db_path, temp_path / f"{graph_id}.kuzu")
-      else:
-        # Directory-based database
-        shutil.copytree(db_path, temp_path / graph_id)
+      # Get raw binary backup data from Graph API client
+      backup_data = response["backup_data"]
+      logger.info(
+        f"Successfully retrieved backup from Graph API: {len(backup_data)} bytes"
+      )
 
-      # Create ZIP archive
-      zip_file = temp_path / "backup.zip"
-      with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
-        if os.path.isfile(db_path):
-          zf.write(temp_path / f"{graph_id}.kuzu", f"{graph_id}.kuzu")
-        else:
-          for root, dirs, files in os.walk(temp_path / graph_id):
-            for file in files:
-              file_path = Path(root) / file
-              arc_path = file_path.relative_to(temp_path)
-              zf.write(file_path, arc_path)
+      return backup_data, ".kuzu.zip"
 
-      # Read ZIP file content
-      with open(zip_file, "rb") as f:
-        backup_data = f.read()
-
-    return backup_data, ".kuzu.zip"
+    except Exception as e:
+      logger.error(f"Failed to create backup via Graph API for {graph_id}: {e}")
+      raise
 
   async def _import_backup_data(
     self,
@@ -1221,13 +1261,19 @@ class BackupManager:
           if success:
             logger.info("System backup created successfully")
           else:
-            logger.warning(
-              f"Failed to upload system backup to S3 for graph '{graph_id}'"
+            error_msg = f"Failed to upload system backup to S3 for graph '{graph_id}'"
+            logger.error(error_msg)
+            raise RuntimeError(
+              f"System backup failed for graph '{graph_id}' - aborting restore for safety. "
+              "Set create_system_backup=False to skip backup and force restore."
             )
 
       except Exception as e:
         logger.error(f"Error creating system backup for graph '{graph_id}': {str(e)}")
-        # Continue with restore even if backup fails
+        raise RuntimeError(
+          f"Failed to create system backup before restore: {str(e)}. "
+          "Aborting restore for safety. Set create_system_backup=False to skip backup and force restore."
+        ) from e
 
     with tempfile.TemporaryDirectory() as temp_dir:
       temp_path = Path(temp_dir)
@@ -1280,7 +1326,16 @@ class BackupManager:
     import hashlib
 
     calculated_checksum = hashlib.sha256(backup_data).hexdigest()
-    return calculated_checksum == metadata.checksum
+    expected_checksum = metadata.checksum
+
+    logger.info(
+      f"Integrity check - Data size: {len(backup_data)} bytes, "
+      f"Calculated checksum: {calculated_checksum}, "
+      f"Expected checksum: {expected_checksum}, "
+      f"Match: {calculated_checksum == expected_checksum}"
+    )
+
+    return calculated_checksum == expected_checksum
 
   async def _verify_restore(
     self, graph_id: str, original_metadata: BackupMetadata

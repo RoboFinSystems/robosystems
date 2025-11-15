@@ -605,6 +605,7 @@ jobs:
       worker_ingestion_enabled: ${{ vars.WORKER_INGESTION_ENABLED_STAGING }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
+      run_migrations: ${{ vars.RUN_MIGRATIONS_STAGING || 'true' }}
       refresh_ecs_service: ${{ vars.WORKER_ASG_REFRESH_STAGING || 'true' }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}

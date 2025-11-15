@@ -128,7 +128,9 @@ async def list_backups(
           graph_id=graph_id,
           backup_format=backup_format,
           backup_type=backup.backup_type,
-          status=backup.status.value,
+          status=backup.status.value
+          if hasattr(backup.status, "value")
+          else str(backup.status),
           # s3_bucket and s3_key removed - infrastructure details not exposed
           original_size_bytes=backup.original_size_bytes or 0,
           compressed_size_bytes=backup.compressed_size_bytes or 0,
@@ -344,15 +346,36 @@ async def create_backup(
         detail="Database service temporarily unavailable",
       )
 
-    # For now, return a mock response since BackupJob implementation is incomplete
-    # TODO: Implement proper backup job execution
+    # Queue Celery task for backup creation with SSE progress tracking
     import uuid
+    from robosystems.tasks.graph_operations.backup import create_graph_backup
+    from robosystems.middleware.sse.event_storage import get_event_storage
 
     operation_id = str(uuid.uuid4())
 
-    # Return mock response that matches expected format
     logger.info(
-      f"Backup requested for graph {graph_id} with operation_id {operation_id}"
+      f"Queueing backup task for graph {graph_id} with operation_id {operation_id}"
+    )
+
+    # Register operation with SSE before queuing task
+    event_storage = get_event_storage()
+    await event_storage.create_operation(
+      operation_type="backup_creation",
+      user_id=str(current_user.id),
+      graph_id=graph_id,
+      operation_id=operation_id,
+    )
+
+    # Queue Celery task with SSE progress tracking
+    create_graph_backup.delay(  # type: ignore[attr-defined]
+      graph_id=graph_id,
+      backup_type="full",
+      user_id=str(current_user.id),
+      retention_days=request.retention_days,
+      compression=True,
+      encryption=request.encryption,
+      backup_format=request.backup_format,
+      operation_id=operation_id,
     )
 
     # Record business event
@@ -374,13 +397,13 @@ async def create_backup(
 
     # Security audit log
     SecurityAuditLogger.log_security_event(
-      event_type=SecurityEventType.AUTH_SUCCESS,  # Could add BACKUP_CREATED
+      event_type=SecurityEventType.AUTH_SUCCESS,
       user_id=str(current_user.id),
       ip_address=client_ip,
       user_agent=user_agent,
       endpoint=f"/v1/graphs/{graph_id}/backups",
       details={
-        "action": "backup_created",
+        "action": "backup_queued",
         "graph_id": graph_id,
         "backup_format": request.backup_format,
         "encryption_enabled": request.encryption,

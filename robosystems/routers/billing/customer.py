@@ -11,8 +11,7 @@ from ...models.billing import BillingCustomer as BillingCustomerModel
 from ...models.api.billing.customer import (
   BillingCustomer,
   PaymentMethod,
-  UpdatePaymentMethodRequest,
-  UpdatePaymentMethodResponse,
+  PortalSessionResponse,
 )
 from ...operations.providers.payment_provider import get_payment_provider
 from ...logger import get_logger
@@ -101,29 +100,35 @@ async def get_customer(
 
 
 @router.post(
-  "/{org_id}/payment-method",
-  response_model=UpdatePaymentMethodResponse,
-  summary="Update Organization Default Payment Method",
-  description="""Update the default payment method for the organization.
+  "/{org_id}/portal",
+  response_model=PortalSessionResponse,
+  summary="Create Customer Portal Session",
+  description="""Create a Stripe Customer Portal session for managing payment methods.
 
-This changes which payment method will be used for future subscription charges.
+The portal allows users to:
+- Add new payment methods
+- Remove existing payment methods
+- Update default payment method
+- View billing history
+
+The user will be redirected to Stripe's hosted portal page and returned to the billing page when done.
 
 **Requirements:**
-- User must be an OWNER of the organization""",
-  operation_id="updateOrgPaymentMethod",
+- User must be an OWNER of the organization
+- Organization must have a Stripe customer ID (i.e., has gone through checkout at least once)""",
+  operation_id="createPortalSession",
 )
-async def update_payment_method(
+async def create_portal_session(
   org_id: str,
-  request: UpdatePaymentMethodRequest,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
-  """Update default payment method for organization."""
+  """Create Stripe Customer Portal session for payment management."""
   try:
     from ...models.iam import OrgUser, OrgRole
+    from ...config import env
 
-    # Verify user is an owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:
       raise HTTPException(
@@ -134,43 +139,33 @@ async def update_payment_method(
     if membership.role != OrgRole.OWNER:
       raise HTTPException(
         status_code=403,
-        detail="Only organization owners can update payment methods",
+        detail="Only organization owners can manage billing",
       )
 
     customer = BillingCustomerModel.get_or_create(org_id, db)
 
     if not customer.stripe_customer_id:
-      raise HTTPException(status_code=400, detail="No Stripe customer ID found")
+      raise HTTPException(
+        status_code=400,
+        detail="No Stripe customer found. Please complete checkout first to add a payment method.",
+      )
 
     provider = get_payment_provider("stripe")
-    updated_pm = provider.update_default_payment_method(
-      customer.stripe_customer_id, request.payment_method_id
-    )
+    return_url = f"{env.ROBOSYSTEMS_URL}/billing"
+    portal_url = provider.create_portal_session(customer.stripe_customer_id, return_url)
 
     logger.info(
-      f"Updated default payment method for org {org_id}",
+      f"Created portal session for org {org_id}",
       extra={
         "org_id": org_id,
         "user_id": current_user.id,
-        "payment_method_id": request.payment_method_id,
       },
     )
 
-    return UpdatePaymentMethodResponse(
-      message="Default payment method updated successfully",
-      payment_method=PaymentMethod(
-        id=updated_pm["id"],
-        type=updated_pm["type"],
-        brand=updated_pm.get("card", {}).get("brand"),
-        last4=updated_pm.get("card", {}).get("last4"),
-        exp_month=updated_pm.get("card", {}).get("exp_month"),
-        exp_year=updated_pm.get("card", {}).get("exp_year"),
-        is_default=True,
-      ),
-    )
+    return PortalSessionResponse(portal_url=portal_url)
 
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to update payment method: {e}", exc_info=True)
-    raise HTTPException(status_code=500, detail="Failed to update payment method")
+    logger.error(f"Failed to create portal session: {e}", exc_info=True)
+    raise HTTPException(status_code=500, detail="Failed to create portal session")

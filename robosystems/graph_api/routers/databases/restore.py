@@ -5,15 +5,15 @@ This module provides endpoints for restoring Kuzu databases
 from encrypted backups.
 """
 
-from typing import Dict, Any
+from datetime import datetime, timezone
 from fastapi import (
   APIRouter,
+  BackgroundTasks,
   Depends,
   HTTPException,
   Path,
   Form,
-  File,
-  UploadFile,
+  Response,
 )
 from fastapi import status as http_status
 
@@ -22,25 +22,138 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.task_manager import restore_task_manager
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
+from robosystems.operations.kuzu.backup_manager import (
+  create_backup_manager,
+  RestoreJob,
+  BackupFormat,
+)
 
 router = APIRouter(prefix="/databases", tags=["Backup"])
 
 
+async def perform_restore(
+  task_id: str,
+  graph_id: str,
+  s3_bucket: str,
+  s3_key: str,
+  create_system_backup: bool,
+  force_overwrite: bool,
+  encrypted: bool,
+  compressed: bool,
+  connection_pool=None,
+) -> None:
+  """
+  Perform the actual restore in the background.
+  Updates task status for monitoring.
+
+  Args:
+      connection_pool: Kuzu connection pool for closing connections before restore
+  """
+  try:
+    # Update task status to running
+    await restore_task_manager.update_task(
+      task_id,
+      status="running",
+      metadata={"started_at": datetime.now(timezone.utc).isoformat()},
+    )
+
+    logger.info(
+      f"[Task {task_id}] Starting restore for database '{graph_id}' from {s3_bucket}/{s3_key}"
+    )
+
+    # Create backup manager
+    backup_manager = create_backup_manager()
+
+    # Download actual metadata from S3
+    backup_metadata = await backup_manager.s3_adapter.get_backup_metadata_by_key(s3_key)
+
+    if not backup_metadata:
+      logger.error(f"[Task {task_id}] Failed to download backup metadata from S3")
+      raise RuntimeError(f"Failed to download backup metadata for {s3_key}")
+
+    logger.info(
+      f"[Task {task_id}] Downloaded metadata - checksum: {backup_metadata.checksum}, "
+      f"original_size: {backup_metadata.original_size}"
+    )
+
+    # If force_overwrite, delete the existing database first
+    # This happens in the Graph API so we properly close connections and clean up
+    if connection_pool and force_overwrite:
+      from pathlib import Path
+      import shutil
+      from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+
+      logger.info(f"[Task {task_id}] Deleting existing database for {graph_id}")
+
+      # Close all Kuzu connections first
+      connection_pool.close_database_connections(graph_id)
+      logger.info(f"[Task {task_id}] Closed Kuzu connections")
+
+      # Delete the database files
+      db_path = Path(MultiTenantUtils.get_database_path_for_graph(graph_id))
+      if db_path.exists():
+        if db_path.is_file():
+          db_path.unlink()
+        else:
+          shutil.rmtree(db_path)
+        logger.info(f"[Task {task_id}] Deleted existing database files at {db_path}")
+
+    # Create restore job
+    # drop_existing=False because we already deleted it above if needed
+    restore_job = RestoreJob(
+      graph_id=graph_id,
+      backup_metadata=backup_metadata,
+      backup_format=BackupFormat.FULL_DUMP,
+      create_new_database=False,
+      drop_existing=False,
+      verify_after_restore=True,
+      progress_tracker=None,
+    )
+
+    # Run restore (this is async)
+    success = await backup_manager.restore_backup(restore_job)
+
+    if not success:
+      raise RuntimeError("Restore verification failed")
+
+    # Mark task as completed
+    await restore_task_manager.complete_task(
+      task_id,
+      result={
+        "graph_id": graph_id,
+        "s3_key": s3_key,
+        "restored_at": datetime.now(timezone.utc).isoformat(),
+      },
+    )
+
+    logger.info(f"[Task {task_id}] Restore completed successfully")
+
+  except Exception as e:
+    logger.error(f"[Task {task_id}] Restore failed: {str(e)}")
+    await restore_task_manager.fail_task(task_id, str(e))
+
+
 @router.post("/{graph_id}/restore", response_model=RestoreResponse)
 async def restore_database(
-  backup_data: UploadFile = File(..., description="Encrypted backup data to restore"),
+  background_tasks: BackgroundTasks,
+  s3_bucket: str = Form(..., description="S3 bucket containing the backup"),
+  s3_key: str = Form(..., description="S3 key path to the backup"),
   graph_id: str = Path(..., description="Graph database identifier"),
   create_system_backup: bool = Form(
     True, description="Create system backup before restore"
   ),
   force_overwrite: bool = Form(False, description="Force overwrite existing database"),
+  encrypted: bool = Form(True, description="Whether the backup is encrypted"),
+  compressed: bool = Form(True, description="Whether the backup is compressed"),
   cluster_service=Depends(get_cluster_service),
 ) -> RestoreResponse:
   """
-  Restore a database from an encrypted backup.
+  Restore a database from S3 backup.
 
-  This endpoint restores a complete Kuzu database from backup data:
-  - Only accepts encrypted backup data for security
+  This endpoint restores a complete Kuzu database from S3:
+  - Downloads backup from S3
+  - Decrypts if encrypted
+  - Decompresses if compressed
   - Creates a system backup of existing database before restore
   - Runs asynchronously with progress tracking
 
@@ -65,24 +178,32 @@ async def restore_database(
       detail=f"Database {graph_id} already exists. Use force_overwrite=true to replace it.",
     )
 
-  # Read the uploaded file
-  backup_bytes = await backup_data.read()
-
   # Create task in task manager
   task_id = await restore_task_manager.create_task(
     task_type="restore",
     metadata={
       "database": graph_id,
-      "backup_size": len(backup_bytes),
+      "s3_bucket": s3_bucket,
+      "s3_key": s3_key,
       "create_system_backup": create_system_backup and database_exists,
       "force_overwrite": force_overwrite,
+      "encrypted": encrypted,
+      "compressed": compressed,
     },
   )
 
-  # Add restore task to background tasks (when implemented)
-  # For now, just mark as failed since it's not implemented
-  await restore_task_manager.fail_task(
-    task_id, "Restore functionality not yet implemented"
+  # Add restore task to FastAPI background tasks
+  background_tasks.add_task(
+    perform_restore,
+    task_id=task_id,
+    graph_id=graph_id,
+    s3_bucket=s3_bucket,
+    s3_key=s3_key,
+    create_system_backup=create_system_backup and database_exists,
+    force_overwrite=force_overwrite,
+    encrypted=encrypted,
+    compressed=compressed,
+    connection_pool=cluster_service.db_manager.connection_pool,
   )
 
   logger.info(f"Restore initiated for database {graph_id} with task ID: {task_id}")
@@ -97,11 +218,11 @@ async def restore_database(
   )
 
 
-@router.post("/{graph_id}/backup-download", response_model=Dict[str, Any])
+@router.post("/{graph_id}/backup-download")
 async def download_backup(
   graph_id: str = Path(..., description="Graph database identifier"),
   cluster_service=Depends(get_cluster_service),
-) -> Dict[str, Any]:
+) -> Response:
   """
   Download the current database as a backup.
 
@@ -174,12 +295,16 @@ async def download_backup(
       f"Created backup for database {graph_id}, size: {len(backup_data)} bytes"
     )
 
-    return {
-      "backup_data": backup_data,
-      "size_bytes": len(backup_data),
-      "database": graph_id,
-      "format": "full_dump",
-    }
+    return Response(
+      content=backup_data,
+      media_type="application/zip",
+      headers={
+        "Content-Disposition": f'attachment; filename="{graph_id}_backup.zip"',
+        "X-Database": graph_id,
+        "X-Backup-Format": "full_dump",
+        "X-Backup-Size": str(len(backup_data)),
+      },
+    )
 
   except HTTPException:
     raise

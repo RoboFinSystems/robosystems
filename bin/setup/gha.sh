@@ -199,6 +199,8 @@ function setup_minimum_config() {
     # Worker Configuration
     gh variable set WORKER_ASG_REFRESH_PROD --body "true"
     gh variable set WORKER_ASG_REFRESH_STAGING --body "true"
+    gh variable set RUN_MIGRATIONS_PROD --body "false"
+    gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
     # Database Configuration
     gh variable set DATABASE_ENGINE_PROD --body "postgres"
@@ -341,6 +343,7 @@ function setup_minimum_config() {
     echo "  🔐 Valkey Encryption: Enabled for both environments"
     echo "  🔐 Valkey Secret Rotation: Every 90 days (both environments)"
     echo "  💾 Valkey Snapshots: 7 days (prod), disabled (staging)"
+    echo "  🔄 Database Migrations: Disabled (prod), Enabled (staging)"
     echo ""
     echo "🚀 Your deployment is ready to run!"
     echo "💡 All settings use cost-optimized defaults."
@@ -415,6 +418,8 @@ function setup_full_config() {
     # Worker Configuration
     gh variable set WORKER_ASG_REFRESH_PROD --body "true"
     gh variable set WORKER_ASG_REFRESH_STAGING --body "true"
+    gh variable set RUN_MIGRATIONS_PROD --body "false"
+    gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
     # Database Configuration
     gh variable set DATABASE_ENGINE_PROD --body "postgres"
@@ -561,7 +566,7 @@ function setup_full_config() {
     echo "  🌐 Domains: api.$ROOT_DOMAIN, staging.api.$ROOT_DOMAIN"
     echo "  📦 Repository: $REPOSITORY_NAME"
     echo "  🐳 ECR: $ECR_REPOSITORY"
-    echo "  🔧 Total variables configured: 71"
+    echo "  🔧 Total variables configured: 73"
     echo ""
     echo "All variables have been set to their current production defaults."
 }

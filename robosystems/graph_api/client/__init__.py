@@ -1,12 +1,11 @@
 """
-Graph API Client - Unified sync/async client for graph database access.
+Graph API Client - Async client for graph database access.
 
-This module provides both synchronous and asynchronous clients for interacting
-with graph database backends (Kuzu and Neo4j) via the Graph API.
+This module provides an asynchronous client for interacting with graph database
+backends (Kuzu and Neo4j) via the Graph API.
 """
 
 from .client import GraphClient
-from .sync_client import GraphSyncClient
 from .exceptions import (
   GraphAPIError,
   GraphTransientError,
@@ -25,7 +24,6 @@ from .factory import (
 
 __all__ = [
   "GraphClient",
-  "GraphSyncClient",
   "GraphClientConfig",
   "GraphAPIError",
   "GraphTransientError",

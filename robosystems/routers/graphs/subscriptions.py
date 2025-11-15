@@ -9,7 +9,6 @@ The same endpoint structure works for both, with automatic detection of the reso
 """
 
 import logging
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
@@ -25,7 +24,6 @@ from ...models.api.billing.subscription import (
   GraphSubscriptionResponse,
   CreateRepositorySubscriptionRequest,
   UpgradeSubscriptionRequest,
-  CancellationResponse,
 )
 from ...config import BillingConfig, env
 from ...operations.graph.repository_subscription_service import (
@@ -74,6 +72,7 @@ def subscription_to_response(
     canceled_at=(
       subscription.canceled_at.isoformat() if subscription.canceled_at else None
     ),
+    ends_at=subscription.ends_at.isoformat() if subscription.ends_at else None,
     created_at=subscription.created_at.isoformat(),
   )
 
@@ -449,74 +448,3 @@ async def upgrade_subscription(
   except Exception as e:
     logger.error(f"Failed to upgrade subscription: {e}")
     raise HTTPException(status_code=500, detail="Failed to upgrade subscription")
-
-
-@router.delete(
-  "",
-  response_model=CancellationResponse,
-  summary="Cancel Subscription",
-  description="""Cancel a subscription.
-
-For shared repositories: Cancels the user's personal subscription
-For user graphs: Not allowed - delete the graph instead
-
-The subscription will be marked as canceled and will end at the current period end date.""",
-  operation_id="cancelSubscription",
-  responses={
-    200: {"description": "Subscription canceled successfully"},
-    400: {"description": "Cannot cancel graph subscriptions directly"},
-    404: {"description": "No subscription found"},
-  },
-)
-async def cancel_subscription(
-  graph_id: str = Path(..., description="Graph ID or repository name"),
-  current_user: User = Depends(get_current_user),
-  db: Session = Depends(get_db_session),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> CancellationResponse:
-  """Cancel a subscription."""
-  try:
-    if not is_shared_repository(graph_id):
-      raise HTTPException(
-        status_code=400,
-        detail=(
-          "Cannot cancel graph subscriptions directly. "
-          "To cancel a graph subscription, delete the graph instead."
-        ),
-      )
-
-    subscription = BillingSubscription.get_by_resource_and_user(
-      resource_type="repository",
-      resource_id=graph_id,
-      user_id=current_user.id,
-      session=db,
-    )
-
-    if not subscription:
-      raise HTTPException(
-        status_code=404,
-        detail=f"No subscription found for {graph_id}",
-      )
-
-    subscription.cancel(db, immediate=False)
-
-    logger.info(
-      f"Canceled subscription {subscription.id} for user {current_user.id}",
-      extra={
-        "user_id": current_user.id,
-        "repository": graph_id,
-        "subscription_id": subscription.id,
-      },
-    )
-
-    return CancellationResponse(
-      message=f"Successfully canceled subscription to {graph_id}",
-      subscription_id=subscription.id,
-      cancelled_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.error(f"Failed to cancel subscription: {e}")
-    raise HTTPException(status_code=500, detail="Failed to cancel subscription")

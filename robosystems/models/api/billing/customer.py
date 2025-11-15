@@ -9,9 +9,11 @@ class PaymentMethod(BaseModel):
   id: str = Field(..., description="Payment method ID")
   type: str = Field(..., description="Payment method type (card, bank_account, etc.)")
   brand: str | None = Field(None, description="Card brand (visa, mastercard, etc.)")
-  last4: str | None = Field(None, description="Last 4 digits")
-  exp_month: int | None = Field(None, description="Expiration month")
-  exp_year: int | None = Field(None, description="Expiration year")
+  last4: str | None = Field(
+    None, description="Last 4 digits of the card or account number"
+  )
+  exp_month: int | None = Field(None, description="Expiration month of the card")
+  exp_year: int | None = Field(None, description="Expiration year of the card")
   is_default: bool = Field(
     ..., description="Whether this is the default payment method"
   )
@@ -36,14 +38,9 @@ class BillingCustomer(BaseModel):
   created_at: str = Field(..., description="Customer creation timestamp (ISO format)")
 
 
-class UpdatePaymentMethodRequest(BaseModel):
-  """Request to update default payment method."""
+class PortalSessionResponse(BaseModel):
+  """Response for customer portal session creation."""
 
-  payment_method_id: str = Field(..., description="Payment method ID to set as default")
-
-
-class UpdatePaymentMethodResponse(BaseModel):
-  """Response for payment method update."""
-
-  message: str = Field(..., description="Success message")
-  payment_method: PaymentMethod = Field(..., description="Updated payment method")
+  portal_url: str = Field(
+    ..., description="Stripe Customer Portal URL where user can manage payment methods"
+  )

@@ -175,14 +175,6 @@ class AllocationResponse(BaseModel):
   total_subscriptions: int = Field(..., description="Total number of subscriptions")
 
 
-class CancellationResponse(BaseModel):
-  """Response for subscription cancellation."""
-
-  message: str = Field(..., description="Cancellation confirmation message")
-  subscription_id: str = Field(..., description="ID of the cancelled subscription")
-  cancelled_at: str = Field(..., description="Cancellation timestamp (ISO format)")
-
-
 class GraphSubscriptionResponse(BaseModel):
   """Response for graph or repository subscription details."""
 
@@ -199,6 +191,10 @@ class GraphSubscriptionResponse(BaseModel):
   current_period_end: str | None = Field(None, description="Current billing period end")
   started_at: str | None = Field(None, description="Subscription start date")
   canceled_at: str | None = Field(None, description="Cancellation date")
+  ends_at: str | None = Field(
+    None,
+    description="Subscription end date (when access will be revoked, especially relevant for cancelled subscriptions)",
+  )
   created_at: str = Field(..., description="Creation timestamp")
 
 

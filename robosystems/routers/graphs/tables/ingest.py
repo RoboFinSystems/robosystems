@@ -351,10 +351,15 @@ async def ingest_tables(
             detail=f"No schema found for graph {graph_id}",
           )
 
-        logger.info(f"Recreating Kuzu database with schema type: {schema.schema_type}")
+        # Use "custom" schema type when we have custom DDL to ensure the DDL is applied
+        # If we use "entity", the Graph API ignores custom_schema_ddl and uses dynamic loader
+        schema_type_for_rebuild = "custom" if schema.schema_ddl else "entity"
+        logger.info(
+          f"Recreating Kuzu database with schema type: {schema_type_for_rebuild} (original: {schema.schema_type})"
+        )
         await client.create_database(
           graph_id=graph_id,
-          schema_type=schema.schema_type,
+          schema_type=schema_type_for_rebuild,
           custom_schema_ddl=schema.schema_ddl,
         )
 

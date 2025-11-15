@@ -96,6 +96,13 @@ on:
         type: string
         default: ""
 
+      # Application Configuration
+      run_migrations:
+        description: "Whether to run database migrations on Beat startup"
+        required: false
+        type: string
+        default: "true"
+
       # Other Configuration
       refresh_ecs_service:
         description: "Whether to refresh the Beat ECS service after deployment"
@@ -191,7 +198,8 @@ jobs:
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=ValkeyCacheClusterId,ParameterValue=${{ inputs.valkey_cluster_id }} \
-                ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\""
+                ParameterKey=PrometheusStackName,ParameterValue=\"${{ inputs.prometheus_stack_name }}\" \
+                ParameterKey=RunMigrations,ParameterValue=${{ inputs.run_migrations }}"
 
           # Add Lambda bucket and fetch S3 key from manifest if provided
           if [ -n "${{ inputs.lambda_code_bucket }}" ]; then

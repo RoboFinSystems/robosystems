@@ -72,6 +72,7 @@ async def list_subscriptions(
           ),
           started_at=sub.started_at.isoformat() if sub.started_at else None,
           canceled_at=(sub.canceled_at.isoformat() if sub.canceled_at else None),
+          ends_at=sub.ends_at.isoformat() if sub.ends_at else None,
           created_at=sub.created_at.isoformat(),
         )
       )
@@ -155,6 +156,7 @@ async def get_subscription(
       canceled_at=(
         subscription.canceled_at.isoformat() if subscription.canceled_at else None
       ),
+      ends_at=subscription.ends_at.isoformat() if subscription.ends_at else None,
       created_at=subscription.created_at.isoformat(),
     )
 
@@ -252,6 +254,7 @@ async def cancel_subscription(
       canceled_at=(
         subscription.canceled_at.isoformat() if subscription.canceled_at else None
       ),
+      ends_at=subscription.ends_at.isoformat() if subscription.ends_at else None,
       created_at=subscription.created_at.isoformat(),
     )
 
