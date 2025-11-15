@@ -348,7 +348,7 @@ async def create_backup(
 
     # Queue Celery task for backup creation with SSE progress tracking
     import uuid
-    from robosystems.tasks.graph_operations.backup import create_graph_backup_sse
+    from robosystems.tasks.graph_operations.backup import create_graph_backup
     from robosystems.middleware.sse.event_storage import get_event_storage
 
     operation_id = str(uuid.uuid4())
@@ -367,7 +367,7 @@ async def create_backup(
     )
 
     # Queue Celery task with SSE progress tracking
-    create_graph_backup_sse.delay(  # type: ignore[attr-defined]
+    create_graph_backup.delay(  # type: ignore[attr-defined]
       graph_id=graph_id,
       backup_type="full",
       user_id=str(current_user.id),

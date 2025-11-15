@@ -996,7 +996,13 @@ class GraphClient(BaseGraphClient):
       headers=self.config.headers,
     )
     response.raise_for_status()
-    return response.json()
+
+    return {
+      "backup_data": response.content,
+      "size_bytes": int(response.headers.get("X-Backup-Size", len(response.content))),
+      "database": response.headers.get("X-Database", graph_id),
+      "format": response.headers.get("X-Backup-Format", "full_dump"),
+    }
 
   async def restore_backup(
     self,

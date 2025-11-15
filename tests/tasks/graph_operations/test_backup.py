@@ -4,121 +4,12 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from robosystems.tasks.graph_operations.backup import (
-  create_graph_backup,
   cleanup_expired_backups,
   backup_health_check,
   restore_graph_backup,
   delete_single_backup,
   generate_backup_metrics,
 )
-
-
-class TestCreateGraphBackupTask:
-  """Test cases for graph backup creation task."""
-
-  @patch("robosystems.security.encryption.encrypt_data")
-  @patch("gzip.compress")
-  @patch("robosystems.tasks.graph_operations.backup.GraphClientFactory")
-  @patch("robosystems.tasks.graph_operations.backup.S3BackupAdapter")
-  @patch("robosystems.tasks.graph_operations.backup.GraphBackup")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
-  @patch("robosystems.tasks.graph_operations.backup.asyncio")
-  @patch("robosystems.tasks.graph_operations.backup.session")
-  def test_successful_backup_creation(
-    self,
-    mock_session,
-    mock_asyncio,
-    mock_utils,
-    mock_backup_model,
-    mock_s3_adapter,
-    mock_client_factory,
-    mock_gzip_compress,
-    mock_encrypt,
-  ):
-    """Test successful backup creation."""
-    mock_utils.is_shared_repository.return_value = False
-    mock_utils.validate_graph_id.return_value = None
-    mock_utils.get_database_name.return_value = "graph1_db"
-
-    mock_s3 = MagicMock()
-    mock_s3.bucket_name = "test-bucket"
-    mock_s3_adapter.return_value = mock_s3
-
-    mock_backup_record = MagicMock()
-    mock_backup_record.id = "backup123"
-    mock_backup_model.create.return_value = mock_backup_record
-
-    mock_client = MagicMock()
-    mock_asyncio.run.side_effect = [
-      mock_client,
-      {"backup_data": b"test_backup_data"},
-      None,
-      MagicMock(checksum="abc123", compressed_size=100, compression_ratio=0.5),
-    ]
-
-    mock_gzip_compress.return_value = b"compressed_data"
-    mock_encrypt.return_value = b"encrypted_data"
-
-    result = create_graph_backup.apply(  # type: ignore[attr-defined]
-      args=(),
-      kwargs={"graph_id": "graph1", "backup_type": "full"},
-    ).get()
-
-    assert result["status"] == "completed"
-    assert result["graph_id"] == "graph1"
-    assert "backup_id" in result
-    mock_backup_record.start_backup.assert_called_once()
-    mock_backup_record.complete_backup.assert_called_once()
-
-  @patch("robosystems.security.encryption.encrypt_data")
-  @patch("gzip.compress")
-  @patch("robosystems.tasks.graph_operations.backup.GraphClientFactory")
-  @patch("robosystems.tasks.graph_operations.backup.S3BackupAdapter")
-  @patch("robosystems.tasks.graph_operations.backup.GraphBackup")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
-  @patch("robosystems.tasks.graph_operations.backup.asyncio")
-  @patch("robosystems.tasks.graph_operations.backup.session")
-  def test_backup_without_encryption(
-    self,
-    mock_session,
-    mock_asyncio,
-    mock_utils,
-    mock_backup_model,
-    mock_s3_adapter,
-    mock_client_factory,
-    mock_gzip_compress,
-    mock_encrypt,
-  ):
-    """Test backup creation without encryption."""
-    mock_utils.is_shared_repository.return_value = False
-    mock_utils.validate_graph_id.return_value = None
-    mock_utils.get_database_name.return_value = "graph1_db"
-
-    mock_s3 = MagicMock()
-    mock_s3.bucket_name = "test-bucket"
-    mock_s3_adapter.return_value = mock_s3
-
-    mock_backup_record = MagicMock()
-    mock_backup_record.id = "backup123"
-    mock_backup_model.create.return_value = mock_backup_record
-
-    mock_client = MagicMock()
-    mock_asyncio.run.side_effect = [
-      mock_client,
-      {"backup_data": b"test_data"},
-      None,
-      MagicMock(checksum="xyz789", compressed_size=50, compression_ratio=0.8),
-    ]
-
-    mock_gzip_compress.return_value = b"compressed_only"
-
-    result = create_graph_backup.apply(  # type: ignore[attr-defined]
-      args=(),
-      kwargs={"graph_id": "graph1", "encryption": False},
-    ).get()
-
-    assert result["status"] == "completed"
-    mock_encrypt.assert_not_called()
 
 
 class TestCleanupExpiredBackupsTask:

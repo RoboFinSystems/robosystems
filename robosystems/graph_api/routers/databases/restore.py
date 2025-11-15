@@ -6,7 +6,6 @@ from encrypted backups.
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Any
 from fastapi import (
   APIRouter,
   BackgroundTasks,
@@ -14,6 +13,7 @@ from fastapi import (
   HTTPException,
   Path,
   Form,
+  Response,
 )
 from fastapi import status as http_status
 
@@ -198,11 +198,11 @@ async def restore_database(
   )
 
 
-@router.post("/{graph_id}/backup-download", response_model=Dict[str, Any])
+@router.post("/{graph_id}/backup-download")
 async def download_backup(
   graph_id: str = Path(..., description="Graph database identifier"),
   cluster_service=Depends(get_cluster_service),
-) -> Dict[str, Any]:
+) -> Response:
   """
   Download the current database as a backup.
 
@@ -275,12 +275,16 @@ async def download_backup(
       f"Created backup for database {graph_id}, size: {len(backup_data)} bytes"
     )
 
-    return {
-      "backup_data": backup_data,
-      "size_bytes": len(backup_data),
-      "database": graph_id,
-      "format": "full_dump",
-    }
+    return Response(
+      content=backup_data,
+      media_type="application/zip",
+      headers={
+        "Content-Disposition": f'attachment; filename="{graph_id}_backup.zip"',
+        "X-Database": graph_id,
+        "X-Backup-Format": "full_dump",
+        "X-Backup-Size": str(len(backup_data)),
+      },
+    )
 
   except HTTPException:
     raise

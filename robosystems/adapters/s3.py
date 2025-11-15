@@ -787,6 +787,9 @@ class S3BackupAdapter:
       graph_id, backup_type, timestamp, file_extension
     )
     metadata_path = self._generate_metadata_path(graph_id, timestamp)
+    logger.info(
+      f"Generated S3 backup_path: {backup_path} (file_extension={file_extension})"
+    )
 
     try:
       # Upload backup data - use multipart for large files

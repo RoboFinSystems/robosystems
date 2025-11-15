@@ -181,6 +181,10 @@ class BackupManager:
         if backup.encryption_enabled:
           raise ValueError("Encrypted backups cannot be downloaded")
 
+        # Format timestamp for filename (aligned with created_at shown in frontend)
+        timestamp_str = backup.created_at.strftime("%Y%m%d_%H%M%S")
+        filename = f"{graph_id}_{timestamp_str}.zip"
+
         # Generate presigned URL using the S3 key from the backup record
         import asyncio
 
@@ -188,7 +192,11 @@ class BackupManager:
           None,
           lambda: self.s3_adapter.s3_client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": backup.s3_bucket, "Key": backup.s3_key},
+            Params={
+              "Bucket": backup.s3_bucket,
+              "Key": backup.s3_key,
+              "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            },
             ExpiresIn=expires_in,
           ),
         )
@@ -989,11 +997,8 @@ class BackupManager:
       if not response or "backup_data" not in response:
         raise RuntimeError(f"Failed to get backup from Graph API for {graph_id}")
 
-      # Decode base64 backup data
-      import base64
-
-      backup_data_b64 = response["backup_data"]
-      backup_data = base64.b64decode(backup_data_b64)
+      # Get raw binary backup data from Graph API client
+      backup_data = response["backup_data"]
       logger.info(
         f"Successfully retrieved backup from Graph API: {len(backup_data)} bytes"
       )

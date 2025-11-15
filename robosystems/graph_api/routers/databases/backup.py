@@ -60,6 +60,11 @@ async def perform_backup(
     # Run backup (this is async)
     backup_info = await backup_manager.create_backup(backup_job)
 
+    # Ensure checksum is a string (convert from bytes if needed)
+    checksum_str = backup_info.checksum
+    if isinstance(checksum_str, bytes):
+      checksum_str = checksum_str.hex()
+
     # Mark task as completed
     await backup_task_manager.complete_task(
       task_id,
@@ -67,7 +72,7 @@ async def perform_backup(
         "s3_key": backup_info.s3_key,
         "original_size": backup_info.original_size,
         "compressed_size": backup_info.compressed_size,
-        "checksum": backup_info.checksum,
+        "checksum": checksum_str,
         "duration_seconds": backup_info.backup_duration_seconds,
       },
     )

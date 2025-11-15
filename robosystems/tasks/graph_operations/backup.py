@@ -32,249 +32,6 @@ class CallbackTask(Task):
 
 
 @celery_app.task(bind=True, base=CallbackTask, queue=QUEUE_DEFAULT)
-def create_graph_backup(
-  self,
-  graph_id: str,
-  backup_type: str = "full",
-  user_id: Optional[str] = None,
-  retention_days: int = 90,
-  compression: bool = True,
-  encryption: bool = True,
-  backup_format: str = "full_dump",
-) -> Dict[str, Any]:
-  """
-  Create a backup of a graph database.
-
-  Args:
-      graph_id: Graph database identifier
-      backup_type: 'full' or 'incremental'
-      user_id: User requesting the backup (optional)
-      retention_days: Number of days to retain backup
-      compression: Enable compression
-      encryption: Enable encryption
-      backup_format: Backup format (csv, json, parquet, full_dump)
-
-  Returns:
-      Dict containing backup information
-  """
-  task_id = self.request.id
-  logger.info(f"Starting backup task {task_id} for graph '{graph_id}'")
-
-  try:
-    # Initialize backup_record to avoid unbound variable issues
-    backup_record = None
-
-    # Import at function level to avoid circular imports
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
-
-    # Validate graph_id
-    if not MultiTenantUtils.is_shared_repository(graph_id):
-      MultiTenantUtils.validate_graph_id(graph_id)
-
-    database_name = MultiTenantUtils.get_database_name(graph_id)
-
-    # Create backup record in PostgreSQL
-    # Note: We handle compression and encryption in this task
-    # Disable S3 adapter's compression since we already compressed the data
-    s3_adapter = S3BackupAdapter(enable_compression=False)
-    s3_bucket = s3_adapter.bucket_name
-
-    # Generate S3 key path
-    timestamp = datetime.now(timezone.utc)
-    timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
-
-    # Determine base extension based on format
-    format_extensions = {
-      "csv": ".csv.zip",
-      "json": ".json.zip",
-      "parquet": ".parquet.zip",
-      "full_dump": ".kuzu.zip",
-    }
-    extension = format_extensions.get(backup_format.lower(), ".kuzu.zip")
-
-    if compression:
-      extension += ".gz"
-    if encryption:
-      extension += ".enc"
-
-    s3_key = f"graph-backups/databases/{graph_id}/{backup_type}/backup-{timestamp_str}{extension}"
-
-    logger.info(f"Creating backup with timestamp: {timestamp.isoformat()}")
-    logger.info(f"Generated S3 key for database record: {s3_key}")
-
-    backup_record = GraphBackup.create(
-      graph_id=graph_id,
-      database_name=database_name,
-      backup_type=backup_type,
-      s3_bucket=s3_bucket,
-      s3_key=s3_key,
-      session=session,
-      created_by_user_id=user_id,
-      compression_enabled=compression,
-      encryption_enabled=encryption,
-      expires_at=datetime.now(timezone.utc) + timedelta(days=retention_days),
-    )
-
-    # Start backup process
-    backup_record.start_backup(session)
-
-    # Call Graph API to create the backup
-    logger.info(f"Calling Graph API to create backup for graph '{graph_id}'")
-
-    # Helper function to safely run async code in sync context
-    def run_async(coro):
-      try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-          loop = asyncio.new_event_loop()
-          asyncio.set_event_loop(loop)
-      except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-      return loop.run_until_complete(coro)
-
-    # Get properly routed Graph client
-    client = run_async(
-      GraphClientFactory.create_client(graph_id=graph_id, operation_type="read")
-    )
-
-    try:
-      # First, download the backup from Kuzu
-      logger.info(f"Downloading backup from Kuzu instance for graph '{graph_id}'")
-      backup_result = run_async(client.download_backup(graph_id=graph_id))
-      backup_data = backup_result.get("backup_data")
-
-      if not backup_data:
-        raise RuntimeError("Failed to download backup data from Kuzu instance")
-
-      # Convert string backup data to bytes if needed
-      if isinstance(backup_data, str):
-        import base64
-
-        backup_data = base64.b64decode(backup_data)
-
-      logger.info(f"Downloaded backup, size: {len(backup_data)} bytes")
-
-      # Now compress and encrypt as needed for S3 storage
-      original_size = len(backup_data)
-      compressed_size = original_size
-      encrypted_size = original_size
-
-      if compression:
-        logger.info("Compressing backup data")
-        import gzip
-
-        backup_data = gzip.compress(backup_data)
-        compressed_size = len(backup_data)
-
-      if encryption:
-        logger.info("Encrypting backup data")
-        from robosystems.security.encryption import encrypt_data
-
-        backup_data = encrypt_data(backup_data)
-        encrypted_size = len(backup_data)
-
-    finally:
-      run_async(client.close())
-
-    # Calculate some basic metadata
-    backup_metadata = {
-      "backup_id": str(backup_record.id),
-      "original_size": original_size,
-      "compressed_size": compressed_size,
-      "encrypted_size": encrypted_size if encryption else compressed_size,
-      "checksum": None,  # Could calculate if needed
-      "node_count": 0,  # Would need to query for actual counts
-      "relationship_count": 0,
-      "database_version": "1.0.0",
-      "compression_ratio": compressed_size / original_size
-      if original_size > 0
-      else 1.0,
-      "backup_duration_seconds": 0,  # Will calculate at the end
-    }
-
-    # Upload to S3
-    logger.info(f"Uploading backup to S3 with key: {s3_key}")
-
-    # Prepare metadata for S3 upload
-    upload_metadata = {
-      "node_count": backup_metadata["node_count"],
-      "relationship_count": backup_metadata["relationship_count"],
-      "database_version": backup_metadata["database_version"],
-      "backup_duration_seconds": backup_metadata["backup_duration_seconds"],
-      "is_encrypted": encryption,
-      "encryption_method": "fernet" if encryption else None,
-      "kuzu_version": backup_metadata.get("database_version", "unknown"),
-    }
-
-    # Upload returns BackupMetadata object
-    s3_metadata = asyncio.run(
-      s3_adapter.upload_backup(
-        graph_id=graph_id,
-        backup_data=backup_data,
-        backup_type="full",
-        metadata=upload_metadata,
-        timestamp=timestamp,
-        file_extension=extension,
-      )
-    )
-
-    # Update our local metadata with S3 results
-    backup_metadata["checksum"] = s3_metadata.checksum
-    backup_metadata["compressed_size"] = s3_metadata.compressed_size
-    backup_metadata["compression_ratio"] = s3_metadata.compression_ratio
-
-    # Update backup record's S3 key with the actual key used by S3 adapter
-    actual_s3_key = s3_metadata.s3_key
-    backup_record.s3_key = actual_s3_key
-
-    # Update backup record with results
-    backup_record.complete_backup(
-      session=session,
-      original_size=backup_metadata["original_size"],
-      compressed_size=backup_metadata["compressed_size"],
-      encrypted_size=backup_metadata["encrypted_size"],
-      checksum=backup_metadata["checksum"],
-      node_count=backup_metadata["node_count"],
-      relationship_count=backup_metadata["relationship_count"],
-      backup_duration=backup_metadata["backup_duration_seconds"],
-      metadata={
-        "graph_version": backup_metadata["database_version"],
-        "compression_ratio": backup_metadata["compression_ratio"],
-        "task_id": task_id,
-        "backup_format": backup_format,
-      },
-    )
-
-    result = {
-      "backup_id": backup_record.id,
-      "graph_id": graph_id,
-      "status": "completed",
-      "s3_key": actual_s3_key,
-      "original_size": backup_metadata["original_size"],
-      "compressed_size": backup_metadata["compressed_size"],
-      "compression_ratio": backup_metadata["compression_ratio"],
-      "duration_seconds": backup_metadata["backup_duration_seconds"],
-      "node_count": backup_metadata["node_count"],
-      "relationship_count": backup_metadata["relationship_count"],
-    }
-
-    logger.info(f"Backup task {task_id} completed successfully for graph '{graph_id}'")
-    return result
-
-  except Exception as e:
-    # Update backup record with failure
-    try:
-      if backup_record:  # type: ignore[possibly-unbound]
-        backup_record.fail_backup(session, str(e))
-    except Exception:
-      pass  # Record might not exist yet
-
-    logger.error(f"Backup task {task_id} failed for graph '{graph_id}': {e}")
-    raise
-
-
-@celery_app.task(bind=True, base=CallbackTask, queue=QUEUE_DEFAULT)
 def cleanup_expired_backups(self, dry_run: bool = False) -> Dict[str, Any]:
   """
   Clean up expired backups from S3 and database.
@@ -817,11 +574,8 @@ BACKUP_SCHEDULES = {
 }
 
 
-# SSE-compatible backup tasks for unified operation monitoring
-
-
 @celery_app.task(bind=True, base=CallbackTask, queue=QUEUE_DEFAULT)
-def create_graph_backup_sse(
+def create_graph_backup(
   self,
   graph_id: str,
   backup_type: str = "full",
@@ -954,6 +708,16 @@ def create_graph_backup_sse(
     )
     backup_info = asyncio.run(backup_manager.create_backup(backup_job))
 
+    # Update backup record's S3 key with the actual key used by S3 adapter
+    actual_s3_key = backup_info.s3_key
+    logger.info(
+      f"SSE backup: Updating s3_key from '{backup_record.s3_key}' to '{actual_s3_key}'"
+    )
+    backup_record.s3_key = actual_s3_key
+    session.commit()
+    session.refresh(backup_record)
+    logger.info(f"SSE backup: S3 key updated successfully to '{backup_record.s3_key}'")
+
     # Update backup record with results
     progress_tracker.emit_progress("Finalizing backup metadata...", 85)
     backup_record.complete_backup(
@@ -989,7 +753,7 @@ def create_graph_backup_sse(
     progress_tracker.emit_completion(
       {
         "backup_id": str(backup_record.id),
-        "s3_key": s3_key,
+        "s3_key": actual_s3_key,
         "size_bytes": backup_info.compressed_size,
       },
       additional_context={
@@ -1007,7 +771,7 @@ def create_graph_backup_sse(
       "backup_type": backup_type,
       "backup_format": backup_format,
       "s3_bucket": s3_bucket,
-      "s3_key": s3_key,
+      "s3_key": actual_s3_key,
       "size_bytes": backup_info.compressed_size,
       "created_at": timestamp.isoformat(),
     }

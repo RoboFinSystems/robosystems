@@ -195,15 +195,15 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
     lambda graph_id: str(db_file),
   )
 
-  payload = await restore_module.download_backup(
+  response = await restore_module.download_backup(
     graph_id="graph1", cluster_service=cluster
   )
 
-  assert payload["database"] == "graph1"
-  assert payload["format"] == "full_dump"
-  assert payload["size_bytes"] > 0
+  assert response.headers["X-Database"] == "graph1"
+  assert response.headers["X-Backup-Format"] == "full_dump"
+  assert int(response.headers["X-Backup-Size"]) > 0
 
-  backup_bytes = payload["backup_data"]
+  backup_bytes = response.body
   assert isinstance(backup_bytes, bytes)
 
   with zipfile.ZipFile(io.BytesIO(backup_bytes), "r") as zf:
@@ -265,11 +265,11 @@ async def test_download_backup_directory_database(monkeypatch, tmp_path):
     lambda graph_id: str(db_dir),
   )
 
-  payload = await restore_module.download_backup(
+  response = await restore_module.download_backup(
     graph_id="graph1", cluster_service=cluster
   )
 
-  backup_bytes = payload["backup_data"]
+  backup_bytes = response.body
   with zipfile.ZipFile(io.BytesIO(backup_bytes), "r") as zf:
     names = sorted(zf.namelist())
     assert names == ["graph1/logs/metrics.log", "graph1/nodes"]
