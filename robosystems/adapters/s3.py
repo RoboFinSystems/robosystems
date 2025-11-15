@@ -1092,6 +1092,60 @@ class S3BackupAdapter:
       logger.warning(f"Failed to get backup metadata for {backup_id}: {e}")
       return None
 
+  async def get_backup_metadata_by_key(self, s3_key: str) -> Optional[BackupMetadata]:
+    """
+    Get backup metadata by extracting info from S3 backup key.
+
+    Args:
+        s3_key: S3 key of the backup file (e.g., graph-backups/databases/graph_id/full/backup-20241115_023045.kuzu.zip)
+
+    Returns:
+        BackupMetadata object or None if metadata not found
+    """
+    try:
+      # Extract graph_id and timestamp from backup key
+      # Format: graph-backups/databases/{graph_id}/{backup_type}/backup-{timestamp}{extension}
+      parts = s3_key.split("/")
+      if len(parts) < 5 or parts[0] != "graph-backups" or parts[1] != "databases":
+        logger.warning(f"Invalid backup key format: {s3_key}")
+        return None
+
+      graph_id = parts[2]
+      backup_filename = parts[4]
+
+      # Extract timestamp from filename (e.g., backup-20241115_023045.kuzu.zip -> 20241115_023045)
+      if not backup_filename.startswith("backup-"):
+        logger.warning(f"Invalid backup filename format: {backup_filename}")
+        return None
+
+      timestamp_with_ext = backup_filename[7:]
+      # Remove all extensions (could be .kuzu.zip, .kuzu.zip.enc, etc.)
+      timestamp_str = timestamp_with_ext.split(".")[0]
+
+      # Parse timestamp
+      timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S").replace(
+        tzinfo=timezone.utc
+      )
+
+      # Generate metadata path
+      metadata_path = self._generate_metadata_path(graph_id, timestamp)
+
+      # Download metadata from S3
+      response = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: self.s3_client.get_object(Bucket=self.bucket_name, Key=metadata_path),
+      )
+
+      metadata_json = response["Body"].read().decode("utf-8")
+      metadata_dict = json.loads(metadata_json)
+
+      # Convert dict to BackupMetadata object
+      return BackupMetadata.from_dict(metadata_dict)
+
+    except (ClientError, ValueError, json.JSONDecodeError, IndexError) as e:
+      logger.warning(f"Failed to get backup metadata from S3 key {s3_key}: {e}")
+      return None
+
   async def generate_download_url(
     self, graph_id: str, backup_id: str, expires_in: int = 3600
   ) -> str:

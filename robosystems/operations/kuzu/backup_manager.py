@@ -1326,7 +1326,16 @@ class BackupManager:
     import hashlib
 
     calculated_checksum = hashlib.sha256(backup_data).hexdigest()
-    return calculated_checksum == metadata.checksum
+    expected_checksum = metadata.checksum
+
+    logger.info(
+      f"Integrity check - Data size: {len(backup_data)} bytes, "
+      f"Calculated checksum: {calculated_checksum}, "
+      f"Expected checksum: {expected_checksum}, "
+      f"Match: {calculated_checksum == expected_checksum}"
+    )
+
+    return calculated_checksum == expected_checksum
 
   async def _verify_restore(
     self, graph_id: str, original_metadata: BackupMetadata

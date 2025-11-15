@@ -17,6 +17,7 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 class FakeDBManager:
   def __init__(self, databases):
     self._databases = databases
+    self.connection_pool = None
 
   def list_databases(self):
     return list(self._databases)

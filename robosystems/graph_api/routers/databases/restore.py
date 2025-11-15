@@ -27,7 +27,6 @@ from robosystems.operations.kuzu.backup_manager import (
   RestoreJob,
   BackupFormat,
 )
-from robosystems.adapters.s3 import BackupMetadata
 
 router = APIRouter(prefix="/databases", tags=["Backup"])
 
@@ -41,10 +40,14 @@ async def perform_restore(
   force_overwrite: bool,
   encrypted: bool,
   compressed: bool,
+  connection_pool=None,
 ) -> None:
   """
   Perform the actual restore in the background.
   Updates task status for monitoring.
+
+  Args:
+      connection_pool: Kuzu connection pool for closing connections before restore
   """
   try:
     # Update task status to running
@@ -61,32 +64,48 @@ async def perform_restore(
     # Create backup manager
     backup_manager = create_backup_manager()
 
-    # Construct backup metadata
-    # TODO: In the future, download actual metadata from S3
-    backup_metadata = BackupMetadata(
-      graph_id=graph_id,
-      backup_type="full",
-      timestamp=datetime.now(timezone.utc),
-      original_size=0,
-      compressed_size=0,
-      checksum="",
-      compression_ratio=0.0,
-      node_count=0,
-      relationship_count=0,
-      backup_duration_seconds=0.0,
-      backup_format="full",
-      s3_key=s3_key,
-      is_encrypted=encrypted,
-      encryption_method="fernet" if encrypted else None,
+    # Download actual metadata from S3
+    backup_metadata = await backup_manager.s3_adapter.get_backup_metadata_by_key(s3_key)
+
+    if not backup_metadata:
+      logger.error(f"[Task {task_id}] Failed to download backup metadata from S3")
+      raise RuntimeError(f"Failed to download backup metadata for {s3_key}")
+
+    logger.info(
+      f"[Task {task_id}] Downloaded metadata - checksum: {backup_metadata.checksum}, "
+      f"original_size: {backup_metadata.original_size}"
     )
 
+    # If force_overwrite, delete the existing database first
+    # This happens in the Graph API so we properly close connections and clean up
+    if connection_pool and force_overwrite:
+      from pathlib import Path
+      import shutil
+      from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+
+      logger.info(f"[Task {task_id}] Deleting existing database for {graph_id}")
+
+      # Close all Kuzu connections first
+      connection_pool.close_database_connections(graph_id)
+      logger.info(f"[Task {task_id}] Closed Kuzu connections")
+
+      # Delete the database files
+      db_path = Path(MultiTenantUtils.get_database_path_for_graph(graph_id))
+      if db_path.exists():
+        if db_path.is_file():
+          db_path.unlink()
+        else:
+          shutil.rmtree(db_path)
+        logger.info(f"[Task {task_id}] Deleted existing database files at {db_path}")
+
     # Create restore job
+    # drop_existing=False because we already deleted it above if needed
     restore_job = RestoreJob(
       graph_id=graph_id,
       backup_metadata=backup_metadata,
       backup_format=BackupFormat.FULL_DUMP,
-      create_new_database=not force_overwrite,
-      drop_existing=force_overwrite,
+      create_new_database=False,
+      drop_existing=False,
       verify_after_restore=True,
       progress_tracker=None,
     )
@@ -184,6 +203,7 @@ async def restore_database(
     force_overwrite=force_overwrite,
     encrypted=encrypted,
     compressed=compressed,
+    connection_pool=cluster_service.db_manager.connection_pool,
   )
 
   logger.info(f"Restore initiated for database {graph_id} with task ID: {task_id}")
