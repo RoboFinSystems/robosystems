@@ -199,53 +199,86 @@ class XBRLDuckDBGraphProcessor:
     processed/year=YYYY/relationships/TableName/file.parquet
 
     Args:
-        year: Optional year filter
+        year: Optional year filter. If None, scans all year subdirectories.
 
     Returns:
         Dictionary mapping table names to list of S3 keys
     """
     tables_info: Dict[str, List[str]] = {}
 
-    # Scan both nodes and relationships directories
-    for entity_type in ["nodes", "relationships"]:
-      # Build prefix based on year filter
-      if year:
-        prefix = f"{self.source_prefix}/year={year}/{entity_type}/"
-      else:
-        prefix = f"{self.source_prefix}/{entity_type}/"
+    # Determine which years to scan
+    if year is None:
+      # Discover all year subdirectories by listing the processed/ prefix
+      year_prefix = f"{self.source_prefix}/"
+      logger.info(f"Discovering year subdirectories in {self.bucket}/{year_prefix}")
 
-      logger.info(f"Scanning S3 bucket {self.bucket} with prefix {prefix}")
-
-      # List all files recursively
+      # List directories to find year= subdirectories
       paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
-      pages = paginator.paginate(Bucket=self.bucket, Prefix=prefix)
+      pages = paginator.paginate(Bucket=self.bucket, Prefix=year_prefix, Delimiter="/")
 
+      years_to_scan = []
       for page in pages:
-        if "Contents" not in page:
-          continue
+        # CommonPrefixes contains the "directories" (year= prefixes)
+        if "CommonPrefixes" in page:
+          for prefix_info in page["CommonPrefixes"]:
+            prefix_path = prefix_info["Prefix"]
+            # Extract year from prefix like "processed/year=2025/"
+            if "year=" in prefix_path:
+              year_part = prefix_path.split("year=")[1].rstrip("/")
+              try:
+                year_num = int(year_part)
+                years_to_scan.append(year_num)
+                logger.debug(f"Found year subdirectory: {year_num}")
+              except ValueError:
+                logger.debug(f"Skipping non-year prefix: {prefix_path}")
 
-        for obj in page["Contents"]:
-          key = obj["Key"]
+      if not years_to_scan:
+        logger.warning(f"No year subdirectories found under {year_prefix}")
+        return tables_info
 
-          # Skip non-Parquet files
-          if not key.endswith(".parquet"):
+      logger.info(
+        f"Discovered {len(years_to_scan)} years to scan: {sorted(years_to_scan)}"
+      )
+    else:
+      # Single year specified
+      years_to_scan = [year]
+
+    # Scan both nodes and relationships directories across all years
+    for entity_type in ["nodes", "relationships"]:
+      for scan_year in years_to_scan:
+        prefix = f"{self.source_prefix}/year={scan_year}/{entity_type}/"
+        logger.debug(f"Scanning S3 bucket {self.bucket} with prefix {prefix}")
+
+        # List all files recursively
+        paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=self.bucket, Prefix=prefix)
+
+        for page in pages:
+          if "Contents" not in page:
             continue
 
-          # Extract table name from path: processed/year=YYYY/nodes|relationships/TableName/file.parquet
-          # Structure: processed/year=YYYY/nodes|relationships/TableName/CIK_ACCESSION.parquet
-          path_parts = key.replace(prefix, "").split("/")
+          for obj in page["Contents"]:
+            key = obj["Key"]
 
-          # First part after nodes/ or relationships/ is the table name
-          if len(path_parts) >= 2:
-            table_name = path_parts[0]
-          else:
-            logger.debug(f"Skipping file with unexpected path structure: {key}")
-            continue
+            # Skip non-Parquet files
+            if not key.endswith(".parquet"):
+              continue
 
-          if table_name not in tables_info:
-            tables_info[table_name] = []
+            # Extract table name from path: processed/year=YYYY/nodes|relationships/TableName/file.parquet
+            # Structure: processed/year=YYYY/nodes|relationships/TableName/CIK_ACCESSION.parquet
+            path_parts = key.replace(prefix, "").split("/")
 
-          tables_info[table_name].append(key)
+            # First part after nodes/ or relationships/ is the table name
+            if len(path_parts) >= 2:
+              table_name = path_parts[0]
+            else:
+              logger.debug(f"Skipping file with unexpected path structure: {key}")
+              continue
+
+            if table_name not in tables_info:
+              tables_info[table_name] = []
+
+            tables_info[table_name].append(key)
 
     logger.info(f"Discovered {len(tables_info)} tables with files:")
     for table_name, files in tables_info.items():
