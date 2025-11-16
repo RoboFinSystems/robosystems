@@ -49,7 +49,6 @@ class TestSyncTaskAsync:
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -60,7 +59,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service,
     mock_get_session,
   ):
@@ -73,7 +71,6 @@ class TestSyncTaskAsync:
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -84,7 +81,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service,
     mock_get_session,
   ):
@@ -107,7 +103,6 @@ class TestSyncTaskAsync:
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -118,7 +113,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service,
     mock_get_session,
   ):
@@ -145,7 +139,6 @@ class TestSyncTaskAsync:
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -156,7 +149,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service,
     mock_get_session,
   ):
@@ -185,7 +177,6 @@ class TestSyncTaskAsync:
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -196,7 +187,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service,
     mock_get_session,
   ):
@@ -224,7 +214,6 @@ class TestSyncTaskAsync:
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -235,7 +224,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service_class,
     mock_get_session,
   ):
@@ -267,10 +255,6 @@ class TestSyncTaskAsync:
     mock_qb.sync = MagicMock()
     mock_qb_processor.return_value = mock_qb
 
-    mock_tb = MagicMock()
-    mock_tb.generate = MagicMock()
-    mock_tb_processor.return_value = mock_tb
-
     mock_db = MagicMock()
     mock_db.__enter__ = MagicMock(return_value=mock_db)
     mock_db.__exit__ = MagicMock(return_value=False)
@@ -284,7 +268,6 @@ class TestSyncTaskAsync:
 
     assert result is None
     mock_qb.sync.assert_called_once()
-    mock_tb.generate.assert_called_once()
     mock_credit_service.consume_credits.assert_called_once_with(
       graph_id="graph1",
       operation_type="connection_sync",
@@ -298,7 +281,6 @@ class TestSyncTaskAsync:
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -309,7 +291,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service_class,
     mock_get_session,
   ):
@@ -341,10 +322,6 @@ class TestSyncTaskAsync:
     mock_qb.sync = MagicMock()
     mock_qb_processor.return_value = mock_qb
 
-    mock_tb = MagicMock()
-    mock_tb.generate = MagicMock()
-    mock_tb_processor.return_value = mock_tb
-
     mock_db = MagicMock()
     mock_db.__enter__ = MagicMock(return_value=mock_db)
     mock_db.__exit__ = MagicMock(return_value=False)
@@ -358,12 +335,10 @@ class TestSyncTaskAsync:
 
     assert result is None
     mock_qb.sync.assert_called_once()
-    mock_tb.generate.assert_called_once()
     mock_credit_service.consume_credits.assert_not_called()
 
   @patch("robosystems.tasks.data_sync.qb.get_db_session")
   @patch("robosystems.tasks.data_sync.qb.CreditService")
-  @patch("robosystems.tasks.data_sync.qb.TrialBalanceProcessor")
   @patch("robosystems.tasks.data_sync.qb.QBTransactionsProcessor")
   @patch("robosystems.tasks.data_sync.qb.ConnectionService")
   @patch("robosystems.tasks.data_sync.qb.get_graph_repository")
@@ -374,7 +349,6 @@ class TestSyncTaskAsync:
     mock_repo,
     mock_conn_service,
     mock_qb_processor,
-    mock_tb_processor,
     mock_credit_service_class,
     mock_get_session,
   ):
@@ -406,10 +380,6 @@ class TestSyncTaskAsync:
     mock_qb.sync = MagicMock()
     mock_qb_processor.return_value = mock_qb
 
-    mock_tb = MagicMock()
-    mock_tb.generate = MagicMock()
-    mock_tb_processor.return_value = mock_tb
-
     mock_db = MagicMock()
     mock_db.__enter__ = MagicMock(return_value=mock_db)
     mock_db.__exit__ = MagicMock(return_value=False)
@@ -425,7 +395,6 @@ class TestSyncTaskAsync:
 
     assert result is None
     mock_qb.sync.assert_called_once()
-    mock_tb.generate.assert_called_once()
 
 
 class TestSyncTaskSSE:

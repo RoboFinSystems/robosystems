@@ -19,8 +19,6 @@ processors/
 │   ├── textblock_externalizer.py      # Text block extraction
 │   ├── schema_adapter.py              # XBRLSchemaAdapter - DataFrame schema adaptation
 │   └── schema_config_generator.py     # XBRLSchemaConfigGenerator - Schema config generation
-├── trial_balance.py                   # TrialBalanceProcessor - Financial calculations
-├── schedule.py                        # ScheduleProcessor - Financial schedule generation
 └── qb_transactions.py                 # QBTransactionsProcessor - QuickBooks processing
 ```
 
@@ -93,19 +91,6 @@ Processors handle the "heavy lifting" of data transformation and business logic 
   - **Helper Modules**
     - `id_utils.py` - Standardized identifier generation
     - `naming_utils.py` - Consistent naming conventions
-
-### **Financial Processing**
-
-- **`TrialBalanceProcessor`** - Generates financial trial balances
-
-  - Processes chart of accounts and transaction data
-  - Calculates account balances and financial positions
-  - Handles retained earnings and current year calculations
-
-- **`ScheduleProcessor`** - Creates financial schedules and reports
-  - Generates structured financial reporting schedules
-  - Handles transaction scheduling and amortization
-  - Creates timeline-based financial projections
 
 ### **External Data Integration**
 

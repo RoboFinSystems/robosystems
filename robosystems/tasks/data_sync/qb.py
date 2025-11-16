@@ -1,6 +1,5 @@
 import asyncio
 from decimal import Decimal
-from robosystems.processors.trial_balance import TrialBalanceProcessor
 from ...celery import celery_app, QUEUE_DEFAULT
 from ...processors.qb_transactions import QBTransactionsProcessor
 from robosystems.logger import logger
@@ -117,12 +116,6 @@ async def _sync_task_async(*args):
   logger.info(
     f"Successfully completed QuickBooks transaction sync for entity: {entityId}"
   )
-
-  # Generate trial balance
-  logger.info(f"Generating trial balance for entity: {entityId}")
-  tb = TrialBalanceProcessor(entity_id=entityId, database_name=database_name)
-  tb.generate()
-  logger.info(f"Successfully generated trial balance for entity: {entityId}")
 
   # Consume credits for successful sync
   try:

@@ -19,6 +19,7 @@ from .limits import router as limits_router
 from .subgraphs import router as subgraphs_router
 from .subscriptions import router as subscriptions_router
 from .tables import router as tables_router
+from .views import router as views_router
 
 __all__ = [
   "main_router",
@@ -34,4 +35,5 @@ __all__ = [
   "subgraphs_router",
   "subscriptions_router",
   "tables_router",
+  "views_router",
 ]
