@@ -4,6 +4,25 @@ Common types and enums for the graph middleware.
 This module defines the type system for distinguishing between different categories
 and types of graphs in the system, providing clear separation between user-created
 graphs and shared repository graphs.
+
+Graph ID Formats:
+    - Parent graphs: kg[a-f0-9]{16,} (e.g., kg1234567890abcdef)
+    - Subgraph IDs: {parent_id}_{subgraph_name} (e.g., kg1234567890abcdef_dev)
+    - Shared repositories: Fixed names (sec, industry, economic)
+
+Subgraph Naming Rules:
+    - Alphanumeric characters only: [a-zA-Z0-9]
+    - Length: 1-20 characters
+    - No special characters, hyphens, or underscores
+    - Case-sensitive
+
+Examples:
+    >>> is_subgraph_id("kg1234567890abcdef_dev")
+    True
+    >>> parse_graph_id("kg1234567890abcdef_staging")
+    ("kg1234567890abcdef", "staging")
+    >>> construct_subgraph_id("kg1234567890abcdef", "prod")
+    "kg1234567890abcdef_prod"
 """
 
 from enum import Enum

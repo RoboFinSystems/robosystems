@@ -206,6 +206,12 @@ async def list_subgraphs(
 
 **Returns:**
 - Created subgraph details including its unique ID
+- Subgraph ID format: `{parent_id}_{subgraph_name}` (e.g., kg1234567890abcdef_dev)
+
+**Usage:**
+- Subgraphs share parent's credit pool
+- Subgraph ID can be used in all standard `/v1/graphs/{graph_id}/*` endpoints
+- Permissions inherited from parent graph
 """,
   status_code=status.HTTP_201_CREATED,
 )

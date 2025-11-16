@@ -285,6 +285,57 @@ is_shared = MultiTenantUtils.is_shared_repository("sec")
 routing = MultiTenantUtils.get_graph_routing("kg1a2b3c")
 ```
 
+### 11. Subgraph Support (`types.py`, `allocation_manager.py`)
+
+Subgraph functionality allows users on dedicated tiers to create isolated databases on their parent instance.
+
+**Key Functions:**
+
+```python
+from robosystems.middleware.graph.types import (
+    is_subgraph_id,
+    parse_graph_id,
+    construct_subgraph_id,
+)
+
+# Check if ID is a subgraph
+if is_subgraph_id("kg1234567890abcdef_dev"):
+    print("This is a subgraph")
+
+# Parse subgraph ID to get parent
+parent_id, subgraph_name = parse_graph_id("kg1234567890abcdef_dev")
+# Returns: ("kg1234567890abcdef", "dev")
+
+# Construct subgraph ID
+subgraph_id = construct_subgraph_id("kg1234567890abcdef", "staging")
+# Returns: "kg1234567890abcdef_staging"
+```
+
+**Allocation Manager Integration:**
+
+The `KuzuAllocationManager.find_database_location()` automatically resolves subgraphs to their parent's location:
+
+```python
+manager = KuzuAllocationManager(environment="prod")
+
+# Requesting location for subgraph returns parent's instance location
+location = await manager.find_database_location("kg1234567890abcdef_dev")
+# Returns location with subgraph_id but parent's instance details
+```
+
+**Validation:**
+
+- Parent graph ID: Must match `kg[a-f0-9]{16,}` (16+ hex chars)
+- Subgraph name: Must match `[a-zA-Z0-9]{1,20}` (alphanumeric only)
+- Format: `{parent_id}_{subgraph_name}`
+
+**Limitations:**
+
+- Subgraphs inherit parent's tier and instance
+- No DynamoDB registry entries for subgraphs (resolved via parent)
+- Cannot create subgraphs of subgraphs (single-level only)
+- Shared repositories cannot have subgraphs
+
 ## Configuration
 
 Key environment variables:

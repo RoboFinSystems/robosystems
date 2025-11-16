@@ -57,8 +57,10 @@ All data in the subgraph will be lost.
 If backup requested, stored in S3 Kuzu database bucket at:
 `s3://{kuzu_s3_bucket}/{instance_id}/{database_name}_{timestamp}.backup`
 
-**Note:**
-Use the subgraph name (e.g., 'dev', 'staging') not the full subgraph ID.""",
+**Notes:**
+- Use the subgraph name (e.g., 'dev', 'staging') not the full subgraph ID
+- Deletion does not affect parent graph's credit pool or permissions
+- Backup creation consumes credits from parent graph's allocation""",
   responses={
     200: {"description": "Subgraph deleted successfully"},
     400: {"description": "Invalid subgraph identifier"},

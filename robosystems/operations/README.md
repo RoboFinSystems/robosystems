@@ -44,6 +44,7 @@ High-level business operations for graph database management:
 
 - **`GenericGraphService`** - Core graph CRUD operations
 - **`EntityGraphService`** - Entity-specific graph workflows
+- **`SubgraphService`** - Subgraph lifecycle management (create, list, delete)
 - **`GraphSubscriptionService`** - Billing subscription creation for graphs (uses billing namespace)
 - **`CreditService`** - Credit-based billing and consumption tracking
 - **`GraphPricingService`** - Dynamic pricing calculations
@@ -235,6 +236,35 @@ service = EntityGraphService(graph_id="kg1a2b3c")
 await service.create_entity(entity_data)
 await service.add_financial_data(filing_data)
 metrics = await service.get_performance_metrics()
+```
+
+### Subgraph Management
+
+```python
+# Subgraph operations (requires kuzu-large or kuzu-xlarge tier)
+from robosystems.operations.graph.subgraph_service import SubgraphService
+
+service = SubgraphService()
+
+# Create a subgraph for development environment
+result = await service.create_subgraph_database(
+    parent_graph_id="kg1234567890abcdef",
+    subgraph_name="dev",
+    schema_extensions=["analytics"]
+)
+
+# List all subgraphs for a parent
+subgraphs = await service.list_subgraph_databases("kg1234567890abcdef")
+
+# Get info about a specific subgraph
+info = await service.get_subgraph_info("kg1234567890abcdef_dev")
+
+# Delete subgraph with backup
+await service.delete_subgraph_database(
+    subgraph_id="kg1234567890abcdef_dev",
+    force=True,
+    create_backup=True
+)
 ```
 
 ### Credit Management
