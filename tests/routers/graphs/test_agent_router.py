@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from robosystems.operations.agents.base import AgentMode
 from robosystems.models.iam import User
+from tests.conftest import VALID_TEST_GRAPH_ID
 
 
 @pytest.fixture
@@ -145,7 +146,7 @@ class TestAgentEndpoints:
     }
 
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json=request_data,
       headers={"Authorization": "Bearer test_token"},
     )
@@ -174,7 +175,7 @@ class TestAgentEndpoints:
     }
 
     response = client.post(
-      "/v1/graphs/test_graph/agent/research",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent/research",
       json=request_data,
       headers={"Authorization": "Bearer test_token"},
     )
@@ -184,7 +185,7 @@ class TestAgentEndpoints:
   def test_list_agents_endpoint(self, client, mock_registry):
     """Test listing available agents."""
     response = client.get(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       headers={"Authorization": "Bearer test_token"},
     )
 
@@ -197,7 +198,7 @@ class TestAgentEndpoints:
   def test_agent_metadata_endpoint(self, client, mock_registry):
     """Test getting agent metadata."""
     response = client.get(
-      "/v1/graphs/test_graph/agent/financial",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent/financial",
       headers={"Authorization": "Bearer test_token"},
     )
 
@@ -226,7 +227,7 @@ class TestAgentEndpoints:
     mock_orchestrator.route_query.return_value = mock_response
 
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json=request_data,
       headers={"Authorization": "Bearer test_token"},
     )
@@ -247,7 +248,7 @@ class TestAgentEndpoints:
     }
 
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json=request_data,
       headers={"Authorization": "Bearer test_token"},
     )
@@ -262,7 +263,7 @@ class TestAgentEndpoints:
     mock_orchestrator.route_query.side_effect = Exception("Agent failed")
 
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json={"message": "Test query"},
       headers={"Authorization": "Bearer test_token"},
     )
@@ -280,7 +281,7 @@ class TestAgentEndpoints:
     test_client = TestClient(app)
 
     response = test_client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json={"message": "Test query"},
     )
 
@@ -300,7 +301,7 @@ class TestAgentEndpoints:
     mock_orchestrator.route_query.return_value = mock_response
 
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json={"message": "Test query"},
       headers={"Authorization": "Bearer test_token"},
     )
@@ -313,7 +314,7 @@ class TestAgentEndpoints:
   def test_agent_invalid_mode(self, client):
     """Test invalid agent mode."""
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json={"message": "Test", "mode": "invalid_mode"},
       headers={"Authorization": "Bearer test_token"},
     )
@@ -342,7 +343,7 @@ class TestAgentEndpoints:
     }
 
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json=request_data,
       headers={"Authorization": "Bearer test_token"},
     )
@@ -360,7 +361,7 @@ class TestAgentEndpoints:
     }
 
     response = client.post(
-      "/v1/graphs/test_graph/agent/batch",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent/batch",
       json=request_data,
       headers={"Authorization": "Bearer test_token"},
     )
@@ -385,7 +386,7 @@ class TestAgentEndpoints:
       }
 
       response = client.post(
-        "/v1/graphs/test_graph/agent",
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
         json=request_data,
         headers={"Authorization": "Bearer test_token"},
       )
@@ -404,7 +405,7 @@ class TestAgentEndpoints:
     }
 
     response = client.post(
-      "/v1/graphs/test_graph/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json=request_data,
       headers={"Authorization": "Bearer test_token"},
     )
@@ -417,7 +418,7 @@ class TestAgentEndpoints:
   def test_agent_capability_filter(self, client):
     """Test filtering agents by capability."""
     response = client.get(
-      "/v1/graphs/test_graph/agent?capability=financial_analysis",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent?capability=financial_analysis",
       headers={"Authorization": "Bearer test_token"},
     )
 

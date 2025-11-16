@@ -231,7 +231,7 @@ class TestStorageLimitsAPI:
   def test_get_storage_limits_no_credit_pool(self, client_with_test_user: TestClient):
     """Test storage limits for non-existent graph."""
     response = client_with_test_user.get(
-      "/v1/graphs/nonexistent_graph/credits/storage/limits"
+      "/v1/graphs/kg77777777777777777/credits/storage/limits"
     )
 
     # Access check happens before credit pool check, so we get 403 instead of 404
@@ -376,7 +376,8 @@ def sample_graph_credits(db_session, test_user, test_org):
   # First create the graph
   from robosystems.models.iam import Graph, GraphUser
 
-  graph_id = f"api_test_graph_{uuid.uuid4().hex[:8]}"
+  unique_id = uuid.uuid4().hex[:8]
+  graph_id = f"kg{unique_id}{unique_id}"
   Graph.create(
     graph_id=graph_id,
     org_id=test_org.id,

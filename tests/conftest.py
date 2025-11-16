@@ -15,6 +15,13 @@ from robosystems.security import password as password_module
 
 password_module.PasswordSecurity.BCRYPT_ROUNDS = 4  # Fast for tests
 
+# Valid test graph IDs matching the GRAPH_ID_PATTERN
+# Pattern: kg + 10-20 alphanumeric chars (lowercase)
+# This matches the actual format: kg + 14 ULID chars + 4 entity hash chars = 18 total
+VALID_TEST_GRAPH_ID = "kg01234567890abcdef"
+VALID_TEST_GRAPH_ID_2 = "kg11111111111111111"
+VALID_TEST_GRAPH_ID_3 = "kg22222222222222222"
+
 
 @pytest.fixture(scope="session", autouse=True)
 def configure_celery_for_tests():
@@ -413,9 +420,9 @@ def sample_graph(test_db, test_org):
   from robosystems.config.graph_tier import GraphTier
   import uuid
 
-  unique_id = str(uuid.uuid4())[:8]
+  unique_id = str(uuid.uuid4().hex)[:8]
   graph = Graph.create(
-    graph_id=f"test_graph_{unique_id}",
+    graph_id=f"kg{unique_id}{unique_id}",
     graph_name="Test Graph Fixture",
     graph_type="entity",
     org_id=test_org.id,

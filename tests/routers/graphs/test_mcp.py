@@ -3,6 +3,7 @@ Comprehensive tests for MCP tool execution endpoints.
 """
 
 import pytest
+from tests.conftest import VALID_TEST_GRAPH_ID
 import json
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
@@ -33,7 +34,7 @@ class CircuitBreakerState(Enum):
 def mock_mcp_client():
   """Mock MCP client for tests."""
   client = AsyncMock(spec=KuzuMCPClient)
-  client.graph_id = "test_graph"
+  client.graph_id = VALID_TEST_GRAPH_ID
   client.api_base_url = "http://test:8001"
   client.timeout = 30
   return client
@@ -369,7 +370,7 @@ class TestMCPStrategies:
         "prefers_streaming": True,
       },
       system_state={"queue_size": 0, "running_queries": 0},
-      graph_id="test_graph",
+      graph_id=VALID_TEST_GRAPH_ID,
       user_tier="standard",
     )
 
@@ -390,7 +391,7 @@ class TestMCPStrategies:
       arguments={"query": "MATCH (n) RETURN n"},  # No LIMIT
       client_info={"client_type": "unknown", "is_mcp_client": False},
       system_state={"queue_size": 10, "running_queries": 5},
-      graph_id="test_graph",
+      graph_id=VALID_TEST_GRAPH_ID,
       user_tier="standard",
     )
 
@@ -410,7 +411,7 @@ class TestMCPStrategies:
       arguments={},
       client_info={"client_type": "unknown", "is_mcp_client": False},
       system_state={"queue_size": 0, "running_queries": 0},
-      graph_id="test_graph",
+      graph_id=VALID_TEST_GRAPH_ID,
       user_tier="standard",
     )
 
@@ -429,7 +430,7 @@ class TestMCPStrategies:
       arguments={"query": "MATCH (n) RETURN n LIMIT 10"},
       client_info={"client_type": "unknown", "is_mcp_client": False},
       system_state={"queue_size": 50, "running_queries": 20},  # High load
-      graph_id="test_graph",
+      graph_id=VALID_TEST_GRAPH_ID,
       user_tier="standard",
     )
 
@@ -738,7 +739,7 @@ class TestMCPAccessControl:
 
     # Try to access a graph without permission
     response = await async_client.post(
-      "/v1/graphs/unauthorized_graph/mcp/call-tool", json=request_data, headers=headers
+      "/v1/graphs/kg88888888888888888/mcp/call-tool", json=request_data, headers=headers
     )
 
     # Accept 422 (validation error) as a valid response for unauthorized access

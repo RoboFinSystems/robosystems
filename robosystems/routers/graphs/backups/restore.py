@@ -26,6 +26,7 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 from .utils import verify_admin_access
 
@@ -121,7 +122,9 @@ async def restore_backup(
   request: BackupRestoreRequest,
   fastapi_request: Request,
   backup_id: str = Path(..., description="Backup identifier"),
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

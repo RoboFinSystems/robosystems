@@ -25,6 +25,7 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.logger import logger
 
 from .utils import get_backup_manager
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 # Create router
 router = APIRouter()
@@ -50,7 +51,9 @@ router = APIRouter()
 )
 async def get_backup_download_url(
   backup_id: str = Path(..., description="Backup identifier"),
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   expires_in: int = Query(
     3600, ge=300, le=86400, description="URL expiration time in seconds"
   ),

@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 from robosystems.models.api.graphs.agent import AgentMessage
+from tests.conftest import VALID_TEST_GRAPH_ID
 
 
 @pytest.fixture
@@ -29,17 +30,22 @@ async def test_agent_router_basic(
   ):
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
-    mock_credits.graph_id = "default"
+    mock_credits.graph_id = VALID_TEST_GRAPH_ID
     mock_credits.current_balance = 1000.0
     mock_get_credits.return_value = mock_credits
 
     # Mock the AgentOrchestrator class instance
     mock_orchestrator_instance = MagicMock()
     mock_agent_response = MagicMock()
-    mock_agent_response.content = "Test response for: simple query using graph default"
+    mock_agent_response.content = (
+      f"Test response for: simple query using graph {VALID_TEST_GRAPH_ID}"
+    )
     mock_agent_response.agent_name = "financial"
     mock_agent_response.mode_used.value = "standard"
-    mock_agent_response.metadata = {"analysis_type": "test", "graph_id": "default"}
+    mock_agent_response.metadata = {
+      "analysis_type": "test",
+      "graph_id": VALID_TEST_GRAPH_ID,
+    }
     mock_agent_response.tokens_used = {"input": 50, "output": 50}
     mock_agent_response.confidence_score = 0.95
     mock_agent_response.error_details = None
@@ -49,7 +55,7 @@ async def test_agent_router_basic(
     mock_orchestrator_class.return_value = mock_orchestrator_instance
 
     response = client_with_mocked_auth.post(
-      "/v1/graphs/default/agent", json={"message": "simple query"}
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent", json={"message": "simple query"}
     )
 
     assert response.status_code == 200
@@ -79,7 +85,7 @@ async def test_agent_endpoint_with_history(
   ):
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
-    mock_credits.graph_id = "default"
+    mock_credits.graph_id = VALID_TEST_GRAPH_ID
     mock_credits.current_balance = 1000.0
     mock_get_credits.return_value = mock_credits
 
@@ -89,7 +95,10 @@ async def test_agent_endpoint_with_history(
     mock_agent_response.content = "Response with history"
     mock_agent_response.agent_name = "financial"
     mock_agent_response.mode_used.value = "standard"
-    mock_agent_response.metadata = {"has_history": True, "graph_id": "default"}
+    mock_agent_response.metadata = {
+      "has_history": True,
+      "graph_id": VALID_TEST_GRAPH_ID,
+    }
     mock_agent_response.tokens_used = {"input": 50, "output": 50}
     mock_agent_response.confidence_score = 0.95
     mock_agent_response.error_details = None
@@ -99,7 +108,7 @@ async def test_agent_endpoint_with_history(
     mock_orchestrator_class.return_value = mock_orchestrator_instance
 
     response = client_with_mocked_auth.post(
-      "/v1/graphs/default/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json={
         "message": "simple query",
         "history": [msg.model_dump() for msg in history],
@@ -129,7 +138,7 @@ async def test_agent_endpoint_with_context(
   ):
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
-    mock_credits.graph_id = "default"
+    mock_credits.graph_id = VALID_TEST_GRAPH_ID
     mock_credits.current_balance = 1000.0
     mock_get_credits.return_value = mock_credits
 
@@ -139,7 +148,10 @@ async def test_agent_endpoint_with_context(
     mock_agent_response.content = "Response with context"
     mock_agent_response.agent_name = "financial"
     mock_agent_response.mode_used.value = "standard"
-    mock_agent_response.metadata = {"has_context": True, "graph_id": "default"}
+    mock_agent_response.metadata = {
+      "has_context": True,
+      "graph_id": VALID_TEST_GRAPH_ID,
+    }
     mock_agent_response.tokens_used = {"input": 50, "output": 50}
     mock_agent_response.confidence_score = 0.95
     mock_agent_response.error_details = None
@@ -149,7 +161,7 @@ async def test_agent_endpoint_with_context(
     mock_orchestrator_class.return_value = mock_orchestrator_instance
 
     response = client_with_mocked_auth.post(
-      "/v1/graphs/default/agent",
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
       json={
         "message": "simple query",
         "context": {"key": "value"},
@@ -179,7 +191,7 @@ async def test_agent_error_handling(
   ):
     # Mock GraphCredits to return a credit pool
     mock_credits = MagicMock()
-    mock_credits.graph_id = "default"
+    mock_credits.graph_id = VALID_TEST_GRAPH_ID
     mock_credits.current_balance = 1000.0
     mock_get_credits.return_value = mock_credits
 
@@ -187,7 +199,7 @@ async def test_agent_error_handling(
     mock_orchestrator_class.side_effect = Exception("Test error")
 
     response = client_with_mocked_auth.post(
-      "/v1/graphs/default/agent", json={"message": "simple query"}
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent", json={"message": "simple query"}
     )
 
     assert response.status_code == 500
@@ -214,9 +226,9 @@ class TestAgentUnauthorizedAccess:
     try:
       # Create a client without any auth overrides
       with TestClient(app) as test_client:
-        # Test POST /v1/default/agent endpoint
+        # Test POST /v1/graphs/{graph_id}/agent endpoint
         response = test_client.post(
-          "/v1/graphs/default/agent", json={"message": "test"}
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent", json={"message": "test"}
         )
         assert response.status_code == 401
     finally:
@@ -237,7 +249,7 @@ class TestAgentUnauthorizedAccess:
       with TestClient(app) as test_client:
         headers = {"Authorization": "Bearer invalid-api-key-12345"}
         response = test_client.post(
-          "/v1/graphs/default/agent",
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent",
           json={"message": "test"},
           headers=headers,
         )
@@ -262,7 +274,7 @@ class TestGraphIdValidation:
     ):
       # Mock GraphCredits to return a credit pool
       mock_credits = MagicMock()
-      mock_credits.graph_id = "test_graph"
+      mock_credits.graph_id = VALID_TEST_GRAPH_ID
       mock_credits.current_balance = 1000.0
       mock_get_credits.return_value = mock_credits
 
@@ -272,7 +284,7 @@ class TestGraphIdValidation:
       mock_agent_response.content = "Test response"
       mock_agent_response.agent_name = "financial"
       mock_agent_response.mode_used.value = "standard"
-      mock_agent_response.metadata = {"graph_id": "test_graph"}
+      mock_agent_response.metadata = {"graph_id": VALID_TEST_GRAPH_ID}
       mock_agent_response.tokens_used = {"input": 50, "output": 50}
       mock_agent_response.confidence_score = 0.95
       mock_agent_response.error_details = None
@@ -285,7 +297,7 @@ class TestGraphIdValidation:
 
       # Test with valid graph_id
       response = client_with_mocked_auth.post(
-        "/v1/graphs/test_graph/agent", json={"message": "test"}
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/agent", json={"message": "test"}
       )
       assert response.status_code == 200
 

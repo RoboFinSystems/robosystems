@@ -32,6 +32,7 @@ from robosystems.middleware.robustness import (
 )
 
 from .utils import circuit_breaker, timeout_coordinator
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -76,7 +77,9 @@ This operation is included - no credit consumption required.""",
   },
 )
 async def validate_schema(
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   request: SchemaValidationRequest = Body(
     ...,
     description="Schema definition to validate",

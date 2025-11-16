@@ -27,6 +27,7 @@ from .utils import (
   record_operation_metrics,
   handle_circuit_breaker_check,
 )
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -68,8 +69,12 @@ If backup requested, stored in S3 Kuzu database bucket at:
   business_event_type="subgraph_deleted",
 )
 async def delete_subgraph(
-  graph_id: str = Path(..., description="Parent graph identifier"),
-  subgraph_id: str = Path(..., description="Subgraph identifier to delete"),
+  graph_id: str = Path(
+    ..., description="Parent graph identifier", pattern=GRAPH_ID_PATTERN
+  ),
+  subgraph_id: str = Path(
+    ..., description="Subgraph identifier to delete", pattern=GRAPH_ID_PATTERN
+  ),
   request: DeleteSubgraphRequest = ...,
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),

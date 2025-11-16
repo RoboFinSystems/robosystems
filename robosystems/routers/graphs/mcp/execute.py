@@ -54,6 +54,7 @@ from robosystems.middleware.robustness import (
 )
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.sse.operation_manager import create_operation_response
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 # Import MCP components
 from .handlers import MCPHandler, validate_mcp_access
@@ -190,7 +191,7 @@ async def call_mcp_tool(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   tool_call: MCPToolCall = Body(
     ...,

@@ -36,6 +36,7 @@ from robosystems.middleware.robustness import (
   record_operation_metric,
   get_operation_logger,
 )
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 
 router = APIRouter(tags=["Usage"])
@@ -84,7 +85,9 @@ This operation is included - no credit consumption required.""",
   business_event_type="graph_metrics_accessed",
 )
 async def get_graph_metrics(
-  graph_id: str = Path(..., description="The graph ID to get metrics for"),
+  graph_id: str = Path(
+    ..., description="The graph ID to get metrics for", pattern=GRAPH_ID_PATTERN
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
@@ -310,7 +313,9 @@ This operation is included - no credit consumption required.""",
   business_event_type="graph_usage_accessed",
 )
 async def get_graph_usage_analytics(
-  graph_id: str = Path(..., description="The graph ID to get usage analytics for"),
+  graph_id: str = Path(
+    ..., description="The graph ID to get usage analytics for", pattern=GRAPH_ID_PATTERN
+  ),
   time_range: str = Query(
     "30d",
     description="Time range: 24h, 7d, 30d, current_month, last_month",

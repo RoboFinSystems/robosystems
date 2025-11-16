@@ -31,6 +31,7 @@ from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 # Create router
 router = APIRouter(tags=["Graph Limits"])
@@ -95,7 +96,7 @@ async def get_graph_limits(
   graph_id: str = Path(
     ...,
     description="Graph database identifier (user graph or shared repository)",
-    pattern="^(kg[a-z0-9]{10}|sec|industry|economic|[a-zA-Z][a-zA-Z0-9_]{2,62})$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),

@@ -28,14 +28,15 @@ from robosystems.middleware.graph.types import GraphTypeRegistry, GraphTier
 from .multitenant_utils import MultiTenantUtils
 from .subgraph_utils import parse_subgraph_id
 from robosystems.config import env
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 # Valid identifier patterns for security with length limits
 VALID_ENTITY_ID_PATTERN = re.compile(
   r"^[a-zA-Z0-9_-]{1,128}$"
 )  # Entity IDs: alphanumeric, underscore, dash (max 128 chars)
 VALID_GRAPH_ID_PATTERN = re.compile(
-  r"^[a-zA-Z0-9_-]{1,128}$"
-)  # Graph IDs: alphanumeric, underscore, dash (max 128 chars)
+  GRAPH_ID_PATTERN
+)  # Graph IDs: canonical pattern from constants
 VALID_INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]{8,17}$")  # AWS instance ID format
 
 

@@ -42,6 +42,7 @@ from robosystems.middleware.otel.metrics import (
   get_endpoint_metrics,
 )
 from robosystems.middleware.robustness import CircuitBreakerManager
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -141,7 +142,7 @@ async def query_tables(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   request: TableQueryRequest = Body(..., description="SQL query request"),
   current_user: User = Depends(get_current_user_with_graph),

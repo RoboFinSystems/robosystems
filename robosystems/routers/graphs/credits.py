@@ -38,12 +38,15 @@ from robosystems.models.api.billing.credits import (
   TransactionSummaryResponse,
   DetailedTransactionsResponse,
 )
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 logger = logging.getLogger(__name__)
 
 
 def get_graph_access(
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
 ) -> GraphUser:
@@ -142,7 +145,9 @@ No credits are consumed for checking credit status.""",
 )
 async def get_credit_summary(
   graph_id: str = Path(
-    ..., description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')"
+    ...,
+    description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   user_graph: GraphUser = Depends(get_graph_access),
@@ -221,7 +226,9 @@ No credits are consumed for viewing transaction history.""",
   },
 )
 async def get_credit_transactions(
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   transaction_type: Optional[str] = Query(
     None,
     description="Filter by transaction type (allocation, consumption, bonus, refund)",
@@ -515,7 +522,9 @@ No credits are consumed for checking availability.""",
   },
 )
 async def check_credit_balance(
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   operation_type: str = Query(..., description="Type of operation to check"),
   base_cost: Optional[Decimal] = Query(
     None, description="Custom base cost (uses default if not provided)"
@@ -620,7 +629,9 @@ and associated credit costs.""",
   },
 )
 async def get_storage_usage(
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   days: int = Query(
     30, ge=1, le=365, description="Number of days of history to return"
   ),
@@ -782,7 +793,9 @@ limit increases. No credits are consumed for checking storage limits.""",
 )
 async def check_storage_limits(
   graph_id: str = Path(
-    ..., description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')"
+    ...,
+    description="Graph database identifier (e.g., 'kg1a2b3c' or 'sec')",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   user_graph: GraphUser = Depends(get_graph_access),

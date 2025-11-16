@@ -41,6 +41,7 @@ from robosystems.operations.agents.base import (
 from robosystems.logger import logger
 from robosystems.models.api.common import ErrorResponse
 from robosystems.config import env
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 from .strategies import (
   AgentExecutionStrategy,
@@ -104,7 +105,7 @@ async def list_agents(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   capability: Optional[str] = Query(
     None,
@@ -201,7 +202,7 @@ async def auto_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   mode: Optional[ResponseMode] = Query(
     None, description="Override execution mode: sync, async, stream, or auto"
@@ -329,7 +330,7 @@ async def get_agent_metadata(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   agent_type: str = Path(
     ...,
@@ -391,7 +392,7 @@ async def specific_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   mode: Optional[ResponseMode] = Query(
     None, description="Override execution mode: sync, async, stream, or auto"
@@ -519,7 +520,7 @@ async def batch_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
@@ -652,7 +653,7 @@ async def recommend_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),

@@ -27,6 +27,7 @@ from .utils import (
 )
 
 import asyncio
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -78,7 +79,9 @@ Returns a task ID for monitoring sync progress.""",
   },
 )
 async def sync_connection(
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   connection_id: str = Path(..., description="Connection identifier"),
   request: SyncConnectionRequest = ...,
   current_user: User = Depends(get_current_user_with_graph),

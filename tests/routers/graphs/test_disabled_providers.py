@@ -1,6 +1,7 @@
 """Test error handling for disabled providers."""
 
 import pytest
+from tests.conftest import VALID_TEST_GRAPH_ID
 from unittest.mock import patch, MagicMock
 from fastapi import status
 from fastapi.testclient import TestClient
@@ -35,7 +36,9 @@ class TestDisabledProviderHandling:
       }
 
       response = client.post(
-        "/v1/graphs/kg1a2b3c4d5/connections", json=request_data, headers=auth_headers
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections",
+        json=request_data,
+        headers=auth_headers,
       )
 
       # Should return 403 Forbidden, not 500
@@ -70,7 +73,9 @@ class TestDisabledProviderHandling:
       }
 
       response = client.post(
-        "/v1/graphs/kg1a2b3c4d5/connections", json=request_data, headers=auth_headers
+        f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections",
+        json=request_data,
+        headers=auth_headers,
       )
 
       # Should return 403 Forbidden, not 500
@@ -112,7 +117,7 @@ class TestDisabledProviderHandling:
         request_data = {"sync_options": {}}
 
         response = client.post(
-          "/v1/graphs/kg1a2b3c4d5/connections/conn_123/sync",
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections/conn_123/sync",
           json=request_data,
           headers=auth_headers,
         )
@@ -161,7 +166,7 @@ class TestDisabledProviderHandling:
         }
 
         response = client.post(
-          "/v1/graphs/kg1a2b3c4d5/connections/link/token",
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections/link/token",
           json=request_data,
           headers=auth_headers,
         )
@@ -208,7 +213,8 @@ class TestDisabledProviderHandling:
           management.provider_registry = new_registry
 
           response = client.delete(
-            "/v1/graphs/kg1a2b3c4d5/connections/conn_123", headers=auth_headers
+            f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections/conn_123",
+            headers=auth_headers,
           )
 
           # Should return 403 Forbidden, not 500
@@ -227,7 +233,9 @@ class TestDisabledProviderHandling:
     }
 
     response = client.post(
-      "/v1/graphs/kg1a2b3c4d5/connections", json=request_data, headers=auth_headers
+      f"/v1/graphs/{VALID_TEST_GRAPH_ID}/connections",
+      json=request_data,
+      headers=auth_headers,
     )
 
     # Invalid providers should return 422 Unprocessable Entity (Pydantic validation)
@@ -246,11 +254,11 @@ class TestDisabledProviderHandling:
 
     # Create the graph first (only if it doesn't exist)
     existing_graph = (
-      test_db.query(Graph).filter(Graph.graph_id == "kg1a2b3c4d5").first()
+      test_db.query(Graph).filter(Graph.graph_id == VALID_TEST_GRAPH_ID).first()
     )
     if not existing_graph:
       Graph.create(
-        graph_id="kg1a2b3c4d5",
+        graph_id=VALID_TEST_GRAPH_ID,
         org_id=test_org.id,
         graph_name="Test Graph",
         graph_type="generic",
@@ -260,12 +268,17 @@ class TestDisabledProviderHandling:
     # Create GraphUser relationship for the test graph (only if it doesn't exist)
     existing_user_graph = (
       test_db.query(GraphUser)
-      .filter(GraphUser.user_id == test_user.id, GraphUser.graph_id == "kg1a2b3c4d5")
+      .filter(
+        GraphUser.user_id == test_user.id, GraphUser.graph_id == VALID_TEST_GRAPH_ID
+      )
       .first()
     )
     if not existing_user_graph:
       GraphUser.create(
-        user_id=test_user.id, graph_id="kg1a2b3c4d5", role="admin", session=test_db
+        user_id=test_user.id,
+        graph_id=VALID_TEST_GRAPH_ID,
+        role="admin",
+        session=test_db,
       )
 
     # Create an API key for the test user

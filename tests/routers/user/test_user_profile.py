@@ -6,6 +6,11 @@ These tests focus on endpoint behavior rather than full integration testing.
 """
 
 import pytest
+from tests.conftest import (
+  VALID_TEST_GRAPH_ID,
+  VALID_TEST_GRAPH_ID_2,
+  VALID_TEST_GRAPH_ID_3,
+)
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock, Mock
 import bcrypt
@@ -277,7 +282,7 @@ class TestUserGraphs:
     mock_graphs = [
       Mock(
         user_id="test-user-456",
-        graph_id="graph1",
+        graph_id=VALID_TEST_GRAPH_ID,
         role="admin",
         is_selected=True,
         created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
@@ -285,7 +290,7 @@ class TestUserGraphs:
       ),
       Mock(
         user_id="test-user-456",
-        graph_id="graph2",
+        graph_id=VALID_TEST_GRAPH_ID_2,
         role="member",
         is_selected=False,
         created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
@@ -293,7 +298,7 @@ class TestUserGraphs:
       ),
       Mock(
         user_id="test-user-456",
-        graph_id="graph3",
+        graph_id=VALID_TEST_GRAPH_ID_3,
         role="admin",
         is_selected=False,
         created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
@@ -372,7 +377,7 @@ class TestUserGraphs:
 
     # Check graph data
     assert len(data["graphs"]) == 3
-    assert data["selectedGraphId"] == "graph1"
+    assert data["selectedGraphId"] == VALID_TEST_GRAPH_ID
 
     # Check individual graph structure
     graph = data["graphs"][0]
@@ -394,7 +399,7 @@ class TestUserGraphs:
     # Mock successful graph selection
     mock_set_selected.return_value = True
 
-    response = client_with_graphs.post("/v1/graphs/graph2/select")
+    response = client_with_graphs.post(f"/v1/graphs/{VALID_TEST_GRAPH_ID_2}/select")
 
     assert response.status_code == 200
     data = response.json()
@@ -402,7 +407,7 @@ class TestUserGraphs:
     # SuccessResponse format
     assert data["success"] is True
     assert data["message"] == "Graph selected successfully"
-    assert data["data"]["selectedGraphId"] == "graph2"
+    assert data["data"]["selectedGraphId"] == VALID_TEST_GRAPH_ID_2
 
     # Verify the method was called with correct parameters
     mock_set_selected.assert_called_once()
@@ -431,13 +436,13 @@ class TestUserGraphs:
     """Test graph selection for non-existent graph."""
     # Create a mock graph that includes the requested graph in user's available graphs
     mock_graphs = client_with_graphs.mock_user.graphs.copy()
-    mock_graphs.append(Mock(graph_id="nonexistent-graph"))
+    mock_graphs.append(Mock(graph_id="kg99999999999999999"))
     mock_get_by_user_id.return_value = mock_graphs
 
     # Mock graph not found by set_selected_graph (passes access check but fails selection)
     mock_set_selected.return_value = False
 
-    response = client_with_graphs.post("/v1/graphs/nonexistent-graph/select")
+    response = client_with_graphs.post("/v1/graphs/kg99999999999999999/select")
 
     assert response.status_code == 404
 
