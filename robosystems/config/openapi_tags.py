@@ -7,8 +7,12 @@ MAIN_API_TAGS = [
     "description": "🏗️ Graphs - Create and manage graph databases",
   },
   {
+    "name": "Subgraphs",
+    "description": "🌳 Subgraphs - Manage subgraph databases for version control and memory context",
+  },
+  {
     "name": "Query",
-    "description": "🔍 Graph queries - Execute Cypher (read only) queries against graph databases",
+    "description": "🔍 Graph queries - Execute Cypher queries against graph databases",
   },
   {
     "name": "MCP",
@@ -25,10 +29,6 @@ MAIN_API_TAGS = [
   {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
-  },
-  {
-    "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Manage subgraph databases for version control and memory context",
   },
   {
     "name": "Backup",

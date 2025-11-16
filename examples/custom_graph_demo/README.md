@@ -9,109 +9,68 @@ This demo showcases RoboSystems' graph database capabilities for generic graph d
 - **Project Nodes**: Work initiatives connecting people and companies
 - **Relationships**: Custom relationships showing collaborations, employment, and project participation
 
-## 🚀 Quick Start - Run All Steps
+## Quick Start - Run All Steps
 
 ```bash
 # Make sure RoboSystems is running
-just start robosystems
+just start
 
-# Navigate to the demo directory
-cd examples/custom_graph_demo
+# Run the complete demo (all steps automatically)
+just demo-custom-graph
 
-# Run each step in sequence
-uv run 01_setup_credentials.py
-uv run 02_create_graph.py
-uv run 03_generate_data.py
-uv run 04_upload_ingest.py
-uv run 05_query_graph.py --all
+# Or create a new graph explicitly
+just demo-custom-graph "new-graph"
+
+# Or reuse an existing graph
+just demo-custom-graph "reuse-graph"
 ```
 
-## 📋 Step-by-Step Guide
+## What The Demo Does
 
-### Step 1: Setup Credentials
+When you run `just demo-custom-graph`, it automatically:
 
-Creates a user account and API key, saves credentials to `credentials/config.json`.
-
-```bash
-uv run 01_setup_credentials.py
-
-# Options:
-uv run 01_setup_credentials.py --name "Your Name"
-uv run 01_setup_credentials.py --email your@email.com
-uv run 01_setup_credentials.py --force  # Create new credentials
-```
-
-**Output**: User created, API key generated, credentials saved
-
-### Step 2: Create Graph
-
-Creates a new generic graph database using the custom schema defined in `schema.json`.
-
-```bash
-uv run 02_create_graph.py
-
-# Options:
-uv run 02_create_graph.py --name "My Custom Graph Demo"
-uv run 02_create_graph.py --reuse  # Reuse existing graph
-```
-
-**Output**: Graph created with custom schema, graph_id saved to credentials
+1. **Sets up credentials** - Creates a user account and API key (or reuses existing)
+2. **Creates graph** - Initializes a new graph database with custom schema from `schema.json`
+3. **Generates data** - Creates 50 people, 10 companies, and 15 projects with relationships
+4. **Uploads & ingests** - Loads data into the graph via staging tables
+5. **Runs queries** - Executes example queries to demonstrate capabilities
 
 **Note**: The graph structure is defined in `schema.json` - you can customize this file to create your own graph schema!
 
-### Step 3: Generate Data
+## Advanced Usage - Individual Steps
 
-Generates custom graph data as Parquet files.
+The `just demo-custom-graph` command runs `main.py` which executes all steps automatically. For manual control, you can run individual steps:
+
+### Step 1: Setup Credentials
 
 ```bash
+# Using just command (recommended)
+just demo-user
+
+# Or run directly with options
+cd examples/custom_graph_demo
+uv run 01_setup_credentials.py --name "Your Name" --email your@email.com
+```
+
+**Output**: User created, API key generated, credentials saved to `examples/credentials/config.json`
+
+### Step 2-5: Run All Remaining Steps
+
+```bash
+# Run the main demo script
+cd examples/custom_graph_demo
+uv run main.py --flags "new-graph"
+
+# Or run each step individually
+uv run 02_create_graph.py
 uv run 03_generate_data.py
-
-# Options:
-uv run 03_generate_data.py --count 100  # Generate 100 people instead of default
-uv run 03_generate_data.py --regenerate  # Force regenerate
-uv run 03_generate_data.py --seed 1234   # Deterministic dataset for testing
-```
-
-**Output**: 3 node and 3 relationship Parquet files created under `data/`:
-
-- `nodes/Person.parquet` - Individual people
-- `nodes/Company.parquet` - Organizations and businesses
-- `nodes/Project.parquet` - Work initiatives and collaborations
-- `relationships/PERSON_WORKS_FOR_COMPANY.parquet` - Employment relationships
-- `relationships/PERSON_WORKS_ON_PROJECT.parquet` - Project participation relationships
-- `relationships/COMPANY_SPONSORS_PROJECT.parquet` - Sponsorship relationships
-
-### Step 4: Upload & Ingest
-
-Uploads the Parquet files and ingests them into the graph.
-
-```bash
 uv run 04_upload_ingest.py
-```
-
-**Output**: All files uploaded, data ingested into graph, verification queries run
-
-### Step 5: Query Graph
-
-Run example queries or enter interactive mode.
-
-```bash
-# Run all preset queries
 uv run 05_query_graph.py --all
-
-# Run a specific preset
-uv run 05_query_graph.py --preset summary
-uv run 05_query_graph.py --preset people
-uv run 05_query_graph.py --preset projects
-
-# Run a custom query
-uv run 05_query_graph.py --query "MATCH (n) RETURN count(n)"
-
-# Interactive mode
-uv run 05_query_graph.py
 ```
 
-## 📊 Available Preset Queries
+**Output**: Graph created with custom data, example queries executed
+
+## Available Preset Queries
 
 ### Summary
 
@@ -199,7 +158,7 @@ RETURN
 ORDER BY cross_company_pairs DESC
 ```
 
-## 🛠️ Technical Details
+## Technical Details
 
 ### Graph Schema
 
@@ -262,7 +221,7 @@ This demo demonstrates best practices for graph database design:
 - **Property design**: Focused attributes that support analytics and graph traversal
 - **Query patterns**: Examples for aggregations, path exploration, and team analysis
 
-## 🔧 Advanced Usage
+## Advanced Usage
 
 ### Customize the Schema
 
@@ -270,6 +229,7 @@ The `schema.json` file is your starting point for creating custom graph structur
 
 ```bash
 # 1. Copy the example schema
+cd examples/custom_graph_demo
 cp schema.json my_custom_schema.json
 
 # 2. Edit my_custom_schema.json to add your own:
@@ -280,10 +240,8 @@ cp schema.json my_custom_schema.json
 # 3. Update 02_create_graph.py to load your schema:
 #    Change: schema_file = Path(__file__).parent / "my_custom_schema.json"
 
-# 4. Generate matching data and run the pipeline
-uv run 02_create_graph.py
-uv run 03_generate_data.py
-uv run 04_upload_ingest.py
+# 4. Generate matching data and run the demo
+just demo-custom-graph "new-graph"
 ```
 
 **Example: Adding a new node type**
@@ -300,27 +258,27 @@ uv run 04_upload_ingest.py
 }
 ```
 
-### Generate More Data
-
-Generate more custom entities instead of the default:
-
-```bash
-uv run 03_generate_data.py --count 200 --regenerate
-uv run 04_upload_ingest.py
-```
-
 ### Custom Queries
 
-Run custom Cypher queries:
+Run custom Cypher queries against your graph:
 
 ```bash
-# Find all people interested in 'AI'
-uv run 05_query_graph.py --query "
-MATCH (p:Person)
-WHERE p.interests ILIKE '%AI%'
-RETURN p.name, p.age, p.interests
-ORDER BY p.age
-"
+# Using just command
+just graph-query <graph_id> "MATCH (p:Person) WHERE p.interests ILIKE '%AI%' RETURN p.name, p.age"
+
+# Or use the query script
+cd examples/custom_graph_demo
+uv run 05_query_graph.py --query "MATCH (p:Person) RETURN count(p)"
+```
+
+### Generate More Data
+
+To generate more entities than the default:
+
+```bash
+cd examples/custom_graph_demo
+uv run 03_generate_data.py --count 200 --regenerate
+uv run 04_upload_ingest.py
 ```
 
 ### Interactive Mode
@@ -328,6 +286,7 @@ ORDER BY p.age
 Enter interactive mode for ad-hoc queries:
 
 ```bash
+cd examples/custom_graph_demo
 uv run 05_query_graph.py
 
 # Then type preset names or custom queries
@@ -338,7 +297,7 @@ uv run 05_query_graph.py
 > quit
 ```
 
-## 📚 Learn More
+## Learn More
 
 ### Graph Database Benefits for Custom Applications
 
@@ -357,68 +316,57 @@ This demo shows patterns used in real RoboSystems integrations:
 - **CRM Systems**: Customer and contact relationship networks
 - **Knowledge Graphs**: Any domain with interconnected entities
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-**Problem:** Script fails with "No credentials found"
-**Solution:** Run step 1 first:
-
-```bash
-uv run 01_setup_credentials.py
-```
-
-**Problem:** Script fails with "No graph_id found"
-**Solution:** Run step 2 first:
-
-```bash
-uv run 02_create_graph.py
-```
-
-**Problem:** Script fails with "No parquet files found"
-**Solution:** Run step 3 first:
-
-```bash
-uv run 03_generate_data.py
-```
-
-**Problem:** Connection error
+**Problem:** Connection error or "API unavailable"
 **Solution:** Ensure RoboSystems is running:
-
 ```bash
-just start robosystems
+just start
+just logs robosystems-api  # Check API logs
 ```
 
-**Problem:** Import errors
-**Solution:** Install dev dependencies:
-
+**Problem:** "No credentials found"
+**Solution:** Run the credential setup:
 ```bash
-just install
+just demo-user
 ```
 
-## 💡 Tips
+**Problem:** Demo fails with authentication error
+**Solution:** Recreate credentials:
+```bash
+just demo-user --force
+```
+
+**Problem:** Want to start fresh with a new graph
+**Solution:** Use the new-graph flag:
+```bash
+just demo-custom-graph "new-graph"
+```
+
+## Tips
 
 - **`schema.json` is your template** - Copy and customize it for your own graph database schemas
-- All scripts can be run independently after their dependencies are met
-- Credentials and data are saved locally and reused across runs
-- Use `--force` or `--regenerate` flags to start fresh
-- The demo uses auto-generated test data - perfect for exploring the API
-- Check the generated Parquet files in `data/` to see the data structure
+- The `just demo-custom-graph` command handles all setup automatically
+- Credentials are saved in `examples/credentials/config.json` and reused across all demos
+- Generated data files are saved in `examples/custom_graph_demo/data/` for inspection
+- Use `just graph-query <graph_id> "<cypher>"` for ad-hoc queries
+- Check `just logs robosystems-api` if you encounter issues
 - Review `schema.json` to understand the complete graph structure before querying
 
-## 🎉 Success!
+## Success!
 
-After running all steps, you have:
+After running the demo, you have:
 
-1. ✅ User account & API key
-2. ✅ Generic graph database ready for custom data
-3. ✅ Sample people, companies, and projects data
-4. ✅ Ready-to-use query examples
+1. User account & API key (shared across all demos)
+2. Custom graph database with your schema
+3. Sample data demonstrating the graph structure
+4. Ready-to-use query examples
 
-Happy querying!
+Explore the data further with `just graph-query` or customize the schema for your own use case!
 
-## 📞 Support
+## Support
 
 For questions or issues:
-
-- Check the main project [README.md](../../README.md)
-- Review the [CLAUDE.md](../../CLAUDE.md) development guide
-- Open an issue on GitHub
+- Check the [Examples README](../README.md) for overview of all demos
+- Review the main [README.md](../../README.md) for platform documentation
+- Open an issue on [GitHub](https://github.com/RoboFinSystems/robosystems/issues)

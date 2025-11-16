@@ -218,6 +218,7 @@ pip install robosystems-client
 - **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
 - **[API Models](/robosystems/models/api/README.md)** - API request/response models
 - **[Configuration](/robosystems/config/README.md)** - Configuration management
+- **[Tasks](/robosystems/tasks/README.md)** - Celery task organization
 
 **Graph Database System:**
 
@@ -231,9 +232,15 @@ pip install robosystems-client
 - **[Authentication](/robosystems/middleware/auth/README.md)** - Authentication and authorization
 - **[Graph Routing](/robosystems/middleware/graph/README.md)** - Graph routing layer
 - **[MCP](/robosystems/middleware/mcp/README.md)** - MCP tools and pooling
-- **[Credits](/robosystems/middleware/credits/README.md)** - AI credit system
+- **[Billing](/robosystems/middleware/billing/README.md)** - Subscription and billing management
 - **[Observability](/robosystems/middleware/otel/README.md)** - OpenTelemetry observability
 - **[Robustness](/robosystems/middleware/robustness/README.md)** - Circuit breakers and retry policies
+
+**Development Resources:**
+
+- **[Examples](/examples/README.md)** - Runnable demos and integration examples
+- **[Tests](/tests/README.md)** - Testing strategy and organization
+- **[Admin Tools](/robosystems/admin/README.md)** - Administrative utilities and scripts
 
 **Security & Compliance:**
 
