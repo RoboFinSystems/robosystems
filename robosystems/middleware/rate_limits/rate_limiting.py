@@ -402,9 +402,9 @@ def subscription_aware_rate_limit_dependency(request: Request):
     subscription_tier = "free"
     identifier = f"anon_sub:{request.client.host if request.client else 'unknown'}"
   else:
-    # All authenticated users get standard tier rate limits
+    # All authenticated users get kuzu-standard tier rate limits
     # Graph-specific subscriptions are handled at the graph level
-    subscription_tier = "standard"
+    subscription_tier = "kuzu-standard"
     identifier = f"user_sub:{user_id}"
 
   # Determine endpoint category
@@ -493,9 +493,9 @@ def sse_connection_rate_limit_dependency(request: Request):
   user_id = get_user_from_request(request)
 
   # Determine subscription tier
-  # For now, all authenticated users get standard tier
+  # For now, all authenticated users get kuzu-standard tier
   # In the future, this could check actual subscription status
-  subscription_tier = "standard" if user_id else "free"
+  subscription_tier = "kuzu-standard" if user_id else "free"
 
   # Get rate limit for SSE based on subscription tier
   rate_limit = RateLimitConfig.get_rate_limit(subscription_tier, EndpointCategory.SSE)

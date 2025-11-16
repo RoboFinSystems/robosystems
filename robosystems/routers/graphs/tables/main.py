@@ -48,7 +48,7 @@ from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -127,7 +127,7 @@ async def list_tables(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

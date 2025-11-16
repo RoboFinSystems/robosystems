@@ -24,7 +24,7 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.routers.graphs.mcp.handlers import MCPHandler
 from robosystems.logger import logger
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Import MCP components
 from .handlers import validate_mcp_access
@@ -65,6 +65,13 @@ The tool list is customized based on:
 - User permissions and subscription tier
 - Backend capabilities (Kuzu, Neo4j, etc.)
 
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+The returned tool list is identical for parent graphs and subgraphs, as all
+MCP tools work uniformly across graph boundaries.
+
 **Note:**
 MCP tool listing is included - no credit consumption required.""",
   operation_id="listMcpTools",
@@ -81,7 +88,7 @@ async def list_mcp_tools(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),

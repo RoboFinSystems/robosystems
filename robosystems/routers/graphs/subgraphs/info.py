@@ -20,13 +20,13 @@ from .utils import (
   record_operation_metrics,
   handle_circuit_breaker_check,
 )
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN, SUBGRAPH_NAME_PATTERN
 
 router = APIRouter()
 
 
 @router.get(
-  "/{subgraph_id}/info",
+  "/{subgraph_name}/info",
   response_model=SubgraphResponse,
   operation_id="getSubgraphInfo",
   summary="Get Subgraph Details",
@@ -34,6 +34,7 @@ router = APIRouter()
 
 **Requirements:**
 - User must have read access to parent graph
+- Subgraph name must be alphanumeric (1-20 characters)
 
 **Response includes:**
 - Full subgraph metadata
@@ -48,7 +49,11 @@ Real-time statistics queried from Kuzu:
 - Node count
 - Edge count
 - Database size on disk
-- Schema information""",
+- Schema information
+
+**Note:**
+Use the subgraph name (e.g., 'dev', 'staging') not the full subgraph ID.
+The full ID is returned in the response (e.g., 'kg0123456789abcdef_dev').""",
   responses={
     200: {"description": "Subgraph information retrieved"},
     400: {"description": "Not a valid subgraph"},
@@ -65,8 +70,10 @@ async def get_subgraph_info(
   graph_id: str = Path(
     ..., description="Parent graph identifier", pattern=GRAPH_ID_PATTERN
   ),
-  subgraph_id: str = Path(
-    ..., description="Subgraph identifier", pattern=GRAPH_ID_PATTERN
+  subgraph_name: str = Path(
+    ...,
+    description="Subgraph name (e.g., 'dev', 'staging')",
+    pattern=SUBGRAPH_NAME_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
@@ -81,8 +88,8 @@ async def get_subgraph_info(
   handle_circuit_breaker_check(graph_id, "subgraph_info")
 
   try:
-    # Get and verify subgraph using subgraph_id parameter
-    subgraph = get_subgraph_by_name(graph_id, subgraph_id, session, current_user)
+    # Get and verify subgraph using subgraph name
+    subgraph = get_subgraph_by_name(graph_id, subgraph_name, session, current_user)
 
     if not subgraph.is_subgraph:
       raise HTTPException(

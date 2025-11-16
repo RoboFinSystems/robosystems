@@ -25,7 +25,7 @@ def create_graph_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
           - graph_id: Optional requested graph ID
           - schema_extensions: List of schema extensions to install
           - metadata: Graph metadata (name, description, type, tags)
-          - tier: Service tier (standard, enterprise, premium)
+          - tier: Service tier (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
           - initial_data: Optional initial data to populate
           - user_id: ID of the user creating the graph
           - custom_schema: Optional custom schema definition

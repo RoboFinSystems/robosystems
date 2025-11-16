@@ -125,12 +125,12 @@ class DatabaseCreateRequest(BaseModel):
   )
   is_subgraph: bool = Field(
     default=False,
-    description="Whether this is a subgraph (bypasses max_databases check for Enterprise/Premium)",
+    description="Whether this is a subgraph (bypasses max_databases check for higher tiers)",
   )
   tenant_tier: str = Field(
-    default="standard",
+    default="kuzu-standard",
     description="Tenant tier affecting resource allocation",
-    pattern=r"^(standard|enterprise|premium)$",
+    pattern=r"^(free|kuzu-standard|kuzu-large|kuzu-xlarge|kuzu-shared|neo4j-community-large|neo4j-enterprise-xlarge)$",
   )
 
 

@@ -151,15 +151,17 @@ class GraphTypeRegistry:
     """
     Build graph ID validation pattern for API endpoints.
 
-    Format: kg + 10-20 alphanumeric characters (lowercase hex from ULID generation)
+    Format: kg + 16+ hex characters (lowercase hex from ULID generation)
     Special cases: Shared repository names from SHARED_REPOSITORIES
-    Current generation: kg + 14 chars (ULID) + 4 chars (entity hash) = 18 chars total
+    Current generation:
+      - Generic graphs: kg + 16 chars (ULID) = 16 chars after prefix
+      - Entity graphs: kg + 14 chars (ULID) + 4 chars (entity hash) = 18 chars after prefix
 
     Returns:
         Regex pattern string for validating graph IDs
     """
     repo_names = "|".join(cls.SHARED_REPOSITORIES.keys())
-    return f"^(kg[a-z0-9]{{10,20}}|{repo_names})$"
+    return f"^(kg[a-f0-9]{{16,}}|{repo_names})$"
 
   # Patterns for identifying graph types
   USER_GRAPH_PATTERNS = [
@@ -285,5 +287,110 @@ class GraphTypeRegistry:
     return list(cls.SHARED_REPOSITORIES.keys())
 
 
-# Convenience constant for API endpoint validation
+# Convenience constants for API endpoint validation
+# Parent graphs and shared repositories only (for subgraph management and DynamoDB registry)
 GRAPH_ID_PATTERN = GraphTypeRegistry.get_graph_id_pattern()
+
+# Parent graphs, subgraphs, and shared repositories (for general graph-scoped endpoints)
+# Accepts: kg[hex]{16,} OR kg[hex]{16,}_[alphanumeric]{1,20} OR shared repo names
+GRAPH_OR_SUBGRAPH_ID_PATTERN = (
+  r"^(kg[a-f0-9]{16,}(?:_[a-zA-Z0-9]{1,20})?|"
+  + "|".join(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
+  + r")$"
+)
+
+# Subgraph name pattern (for subgraph creation/management endpoints)
+# Just the name part (e.g., "dev", "staging", "prod1"), not the full ID
+SUBGRAPH_NAME_PATTERN = r"^[a-zA-Z0-9]{1,20}$"
+
+
+def is_subgraph_id(graph_id: str) -> bool:
+  """
+  Check if graph_id is a subgraph ID.
+
+  Subgraph IDs contain an underscore with non-empty parent and subgraph parts,
+  and are not shared repositories.
+
+  Args:
+      graph_id: The graph identifier to check
+
+  Returns:
+      True if graph_id is a subgraph ID, False otherwise
+
+  Examples:
+      >>> is_subgraph_id("kg0123456789abcdef_dev")
+      True
+      >>> is_subgraph_id("kg0123456789abcdef")
+      False
+      >>> is_subgraph_id("sec")
+      False
+      >>> is_subgraph_id("_")
+      False
+      >>> is_subgraph_id("kg_")
+      True
+  """
+  if not graph_id or graph_id in GraphTypeRegistry.SHARED_REPOSITORIES:
+    return False
+  if "_" not in graph_id:
+    return False
+  parts = graph_id.split("_", 1)
+  return len(parts[0]) > 0
+
+
+def parse_graph_id(graph_id: str) -> tuple[str, Optional[str]]:
+  """
+  Parse graph_id into parent graph ID and optional subgraph name.
+
+  Args:
+      graph_id: The graph identifier to parse
+
+  Returns:
+      Tuple of (parent_graph_id, subgraph_name)
+      - For parent graphs: (graph_id, None)
+      - For subgraphs: (parent_id, subgraph_name)
+      - For shared repos: (graph_id, None)
+
+  Examples:
+      >>> parse_graph_id("kg0123456789abcdef_dev")
+      ("kg0123456789abcdef", "dev")
+      >>> parse_graph_id("kg0123456789abcdef")
+      ("kg0123456789abcdef", None)
+      >>> parse_graph_id("sec")
+      ("sec", None)
+  """
+  if is_subgraph_id(graph_id):
+    parts = graph_id.split("_", 1)
+    return parts[0], parts[1]
+  return graph_id, None
+
+
+def construct_subgraph_id(parent_graph_id: str, subgraph_name: str) -> str:
+  """
+  Construct a full subgraph ID from parent graph ID and subgraph name.
+
+  Args:
+      parent_graph_id: The parent graph identifier
+      subgraph_name: The subgraph name
+
+  Returns:
+      Full subgraph ID in format: parent_id_subgraph_name
+
+  Examples:
+      >>> construct_subgraph_id("kg0123456789abcdef", "dev")
+      "kg0123456789abcdef_dev"
+
+  Raises:
+      ValueError: If parent_graph_id or subgraph_name are invalid
+  """
+  if not parent_graph_id:
+    raise ValueError("parent_graph_id cannot be empty")
+  if not subgraph_name:
+    raise ValueError("subgraph_name cannot be empty")
+  if "_" in parent_graph_id:
+    raise ValueError(f"parent_graph_id cannot contain underscore: {parent_graph_id}")
+  if not re.match(SUBGRAPH_NAME_PATTERN, subgraph_name):
+    raise ValueError(
+      f"subgraph_name must be alphanumeric (1-20 chars): {subgraph_name}"
+    )
+
+  return f"{parent_graph_id}_{subgraph_name}"

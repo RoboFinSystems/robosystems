@@ -87,7 +87,7 @@ from robosystems.config.valkey_registry import (
   ValkeyDatabase,
   create_async_redis_client,
 )
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 import time
 
 router = APIRouter()
@@ -116,7 +116,7 @@ Processes all tables in a single bulk operation with comprehensive error handlin
 2. Files are validated and marked as 'uploaded'
 3. Trigger ingestion: `POST /tables/ingest`
 4. DuckDB staging tables created from S3 patterns
-5. Data copied row-by-row from DuckDB to Kuzu
+5. Data copied from DuckDB to Kuzu
 6. Per-table results and metrics returned
 
 **Rebuild Feature:**
@@ -146,6 +146,13 @@ Setting `rebuild=true` regenerates the entire graph database from scratch:
 Only one ingestion can run per graph at a time. If another ingestion is in progress,
 you'll receive a 409 Conflict error. The distributed lock automatically expires after
 the configured TTL (default: 1 hour) to prevent deadlocks from failed ingestions.
+
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+Each subgraph has independent staging tables and graph data. Ingestion operates
+on the specified graph/subgraph only and does not affect other subgraphs.
 
 **Important Notes:**
 - Only files with 'uploaded' status are processed
@@ -204,7 +211,7 @@ async def ingest_tables(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   request: BulkIngestRequest = Body(..., description="Ingestion request"),
   current_user: User = Depends(get_current_user_with_graph),

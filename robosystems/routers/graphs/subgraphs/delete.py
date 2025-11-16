@@ -27,13 +27,13 @@ from .utils import (
   record_operation_metrics,
   handle_circuit_breaker_check,
 )
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN, SUBGRAPH_NAME_PATTERN
 
 router = APIRouter()
 
 
 @router.delete(
-  "/{subgraph_id}",
+  "/{subgraph_name}",
   response_model=DeleteSubgraphResponse,
   operation_id="deleteSubgraph",
   summary="Delete Subgraph",
@@ -42,6 +42,7 @@ router = APIRouter()
 **Requirements:**
 - Must be a valid subgraph (not parent graph)
 - User must have admin access to parent graph
+- Subgraph name must be alphanumeric (1-20 characters)
 - Optional backup before deletion
 
 **Deletion Options:**
@@ -54,7 +55,10 @@ All data in the subgraph will be lost.
 
 **Backup Location:**
 If backup requested, stored in S3 Kuzu database bucket at:
-`s3://{kuzu_s3_bucket}/{instance_id}/{database_name}_{timestamp}.backup`""",
+`s3://{kuzu_s3_bucket}/{instance_id}/{database_name}_{timestamp}.backup`
+
+**Note:**
+Use the subgraph name (e.g., 'dev', 'staging') not the full subgraph ID.""",
   responses={
     200: {"description": "Subgraph deleted successfully"},
     400: {"description": "Invalid subgraph identifier"},
@@ -72,8 +76,10 @@ async def delete_subgraph(
   graph_id: str = Path(
     ..., description="Parent graph identifier", pattern=GRAPH_ID_PATTERN
   ),
-  subgraph_id: str = Path(
-    ..., description="Subgraph identifier to delete", pattern=GRAPH_ID_PATTERN
+  subgraph_name: str = Path(
+    ...,
+    description="Subgraph name to delete (e.g., 'dev', 'staging')",
+    pattern=SUBGRAPH_NAME_PATTERN,
   ),
   request: DeleteSubgraphRequest = ...,
   current_user: User = Depends(get_current_user_with_graph),
@@ -92,8 +98,8 @@ async def delete_subgraph(
   handle_circuit_breaker_check(graph_id, "subgraph_delete")
 
   try:
-    # Get and verify subgraph using subgraph_id parameter
-    subgraph = get_subgraph_by_name(graph_id, subgraph_id, session, current_user)
+    # Get and verify subgraph using subgraph name
+    subgraph = get_subgraph_by_name(graph_id, subgraph_name, session, current_user)
 
     user_graph = (
       session.query(GraphUser)

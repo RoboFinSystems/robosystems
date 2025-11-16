@@ -170,7 +170,7 @@ class SubgraphService:
       logger.error(f"Failed to create subgraph database {subgraph_id}: {e}")
       raise GraphAllocationError(f"Failed to create subgraph: {str(e)}")
 
-  def create_subgraph(
+  async def create_subgraph(
     self,
     parent_graph: "Graph",
     user: "User",
@@ -182,8 +182,11 @@ class SubgraphService:
     """
     Create a subgraph including both the database and PostgreSQL metadata.
 
-    This is a synchronous wrapper that creates the PostgreSQL records.
-    The actual Kuzu database creation happens asynchronously.
+    This method:
+    1. Creates the actual Kuzu database on the parent's instance
+    2. Installs schema (base + extensions from parent)
+    3. Creates PostgreSQL metadata records
+    4. Creates user-graph relationship
 
     Args:
         parent_graph: Parent graph model
@@ -202,6 +205,24 @@ class SubgraphService:
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
 
+    # Step 1: Create the actual Kuzu database on the parent's instance
+    logger.info(
+      f"Creating Kuzu database for subgraph {subgraph_id} on parent {parent_graph.graph_id}'s instance"
+    )
+
+    try:
+      # Directly await the async database creation method
+      db_creation_result = await self.create_subgraph_database(
+        parent_graph_id=parent_graph.graph_id,
+        subgraph_name=name,
+        schema_extensions=parent_graph.schema_extensions or [],
+      )
+      logger.info(f"Kuzu database created: {db_creation_result}")
+    except Exception as e:
+      logger.error(f"Failed to create Kuzu database for subgraph: {e}")
+      raise
+
+    # Step 2: Create PostgreSQL metadata records
     db = next(get_db_session())
     try:
       existing_subgraphs = (
@@ -262,6 +283,8 @@ class SubgraphService:
         "status": "active",
         "created_at": subgraph.created_at,
         "updated_at": subgraph.updated_at,
+        "database_created": db_creation_result.get("status") == "created",
+        "instance_id": db_creation_result.get("instance_id"),
       }
 
     except Exception as e:

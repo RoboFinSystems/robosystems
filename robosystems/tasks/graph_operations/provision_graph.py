@@ -130,7 +130,7 @@ def provision_graph_task(
       entity_data = {
         **initial_entity,
         "graph_tier": tier,
-        "subscription_tier": "standard",
+        "subscription_tier": "kuzu-standard",
         "extensions": graph_config.get("schema_extensions", []),
         "graph_name": graph_config.get("graph_name"),
         "graph_description": graph_config.get("description"),

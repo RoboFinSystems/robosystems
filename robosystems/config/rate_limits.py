@@ -135,7 +135,7 @@ class RateLimitConfig:
       EndpointCategory.GRAPH_AGENT: (50, RateLimitPeriod.MINUTE),  # 3k/hour possible
       EndpointCategory.GRAPH_QUERY: (200, RateLimitPeriod.MINUTE),  # 12k/hour possible
       EndpointCategory.GRAPH_IMPORT: (50, RateLimitPeriod.MINUTE),  # 3k/hour possible
-      # Table operations - standard tier (generous burst limits)
+      # Table operations (generous burst limits)
       EndpointCategory.TABLE_QUERY: (60, RateLimitPeriod.MINUTE),  # 3.6k/hour possible
       EndpointCategory.TABLE_UPLOAD: (20, RateLimitPeriod.MINUTE),  # 1.2k/hour possible
       EndpointCategory.TABLE_MANAGEMENT: (
@@ -175,7 +175,7 @@ class RateLimitConfig:
       ),  # 9k/hour possible
     },
     "kuzu-xlarge": {
-      # Premium gets extreme burst limits - essentially unlimited
+      # XLarge tier gets extreme burst limits - essentially unlimited
       # Only safety limits to prevent complete system abuse
       EndpointCategory.AUTH: (100, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (3000, RateLimitPeriod.MINUTE),
@@ -184,7 +184,7 @@ class RateLimitConfig:
       EndpointCategory.SSE: (
         100,
         RateLimitPeriod.MINUTE,
-      ),  # Generous SSE connections for premium
+      ),  # Generous SSE connections for xlarge tier
       # Graph-scoped endpoints - EXTREME BURST LIMITS
       EndpointCategory.GRAPH_READ: (
         10000,
@@ -228,11 +228,6 @@ class RateLimitConfig:
       ),  # 30k/hour possible
     },
   }
-
-  # Add legacy tier name mappings directly in the class after definition
-  SUBSCRIPTION_RATE_LIMITS["standard"] = SUBSCRIPTION_RATE_LIMITS["kuzu-standard"]
-  SUBSCRIPTION_RATE_LIMITS["enterprise"] = SUBSCRIPTION_RATE_LIMITS["kuzu-large"]
-  SUBSCRIPTION_RATE_LIMITS["premium"] = SUBSCRIPTION_RATE_LIMITS["kuzu-xlarge"]
 
   @classmethod
   def get_rate_limit(

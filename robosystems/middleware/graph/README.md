@@ -16,8 +16,8 @@ The graph middleware:
 **Supported Backends:**
 
 - **Kuzu**: Embedded graph database with EC2-based clusters
-- **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers
-- **Neo4j Enterprise**: Multi-database support for Premium tier
+- **Neo4j Community**: Client-server architecture for kuzu-large tier
+- **Neo4j Enterprise**: Multi-database support for kuzu-xlarge tier
 
 ## Architecture
 
@@ -67,7 +67,7 @@ router = GraphRouter()
 repo = router.get_repository(
     graph_id="kg1a2b3c",
     operation_type="write",
-    tier=InstanceTier.STANDARD
+    tier=GraphTier.KUZU_STANDARD
 )
 result = await repo.execute_query("MATCH (n) RETURN n LIMIT 10")
 ```
@@ -226,7 +226,7 @@ Core type definitions and enums.
 **Key Types:**
 
 - `GraphType`: Enum for graph types (ENTITY, SHARED_REPOSITORY)
-- `InstanceTier`: Enum for instance tiers (STANDARD, ENTERPRISE, PREMIUM)
+- `GraphTier`: Enum for graph tiers (KUZU_STANDARD, KUZU_LARGE, KUZU_XLARGE)
 - `OperationType`: Enum for operations (READ, WRITE, ADMIN)
 - `QueryPriority`: Priority levels (1-10)
 
@@ -240,18 +240,19 @@ DynamoDB-based allocation manager for graph databases across instances (Kuzu-spe
 - **Instance Management**: Tracks capacity and health of Kuzu instances
 - **Atomic Allocation**: Race-condition-free database assignment
 - **Auto-scaling Integration**: Triggers capacity increases when needed
-- **Multi-tier Support**: Standard/Enterprise/Premium instance tiers
+- **Multi-tier Support**: kuzu-standard, kuzu-large, kuzu-xlarge instance tiers
 - **Instance Protection**: Automatically enables scale-in protection for instances with allocated databases
 
 **Usage:**
 
 ```python
 from robosystems.middleware.graph.allocation_manager import KuzuAllocationManager
+from robosystems.config.graph_tier import GraphTier
 
 manager = KuzuAllocationManager(environment="prod")
 location = await manager.allocate_database(
     entity_id="kg1a2b3c",
-    instance_tier=InstanceTier.STANDARD
+    instance_tier=GraphTier.KUZU_STANDARD
 )
 print(f"Database allocated to {location.instance_id}")
 ```

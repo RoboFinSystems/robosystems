@@ -26,6 +26,7 @@ from ...models.iam.user_repository_credits import UserRepositoryCredits
 from ...models.iam.user_repository import UserRepository, RepositoryType
 from ...config.credits import CreditConfig
 from ...config import BillingConfig
+from ...middleware.graph.types import parse_graph_id
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,8 @@ class CreditService:
         graph_id: Unique graph identifier
         user_id: Graph owner user ID
         billing_admin_id: User responsible for billing
-        subscription_tier: User's subscription tier (standard/enterprise/premium)
-        graph_tier: Database tier (standard/enterprise/premium)
+        subscription_tier: User's subscription tier (kuzu-standard/kuzu-large/kuzu-xlarge)
+        graph_tier: Database tier (kuzu-standard/kuzu-large/kuzu-xlarge)
 
     Returns:
         GraphCredits instance
@@ -95,6 +96,19 @@ class CreditService:
       f"Created credit pool for graph {graph_id}: {plan_config['monthly_credit_allocation']} credits"
     )
     return credits
+
+  def _get_parent_graph_id(self, graph_id: str) -> str:
+    """
+    Get the parent graph ID from any graph ID.
+
+    For subgraphs (e.g., 'kg0123_dev'), returns the parent ID ('kg0123').
+    For parent graphs, returns the graph ID unchanged.
+    For shared repositories, returns the graph ID unchanged.
+
+    This ensures subgraphs share the same credit pool as their parent.
+    """
+    parent_id, _ = parse_graph_id(graph_id)
+    return parent_id
 
   def _is_shared_repository(self, graph_id: str) -> bool:
     """Check if the graph_id represents a shared repository."""
@@ -156,10 +170,13 @@ class CreditService:
         base_cost=base_cost,  # Pass the base_cost through for AI operations
       )
 
+    # For subgraphs, use parent graph ID to access shared credit pool
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
     # Try to get cached balance first
     from ...middleware.billing.cache import credit_cache
 
-    cached_data = credit_cache.get_cached_graph_credit_balance(graph_id)
+    cached_data = credit_cache.get_cached_graph_credit_balance(parent_graph_id)
 
     if cached_data:
       # Use cached balance for quick check
@@ -175,12 +192,14 @@ class CreditService:
           "available_credits": float(balance),
         }
 
-    # Get credit record from database
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
+    # Get credit record from database using parent graph ID
+    # Subgraphs share the same credit pool as their parent
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {
         "success": False,
-        "error": "No credit pool found for graph",
+        "error": f"No credit pool found for graph {parent_graph_id}"
+        + (f" (parent of subgraph {graph_id})" if graph_id != parent_graph_id else ""),
         "credits_consumed": 0,
       }
 
@@ -196,11 +215,12 @@ class CreditService:
 
     if consumption_result["success"]:
       # Update cache with new balance from atomic operation
+      # Use parent_graph_id for cache to ensure subgraphs share cache with parent
       try:
         from ...middleware.billing.cache import credit_cache
 
         # Invalidate old cache and set new one with updated balance
-        credit_cache.invalidate_graph_credit_balance(graph_id)
+        credit_cache.invalidate_graph_credit_balance(parent_graph_id)
 
         # Cache the new balance from atomic operation
         graph_tier_value = (
@@ -209,7 +229,7 @@ class CreditService:
           else str(credits.graph_tier)
         )
         credit_cache.cache_graph_credit_balance(
-          graph_id=graph_id,
+          graph_id=parent_graph_id,
           balance=Decimal(str(consumption_result["new_balance"])),
           graph_tier=graph_tier_value,
         )
@@ -226,10 +246,11 @@ class CreditService:
       }
     else:
       # Invalidate cache on failure to ensure consistency
+      # Use parent_graph_id to ensure subgraphs' shared cache is invalidated
       try:
         from ...middleware.billing.cache import credit_cache
 
-        credit_cache.invalidate_graph_credit_balance(graph_id)
+        credit_cache.invalidate_graph_credit_balance(parent_graph_id)
       except Exception as e:
         logger.warning(f"Failed to invalidate credit cache: {e}")
 
@@ -293,26 +314,28 @@ class CreditService:
         "last_allocation_date": repo_summary["last_allocation_date"],
       }
 
-    # For user graphs, use the existing logic
+    # For user graphs (and subgraphs), use parent graph ID to access shared credit pool
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
     # Try cache first
     from ...middleware.billing.cache import credit_cache
 
-    cached_summary = credit_cache.get_cached_credit_summary(graph_id)
+    cached_summary = credit_cache.get_cached_credit_summary(parent_graph_id)
     if cached_summary:
       return cached_summary
 
-    # Fallback to database
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
+    # Fallback to database using parent graph ID (subgraphs share parent's pool)
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
-      return {"error": "No credit pool found for graph"}
+      return {"error": f"No credit pool found for graph {parent_graph_id}"}
 
     summary = credits.get_usage_summary(self.session)
 
-    # Cache the summary
+    # Cache the summary using parent_graph_id (subgraphs share parent's cache)
     try:
       from ...middleware.billing.cache import credit_cache
 
-      credit_cache.cache_credit_summary(graph_id, summary)
+      credit_cache.cache_credit_summary(parent_graph_id, summary)
     except Exception as e:
       logger.warning(f"Failed to cache credit summary: {e}")
 
@@ -320,7 +343,10 @@ class CreditService:
 
   def allocate_monthly_credits(self, graph_id: str) -> Dict[str, Any]:
     """Allocate monthly credits if due."""
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
+    # For subgraphs, use parent graph ID to access shared credit pool
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {"error": "No credit pool found for graph"}
 
@@ -329,11 +355,11 @@ class CreditService:
     if allocated:
       self.session.commit()
 
-      # Invalidate cache after allocation
+      # Invalidate cache after allocation using parent_graph_id
       try:
         from ...middleware.billing.cache import credit_cache
 
-        credit_cache.invalidate_graph_credit_balance(graph_id)
+        credit_cache.invalidate_graph_credit_balance(parent_graph_id)
       except Exception as e:
         logger.warning(f"Failed to invalidate credit cache after allocation: {e}")
 
@@ -354,7 +380,10 @@ class CreditService:
     metadata: Optional[Dict[str, Any]] = None,
   ) -> Dict[str, Any]:
     """Add bonus credits to a graph."""
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
+    # For subgraphs, use parent graph ID to access shared credit pool
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {"error": "No credit pool found for graph"}
 
@@ -362,10 +391,10 @@ class CreditService:
     credits.current_balance += amount
     credits.updated_at = datetime.now(timezone.utc)
 
-    # Record transaction with idempotency
+    # Record transaction with idempotency using parent_graph_id
     import uuid
 
-    idempotency_key = f"bonus_{graph_id}_{uuid.uuid4()}"
+    idempotency_key = f"bonus_{parent_graph_id}_{uuid.uuid4()}"
 
     GraphCreditTransaction.create_transaction(
       graph_credits_id=credits.id,
@@ -375,17 +404,17 @@ class CreditService:
       metadata=metadata,
       session=self.session,
       idempotency_key=idempotency_key,
-      graph_id=graph_id,
+      graph_id=parent_graph_id,
       user_id=credits.user_id,
     )
 
     self.session.commit()
 
-    # Invalidate cache after bonus credits
+    # Invalidate cache after bonus credits using parent_graph_id
     try:
       from ...middleware.billing.cache import credit_cache
 
-      credit_cache.invalidate_graph_credit_balance(graph_id)
+      credit_cache.invalidate_graph_credit_balance(parent_graph_id)
     except Exception as e:
       logger.warning(f"Failed to invalidate credit cache after bonus: {e}")
 
@@ -403,7 +432,10 @@ class CreditService:
     limit: int = 100,
   ) -> List[Dict[str, Any]]:
     """Get credit transactions for a graph."""
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
+    # For subgraphs, use parent graph ID to access shared credit pool
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return []
 
@@ -470,10 +502,13 @@ class CreditService:
         }
 
     # Original graph credit logic for regular graphs
+    # For subgraphs, use parent graph ID to access shared credit pool
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
     # Try cache first for quick balance check
     from ...middleware.billing.cache import credit_cache
 
-    cached_data = credit_cache.get_cached_graph_credit_balance(graph_id)
+    cached_data = credit_cache.get_cached_graph_credit_balance(parent_graph_id)
 
     if cached_data:
       balance, graph_tier = cached_data
@@ -488,8 +523,8 @@ class CreditService:
         "repository_type": "graph",
       }
 
-    # Fallback to database
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
+    # Fallback to database using parent graph ID (subgraphs share parent's pool)
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return {
         "has_sufficient_credits": False,
@@ -497,12 +532,12 @@ class CreditService:
       }
 
     # Calculate actual remaining balance (allocation - consumed)
-    consumed_this_month = self._get_consumed_this_month(graph_id)
+    consumed_this_month = self._get_consumed_this_month(parent_graph_id)
     actual_balance = float(credits.monthly_allocation) - float(consumed_this_month)
 
     has_sufficient = Decimal(str(actual_balance)) >= required_credits
 
-    # Cache the balance for future checks
+    # Cache the balance for future checks using parent_graph_id
     try:
       from ...middleware.billing.cache import credit_cache
 
@@ -510,7 +545,7 @@ class CreditService:
       graph_tier_value = credits.graph_tier
 
       credit_cache.cache_graph_credit_balance(
-        graph_id=graph_id,
+        graph_id=parent_graph_id,
         balance=Decimal(str(actual_balance)),
         graph_tier=graph_tier_value,
       )
@@ -533,20 +568,6 @@ class CreditService:
       "kuzu-standard": [GraphTier.KUZU_STANDARD],
       "kuzu-large": [GraphTier.KUZU_STANDARD, GraphTier.KUZU_LARGE],
       "kuzu-xlarge": [
-        GraphTier.KUZU_STANDARD,
-        GraphTier.KUZU_LARGE,
-        GraphTier.KUZU_XLARGE,
-        GraphTier.NEO4J_COMMUNITY_LARGE,
-        GraphTier.NEO4J_ENTERPRISE_XLARGE,
-      ],
-      # Legacy tier names for backward compatibility
-      "standard": [GraphTier.KUZU_STANDARD],
-      "enterprise": [
-        GraphTier.KUZU_STANDARD,
-        GraphTier.KUZU_LARGE,
-        GraphTier.KUZU_XLARGE,
-      ],
-      "premium": [
         GraphTier.KUZU_STANDARD,
         GraphTier.KUZU_LARGE,
         GraphTier.KUZU_XLARGE,
@@ -598,8 +619,11 @@ class CreditService:
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # Get the graph credits record
-    credits = GraphCredits.get_by_graph_id(graph_id, self.session)
+    # For subgraphs, use parent graph ID to access shared credit pool
+    parent_graph_id = self._get_parent_graph_id(graph_id)
+
+    # Get the graph credits record using parent_graph_id
+    credits = GraphCredits.get_by_graph_id(parent_graph_id, self.session)
     if not credits:
       return Decimal("0")
 
@@ -626,20 +650,6 @@ class CreditService:
       "kuzu-standard": [GraphTier.KUZU_STANDARD],
       "kuzu-large": [GraphTier.KUZU_STANDARD, GraphTier.KUZU_LARGE],
       "kuzu-xlarge": [
-        GraphTier.KUZU_STANDARD,
-        GraphTier.KUZU_LARGE,
-        GraphTier.KUZU_XLARGE,
-        GraphTier.NEO4J_COMMUNITY_LARGE,
-        GraphTier.NEO4J_ENTERPRISE_XLARGE,
-      ],
-      # Legacy tier names for backward compatibility
-      "standard": [GraphTier.KUZU_STANDARD],
-      "enterprise": [
-        GraphTier.KUZU_STANDARD,
-        GraphTier.KUZU_LARGE,
-        GraphTier.KUZU_XLARGE,
-      ],
-      "premium": [
         GraphTier.KUZU_STANDARD,
         GraphTier.KUZU_LARGE,
         GraphTier.KUZU_XLARGE,

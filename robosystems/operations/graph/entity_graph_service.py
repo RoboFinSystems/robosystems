@@ -37,11 +37,6 @@ SUBSCRIPTION_TO_GRAPH_TIER = {
   "kuzu-standard": GraphTier.KUZU_STANDARD,
   "kuzu-large": GraphTier.KUZU_LARGE,
   "kuzu-xlarge": GraphTier.KUZU_XLARGE,
-  # Legacy mappings for backward compatibility
-  "standard": GraphTier.KUZU_STANDARD,
-  "professional": GraphTier.KUZU_LARGE,
-  "enterprise": GraphTier.KUZU_XLARGE,
-  "premium": GraphTier.KUZU_XLARGE,
 }
 
 
@@ -87,7 +82,7 @@ class EntityGraphService:
     Args:
         entity_data_dict: Entity creation data as dictionary
         user_id: ID of the user creating the entity
-        tier: Service tier (shared, enterprise, premium)
+        tier: Service tier (kuzu-shared, kuzu-standard, kuzu-large, kuzu-xlarge)
         cancellation_callback: Optional callback to check for cancellation
 
     Returns:
@@ -418,8 +413,8 @@ class EntityGraphService:
     Uses ULID for sequential ordering (optimal B-tree performance) plus
     entity name hash for additional uniqueness and traceability.
 
-    The ID must be between 10-20 characters after the 'kg' prefix to match
-    the API validation pattern: ^(kg[a-z0-9]{10,20}|sec|industry|economic)$
+    The ID must be 16+ hex characters after the 'kg' prefix to match
+    the API validation pattern: ^(kg[a-f0-9]{16,}|sec|industry|economic)$
     """
     from ...utils.ulid import generate_ulid_hex
 

@@ -271,7 +271,7 @@ async def create_subgraph(
 
     # 6. Create the subgraph using service
     service = get_subgraph_service()
-    subgraph_result = service.create_subgraph(
+    subgraph_result = await service.create_subgraph(
       parent_graph=parent_graph,
       user=current_user,
       name=request.name,

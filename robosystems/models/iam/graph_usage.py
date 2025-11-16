@@ -85,7 +85,7 @@ class GraphUsage(Model):
   # Graph tier and infrastructure
   graph_tier = Column(
     String, nullable=False, index=True
-  )  # standard, enterprise, premium
+  )  # kuzu-standard, kuzu-large, kuzu-xlarge, etc.
   instance_id = Column(String, nullable=True)  # Infrastructure instance
   region = Column(String, nullable=True)  # AWS region
 

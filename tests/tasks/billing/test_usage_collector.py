@@ -33,12 +33,12 @@ class TestGraphUsageCollectorTask:
       {
         "graph_id": "graph1",
         "user_id": "user1",
-        "graph_tier": "standard",
+        "graph_tier": "kuzu-standard",
       },
       {
         "graph_id": "graph2",
         "user_id": "user2",
-        "graph_tier": "enterprise",
+        "graph_tier": "kuzu-large",
       },
     ]
     mock_get_graphs.return_value = mock_graphs
@@ -138,9 +138,9 @@ class TestGraphUsageCollectorTask:
     mock_session.return_value = mock_db
 
     mock_graphs = [
-      {"graph_id": "graph1", "user_id": "user1", "graph_tier": "standard"},
-      {"graph_id": "graph2", "user_id": "user2", "graph_tier": "enterprise"},
-      {"graph_id": "graph3", "user_id": "user3", "graph_tier": "premium"},
+      {"graph_id": "graph1", "user_id": "user1", "graph_tier": "kuzu-standard"},
+      {"graph_id": "graph2", "user_id": "user2", "graph_tier": "kuzu-large"},
+      {"graph_id": "graph3", "user_id": "user3", "graph_tier": "kuzu-xlarge"},
     ]
     mock_get_graphs.return_value = mock_graphs
 

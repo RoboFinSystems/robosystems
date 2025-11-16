@@ -23,7 +23,7 @@ from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Create router
 router = APIRouter(tags=["Graph Info"])
@@ -76,6 +76,13 @@ Database statistics:
 - **Backup Status**: Backup availability and recency
 - **Timestamps**: Creation and modification dates
 
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+Returned metrics are specific to the requested graph/subgraph. Subgraphs have
+independent size, node/relationship counts, and backup status.
+
 This endpoint provides essential database information for capacity planning and monitoring.""",
   operation_id="getDatabaseInfo",
   responses={
@@ -96,7 +103,7 @@ async def get_database_info(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),

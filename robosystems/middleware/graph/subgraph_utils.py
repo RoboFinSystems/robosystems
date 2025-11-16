@@ -10,6 +10,8 @@ import re
 from typing import Optional, NamedTuple, Tuple
 from enum import Enum
 
+from .types import SUBGRAPH_NAME_PATTERN as SUBGRAPH_NAME_PATTERN_STR
+
 
 class SubgraphType(Enum):
   """Types of subgraphs (for future expansion)."""
@@ -30,10 +32,17 @@ class SubgraphInfo(NamedTuple):
   subgraph_index: Optional[int] = None  # Numeric index if applicable
 
 
-# Regex patterns for validation
+# Regex patterns for subgraph parsing
+# NOTE: SUBGRAPH_NAME_PATTERN is imported from types.py for consistency
+
 # Only user graphs (kg prefix) can be parents - shared repositories CANNOT have subgraphs
 PARENT_GRAPH_PATTERN = re.compile(r"^kg[a-f0-9]{16,}$")
-SUBGRAPH_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9]{1,20}$")
+
+# Subgraph name validation (compiled from imported pattern for efficiency)
+SUBGRAPH_NAME_PATTERN = re.compile(SUBGRAPH_NAME_PATTERN_STR)
+
+# Full subgraph ID pattern with capture groups for parsing
+# Matches: kg[hex]{16,}_[alphanumeric]{1,20}
 FULL_SUBGRAPH_PATTERN = re.compile(r"^(kg[a-f0-9]{16,})_([a-zA-Z0-9]{1,20})$")
 
 

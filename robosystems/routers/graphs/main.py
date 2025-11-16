@@ -449,7 +449,7 @@ async def create_graph(
           "entity_data": {
             **request.initial_entity.model_dump(),
             "graph_tier": graph_tier.value,
-            "subscription_tier": "standard",  # Default for tracking
+            "subscription_tier": "kuzu-standard",  # Default for tracking
             "extensions": request.metadata.schema_extensions,  # EntityCreate expects 'extensions' not 'schema_extensions'
             "graph_name": request.metadata.graph_name,
             "graph_description": request.metadata.description,

@@ -42,7 +42,7 @@ from robosystems.middleware.otel.metrics import (
   get_endpoint_metrics,
 )
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -98,6 +98,12 @@ Query parameters provide automatic escaping and type safety. Use `?` placeholder
 - Read-only: No INSERT, UPDATE, DELETE
 - User's tables only: Cannot query other users' data
 
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+Each subgraph has its own independent staging tables.
+
 **Shared Repositories:**
 Shared repositories (SEC, etc.) do not allow direct SQL queries.
 Use the graph query endpoint instead: `POST /v1/graphs/{graph_id}/query`
@@ -142,7 +148,7 @@ async def query_tables(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   request: TableQueryRequest = Body(..., description="SQL query request"),
   current_user: User = Depends(get_current_user_with_graph),

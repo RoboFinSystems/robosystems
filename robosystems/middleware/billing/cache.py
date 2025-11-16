@@ -77,7 +77,7 @@ class CreditCache:
     Args:
         graph_id: Graph identifier
         balance: Current credit balance
-        graph_tier: Graph tier (standard/enterprise/premium)
+        graph_tier: Graph tier (kuzu-standard/kuzu-large/kuzu-xlarge)
     """
     try:
       cache_key = self._get_graph_credit_key(graph_id)

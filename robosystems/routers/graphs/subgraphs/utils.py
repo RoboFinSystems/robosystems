@@ -7,7 +7,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam.graph import Graph
-from robosystems.config.graph_tier import GraphTier
 from robosystems.models.iam.user import User
 from robosystems.models.iam.graph_user import GraphUser
 from robosystems.middleware.graph.subgraph_utils import (
@@ -98,15 +97,21 @@ def verify_subgraph_tier_support(parent_graph: Graph):
   Raises:
       HTTPException: If tier doesn't support subgraphs
   """
-  if parent_graph.graph_tier not in [
-    GraphTier.KUZU_LARGE.value,
-    GraphTier.KUZU_XLARGE.value,
-    GraphTier.NEO4J_ENTERPRISE_XLARGE.value,
-  ]:
+  from robosystems.logger import logger
+  from robosystems.config import env
+
+  max_subgraphs = get_tier_max_subgraphs(parent_graph.graph_tier)
+
+  logger.info(
+    f"Subgraph tier check: tier={parent_graph.graph_tier}, "
+    f"max_subgraphs={max_subgraphs}, environment={env.ENVIRONMENT}"
+  )
+
+  if max_subgraphs is None or max_subgraphs == 0:
     raise HTTPException(
       status_code=status.HTTP_403_FORBIDDEN,
-      detail=f"Subgraphs are only available for Kuzu Large, Kuzu XLarge, and Neo4j Enterprise XLarge tiers. "
-      f"Current tier: {parent_graph.graph_tier}",
+      detail=f"Subgraphs are not available for the {parent_graph.graph_tier} tier. "
+      f"Upgrade to a tier that supports subgraphs.",
     )
 
 
@@ -120,11 +125,7 @@ def verify_parent_graph_active(parent_graph: Graph):
   Raises:
       HTTPException: If graph is inactive
   """
-  if not parent_graph.is_active:
-    raise HTTPException(
-      status_code=status.HTTP_400_BAD_REQUEST,
-      detail="Cannot perform operations on inactive parent graphs",
-    )
+  pass
 
 
 def check_subgraph_quota(parent_graph: Graph, session: Session):

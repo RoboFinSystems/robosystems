@@ -35,7 +35,7 @@ def test_get_priority_for_user_applies_premium_boost(monkeypatch):
   monkeypatch.setattr(QueryQueueConfig, "DEFAULT_PRIORITY", 10)
   monkeypatch.setattr(QueryQueueConfig, "PRIORITY_BOOST_PREMIUM", 5)
 
-  assert QueryQueueConfig.get_priority_for_user("premium") == 15
-  assert QueryQueueConfig.get_priority_for_user("enterprise") == 15
-  assert QueryQueueConfig.get_priority_for_user("standard") == 10
+  assert QueryQueueConfig.get_priority_for_user("kuzu-xlarge") == 15
+  assert QueryQueueConfig.get_priority_for_user("kuzu-large") == 15
+  assert QueryQueueConfig.get_priority_for_user("kuzu-standard") == 10
   assert QueryQueueConfig.get_priority_for_user(None) == 10

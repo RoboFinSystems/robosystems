@@ -44,7 +44,7 @@ The factory is responsible for intelligent routing decisions based on:
 - **Graph Type**: User graphs vs shared repositories (SEC, industry, economic)
 - **Operation Type**: Read vs Write operations
 - **Environment**: Development, Staging, Production
-- **Tier**: Standard, Enterprise, Premium for user graphs
+- **Tier**: kuzu-standard, kuzu-large, kuzu-xlarge for user graphs
 - **Backend Type**: Kuzu or Neo4j
 
 #### Routing Logic
@@ -163,13 +163,13 @@ async with client:
 ### User Graph Operations
 
 ```python
-from robosystems.middleware.graph.types import InstanceTier
+from robosystems.config.graph_tier import GraphTier
 
 # Create client for user graph
 client = await GraphClientFactory.create_client(
     graph_id="kg1a2b3c4d5",           # User graph ID
     operation_type="write",            # Write operation
-    tier=InstanceTier.ENTERPRISE      # Tier determines routing
+    tier=GraphTier.KUZU_LARGE         # Tier determines routing
 )
 
 # Perform operations
@@ -419,7 +419,7 @@ result = await client.query(
 
 ```python
 # Match configuration to workload requirements
-# Configuration types are defined in deployment (e.g., standard, enterprise, premium)
+# Configuration types are defined in deployment (e.g., kuzu-standard, kuzu-large, kuzu-xlarge)
 # Consult your infrastructure setup for available tiers
 ```
 
@@ -529,7 +529,7 @@ async def process_graph_data(graph_id: str, data_files: list):
     client = await GraphClientFactory.create_client(
         graph_id=graph_id,
         operation_type="write",
-        tier=InstanceTier.STANDARD
+        tier=GraphTier.KUZU_STANDARD
     )
 
     # Ingest data

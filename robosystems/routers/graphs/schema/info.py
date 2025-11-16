@@ -24,7 +24,7 @@ from robosystems.middleware.robustness import (
 )
 
 from .utils import get_schema_info, circuit_breaker, timeout_coordinator
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -68,6 +68,14 @@ This endpoint inspects the **actual current state** of the graph database and re
 Property discovery is limited to 10 properties per node type for performance.
 For complete schema definitions, use `/schema/export`.
 
+## Subgraph Support
+
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+Each subgraph has independent schema and data. The returned schema reflects
+only the specified graph/subgraph's actual structure.
+
 This operation is included - no credit consumption required.""",
   operation_id="getGraphSchema",
   responses={
@@ -85,7 +93,9 @@ This operation is included - no credit consumption required.""",
 )
 async def get_graph_schema_info(
   graph_id: str = Path(
-    ..., description="The graph database to get schema for", pattern=GRAPH_ID_PATTERN
+    ...,
+    description="The graph database to get schema for",
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),

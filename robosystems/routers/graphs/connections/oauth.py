@@ -12,7 +12,7 @@ from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dep
 from robosystems.operations.connection_service import ConnectionService
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.models.api.oauth import (
   OAuthInitRequest,
   OAuthInitResponse,
@@ -32,7 +32,7 @@ router = APIRouter()
 @router.post("/oauth/init", operation_id="initOAuth", response_model=OAuthInitResponse)
 async def init_oauth(
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   request: OAuthInitRequest = ...,
   current_user: User = Depends(get_current_user_with_graph),
@@ -144,7 +144,7 @@ No credits are consumed for OAuth callbacks.""",
 async def oauth_callback(
   provider: str = Path(..., description="OAuth provider name"),
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   request: OAuthCallbackRequest = ...,
   current_user: User = Depends(get_current_user_with_graph),

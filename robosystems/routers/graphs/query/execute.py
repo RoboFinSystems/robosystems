@@ -71,7 +71,7 @@ from .handlers import (
   get_user_priority as get_user_priority_from_handler,
 )
 from robosystems.middleware.sse.operation_manager import create_operation_response
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Initialize circuit breaker
 circuit_breaker = CircuitBreakerManager()
@@ -146,6 +146,12 @@ This endpoint automatically selects the best execution strategy based on:
 - `503 Service Unavailable`: Circuit breaker open or SSE disabled
 - Clients should implement exponential backoff
 
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+Subgraphs share the same instance as their parent graph and have independent data.
+
 **Note:**
 Query operations are included - no credit consumption required.
 Queue position is based on subscription tier for priority.""",
@@ -198,7 +204,7 @@ async def execute_cypher_query(
   request: CypherQueryRequest,
   full_request: Request,
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   mode: Optional[ResponseMode] = QueryParam(
     default=None, description="Response mode override"
@@ -234,9 +240,9 @@ async def execute_cypher_query(
   if chunk_size is None:
     if graph and graph.graph_tier:
       tier_chunk_sizes = {
-        "standard": env.KUZU_STANDARD_CHUNK_SIZE,
-        "enterprise": env.KUZU_ENTERPRISE_CHUNK_SIZE,
-        "premium": env.KUZU_PREMIUM_CHUNK_SIZE,
+        "kuzu-standard": env.KUZU_STANDARD_CHUNK_SIZE,
+        "kuzu-large": env.KUZU_ENTERPRISE_CHUNK_SIZE,
+        "kuzu-xlarge": env.KUZU_PREMIUM_CHUNK_SIZE,
       }
       chunk_size = tier_chunk_sizes.get(graph.graph_tier.lower(), 1000)
       logger.debug(f"Using tier-based chunk size for {graph.graph_tier}: {chunk_size}")
@@ -890,7 +896,7 @@ async def _check_shared_repository_limits(
     limiter = DualLayerRateLimiter(redis_client)
 
     # Get user's subscription tier (for burst protection)
-    user_tier = getattr(user, "subscription_tier", "standard")
+    user_tier = getattr(user, "subscription_tier", "kuzu-standard")
 
     # Get user's repository access plan
     repo_access = UserRepository.get_by_user_and_repository(user.id, graph_id, session)
