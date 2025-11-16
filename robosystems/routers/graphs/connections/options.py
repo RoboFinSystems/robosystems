@@ -13,6 +13,7 @@ from robosystems.models.api.graphs.connections import (
 )
 from robosystems.models.api.common import ErrorResponse
 from robosystems.config import env
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -52,7 +53,9 @@ No credits are consumed for viewing connection options.""",
   },
 )
 async def get_connection_options(
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ) -> ConnectionOptionsResponse:

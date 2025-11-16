@@ -35,6 +35,7 @@ from .utils import (
 )
 from robosystems.config.graph_tier import get_tier_max_subgraphs
 from robosystems.config import env
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -65,7 +66,7 @@ async def list_subgraphs(
   graph_id: str = Path(
     ...,
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
-    pattern="^(kg[a-f0-9]{16}|sec)$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
@@ -217,7 +218,7 @@ async def create_subgraph(
   graph_id: str = Path(
     ...,
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
-    pattern="^(kg[a-f0-9]{16}|sec)$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),

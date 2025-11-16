@@ -22,6 +22,7 @@ from .utils import (
   handle_circuit_breaker_check,
 )
 from robosystems.config.graph_tier import get_tier_max_subgraphs
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -59,7 +60,9 @@ Individual subgraph sizes shown in list endpoint.""",
   "/v1/graphs/{graph_id}/subgraphs/quota", business_event_type="subgraph_quota_checked"
 )
 async def get_subgraph_quota(
-  graph_id: str = Path(..., description="Parent graph identifier"),
+  graph_id: str = Path(
+    ..., description="Parent graph identifier", pattern=GRAPH_ID_PATTERN
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
 ) -> SubgraphQuotaResponse:

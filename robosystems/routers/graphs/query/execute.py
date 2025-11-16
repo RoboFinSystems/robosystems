@@ -71,6 +71,7 @@ from .handlers import (
   get_user_priority as get_user_priority_from_handler,
 )
 from robosystems.middleware.sse.operation_manager import create_operation_response
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 # Initialize circuit breaker
 circuit_breaker = CircuitBreakerManager()
@@ -197,7 +198,7 @@ async def execute_cypher_query(
   request: CypherQueryRequest,
   full_request: Request,
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$"
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
   ),
   mode: Optional[ResponseMode] = QueryParam(
     default=None, description="Response mode override"

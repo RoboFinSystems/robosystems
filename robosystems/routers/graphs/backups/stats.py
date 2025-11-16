@@ -20,6 +20,7 @@ from robosystems.models.api.graphs.backups import BackupStatsResponse
 from robosystems.models.iam import User
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.logger import logger
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 # Constants
 PERCENTAGE_MULTIPLIER = 100.0
@@ -42,7 +43,9 @@ router = APIRouter()
 )
 async def get_backup_stats(
   request: Request,
-  graph_id: str = Path(..., description="Graph database identifier"),
+  graph_id: str = Path(
+    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),

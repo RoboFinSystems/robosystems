@@ -87,6 +87,7 @@ from robosystems.config.valkey_registry import (
   ValkeyDatabase,
   create_async_redis_client,
 )
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 import time
 
 router = APIRouter()
@@ -203,7 +204,7 @@ async def ingest_tables(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   request: BulkIngestRequest = Body(..., description="Ingestion request"),
   current_user: User = Depends(get_current_user_with_graph),

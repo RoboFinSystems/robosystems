@@ -6,6 +6,7 @@ including authentication, request validation, and response formatting.
 """
 
 import pytest
+from tests.conftest import VALID_TEST_GRAPH_ID
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
@@ -68,7 +69,7 @@ class TestBackupEndpoints:
 
   def test_backup_endpoints_require_authentication(self, client):
     """Test that backup endpoints require authentication."""
-    graph_id = "test_graph_123"  # Use underscores instead of dashes
+    graph_id = VALID_TEST_GRAPH_ID  # Use valid test graph ID
 
     # Test endpoints without authentication
     endpoints = [
@@ -139,18 +140,18 @@ class TestBackupEndpoints:
       mock_is_shared.return_value = False  # Not a shared repository
 
       # Mock database path - returns the database path for the graph
-      mock_get_database_path.return_value = "/tmp/kuzu/test_graph_123"
+      mock_get_database_path.return_value = f"/tmp/kuzu/{VALID_TEST_GRAPH_ID}"
 
       # Mock os.path.exists to return False (database doesn't exist yet, size will be 0)
       mock_path_exists.return_value = False
 
       # Mock user graph access - create a mock GraphUser with the test graph_id and admin role
       mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = "test_graph_123"
+      mock_user_graph.graph_id = VALID_TEST_GRAPH_ID
       mock_user_graph.role = "admin"  # Admin role required for backup creation
       mock_get_by_user_id.return_value = [
         mock_user_graph
-      ]  # User has access to test_graph_123
+      ]  # User has access to VALID_TEST_GRAPH_ID
 
       # Set mock user ID
       mock_auth_user.id = "test-user-123"
@@ -160,7 +161,7 @@ class TestBackupEndpoints:
       mock_task_result.id = "task-123"
       mock_task.apply_async.return_value = mock_task_result
 
-      graph_id = "test_graph_123"  # Use underscores instead of dashes
+      graph_id = VALID_TEST_GRAPH_ID  # Use valid test graph ID
       response = client.post(
         f"/v1/graphs/{graph_id}/backups",
         json={
@@ -217,11 +218,11 @@ class TestBackupEndpoints:
 
       # Mock user graph access - create a mock GraphUser with the test graph_id and admin role
       mock_user_graph = MagicMock()
-      mock_user_graph.graph_id = "test_graph_123"
+      mock_user_graph.graph_id = VALID_TEST_GRAPH_ID
       mock_user_graph.role = "admin"  # Admin role required for backup creation
       mock_get_by_user_id.return_value = [
         mock_user_graph
-      ]  # User has access to test_graph_123
+      ]  # User has access to VALID_TEST_GRAPH_ID
 
       # Set mock user ID
       mock_auth_user.id = "test-user-123"
@@ -231,7 +232,7 @@ class TestBackupEndpoints:
       mock_backup_query.filter.return_value.order_by.return_value.all.return_value = []  # Empty backup list
       mock_session.query.return_value = mock_backup_query
 
-      graph_id = "test_graph_123"  # Use underscores instead of dashes
+      graph_id = VALID_TEST_GRAPH_ID  # Use valid test graph ID
       response = client.get(
         f"/v1/graphs/{graph_id}/backups", headers={"X-API-Key": "test-api-key"}
       )

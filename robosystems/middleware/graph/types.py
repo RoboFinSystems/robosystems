@@ -146,6 +146,21 @@ class GraphTypeRegistry:
     "reference": SharedRepositoryType.REFERENCE,
   }
 
+  @classmethod
+  def get_graph_id_pattern(cls) -> str:
+    """
+    Build graph ID validation pattern for API endpoints.
+
+    Format: kg + 10-20 alphanumeric characters (lowercase hex from ULID generation)
+    Special cases: Shared repository names from SHARED_REPOSITORIES
+    Current generation: kg + 14 chars (ULID) + 4 chars (entity hash) = 18 chars total
+
+    Returns:
+        Regex pattern string for validating graph IDs
+    """
+    repo_names = "|".join(cls.SHARED_REPOSITORIES.keys())
+    return f"^(kg[a-z0-9]{{10,20}}|{repo_names})$"
+
   # Patterns for identifying graph types
   USER_GRAPH_PATTERNS = [
     (
@@ -268,3 +283,7 @@ class GraphTypeRegistry:
   def list_shared_repositories(cls) -> List[str]:
     """Get list of all available shared repositories."""
     return list(cls.SHARED_REPOSITORIES.keys())
+
+
+# Convenience constant for API endpoint validation
+GRAPH_ID_PATTERN = GraphTypeRegistry.get_graph_id_pattern()

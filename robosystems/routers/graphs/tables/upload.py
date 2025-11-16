@@ -91,6 +91,7 @@ from robosystems.logger import logger, api_logger
 from robosystems.middleware.graph.types import (
   GraphTypeRegistry,
   SHARED_REPO_WRITE_ERROR_MESSAGE,
+  GRAPH_ID_PATTERN,
 )
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
@@ -175,7 +176,7 @@ async def get_upload_url(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   table_name: str = Path(..., description="Table name"),
   request: FileUploadRequest = Body(..., description="Upload request"),
@@ -485,7 +486,7 @@ async def update_file_status(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   file_id: str = Path(..., description="File identifier"),
   request: FileStatusUpdate = Body(..., description="Status update"),

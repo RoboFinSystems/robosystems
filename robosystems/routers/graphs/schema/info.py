@@ -24,6 +24,7 @@ from robosystems.middleware.robustness import (
 )
 
 from .utils import get_schema_info, circuit_breaker, timeout_coordinator
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -83,7 +84,9 @@ This operation is included - no credit consumption required.""",
   "/v1/graphs/{graph_id}/schema", business_event_type="schema_retrieved"
 )
 async def get_graph_schema_info(
-  graph_id: str = Path(..., description="The graph database to get schema for"),
+  graph_id: str = Path(
+    ..., description="The graph database to get schema for", pattern=GRAPH_ID_PATTERN
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
   _: None = Depends(subscription_aware_rate_limit_dependency),

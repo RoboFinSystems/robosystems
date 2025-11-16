@@ -1,4 +1,5 @@
 import pytest
+from tests.conftest import VALID_TEST_GRAPH_ID
 from unittest.mock import Mock, AsyncMock, patch
 
 from robosystems.routers.graphs.tables.upload import get_upload_url
@@ -9,7 +10,7 @@ from robosystems.models.api.graphs.tables import FileUploadRequest
 class TestUploadRouterAutoTableCreation:
   @pytest.mark.asyncio
   async def test_auto_creates_node_table_for_pascal_case_name(self):
-    graph_id = "kg_test_123"
+    graph_id = VALID_TEST_GRAPH_ID
     table_name = "Company"
     file_request = FileUploadRequest(
       file_name="companies.parquet", content_type="application/x-parquet"
@@ -68,7 +69,7 @@ class TestUploadRouterAutoTableCreation:
 
   @pytest.mark.asyncio
   async def test_auto_creates_relationship_table_for_screaming_snake_case(self):
-    graph_id = "kg_test_456"
+    graph_id = VALID_TEST_GRAPH_ID
     table_name = "PERSON_WORKS_FOR_COMPANY"
     file_request = FileUploadRequest(
       file_name="relationships.parquet", content_type="application/x-parquet"
@@ -126,7 +127,7 @@ class TestUploadRouterAutoTableCreation:
 
   @pytest.mark.asyncio
   async def test_does_not_create_table_if_exists(self):
-    graph_id = "kg_test_789"
+    graph_id = VALID_TEST_GRAPH_ID
     table_name = "Person"
     file_request = FileUploadRequest(
       file_name="people.parquet", content_type="application/x-parquet"

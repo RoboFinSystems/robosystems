@@ -24,6 +24,7 @@ from robosystems.middleware.otel.metrics import (
 from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.routers.graphs.mcp.handlers import MCPHandler
 from robosystems.logger import logger
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 # Import MCP components
 from .handlers import validate_mcp_access
@@ -80,7 +81,7 @@ async def list_mcp_tools(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern="^[a-zA-Z][a-zA-Z0-9_]{2,62}$",
+    pattern=GRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
