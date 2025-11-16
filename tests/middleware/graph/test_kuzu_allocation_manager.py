@@ -341,9 +341,9 @@ class TestKuzuAllocationManagerSubgraphs:
     assert location.instance_id == "i-parent123"
     assert location.private_ip == "10.0.1.100"
 
-    # The implementation first tries the subgraph ID directly
+    # The implementation detects subgraph and looks up parent directly
     self.mock_graph_table.get_item.assert_called_once_with(
-      Key={"graph_id": subgraph_id}
+      Key={"graph_id": parent_graph_id}
     )
 
   async def test_find_database_location_subgraph_parent_not_found(self):
@@ -360,9 +360,9 @@ class TestKuzuAllocationManagerSubgraphs:
     # Should return None
     assert location is None
 
-    # The implementation tries the subgraph ID directly
+    # The implementation detects subgraph and looks up parent directly
     self.mock_graph_table.get_item.assert_called_once_with(
-      Key={"graph_id": subgraph_id}
+      Key={"graph_id": parent_graph_id}
     )
 
   async def test_allocate_database_for_subgraph_attempts_allocation(self):

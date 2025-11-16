@@ -187,7 +187,7 @@ class TestSubgraphCacheSharing:
   ):
     """Credit summary cache should be shared between parent and subgraphs"""
     parent_graph, parent_credits, user = parent_graph_setup
-    subgraph_id = f"{parent_graph.graph_id}_cache_test"
+    subgraph_id = f"{parent_graph.graph_id}_cachetest"
 
     credit_service = CreditService(db_session)
 
@@ -212,7 +212,7 @@ class TestSubgraphCacheSharing:
   ):
     """Test cache miss followed by cache hit for subgraph"""
     parent_graph, parent_credits, user = parent_graph_setup
-    subgraph_id = f"{parent_graph.graph_id}_miss_hit"
+    subgraph_id = f"{parent_graph.graph_id}_misshit"
 
     credit_service = CreditService(db_session)
 
@@ -248,7 +248,7 @@ class TestSubgraphCacheSharing:
     from datetime import datetime, timezone
 
     parent_graph, parent_credits, user = parent_graph_setup
-    subgraph_id = f"{parent_graph.graph_id}_allocation"
+    subgraph_id = f"{parent_graph.graph_id}_alloc"
 
     credit_service = CreditService(db_session)
 

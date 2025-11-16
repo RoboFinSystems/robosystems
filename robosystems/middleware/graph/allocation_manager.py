@@ -567,12 +567,38 @@ class KuzuAllocationManager:
     """
     Find the location of an existing database.
 
+    For subgraphs, this method automatically resolves to the parent graph's location
+    since subgraphs share the same physical instance as their parent.
+
     Args:
-        graph_id: Graph/database identifier
+        graph_id: Graph/database identifier (can be parent or subgraph)
 
     Returns:
         DatabaseLocation if found, None otherwise
     """
+    # Check if this is a subgraph - if so, look up parent instead
+    subgraph_info = parse_subgraph_id(graph_id)
+    if subgraph_info:
+      logger.debug(
+        f"Resolving subgraph {graph_id} to parent {subgraph_info.parent_graph_id}"
+      )
+      # Recursively call with parent ID to get parent's location
+      parent_location = await self.find_database_location(subgraph_info.parent_graph_id)
+      if not parent_location:
+        return None
+
+      # Return location with subgraph's graph_id but parent's instance details
+      return DatabaseLocation(
+        graph_id=graph_id,
+        instance_id=parent_location.instance_id,
+        private_ip=parent_location.private_ip,
+        availability_zone=parent_location.availability_zone,
+        created_at=parent_location.created_at,
+        status=parent_location.status,
+        backend_type=parent_location.backend_type,
+      )
+
+    # Parent graph or shared repository - look up in DynamoDB
     try:
       response = self.graph_table.get_item(Key={"graph_id": graph_id})
 

@@ -308,8 +308,8 @@ def is_subgraph_id(graph_id: str) -> bool:
   """
   Check if graph_id is a subgraph ID.
 
-  Subgraph IDs contain an underscore with non-empty parent and subgraph parts,
-  and are not shared repositories.
+  Subgraph IDs must match the pattern: kg[a-f0-9]{16,}_[a-zA-Z0-9]{1,20}
+  where the parent part follows the standard graph ID format.
 
   Args:
       graph_id: The graph identifier to check
@@ -324,17 +324,35 @@ def is_subgraph_id(graph_id: str) -> bool:
       False
       >>> is_subgraph_id("sec")
       False
+      >>> is_subgraph_id("tenant1_entity")
+      False
       >>> is_subgraph_id("_")
       False
-      >>> is_subgraph_id("kg_")
-      True
   """
   if not graph_id or graph_id in GraphTypeRegistry.SHARED_REPOSITORIES:
     return False
   if "_" not in graph_id:
     return False
   parts = graph_id.split("_", 1)
-  return len(parts[0]) > 0
+  parent_part = parts[0]
+  subgraph_part = parts[1] if len(parts) > 1 else ""
+
+  # Parent must match the kg[hex]{16,} pattern
+  if not parent_part.startswith("kg") or len(parent_part) < 18:
+    return False
+
+  # Validate parent is all lowercase hex after "kg"
+  hex_part = parent_part[2:]
+  if not all(c in "0123456789abcdef" for c in hex_part):
+    return False
+
+  # Subgraph name must be non-empty and match pattern
+  if not subgraph_part or len(subgraph_part) > 20:
+    return False
+  if not all(c.isalnum() for c in subgraph_part):
+    return False
+
+  return True
 
 
 def parse_graph_id(graph_id: str) -> tuple[str, Optional[str]]:

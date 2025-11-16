@@ -151,10 +151,15 @@ class TestSubgraphAuthorization:
     )
     assert parent_access is True
 
-    direct_subgraph_query = GraphUser.user_has_access(
-      auth_user.id, subgraph_id, db_session
+    direct_record = (
+      db_session.query(GraphUser)
+      .filter(GraphUser.user_id == auth_user.id, GraphUser.graph_id == subgraph_id)
+      .first()
     )
-    assert direct_subgraph_query is False
+    assert direct_record is None
+
+    subgraph_access = GraphUser.user_has_access(auth_user.id, subgraph_id, db_session)
+    assert subgraph_access is True
 
   @pytest.mark.integration
   def test_authorization_middleware_handles_subgraph_ids(
@@ -181,10 +186,10 @@ class TestSubgraphAuthorization:
   def test_parse_various_subgraph_formats(self):
     """Test parsing various valid subgraph ID formats"""
     test_cases = [
-      ("kg1234_dev", "kg1234", "dev"),
-      ("kg1234_staging", "kg1234", "staging"),
-      ("kg1234_prod", "kg1234", "prod"),
-      ("kg1234_test123", "kg1234", "test123"),
+      ("kg1234567890abcdef_dev", "kg1234567890abcdef", "dev"),
+      ("kg1234567890abcdef_staging", "kg1234567890abcdef", "staging"),
+      ("kgabcdef1234567890_prod", "kgabcdef1234567890", "prod"),
+      ("kg0123456789abcdef_test123", "kg0123456789abcdef", "test123"),
       ("kg1234567890abcdef_a", "kg1234567890abcdef", "a"),
     ]
 

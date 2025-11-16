@@ -13,17 +13,17 @@ from robosystems.middleware.graph.types import (
 class TestIsSubgraphId:
   @pytest.mark.unit
   def test_valid_subgraph_ids(self):
+    # Valid subgraphs must have parent IDs with kg + 16+ hex chars
     valid_subgraph_ids = [
       "kg1234567890abcdef_dev",
       "kg1234567890abcdef_staging",
       "kg1234567890abcdef_prod",
       "kg1234567890abcdef_test",
-      "kg123_a",
-      "kg1_dev",
-      "kg12345678_production",
+      "kgabcdef1234567890_production",
       "kg1234567890abcdef_A1B2C3",
       "kg1234567890abcdef_12345",
-      "kgabc123_test",
+      "kg0123456789abcdef_test",
+      "kgfedcba9876543210_a",
     ]
 
     for graph_id in valid_subgraph_ids:
@@ -55,32 +55,39 @@ class TestIsSubgraphId:
 
   @pytest.mark.unit
   def test_empty_and_special_cases(self):
+    # All of these should be False (invalid subgraph IDs)
     assert is_subgraph_id("") is False
     assert is_subgraph_id("_") is False
-    assert is_subgraph_id("kg_") is True
-    assert is_subgraph_id("_dev") is False
+    assert is_subgraph_id("kg_") is False  # Parent too short, empty subgraph name
+    assert is_subgraph_id("_dev") is False  # Missing parent
 
   @pytest.mark.unit
   def test_multiple_underscores(self):
-    assert is_subgraph_id("kg123_dev_test") is True
-    assert is_subgraph_id("kg123_a_b_c") is True
-    assert is_subgraph_id("kg_a_b") is True
+    # Subgraph names must be alphanumeric only - no underscores allowed
+    assert (
+      is_subgraph_id("kg1234567890abcdef_dev_test") is False
+    )  # "dev_test" not alphanumeric
+    assert (
+      is_subgraph_id("kg1234567890abcdef_a_b_c") is False
+    )  # "a_b_c" not alphanumeric
 
   @pytest.mark.unit
   def test_case_sensitivity(self):
-    assert is_subgraph_id("kg123_DEV") is True
-    assert is_subgraph_id("kg123_Dev") is True
-    assert is_subgraph_id("kg123_dev") is True
+    # Case sensitivity is allowed in subgraph names
+    assert is_subgraph_id("kg1234567890abcdef_DEV") is True
+    assert is_subgraph_id("kg1234567890abcdef_Dev") is True
+    assert is_subgraph_id("kg1234567890abcdef_dev") is True
 
 
 class TestParseGraphId:
   @pytest.mark.unit
   def test_parse_valid_subgraph_ids(self):
+    # All parent IDs must be kg + 16+ hex chars
     test_cases = [
       ("kg1234567890abcdef_dev", "kg1234567890abcdef", "dev"),
       ("kg1234567890abcdef_staging", "kg1234567890abcdef", "staging"),
-      ("kg123_prod", "kg123", "prod"),
-      ("kg1_test", "kg1", "test"),
+      ("kgabcdef1234567890_prod", "kgabcdef1234567890", "prod"),
+      ("kg0000000000000001_test", "kg0000000000000001", "test"),
       ("kg1234567890abcdef_A1B2C3", "kg1234567890abcdef", "A1B2C3"),
       ("kg1234567890abcdef_12345", "kg1234567890abcdef", "12345"),
     ]
@@ -115,10 +122,19 @@ class TestParseGraphId:
 
   @pytest.mark.unit
   def test_parse_multiple_underscores(self):
+    # Subgraph names with underscores are NOT valid (must be alphanumeric only)
+    # These should be returned unchanged since they're not valid subgraph IDs
     test_cases = [
-      ("kg123_dev_test", "kg123", "dev_test"),
-      ("kg123_a_b_c", "kg123", "a_b_c"),
-      ("kg1234567890abcdef_my_long_name", "kg1234567890abcdef", "my_long_name"),
+      (
+        "kg1234567890abcdef_dev_test",
+        "kg1234567890abcdef_dev_test",
+        None,
+      ),  # Invalid: "dev_test" not alphanumeric
+      (
+        "kg1234567890abcdef_a_b_c",
+        "kg1234567890abcdef_a_b_c",
+        None,
+      ),  # Invalid: "a_b_c" not alphanumeric
     ]
 
     for graph_id, expected_parent, expected_subgraph in test_cases:
@@ -128,21 +144,22 @@ class TestParseGraphId:
 
   @pytest.mark.unit
   def test_parse_edge_cases(self):
+    # Both are invalid subgraph IDs, returned unchanged
     assert parse_graph_id("") == ("", None)
-    assert parse_graph_id("kg_") == ("kg", "")
+    assert parse_graph_id("kg_") == ("kg_", None)
 
   @pytest.mark.unit
   def test_parse_preserves_case(self):
-    parent_id, subgraph_name = parse_graph_id("kg123_DEV")
+    parent_id, subgraph_name = parse_graph_id("kg1234567890abcdef_DEV")
     assert subgraph_name == "DEV"
 
-    parent_id, subgraph_name = parse_graph_id("kg123_Dev")
+    parent_id, subgraph_name = parse_graph_id("kg1234567890abcdef_Dev")
     assert subgraph_name == "Dev"
 
   @pytest.mark.unit
   def test_parse_numeric_subgraph_names(self):
-    parent_id, subgraph_name = parse_graph_id("kg123_12345")
-    assert parent_id == "kg123"
+    parent_id, subgraph_name = parse_graph_id("kg1234567890abcdef_12345")
+    assert parent_id == "kg1234567890abcdef"
     assert subgraph_name == "12345"
 
   @pytest.mark.unit
@@ -329,11 +346,12 @@ class TestSubgraphNamePattern:
 class TestHelperFunctionIntegration:
   @pytest.mark.unit
   def test_construct_then_parse_identity(self):
+    # All parent IDs must be kg + 16+ hex chars
     test_cases = [
       ("kg1234567890abcdef", "dev"),
-      ("kg123", "staging"),
-      ("kg1", "prod"),
-      ("kgabc", "test123"),
+      ("kgabcdef1234567890", "staging"),
+      ("kg0000000000000001", "prod"),
+      ("kgfedcba9876543210", "test123"),
       ("kg1234567890abcdef", "A1B2C3"),
     ]
 
@@ -348,9 +366,9 @@ class TestHelperFunctionIntegration:
   @pytest.mark.unit
   def test_parse_then_validate_subgraph_name(self):
     valid_subgraph_ids = [
-      "kg123_dev",
+      "kg1234567890abcdef_dev",
       "kg1234567890abcdef_staging",
-      "kg1_A1B2C3",
+      "kg1234567890abcdef_A1B2C3",
     ]
 
     pattern = re.compile(SUBGRAPH_NAME_PATTERN)
@@ -362,10 +380,10 @@ class TestHelperFunctionIntegration:
   @pytest.mark.unit
   def test_is_subgraph_implies_parse_success(self):
     test_ids = [
-      "kg123_dev",
+      "kg1234567890abcdef_dev",
       "kg1234567890abcdef_staging",
-      "kg1_prod",
-      "kgabc_test123",
+      "kgabcdef1234567890_prod",
+      "kg0123456789abcdef_test123",
     ]
 
     for graph_id in test_ids:

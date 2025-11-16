@@ -68,8 +68,25 @@ class TestSubgraphService:
     mock_kuzu_client,
     mock_parent_location,
     valid_parent_graph_id,
+    db_session,
   ):
     """Test successful subgraph creation."""
+    from robosystems.models.iam.graph import Graph
+    from robosystems.config.graph_tier import GraphTier
+
+    existing_graph = (
+      db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
+    )
+    if not existing_graph:
+      parent_graph = Graph(
+        graph_id=valid_parent_graph_id,
+        graph_name="Parent Graph",
+        graph_type="generic",
+        graph_tier=GraphTier.KUZU_LARGE.value,
+      )
+      db_session.add(parent_graph)
+      db_session.commit()
+
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
 
     with patch(
@@ -91,11 +108,16 @@ class TestSubgraphService:
       assert result["instance_ip"] == "10.0.1.100"
       assert "created_at" in result
 
-      # Verify calls
-      mock_allocation_manager.find_database_location.assert_called_once_with(
+      # Verify calls - Both find_database_location and get_graph_client_for_instance
+      # are called twice:
+      # 1. During tier limit enforcement (listing existing subgraphs)
+      # 2. During actual subgraph creation
+      assert mock_allocation_manager.find_database_location.call_count == 2
+      mock_allocation_manager.find_database_location.assert_called_with(
         "kg5f2e5e0da65d45d69645"
       )
-      mock_get_client.assert_called_once_with("10.0.1.100")
+      assert mock_get_client.call_count == 2
+      mock_get_client.assert_called_with("10.0.1.100")
       mock_kuzu_client.create_database.assert_called_once_with(
         graph_id="kg5f2e5e0da65d45d69645_analysis",
         schema_type="entity",
@@ -106,11 +128,34 @@ class TestSubgraphService:
 
   @pytest.mark.asyncio
   async def test_create_subgraph_already_exists(
-    self, service, mock_allocation_manager, mock_kuzu_client, mock_parent_location
+    self,
+    service,
+    mock_allocation_manager,
+    mock_kuzu_client,
+    mock_parent_location,
+    db_session,
+    valid_parent_graph_id,
   ):
     """Test creating a subgraph that already exists."""
+    from robosystems.models.iam.graph import Graph
+    from robosystems.config.graph_tier import GraphTier
+
+    # Check if parent graph already exists (from previous test)
+    existing_graph = (
+      db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
+    )
+    if not existing_graph:
+      parent_graph = Graph(
+        graph_id=valid_parent_graph_id,
+        graph_name="Parent Graph",
+        graph_type="generic",
+        graph_tier=GraphTier.KUZU_LARGE.value,
+      )
+      db_session.add(parent_graph)
+      db_session.commit()
+
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = ["kg5f2e5e0da65d45d69645_analysis"]
+    mock_kuzu_client.list_databases.return_value = [f"{valid_parent_graph_id}_analysis"]
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
@@ -118,7 +163,7 @@ class TestSubgraphService:
       mock_get_client.return_value = mock_kuzu_client
 
       result = await service.create_subgraph_database(
-        parent_graph_id="kg5f2e5e0da65d45d69645", subgraph_name="analysis"
+        parent_graph_id=valid_parent_graph_id, subgraph_name="analysis"
       )
 
       assert result["status"] == "exists"
@@ -128,9 +173,31 @@ class TestSubgraphService:
 
   @pytest.mark.asyncio
   async def test_create_subgraph_with_extensions(
-    self, service, mock_allocation_manager, mock_kuzu_client, mock_parent_location
+    self,
+    service,
+    mock_allocation_manager,
+    mock_kuzu_client,
+    mock_parent_location,
+    db_session,
+    valid_parent_graph_id,
   ):
     """Test creating a subgraph with schema extensions."""
+    from robosystems.models.iam.graph import Graph
+    from robosystems.config.graph_tier import GraphTier
+
+    existing_graph = (
+      db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
+    )
+    if not existing_graph:
+      parent_graph = Graph(
+        graph_id=valid_parent_graph_id,
+        graph_name="Parent Graph",
+        graph_type="generic",
+        graph_tier=GraphTier.KUZU_LARGE.value,
+      )
+      db_session.add(parent_graph)
+      db_session.commit()
+
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
 
     with patch(
@@ -139,7 +206,7 @@ class TestSubgraphService:
       mock_get_client.return_value = mock_kuzu_client
 
       result = await service.create_subgraph_database(
-        parent_graph_id="kg5f2e5e0da65d45d69645",
+        parent_graph_id=valid_parent_graph_id,
         subgraph_name="extended",
         schema_extensions=["analytics", "ml"],
       )
@@ -196,9 +263,31 @@ class TestSubgraphService:
 
   @pytest.mark.asyncio
   async def test_create_subgraph_creation_failure(
-    self, service, mock_allocation_manager, mock_kuzu_client, mock_parent_location
+    self,
+    service,
+    mock_allocation_manager,
+    mock_kuzu_client,
+    mock_parent_location,
+    db_session,
+    valid_parent_graph_id,
   ):
     """Test handling of database creation failure."""
+    from robosystems.models.iam.graph import Graph
+    from robosystems.config.graph_tier import GraphTier
+
+    existing_graph = (
+      db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
+    )
+    if not existing_graph:
+      parent_graph = Graph(
+        graph_id=valid_parent_graph_id,
+        graph_name="Parent Graph",
+        graph_type="generic",
+        graph_tier=GraphTier.KUZU_LARGE.value,
+      )
+      db_session.add(parent_graph)
+      db_session.commit()
+
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
     mock_kuzu_client.create_database.side_effect = Exception("Database creation failed")
 
@@ -209,7 +298,7 @@ class TestSubgraphService:
 
       with pytest.raises(GraphAllocationError) as exc_info:
         await service.create_subgraph_database(
-          parent_graph_id="kg5f2e5e0da65d45d69645", subgraph_name="failed"
+          parent_graph_id=valid_parent_graph_id, subgraph_name="failed"
         )
 
       assert "Failed to create subgraph" in str(exc_info.value)
@@ -531,8 +620,27 @@ class TestSubgraphServiceIntegration:
 
   @pytest.mark.asyncio
   @pytest.mark.integration
-  async def test_full_subgraph_lifecycle(self):
+  async def test_full_subgraph_lifecycle(self, db_session):
     """Test complete subgraph lifecycle: create, list, get info, delete."""
+    from robosystems.models.iam.graph import Graph
+    from robosystems.config.graph_tier import GraphTier
+
+    parent_graph_id = "kg5f2e5e0da65d45d69645"
+
+    # Create parent graph in database
+    existing_graph = (
+      db_session.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
+    )
+    if not existing_graph:
+      parent_graph = Graph(
+        graph_id=parent_graph_id,
+        graph_name="Parent Graph",
+        graph_type="generic",
+        graph_tier=GraphTier.KUZU_LARGE.value,
+      )
+      db_session.add(parent_graph)
+      db_session.commit()
+
     service = SubgraphService()
 
     # Mock the dependencies
@@ -548,12 +656,13 @@ class TestSubgraphServiceIntegration:
     mock_client.get_database = AsyncMock()
     mock_client.delete_database = AsyncMock()
 
-    # Set up mock returns for lifecycle
+    # Set up mock returns for lifecycle - need more calls now due to tier limit enforcement
     mock_client.list_databases.side_effect = [
+      [],  # Tier limit check - empty
       [],  # Creation check - empty
-      ["kg5f2e5e0da65d45d69645_test"],  # List check - has subgraph
-      ["kg5f2e5e0da65d45d69645_test"],  # Get info check - exists
-      ["kg5f2e5e0da65d45d69645_test"],  # Delete check - exists
+      [f"{parent_graph_id}_test"],  # List check - has subgraph
+      [f"{parent_graph_id}_test"],  # Get info check - exists
+      [f"{parent_graph_id}_test"],  # Delete check - exists
     ]
     mock_client.execute.return_value = [{"node_count": 0}]
 
@@ -568,21 +677,19 @@ class TestSubgraphServiceIntegration:
         mock_get_client.return_value = mock_client
 
         # Create
-        create_result = await service.create_subgraph_database(
-          "kg5f2e5e0da65d45d69645", "test"
-        )
+        create_result = await service.create_subgraph_database(parent_graph_id, "test")
         assert create_result["status"] == "created"
 
         # List
-        list_result = await service.list_subgraph_databases("kg5f2e5e0da65d45d69645")
+        list_result = await service.list_subgraph_databases(parent_graph_id)
         assert len(list_result) == 1
 
         # Get Info
-        info_result = await service.get_subgraph_info("kg5f2e5e0da65d45d69645_test")
+        info_result = await service.get_subgraph_info(f"{parent_graph_id}_test")
         assert info_result is not None
 
         # Delete
         delete_result = await service.delete_subgraph_database(
-          "kg5f2e5e0da65d45d69645_test"
+          f"{parent_graph_id}_test"
         )
         assert delete_result["status"] == "deleted"
