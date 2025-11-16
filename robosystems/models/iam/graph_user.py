@@ -147,20 +147,42 @@ class GraphUser(Model):
 
   @classmethod
   def user_has_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
-    """Check if a user has access to a specific graph."""
+    """
+    Check if a user has access to a specific graph.
+
+    For subgraphs (e.g., 'kg123_dev'), this method checks access to the parent graph ('kg123')
+    since subgraphs inherit permissions from their parent.
+    """
+    from ...middleware.graph.types import parse_graph_id
+
+    # Resolve subgraph to parent graph for permission check
+    # Subgraphs inherit parent's permissions
+    parent_id, _ = parse_graph_id(graph_id)
+
     return (
       session.query(cls)
-      .filter(cls.user_id == user_id, cls.graph_id == graph_id)
+      .filter(cls.user_id == user_id, cls.graph_id == parent_id)
       .first()
       is not None
     )
 
   @classmethod
   def user_has_admin_access(cls, user_id: str, graph_id: str, session: Session) -> bool:
-    """Check if a user has admin access to a specific graph."""
+    """
+    Check if a user has admin access to a specific graph.
+
+    For subgraphs (e.g., 'kg123_dev'), this method checks admin access to the parent graph ('kg123')
+    since subgraphs inherit permissions from their parent.
+    """
+    from ...middleware.graph.types import parse_graph_id
+
+    # Resolve subgraph to parent graph for permission check
+    # Subgraphs inherit parent's permissions
+    parent_id, _ = parse_graph_id(graph_id)
+
     graph_user = (
       session.query(cls)
-      .filter(cls.user_id == user_id, cls.graph_id == graph_id)
+      .filter(cls.user_id == user_id, cls.graph_id == parent_id)
       .first()
     )
 

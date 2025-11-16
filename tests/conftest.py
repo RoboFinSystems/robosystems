@@ -16,11 +16,11 @@ from robosystems.security import password as password_module
 password_module.PasswordSecurity.BCRYPT_ROUNDS = 4  # Fast for tests
 
 # Valid test graph IDs matching the GRAPH_ID_PATTERN
-# Pattern: kg + 10-20 alphanumeric chars (lowercase)
-# This matches the actual format: kg + 14 ULID chars + 4 entity hash chars = 18 total
-VALID_TEST_GRAPH_ID = "kg01234567890abcdef"
-VALID_TEST_GRAPH_ID_2 = "kg11111111111111111"
-VALID_TEST_GRAPH_ID_3 = "kg22222222222222222"
+# Pattern: kg + 16+ hex chars (lowercase, 0-9 and a-f only)
+# Actual formats: kg + 16 (generic) or kg + 18 (entity with 14 ULID + 4 hash)
+VALID_TEST_GRAPH_ID = "kg01234567890abcdef"  # 18 hex chars (entity format)
+VALID_TEST_GRAPH_ID_2 = "kg11111111111111111"  # 17 hex chars
+VALID_TEST_GRAPH_ID_3 = "kg22222222222222222"  # 17 hex chars
 
 
 @pytest.fixture(scope="session", autouse=True)

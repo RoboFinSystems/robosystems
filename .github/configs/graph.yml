@@ -530,3 +530,47 @@ staging:
         enable_var: NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING
         enabled_default: false # DISABLED
         optional: true
+
+# =============================================================================
+# DEVELOPMENT ENVIRONMENT
+# =============================================================================
+development:
+  writers:
+    # =========================================================================
+    # KUZU STANDARD TIER - Development (subgraphs enabled for testing)
+    # =========================================================================
+    - name: kuzu-standard
+      description: Kuzu standard tier for local development with subgraph support
+      backend: kuzu
+      stack_suffix: KuzuDev
+      tier: kuzu-standard
+
+      max_subgraphs: 2
+      api_rate_multiplier: 1.0
+
+      copy_operations:
+        max_file_size_gb: 1.0
+        timeout_seconds: 300
+        concurrent_operations: 1
+        max_files_per_operation: 100
+        daily_copy_operations: 10
+
+      backup_limits:
+        max_backup_size_gb: 10
+        backup_retention_days: 7
+        max_backups_per_day: 2
+
+      instance:
+        type: r7g.medium
+        databases_per_instance: 10
+        max_memory_mb: 7168
+        memory_per_db_mb: 716
+        chunk_size: 750
+        query_timeout: 30
+        max_query_length: 10000
+        ingestion_batch_size: 750
+        connection_pool_size: 10
+
+      deployment:
+        always_enabled: true
+        enabled_default: true

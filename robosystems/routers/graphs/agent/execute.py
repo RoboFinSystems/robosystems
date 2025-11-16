@@ -41,7 +41,7 @@ from robosystems.operations.agents.base import (
 from robosystems.logger import logger
 from robosystems.models.api.common import ErrorResponse
 from robosystems.config import env
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 from .strategies import (
   AgentExecutionStrategy,
@@ -105,7 +105,7 @@ async def list_agents(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   capability: Optional[str] = Query(
     None,
@@ -181,6 +181,13 @@ Use query parameter `?mode=sync|async` to override automatic strategy selection.
 - Leverage conversation history for contextual understanding
 - Enable RAG for knowledge base enrichment
 
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+Agents operate on the specified graph/subgraph's data independently. RAG enrichment
+and knowledge base search are scoped to the specific graph/subgraph.
+
 See request/response examples in the "Examples" dropdown below.""",
   operation_id="autoSelectAgent",
   status_code=200,
@@ -202,7 +209,7 @@ async def auto_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   mode: Optional[ResponseMode] = Query(
     None, description="Override execution mode: sync, async, stream, or auto"
@@ -330,7 +337,7 @@ async def get_agent_metadata(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   agent_type: str = Path(
     ...,
@@ -392,7 +399,7 @@ async def specific_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   mode: Optional[ResponseMode] = Query(
     None, description="Override execution mode: sync, async, stream, or auto"
@@ -520,7 +527,7 @@ async def batch_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
@@ -653,7 +660,7 @@ async def recommend_agent(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),

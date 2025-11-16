@@ -9,105 +9,66 @@ This demo showcases RoboSystems' graph database capabilities for accounting and 
 - **~30 Transactions**: 6 months of business transactions per month (rent, consulting revenue, salaries, expenses)
 - **~60 Line Items**: Double-entry journal entries
 
-## 🚀 Quick Start - Run All Steps
+## Quick Start - Run All Steps
 
 ```bash
 # Make sure RoboSystems is running
-just start robosystems
+just start
 
-# Navigate to the demo directory
-cd examples/accounting_demo
+# Run the complete demo (all steps automatically)
+just demo-accounting
 
-# Run each step in sequence
-uv run 01_setup_credentials.py
-uv run 02_create_graph.py
-uv run 03_generate_data.py
-uv run 04_upload_ingest.py
-uv run 05_query_graph.py --all
+# Or create a new graph explicitly
+just demo-accounting "new-graph"
+
+# Or reuse an existing graph
+just demo-accounting "reuse-graph"
 ```
 
-## 📋 Step-by-Step Guide
+## What The Demo Does
+
+When you run `just demo-accounting`, it automatically:
+
+1. **Sets up credentials** - Creates a user account and API key (or reuses existing)
+2. **Creates graph** - Initializes a new graph database with accounting schema
+3. **Generates data** - Creates 6 months of realistic accounting transactions
+4. **Uploads & ingests** - Loads data into the graph via staging tables
+5. **Runs queries** - Executes example queries to demonstrate capabilities
+
+## Advanced Usage - Individual Steps
+
+The `just demo-accounting` command runs `main.py` which executes all steps automatically. For manual control, you can run individual steps:
 
 ### Step 1: Setup Credentials
 
-Creates a user account and API key, saves credentials to `credentials/config.json`.
-
 ```bash
-uv run 01_setup_credentials.py
+# Using just command (recommended)
+just demo-user
 
-# Options:
-uv run 01_setup_credentials.py --name "Your Name"
-uv run 01_setup_credentials.py --email your@email.com
-uv run 01_setup_credentials.py --force  # Create new credentials
+# Or run directly with options
+cd examples/accounting_demo
+uv run 01_setup_credentials.py --name "Your Name" --email your@email.com
 ```
 
-**Output**: User created, API key generated, credentials saved
+**Output**: User created, API key generated, credentials saved to `examples/credentials/config.json`
 
-### Step 2: Create Graph
-
-Creates a new graph database for the accounting demo.
+### Step 2-5: Run All Remaining Steps
 
 ```bash
+# Run the main demo script
+cd examples/accounting_demo
+uv run main.py --flags "new-graph"
+
+# Or run each step individually
 uv run 02_create_graph.py
-
-# Options:
-uv run 02_create_graph.py --name "My Accounting Demo"
-uv run 02_create_graph.py --reuse  # Reuse existing graph
-```
-
-**Output**: Graph created, graph_id saved to credentials
-
-### Step 3: Generate Data
-
-Generates realistic accounting data as Parquet files.
-
-```bash
 uv run 03_generate_data.py
-
-# Options:
-uv run 03_generate_data.py --months 12  # Generate 12 months of data
-uv run 03_generate_data.py --regenerate  # Force regenerate
-```
-
-**Output**: 6 Parquet files created in `data/` directory:
-- `Entity.parquet` - Business entity
-- `Element.parquet` - Chart of accounts
-- `Transaction.parquet` - Financial transactions
-- `LineItem.parquet` - Journal entry lines
-- `TRANSACTION_HAS_LINE_ITEM.parquet` - Relationships
-- `LINE_ITEM_RELATES_TO_ELEMENT.parquet` - Relationships
-
-### Step 4: Upload & Ingest
-
-Uploads the Parquet files and ingests them into the graph.
-
-```bash
 uv run 04_upload_ingest.py
-```
-
-**Output**: All files uploaded, data ingested into graph, verification queries run
-
-### Step 5: Query Graph
-
-Run example queries or enter interactive mode.
-
-```bash
-# Run all preset queries
 uv run 05_query_graph.py --all
-
-# Run a specific preset
-uv run 05_query_graph.py --preset trial_balance
-uv run 05_query_graph.py --preset income_statement
-uv run 05_query_graph.py --preset cash_flow
-
-# Run a custom query
-uv run 05_query_graph.py --query "MATCH (n) RETURN count(n)"
-
-# Interactive mode
-uv run 05_query_graph.py
 ```
 
-## 📊 Available Preset Queries
+**Output**: Graph created with 6 months of accounting data, example queries executed
+
+## Available Preset Queries
 
 ### Chart of Accounts
 View the complete chart of accounts:
@@ -189,7 +150,7 @@ RETURN
 ORDER BY month
 ```
 
-## 🛠️ Technical Details
+## Technical Details
 
 ### Graph Schema
 
@@ -221,33 +182,34 @@ This demo follows standard accounting principles:
 - **Normal balances**: Assets/Expenses are debits, Liabilities/Equity/Revenue are credits
 - **Period types**: Balance sheet accounts use "instant", income statement accounts use "duration"
 
-## 🔧 Advanced Usage
-
-### Generate More Data
-
-Generate 12 months of data instead of 6:
-```bash
-uv run 03_generate_data.py --months 12 --regenerate
-uv run 04_upload_ingest.py
-```
+## Advanced Usage
 
 ### Custom Queries
 
-Run custom Cypher queries:
+Run custom Cypher queries against your accounting graph:
 ```bash
-# Find all expenses over $500
-uv run 05_query_graph.py --query "
-MATCH (li:LineItem)-[:LINE_ITEM_RELATES_TO_ELEMENT]->(e:Element)
-WHERE e.classification = 'expense' AND li.debit_amount > 500
-RETURN e.name, li.description, li.debit_amount
-ORDER BY li.debit_amount DESC
-"
+# Using just command
+just graph-query <graph_id> "MATCH (e:Element) WHERE e.classification = 'expense' RETURN e.name, e.balance"
+
+# Or use the query script
+cd examples/accounting_demo
+uv run 05_query_graph.py --query "MATCH (n) RETURN count(n)"
+```
+
+### Generate More Data
+
+To generate more than the default 6 months:
+```bash
+cd examples/accounting_demo
+uv run 03_generate_data.py --months 12 --regenerate
+uv run 04_upload_ingest.py
 ```
 
 ### Interactive Mode
 
 Enter interactive mode for ad-hoc queries:
 ```bash
+cd examples/accounting_demo
 uv run 05_query_graph.py
 
 # Then type preset names or custom queries
@@ -257,7 +219,7 @@ uv run 05_query_graph.py
 > quit
 ```
 
-## 📚 Learn More
+## Learn More
 
 ### Graph Database Benefits for Accounting
 
@@ -275,60 +237,55 @@ This demo shows patterns used in real RoboSystems integrations:
 - **QuickBooks Sync**: Small business accounting (`/robosystems/processors/qb_transactions.py`)
 - **Custom ERPs**: Any double-entry accounting system
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-**Problem:** Script fails with "No credentials found"
-**Solution:** Run step 1 first:
-```bash
-uv run 01_setup_credentials.py
-```
-
-**Problem:** Script fails with "No graph_id found"
-**Solution:** Run step 2 first:
-```bash
-uv run 02_create_graph.py
-```
-
-**Problem:** Script fails with "No parquet files found"
-**Solution:** Run step 3 first:
-```bash
-uv run 03_generate_data.py
-```
-
-**Problem:** Connection error
+**Problem:** Connection error or "API unavailable"
 **Solution:** Ensure RoboSystems is running:
 ```bash
-just start robosystems
+just start
+just logs robosystems-api  # Check API logs
 ```
 
-**Problem:** Import errors
-**Solution:** Install dev dependencies:
+**Problem:** "No credentials found"
+**Solution:** Run the credential setup:
 ```bash
-just install
+just demo-user
 ```
 
-## 💡 Tips
+**Problem:** Demo fails with authentication error
+**Solution:** Recreate credentials:
+```bash
+just demo-user --force
+```
 
-- All scripts can be run independently after their dependencies are met
-- Credentials and data are saved locally and reused across runs
-- Use `--force` or `--regenerate` flags to start fresh
-- The demo uses auto-generated test data - perfect for exploring the API
-- Check the generated Parquet files in `data/` to see the data structure
+**Problem:** Want to start fresh with a new graph
+**Solution:** Use the new-graph flag:
+```bash
+just demo-accounting "new-graph"
+```
 
-## 🎉 Success!
+## Tips
 
-After running all steps, you have:
+- The `just demo-accounting` command handles all setup automatically
+- Credentials are saved in `examples/credentials/config.json` and reused across all demos
+- Generated data files are saved in `examples/accounting_demo/data/` for inspection
+- Use `just graph-query <graph_id> "<cypher>"` for ad-hoc queries
+- Check `just logs robosystems-api` if you encounter issues
 
-1. ✅ User account & API key
-2. ✅ Complete accounting graph
-3. ✅ 6 months of transaction data
-4. ✅ Ready-to-use query examples
+## Success!
 
-Happy querying!
+After running the demo, you have:
 
-## 📞 Support
+1. User account & API key (shared across all demos)
+2. Complete accounting graph with realistic data
+3. 6 months of transaction history
+4. Ready-to-use query examples
+
+Explore the data further with `just graph-query` or the query script!
+
+## Support
 
 For questions or issues:
-- Check the main project [README.md](../../README.md)
-- Review the [CLAUDE.md](../../CLAUDE.md) development guide
-- Open an issue on GitHub
+- Check the [Examples README](../README.md) for overview of all demos
+- Review the main [README.md](../../README.md) for platform documentation
+- Open an issue on [GitHub](https://github.com/RoboFinSystems/robosystems/issues)

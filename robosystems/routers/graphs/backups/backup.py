@@ -33,7 +33,7 @@ from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.config import env
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 from .utils import verify_admin_access
 
@@ -56,7 +56,7 @@ router = APIRouter()
 async def list_backups(
   request: Request,
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   limit: int = Query(
     50, ge=1, le=100, description="Maximum number of backups to return"
@@ -269,7 +269,7 @@ async def create_backup(
   request: BackupCreateRequest,
   fastapi_request: Request,
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_async_db_session),

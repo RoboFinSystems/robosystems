@@ -37,6 +37,7 @@ just rebuild                       # FULL: Rebuild images AND restart containers
 # Testing
 just test                          # Run tests
 just test-all                      # Run all tests with linting
+just test routers                  # Run tests at /tests/routers
 just lint && just format          # Code quality
 
 # For long-running tests that may exceed default timeout:
@@ -46,6 +47,7 @@ just lint && just format          # Code quality
 **When to use `just restart` vs `just rebuild`:**
 
 - **`just restart`** - Fast container restart (5-10 seconds)
+
   - Use for: Python code changes in `/robosystems` directory
   - Does NOT rebuild Docker images, just restarts existing containers
   - Code changes are picked up because `/robosystems` is mounted as a volume
@@ -58,6 +60,7 @@ just lint && just format          # Code quality
   - Always safe to use, but slower than `just restart`
 
 **Quick decision:**
+
 - Changed Python files? → `just restart`
 - Changed `pyproject.toml` or added packages? → `just rebuild`
 - Not sure? → `just rebuild` (always works, just slower)
@@ -240,6 +243,41 @@ just kuzu-query graph_id "MATCH (e:Entity) RETURN e"  # Direct embedded database
 just sec-load NVDA 2025            # Load company data (year optional)
 just sec-health                    # SEC database health
 ```
+
+### Subgraph Management
+
+Subgraphs allow users on dedicated tiers (kuzu-large and kuzu-xlarge) to create isolated databases on their parent graph's instance. They share the parent's resources and credit pool while maintaining separate data.
+
+#### Key Concepts
+
+- **Parent Graph**: The main graph that owns subgraphs
+- **Subgraph ID Format**: `{parent_graph_id}_{subgraph_name}`
+  - Example: `kg1234567890abcdef_dev`
+- **Naming Rules**: Alphanumeric only, 1-20 characters (no hyphens, underscores, or special chars)
+  - Valid: `dev`, `staging`, `prod1`, `test123`
+  - Invalid: `dev-test`, `my_subgraph`, `test.env`
+
+#### Tier Limits
+
+- **kuzu-standard**: 0 subgraphs (not supported)
+- **kuzu-large**: 10 subgraphs maximum
+- **kuzu-xlarge**: 25 subgraphs maximum
+
+#### Features
+
+- **Shared Credit Pool**: Subgraphs consume credits from parent's allocation
+- **Shared Permissions**: Users with parent access automatically have subgraph access
+- **Isolated Data**: Each subgraph has its own database, independent from parent
+- **Schema Inheritance**: Subgraphs inherit parent's schema extensions
+- **Same Instance**: All subgraphs run on parent's dedicated instance
+
+#### Usage Notes
+
+- Subgraphs are NOT tracked in DynamoDB - location resolution uses parent
+- Deletion requires `force=true` if subgraph contains data
+- Optional backup creation on deletion with `create_backup=true`
+- Subgraphs count against parent's max_subgraphs tier limit
+- All standard graph endpoints work with subgraph IDs
 
 ### Valkey/Redis Configuration
 

@@ -89,7 +89,12 @@ class GraphTierConfig:
         Tier configuration dictionary
     """
     if environment is None:
-      environment = "production" if env.ENVIRONMENT == "prod" else "staging"
+      if env.ENVIRONMENT == "prod":
+        environment = "production"
+      elif env.ENVIRONMENT == "dev":
+        environment = "development"
+      else:
+        environment = "staging"
 
     config = cls._load_config()
 
@@ -345,7 +350,12 @@ class GraphTierConfig:
         List of tier configuration dictionaries with formatted information
     """
     if environment is None:
-      environment = "production" if env.ENVIRONMENT == "prod" else "staging"
+      if env.ENVIRONMENT == "prod":
+        environment = "production"
+      elif env.ENVIRONMENT == "dev":
+        environment = "development"
+      else:
+        environment = "staging"
 
     config = cls._load_config()
     env_config = config.get(environment, {})
@@ -440,14 +450,13 @@ class GraphTierConfig:
     cls._config_cache = None
 
 
-@lru_cache(maxsize=32)
 def get_tier_max_subgraphs(
   tier: str, environment: Optional[str] = None
 ) -> Optional[int]:
-  """Cached function to get max subgraphs for a tier.
+  """Get max subgraphs for a tier.
 
   Args:
-      tier: The tier name (standard, enterprise, premium)
+      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
       environment: Environment (defaults to current env)
 
   Returns:
@@ -461,7 +470,7 @@ def get_tier_api_rate_multiplier(tier: str, environment: Optional[str] = None) -
   """Cached function to get rate limit multiplier for a tier.
 
   Args:
-      tier: The tier name (standard, enterprise, premium)
+      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
       environment: Environment (defaults to current env)
 
   Returns:
@@ -477,7 +486,7 @@ def get_tier_copy_operation_limits(
   """Cached function to get copy operation limits for a tier.
 
   Args:
-      tier: The tier name (standard, enterprise, premium)
+      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
       environment: Environment (defaults to current env)
 
   Returns:

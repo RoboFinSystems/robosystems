@@ -76,7 +76,7 @@ class GraphLimitsResponse(BaseModel):
           "description": "Operational limits for a kuzu-standard tier user graph with full details",
           "value": {
             "graph_id": "kg1a2b3c4d5",
-            "subscription_tier": "standard",
+            "subscription_tier": "kuzu-standard",
             "graph_tier": "kuzu-standard",
             "is_shared_repository": False,
             "storage": {
@@ -121,7 +121,7 @@ class GraphLimitsResponse(BaseModel):
           "description": "Operational limits for SEC shared repository (read-only, no credits)",
           "value": {
             "graph_id": "sec",
-            "subscription_tier": "standard",
+            "subscription_tier": "kuzu-standard",
             "graph_tier": "kuzu-shared",
             "is_shared_repository": True,
             "storage": {
@@ -160,7 +160,7 @@ class GraphLimitsResponse(BaseModel):
           "description": "Operational limits for kuzu-large tier with enhanced capabilities",
           "value": {
             "graph_id": "kg9f8e7d6c5",
-            "subscription_tier": "enterprise",
+            "subscription_tier": "kuzu-large",
             "graph_tier": "kuzu-large",
             "is_shared_repository": False,
             "storage": {

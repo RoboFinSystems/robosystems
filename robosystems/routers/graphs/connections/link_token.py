@@ -30,7 +30,7 @@ from .utils import (
 )
 
 import asyncio
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -74,7 +74,7 @@ No credits are consumed for creating link tokens.""",
 )
 async def create_link_token(
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   request: LinkTokenRequest = ...,
   current_user: User = Depends(get_current_user_with_graph),
@@ -301,7 +301,7 @@ No credits are consumed for token exchange.""",
 )
 async def exchange_link_token(
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   request: ExchangeTokenRequest = ...,
   fastapi_request: Request = ...,

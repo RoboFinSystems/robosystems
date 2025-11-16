@@ -92,21 +92,23 @@ class TestSubscriptionRateLimits:
     assert limit == 10
     assert window == 60  # 1 minute
 
-    # Standard tier
-    limit, window = get_subscription_rate_limit("standard", EndpointCategory.GRAPH_READ)
+    # Kuzu Standard tier
+    limit, window = get_subscription_rate_limit(
+      "kuzu-standard", EndpointCategory.GRAPH_READ
+    )
     assert limit == 500
     assert window == 60
 
-    # Standard tier write
+    # Kuzu Standard tier write
     limit, window = get_subscription_rate_limit(
-      "standard", EndpointCategory.GRAPH_WRITE
+      "kuzu-standard", EndpointCategory.GRAPH_WRITE
     )
     assert limit == 100
     assert window == 60
 
-    # Enterprise tier
+    # Kuzu Large tier (enterprise-level)
     limit, window = get_subscription_rate_limit(
-      "enterprise", EndpointCategory.GRAPH_QUERY
+      "kuzu-large", EndpointCategory.GRAPH_QUERY
     )
     assert limit == 1000
     assert window == 60
@@ -114,7 +116,7 @@ class TestSubscriptionRateLimits:
   def test_standard_tier_has_appropriate_limits(self):
     """Test that standard tier has appropriate limits."""
     for category in EndpointCategory:
-      standard_limit = get_subscription_rate_limit("standard", category)
+      standard_limit = get_subscription_rate_limit("kuzu-standard", category)
       free_limit = get_subscription_rate_limit("free", category)
       # Standard should have higher limits than free
       assert standard_limit is not None and free_limit is not None
@@ -186,7 +188,7 @@ class TestSubscriptionAwareRateLimiting:
     # Verify request state was updated
     assert mock_request.state.rate_limit_remaining == 5000
     assert mock_request.state.rate_limit_limit == 500
-    assert mock_request.state.rate_limit_tier == "standard"
+    assert mock_request.state.rate_limit_tier == "kuzu-standard"
 
   @patch("robosystems.middleware.rate_limits.rate_limiting.get_user_from_request")
   @patch(
@@ -262,6 +264,8 @@ class TestSubscriptionAwareRateLimiting:
     assert limit == 10
     assert window == 60  # Minute limit
 
-    limit, window = get_subscription_rate_limit("standard", EndpointCategory.GRAPH_MCP)
+    limit, window = get_subscription_rate_limit(
+      "kuzu-standard", EndpointCategory.GRAPH_MCP
+    )
     assert limit == 100
     assert window == 60

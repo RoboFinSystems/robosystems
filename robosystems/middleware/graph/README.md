@@ -16,8 +16,8 @@ The graph middleware:
 **Supported Backends:**
 
 - **Kuzu**: Embedded graph database with EC2-based clusters
-- **Neo4j Community**: Client-server architecture for Professional/Enterprise tiers
-- **Neo4j Enterprise**: Multi-database support for Premium tier
+- **Neo4j Community**: Client-server architecture for kuzu-large tier
+- **Neo4j Enterprise**: Multi-database support for kuzu-xlarge tier
 
 ## Architecture
 
@@ -67,7 +67,7 @@ router = GraphRouter()
 repo = router.get_repository(
     graph_id="kg1a2b3c",
     operation_type="write",
-    tier=InstanceTier.STANDARD
+    tier=GraphTier.KUZU_STANDARD
 )
 result = await repo.execute_query("MATCH (n) RETURN n LIMIT 10")
 ```
@@ -226,7 +226,7 @@ Core type definitions and enums.
 **Key Types:**
 
 - `GraphType`: Enum for graph types (ENTITY, SHARED_REPOSITORY)
-- `InstanceTier`: Enum for instance tiers (STANDARD, ENTERPRISE, PREMIUM)
+- `GraphTier`: Enum for graph tiers (KUZU_STANDARD, KUZU_LARGE, KUZU_XLARGE)
 - `OperationType`: Enum for operations (READ, WRITE, ADMIN)
 - `QueryPriority`: Priority levels (1-10)
 
@@ -240,18 +240,19 @@ DynamoDB-based allocation manager for graph databases across instances (Kuzu-spe
 - **Instance Management**: Tracks capacity and health of Kuzu instances
 - **Atomic Allocation**: Race-condition-free database assignment
 - **Auto-scaling Integration**: Triggers capacity increases when needed
-- **Multi-tier Support**: Standard/Enterprise/Premium instance tiers
+- **Multi-tier Support**: kuzu-standard, kuzu-large, kuzu-xlarge instance tiers
 - **Instance Protection**: Automatically enables scale-in protection for instances with allocated databases
 
 **Usage:**
 
 ```python
 from robosystems.middleware.graph.allocation_manager import KuzuAllocationManager
+from robosystems.config.graph_tier import GraphTier
 
 manager = KuzuAllocationManager(environment="prod")
 location = await manager.allocate_database(
     entity_id="kg1a2b3c",
-    instance_tier=InstanceTier.STANDARD
+    instance_tier=GraphTier.KUZU_STANDARD
 )
 print(f"Database allocated to {location.instance_id}")
 ```
@@ -283,6 +284,57 @@ is_shared = MultiTenantUtils.is_shared_repository("sec")
 # Get routing information
 routing = MultiTenantUtils.get_graph_routing("kg1a2b3c")
 ```
+
+### 11. Subgraph Support (`types.py`, `allocation_manager.py`)
+
+Subgraph functionality allows users on dedicated tiers to create isolated databases on their parent instance.
+
+**Key Functions:**
+
+```python
+from robosystems.middleware.graph.types import (
+    is_subgraph_id,
+    parse_graph_id,
+    construct_subgraph_id,
+)
+
+# Check if ID is a subgraph
+if is_subgraph_id("kg1234567890abcdef_dev"):
+    print("This is a subgraph")
+
+# Parse subgraph ID to get parent
+parent_id, subgraph_name = parse_graph_id("kg1234567890abcdef_dev")
+# Returns: ("kg1234567890abcdef", "dev")
+
+# Construct subgraph ID
+subgraph_id = construct_subgraph_id("kg1234567890abcdef", "staging")
+# Returns: "kg1234567890abcdef_staging"
+```
+
+**Allocation Manager Integration:**
+
+The `KuzuAllocationManager.find_database_location()` automatically resolves subgraphs to their parent's location:
+
+```python
+manager = KuzuAllocationManager(environment="prod")
+
+# Requesting location for subgraph returns parent's instance location
+location = await manager.find_database_location("kg1234567890abcdef_dev")
+# Returns location with subgraph_id but parent's instance details
+```
+
+**Validation:**
+
+- Parent graph ID: Must match `kg[a-f0-9]{16,}` (16+ hex chars)
+- Subgraph name: Must match `[a-zA-Z0-9]{1,20}` (alphanumeric only)
+- Format: `{parent_id}_{subgraph_name}`
+
+**Limitations:**
+
+- Subgraphs inherit parent's tier and instance
+- No DynamoDB registry entries for subgraphs (resolved via parent)
+- Cannot create subgraphs of subgraphs (single-level only)
+- Shared repositories cannot have subgraphs
 
 ## Configuration
 

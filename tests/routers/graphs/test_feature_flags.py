@@ -50,7 +50,7 @@ class TestConnectionFeatureFlags:
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
         ):
-          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+          response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/connections/options")
 
           assert response.status_code == 200
           data = response.json()
@@ -77,7 +77,7 @@ class TestConnectionFeatureFlags:
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
         ):
-          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+          response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/connections/options")
 
           assert response.status_code == 200
           data = response.json()
@@ -107,7 +107,7 @@ class TestConnectionFeatureFlags:
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
         ):
-          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+          response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/connections/options")
 
           assert response.status_code == 200
           data = response.json()
@@ -135,7 +135,7 @@ class TestConnectionFeatureFlags:
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
         ):
-          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+          response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/connections/options")
 
           assert response.status_code == 200
           data = response.json()
@@ -163,7 +163,7 @@ class TestConnectionFeatureFlags:
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
         ):
-          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+          response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/connections/options")
 
           assert response.status_code == 200
           data = response.json()
@@ -195,7 +195,7 @@ class TestConnectionFeatureFlags:
         with patch(
           "robosystems.operations.connection_service.ConnectionService.get_connection"
         ):
-          response = client.get("/v1/graphs/kg1a2b3c4d5e/connections/options")
+          response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/connections/options")
 
           assert response.status_code == 200
           data = response.json()
@@ -377,7 +377,7 @@ class TestProviderRegistry:
           entity_id="test-entity",
           config=SECConnectionConfig(cik="0000012345", entity_name="Test Company"),
           user_id="test-user",
-          graph_id="kg1a2b3c4d5e",
+          graph_id="kg1a2b3c4d5e6f7a8b",
           db=mock_db,
         )
 
@@ -405,7 +405,7 @@ class TestProviderRegistry:
           provider_type="quickbooks",
           connection=connection,
           sync_options=None,
-          graph_id="kg1a2b3c4d5e",
+          graph_id="kg1a2b3c4d5e6f7a8b",
         )
 
       assert "QuickBooks provider is not enabled" in str(exc_info.value)
@@ -429,7 +429,7 @@ class TestProviderRegistry:
 
       with pytest.raises(ValueError) as exc_info:
         await registry.cleanup_connection(
-          provider_type="plaid", connection=connection, graph_id="kg1a2b3c4d5e"
+          provider_type="plaid", connection=connection, graph_id="kg1a2b3c4d5e6f7a8b"
         )
 
       assert "Plaid provider is not enabled" in str(exc_info.value)
@@ -563,7 +563,9 @@ class TestGraphOperationFeatureFlags:
             "retention_days": 30,
           }
 
-          response = client.post("/v1/graphs/kg1a2b3c4d5e/backups", json=request_data)
+          response = client.post(
+            "/v1/graphs/kg1a2b3c4d5e6f7a8b/backups", json=request_data
+          )
 
           assert response.status_code == 403
           data = response.json()
@@ -628,7 +630,9 @@ class TestGraphOperationFeatureFlags:
             "description": "Test subgraph",
           }
 
-          response = client.post("/v1/graphs/kg1a2b3c4d5e/subgraphs", json=request_data)
+          response = client.post(
+            "/v1/graphs/kg1a2b3c4d5e6f7a8b/subgraphs", json=request_data
+          )
 
           # Should not return 403 when enabled - might fail later in validation but not due to feature flag
           assert response.status_code != 403
@@ -677,7 +681,9 @@ class TestGraphOperationFeatureFlags:
               "retention_days": 30,
             }
 
-            response = client.post("/v1/graphs/kg1a2b3c4d5e/backups", json=request_data)
+            response = client.post(
+              "/v1/graphs/kg1a2b3c4d5e6f7a8b/backups", json=request_data
+            )
 
             # Should not return 403 when enabled - should proceed to actual backup logic
             assert response.status_code != 403
@@ -743,7 +749,7 @@ class TestAgentPostFeatureFlags:
           "history": [],
         }
 
-        response = client.post("/v1/graphs/kg1a2b3c4d5e/agent", json=request_data)
+        response = client.post("/v1/graphs/kg1a2b3c4d5e6f7a8b/agent", json=request_data)
 
         assert response.status_code == 403
         data = response.json()
@@ -775,7 +781,7 @@ class TestAgentPostFeatureFlags:
         }
 
         response = client.post(
-          "/v1/graphs/kg1a2b3c4d5e/agent/financial", json=request_data
+          "/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/financial", json=request_data
         )
 
         assert response.status_code == 403
@@ -815,7 +821,9 @@ class TestAgentPostFeatureFlags:
           "parallel": False,
         }
 
-        response = client.post("/v1/graphs/kg1a2b3c4d5e/agent/batch", json=request_data)
+        response = client.post(
+          "/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/batch", json=request_data
+        )
 
         # Due to route precedence issues in test environment, this may return either:
         # - 403 if routed to correct /batch endpoint (feature flag check)
@@ -855,7 +863,7 @@ class TestAgentPostFeatureFlags:
         request_data = {"message": "Help me analyze financial data", "context": None}
 
         response = client.post(
-          "/v1/graphs/kg1a2b3c4d5e/agent/recommend", json=request_data
+          "/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/recommend", json=request_data
         )
 
         assert response.status_code == 403
@@ -880,12 +888,12 @@ class TestAgentPostFeatureFlags:
         mock_env.AGENT_POST_ENABLED = False
 
         # Test list agents endpoint (GET)
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/agent")
+        response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/agent")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
 
         # Test agent metadata endpoint (GET)
-        response = client.get("/v1/graphs/kg1a2b3c4d5e/agent/financial")
+        response = client.get("/v1/graphs/kg1a2b3c4d5e6f7a8b/agent/financial")
         # Should not return 403 - GET endpoints are not affected by this flag
         assert response.status_code != 403
     finally:

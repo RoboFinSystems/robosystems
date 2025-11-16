@@ -45,19 +45,23 @@ staging:
       monthly_credits: 900
       instance:
         query_timeout: 90
+development:
+  writers:
+    - tier: kuzu-standard
+      monthly_credits: 900
+      instance:
+        query_timeout: 90
 """
 
 
 @pytest.fixture(autouse=True)
 def reset_tier_config_caches():
   GraphTierConfig.clear_cache()
-  get_tier_max_subgraphs.cache_clear()
   get_tier_api_rate_multiplier.cache_clear()
   get_tier_copy_operation_limits.cache_clear()
   get_tier_backup_limits.cache_clear()
   yield
   GraphTierConfig.clear_cache()
-  get_tier_max_subgraphs.cache_clear()
   get_tier_api_rate_multiplier.cache_clear()
   get_tier_copy_operation_limits.cache_clear()
   get_tier_backup_limits.cache_clear()

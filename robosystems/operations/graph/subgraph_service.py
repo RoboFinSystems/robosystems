@@ -94,6 +94,39 @@ class SubgraphService:
         "Must be alphanumeric and 1-20 characters."
       )
 
+    # Check subgraph limit for parent's tier
+    from ...models.iam.graph import Graph
+    from ...database import get_db_session
+    from ...config.graph_tier import GraphTierConfig
+
+    db = next(get_db_session())
+    try:
+      parent_graph = db.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
+      if not parent_graph:
+        raise GraphAllocationError(
+          f"Parent graph {parent_graph_id} not found in database. "
+          "The parent graph must exist before creating subgraphs."
+        )
+
+      max_subgraphs = GraphTierConfig.get_max_subgraphs(parent_graph.graph_tier)
+
+      if max_subgraphs is not None and max_subgraphs == 0:
+        raise GraphAllocationError(
+          f"Tier '{parent_graph.graph_tier}' does not support subgraphs. "
+          f"Upgrade to a tier with subgraph support to use this feature."
+        )
+
+      if max_subgraphs is not None:
+        existing_subgraphs = await self.list_subgraph_databases(parent_graph_id)
+        if len(existing_subgraphs) >= max_subgraphs:
+          raise GraphAllocationError(
+            f"Maximum subgraph limit ({max_subgraphs}) reached for tier '{parent_graph.graph_tier}'. "
+            f"Currently have {len(existing_subgraphs)} subgraphs. "
+            f"Upgrade to a higher tier for more subgraphs."
+          )
+    finally:
+      db.close()
+
     # Construct the full subgraph ID
     subgraph_id = construct_subgraph_id(parent_graph_id, subgraph_name)
     database_name = subgraph_id  # Using underscore notation
@@ -170,7 +203,7 @@ class SubgraphService:
       logger.error(f"Failed to create subgraph database {subgraph_id}: {e}")
       raise GraphAllocationError(f"Failed to create subgraph: {str(e)}")
 
-  def create_subgraph(
+  async def create_subgraph(
     self,
     parent_graph: "Graph",
     user: "User",
@@ -182,8 +215,11 @@ class SubgraphService:
     """
     Create a subgraph including both the database and PostgreSQL metadata.
 
-    This is a synchronous wrapper that creates the PostgreSQL records.
-    The actual Kuzu database creation happens asynchronously.
+    This method:
+    1. Creates the actual Kuzu database on the parent's instance
+    2. Installs schema (base + extensions from parent)
+    3. Creates PostgreSQL metadata records
+    4. Creates user-graph relationship
 
     Args:
         parent_graph: Parent graph model
@@ -202,6 +238,24 @@ class SubgraphService:
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
 
+    # Step 1: Create the actual Kuzu database on the parent's instance
+    logger.info(
+      f"Creating Kuzu database for subgraph {subgraph_id} on parent {parent_graph.graph_id}'s instance"
+    )
+
+    try:
+      # Directly await the async database creation method
+      db_creation_result = await self.create_subgraph_database(
+        parent_graph_id=parent_graph.graph_id,
+        subgraph_name=name,
+        schema_extensions=parent_graph.schema_extensions or [],
+      )
+      logger.info(f"Kuzu database created: {db_creation_result}")
+    except Exception as e:
+      logger.error(f"Failed to create Kuzu database for subgraph: {e}")
+      raise
+
+    # Step 2: Create PostgreSQL metadata records
     db = next(get_db_session())
     try:
       existing_subgraphs = (
@@ -262,11 +316,31 @@ class SubgraphService:
         "status": "active",
         "created_at": subgraph.created_at,
         "updated_at": subgraph.updated_at,
+        "database_created": db_creation_result.get("status") == "created",
+        "instance_id": db_creation_result.get("instance_id"),
       }
 
     except Exception as e:
       db.rollback()
       logger.error(f"Failed to create subgraph metadata: {e}")
+
+      if db_creation_result.get("status") == "created":
+        logger.warning(
+          f"Cleaning up orphaned Kuzu database {subgraph_id} due to metadata creation failure"
+        )
+        try:
+          await self.delete_subgraph_database(
+            subgraph_id=subgraph_id,
+            force=True,
+            create_backup=False,
+          )
+          logger.info(f"Successfully cleaned up orphaned database {subgraph_id}")
+        except Exception as cleanup_error:
+          logger.error(
+            f"Failed to clean up orphaned database {subgraph_id}: {cleanup_error}. "
+            f"Manual cleanup may be required."
+          )
+
       raise
     finally:
       db.close()

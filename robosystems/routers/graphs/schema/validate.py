@@ -32,7 +32,7 @@ from robosystems.middleware.robustness import (
 )
 
 from .utils import circuit_breaker, timeout_coordinator
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -62,6 +62,13 @@ Validation helps prevent:
 - Performance problems
 - Naming conflicts
 
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+Schema validation is performed against the specified graph/subgraph's current
+schema and data structure.
+
 This operation is included - no credit consumption required.""",
   status_code=status.HTTP_200_OK,
   operation_id="validateSchema",
@@ -78,7 +85,7 @@ This operation is included - no credit consumption required.""",
 )
 async def validate_schema(
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   request: SchemaValidationRequest = Body(
     ...,

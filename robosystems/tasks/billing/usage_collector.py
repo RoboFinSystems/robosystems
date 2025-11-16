@@ -198,7 +198,7 @@ def get_user_graphs_with_details(session: Session) -> List[Dict]:
       {
         "graph_id": row.graph_id,
         "user_id": row.user_id,
-        "graph_tier": row.graph_tier or "standard",
+        "graph_tier": row.graph_tier or "kuzu-standard",
       }
     )
 

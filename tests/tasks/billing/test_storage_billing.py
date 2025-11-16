@@ -489,13 +489,13 @@ class TestHelperFunctions:
     mock_row1 = MagicMock()
     mock_row1.graph_id = "graph1"
     mock_row1.user_id = "user1"
-    mock_row1.graph_tier = "standard"
+    mock_row1.graph_tier = "kuzu-standard"
     mock_row1.measurement_count = 24
 
     mock_row2 = MagicMock()
     mock_row2.graph_id = "graph2"
     mock_row2.user_id = "user2"
-    mock_row2.graph_tier = "enterprise"
+    mock_row2.graph_tier = "kuzu-large"
     mock_row2.measurement_count = 48
 
     mock_query = MagicMock()

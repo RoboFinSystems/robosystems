@@ -54,7 +54,7 @@ from robosystems.middleware.robustness import (
 )
 from robosystems.logger import logger, api_logger
 from robosystems.middleware.sse.operation_manager import create_operation_response
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Import MCP components
 from .handlers import MCPHandler, validate_mcp_access
@@ -165,6 +165,13 @@ automatically aggregated for seamless consumption.
 - `408 Request Timeout`: Tool execution exceeded timeout
 - Clients should implement exponential backoff on errors
 
+**Subgraph Support:**
+This endpoint accepts both parent graph IDs and subgraph IDs.
+- Parent graph: Use `graph_id` like `kg0123456789abcdef`
+- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
+MCP tools operate on the specified graph/subgraph independently. Each subgraph
+has its own schema, data, and can be queried separately via MCP.
+
 **Credit Model:**
 MCP tool execution is included - no credit consumption required. Database
 operations (queries, schema inspection, analytics) are completely free.
@@ -191,7 +198,7 @@ async def call_mcp_tool(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   tool_call: MCPToolCall = Body(
     ...,
@@ -346,7 +353,7 @@ async def call_mcp_tool(
         limiter = DualLayerRateLimiter(redis_client)
 
         # Get user's subscription tier for burst protection
-        user_tier = "standard"  # Default for authenticated users
+        user_tier = "kuzu-standard"  # Default for authenticated users
         if hasattr(current_user, "subscription") and current_user.subscription:
           if current_user.subscription.billing_plan:
             user_tier = current_user.subscription.billing_plan.name

@@ -31,7 +31,7 @@ from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Create router
 router = APIRouter(tags=["Graph Limits"])
@@ -79,7 +79,7 @@ Returns all operational limits that apply to this graph including:
 
 This unified endpoint provides all limits in one place for easier client integration.
 
-**Note**: Limits vary based on subscription tier (Standard, Enterprise, Premium).""",
+**Note**: Limits vary based on subscription tier (kuzu-standard, kuzu-large, kuzu-xlarge).""",
   operation_id="getGraphLimits",
   responses={
     200: {"description": "Limits retrieved successfully"},
@@ -96,7 +96,7 @@ async def get_graph_limits(
   graph_id: str = Path(
     ...,
     description="Graph database identifier (user graph or shared repository)",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_async_db_session),
@@ -134,7 +134,7 @@ async def get_graph_limits(
     from robosystems.config.billing.storage import StorageBillingConfig
 
     # Get user's subscription tier
-    user_tier = getattr(current_user, "subscription_tier", "standard")
+    user_tier = getattr(current_user, "subscription_tier", "kuzu-standard")
 
     # Get graph information if it exists
     graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()

@@ -24,7 +24,11 @@ from botocore.exceptions import ClientError
 
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.middleware.graph.types import GraphTypeRegistry, GraphTier
+from robosystems.middleware.graph.types import (
+  GraphTypeRegistry,
+  GraphTier,
+  is_subgraph_id,
+)
 from .multitenant_utils import MultiTenantUtils
 from .subgraph_utils import parse_subgraph_id
 from robosystems.config import env
@@ -34,9 +38,9 @@ from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 VALID_ENTITY_ID_PATTERN = re.compile(
   r"^[a-zA-Z0-9_-]{1,128}$"
 )  # Entity IDs: alphanumeric, underscore, dash (max 128 chars)
-VALID_GRAPH_ID_PATTERN = re.compile(
+VALID_GRAPH_ID_REGEX = re.compile(
   GRAPH_ID_PATTERN
-)  # Graph IDs: canonical pattern from constants
+)  # Graph IDs: canonical pattern from constants (compiled regex)
 VALID_INSTANCE_ID_PATTERN = re.compile(r"^i-[0-9a-f]{8,17}$")  # AWS instance ID format
 
 
@@ -270,14 +274,29 @@ class KuzuAllocationManager:
 
       graph_id = f"kg{uuid.uuid4().hex[:16]}"
 
-    if not VALID_GRAPH_ID_PATTERN.match(graph_id):
+    if not VALID_GRAPH_ID_REGEX.match(graph_id):
+      # Check if this looks like a subgraph ID - provide helpful error
+      if is_subgraph_id(graph_id):
+        parent_id = graph_id.split("_")[0]
+        SecurityAuditLogger.log_input_validation_failure(
+          field_name="graph_id",
+          invalid_value=graph_id,
+          validation_error="Subgraph ID used in registry lookup",
+        )
+        raise ValueError(
+          f"Subgraph IDs are not stored in the DynamoDB registry. "
+          f"Use the parent graph ID ('{parent_id}') for registry lookups. "
+          f"Subgraphs share their parent's instance allocation."
+        )
+
+      # Generic validation error for other invalid formats
       SecurityAuditLogger.log_input_validation_failure(
         field_name="graph_id",
         invalid_value=graph_id,
         validation_error="Invalid graph ID format",
       )
       raise ValueError(
-        f"Invalid graph ID format: {graph_id}. Must contain only alphanumeric characters, underscores, and dashes."
+        f"Invalid graph ID format: {graph_id}. Must be 'kg' followed by 16+ lowercase hex characters or a shared repository name."
       )
 
     # Check if this is a subgraph - if so, route to parent's allocation
@@ -548,12 +567,38 @@ class KuzuAllocationManager:
     """
     Find the location of an existing database.
 
+    For subgraphs, this method automatically resolves to the parent graph's location
+    since subgraphs share the same physical instance as their parent.
+
     Args:
-        graph_id: Graph/database identifier
+        graph_id: Graph/database identifier (can be parent or subgraph)
 
     Returns:
         DatabaseLocation if found, None otherwise
     """
+    # Check if this is a subgraph - if so, look up parent instead
+    subgraph_info = parse_subgraph_id(graph_id)
+    if subgraph_info:
+      logger.debug(
+        f"Resolving subgraph {graph_id} to parent {subgraph_info.parent_graph_id}"
+      )
+      # Recursively call with parent ID to get parent's location
+      parent_location = await self.find_database_location(subgraph_info.parent_graph_id)
+      if not parent_location:
+        return None
+
+      # Return location with subgraph's graph_id but parent's instance details
+      return DatabaseLocation(
+        graph_id=graph_id,
+        instance_id=parent_location.instance_id,
+        private_ip=parent_location.private_ip,
+        availability_zone=parent_location.availability_zone,
+        created_at=parent_location.created_at,
+        status=parent_location.status,
+        backend_type=parent_location.backend_type,
+      )
+
+    # Parent graph or shared repository - look up in DynamoDB
     try:
       response = self.graph_table.get_item(Key={"graph_id": graph_id})
 

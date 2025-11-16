@@ -26,7 +26,7 @@ from ...models.api.billing.subscription import (
   UpgradeSubscriptionRequest,
 )
 from ...config import BillingConfig, env
-from ...middleware.graph.types import GraphTypeRegistry, GRAPH_ID_PATTERN
+from ...middleware.graph.types import GraphTypeRegistry, GRAPH_OR_SUBGRAPH_ID_PATTERN
 from ...operations.graph.repository_subscription_service import (
   RepositorySubscriptionService,
 )
@@ -128,7 +128,7 @@ This unified endpoint automatically detects the resource type and returns the ap
 )
 async def get_subscription(
   graph_id: str = Path(
-    ..., description="Graph ID or repository name", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph ID or repository name", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
@@ -208,7 +208,7 @@ async def create_repository_subscription(
   graph_id: str = Path(
     ...,
     description="Repository name (e.g., 'sec', 'industry')",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   request: CreateRepositorySubscriptionRequest = ...,
   current_user: User = Depends(get_current_user),
@@ -381,7 +381,7 @@ The subscription will be immediately updated to the new plan and pricing.""",
 )
 async def upgrade_subscription(
   graph_id: str = Path(
-    ..., description="Graph ID or repository name", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph ID or repository name", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   request: UpgradeSubscriptionRequest = ...,
   current_user: User = Depends(get_current_user),

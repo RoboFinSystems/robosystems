@@ -190,7 +190,7 @@ def get_cluster_for_entity_graphs(
   Get the best available Kuzu cluster for entity graph creation.
 
   Args:
-      tier: Customer tier (shared, enterprise, premium)
+      tier: Customer tier (kuzu-shared, kuzu-standard, kuzu-large, kuzu-xlarge)
       region: Preferred AWS region
 
   Returns:

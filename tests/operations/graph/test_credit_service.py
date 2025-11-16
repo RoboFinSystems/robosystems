@@ -292,7 +292,7 @@ class TestCreditService:
         sample_graph_credits.get_usage_summary = Mock(
           return_value={
             "graph_id": "graph123",
-            "graph_tier": "standard",
+            "graph_tier": "kuzu-standard",
             "credit_multiplier": 1.0,
             "current_balance": 1000.0,
             "monthly_allocation": 1000.0,
@@ -422,7 +422,7 @@ class TestCreditService:
       return_value={
         "current_balance": 750.0,
         "monthly_allocation": 1000.0,
-        "graph_tier": "enterprise",
+        "graph_tier": "kuzu-large",
         "credit_multiplier": 0.9,
       }
     )
@@ -439,7 +439,7 @@ class TestCreditService:
 
     assert result["current_balance"] == 750.0
     assert result["monthly_allocation"] == 1000.0
-    assert result["graph_tier"] == "enterprise"
+    assert result["graph_tier"] == "kuzu-large"
 
   def test_allocate_monthly_credits_recent(self, credit_service, mock_session):
     """Test monthly allocation when already allocated recently."""

@@ -62,7 +62,7 @@ from robosystems.logger import logger, api_logger
 from robosystems.middleware.graph.types import (
   GraphTypeRegistry,
   SHARED_REPO_DELETE_ERROR_MESSAGE,
-  GRAPH_ID_PATTERN,
+  GRAPH_OR_SUBGRAPH_ID_PATTERN,
 )
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
@@ -158,7 +158,7 @@ async def list_table_files(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   table_name: str = Path(..., description="Table name"),
   current_user: User = Depends(get_current_user_with_graph),
@@ -360,7 +360,7 @@ async def get_file_info(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   file_id: str = Path(..., description="File ID"),
   current_user: User = Depends(get_current_user_with_graph),
@@ -548,7 +548,7 @@ async def delete_file(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
-    pattern=GRAPH_ID_PATTERN,
+    pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   file_id: str = Path(..., description="File ID"),
   current_user: User = Depends(get_current_user_with_graph),

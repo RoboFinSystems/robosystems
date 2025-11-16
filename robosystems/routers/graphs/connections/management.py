@@ -33,7 +33,7 @@ from .utils import (
 )
 
 import asyncio
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -78,7 +78,7 @@ This operation is included - no credit consumption required.""",
 )
 async def create_connection(
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   request: CreateConnectionRequest = ...,
   current_user: User = Depends(get_current_user_with_graph),
@@ -307,7 +307,7 @@ No credits are consumed for listing connections.""",
 )
 async def list_connections(
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   entity_id: Optional[str] = Query(None, description="Filter by entity ID"),
   provider: Optional[ProviderType] = Query(None, description="Filter by provider type"),
@@ -383,7 +383,7 @@ No credits are consumed for viewing connection details.""",
 )
 async def get_connection(
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   connection_id: str = Path(..., description="Unique connection identifier"),
   current_user: User = Depends(get_current_user_with_graph),
@@ -466,7 +466,7 @@ Only users with admin role can delete connections.""",
 async def delete_connection(
   request: Request,
   graph_id: str = Path(
-    ..., description="Graph database identifier", pattern=GRAPH_ID_PATTERN
+    ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   connection_id: str = Path(..., description="Connection identifier"),
   current_user: User = Depends(get_current_user_with_graph),

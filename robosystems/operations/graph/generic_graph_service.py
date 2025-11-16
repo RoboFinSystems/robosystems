@@ -48,7 +48,7 @@ class GenericGraphService:
         graph_id: Requested graph ID (auto-generated if None)
         schema_extensions: List of schema extensions to install
         metadata: Graph metadata (name, description, type, tags)
-        tier: Service tier (standard, enterprise, premium)
+        tier: Service tier (kuzu-standard, kuzu-large, kuzu-xlarge)
         initial_data: Optional initial data to populate
         user_id: ID of the user creating the graph
         cancellation_callback: Optional callback to check for cancellation
