@@ -3636,7 +3636,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.0,<3.0" },
     { name = "retrying", specifier = ">=1.4.0,<2.0" },
     { name = "rich", marker = "extra == 'dev'", specifier = ">=14.0.0,<15.0" },
-    { name = "robosystems-client", marker = "extra == 'dev'", specifier = "==0.2.14" },
+    { name = "robosystems-client", marker = "extra == 'dev'", directory = "../robosystems-python-client" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12.0,<1.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0,<3.0" },
     { name = "sse-starlette", specifier = ">=2.4.1,<3.0" },
@@ -3648,8 +3648,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "robosystems-client"
-version = "0.2.14"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.15"
+source = { directory = "../robosystems-python-client" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
@@ -3657,10 +3657,30 @@ dependencies = [
     { name = "python-dateutil" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/53/22/e6c43e8800c9cd3b59f928ae73cceb96caefb4568a68b7c9aa1a84108ffa/robosystems_client-0.2.14.tar.gz", hash = "sha256:da60088a0caf4cf117237fa06afc43a11e51c8eef144e534fd7bc19efa3f5619", size = 198611, upload-time = "2025-11-14T22:55:11.54Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/43/5e/709b42ce8d3d576fcab11f17d8a2e701bb7ade4014af4583cf9093a81c81/robosystems_client-0.2.14-py3-none-any.whl", hash = "sha256:5a7f4d09062631b25cb2e1726da382908a6c78bb63186017f92d54602e16228b", size = 460710, upload-time = "2025-11-14T22:55:10.37Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "attrs", specifier = ">=23.0.0" },
+    { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.21.0" },
+    { name = "build", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "openapi-python-client", marker = "extra == 'dev'", specifier = ">=0.21.8" },
+    { name = "pandas", marker = "extra == 'all'", specifier = ">=1.5.0" },
+    { name = "pandas", marker = "extra == 'extensions'", specifier = ">=1.5.0" },
+    { name = "pandas", marker = "extra == 'tables'", specifier = ">=1.5.0" },
+    { name = "pyarrow", marker = "extra == 'all'", specifier = ">=10.0.0" },
+    { name = "pyarrow", marker = "extra == 'extensions'", specifier = ">=10.0.0" },
+    { name = "pyarrow", marker = "extra == 'tables'", specifier = ">=10.0.0" },
+    { name = "pydantic", specifier = ">=2.11.7" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.5" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.26.0" },
+    { name = "pytest-httpx", marker = "extra == 'dev'", specifier = ">=0.30.0" },
+    { name = "python-dateutil", specifier = ">=2.8.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.12" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "typing-extensions", specifier = ">=4.0.0" },
 ]
+provides-extras = ["dev", "tables", "extensions", "all"]
 
 [[package]]
 name = "rpds-py"

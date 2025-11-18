@@ -42,6 +42,7 @@ celery_app = Celery(
     "robosystems.tasks.graph_operations.backup",
     "robosystems.tasks.graph_operations.create_entity_graph",
     "robosystems.tasks.graph_operations.create_graph",
+    "robosystems.tasks.graph_operations.create_subgraph",
     # Agent operations
     "robosystems.tasks.agents.analyze",
     # Billing and credits

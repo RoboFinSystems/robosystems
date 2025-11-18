@@ -43,7 +43,7 @@ class TestSubgraphService:
   def mock_kuzu_client(self):
     """Create a mock Kuzu client."""
     client = AsyncMock()
-    client.list_databases = AsyncMock(return_value=[])
+    client.list_databases = AsyncMock(return_value={"databases": []})
     client.create_database = AsyncMock()
     client.delete_database = AsyncMock()
     client.install_schema = AsyncMock()
@@ -120,7 +120,7 @@ class TestSubgraphService:
       mock_get_client.assert_called_with("10.0.1.100")
       mock_kuzu_client.create_database.assert_called_once_with(
         graph_id="kg5f2e5e0da65d45d69645_analysis",
-        schema_type="entity",
+        schema_type="custom",
         custom_schema_ddl=None,
         is_subgraph=True,
       )
@@ -155,7 +155,9 @@ class TestSubgraphService:
       db_session.commit()
 
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = [f"{valid_parent_graph_id}_analysis"]
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": [{"graph_id": f"{valid_parent_graph_id}_analysis"}]
+    }
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
@@ -205,15 +207,19 @@ class TestSubgraphService:
     ) as mock_get_client:
       mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.create_subgraph_database(
-        parent_graph_id=valid_parent_graph_id,
-        subgraph_name="extended",
-        schema_extensions=["analytics", "ml"],
-      )
+      # Mock the DDL generation to avoid needing real schema extensions
+      with patch.object(
+        service, "_generate_schema_ddl", AsyncMock(return_value="CREATE (n:Node)")
+      ):
+        result = await service.create_subgraph_database(
+          parent_graph_id=valid_parent_graph_id,
+          subgraph_name="extended",
+          schema_extensions=["analytics", "ml"],
+        )
 
-      assert result["status"] == "created"
-      # Should install base schema + each extension
-      assert mock_kuzu_client.install_schema.call_count == 3  # base + 2 extensions
+        assert result["status"] == "created"
+        # Should install schema once with combined DDL
+        mock_kuzu_client.install_schema.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_create_subgraph_invalid_parent(self, service):
@@ -309,23 +315,29 @@ class TestSubgraphService:
   ):
     """Test successful subgraph deletion."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = ["kg5f2e5e0da65d45d69645_analysis"]
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
     mock_kuzu_client.execute.return_value = [{"node_count": 0}]  # No data
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.delete_subgraph_database("kg5f2e5e0da65d45d69645_analysis")
+        result = await service.delete_subgraph_database(
+          "kg5f2e5e0da65d45d69645_analysis"
+        )
 
-      assert result["status"] == "deleted"
-      assert result["graph_id"] == "kg5f2e5e0da65d45d69645_analysis"
-      assert "deleted_at" in result
+        assert result["status"] == "deleted"
+        assert result["graph_id"] == "kg5f2e5e0da65d45d69645_analysis"
+        assert "deleted_at" in result
 
-      mock_kuzu_client.delete_database.assert_called_once_with(
-        "kg5f2e5e0da65d45d69645_analysis"
-      )
+        mock_kuzu_client.delete_database.assert_called_once_with(
+          "kg5f2e5e0da65d45d69645_analysis"
+        )
 
   @pytest.mark.asyncio
   async def test_delete_subgraph_not_found(
@@ -333,18 +345,24 @@ class TestSubgraphService:
   ):
     """Test deleting a non-existent subgraph."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = []  # Database doesn't exist
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": []
+    }  # Database doesn't exist
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.delete_subgraph_database("kg5f2e5e0da65d45d69645_missing")
+        result = await service.delete_subgraph_database(
+          "kg5f2e5e0da65d45d69645_missing"
+        )
 
-      assert result["status"] == "not_found"
-      assert result["message"] == "Subgraph database does not exist"
-      mock_kuzu_client.delete_database.assert_not_called()
+        assert result["status"] == "not_found"
+        assert result["message"] == "Subgraph database does not exist"
+        mock_kuzu_client.delete_database.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_delete_subgraph_with_data_no_force(
@@ -352,22 +370,26 @@ class TestSubgraphService:
   ):
     """Test deletion fails when subgraph has data and force=False."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = ["kg5f2e5e0da65d45d69645_analysis"]
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
     mock_kuzu_client.execute.return_value = [{"node_count": 100}]  # Has data
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      with pytest.raises(GraphAllocationError) as exc_info:
-        await service.delete_subgraph_database(
-          "kg5f2e5e0da65d45d69645_analysis", force=False
-        )
+        with pytest.raises(GraphAllocationError) as exc_info:
+          await service.delete_subgraph_database(
+            "kg5f2e5e0da65d45d69645_analysis", force=False
+          )
 
-      assert "contains data" in str(exc_info.value)
-      assert "force=True" in str(exc_info.value)
-      mock_kuzu_client.delete_database.assert_not_called()
+        assert "contains data" in str(exc_info.value)
+        assert "force=True" in str(exc_info.value)
+        mock_kuzu_client.delete_database.assert_not_called()
 
   @pytest.mark.asyncio
   async def test_delete_subgraph_with_data_force(
@@ -375,20 +397,24 @@ class TestSubgraphService:
   ):
     """Test forced deletion of subgraph with data."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = ["kg5f2e5e0da65d45d69645_analysis"]
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
     mock_kuzu_client.execute.return_value = [{"node_count": 100}]  # Has data
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.delete_subgraph_database(
-        "kg5f2e5e0da65d45d69645_analysis", force=True
-      )
+        result = await service.delete_subgraph_database(
+          "kg5f2e5e0da65d45d69645_analysis", force=True
+        )
 
-      assert result["status"] == "deleted"
-      mock_kuzu_client.delete_database.assert_called_once()
+        assert result["status"] == "deleted"
+        mock_kuzu_client.delete_database.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_delete_subgraph_with_backup(
@@ -396,22 +422,26 @@ class TestSubgraphService:
   ):
     """Test deletion with backup creation."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = ["kg5f2e5e0da65d45d69645_analysis"]
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
     mock_kuzu_client.execute.return_value = [{"node_count": 0}]
     mock_kuzu_client.backup.return_value = {"location": "s3://backup/location"}
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.delete_subgraph_database(
-        "kg5f2e5e0da65d45d69645_analysis", create_backup=True
-      )
+        result = await service.delete_subgraph_database(
+          "kg5f2e5e0da65d45d69645_analysis", create_backup=True
+        )
 
-      assert result["status"] == "deleted"
-      assert result["backup_location"] is not None
-      mock_kuzu_client.backup.assert_called_once()
+        assert result["status"] == "deleted"
+        assert result["backup_location"] is not None
+        mock_kuzu_client.backup.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_delete_invalid_subgraph_id(self, service):
@@ -427,25 +457,29 @@ class TestSubgraphService:
   ):
     """Test listing subgraphs for a parent."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = [
-      "kg5f2e5e0da65d45d69645",  # Parent itself
-      "kg5f2e5e0da65d45d69645_analysis",  # Subgraph
-      "kg5f2e5e0da65d45d69645_reporting",  # Subgraph
-      "other_database",  # Unrelated
-    ]
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": [
+        {"graph_id": "kg5f2e5e0da65d45d69645"},  # Parent itself
+        {"graph_id": "kg5f2e5e0da65d45d69645_analysis"},  # Subgraph
+        {"graph_id": "kg5f2e5e0da65d45d69645_reporting"},  # Subgraph
+        {"graph_id": "other_database"},  # Unrelated
+      ]
+    }
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.list_subgraph_databases("kg5f2e5e0da65d45d69645")
+        result = await service.list_subgraph_databases("kg5f2e5e0da65d45d69645")
 
-      assert len(result) == 2
-      assert result[0]["graph_id"] == "kg5f2e5e0da65d45d69645_analysis"
-      assert result[0]["subgraph_name"] == "analysis"
-      assert result[1]["graph_id"] == "kg5f2e5e0da65d45d69645_reporting"
-      assert result[1]["subgraph_name"] == "reporting"
+        assert len(result) == 2
+        assert result[0]["graph_id"] == "kg5f2e5e0da65d45d69645_analysis"
+        assert result[0]["subgraph_name"] == "analysis"
+        assert result[1]["graph_id"] == "kg5f2e5e0da65d45d69645_reporting"
+        assert result[1]["subgraph_name"] == "reporting"
 
   @pytest.mark.asyncio
   async def test_list_subgraphs_parent_not_found(
@@ -480,7 +514,9 @@ class TestSubgraphService:
   ):
     """Test getting detailed subgraph information."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = ["kg5f2e5e0da65d45d69645_analysis"]
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
+    }
     mock_kuzu_client.execute.side_effect = [
       [{"count": 100}],  # Node count
       [{"count": 50}],  # Edge count
@@ -493,16 +529,18 @@ class TestSubgraphService:
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.get_subgraph_info("kg5f2e5e0da65d45d69645_analysis")
+        result = await service.get_subgraph_info("kg5f2e5e0da65d45d69645_analysis")
 
-      assert result is not None
-      assert result["graph_id"] == "kg5f2e5e0da65d45d69645_analysis"
-      assert result["subgraph_name"] == "analysis"
-      assert result["statistics"]["node_count"] == 100
-      assert result["statistics"]["edge_count"] == 50
-      assert result["statistics"]["size_mb"] == 10.5
+        assert result is not None
+        assert result["graph_id"] == "kg5f2e5e0da65d45d69645_analysis"
+        assert result["subgraph_name"] == "analysis"
+        assert result["statistics"]["node_count"] == 100
+        assert result["statistics"]["edge_count"] == 50
+        assert result["statistics"]["size_mb"] == 10.5
 
   @pytest.mark.asyncio
   async def test_get_subgraph_info_not_found(
@@ -510,16 +548,20 @@ class TestSubgraphService:
   ):
     """Test getting info for non-existent subgraph."""
     mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_kuzu_client.list_databases.return_value = []  # Subgraph doesn't exist
+    mock_kuzu_client.list_databases.return_value = {
+      "databases": []
+    }  # Subgraph doesn't exist
 
     with patch(
       "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
     ) as mock_get_client:
-      mock_get_client.return_value = mock_kuzu_client
+      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_kuzu_client
+        mock_get_client.return_value = mock_kuzu_client
 
-      result = await service.get_subgraph_info("kg5f2e5e0da65d45d69645_missing")
+        result = await service.get_subgraph_info("kg5f2e5e0da65d45d69645_missing")
 
-      assert result is None
+        assert result is None
 
   @pytest.mark.asyncio
   async def test_get_subgraph_info_invalid_id(self, service):
@@ -537,8 +579,10 @@ class TestSubgraphService:
       mock_kuzu_client, "test_db", ["ext1", "ext2"]
     )
 
-    # Should call install_schema 3 times (base + 2 extensions)
-    assert mock_kuzu_client.install_schema.call_count == 3
+    # Should call install_schema once with base_schema and extensions
+    mock_kuzu_client.install_schema.assert_called_once_with(
+      graph_id="test_db", base_schema="entity", extensions=["ext1", "ext2"]
+    )
 
   @pytest.mark.asyncio
   async def test_private_install_base_schema(self, service, mock_kuzu_client):
@@ -546,7 +590,7 @@ class TestSubgraphService:
     await service._install_base_schema(mock_kuzu_client, "test_db")
 
     mock_kuzu_client.install_schema.assert_called_once_with(
-      graph_id="test_db", base_schema="base", extensions=[]
+      graph_id="test_db", base_schema="entity", extensions=[]
     )
 
   @pytest.mark.asyncio
@@ -658,11 +702,15 @@ class TestSubgraphServiceIntegration:
 
     # Set up mock returns for lifecycle - need more calls now due to tier limit enforcement
     mock_client.list_databases.side_effect = [
-      [],  # Tier limit check - empty
-      [],  # Creation check - empty
-      [f"{parent_graph_id}_test"],  # List check - has subgraph
-      [f"{parent_graph_id}_test"],  # Get info check - exists
-      [f"{parent_graph_id}_test"],  # Delete check - exists
+      {"databases": []},  # Tier limit check - empty
+      {"databases": []},  # Creation check - empty
+      {
+        "databases": [{"graph_id": f"{parent_graph_id}_test"}]
+      },  # List check - has subgraph
+      {
+        "databases": [{"graph_id": f"{parent_graph_id}_test"}]
+      },  # Get info check - exists
+      {"databases": [{"graph_id": f"{parent_graph_id}_test"}]},  # Delete check - exists
     ]
     mock_client.execute.return_value = [{"node_count": 0}]
 
@@ -674,22 +722,28 @@ class TestSubgraphServiceIntegration:
       with patch(
         "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
       ) as mock_get_client:
-        mock_get_client.return_value = mock_client
+        with patch(
+          "robosystems.graph_api.client.GraphClient"
+        ) as mock_graph_client_class:
+          mock_graph_client_class.return_value = mock_client
+          mock_get_client.return_value = mock_client
 
-        # Create
-        create_result = await service.create_subgraph_database(parent_graph_id, "test")
-        assert create_result["status"] == "created"
+          # Create
+          create_result = await service.create_subgraph_database(
+            parent_graph_id, "test"
+          )
+          assert create_result["status"] == "created"
 
-        # List
-        list_result = await service.list_subgraph_databases(parent_graph_id)
-        assert len(list_result) == 1
+          # List
+          list_result = await service.list_subgraph_databases(parent_graph_id)
+          assert len(list_result) == 1
 
-        # Get Info
-        info_result = await service.get_subgraph_info(f"{parent_graph_id}_test")
-        assert info_result is not None
+          # Get Info
+          info_result = await service.get_subgraph_info(f"{parent_graph_id}_test")
+          assert info_result is not None
 
-        # Delete
-        delete_result = await service.delete_subgraph_database(
-          f"{parent_graph_id}_test"
-        )
-        assert delete_result["status"] == "deleted"
+          # Delete
+          delete_result = await service.delete_subgraph_database(
+            f"{parent_graph_id}_test"
+          )
+          assert delete_result["status"] == "deleted"

@@ -1,3 +1,12 @@
+from robosystems.models.api.views.element_mapping import (
+  AggregationMethod,
+  CreateAssociationRequest,
+  CreateMappingRequest,
+  ElementAssociation,
+  MappingResponse,
+  MappingStructure,
+  UpdateAssociationRequest,
+)
 from robosystems.models.api.views.fact_grid import (
   Dimension,
   DimensionType,
@@ -16,13 +25,26 @@ from robosystems.models.api.views.view_response import (
   ViewMetadata,
   ViewResponse,
 )
+from robosystems.models.api.views.save_view import (
+  SaveViewRequest,
+  SaveViewResponse,
+  FactDetail,
+  StructureDetail,
+)
 
 __all__ = [
+  "AggregationMethod",
+  "CreateAssociationRequest",
+  "CreateMappingRequest",
   "Dimension",
   "DimensionType",
+  "ElementAssociation",
   "FactGrid",
   "FactGridMetadata",
   "CreateViewRequest",
+  "MappingResponse",
+  "MappingStructure",
+  "UpdateAssociationRequest",
   "ViewAxisConfig",
   "ViewConfig",
   "ViewSource",
@@ -30,4 +52,8 @@ __all__ = [
   "PivotTablePresentation",
   "ViewMetadata",
   "ViewResponse",
+  "SaveViewRequest",
+  "SaveViewResponse",
+  "FactDetail",
+  "StructureDetail",
 ]

@@ -96,6 +96,7 @@ update:
 demo-all:
     @just demo-accounting
     @just demo-custom-graph
+    @just demo-element-mapping
     @just demo-sec
 
 # Create or reuse demo user (uses shared examples/credentials/config.json)
@@ -117,6 +118,10 @@ demo-accounting flags="new-graph" base_url="http://localhost:8000":
 # Run custom graph demo end-to-end (flags: new-user,new-graph,skip-queries)
 demo-custom-graph flags="new-graph" base_url="http://localhost:8000":
     uv run examples/custom_graph_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
+
+# Run element mapping demo end-to-end (demonstrates CoA → US-GAAP aggregation)
+demo-element-mapping flags="new-graph" base_url="http://localhost:8000":
+    uv run examples/element_mapping_demo/main.py --base-url {{base_url}} {{ if flags != "" { "--flags " + flags } else { "" } }}
 
 
 ## Testing ##

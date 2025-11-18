@@ -1215,3 +1215,37 @@ class GraphClient(BaseGraphClient):
       },
     )
     return response.json()
+
+  async def fork_from_parent(
+    self,
+    parent_graph_id: str,
+    subgraph_id: str,
+    tables: Optional[List[str]] = None,
+    ignore_errors: bool = True,
+  ) -> Dict[str, Any]:
+    """
+    Fork data from parent graph's DuckDB directly into subgraph's Kuzu.
+
+    This operation:
+    1. Attaches parent graph's DuckDB staging database
+    2. Copies specified tables (or all tables) from parent DuckDB to subgraph Kuzu
+    3. Runs on the same EC2 instance where both DuckDB and Kuzu databases live
+
+    Args:
+        parent_graph_id: Parent graph to copy data from
+        subgraph_id: Subgraph to copy data to
+        tables: List of table names to copy (empty list = all tables)
+        ignore_errors: Continue ingestion on row errors
+
+    Returns:
+        Fork response with tables copied, row counts, and timing
+    """
+    response = await self._request(
+      "POST",
+      f"/databases/{subgraph_id}/tables/{subgraph_id}/fork-from/{parent_graph_id}",
+      json_data={
+        "tables": tables or [],
+        "ignore_errors": ignore_errors,
+      },
+    )
+    return response.json()

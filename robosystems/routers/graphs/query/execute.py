@@ -89,11 +89,14 @@ router = APIRouter()
 @router.post(
   "/query",  # Full path without trailing slash
   response_model=None,  # Dynamic response type
-  summary="Execute Cypher Query (Read-Only)",
-  description="""Execute a read-only Cypher query with intelligent response optimization.
+  summary="Execute Cypher Query",
+  description="""Execute a Cypher query with intelligent response optimization.
 
-**IMPORTANT: This endpoint is READ-ONLY.** Write operations (CREATE, MERGE, SET, DELETE) are not allowed.
-To load data into your graph, use the staging pipeline:
+**IMPORTANT: Write operations depend on graph type:**
+- **Main Graphs**: READ-ONLY. Write operations (CREATE, MERGE, SET, DELETE) are not allowed.
+- **Subgraphs**: WRITE-ENABLED. Full Cypher write operations are supported for development and report creation.
+
+To load data into main graphs, use the staging pipeline:
 1. Create file upload: `POST /v1/graphs/{graph_id}/tables/{table_name}/files`
 2. Ingest to graph: `POST /v1/graphs/{graph_id}/tables/ingest`
 
@@ -257,18 +260,30 @@ async def execute_cypher_query(
     is_write = is_write_operation(request.query)
     access_type = "write" if is_write else "read"
 
-    # Block ALL write operations - query endpoint is read-only
-    if is_write:
+    # Check if this is a subgraph (allows writes) or main graph (read-only)
+    from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
+
+    is_subgraph = parse_subgraph_id(graph_id) is not None
+
+    # Block write operations for main graphs only - subgraphs allow writes
+    if is_write and not is_subgraph:
       logger.warning(
-        f"User {current_user.id} attempted write operation through query endpoint: {request.query[:100]}"
+        f"User {current_user.id} attempted write operation through query endpoint on main graph: {request.query[:100]}"
       )
       raise HTTPException(
         status_code=http_status.HTTP_403_FORBIDDEN,
-        detail="Write operations (CREATE, MERGE, SET, DELETE) are not allowed. "
-        "The query endpoint is read-only. Use the staging pipeline to load data:\n"
+        detail="Write operations (CREATE, MERGE, SET, DELETE) are not allowed on main graphs. "
+        "The query endpoint is read-only for main graphs. Use the staging pipeline to load data:\n"
         "1. Create file upload: POST /v1/graphs/{graph_id}/tables/{table_name}/files\n"
         "2. Ingest to graph: POST /v1/graphs/{graph_id}/tables/ingest\n"
-        "This ensures data integrity and enables pipeline benefits (audit, rollback, validation).",
+        "This ensures data integrity and enables pipeline benefits (audit, rollback, validation).\n"
+        "Note: Subgraphs support write operations for development and report creation.",
+      )
+
+    # Log write operations on subgraphs for audit
+    if is_write and is_subgraph:
+      logger.info(
+        f"User {current_user.id} executing write operation on subgraph {graph_id}: {request.query[:100]}"
       )
 
     # Check for bulk operations (COPY, LOAD, IMPORT) - should never reach here due to write check above

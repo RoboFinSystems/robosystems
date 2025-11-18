@@ -108,8 +108,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    # RoboSystems client for demo
-    "robosystems-client==0.2.14",
+    # RoboSystems client for demo (local development version)
+    "robosystems-client @ file:///Users/french/Projects/robosystems-python-client",
 
     # Testing framework
     "pytest>=8.4.0,<9.0",

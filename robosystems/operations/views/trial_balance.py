@@ -7,11 +7,12 @@ async def aggregate_trial_balance(
   period_start: str,
   period_end: str,
   entity_id: str | None = None,
+  requested_dimensions: list[str] | None = None,
 ) -> pd.DataFrame:
   """
   Aggregate transactions to trial balance (Mode 1: Transaction Aggregation).
 
-  This is the core of the real-time reporting demo - generating financial
+  This is the core of the financial reporting system - generating financial
   reports on-demand from raw transaction data without pre-computed facts.
 
   Args:
@@ -19,6 +20,7 @@ async def aggregate_trial_balance(
       period_start: Start date (YYYY-MM-DD)
       period_end: End date (YYYY-MM-DD)
       entity_id: Optional entity filter
+      requested_dimensions: Dimension axes (not typically used for transactions)
 
   Returns:
       DataFrame with columns:
@@ -42,6 +44,7 @@ async def aggregate_trial_balance(
          sum(li.credit_amount) AS total_credits
 
     RETURN elem.identifier AS element_id,
+           elem.uri AS element_uri,
            elem.name AS element_name,
            elem.classification AS element_classification,
            elem.balance AS element_balance,
@@ -68,6 +71,7 @@ async def aggregate_trial_balance(
     return pd.DataFrame(
       columns=[
         "element_id",
+        "element_uri",
         "element_name",
         "element_classification",
         "element_balance",

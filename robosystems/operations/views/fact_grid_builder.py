@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from robosystems.models.api.views import (
@@ -42,24 +42,65 @@ class FactGridBuilder:
     if fact_data.empty:
       return self._build_empty_grid(source)
 
-    dimensions = self._extract_dimensions(fact_data)
+    df = fact_data.copy()
+
+    if view_config.rows or view_config.columns:
+      df = self._apply_aspect_filtering(df, view_config)
+
+    dimensions = self._extract_dimensions(df)
 
     metadata = FactGridMetadata(
-      fact_count=len(fact_data),
+      fact_count=len(df),
       dimension_count=len(dimensions),
       construction_time_ms=(time.time() - start_time) * 1000,
       source=source,
       lineage={
-        "fact_count": len(fact_data),
-        "columns": list(fact_data.columns),
+        "original_fact_count": len(fact_data),
+        "filtered_fact_count": len(df),
+        "columns": list(df.columns),
       },
     )
 
     return FactGrid(
       dimensions=dimensions,
-      facts_df=fact_data,
+      facts_df=df,
       metadata=metadata,
     )
+
+  def _apply_aspect_filtering(
+    self, df: pd.DataFrame, view_config: ViewConfig
+  ) -> pd.DataFrame:
+    """
+    Apply aspect filtering based on ViewAxisConfig.selected_members.
+
+    Filters DataFrame to only include rows where axis values match selected members.
+    """
+    result = df.copy()
+
+    all_axes = (view_config.rows or []) + (view_config.columns or [])
+
+    for axis in all_axes:
+      if not axis.selected_members:
+        continue
+
+      column_map = {
+        "element": "element_id",
+        "period": "period_end",
+        "entity": "entity_id",
+        "dimension": "dimension_member",
+      }
+
+      column_name = column_map.get(axis.type)
+      if not column_name or column_name not in result.columns:
+        continue
+
+      mask = result[column_name].isin(axis.selected_members)
+      if not axis.include_null_dimension:
+        mask = mask | result[column_name].isna()
+
+      result = result[mask]
+
+    return result
 
   def _extract_dimensions(self, fact_data: pd.DataFrame) -> List[Dimension]:
     """Extract dimensions from fact data."""
@@ -129,12 +170,16 @@ class FactGridBuilder:
       ),
     )
 
-  def generate_pivot_table(self, fact_grid: FactGrid) -> Dict[str, Any]:
+  def generate_pivot_table(
+    self, fact_grid: FactGrid, view_config: Optional[ViewConfig] = None
+  ) -> Dict[str, Any]:
     """
     Generate pivot table presentation from FactGrid.
 
-    Returns simple pivot table structure for now.
-    Future: Full multi-dimensional pivot with hierarchies.
+    Supports:
+    - Element hierarchies with subtotals
+    - Custom member ordering and labels
+    - ViewConfig-driven axis configuration
     """
     if fact_grid.facts_df is None or fact_grid.facts_df.empty:
       return {
@@ -144,9 +189,12 @@ class FactGridBuilder:
         "metadata": {"row_count": 0, "column_count": 0},
       }
 
-    df = fact_grid.facts_df
+    df = fact_grid.facts_df.copy()
 
-    element_col = "element_name" if "element_name" in df.columns else None
+    element_col = "element_label" if "element_label" in df.columns else "element_name"
+    if element_col not in df.columns:
+      element_col = None
+
     value_col = "numeric_value" if "numeric_value" in df.columns else "net_balance"
 
     if not element_col or value_col not in df.columns:
@@ -161,10 +209,17 @@ class FactGridBuilder:
       }
 
     period_col = None
-    for col in ["period_start", "period_end"]:
+    for col in ["period_end", "period_start"]:
       if col in df.columns and not df[col].isna().all():
         period_col = col
         break
+
+    period_axis = None
+    if view_config:
+      for axis in (view_config.rows or []) + (view_config.columns or []):
+        if axis.type == "period":
+          period_axis = axis
+          break
 
     if period_col:
       pivot = df.pivot_table(
@@ -174,9 +229,47 @@ class FactGridBuilder:
         aggfunc="sum",
         fill_value=0.0,
       )
+
+      if period_axis and period_axis.member_order:
+        available_cols = [c for c in period_axis.member_order if c in pivot.columns]
+        pivot = pivot[available_cols]
+
+      if period_axis and period_axis.member_labels:
+        pivot = pivot.rename(columns=period_axis.member_labels)
     else:
       pivot = df[[element_col, value_col]].copy()
       pivot = pivot.groupby(element_col)[value_col].sum()
+
+    element_axis = None
+    if view_config:
+      for axis in (view_config.rows or []) + (view_config.columns or []):
+        if axis.type == "element":
+          element_axis = axis
+          break
+
+    if element_axis and element_axis.element_order and isinstance(pivot, pd.DataFrame):
+      element_id_to_name = {}
+      if "element_id" in df.columns and element_col in df.columns:
+        mapping_df = df[["element_id", element_col]].drop_duplicates()
+        element_id_to_name = dict(
+          zip(mapping_df["element_id"], mapping_df[element_col])
+        )
+
+      if element_id_to_name:
+        ordered_names = [
+          element_id_to_name.get(eid, eid)
+          for eid in element_axis.element_order
+          if element_id_to_name.get(eid, eid) in pivot.index
+        ]
+        if ordered_names:
+          pivot = pivot.reindex(ordered_names)
+      else:
+        available_elements = [e for e in element_axis.element_order if e in pivot.index]
+        if available_elements:
+          pivot = pivot.reindex(available_elements)
+
+    if element_axis and element_axis.element_labels and isinstance(pivot, pd.DataFrame):
+      pivot = pivot.rename(index=element_axis.element_labels)
 
     index_values = (
       [[idx] for idx in pivot.index]
@@ -203,5 +296,6 @@ class FactGridBuilder:
         "row_count": len(index_values),
         "column_count": len(column_values),
         "has_periods": period_col is not None,
+        "has_hierarchy": "element_depth" in df.columns,
       },
     }

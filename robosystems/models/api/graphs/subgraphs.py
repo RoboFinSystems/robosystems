@@ -62,6 +62,11 @@ class CreateSubgraphRequest(BaseModel):
     examples=[{"environment": "development", "team": "engineering"}],
   )
 
+  fork_parent: bool = Field(
+    False,
+    description="If true, copy all data from parent graph to create a 'fork'",
+  )
+
   @field_validator("name")
   @classmethod
   def validate_name(cls, v: str) -> str:

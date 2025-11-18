@@ -8,6 +8,7 @@ async def query_facts_with_aspects(
   period_start: str | None = None,
   period_end: str | None = None,
   entity_id: str | None = None,
+  requested_dimensions: list[str] | None = None,
 ) -> pd.DataFrame:
   """
   Query existing facts with all aspects (Mode 2: Existing Facts).
@@ -15,12 +16,18 @@ async def query_facts_with_aspects(
   This mode works with pre-existing Fact nodes (like SEC filings data)
   and returns them with all their aspects for multidimensional analysis.
 
+  IMPORTANT: Dimension Filtering
+  - If requested_dimensions is None or empty: EXCLUDES all dimensional facts
+  - If requested_dimensions contains axes: ONLY includes facts with those dimensions
+  - This prevents mixing dimensional and non-dimensional facts (data integrity)
+
   Args:
       graph_id: Graph containing facts
       fact_set_id: Optional FactSet filter
       period_start: Optional period start filter
       period_end: Optional period end filter
       entity_id: Optional entity filter
+      requested_dimensions: Dimension axes to include (None = exclude all dimensions)
 
   Returns:
       DataFrame with columns:
@@ -66,6 +73,12 @@ async def query_facts_with_aspects(
   if entity_id:
     where_clauses.append("ent.identifier = $entity_id")
     params["entity_id"] = entity_id
+
+  if requested_dimensions is None or len(requested_dimensions) == 0:
+    where_clauses.append("fd IS NULL")
+  else:
+    where_clauses.append("axis.name IN $requested_dimensions")
+    params["requested_dimensions"] = requested_dimensions
 
   if where_clauses:
     query += "\nWHERE " + " AND ".join(where_clauses)
