@@ -261,6 +261,9 @@ class ForkFromParentResponse(BaseModel):
   "/{subgraph_id}/fork-from/{parent_graph_id}", response_model=ForkFromParentResponse
 )
 async def fork_from_parent_duckdb(
+  graph_id: str = Path(
+    ..., description="Graph database identifier (must match subgraph_id)"
+  ),
   parent_graph_id: str = Path(..., description="Parent graph database identifier"),
   subgraph_id: str = Path(..., description="Subgraph database identifier"),
   request: ForkFromParentRequest = Body(...),
@@ -275,6 +278,7 @@ async def fork_from_parent_duckdb(
   3. Runs on the same EC2 instance where both DuckDB and Kuzu databases live
 
   Args:
+      graph_id: Graph database identifier from router prefix (must equal subgraph_id)
       parent_graph_id: Parent graph to copy data from
       subgraph_id: Subgraph to copy data to
       request: Fork options (tables to copy, error handling)
@@ -286,6 +290,12 @@ async def fork_from_parent_duckdb(
   from pathlib import Path as PathLib
 
   start_time = time.time()
+
+  if graph_id != subgraph_id:
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST,
+      detail=f"graph_id ({graph_id}) must match subgraph_id ({subgraph_id})",
+    )
 
   logger.info(f"Forking data from {parent_graph_id} DuckDB to {subgraph_id} Kuzu")
 
