@@ -25,7 +25,7 @@ from robosystems.operations.views import (
   save_view_as_report,
 )
 
-router = APIRouter(prefix="/views", tags=["views"])
+router = APIRouter(prefix="/views", tags=["Views"])
 
 
 def get_graph_tier(graph_id: str, session: Session) -> GraphTier:
