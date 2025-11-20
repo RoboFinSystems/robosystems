@@ -810,15 +810,17 @@ class EntityGraphService:
         graph_id=graph_id, table_name="Entity", s3_pattern=s3_pattern
       )
 
-      logger.info("Ingesting Entity table to Kuzu graph database")
-      ingest_response = await kuzu_client.ingest_table_to_graph(
+      logger.info("Materializing Entity table to Kuzu graph database")
+      ingest_response = await kuzu_client.materialize_table(
         graph_id=graph_id,
         table_name="Entity",
         ignore_errors=False,
       )
 
       rows_ingested = ingest_response.get("rows_ingested", 0)
-      logger.info(f"Entity node created via controlled ingestion: {rows_ingested} rows")
+      logger.info(
+        f"Entity node created via controlled materialization: {rows_ingested} rows"
+      )
 
       # Step 7: Return EntityResponse
       return EntityResponse(

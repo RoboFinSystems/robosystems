@@ -170,16 +170,16 @@ def stage_file_in_duckdb(
 
       # Chain to graph ingestion if requested
       if ingest_to_graph:
-        from robosystems.tasks.table_operations.graph_ingestion import (
-          ingest_file_to_graph,
+        from robosystems.tasks.table_operations.graph_materialization import (
+          materialize_file_to_graph,
         )
 
         logger.info(
-          f"Chaining to graph ingestion for file {file_id} in table {table.table_name}"
+          f"Chaining to graph materialization for file {file_id} in table {table.table_name}"
         )
 
         try:
-          ingest_file_to_graph.apply_async(  # type: ignore[attr-defined]
+          materialize_file_to_graph.apply_async(  # type: ignore[attr-defined]
             args=[file_id, graph_id, table.table_name],
             priority=5,
           )

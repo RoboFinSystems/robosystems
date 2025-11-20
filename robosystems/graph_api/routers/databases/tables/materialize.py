@@ -9,45 +9,47 @@ from robosystems.config import env
 router = APIRouter(prefix="/databases/{graph_id}/tables")
 
 
-class TableIngestRequest(BaseModel):
+class TableMaterializationRequest(BaseModel):
   ignore_errors: bool = Field(
-    default=True, description="Continue ingestion on row errors"
+    default=True, description="Continue materialization on row errors"
   )
   file_ids: list[str] | None = Field(
     default=None,
-    description="Optional list of file IDs to ingest. If None, ingests all files (full materialization).",
+    description="Optional list of file IDs to materialize. If None, materializes all files (full materialization).",
   )
 
   class Config:
     extra = "forbid"
 
 
-class TableIngestResponse(BaseModel):
-  status: str = Field(..., description="Ingestion status")
+class TableMaterializationResponse(BaseModel):
+  status: str = Field(..., description="Materialization status")
   graph_id: str = Field(..., description="Graph database identifier")
   table_name: str = Field(..., description="Table name")
-  rows_ingested: int = Field(..., description="Number of rows ingested")
-  execution_time_ms: float = Field(..., description="Ingestion time in milliseconds")
+  rows_ingested: int = Field(..., description="Number of rows materialized")
+  execution_time_ms: float = Field(
+    ..., description="Materialization time in milliseconds"
+  )
 
 
-@router.post("/{table_name}/ingest", response_model=TableIngestResponse)
-async def ingest_table_to_graph(
+@router.post("/{table_name}/materialize", response_model=TableMaterializationResponse)
+async def materialize_table(
   graph_id: str = Path(..., description="Graph database identifier"),
-  table_name: str = Path(..., description="Table name to ingest from DuckDB"),
-  request: TableIngestRequest = Body(...),
+  table_name: str = Path(..., description="Table name to materialize from DuckDB"),
+  request: TableMaterializationRequest = Body(...),
   cluster_service=Depends(get_cluster_service),
-) -> TableIngestResponse:
+) -> TableMaterializationResponse:
   import time
   from pathlib import Path as PathLib
 
   start_time = time.time()
 
-  logger.info(f"Ingesting table {table_name} from DuckDB to Kuzu graph {graph_id}")
+  logger.info(f"Materializing table {table_name} from DuckDB to Kuzu graph {graph_id}")
 
   if cluster_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
-      detail="Ingestion not allowed on read-only nodes",
+      detail="Materialization not allowed on read-only nodes",
     )
 
   try:
@@ -58,7 +60,9 @@ async def ingest_table_to_graph(
 
     # CRITICAL: Checkpoint DuckDB to flush WAL to main database BEFORE Kuzu attaches
     # Kuzu's DuckDB extension creates a new session that won't see uncommitted WAL data
-    logger.info(f"Checkpointing DuckDB database before Kuzu ingestion: {duck_path}")
+    logger.info(
+      f"Checkpointing DuckDB database before Kuzu materialization: {duck_path}"
+    )
     from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
@@ -67,7 +71,7 @@ async def ingest_table_to_graph(
         duck_conn.execute("CHECKPOINT")
         logger.info(f"✅ DuckDB checkpointed successfully for {graph_id}")
     except Exception as cp_err:
-      logger.warning(f"Could not checkpoint DuckDB before ingestion: {cp_err}")
+      logger.warning(f"Could not checkpoint DuckDB before materialization: {cp_err}")
 
     with cluster_service.db_manager.connection_pool.get_connection(graph_id) as conn:
       try:
@@ -98,10 +102,10 @@ async def ingest_table_to_graph(
       # Both node and relationship tables use the same COPY syntax when columns match
       # For relationships, Kuzu automatically maps 'src' and 'dst' columns to relationship endpoints
 
-      # Selective ingestion: filter by file_ids if provided (incremental updates)
+      # Selective materialization: filter by file_ids if provided (incremental updates)
       # Full materialization: copy all rows if file_ids is None
       if request.file_ids:
-        # Selective: only ingest specific file_ids
+        # Selective: only materialize specific file_ids
         file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
         subquery = (
           f"SELECT * EXCLUDE (file_id) FROM duck.{table_name} "
@@ -114,7 +118,7 @@ async def ingest_table_to_graph(
           copy_query = f"COPY {table_name} FROM ({subquery})"
 
         logger.info(
-          f"Executing selective copy from DuckDB to graph: {table_name} "
+          f"Executing selective materialization from DuckDB to graph: {table_name} "
           f"({len(request.file_ids)} file(s))"
         )
       else:
@@ -124,7 +128,9 @@ async def ingest_table_to_graph(
         else:
           copy_query = f"COPY {table_name} FROM duck.{table_name}"
 
-        logger.info(f"Executing full copy from DuckDB to graph: {table_name}")
+        logger.info(
+          f"Executing full materialization from DuckDB to graph: {table_name}"
+        )
       result = conn.execute(copy_query)
 
       rows_ingested = 0
@@ -141,10 +147,10 @@ async def ingest_table_to_graph(
     execution_time_ms = (time.time() - start_time) * 1000
 
     logger.info(
-      f"Ingested {rows_ingested} rows from {table_name} in {execution_time_ms:.2f}ms"
+      f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms:.2f}ms"
     )
 
-    return TableIngestResponse(
+    return TableMaterializationResponse(
       status="success",
       graph_id=graph_id,
       table_name=table_name,
@@ -153,11 +159,11 @@ async def ingest_table_to_graph(
     )
 
   except Exception as e:
-    logger.error(f"Failed to ingest table {table_name}: {e}")
+    logger.error(f"Failed to materialize table {table_name}: {e}")
 
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to ingest table: {str(e)}",
+      detail=f"Failed to materialize table: {str(e)}",
     )
 
 
@@ -167,7 +173,7 @@ class ForkFromParentRequest(BaseModel):
     description="List of table names to copy from parent, or empty for all tables",
   )
   ignore_errors: bool = Field(
-    default=True, description="Continue ingestion on row errors"
+    default=True, description="Continue materialization on row errors"
   )
 
   class Config:

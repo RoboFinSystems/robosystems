@@ -638,7 +638,7 @@ async def materialize_graph(
       try:
         logger.info(f"Materializing table {table_name} from DuckDB to graph")
 
-        result = await client.ingest_table_to_graph(
+        result = await client.materialize_table(
           graph_id=graph_id,
           table_name=table_name,
           ignore_errors=request.ignore_errors,

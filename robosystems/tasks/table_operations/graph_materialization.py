@@ -29,20 +29,20 @@ from robosystems.graph_api.client.factory import GraphClientFactory
 @celery_app.task(
   bind=True,
   queue=QUEUE_DEFAULT,
-  name="table_operations.ingest_file_to_graph",
+  name="table_operations.ingest_file_to_graph",  # Keep task name for backward compatibility
   max_retries=3,
   default_retry_delay=120,
 )
-def ingest_file_to_graph(
+def materialize_file_to_graph(
   self: Task,
   file_id: str,
   graph_id: str,
   table_name: str,
 ) -> Dict[str, Any]:
   """
-  Ingest a single file from DuckDB staging to graph database (selective ingestion).
+  Materialize a single file from DuckDB staging to graph database (selective materialization).
 
-  This task runs after DuckDB staging completes. It ingests ONLY the rows
+  This task runs after DuckDB staging completes. It materializes ONLY the rows
   for the specified file_id, enabling incremental updates without full rebuilds.
 
   NOTE: This is for ADDITIONS only. Deletions require marking graph stale
@@ -78,16 +78,16 @@ def ingest_file_to_graph(
       }
 
     logger.info(
-      f"Ingesting file {file_id} to graph using Graph API (selective ingestion)"
+      f"Materializing file {file_id} to graph using Graph API (selective materialization)"
     )
 
     client = asyncio.run(
       GraphClientFactory.create_client(graph_id=graph_id, operation_type="write")
     )
 
-    # Selective ingestion: only ingest this specific file_id
+    # Selective materialization: only materialize this specific file_id
     result = asyncio.run(
-      client.ingest_table_to_graph(
+      client.materialize_table(
         graph_id=graph_id,
         table_name=table_name,
         ignore_errors=True,
@@ -99,14 +99,14 @@ def ingest_file_to_graph(
     execution_time_ms = result.get("execution_time_ms", 0)
 
     logger.info(
-      f"Successfully ingested {rows_ingested} rows for file {file_id} to graph in {execution_time_ms:.2f}ms"
+      f"Successfully materialized {rows_ingested} rows for file {file_id} to graph in {execution_time_ms:.2f}ms"
     )
 
     graph_file.mark_graph_ingested(session=session)
 
     execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
-    logger.info(f"File {file_id} marked as graph ingested in {execution_time:.2f}s")
+    logger.info(f"File {file_id} marked as graph materialized in {execution_time:.2f}s")
 
     return {
       "status": "success",

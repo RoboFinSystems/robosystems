@@ -1215,7 +1215,7 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
-  async def ingest_table_to_graph(
+  async def materialize_table(
     self,
     graph_id: str,
     table_name: str,
@@ -1223,19 +1223,19 @@ class GraphClient(BaseGraphClient):
     file_ids: list[str] | None = None,
   ) -> Dict[str, Any]:
     """
-    Ingest a DuckDB staging table into the graph database.
+    Materialize a DuckDB staging table into the graph database.
 
-    Supports both selective ingestion (filtering by file_ids) and full
+    Supports both selective materialization (filtering by file_ids) and full
     materialization (copying entire table).
 
     Args:
         graph_id: Graph database identifier
-        table_name: Table name to ingest
+        table_name: Table name to materialize
         ignore_errors: Continue on row errors
-        file_ids: Optional list of file IDs to ingest. If None, ingests all rows (full materialization).
+        file_ids: Optional list of file IDs to materialize. If None, materializes all rows (full materialization).
 
     Returns:
-        Ingestion response with rows ingested and timing
+        Materialization response with rows materialized and timing
     """
     json_data: dict[str, Any] = {"ignore_errors": ignore_errors}
 
@@ -1244,7 +1244,7 @@ class GraphClient(BaseGraphClient):
 
     response = await self._request(
       "POST",
-      f"/databases/{graph_id}/tables/{table_name}/ingest",
+      f"/databases/{graph_id}/tables/{table_name}/materialize",
       json_data=json_data,
     )
     return response.json()
