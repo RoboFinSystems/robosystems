@@ -348,10 +348,10 @@ class XBRLDuckDBGraphProcessor:
     results = []
 
     for table_name in table_names:
-      logger.info(f"Ingesting table: {table_name}")
+      logger.info(f"Materializing table: {table_name}")
 
       try:
-        response = await graph_client.ingest_table_to_graph(
+        response = await graph_client.materialize_table(
           graph_id=self.graph_id,
           table_name=table_name,
           ignore_errors=True,
@@ -369,13 +369,13 @@ class XBRLDuckDBGraphProcessor:
         )
 
         logger.info(
-          f"✓ Ingested {table_name}: "
+          f"✓ Materialized {table_name}: "
           f"{response.get('rows_ingested', 0)} rows in "
           f"{response.get('execution_time_ms', 0):.2f}ms"
         )
 
       except Exception as e:
-        logger.error(f"Failed to ingest table {table_name}: {e}")
+        logger.error(f"Failed to materialize table {table_name}: {e}")
         results.append(
           {
             "table_name": table_name,

@@ -25,6 +25,9 @@ from .graphs import (
   subgraphs_router,
   subscriptions_router as graph_subscriptions_router,
   tables_router,
+  views_router,
+  materialize_router,
+  files_router,
 )  # Removed allocation_router - too dangerous for public API
 from .graphs.mcp import router as mcp_router
 from .offering import offering_router
@@ -67,6 +70,9 @@ router.include_router(
 router.include_router(
   tables_router
 )  # No prefix - handles all /tables and /files paths internally
+router.include_router(views_router)  # No prefix - handles /views internally
+router.include_router(materialize_router)  # No prefix - handles /materialize endpoint
+router.include_router(files_router)  # No prefix - handles /files endpoint
 
 # Non-graph-scoped routes that don't require a graph_id
 user_router_v1 = APIRouter(prefix="/v1", tags=[])

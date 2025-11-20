@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from . import management, query, ingest
+from . import management, query, materialize
 
 router = APIRouter(
   tags=["Tables"],
@@ -16,7 +16,7 @@ for route in management.router.routes:
     route.tags = ["Tables"]
   router.routes.append(route)
 
-for route in ingest.router.routes:
+for route in materialize.router.routes:
   if not hasattr(route, "tags") or not route.tags:
     route.tags = ["Tables"]
   router.routes.append(route)

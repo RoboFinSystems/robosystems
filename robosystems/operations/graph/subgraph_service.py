@@ -137,22 +137,66 @@ class SubgraphService:
 
     try:
       # Get the parent's instance location
-      parent_location = await self.allocation_manager.find_database_location(
-        parent_graph_id
-      )
+      # For local dev graphs, use PostgreSQL instance_id directly
+      from robosystems.database import get_db_session
+      from robosystems.models.iam.graph import Graph
+      from robosystems.config import env
 
-      if not parent_location:
+      session = next(get_db_session())
+      parent_graph_record = (
+        session.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
+      )
+      session.close()
+
+      if not parent_graph_record:
+        logger.warning(f"Parent graph {parent_graph_id} not found")
         raise GraphAllocationError(
           f"Parent graph {parent_graph_id} not found. "
           "The parent graph must exist before creating subgraphs."
         )
 
+      # Check if this is a local dev graph
+      if (
+        parent_graph_record.graph_instance_id
+        and parent_graph_record.graph_instance_id.startswith("local-")
+      ):
+        # For local graphs, create a mock location without DynamoDB lookup
+        from dataclasses import dataclass
+
+        @dataclass
+        class LocalGraphLocation:
+          instance_id: str
+          private_ip: str
+
+        # For local dev, use the graph-api-kuzu service name
+        parent_location = LocalGraphLocation(
+          instance_id=parent_graph_record.graph_instance_id,
+          private_ip="graph-api-kuzu" if env.ENVIRONMENT == "dev" else "localhost",
+        )
+        logger.info(
+          f"Using local graph instance: {parent_location.instance_id} at {parent_location.private_ip}"
+        )
+      else:
+        # For production graphs, use the allocation manager to find in DynamoDB
+        parent_location = await self.allocation_manager.find_database_location(
+          parent_graph_id
+        )
+
+        if not parent_location:
+          raise GraphAllocationError(
+            f"Parent graph {parent_graph_id} not found. "
+            "The parent graph must exist before creating subgraphs."
+          )
+
       # Get a direct client to the parent's instance
       client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # Check if database already exists
-      existing_databases = await client.list_databases()
-      if database_name in existing_databases:
+      existing_databases_response = await client.list_databases()
+      existing_database_ids = [
+        db["graph_id"] for db in existing_databases_response.get("databases", [])
+      ]
+      if database_name in existing_database_ids:
         logger.warning(f"Database {database_name} already exists on instance")
         return {
           "status": "exists",
@@ -172,20 +216,18 @@ class SubgraphService:
 
       await client.create_database(
         graph_id=database_name,
-        schema_type="entity",  # Subgraphs use entity schema type
-        custom_schema_ddl=None,  # Will install schema separately
+        schema_type="custom",  # Use custom to skip auto schema installation
+        custom_schema_ddl=None,  # We'll install schema with extensions separately
         is_subgraph=True,  # Bypass max_databases check for Enterprise/Premium
       )
 
-      # Install schema with extensions if provided
-      if schema_extensions:
-        logger.info(f"Installing schema with extensions: {schema_extensions}")
-        await self._install_schema_with_extensions(
-          client, database_name, schema_extensions
-        )
-      else:
-        logger.info("Installing base schema only (no extensions)")
-        await self._install_base_schema(client, database_name)
+      # Install schema with extensions using the same pattern as entity graph creation
+      logger.info(f"Installing schema with extensions: {schema_extensions}")
+      ddl = await self._generate_schema_ddl(schema_extensions or [])
+
+      result = await client.install_schema(graph_id=database_name, custom_ddl=ddl)
+      logger.info(f"Schema installation completed: {result}")
+      logger.info(f"Installed schema with {len(schema_extensions or [])} extensions")
 
       logger.info(f"Successfully created subgraph database {subgraph_id}")
 
@@ -211,6 +253,8 @@ class SubgraphService:
     description: str | None = None,
     subgraph_type: str = "static",
     metadata: dict | None = None,
+    fork_parent: bool = False,
+    fork_options: Optional[Dict[str, Any]] = None,
   ) -> Dict[str, Any]:
     """
     Create a subgraph including both the database and PostgreSQL metadata.
@@ -220,6 +264,7 @@ class SubgraphService:
     2. Installs schema (base + extensions from parent)
     3. Creates PostgreSQL metadata records
     4. Creates user-graph relationship
+    5. Optionally forks parent data via ingestion
 
     Args:
         parent_graph: Parent graph model
@@ -228,6 +273,8 @@ class SubgraphService:
         description: Optional description
         subgraph_type: Type of subgraph (default: "static")
         metadata: Optional metadata dict
+        fork_parent: If True, copy data from parent graph (creates a "fork")
+        fork_options: Options for forking (tables, filters, etc.)
 
     Returns:
         Dictionary with created subgraph details
@@ -309,6 +356,24 @@ class SubgraphService:
         f"Created subgraph {subgraph_id} (index {next_index}) for parent {parent_graph.graph_id}"
       )
 
+      # Step 3: Fork parent data if requested
+      fork_status = None
+      if fork_parent:
+        logger.info(
+          f"Forking parent data from {parent_graph.graph_id} to {subgraph_id}"
+        )
+        try:
+          fork_status = await self.fork_parent_data(
+            parent_graph_id=parent_graph.graph_id,
+            subgraph_id=subgraph_id,
+            options=fork_options,
+          )
+          logger.info(f"Fork completed: {fork_status}")
+        except Exception as fork_error:
+          logger.error(f"Fork failed but subgraph created: {fork_error}")
+          # Don't fail the whole operation if fork fails
+          fork_status = {"status": "failed", "error": str(fork_error)}
+
       return {
         "graph_id": subgraph.graph_id,
         "subgraph_index": subgraph.subgraph_index,
@@ -318,6 +383,7 @@ class SubgraphService:
         "updated_at": subgraph.updated_at,
         "database_created": db_creation_result.get("status") == "created",
         "instance_id": db_creation_result.get("instance_id"),
+        "fork_status": fork_status,
       }
 
     except Exception as e:
@@ -380,22 +446,42 @@ class SubgraphService:
     logger.info(f"Deleting subgraph database {subgraph_id}")
 
     try:
-      # Get the parent's instance location
-      parent_location = await self.allocation_manager.find_database_location(
-        parent_graph_id
+      # Get the Graph API client
+      # In local mode, use direct URL; in production, resolve parent's instance
+      from ...graph_api.client.factory import get_graph_client_for_instance
+      from ...graph_api.client import GraphClient
+      from ...config import env
+
+      # Local development mode: use GRAPH_API_URL directly
+      # Check for localhost or docker container hostnames (graph-api-kuzu, etc.)
+      is_local = env.GRAPH_API_URL and any(
+        host in env.GRAPH_API_URL
+        for host in ["localhost", "graph-api-kuzu", "127.0.0.1"]
       )
 
-      if not parent_location:
-        raise GraphAllocationError(
-          f"Parent graph {parent_graph_id} not found. Cannot delete subgraph."
+      parent_location = None
+      if is_local:
+        logger.info(f"Using local Graph API URL for deletion: {env.GRAPH_API_URL}")
+        client = GraphClient(base_url=env.GRAPH_API_URL)
+      else:
+        # Production mode: resolve parent graph's location from DynamoDB
+        parent_location = await self.allocation_manager.find_database_location(
+          parent_graph_id
         )
 
-      # Get a direct client to the parent's instance
-      client = await get_graph_client_for_instance(parent_location.private_ip)
+        if not parent_location:
+          raise GraphAllocationError(
+            f"Parent graph {parent_graph_id} not found. Cannot delete subgraph."
+          )
+
+        client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # Check if database exists
-      existing_databases = await client.list_databases()
-      if database_name not in existing_databases:
+      existing_databases_response = await client.list_databases()
+      existing_database_ids = [
+        db["graph_id"] for db in existing_databases_response.get("databases", [])
+      ]
+      if database_name not in existing_database_ids:
         logger.warning(f"Database {database_name} does not exist on instance")
         return {
           "status": "not_found",
@@ -403,13 +489,17 @@ class SubgraphService:
           "message": "Subgraph database does not exist",
         }
 
+      # Get instance_id for logging and response
+      if is_local:
+        instance_id = "local-kuzu-writer"
+      else:
+        instance_id = parent_location.instance_id if parent_location else "unknown"
+
       # Create backup if requested
       backup_location = None
       if create_backup:
         logger.info(f"Creating backup of {database_name} before deletion")
-        backup_location = await self._create_backup(
-          client, database_name, parent_location.instance_id
-        )
+        backup_location = await self._create_backup(client, database_name, instance_id)
 
       # Check if database contains data (unless forced)
       if not force:
@@ -421,9 +511,7 @@ class SubgraphService:
           )
 
       # Delete the database
-      logger.info(
-        f"Deleting database {database_name} from instance {parent_location.instance_id}"
-      )
+      logger.info(f"Deleting database {database_name} from instance {instance_id}")
       await client.delete_database(database_name)
 
       logger.info(f"Successfully deleted subgraph database {subgraph_id}")
@@ -433,7 +521,7 @@ class SubgraphService:
         "graph_id": subgraph_id,
         "database_name": database_name,
         "parent_graph_id": parent_graph_id,
-        "instance_id": parent_location.instance_id,
+        "instance_id": instance_id,
         "backup_location": backup_location,
         "deleted_at": datetime.now(timezone.utc).isoformat(),
       }
@@ -471,13 +559,16 @@ class SubgraphService:
       client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # List all databases on the instance
-      all_databases = await client.list_databases()
+      all_databases_response = await client.list_databases()
+      all_database_ids = [
+        db["graph_id"] for db in all_databases_response.get("databases", [])
+      ]
 
       # Filter for subgraphs of this parent
       subgraphs = []
       parent_prefix = f"{parent_graph_id}_"
 
-      for db_name in all_databases:
+      for db_name in all_database_ids:
         if db_name.startswith(parent_prefix):
           # This is a subgraph of our parent
           subgraph_info = parse_subgraph_id(db_name)
@@ -535,8 +626,11 @@ class SubgraphService:
       client = await get_graph_client_for_instance(parent_location.private_ip)
 
       # Check if database exists
-      existing_databases = await client.list_databases()
-      if database_name not in existing_databases:
+      existing_databases_response = await client.list_databases()
+      existing_database_ids = [
+        db["graph_id"] for db in existing_databases_response.get("databases", [])
+      ]
+      if database_name not in existing_database_ids:
         logger.warning(f"Subgraph database {database_name} not found")
         return None
 
@@ -559,6 +653,38 @@ class SubgraphService:
 
   # Private helper methods
 
+  async def _generate_schema_ddl(self, extensions: List[str]) -> str:
+    """
+    Generate DDL from schema extensions using SchemaManager.
+
+    This uses the same pattern as entity graph creation to generate
+    DDL from base schema + extensions.
+
+    Args:
+        extensions: List of extension names (e.g., ['roboledger'])
+
+    Returns:
+        str: Generated DDL statements
+    """
+    from ...schemas.manager import SchemaManager
+
+    manager = SchemaManager()
+    config = manager.create_schema_configuration(
+      name="SubgraphSchema",
+      description="Subgraph schema with extensions",
+      extensions=extensions,
+    )
+
+    schema = manager.load_and_compile_schema(config)
+    ddl = schema.to_cypher()
+
+    statement_count = len([s for s in ddl.split(";") if s.strip()])
+    logger.info(
+      f"Generated DDL for subgraph: {statement_count} statements, {len(ddl)} characters"
+    )
+
+    return ddl
+
   async def _install_schema_with_extensions(
     self,
     client: "GraphClient",
@@ -567,15 +693,13 @@ class SubgraphService:
   ) -> None:
     """Install schema with specified extensions."""
     try:
-      # First install base schema
-      await self._install_base_schema(client, database_name)
-
-      # Then install each extension
-      for extension in extensions:
-        logger.info(f"Installing {extension} extension for {database_name}")
-        await client.install_schema(
-          graph_id=database_name, base_schema="base", extensions=[extension]
-        )
+      # Install base schema + all extensions in a single call
+      logger.info(
+        f"Installing entity schema with extensions {extensions} for {database_name}"
+      )
+      await client.install_schema(
+        graph_id=database_name, base_schema="entity", extensions=extensions
+      )
 
       logger.info(
         f"Successfully installed schema with extensions {extensions} for {database_name}"
@@ -591,13 +715,13 @@ class SubgraphService:
   ) -> None:
     """Install base schema only."""
     try:
-      # Install the base entity schema
+      # Install the base entity schema (subgraphs always use entity schema)
       await client.install_schema(
-        graph_id=database_name, base_schema="base", extensions=[]
+        graph_id=database_name, base_schema="entity", extensions=[]
       )
-      logger.info(f"Successfully installed base schema for {database_name}")
+      logger.info(f"Successfully installed base entity schema for {database_name}")
     except Exception as e:
-      logger.error(f"Failed to install base schema for {database_name}: {e}")
+      logger.error(f"Failed to install base entity schema for {database_name}: {e}")
       raise
 
   async def _check_database_has_data(
@@ -699,4 +823,117 @@ class SubgraphService:
         "edge_count": None,
         "size_mb": None,
         "last_modified": None,
+      }
+
+  async def fork_parent_data(
+    self,
+    parent_graph_id: str,
+    subgraph_id: str,
+    options: Optional[Dict[str, Any]] = None,
+    progress_callback: Optional[Any] = None,
+  ) -> Dict[str, Any]:
+    """
+    Fork data from parent graph to subgraph by calling Graph API fork endpoint.
+
+    This method calls the Graph API's fork endpoint which attaches the parent graph's
+    DuckDB staging database and copies tables directly to the subgraph's Kuzu database.
+    All operations happen on the EC2 instance where both databases live.
+
+    Args:
+        parent_graph_id: Parent graph to copy data from
+        subgraph_id: Subgraph to copy data to
+        options: Fork options including:
+          - tables: List of table names (default: all tables)
+          - exclude_patterns: List of table patterns to exclude (e.g., ["Report*"])
+        progress_callback: Optional async callback function(msg, pct) for progress updates
+
+    Returns:
+        Dictionary with fork status including:
+        - status: "success" or "failed"
+        - tables_copied: List of tables successfully copied
+        - row_count: Total rows copied
+        - errors: List of any errors encountered
+    """
+    # Default options
+    options = options or {}
+    tables_to_copy = options.get("tables", [])
+
+    logger.info(
+      f"Forking data from {parent_graph_id} to {subgraph_id} with options: {options}"
+    )
+
+    try:
+      # Report initial progress
+      if progress_callback:
+        progress_callback("Initiating fork from parent DuckDB", 10)
+
+      # Get the Graph API client
+      # In local mode, use direct URL; in production, resolve parent's instance
+      from ...graph_api.client.factory import get_graph_client_for_instance
+      from ...graph_api.client import GraphClient
+      from ...config import env
+
+      if progress_callback:
+        progress_callback("Connecting to Graph API", 20)
+
+      # Local development mode: use GRAPH_API_URL directly
+      # Check for localhost or docker container hostnames (graph-api-kuzu, etc.)
+      is_local = env.GRAPH_API_URL and any(
+        host in env.GRAPH_API_URL
+        for host in ["localhost", "graph-api-kuzu", "127.0.0.1"]
+      )
+
+      if is_local:
+        logger.info(f"Using local Graph API URL: {env.GRAPH_API_URL}")
+        client = GraphClient(base_url=env.GRAPH_API_URL)
+      else:
+        # Production mode: resolve parent graph's location from DynamoDB
+        parent_location = await self.allocation_manager.find_database_location(
+          parent_graph_id
+        )
+        if not parent_location:
+          raise GraphAllocationError(f"Parent graph {parent_graph_id} not found")
+
+        client = await get_graph_client_for_instance(parent_location.private_ip)
+
+      if progress_callback:
+        progress_callback("Forking tables from parent DuckDB", 30)
+
+      logger.info(f"Calling fork endpoint for {parent_graph_id} -> {subgraph_id}")
+
+      result = await client.fork_from_parent(
+        parent_graph_id=parent_graph_id,
+        subgraph_id=subgraph_id,
+        tables=tables_to_copy if tables_to_copy else None,
+        ignore_errors=True,
+      )
+
+      tables_copied = result.get("tables_copied", [])
+      row_count = result.get("total_rows", 0)
+      fork_status = result.get("status", "success")
+
+      if progress_callback:
+        progress_callback(f"Fork complete: {row_count} rows copied", 100)
+
+      logger.info(
+        f"Fork completed with status {fork_status}: "
+        f"{len(tables_copied)} tables, {row_count} rows copied"
+      )
+
+      return {
+        "status": fork_status,
+        "tables_copied": tables_copied,
+        "row_count": row_count,
+        "errors": [],
+        "parent_graph_id": parent_graph_id,
+        "subgraph_id": subgraph_id,
+      }
+
+    except Exception as e:
+      logger.error(f"Fork operation failed: {e}")
+      return {
+        "status": "failed",
+        "error": str(e),
+        "tables_copied": [],
+        "row_count": 0,
       }

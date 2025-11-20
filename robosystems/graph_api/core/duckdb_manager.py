@@ -74,6 +74,10 @@ class TableCreateRequest(BaseModel):
   s3_pattern: Union[str, List[str]] = Field(
     ..., description="S3 glob pattern or list of S3 file paths"
   )
+  file_id_map: Optional[Dict[str, str]] = Field(
+    default=None,
+    description="Optional map of s3_key -> file_id for provenance tracking",
+  )
 
   @field_validator("s3_pattern")
   @classmethod
@@ -199,6 +203,92 @@ class DuckDBTableManager:
         FROM read_parquet({read_pattern}, hive_partitioning=false)
       """
 
+  def _build_table_sql_with_file_id(
+    self,
+    quoted_table: str,
+    has_identifier: bool,
+    has_from_to: bool,
+    s3_files: List[str],
+    file_id_map: Dict[str, str],
+  ) -> str:
+    """
+    Build CREATE TABLE SQL with file_id column injection (v2 incremental ingestion).
+
+    Uses UNION ALL to combine files, injecting file_id for each source file.
+    This enables per-file deletion and provenance tracking.
+
+    Args:
+        quoted_table: Quoted table name
+        has_identifier: Whether table has 'identifier' column
+        has_from_to: Whether table has 'from'/'to' columns
+        s3_files: List of S3 file paths
+        file_id_map: Map of s3_key -> file_id
+
+    Returns:
+        SQL with UNION ALL and file_id injection
+    """
+    # Build individual SELECT queries for each file
+    selects = []
+
+    for s3_key in s3_files:
+      file_id = file_id_map.get(s3_key, "unknown")
+
+      if has_identifier:
+        # Node table: keep identifier, add file_id
+        select = f"""
+          SELECT *, '{file_id}' as file_id
+          FROM read_parquet('{s3_key}', hive_partitioning=false)
+        """
+      elif has_from_to:
+        # Relationship table: rename from/to to src/dst, add file_id
+        select = f"""
+          SELECT
+            "from" as src,
+            "to" as dst,
+            * EXCLUDE ("from", "to"),
+            '{file_id}' as file_id
+          FROM read_parquet('{s3_key}', hive_partitioning=false)
+        """
+      else:
+        # Unknown table: just add file_id
+        select = f"""
+          SELECT *, '{file_id}' as file_id
+          FROM read_parquet('{s3_key}', hive_partitioning=false)
+        """
+
+      selects.append(select)
+
+    # Combine with UNION ALL
+    union_query = "\n UNION ALL\n".join(selects)
+
+    # Wrap in deduplication if needed
+    if has_identifier:
+      return f"""
+        CREATE OR REPLACE TABLE {quoted_table} AS
+        SELECT * EXCLUDE (rn)
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY identifier ORDER BY identifier) AS rn
+          FROM ({union_query})
+        )
+        WHERE rn = 1
+      """
+    elif has_from_to:
+      return f"""
+        CREATE OR REPLACE TABLE {quoted_table} AS
+        SELECT * EXCLUDE (rn)
+        FROM (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY src, dst ORDER BY src, dst) AS rn
+          FROM ({union_query})
+        )
+        WHERE rn = 1
+      """
+    else:
+      # No deduplication for unknown tables
+      return f"""
+        CREATE OR REPLACE TABLE {quoted_table} AS
+        {union_query}
+      """
+
   @validate_table_name_decorator
   def create_table(self, request: TableCreateRequest) -> TableCreateResponse:
     """
@@ -217,6 +307,7 @@ class DuckDBTableManager:
     Supports both:
     - s3_pattern as string: wildcard pattern (e.g., "s3://bucket/path/*.parquet")
     - s3_pattern as list: explicit file paths (uses DuckDB list syntax)
+    - file_id_map: Optional map to inject file_id for incremental ingestion tracking
     """
     import time
 
@@ -227,10 +318,12 @@ class DuckDBTableManager:
 
     is_list = isinstance(request.s3_pattern, list)
     file_count = len(request.s3_pattern) if is_list else "pattern"
+    has_file_id_map = bool(request.file_id_map)
 
     logger.info(
       f"Creating external table {request.table_name} for graph {request.graph_id} "
-      f"from {file_count} {'files' if is_list else ''}"
+      f"from {file_count} {'files' if is_list else ''} "
+      f"(file_id tracking: {has_file_id_map})"
     )
 
     pool = get_duckdb_pool()
@@ -253,18 +346,33 @@ class DuckDBTableManager:
         has_identifier = "identifier" in column_names
         has_from_to = "from" in column_names and "to" in column_names
 
-        # Build SQL using helper method
-        sql = self._build_table_sql(quoted_table, has_identifier, has_from_to, is_list)
-
-        if is_list:
-          # Replace placeholder with DuckDB list syntax: ['file1', 'file2', ...]
-          # Use single quotes for strings (DuckDB requirement)
-          files_list = "[" + ", ".join(f"'{path}'" for path in request.s3_pattern) + "]"
-          sql = sql.replace("__FILES_PLACEHOLDER__", files_list)
+        # v2 Incremental Ingestion: Build UNION ALL with file_id injection
+        if has_file_id_map and is_list:
+          sql = self._build_table_sql_with_file_id(
+            quoted_table,
+            has_identifier,
+            has_from_to,
+            request.s3_pattern,
+            request.file_id_map,
+          )
           conn.execute(sql)
         else:
-          # Use parameter binding for pattern (prevents SQL injection)
-          conn.execute(sql, [request.s3_pattern])
+          # Legacy path: without file_id tracking
+          sql = self._build_table_sql(
+            quoted_table, has_identifier, has_from_to, is_list
+          )
+
+          if is_list:
+            # Replace placeholder with DuckDB list syntax: ['file1', 'file2', ...]
+            # Use single quotes for strings (DuckDB requirement)
+            files_list = (
+              "[" + ", ".join(f"'{path}'" for path in request.s3_pattern) + "]"
+            )
+            sql = sql.replace("__FILES_PLACEHOLDER__", files_list)
+            conn.execute(sql)
+          else:
+            # Use parameter binding for pattern (prevents SQL injection)
+            conn.execute(sql, [request.s3_pattern])
 
         execution_time_ms = (time.time() - start_time) * 1000
 
@@ -574,4 +682,110 @@ class DuckDBTableManager:
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Failed to delete table: {str(e)}",
+      )
+
+  def delete_file_data(
+    self, graph_id: str, table_name: str, file_id: str
+  ) -> Dict[str, Any]:
+    """
+    Delete all rows for a specific file from DuckDB staging table.
+
+    This is the core of incremental deletion - remove data from specific
+    files without rebuilding the entire table.
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Table name
+        file_id: File identifier to delete
+
+    Returns:
+        Dict with status and rows_deleted count
+    """
+    validate_table_name(table_name)
+
+    logger.info(
+      f"Deleting data for file_id={file_id} from table {table_name} in graph {graph_id}"
+    )
+
+    pool = get_duckdb_pool()
+
+    try:
+      with pool.get_connection(graph_id) as conn:
+        quoted_table = f'"{table_name}"'
+
+        # Check if table exists
+        table_check = conn.execute(
+          "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
+          [table_name],
+        ).fetchone()
+
+        if not table_check or table_check[0] == 0:
+          logger.warning(
+            f"Table {table_name} does not exist in graph {graph_id} - nothing to delete"
+          )
+          return {
+            "status": "success",
+            "rows_deleted": 0,
+            "message": f"Table {table_name} does not exist",
+          }
+
+        # Check if file_id column exists
+        columns_result = conn.execute(
+          f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+        ).fetchall()
+        column_names = [row[0] for row in columns_result]
+
+        if "file_id" not in column_names:
+          logger.warning(
+            f"Table {table_name} does not have file_id column - cannot delete by file"
+          )
+          raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Table {table_name} does not support file-level deletion (no file_id column)",
+          )
+
+        # Count rows before deletion
+        count_result = conn.execute(
+          f"SELECT COUNT(*) FROM {quoted_table} WHERE file_id = ?", [file_id]
+        ).fetchone()
+        count_before = count_result[0] if count_result else 0
+
+        if count_before == 0:
+          logger.info(
+            f"No rows found for file_id={file_id} in table {table_name} - nothing to delete"
+          )
+          return {
+            "status": "success",
+            "rows_deleted": 0,
+            "message": f"No rows found for file_id={file_id}",
+          }
+
+        # Delete rows by file_id
+        conn.execute(f"DELETE FROM {quoted_table} WHERE file_id = ?", [file_id])
+
+        # Verify deletion
+        count_result_after = conn.execute(
+          f"SELECT COUNT(*) FROM {quoted_table} WHERE file_id = ?", [file_id]
+        ).fetchone()
+        count_after = count_result_after[0] if count_result_after else 0
+
+        rows_deleted = count_before - count_after
+
+        logger.info(
+          f"Deleted {rows_deleted} rows for file_id={file_id} from table {table_name}"
+        )
+
+        return {
+          "status": "success",
+          "rows_deleted": rows_deleted,
+          "message": f"Deleted {rows_deleted} rows from {table_name}",
+        }
+
+    except HTTPException:
+      raise
+    except Exception as e:
+      logger.error(f"Failed to delete file data from {table_name}: {e}")
+      raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to delete file data: {str(e)}",
       )

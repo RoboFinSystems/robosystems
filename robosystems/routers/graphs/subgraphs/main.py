@@ -2,6 +2,7 @@
 Main subgraph routes (list and create operations).
 """
 
+import json
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -191,10 +192,9 @@ async def list_subgraphs(
 
 @router.post(
   "",
-  response_model=SubgraphResponse,
   operation_id="createSubgraph",
   summary="Create Subgraph",
-  description="""Create a new subgraph within a parent graph.
+  description="""Create a new subgraph within a parent graph, with optional data forking.
 
 **Requirements:**
 - Valid authentication
@@ -204,16 +204,24 @@ async def list_subgraphs(
 - Must be within subgraph quota limits
 - Subgraph name must be unique within the parent graph
 
+**Fork Mode:**
+When `fork_parent=true`, the operation:
+- Returns immediately with an operation_id for SSE monitoring
+- Copies data from parent graph to the new subgraph
+- Supports selective forking via metadata.fork_options
+- Tracks progress in real-time via SSE
+
 **Returns:**
-- Created subgraph details including its unique ID
-- Subgraph ID format: `{parent_id}_{subgraph_name}` (e.g., kg1234567890abcdef_dev)
+- Without fork: Immediate SubgraphResponse with created subgraph details
+- With fork: Operation response with SSE monitoring endpoint
+
+**Subgraph ID format:** `{parent_id}_{subgraph_name}` (e.g., kg1234567890abcdef_dev)
 
 **Usage:**
 - Subgraphs share parent's credit pool
 - Subgraph ID can be used in all standard `/v1/graphs/{graph_id}/*` endpoints
 - Permissions inherited from parent graph
 """,
-  status_code=status.HTTP_201_CREATED,
 )
 @endpoint_metrics_decorator(
   endpoint_name="/v1/graphs/{graph_id}/subgraphs",
@@ -275,7 +283,69 @@ async def create_subgraph(
       },
     )
 
-    # 6. Create the subgraph using service
+    # 6. Check if we need SSE for forking
+    if request.fork_parent:
+      # Use SSE for fork operations (like graph creation)
+      from robosystems.middleware.sse.operation_manager import create_operation_response
+      from robosystems.tasks.graph_operations.create_subgraph import (
+        create_subgraph_with_fork_sse_task,
+      )
+
+      # Create SSE operation
+      operation_response = await create_operation_response(
+        operation_type="subgraph_fork",
+        user_id=str(current_user.id),
+        graph_id=graph_id,
+      )
+
+      # Prepare task data
+      task_data = {
+        "parent_graph_id": graph_id,
+        "user_id": str(current_user.id),
+        "name": request.name,
+        "description": request.display_name,
+        "subgraph_type": request.subgraph_type.value
+        if request.subgraph_type
+        else "static",
+        "metadata": request.metadata,
+        "fork_parent": True,
+        "fork_options": request.metadata.get("fork_options")
+        if request.metadata
+        else {},
+      }
+
+      # Queue the task with operation ID for SSE progress tracking
+      task = create_subgraph_with_fork_sse_task.delay(  # type: ignore[reportFunctionMemberAccess]
+        task_data, operation_response["operation_id"]
+      )
+
+      logger.info(
+        f"Created SSE operation {operation_response['operation_id']} and queued task {task.id} "
+        f"for subgraph creation with fork"
+      )
+
+      # Record success metrics
+      record_operation_metrics(
+        start_time=operation_start_time,
+        operation_name="create_subgraph",
+        parent_graph_id=graph_id,
+        additional_tags={
+          "success": True,
+          "entity_count": 1,
+          "fork": True,
+        },
+      )
+
+      # Return operation response for SSE monitoring (202 Accepted)
+      from fastapi import Response
+
+      return Response(
+        content=json.dumps(operation_response),
+        status_code=status.HTTP_202_ACCEPTED,
+        media_type="application/json",
+      )
+
+    # Non-fork path: Create immediately and return SubgraphResponse
     service = get_subgraph_service()
     subgraph_result = await service.create_subgraph(
       parent_graph=parent_graph,
@@ -284,6 +354,8 @@ async def create_subgraph(
       description=request.display_name,
       subgraph_type=request.subgraph_type.value if request.subgraph_type else "static",
       metadata=request.metadata,
+      fork_parent=False,  # Immediate creation doesn't fork
+      fork_options=None,
     )
 
     # Log security event

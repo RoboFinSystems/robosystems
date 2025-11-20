@@ -8,8 +8,6 @@ Key processors:
 - XBRLGraphProcessor: SEC XBRL filing processing and graph transformation
 - XBRLSchemaAdapter: DataFrame schema adaptation and validation for XBRL
 - XBRLSchemaConfigGenerator: Schema-driven ingestion configuration for XBRL
-- TrialBalanceProcessor: Financial trial balance calculations
-- ScheduleProcessor: Financial schedule generation and analysis
 - QBTransactionsProcessor: QuickBooks transaction processing and normalization
 """
 
@@ -23,8 +21,6 @@ from .xbrl.schema_config_generator import (
   create_roboledger_ingestion_processor,
   create_custom_ingestion_processor,
 )
-from .trial_balance import TrialBalanceProcessor
-from .schedule import ScheduleProcessor
 from .qb_transactions import QBTransactionsProcessor
 
 __all__ = [
@@ -35,7 +31,5 @@ __all__ = [
   "IngestTableInfo",
   "create_roboledger_ingestion_processor",
   "create_custom_ingestion_processor",
-  "TrialBalanceProcessor",
-  "ScheduleProcessor",
   "QBTransactionsProcessor",
 ]

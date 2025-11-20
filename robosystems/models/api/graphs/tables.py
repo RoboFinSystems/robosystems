@@ -131,6 +131,11 @@ class FileUploadRequest(BaseModel):
     description="File MIME type",
     examples=["application/x-parquet", "text/csv", "application/json"],
   )
+  table_name: Optional[str] = Field(
+    default=None,
+    description="Table name to associate file with (required for first-class /files endpoint)",
+    examples=["Entity", "Fact", "PERSON_WORKS_FOR_COMPANY"],
+  )
 
   class Config:
     extra = "forbid"
@@ -139,10 +144,12 @@ class FileUploadRequest(BaseModel):
         {
           "file_name": "entities.parquet",
           "content_type": "application/x-parquet",
+          "table_name": "Entity",
         },
         {
           "file_name": "transactions.csv",
           "content_type": "text/csv",
+          "table_name": "Fact",
         },
       ]
     }
@@ -161,12 +168,17 @@ class FileStatusUpdate(BaseModel):
     description="File status: 'uploaded' (ready for ingest), 'disabled' (exclude from ingest), 'archived' (soft deleted)",
     examples=["uploaded", "disabled", "archived"],
   )
+  ingest_to_graph: bool = Field(
+    default=False,
+    description="Auto-ingest to graph after DuckDB staging. Default=false (batch mode). Set to true for real-time incremental updates.",
+  )
 
   class Config:
     extra = "forbid"
     json_schema_extra = {
       "examples": [
         {"status": "uploaded"},
+        {"status": "uploaded", "ingest_to_graph": True},
         {"status": "disabled"},
       ]
     }
@@ -240,10 +252,29 @@ class FileInfo(BaseModel):
 
 class ListTableFilesResponse(BaseModel):
   graph_id: str = Field(..., description="Graph database identifier")
-  table_name: str = Field(..., description="Table name")
+  table_name: Optional[str] = Field(
+    None, description="Table name (null if listing all files in graph)"
+  )
   files: List[FileInfo] = Field(..., description="List of files in the table")
   total_files: int = Field(..., description="Total number of files")
   total_size_bytes: int = Field(..., description="Total size of all files in bytes")
+
+
+class FileLayerStatus(BaseModel):
+  status: str = Field(..., description="Layer status")
+  timestamp: Optional[str] = Field(None, description="Status timestamp")
+  row_count: Optional[int] = Field(None, description="Row count (if available)")
+  size_bytes: Optional[int] = Field(None, description="Size in bytes (S3 layer only)")
+
+
+class EnhancedFileStatusLayers(BaseModel):
+  s3: FileLayerStatus = Field(..., description="S3 layer status (immutable source)")
+  duckdb: FileLayerStatus = Field(
+    ..., description="DuckDB layer status (mutable staging)"
+  )
+  graph: FileLayerStatus = Field(
+    ..., description="Graph layer status (immutable materialized view)"
+  )
 
 
 class GetFileInfoResponse(BaseModel):
@@ -262,6 +293,10 @@ class GetFileInfoResponse(BaseModel):
     None, description="File upload completion timestamp"
   )
   s3_key: str = Field(..., description="S3 object key")
+  layers: Optional[EnhancedFileStatusLayers] = Field(
+    default=None,
+    description="Multi-layer pipeline status (S3 → DuckDB → Graph). Shows status, timestamps, and row counts for each layer independently.",
+  )
 
 
 class DeleteFileResponse(BaseModel):
@@ -269,3 +304,12 @@ class DeleteFileResponse(BaseModel):
   file_id: str = Field(..., description="Deleted file ID")
   file_name: str = Field(..., description="Deleted file name")
   message: str = Field(..., description="Operation message")
+  cascade_deleted: bool = Field(
+    default=False, description="Whether cascade deletion was performed"
+  )
+  tables_affected: Optional[List[str]] = Field(
+    None, description="Tables from which file data was deleted (if cascade=true)"
+  )
+  graph_marked_stale: bool = Field(
+    default=False, description="Whether graph was marked as stale"
+  )

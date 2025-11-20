@@ -169,9 +169,9 @@ class TestEntityGraphService:
     mocker.patch("robosystems.models.iam.graph.Graph.create")
     mocker.patch("robosystems.models.iam.graph_user.GraphUser.create")
 
-    # Mock controlled ingestion responses
+    # Mock controlled materialization responses
     mock_kuzu_client.create_table.return_value = {"success": True}
-    mock_kuzu_client.ingest_table_to_graph.return_value = {"rows_ingested": 1}
+    mock_kuzu_client.materialize_table.return_value = {"rows_ingested": 1}
 
     # Create service and run test
     service = EntityGraphService(session=mock_session)
@@ -197,12 +197,12 @@ class TestEntityGraphService:
     assert result["entity"]["name"] == "Test Company"
     assert result["entity"]["cik"] == "0001234567"
 
-    # Verify controlled ingestion flow was used
+    # Verify controlled materialization flow was used
     mock_allocation_manager.allocate_database.assert_called_once()
     mock_kuzu_client.create_database.assert_called_once()
     mock_s3_client.s3_client.upload_fileobj.assert_called_once()
     mock_kuzu_client.create_table.assert_called()
-    mock_kuzu_client.ingest_table_to_graph.assert_called_once()
+    mock_kuzu_client.materialize_table.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_create_entity_allocation_failure(self, mocker):

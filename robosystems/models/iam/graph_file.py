@@ -21,6 +21,8 @@ class GraphFile(Base):
     Index("idx_graph_files_graph_id", "graph_id"),
     Index("idx_graph_files_table_id", "table_id"),
     Index("idx_graph_files_status", "upload_status"),
+    Index("idx_graph_files_duckdb_status", "duckdb_status"),
+    Index("idx_graph_files_graph_status", "graph_status"),
   )
 
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("gf"))
@@ -46,6 +48,16 @@ class GraphFile(Base):
 
   upload_status = Column(String, nullable=False, default="pending")
   upload_method = Column(String, nullable=False)
+
+  # v2 Incremental Ingestion: Multi-layer status tracking
+  duckdb_status = Column(String, nullable=False, default="pending")
+  duckdb_row_count = Column(Integer, nullable=True)
+  duckdb_staged_at = Column(DateTime(timezone=True), nullable=True)
+
+  graph_status = Column(String, nullable=False, default="pending")
+  graph_ingested_at = Column(DateTime(timezone=True), nullable=True)
+
+  celery_task_id = Column(String, nullable=True)
 
   created_at = Column(
     DateTime(timezone=True),
@@ -115,5 +127,35 @@ class GraphFile(Base):
 
   def mark_failed(self, session: Session) -> None:
     self.upload_status = "failed"
+    session.commit()
+    session.refresh(self)
+
+  def mark_duckdb_staged(
+    self, session: Session, row_count: Optional[int] = None
+  ) -> None:
+    """Mark file as successfully staged in DuckDB."""
+    self.duckdb_status = "staged"
+    self.duckdb_staged_at = datetime.now(timezone.utc)
+    if row_count is not None:
+      self.duckdb_row_count = row_count
+    session.commit()
+    session.refresh(self)
+
+  def mark_duckdb_failed(self, session: Session) -> None:
+    """Mark DuckDB staging as failed."""
+    self.duckdb_status = "failed"
+    session.commit()
+    session.refresh(self)
+
+  def mark_graph_ingested(self, session: Session) -> None:
+    """Mark file as successfully ingested to graph database."""
+    self.graph_status = "ingested"
+    self.graph_ingested_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(self)
+
+  def mark_graph_failed(self, session: Session) -> None:
+    """Mark graph ingestion as failed."""
+    self.graph_status = "failed"
     session.commit()
     session.refresh(self)

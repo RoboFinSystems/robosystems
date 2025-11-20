@@ -130,9 +130,22 @@ class TaskSSEProgressTracker:
       return
 
     try:
+      # Convert datetime objects to ISO format strings for JSON serialization
+      def serialize_datetime(obj):
+        """Recursively convert datetime objects to ISO format strings."""
+        from datetime import datetime, date
+
+        if isinstance(obj, (datetime, date)):
+          return obj.isoformat()
+        elif isinstance(obj, dict):
+          return {k: serialize_datetime(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+          return [serialize_datetime(item) for item in obj]
+        return obj
+
       completion_data = {
         "message": "Operation completed successfully!",
-        "result": result,
+        "result": serialize_datetime(result),
       }
 
       if additional_context:
