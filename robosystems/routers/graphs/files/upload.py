@@ -1,8 +1,8 @@
 """
 File Upload Management Endpoints.
 
-This module provides secure file upload capabilities for staging tables,
-using presigned S3 URLs and comprehensive validation before ingestion.
+This module provides secure file upload capabilities using presigned S3 URLs
+and comprehensive validation before ingestion.
 
 Key Features:
 - Presigned S3 URLs for secure direct uploads
@@ -14,9 +14,9 @@ Key Features:
 - Comprehensive error handling and recovery
 
 Upload Workflow:
-1. Request presigned URL: `POST /tables/{table_name}/files`
+1. Request presigned URL: `POST /files`
 2. Upload file directly to S3 using presigned URL
-3. Update status to 'uploaded': `PATCH /tables/files/{file_id}`
+3. Update status to 'uploaded': `PATCH /files/{file_id}`
 4. Backend validates file, calculates size and row count
 5. Table statistics updated automatically
 6. DuckDB table registered for queries
@@ -27,7 +27,6 @@ File Lifecycle States:
 - uploaded: Successfully uploaded and validated
 - disabled: Excluded from ingestion
 - archived: Soft deleted
-- failed: Upload or validation failed
 
 Validation Features:
 - File format validation (parquet, csv, json)
@@ -37,25 +36,12 @@ Validation Features:
 - S3 existence verification
 - Path traversal prevention
 
-Auto-Creation:
-- Tables are automatically created on first file upload
-- Table type inferred from naming conventions
-- Schema populated incrementally
-
 Performance:
 - Direct S3 uploads (no API bottleneck)
 - Presigned URLs expire in configurable seconds
 - Optimized S3 head operations for validation
 - Concurrent uploads supported
 - Atomic table statistics updates
-
-Security:
-- Write access required for uploads
-- Presigned URLs with time expiration
-- Shared repositories block uploads
-- Path traversal protection
-- Full audit logging of operations
-- Rate limited per subscription tier
 """
 
 import uuid
@@ -65,7 +51,7 @@ from pathlib import Path as PathLib
 from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphTable, GraphFile
+from robosystems.models.iam import User, GraphTable, GraphFile, Graph
 from robosystems.models.api.graphs.tables import (
   FileUploadRequest,
   FileUploadResponse,
@@ -102,49 +88,36 @@ router = APIRouter()
 
 
 @router.post(
-  "/tables/{table_name}/files",
+  "/files",
   response_model=FileUploadResponse,
-  operation_id="getUploadUrl",
-  summary="Get File Upload URL",
-  description="""Generate a presigned S3 URL for secure file upload.
+  operation_id="createFileUpload",
+  summary="Create File Upload",
+  description="""Generate presigned S3 URL for file upload.
 
-Initiates file upload to a staging table by generating a secure, time-limited
-presigned S3 URL. Files are uploaded directly to S3, bypassing the API for
-optimal performance.
+Initiate file upload by generating a secure, time-limited presigned S3 URL.
+Files are first-class resources uploaded directly to S3.
+
+**Request Body:**
+- `file_name`: Name of the file (1-255 characters)
+- `file_format`: Format (parquet, csv, json)
+- `table_name`: Table to associate file with
 
 **Upload Workflow:**
 1. Call this endpoint to get presigned URL
 2. PUT file directly to S3 URL
-3. Call PATCH /tables/files/{file_id} with status='uploaded'
-4. Backend validates file and calculates metrics
-5. File ready for ingestion
+3. Call PATCH /files/{file_id} with status='uploaded'
+4. Backend validates and stages in DuckDB immediately
+5. Background task ingests to graph
 
 **Supported Formats:**
-- Parquet (`application/x-parquet` with `.parquet` extension)
-- CSV (`text/csv` with `.csv` extension)
-- JSON (`application/json` with `.json` extension)
-
-**Validation:**
-- File extension must match content type
-- File name 1-255 characters
-- No path traversal characters (.. / \\)
-- Auto-creates table if it doesn't exist
+- Parquet, CSV, JSON
 
 **Auto-Table Creation:**
-Tables are automatically created on first file upload with type inferred from name
-(e.g., "Transaction" → relationship) and empty schema populated during ingestion.
-
-**Subgraph Support:**
-This endpoint accepts both parent graph IDs and subgraph IDs.
-- Parent graph: Use `graph_id` like `kg0123456789abcdef`
-- Subgraph: Use full subgraph ID like `kg0123456789abcdef_dev`
-Each subgraph has completely isolated S3 staging areas and tables. Files uploaded
-to one subgraph do not appear in other subgraphs.
+Tables are automatically created if they don't exist.
 
 **Important Notes:**
 - Presigned URLs expire (default: 1 hour)
-- Use appropriate Content-Type header when uploading to S3
-- File extension must match content type
+- Files are graph-scoped, independent resources
 - Upload URL generation is included - no credit consumption""",
   responses={
     200: {
@@ -161,7 +134,7 @@ to one subgraph do not appear in other subgraphs.
       },
     },
     400: {
-      "description": "Invalid file format, name, or extension mismatch",
+      "description": "Invalid file format or parameters",
       "model": ErrorResponse,
     },
     403: {
@@ -172,32 +145,36 @@ to one subgraph do not appear in other subgraphs.
       "description": "Graph not found",
       "model": ErrorResponse,
     },
-    500: {"description": "Internal server error"},
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/tables/{table_name}/files",
-  business_event_type="upload_url_generated",
+  "/v1/graphs/{graph_id}/files", business_event_type="file_upload_created"
 )
-async def get_upload_url(
+async def create_file_upload(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  table_name: str = Path(..., description="Table name"),
-  request: FileUploadRequest = Body(..., description="Upload request"),
+  request: FileUploadRequest = Body(..., description="Upload request with table_name"),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> FileUploadResponse:
   """
-  Generate a presigned S3 URL for file upload.
+  Generate presigned S3 URL for file upload.
 
-  Creates a secure, time-limited URL for direct upload to S3, bypassing
-  the API for optimal performance.
+  Creates secure upload URL for direct S3 upload. Requires table_name in request body
+  to associate file with table.
   """
   start_time = datetime.now(timezone.utc)
+
+  table_name = getattr(request, "table_name", None)
+  if not table_name:
+    raise HTTPException(
+      status_code=status.HTTP_400_BAD_REQUEST,
+      detail="table_name is required in request body",
+    )
 
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     logger.warning(
@@ -220,16 +197,13 @@ async def get_upload_url(
     api_logger.info(
       "Upload URL generation started",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "upload_url_started",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "table_name": table_name,
         "file_name": request.file_name,
         "content_type": request.content_type,
-        "metadata": {
-          "endpoint": "/v1/graphs/{graph_id}/tables/{table_name}/files",
-        },
       },
     )
 
@@ -327,7 +301,7 @@ async def get_upload_url(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/{table_name}/files",
+      endpoint="/v1/graphs/{graph_id}/files",
       method="POST",
       event_type="upload_url_generated_successfully",
       event_data={
@@ -345,7 +319,7 @@ async def get_upload_url(
     api_logger.info(
       "Upload URL generated successfully",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "upload_url_completed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
@@ -374,7 +348,7 @@ async def get_upload_url(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/{table_name}/files",
+      endpoint="/v1/graphs/{graph_id}/files",
       method="POST",
       event_type="upload_url_generation_failed",
       event_data={
@@ -391,7 +365,7 @@ async def get_upload_url(
     api_logger.error(
       "Upload URL generation failed",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "upload_url_failed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
@@ -410,102 +384,81 @@ async def get_upload_url(
 
 
 @router.patch(
-  "/tables/files/{file_id}",
+  "/files/{file_id}",
   response_model=dict,
-  operation_id="updateFileStatus",
-  summary="Update File Upload Status",
-  description="""Update file status after upload completes.
+  operation_id="updateFile",
+  summary="Update File Status",
+  description="""Update file status and trigger processing.
 
-Marks files as uploaded after successful S3 upload. The backend validates
-the file, calculates size and row count, enforces storage limits, and
-registers the DuckDB table for queries.
+Update file status after upload completion. Setting status='uploaded' triggers
+immediate DuckDB staging and optional graph ingestion.
 
-**Status Values:**
-- `uploaded`: File successfully uploaded to S3 (triggers validation)
-- `disabled`: Exclude file from ingestion
-- `archived`: Soft delete file
+**Request Body:**
+- `status`: New status (uploaded, disabled, failed)
+- `ingest_to_graph` (optional): If true, auto-ingest to graph after DuckDB staging
 
-**What Happens on 'uploaded' Status:**
-1. Verify file exists in S3
-2. Calculate actual file size
-3. Enforce tier storage limits
-4. Calculate or estimate row count
-5. Update table statistics
-6. Register DuckDB external table
-7. File ready for ingestion
+**What Happens (status='uploaded'):**
+1. File validated in S3
+2. Row count calculated
+3. DuckDB staging triggered immediately (Celery task)
+4. If ingest_to_graph=true, graph ingestion queued
+5. File queryable in DuckDB within seconds
 
-**Row Count Calculation:**
-- **Parquet**: Exact count from file metadata
-- **CSV**: Count rows (minus header)
-- **JSON**: Count array elements
-- **Fallback**: Estimate from file size if reading fails
+**Use Cases:**
+- Signal upload completion
+- Trigger immediate DuckDB staging
+- Enable/disable files
+- Mark failed uploads
 
-**Storage Limits:**
-Enforced per subscription tier. Returns HTTP 413 if limit exceeded.
-Check current usage before large uploads.
-
-**Important Notes:**
-- Always call this after S3 upload completes
-- Check response for actual row count
-- Storage limit errors (413) mean tier upgrade needed
-- DuckDB registration failures are non-fatal (retried later)
-- Status updates are included - no credit consumption""",
+**Important:**
+- Files must exist in S3 before marking uploaded
+- DuckDB staging happens asynchronously
+- Graph ingestion is optional (ingest_to_graph flag)""",
   responses={
     200: {
       "description": "File status updated successfully",
       "content": {
         "application/json": {
           "example": {
-            "status": "success",
             "file_id": "f123",
-            "upload_status": "uploaded",
-            "file_size_bytes": 1048576,
-            "row_count": 5000,
-            "message": "File validated and ready for ingestion",
+            "status": "uploaded",
+            "message": "File uploaded and queued for DuckDB staging",
+            "duckdb_task_id": "celery_task_123",
           }
         }
       },
     },
     400: {
-      "description": "Invalid status, file too large, or empty file",
+      "description": "Invalid status or file not in S3",
       "model": ErrorResponse,
     },
     403: {
-      "description": "Access denied - shared repositories or insufficient permissions",
+      "description": "Access denied",
       "model": ErrorResponse,
     },
     404: {
-      "description": "Graph, file, or S3 object not found",
+      "description": "File not found",
       "model": ErrorResponse,
     },
-    413: {
-      "description": "Storage limit exceeded for tier",
-      "model": ErrorResponse,
-    },
-    500: {"description": "Internal server error"},
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/tables/files/{file_id}",
-  business_event_type="file_status_updated",
+  "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_updated"
 )
-async def update_file_status(
+async def update_file(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  file_id: str = Path(..., description="File identifier"),
-  request: FileStatusUpdate = Body(..., description="Status update"),
+  file_id: str = Path(..., description="File ID"),
+  request: FileStatusUpdate = Body(..., description="Status update request"),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> dict:
   """
-  Update file upload status with validation.
-
-  Marks files as uploaded after S3 upload completes. Validates file existence,
-  calculates size and row count, enforces storage limits, and registers DuckDB table.
+  Update file status and trigger processing.
   """
   start_time = datetime.now(timezone.utc)
 
@@ -534,7 +487,6 @@ async def update_file_status(
         detail=f"File {file_id} not found",
       )
 
-    # Validate status using enum (exclude PENDING - users can't set files back to pending)
     valid_statuses = {
       FileUploadStatus.UPLOADED.value,
       FileUploadStatus.DISABLED.value,
@@ -550,15 +502,12 @@ async def update_file_status(
     api_logger.info(
       "File status update initiated",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "status_update_started",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "file_id": file_id,
         "requested_status": request.status,
-        "metadata": {
-          "endpoint": "/v1/graphs/{graph_id}/tables/files/{file_id}",
-        },
       },
     )
 
@@ -575,7 +524,7 @@ async def update_file_status(
 
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
-        endpoint="/v1/graphs/{graph_id}/tables/files/{file_id}",
+        endpoint="/v1/graphs/{graph_id}/files/{file_id}",
         method="PATCH",
         event_type="file_disabled",
         event_data={
@@ -603,7 +552,7 @@ async def update_file_status(
 
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
-        endpoint="/v1/graphs/{graph_id}/tables/files/{file_id}",
+        endpoint="/v1/graphs/{graph_id}/files/{file_id}",
         method="PATCH",
         event_type="file_archived",
         event_data={
@@ -649,8 +598,6 @@ async def update_file_status(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"File size {actual_file_size / (1024 * 1024):.2f} MB exceeds maximum of {MAX_FILE_SIZE_MB} MB",
       )
-
-    from robosystems.models.iam import Graph
 
     graph = Graph.get_by_id(graph_id, db)
     if graph:
@@ -745,38 +692,45 @@ async def update_file_status(
       )
 
       if new_file_count > 0:
-        from robosystems.operations.graph.table_service import TableService
-        from robosystems.graph_api.client.factory import get_graph_client
-
-        table_service = TableService(db)
-        s3_pattern = table_service.get_s3_pattern_for_table(
-          graph_id=graph_id,
-          table_name=table.table_name,
-          user_id=current_user.id,
+        from robosystems.tasks.table_operations.duckdb_staging import (
+          stage_file_in_duckdb,
         )
 
+        operation_id = str(uuid.uuid4())
+
         try:
-          client = await get_graph_client(graph_id=graph_id, operation_type="write")
-          await client.create_table(
-            graph_id=graph_id,
-            table_name=table.table_name,
-            s3_pattern=s3_pattern,
+          task = stage_file_in_duckdb.apply_async(  # type: ignore[attr-defined]
+            args=[file_id, graph_id, table.id, operation_id, request.ingest_to_graph],
+            task_id=operation_id,
           )
-          logger.info(
-            f"Registered/updated DuckDB external table {table.table_name} with pattern: {s3_pattern}"
-          )
+
+          graph_file.celery_task_id = task.id
+
+          db.commit()
+          db.refresh(graph_file)
+
+          if request.ingest_to_graph:
+            logger.info(
+              f"v2 Incremental Ingestion: Async DuckDB staging task {task.id} started for file {file_id} "
+              f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
+            )
+          else:
+            logger.info(
+              f"v2 Incremental Ingestion: Async DuckDB staging task {task.id} started for file {file_id}. "
+              f"Monitor at /v1/operations/{operation_id}/stream"
+            )
+
         except Exception as e:
           logger.warning(
-            f"Failed to register DuckDB table {table.table_name}: {e}. "
-            f"Table queries may fail until registration succeeds. "
-            f"Registration will be automatically retried on next upload or query attempt."
+            f"Failed to start async DuckDB staging task for file {file_id}: {e}. "
+            f"File will be staged on next upload or query attempt."
           )
 
     logger.info(
       f"File {file_id} marked as uploaded: {graph_file.file_size_bytes or 0:,} bytes, {graph_file.row_count or 0:,} rows"
     )
 
-    return {
+    response = {
       "status": "success",
       "file_id": file_id,
       "upload_status": "uploaded",
@@ -785,7 +739,43 @@ async def update_file_status(
       "message": "File validated and ready for ingestion",
     }
 
+    if graph_file.celery_task_id:
+      response["duckdb_staging_task_id"] = graph_file.celery_task_id
+      response["monitor_url"] = f"/v1/operations/{graph_file.celery_task_id}/stream"
+
+      if request.ingest_to_graph:
+        response["message"] = (
+          f"File validated. DuckDB staging in progress, then auto-ingesting to graph. "
+          f"Monitor at {response['monitor_url']}"
+        )
+        response["ingest_to_graph"] = True
+      else:
+        response["message"] = (
+          f"File validated. DuckDB staging in progress. Monitor at {response['monitor_url']}"
+        )
+        response["ingest_to_graph"] = False
+
+    return response
+
+  except HTTPException:
+    raise
+
   except Exception as e:
+    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+
+    api_logger.error(
+      "File status update failed",
+      extra={
+        "component": "files_api",
+        "action": "status_update_failed",
+        "user_id": str(current_user.id),
+        "graph_id": graph_id,
+        "file_id": file_id,
+        "duration_ms": execution_time,
+        "error_type": type(e).__name__,
+      },
+    )
+
     logger.error(f"Failed to update file {file_id}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

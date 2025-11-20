@@ -1,56 +1,39 @@
 """
-Staging Table File Management Endpoints.
+File Management - Main Endpoints.
 
-This module provides comprehensive file management for DuckDB staging tables,
-enabling users to list, inspect, and delete files before graph ingestion.
+This module provides core file operations at the graph level, treating files as
+first-class citizens with their own namespace.
 
 Key Features:
-- List all files in a staging table with metadata
-- Get detailed information about individual files
-- Delete files from both S3 and database tracking
-- Automatic table statistics updates on file deletion
-- Full audit trail of file operations
+- List files across graph with filtering
+- Get detailed file information with multi-layer status
+- Delete files with cascade support
+- Independent file lifecycle management
 
-Workflow Integration:
-1. Upload files via upload endpoints
-2. List files to verify uploads (this module)
-3. Inspect individual files for validation (this module)
-4. Delete incorrect files if needed (this module)
-5. Ingest validated data into graph
+Multi-Layer Status Tracking:
+- S3 layer: Immutable source with upload status
+- DuckDB layer: Mutable staging with immediate queryability
+- Graph layer: Immutable materialized view
 
-Use Cases:
-- Monitor file upload progress per table
-- Validate file formats and sizes before ingestion
-- Inspect file metadata (row counts, upload status)
-- Clean up duplicate or incorrect uploads
-- Track storage usage per table
-- Pre-ingestion data quality checks
-
-File Lifecycle:
-- created -> uploading -> uploaded -> ingested
-- Files can be deleted at any stage before ingestion
-- DuckDB automatically excludes deleted files from queries
-- Table statistics recalculated on deletion
-
-Security:
-- Read operations require 'read' access
-- Delete operations require 'write' access (verified via auth)
-- Shared repositories block file deletions
-- Full audit logging of all operations
-- Rate limited per subscription tier
+Architecture:
+Files are first-class resources queried by file_id, independent of table context.
+This enables clean REST semantics and file-centric operations.
 """
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphTable, GraphFile
+from robosystems.models.iam import User, GraphTable, GraphFile, Graph
 from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.tables import (
   FileUploadStatus,
   ListTableFilesResponse,
   GetFileInfoResponse,
   DeleteFileResponse,
+  EnhancedFileStatusLayers,
+  FileLayerStatus,
 )
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
@@ -73,52 +56,49 @@ router = APIRouter()
 
 
 @router.get(
-  "/tables/{table_name}/files",
+  "/files",
   response_model=ListTableFilesResponse,
-  operation_id="listTableFiles",
-  summary="List Files in Staging Table",
-  description="""List all files uploaded to a staging table with comprehensive metadata.
+  operation_id="listFiles",
+  summary="List Files in Graph",
+  description="""List all files in the graph with optional filtering.
 
-Get a complete inventory of all files in a staging table, including upload status,
-file sizes, row counts, and S3 locations. Essential for monitoring upload progress
-and validating data before ingestion.
+Get a complete inventory of files across all tables or filtered by table name,
+status, or other criteria. Files are first-class resources with independent lifecycle.
+
+**Query Parameters:**
+- `table_name` (optional): Filter by table name
+- `status` (optional): Filter by upload status (uploaded, pending, failed, etc.)
 
 **Use Cases:**
-- Monitor file upload progress
+- Monitor file upload progress across all tables
 - Verify files are ready for ingestion
-- Check file formats and sizes
-- Track storage usage per table
+- Check file metadata and sizes
+- Track storage usage per graph
 - Identify failed or incomplete uploads
-- Pre-ingestion validation
+- Audit file provenance
 
 **Returned Metadata:**
 - File ID, name, and format (parquet, csv, json)
 - Size in bytes and row count (if available)
-- Upload status and method
-- Creation and upload timestamps
-- S3 key for reference
+- Upload status and timestamps
+- DuckDB and graph ingestion status
+- Table association
 
-**Upload Status Values:**
-- `pending`: Upload URL generated, awaiting upload
-- `uploaded`: Successfully uploaded, ready for ingestion
-- `disabled`: Excluded from ingestion
-- `archived`: Soft deleted
-- `failed`: Upload failed
+**File Lifecycle Tracking:**
+Multi-layer status across S3 → DuckDB → Graph pipeline
 
 **Important Notes:**
-- Only `uploaded` files are ingested
-- Check `row_count` to estimate data volume
-- Use `total_size_bytes` for storage monitoring
-- Files with `failed` status should be deleted and re-uploaded
+- Files are graph-scoped, not table-scoped
+- Use table_name parameter to filter by table
 - File listing is included - no credit consumption""",
   responses={
     200: {
-      "description": "Files retrieved successfully with full metadata",
+      "description": "Files retrieved successfully",
       "content": {
         "application/json": {
           "example": {
             "graph_id": "kg123",
-            "table_name": "Entity",
+            "table_name": None,
             "files": [
               {
                 "file_id": "f123",
@@ -127,10 +107,9 @@ and validating data before ingestion.
                 "size_bytes": 1048576,
                 "row_count": 5000,
                 "upload_status": "uploaded",
-                "upload_method": "presigned_url",
+                "table_name": "Entity",
                 "created_at": "2025-10-28T10:00:00Z",
                 "uploaded_at": "2025-10-28T10:01:30Z",
-                "s3_key": "user-staging/user123/kg123/Entity/data.parquet",
               }
             ],
             "total_files": 1,
@@ -140,36 +119,39 @@ and validating data before ingestion.
       },
     },
     403: {
-      "description": "Access denied - insufficient permissions for this graph",
+      "description": "Access denied - insufficient permissions",
       "model": ErrorResponse,
     },
     404: {
-      "description": "Graph or table not found",
+      "description": "Graph not found",
       "model": ErrorResponse,
     },
-    500: {"description": "Internal server error"},
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/tables/{table_name}/files",
-  business_event_type="table_files_listed",
+  "/v1/graphs/{graph_id}/files", business_event_type="files_listed"
 )
-async def list_table_files(
+async def list_files(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  table_name: str = Path(..., description="Table name"),
+  table_name: str | None = Query(
+    default=None, description="Filter by table name (optional)"
+  ),
+  file_status: str | None = Query(
+    default=None, description="Filter by upload status (optional)", alias="status"
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> ListTableFilesResponse:
   """
-  List all files in a staging table with metadata.
+  List all files in the graph with optional filtering.
 
-  Returns comprehensive file information including upload status, sizes,
-  and S3 locations for monitoring the data pipeline.
+  Files are first-class resources queried at graph level, with optional
+  filtering by table or status.
   """
   start_time = datetime.now(timezone.utc)
 
@@ -182,39 +164,44 @@ async def list_table_files(
         detail=f"Graph {graph_id} not found",
       )
 
-    table = GraphTable.get_by_name(graph_id, table_name, db)
-    if not table:
-      raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Table {table_name} not found in graph {graph_id}",
-      )
-
     api_logger.info(
-      "Listing table files",
+      "Listing files",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "list_files_started",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
-        "table_name": table_name,
-        "metadata": {
-          "endpoint": "/v1/graphs/{graph_id}/tables/{table_name}/files",
-        },
+        "table_filter": table_name,
+        "status_filter": file_status,
       },
     )
 
-    files = GraphFile.get_all_for_table(table.id, db)
+    if table_name:
+      table = GraphTable.get_by_name(graph_id, table_name, db)
+      if not table:
+        raise HTTPException(
+          status_code=status.HTTP_404_NOT_FOUND,
+          detail=f"Table {table_name} not found in graph {graph_id}",
+        )
+      files = GraphFile.get_all_for_table(table.id, db)
+    else:
+      files = db.query(GraphFile).filter(GraphFile.graph_id == graph_id).all()
+
+    if file_status:
+      files = [f for f in files if f.upload_status == file_status]
+
     total_size = sum(f.file_size_bytes for f in files)
     execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/{table_name}/files",
+      endpoint="/v1/graphs/{graph_id}/files",
       method="GET",
-      event_type="table_files_listed_successfully",
+      event_type="files_listed_successfully",
       event_data={
         "graph_id": graph_id,
-        "table_name": table_name,
+        "table_filter": table_name,
+        "status_filter": file_status,
         "file_count": len(files),
         "total_size_bytes": total_size,
         "execution_time_ms": execution_time,
@@ -223,13 +210,13 @@ async def list_table_files(
     )
 
     api_logger.info(
-      "Table files listed successfully",
+      "Files listed successfully",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "list_files_completed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
-        "table_name": table_name,
+        "table_filter": table_name,
         "duration_ms": execution_time,
         "file_count": len(files),
         "success": True,
@@ -264,35 +251,18 @@ async def list_table_files(
   except Exception as e:
     execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
-    metrics_instance = get_endpoint_metrics()
-    metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/{table_name}/files",
-      method="GET",
-      event_type="list_table_files_failed",
-      event_data={
-        "graph_id": graph_id,
-        "table_name": table_name,
-        "error_type": type(e).__name__,
-        "error_message": str(e),
-        "execution_time_ms": execution_time,
-      },
-      user_id=current_user.id,
-    )
-
     api_logger.error(
-      "Failed to list table files",
+      "Failed to list files",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "list_files_failed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
-        "table_name": table_name,
         "duration_ms": execution_time,
         "error_type": type(e).__name__,
       },
     )
 
-    logger.error(f"Failed to list files for table {table_name}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to list files: {str(e)}",
@@ -300,22 +270,42 @@ async def list_table_files(
 
 
 @router.get(
-  "/tables/files/{file_id}",
+  "/files/{file_id}",
   response_model=GetFileInfoResponse,
-  operation_id="getFileInfo",
+  operation_id="getFile",
   summary="Get File Information",
   description="""Get detailed information about a specific file.
 
-Retrieve comprehensive metadata for a single file, including upload status,
-size, row count, and timestamps. Useful for validating individual files
-before ingestion.
+Retrieve comprehensive metadata for a single file by file_id, independent of
+table context. Files are first-class resources with complete lifecycle tracking.
+
+**Returned Information:**
+- File ID, name, format, size
+- Upload status and timestamps
+- **Enhanced Multi-Layer Status** (new in this version):
+  - S3 layer: upload_status, uploaded_at, size_bytes, row_count
+  - DuckDB layer: duckdb_status, duckdb_staged_at, duckdb_row_count
+  - Graph layer: graph_status, graph_ingested_at
+- Table association
+- S3 location
+
+**Multi-Layer Pipeline Visibility:**
+The `layers` object provides independent status tracking across the three-tier
+data pipeline:
+- **S3 (Immutable Source)**: File upload and validation
+- **DuckDB (Mutable Staging)**: Immediate queryability with file provenance
+- **Graph (Immutable View)**: Optional graph database materialization
+
+Each layer shows its own status, timestamp, and row count (where applicable),
+enabling precise debugging and monitoring of the data ingestion flow.
 
 **Use Cases:**
 - Validate file upload completion
-- Check file metadata before ingestion
-- Debug upload issues
-- Verify file format and size
-- Track file lifecycle
+- Monitor multi-layer ingestion progress in real-time
+- Debug upload or staging issues at specific layers
+- Verify file metadata and row counts
+- Track file provenance through the pipeline
+- Identify bottlenecks in the ingestion process
 
 **Note:**
 File info retrieval is included - no credit consumption""",
@@ -334,29 +324,46 @@ File info retrieval is included - no credit consumption""",
             "size_bytes": 1048576,
             "row_count": 5000,
             "upload_status": "uploaded",
-            "upload_method": "presigned_url",
             "created_at": "2025-10-28T10:00:00Z",
             "uploaded_at": "2025-10-28T10:01:30Z",
-            "s3_key": "user-staging/user123/kg123/Entity/data.parquet",
+            "layers": {
+              "s3": {
+                "status": "uploaded",
+                "timestamp": "2025-10-28T10:01:30Z",
+                "row_count": 5000,
+                "size_bytes": 1048576,
+              },
+              "duckdb": {
+                "status": "staged",
+                "timestamp": "2025-10-28T10:02:15Z",
+                "row_count": 5000,
+                "size_bytes": None,
+              },
+              "graph": {
+                "status": "ingested",
+                "timestamp": "2025-10-28T10:05:45Z",
+                "row_count": None,
+                "size_bytes": None,
+              },
+            },
           }
         }
       },
     },
     403: {
-      "description": "Access denied - insufficient permissions for this graph",
+      "description": "Access denied - insufficient permissions",
       "model": ErrorResponse,
     },
     404: {
-      "description": "File not found in graph",
+      "description": "File not found",
       "model": ErrorResponse,
     },
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/tables/files/{file_id}",
-  business_event_type="file_info_retrieved",
+  "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_retrieved"
 )
-async def get_file_info(
+async def get_file(
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -370,8 +377,7 @@ async def get_file_info(
   """
   Get detailed information about a specific file.
 
-  Returns comprehensive file metadata including upload status, sizes,
-  timestamps, and S3 location.
+  Returns comprehensive file metadata by file_id, independent of table context.
   """
   start_time = datetime.now(timezone.utc)
 
@@ -396,9 +402,9 @@ async def get_file_info(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/files/{file_id}",
+      endpoint="/v1/graphs/{graph_id}/files/{file_id}",
       method="GET",
-      event_type="file_info_retrieved_successfully",
+      event_type="file_retrieved_successfully",
       event_data={
         "graph_id": graph_id,
         "file_id": file_id,
@@ -410,17 +416,27 @@ async def get_file_info(
       user_id=current_user.id,
     )
 
-    api_logger.info(
-      "File info retrieved",
-      extra={
-        "component": "tables_api",
-        "action": "get_file_info_completed",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "file_id": file_id,
-        "duration_ms": execution_time,
-        "success": True,
-      },
+    layers = EnhancedFileStatusLayers(
+      s3=FileLayerStatus(
+        status=file.upload_status,
+        timestamp=file.uploaded_at.isoformat() if file.uploaded_at else None,
+        row_count=file.row_count,
+        size_bytes=file.file_size_bytes,
+      ),
+      duckdb=FileLayerStatus(
+        status=file.duckdb_status,
+        timestamp=file.duckdb_staged_at.isoformat() if file.duckdb_staged_at else None,
+        row_count=file.duckdb_row_count,
+        size_bytes=None,
+      ),
+      graph=FileLayerStatus(
+        status=file.graph_status,
+        timestamp=file.graph_ingested_at.isoformat()
+        if file.graph_ingested_at
+        else None,
+        row_count=None,
+        size_bytes=None,
+      ),
     )
 
     return GetFileInfoResponse(
@@ -437,6 +453,7 @@ async def get_file_info(
       created_at=file.created_at.isoformat() if file.created_at else None,
       uploaded_at=file.uploaded_at.isoformat() if file.uploaded_at else None,
       s3_key=file.s3_key,
+      layers=layers,
     )
 
   except HTTPException:
@@ -445,26 +462,11 @@ async def get_file_info(
   except Exception as e:
     execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
-    metrics_instance = get_endpoint_metrics()
-    metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/files/{file_id}",
-      method="GET",
-      event_type="get_file_info_failed",
-      event_data={
-        "graph_id": graph_id,
-        "file_id": file_id,
-        "error_type": type(e).__name__,
-        "error_message": str(e),
-        "execution_time_ms": execution_time,
-      },
-      user_id=current_user.id,
-    )
-
     api_logger.error(
-      "Failed to get file info",
+      "Failed to get file",
       extra={
-        "component": "tables_api",
-        "action": "get_file_info_failed",
+        "component": "files_api",
+        "action": "get_file_failed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "file_id": file_id,
@@ -475,45 +477,49 @@ async def get_file_info(
 
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve file info: {str(e)}",
+      detail=f"Failed to retrieve file: {str(e)}",
     )
 
 
 @router.delete(
-  "/tables/files/{file_id}",
+  "/files/{file_id}",
   response_model=DeleteFileResponse,
   operation_id="deleteFile",
-  summary="Delete File from Staging",
-  description="""Delete a file from S3 storage and database tracking.
+  summary="Delete File",
+  description="""Delete file from all layers.
 
-Remove unwanted, duplicate, or incorrect files from staging tables before ingestion.
-The file is deleted from both S3 and database tracking, and table statistics
-are automatically recalculated.
+Remove file from S3, database tracking, and optionally from DuckDB and graph.
+Files are deleted by file_id, independent of table context.
+
+**Query Parameters:**
+- `cascade` (optional, default=false): Delete from all layers including DuckDB
+
+**What Happens (cascade=false):**
+1. File deleted from S3
+2. Database record removed
+3. Table statistics updated
+
+**What Happens (cascade=true):**
+1. File data deleted from all DuckDB tables (by file_id)
+2. Graph marked as stale
+3. File deleted from S3
+4. Database record removed
+5. Table statistics updated
 
 **Use Cases:**
-- Remove duplicate uploads
-- Delete files with incorrect data
+- Remove incorrect or duplicate files
 - Clean up failed uploads
-- Fix data quality issues before ingestion
-- Manage storage usage
-
-**What Happens:**
-1. File deleted from S3 storage
-2. Database tracking record removed
-3. Table statistics recalculated (file count, size, row count)
-4. DuckDB automatically excludes file from future queries
+- Delete files before graph ingestion
+- Surgical data removal with cascade
 
 **Security:**
-- Write access required (verified via auth)
-- Shared repositories block file deletions
-- Full audit trail of deletion operations
-- Cannot delete after ingestion to graph
+- Write access required
+- Shared repositories block deletions
+- Full audit trail
 
-**Important Notes:**
-- Delete files before ingestion for best results
-- Table statistics update automatically
-- No need to refresh DuckDB - exclusion is automatic
-- Consider re-uploading corrected version after deletion
+**Important:**
+- Use cascade=true for immediate DuckDB cleanup
+- Graph rebuild recommended after cascade deletion
 - File deletion is included - no credit consumption""",
   responses={
     200: {
@@ -524,7 +530,10 @@ are automatically recalculated.
             "status": "deleted",
             "file_id": "f123",
             "file_name": "data.parquet",
-            "message": "File deleted successfully. DuckDB will automatically exclude it from queries.",
+            "message": "File deleted successfully. Removed data from 2 DuckDB table(s). Graph marked as stale - rebuild recommended.",
+            "cascade_deleted": True,
+            "tables_affected": ["Fact", "Element"],
+            "graph_marked_stale": True,
           }
         }
       },
@@ -534,15 +543,13 @@ are automatically recalculated.
       "model": ErrorResponse,
     },
     404: {
-      "description": "File not found in graph",
+      "description": "File not found",
       "model": ErrorResponse,
     },
-    500: {"description": "Internal server error"},
   },
 )
 @endpoint_metrics_decorator(
-  "/v1/graphs/{graph_id}/tables/files/{file_id}",
-  business_event_type="file_deleted",
+  "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_deleted"
 )
 async def delete_file(
   graph_id: str = Path(
@@ -551,16 +558,19 @@ async def delete_file(
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
   file_id: str = Path(..., description="File ID"),
+  cascade: bool = Query(
+    default=False,
+    description="If true, delete from all layers including DuckDB and mark graph stale",
+  ),
   current_user: User = Depends(get_current_user_with_graph),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
   db: Session = Depends(get_db_session),
 ) -> DeleteFileResponse:
   """
-  Delete a file from S3 and database tracking.
+  Delete file from all layers.
 
-  Removes the file from S3 storage, deletes the database record, and
-  recalculates table statistics. DuckDB will automatically exclude the
-  file from queries.
+  Removes file by file_id, independent of table context. Supports cascade
+  deletion across S3, DuckDB, and graph layers.
   """
   start_time = datetime.now(timezone.utc)
 
@@ -596,18 +606,54 @@ async def delete_file(
     api_logger.info(
       "File deletion initiated",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "delete_file_started",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "file_id": file_id,
         "file_name": file_name,
         "file_size_bytes": file_size,
-        "metadata": {
-          "endpoint": "/v1/graphs/{graph_id}/tables/files/{file_id}",
-        },
+        "cascade": cascade,
       },
     )
+
+    tables_affected = []
+    graph_marked_stale = False
+
+    if cascade:
+      logger.info(
+        f"Cascade deletion enabled for file {file_id} - deleting from DuckDB tables"
+      )
+
+      from robosystems.graph_api.client.factory import get_graph_client
+
+      client = await get_graph_client(graph_id=graph_id, operation_type="write")
+      all_tables = GraphTable.get_all_for_graph(graph_id, db)
+
+      for table in all_tables:
+        try:
+          result = await client.delete_file_data(
+            graph_id=graph_id, table_name=table.table_name, file_id=file_id
+          )
+          if result.get("rows_deleted", 0) > 0:
+            tables_affected.append(table.table_name)
+            logger.info(
+              f"Deleted {result['rows_deleted']} rows from table {table.table_name}"
+            )
+        except Exception as e:
+          logger.warning(
+            f"Failed to delete file data from table {table.table_name}: {e}"
+          )
+
+      if tables_affected:
+        graph = Graph.get_by_id(graph_id, db)
+        if graph:
+          graph.mark_stale(
+            session=db,
+            reason=f"file_deleted: {file_name} from tables {', '.join(tables_affected)}",
+          )
+          graph_marked_stale = True
+          logger.info(f"Marked graph {graph_id} as stale due to file deletion")
 
     s3_client = S3Client()
     bucket = env.AWS_S3_BUCKET
@@ -647,7 +693,7 @@ async def delete_file(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/files/{file_id}",
+      endpoint="/v1/graphs/{graph_id}/files/{file_id}",
       method="DELETE",
       event_type="file_deleted_successfully",
       event_data={
@@ -656,6 +702,9 @@ async def delete_file(
         "file_name": file_name,
         "file_size_bytes": file_size,
         "table_name": table.table_name if table else None,
+        "cascade": cascade,
+        "tables_affected_count": len(tables_affected),
+        "graph_marked_stale": graph_marked_stale,
         "execution_time_ms": execution_time,
       },
       user_id=current_user.id,
@@ -664,12 +713,15 @@ async def delete_file(
     api_logger.info(
       "File deleted successfully",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "delete_file_completed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,
         "file_id": file_id,
         "file_name": file_name,
+        "cascade": cascade,
+        "tables_affected_count": len(tables_affected),
+        "graph_marked_stale": graph_marked_stale,
         "duration_ms": execution_time,
         "success": True,
       },
@@ -680,11 +732,22 @@ async def delete_file(
       f"DuckDB will automatically exclude it from queries"
     )
 
+    message = "File deleted successfully."
+    if cascade and tables_affected:
+      message += f" Removed data from {len(tables_affected)} DuckDB table(s)."
+    if graph_marked_stale:
+      message += " Graph marked as stale - rebuild recommended."
+    elif not cascade:
+      message += " DuckDB will automatically exclude it from queries."
+
     return DeleteFileResponse(
       status="deleted",
       file_id=file_id,
       file_name=file_name,
-      message="File deleted successfully. DuckDB will automatically exclude it from queries.",
+      message=message,
+      cascade_deleted=cascade,
+      tables_affected=tables_affected if cascade else None,
+      graph_marked_stale=graph_marked_stale,
     )
 
   except HTTPException:
@@ -695,7 +758,7 @@ async def delete_file(
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/tables/files/{file_id}",
+      endpoint="/v1/graphs/{graph_id}/files/{file_id}",
       method="DELETE",
       event_type="delete_file_failed",
       event_data={
@@ -711,7 +774,7 @@ async def delete_file(
     api_logger.error(
       "File deletion failed",
       extra={
-        "component": "tables_api",
+        "component": "files_api",
         "action": "delete_file_failed",
         "user_id": str(current_user.id),
         "graph_id": graph_id,

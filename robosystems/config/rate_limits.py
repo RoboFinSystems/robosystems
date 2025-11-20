@@ -320,14 +320,21 @@ class RateLimitConfig:
       # path_parts: ['graphs', '{graph_id}', 'endpoint_type', ...]
       endpoint_type = path_parts[2] if len(path_parts) >= 3 else None
 
-      # Table operations (DuckDB staging tables) - check first for specificity
+      # Files operations (first-class resources or nested under tables)
+      if endpoint_type == "files" or "/files" in path:
+        if method in ["POST", "PUT"]:
+          return EndpointCategory.TABLE_UPLOAD
+        elif method in ["DELETE", "PATCH"]:
+          return EndpointCategory.TABLE_MANAGEMENT
+        else:
+          return EndpointCategory.GRAPH_READ  # File listing/info
+
+      # Table operations (DuckDB staging tables)
       if endpoint_type == "tables" or "/tables/" in path:
         if "query" in path:
           return EndpointCategory.TABLE_QUERY
         elif "ingest" in path:
           return EndpointCategory.GRAPH_IMPORT  # Table ingestion is bulk import
-        elif "/files" in path and method in ["POST", "PUT"]:
-          return EndpointCategory.TABLE_UPLOAD
         elif method in ["POST", "PUT", "DELETE", "PATCH"]:
           return EndpointCategory.TABLE_MANAGEMENT
         else:

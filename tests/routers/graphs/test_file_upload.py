@@ -2,7 +2,7 @@ import pytest
 from tests.conftest import VALID_TEST_GRAPH_ID
 from unittest.mock import Mock, AsyncMock, patch
 
-from robosystems.routers.graphs.tables.upload import get_upload_url
+from robosystems.routers.graphs.files.upload import create_file_upload
 from robosystems.models.api.graphs.tables import FileUploadRequest
 
 
@@ -13,7 +13,9 @@ class TestUploadRouterAutoTableCreation:
     graph_id = VALID_TEST_GRAPH_ID
     table_name = "Company"
     file_request = FileUploadRequest(
-      file_name="companies.parquet", content_type="application/x-parquet"
+      file_name="companies.parquet",
+      content_type="application/x-parquet",
+      table_name=table_name,
     )
 
     mock_user = Mock()
@@ -25,7 +27,7 @@ class TestUploadRouterAutoTableCreation:
     mock_created_table.table_name = "Company"
 
     with patch(
-      "robosystems.routers.graphs.tables.upload.get_universal_repository",
+      "robosystems.routers.graphs.files.upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -52,9 +54,8 @@ class TestUploadRouterAutoTableCreation:
               mock_file.id = "file_123"
               mock_file_create.return_value = mock_file
 
-              await get_upload_url(
+              await create_file_upload(
                 graph_id=graph_id,
-                table_name=table_name,
                 request=file_request,
                 current_user=mock_user,
                 _rate_limit=None,
@@ -72,7 +73,9 @@ class TestUploadRouterAutoTableCreation:
     graph_id = VALID_TEST_GRAPH_ID
     table_name = "PERSON_WORKS_FOR_COMPANY"
     file_request = FileUploadRequest(
-      file_name="relationships.parquet", content_type="application/x-parquet"
+      file_name="relationships.parquet",
+      content_type="application/x-parquet",
+      table_name=table_name,
     )
 
     mock_user = Mock()
@@ -83,7 +86,7 @@ class TestUploadRouterAutoTableCreation:
     mock_created_table.id = "table_456"
 
     with patch(
-      "robosystems.routers.graphs.tables.upload.get_universal_repository",
+      "robosystems.routers.graphs.files.upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -110,9 +113,8 @@ class TestUploadRouterAutoTableCreation:
               mock_file.id = "file_456"
               mock_file_create.return_value = mock_file
 
-              await get_upload_url(
+              await create_file_upload(
                 graph_id=graph_id,
-                table_name=table_name,
                 request=file_request,
                 current_user=mock_user,
                 _rate_limit=None,
@@ -130,7 +132,9 @@ class TestUploadRouterAutoTableCreation:
     graph_id = VALID_TEST_GRAPH_ID
     table_name = "Person"
     file_request = FileUploadRequest(
-      file_name="people.parquet", content_type="application/x-parquet"
+      file_name="people.parquet",
+      content_type="application/x-parquet",
+      table_name=table_name,
     )
 
     mock_user = Mock()
@@ -141,7 +145,7 @@ class TestUploadRouterAutoTableCreation:
     existing_table.id = "existing_table_123"
 
     with patch(
-      "robosystems.routers.graphs.tables.upload.get_universal_repository",
+      "robosystems.routers.graphs.files.upload.get_universal_repository",
       new_callable=AsyncMock,
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
@@ -167,9 +171,8 @@ class TestUploadRouterAutoTableCreation:
               mock_file.id = "file_789"
               mock_file_create.return_value = mock_file
 
-              await get_upload_url(
+              await create_file_upload(
                 graph_id=graph_id,
-                table_name=table_name,
                 request=file_request,
                 current_user=mock_user,
                 _rate_limit=None,

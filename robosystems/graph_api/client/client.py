@@ -1113,6 +1113,7 @@ class GraphClient(BaseGraphClient):
     graph_id: str,
     table_name: str,
     s3_pattern: str | List[str],
+    file_id_map: Dict[str, str] | None = None,
   ) -> Dict[str, Any]:
     """
     Create a DuckDB staging table (external view over S3).
@@ -1121,18 +1122,23 @@ class GraphClient(BaseGraphClient):
         graph_id: Graph database identifier
         table_name: Name for the table
         s3_pattern: S3 glob pattern (string) or list of S3 file paths
+        file_id_map: Optional map of s3_key -> file_id for provenance tracking
 
     Returns:
         Table creation response with status and metadata
     """
+    json_data = {
+      "graph_id": graph_id,
+      "table_name": table_name,
+      "s3_pattern": s3_pattern,
+    }
+    if file_id_map is not None:
+      json_data["file_id_map"] = file_id_map
+
     response = await self._request(
       "POST",
       f"/databases/{graph_id}/tables",
-      json_data={
-        "graph_id": graph_id,
-        "table_name": table_name,
-        "s3_pattern": s3_pattern,
-      },
+      json_data=json_data,
     )
     return response.json()
 
@@ -1190,29 +1196,56 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
+  async def delete_file_data(
+    self, graph_id: str, table_name: str, file_id: str
+  ) -> Dict[str, Any]:
+    """
+    Delete rows from a DuckDB table by file_id.
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Table name to delete from
+        file_id: File ID to delete rows for
+
+    Returns:
+        Deletion response with rows_deleted count
+    """
+    response = await self._request(
+      "DELETE", f"/databases/{graph_id}/tables/{table_name}/files/{file_id}"
+    )
+    return response.json()
+
   async def ingest_table_to_graph(
     self,
     graph_id: str,
     table_name: str,
     ignore_errors: bool = True,
+    file_ids: list[str] | None = None,
   ) -> Dict[str, Any]:
     """
-    Ingest a DuckDB staging table into the Kuzu graph.
+    Ingest a DuckDB staging table into the graph database.
+
+    Supports both selective ingestion (filtering by file_ids) and full
+    materialization (copying entire table).
 
     Args:
         graph_id: Graph database identifier
         table_name: Table name to ingest
         ignore_errors: Continue on row errors
+        file_ids: Optional list of file IDs to ingest. If None, ingests all rows (full materialization).
 
     Returns:
         Ingestion response with rows ingested and timing
     """
+    json_data: dict[str, Any] = {"ignore_errors": ignore_errors}
+
+    if file_ids is not None:
+      json_data["file_ids"] = file_ids
+
     response = await self._request(
       "POST",
       f"/databases/{graph_id}/tables/{table_name}/ingest",
-      json_data={
-        "ignore_errors": ignore_errors,
-      },
+      json_data=json_data,
     )
     return response.json()
 

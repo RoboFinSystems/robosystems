@@ -68,3 +68,25 @@ async def delete_table(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail=f"Failed to delete table: {str(e)}",
     )
+
+
+@router.delete("/{table_name}/files/{file_id}")
+async def delete_file_data(
+  graph_id: str = Path(..., description="Graph database identifier"),
+  table_name: str = Path(..., description="Table name"),
+  file_id: str = Path(..., description="File ID to delete rows for"),
+) -> dict:
+  logger.info(
+    f"Deleting file data for file_id={file_id} from table {table_name} in graph {graph_id}"
+  )
+
+  try:
+    return table_manager.delete_file_data(graph_id, table_name, file_id)
+  except Exception as e:
+    logger.error(
+      f"Failed to delete file data for file_id={file_id} from table {table_name}: {e}"
+    )
+    raise HTTPException(
+      status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+      detail=f"Failed to delete file data: {str(e)}",
+    )

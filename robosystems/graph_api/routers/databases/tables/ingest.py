@@ -13,6 +13,10 @@ class TableIngestRequest(BaseModel):
   ignore_errors: bool = Field(
     default=True, description="Continue ingestion on row errors"
   )
+  file_ids: list[str] | None = Field(
+    default=None,
+    description="Optional list of file IDs to ingest. If None, ingests all files (full materialization).",
+  )
 
   class Config:
     extra = "forbid"
@@ -93,12 +97,34 @@ async def ingest_table_to_graph(
 
       # Both node and relationship tables use the same COPY syntax when columns match
       # For relationships, Kuzu automatically maps 'src' and 'dst' columns to relationship endpoints
-      if request.ignore_errors:
-        copy_query = f"COPY {table_name} FROM duck.{table_name} (ignore_errors=true)"
-      else:
-        copy_query = f"COPY {table_name} FROM duck.{table_name}"
 
-      logger.info(f"Executing copy from DuckDB to Kuzu: {table_name}")
+      # Selective ingestion: filter by file_ids if provided (incremental updates)
+      # Full materialization: copy all rows if file_ids is None
+      if request.file_ids:
+        # Selective: only ingest specific file_ids
+        file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
+        subquery = (
+          f"SELECT * EXCLUDE (file_id) FROM duck.{table_name} "
+          f"WHERE file_id IN ({file_ids_str})"
+        )
+
+        if request.ignore_errors:
+          copy_query = f"COPY {table_name} FROM ({subquery}) (ignore_errors=true)"
+        else:
+          copy_query = f"COPY {table_name} FROM ({subquery})"
+
+        logger.info(
+          f"Executing selective copy from DuckDB to graph: {table_name} "
+          f"({len(request.file_ids)} file(s))"
+        )
+      else:
+        # Full materialization: copy entire table
+        if request.ignore_errors:
+          copy_query = f"COPY {table_name} FROM duck.{table_name} (ignore_errors=true)"
+        else:
+          copy_query = f"COPY {table_name} FROM duck.{table_name}"
+
+        logger.info(f"Executing full copy from DuckDB to graph: {table_name}")
       result = conn.execute(copy_query)
 
       rows_ingested = 0

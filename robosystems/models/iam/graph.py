@@ -46,6 +46,7 @@ class Graph(Model):
     Index("idx_graphs_is_subgraph", "is_subgraph"),
     Index("idx_graphs_is_repository", "is_repository"),
     Index("idx_graphs_repository_type", "repository_type"),
+    Index("idx_graphs_stale", "graph_stale"),
     CheckConstraint(
       "graph_type IN ('generic', 'entity', 'repository')", name="check_graph_type"
     ),
@@ -142,6 +143,15 @@ class Graph(Model):
     onupdate=lambda: datetime.now(timezone.utc),
     nullable=False,
   )
+
+  # v2 Incremental Ingestion: Staleness tracking for graph database
+  graph_stale = Column(
+    Boolean, default=False, nullable=False
+  )  # True if DuckDB has changes not yet in graph database
+  graph_stale_reason = Column(
+    String, nullable=True
+  )  # Reason for staleness (e.g., "file_deleted", "file_added")
+  graph_stale_at = Column(DateTime, nullable=True)  # When graph became stale
 
   # Additional metadata that might be useful
   graph_metadata = Column(JSONB, nullable=True)  # Flexible field for future use
@@ -539,3 +549,38 @@ class Graph(Model):
 
     time_since_sync = datetime.now(timezone.utc) - last_sync
     return time_since_sync > sync_interval
+
+  def mark_stale(self, session: Session, reason: str) -> None:
+    """Mark the graph as stale due to DuckDB changes not yet in graph database.
+
+    Args:
+      session: Database session for committing changes
+      reason: Reason for staleness (e.g., "file_deleted", "file_added")
+    """
+    self.graph_stale = True
+    self.graph_stale_reason = reason
+    self.graph_stale_at = datetime.now(timezone.utc)
+    session.commit()
+
+  def mark_fresh(self, session: Session) -> None:
+    """Mark the graph as fresh after sync with DuckDB.
+
+    Also records the materialization timestamp in graph_metadata.
+
+    Args:
+      session: Database session for committing changes
+    """
+    self.graph_stale = False
+    self.graph_stale_reason = None
+    self.graph_stale_at = None
+
+    metadata = {**self.graph_metadata} if self.graph_metadata else {}
+    metadata["last_materialized_at"] = datetime.now(timezone.utc).isoformat()
+
+    if "materialization_count" in metadata:
+      metadata["materialization_count"] += 1
+    else:
+      metadata["materialization_count"] = 1
+
+    self.graph_metadata = metadata
+    session.commit()

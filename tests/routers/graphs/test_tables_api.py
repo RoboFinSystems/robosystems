@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from robosystems.routers.graphs.tables import main as tables_main
-from robosystems.routers.graphs.tables import upload as tables_upload
+from robosystems.routers.graphs.files import upload as files_upload
 from robosystems.models.api.graphs.tables import FileUploadRequest
 
 
@@ -99,13 +99,13 @@ async def test_get_upload_url_rejects_extension(monkeypatch):
     return SimpleNamespace()
 
   monkeypatch.setattr(
-    tables_upload,
+    files_upload,
     "get_universal_repository",
     fake_repo,
   )
 
   monkeypatch.setattr(
-    tables_upload.GraphTable,
+    files_upload.GraphTable,
     "get_by_name",
     classmethod(
       lambda cls, graph_id, table_name, session: SimpleNamespace(id="table-1")
@@ -115,12 +115,12 @@ async def test_get_upload_url_rejects_extension(monkeypatch):
   request = FileUploadRequest(
     file_name="data.csv",
     content_type="application/x-parquet",
+    table_name="Entity",
   )
 
   with pytest.raises(Exception) as exc:
-    await tables_upload.get_upload_url(
+    await files_upload.create_file_upload(
       graph_id="graph-123",
-      table_name="Entity",
       request=request,
       current_user=SimpleNamespace(id="user-1"),
       _rate_limit=None,
@@ -136,20 +136,20 @@ async def test_get_upload_url_success(monkeypatch):
     return SimpleNamespace()
 
   monkeypatch.setattr(
-    tables_upload,
+    files_upload,
     "get_universal_repository",
     fake_repo,
   )
 
   table_record = SimpleNamespace(id="table-1")
   monkeypatch.setattr(
-    tables_upload.GraphTable,
+    files_upload.GraphTable,
     "get_by_name",
     classmethod(lambda cls, graph_id, table_name, session: table_record),
   )
 
   monkeypatch.setattr(
-    tables_upload.GraphFile,
+    files_upload.GraphFile,
     "create",
     classmethod(lambda cls, **kwargs: SimpleNamespace(id="file-123")),
   )
@@ -160,8 +160,8 @@ async def test_get_upload_url_success(monkeypatch):
         generate_presigned_url=lambda *args, **kwargs: "https://upload.test"
       )
 
-  monkeypatch.setattr(tables_upload, "S3Client", FakeS3Client)
-  monkeypatch.setattr(tables_upload.env, "AWS_S3_BUCKET", "bucket")
+  monkeypatch.setattr(files_upload, "S3Client", FakeS3Client)
+  monkeypatch.setattr(files_upload.env, "AWS_S3_BUCKET", "bucket")
 
   class _StubUUID:
     def __str__(self):
@@ -172,11 +172,11 @@ async def test_get_upload_url_success(monkeypatch):
   request = FileUploadRequest(
     file_name="data.parquet",
     content_type="application/x-parquet",
+    table_name="Entity",
   )
 
-  result = await tables_upload.get_upload_url(
+  result = await files_upload.create_file_upload(
     graph_id="graph-123",
-    table_name="Entity",
     request=request,
     current_user=SimpleNamespace(id="user-1"),
     _rate_limit=None,

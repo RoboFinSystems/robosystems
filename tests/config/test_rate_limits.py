@@ -62,8 +62,18 @@ def test_multiplier_can_be_skipped(monkeypatch):
   [
     ("/v1/graphs/abc/tables/query", "POST", EndpointCategory.TABLE_QUERY),
     ("/v1/graphs/abc/tables/ingest", "POST", EndpointCategory.GRAPH_IMPORT),
-    ("/v1/graphs/abc/tables/files", "POST", EndpointCategory.TABLE_UPLOAD),
-    ("/v1/graphs/abc/tables/files", "GET", EndpointCategory.GRAPH_READ),
+    # New first-class files endpoints
+    ("/v1/graphs/abc/files", "POST", EndpointCategory.TABLE_UPLOAD),
+    ("/v1/graphs/abc/files", "GET", EndpointCategory.GRAPH_READ),
+    ("/v1/graphs/abc/files/f123", "DELETE", EndpointCategory.TABLE_MANAGEMENT),
+    ("/v1/graphs/abc/files/f123", "PATCH", EndpointCategory.TABLE_MANAGEMENT),
+    ("/v1/graphs/abc/files/f123", "GET", EndpointCategory.GRAPH_READ),
+    # Legacy table-nested files endpoints
+    ("/v1/graphs/abc/tables/Entity/files", "POST", EndpointCategory.TABLE_UPLOAD),
+    ("/v1/graphs/abc/tables/Entity/files", "GET", EndpointCategory.GRAPH_READ),
+    ("/v1/graphs/abc/tables/files/f123", "DELETE", EndpointCategory.TABLE_MANAGEMENT),
+    ("/v1/graphs/abc/tables/files/f123", "PATCH", EndpointCategory.TABLE_MANAGEMENT),
+    # Other graph endpoints
     ("/v1/graphs/abc/mcp/execute", "POST", EndpointCategory.GRAPH_MCP),
     ("/v1/graphs/abc/agent/run", "POST", EndpointCategory.GRAPH_AGENT),
     ("/v1/graphs/abc/graph/backup", "POST", EndpointCategory.GRAPH_BACKUP),
@@ -73,6 +83,7 @@ def test_multiplier_can_be_skipped(monkeypatch):
     ("/v1/graphs/abc/import", "POST", EndpointCategory.GRAPH_IMPORT),
     ("/v1/graphs/abc/custom", "POST", EndpointCategory.GRAPH_WRITE),
     ("/v1/graphs/abc/custom", "GET", EndpointCategory.GRAPH_READ),
+    # Non-graph endpoints
     ("/v1/auth/login", "POST", EndpointCategory.AUTH),
     ("/v1/tasks/run", "POST", EndpointCategory.TASKS),
   ],

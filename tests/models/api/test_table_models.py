@@ -36,7 +36,7 @@ class TestFileStatusUpdate:
     model = FileStatusUpdate(status="uploaded")
     dumped = model.model_dump()
 
-    assert dumped == {"status": "uploaded"}
+    assert dumped == {"status": "uploaded", "ingest_to_graph": False}
 
   def test_model_json_schema(self):
     schema = FileStatusUpdate.model_json_schema()
@@ -60,3 +60,4 @@ class TestFileStatusUpdate:
     json_str = model.model_dump_json()
 
     assert '"status":"archived"' in json_str
+    assert '"ingest_to_graph":false' in json_str
