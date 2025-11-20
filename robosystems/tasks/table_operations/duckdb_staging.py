@@ -23,6 +23,7 @@ from robosystems.logger import logger
 from robosystems.database import session
 from robosystems.models.iam import GraphFile, GraphTable
 from robosystems.graph_api.client.factory import GraphClientFactory
+from robosystems.config import env
 
 
 @celery_app.task(
@@ -117,9 +118,10 @@ def stage_file_in_duckdb(
         },
       )
 
-    # Build file list and file_id map
-    s3_files = [f.s3_key for f in uploaded_files]
-    file_id_map = {f.s3_key: f.id for f in uploaded_files}
+    # Build file list and file_id map (convert s3_key to full S3 URIs)
+    bucket = env.AWS_S3_BUCKET
+    s3_files = [f"s3://{bucket}/{f.s3_key}" for f in uploaded_files]
+    file_id_map = {f"s3://{bucket}/{f.s3_key}": f.id for f in uploaded_files}
 
     logger.info(
       f"Staging {len(s3_files)} files in DuckDB table {table.table_name} with file_id tracking"

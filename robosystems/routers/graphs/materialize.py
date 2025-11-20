@@ -476,6 +476,16 @@ async def materialize_graph(
     stale_reason = graph.graph_stale_reason
 
     if not was_stale and not request.force and not request.rebuild:
+      tables_with_data = GraphTable.get_all_for_graph(graph_id, db)
+      tables_with_rows = [t for t in tables_with_data if (t.row_count or 0) > 0]
+      if tables_with_rows:
+        was_stale = True
+        stale_reason = "new_data_uploaded"
+        logger.info(
+          f"Graph {graph_id} has {len(tables_with_rows)} tables with data that may not be materialized yet"
+        )
+
+    if not was_stale and not request.force and not request.rebuild:
       logger.info(
         f"Graph {graph_id} is not stale and force=false, rebuild=false - skipping materialization"
       )

@@ -18,8 +18,8 @@ from pathlib import Path
 from robosystems_client.extensions import (
   RoboSystemsExtensions,
   RoboSystemsExtensionConfig,
-  UploadOptions,
-  IngestOptions,
+  FileUploadOptions,
+  MaterializationOptions,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -82,14 +82,17 @@ def upload_directory(
     print(f"   Size: {file_size:,} bytes")
 
     try:
-      result = extensions.tables.upload_parquet_file(
-        graph_id, table_name, str(file_path), UploadOptions(fix_localstack_url=True)
+      result = extensions.files.upload(
+        graph_id, table_name, str(file_path), FileUploadOptions(fix_localstack_url=True)
       )
 
-      print(
-        f"   ✅ Uploaded {file_path.name} ({result.file_size:,} bytes, {result.row_count} rows)"
-      )
-      success_count += 1
+      if result.success:
+        print(
+          f"   ✅ Uploaded {file_path.name} ({result.file_size:,} bytes, {result.row_count} rows)"
+        )
+        success_count += 1
+      else:
+        print(f"   ❌ Upload failed: {result.error}")
 
     except Exception as e:
       print(f"   ❌ Upload failed: {e}")
@@ -97,24 +100,30 @@ def upload_directory(
   return success_count
 
 
-def ingest_data(extensions, graph_id):
-  """Ingest uploaded data into graph."""
+def materialize_graph(extensions, graph_id):
+  """Materialize uploaded data into graph."""
   print(f"\n{'=' * 70}")
-  print("🔄 Ingesting Data into Graph")
+  print("🔄 Materializing Graph from DuckDB")
   print("=" * 70)
   print("\n⚠️  This may take a few moments...")
 
   try:
-    result = extensions.tables.ingest_all_tables(
-      graph_id, IngestOptions(ignore_errors=True, rebuild=False)
+    result = extensions.materialization.materialize(
+      graph_id, MaterializationOptions(ignore_errors=True, rebuild=False)
     )
 
-    print("\n✅ Ingestion Complete!")
-    if hasattr(result, "message"):
+    if result.success:
+      print("\n✅ Materialization Complete!")
       print(f"   {result.message}")
+      print(f"   Tables: {len(result.tables_materialized)}")
+      print(f"   Total rows: {result.total_rows:,}")
+      print(f"   Execution time: {result.execution_time_ms:.2f}ms")
+    else:
+      print(f"\n❌ Materialization failed: {result.error}")
+      sys.exit(1)
 
   except Exception as e:
-    print(f"\n❌ Ingestion failed: {e}")
+    print(f"\n❌ Materialization failed: {e}")
     sys.exit(1)
 
 
@@ -202,7 +211,7 @@ def main():
       )
       print("=" * 70)
 
-      ingest_data(extensions, graph_id)
+      materialize_graph(extensions, graph_id)
       run_verification_queries(extensions, graph_id)
 
     print("\n" + "=" * 70)

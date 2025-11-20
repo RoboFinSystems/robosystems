@@ -255,10 +255,17 @@ class KuzuDatabaseManager:
         f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
       )
 
-      # Apply schema based on type
-      schema_applied = self._apply_schema(
-        conn, request.schema_type, request.repository_name, request.custom_schema_ddl
-      )
+      # Apply schema based on type (subgraphs inherit schema from parent via fork operation)
+      if request.is_subgraph:
+        logger.info(
+          f"Skipping schema application for subgraph {request.graph_id} "
+          "(schema will be inherited from parent via fork operation)"
+        )
+        schema_applied = True
+      else:
+        schema_applied = self._apply_schema(
+          conn, request.schema_type, request.repository_name, request.custom_schema_ddl
+        )
 
       # Close temporary connections (pool will manage connections going forward)
       conn.close()

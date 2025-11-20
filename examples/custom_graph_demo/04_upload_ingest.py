@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Custom Graph Demo - Upload & Ingest
+Custom Graph Demo - Upload & Materialize
 
 Uploads the generated parquet files for the generic custom graph demo and
-ingests them into the selected graph.
+materializes them into the selected graph.
 
 Workflow:
   1. Upload node tables (Company, Project, Person)
   2. Upload relationship tables (PERSON_WORKS_FOR_COMPANY, PERSON_WORKS_ON_PROJECT, COMPANY_SPONSORS_PROJECT)
-  3. Trigger ingestion
+  3. Trigger materialization
   4. Run quick verification queries
 """
 
@@ -23,8 +23,8 @@ from typing import Iterable
 from robosystems_client.extensions import (
   RoboSystemsExtensions,
   RoboSystemsExtensionConfig,
-  UploadOptions,
-  IngestOptions,
+  FileUploadOptions,
+  MaterializationOptions,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -92,43 +92,51 @@ def upload_tables(
     print(f"   Size: {file_size:,} bytes")
 
     try:
-      result = extensions.tables.upload_parquet_file(
+      result = extensions.files.upload(
         graph_id,
         table_name,
         str(file_path),
-        UploadOptions(fix_localstack_url=True),
+        FileUploadOptions(fix_localstack_url=True),
       )
-      print(
-        f"   ✅ Uploaded {file_path.name} "
-        f"({result.file_size:,} bytes, {result.row_count} rows)"
-      )
+      if result.success:
+        print(
+          f"   ✅ Uploaded {file_path.name} "
+          f"({result.file_size:,} bytes, {result.row_count} rows)"
+        )
+      else:
+        print(f"   ❌ Upload failed: {result.error}")
+        raise RuntimeError(f"Upload failed: {result.error}")
     except Exception as exc:  # noqa: BLE001
       print(f"   ❌ Upload failed: {exc}")
       raise
 
 
-def ingest_graph_data(extensions: RoboSystemsExtensions, graph_id: str) -> None:
-  """Ingest all uploaded tables for the graph."""
+def materialize_graph_data(extensions: RoboSystemsExtensions, graph_id: str) -> None:
+  """Materialize all uploaded tables into the graph."""
   print(f"\n{'=' * 70}")
-  print("🔄 Ingesting data into graph")
+  print("🔄 Materializing graph from DuckDB")
   print("=" * 70)
 
   try:
-    result = extensions.tables.ingest_all_tables(
+    result = extensions.materialization.materialize(
       graph_id,
-      IngestOptions(ignore_errors=True, rebuild=False),
+      MaterializationOptions(ignore_errors=True, rebuild=False),
     )
-    if hasattr(result, "message") and result.message:
-      print(f"\n✅ Ingestion complete: {result.message}")
+    if result.success:
+      print(f"\n✅ Materialization complete: {result.message}")
+      print(f"   Tables: {len(result.tables_materialized)}")
+      print(f"   Total rows: {result.total_rows:,}")
+      print(f"   Execution time: {result.execution_time_ms:.2f}ms")
     else:
-      print("\n✅ Ingestion complete!")
+      print(f"\n❌ Materialization failed: {result.error}")
+      raise RuntimeError(f"Materialization failed: {result.error}")
   except Exception as exc:  # noqa: BLE001
-    print(f"\n❌ Ingestion failed: {exc}")
+    print(f"\n❌ Materialization failed: {exc}")
     raise
 
 
 def run_post_ingest_checks(extensions: RoboSystemsExtensions, graph_id: str) -> None:
-  """Run a small set of sanity-check queries after ingestion."""
+  """Run a small set of sanity-check queries after materialization."""
   print(f"\n{'=' * 70}")
   print("🔍 Verification queries")
   print("=" * 70)
@@ -217,7 +225,7 @@ def main() -> None:
     upload_tables(
       extensions, graph_id, relationship_files, "Phase 2 - Relationship Tables"
     )
-    ingest_graph_data(extensions, graph_id)
+    materialize_graph_data(extensions, graph_id)
     run_post_ingest_checks(extensions, graph_id)
   except Exception:
     print("\n❌ Upload & ingest process failed.")

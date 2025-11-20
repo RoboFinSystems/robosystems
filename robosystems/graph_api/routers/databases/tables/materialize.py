@@ -66,72 +66,103 @@ async def materialize_table(
     from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
+    temp_table_name = f"{table_name}_temp_materialization"
+
+    # Check if table exists, create temp copy without file_id
     try:
       with duckdb_pool.get_connection(graph_id) as duck_conn:
         duck_conn.execute("CHECKPOINT")
         logger.info(f"✅ DuckDB checkpointed successfully for {graph_id}")
-    except Exception as cp_err:
-      logger.warning(f"Could not checkpoint DuckDB before materialization: {cp_err}")
 
-    with cluster_service.db_manager.connection_pool.get_connection(graph_id) as conn:
-      try:
-        conn.execute(f"LOAD EXTENSION '{duckdb_extension_path}'")
-        logger.info(f"Loaded DuckDB extension from {duckdb_extension_path}")
-      except Exception as e:
-        if "already loaded" not in str(e).lower():
-          logger.warning(f"Failed to load DuckDB extension: {e}")
-          raise
+        # Check if table exists
+        result = duck_conn.execute(
+          f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_name}'"
+        ).fetchone()
 
-      # Detach first if already attached (prevents duplicate attachment errors)
-      try:
-        conn.execute("DETACH duck")
-      except Exception:
-        pass
+        if not result or result[0] == 0:
+          logger.info(
+            f"Table {table_name} does not exist in DuckDB - skipping materialization (no data uploaded yet)"
+          )
+          return TableMaterializationResponse(
+            status="skipped",
+            graph_id=graph_id,
+            table_name=table_name,
+            rows_ingested=0,
+            execution_time_ms=0.0,
+          )
 
-      # Attach DuckDB database (Kuzu syntax: ATTACH 'path' AS alias (DBTYPE duckdb))
-      # Data is already materialized in DuckDB tables (not views), so no S3 access needed
-      conn.execute(f"ATTACH '{duck_path}' AS duck (DBTYPE duckdb)")
+        # Drop temp table if it exists from previous failed run
+        try:
+          duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
+        except Exception:
+          pass
 
-      # IMPORTANT: Kuzu COPY command does NOT accept quoted table names anywhere
-      # Both the target table and source reference must be unquoted
-      # ignore_errors syntax: (ignore_errors=true) with parentheses, lowercase
+        # Create physical copy of table without file_id column
+        if request.file_ids:
+          file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
+          duck_conn.execute(
+            f"CREATE TABLE {temp_table_name} AS "
+            f"SELECT * EXCLUDE (file_id) FROM {table_name} "
+            f"WHERE file_id IN ({file_ids_str})"
+          )
+          logger.info(
+            f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
+          )
+        else:
+          duck_conn.execute(
+            f"CREATE TABLE {temp_table_name} AS "
+            f"SELECT * EXCLUDE (file_id) FROM {table_name}"
+          )
+          logger.info(
+            f"Created temp DuckDB table {temp_table_name} for full materialization"
+          )
 
-      # NOTE: Partition columns (like 'year') are excluded when creating DuckDB tables
-      # in duckdb_manager.py, so the schemas should match exactly now
+    except Exception as err:
+      logger.error(f"Could not prepare DuckDB table for materialization: {err}")
+      raise
 
-      # Both node and relationship tables use the same COPY syntax when columns match
-      # For relationships, Kuzu automatically maps 'src' and 'dst' columns to relationship endpoints
+    temp_table_created = True
 
-      # Selective materialization: filter by file_ids if provided (incremental updates)
-      # Full materialization: copy all rows if file_ids is None
-      if request.file_ids:
-        # Selective: only materialize specific file_ids
-        file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
-        subquery = (
-          f"SELECT * EXCLUDE (file_id) FROM duck.{table_name} "
-          f"WHERE file_id IN ({file_ids_str})"
-        )
+    try:
+      with cluster_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+        try:
+          conn.execute(f"LOAD EXTENSION '{duckdb_extension_path}'")
+          logger.info(f"Loaded DuckDB extension from {duckdb_extension_path}")
+        except Exception as e:
+          if "already loaded" not in str(e).lower():
+            logger.warning(f"Failed to load DuckDB extension: {e}")
+            raise
+
+        # Detach first if already attached
+        try:
+          conn.execute("DETACH duck")
+        except Exception:
+          pass
+
+        # Attach DuckDB database
+        conn.execute(f"ATTACH '{duck_path}' AS duck (DBTYPE duckdb)")
+        logger.info(f"Attached DuckDB database: {duck_path}")
+
+        # Copy from the temp table (which already has file_id excluded)
+        if request.file_ids:
+          logger.info(
+            f"Executing selective materialization from DuckDB to graph: {table_name} "
+            f"({len(request.file_ids)} file(s))"
+          )
+        else:
+          logger.info(
+            f"Executing full materialization from DuckDB to graph: {table_name}"
+          )
 
         if request.ignore_errors:
-          copy_query = f"COPY {table_name} FROM ({subquery}) (ignore_errors=true)"
+          copy_query = (
+            f"COPY {table_name} FROM duck.{temp_table_name} (ignore_errors=true)"
+          )
         else:
-          copy_query = f"COPY {table_name} FROM ({subquery})"
+          copy_query = f"COPY {table_name} FROM duck.{temp_table_name}"
 
-        logger.info(
-          f"Executing selective materialization from DuckDB to graph: {table_name} "
-          f"({len(request.file_ids)} file(s))"
-        )
-      else:
-        # Full materialization: copy entire table
-        if request.ignore_errors:
-          copy_query = f"COPY {table_name} FROM duck.{table_name} (ignore_errors=true)"
-        else:
-          copy_query = f"COPY {table_name} FROM duck.{table_name}"
-
-        logger.info(
-          f"Executing full materialization from DuckDB to graph: {table_name}"
-        )
-      result = conn.execute(copy_query)
+        logger.info(f"Executing: {copy_query}")
+        result = conn.execute(copy_query)
 
       rows_ingested = 0
       if result and hasattr(result, "get_as_arrow"):
@@ -144,26 +175,44 @@ async def materialize_table(
           if match:
             rows_ingested = int(match.group(1))
 
-    execution_time_ms = (time.time() - start_time) * 1000
+      execution_time_ms = (time.time() - start_time) * 1000
 
-    logger.info(
-      f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms:.2f}ms"
-    )
+      logger.info(
+        f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms:.2f}ms"
+      )
 
-    return TableMaterializationResponse(
-      status="success",
-      graph_id=graph_id,
-      table_name=table_name,
-      rows_ingested=rows_ingested,
-      execution_time_ms=execution_time_ms,
-    )
+      return TableMaterializationResponse(
+        status="success",
+        graph_id=graph_id,
+        table_name=table_name,
+        rows_ingested=rows_ingested,
+        execution_time_ms=execution_time_ms,
+      )
 
-  except Exception as e:
-    logger.error(f"Failed to materialize table {table_name}: {e}")
+    except Exception as e:
+      logger.error(f"Failed to materialize table {table_name}: {e}")
+      raise HTTPException(
+        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to materialize table: {str(e)}",
+      )
 
+    finally:
+      # Clean up temp table
+      if temp_table_created:
+        try:
+          with duckdb_pool.get_connection(graph_id) as duck_conn:
+            duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table_name}")
+            logger.info(f"Cleaned up temp DuckDB table: {temp_table_name}")
+        except Exception as cleanup_err:
+          logger.warning(
+            f"Failed to clean up temp table {temp_table_name}: {cleanup_err}"
+          )
+
+  except Exception as outer_err:
+    logger.error(f"Failed during table preparation or materialization: {outer_err}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to materialize table: {str(e)}",
+      detail=f"Failed to materialize table: {str(outer_err)}",
     )
 
 
@@ -233,20 +282,17 @@ async def fork_from_parent_duckdb(
       PathLib.home() / ".kuzu" / "extension" / "duckdb" / "libduckdb.kuzu_extension"
     )
 
-    # Checkpoint parent DuckDB to flush WAL
+    # Checkpoint parent DuckDB to flush WAL and create views
     logger.info(f"Checkpointing parent DuckDB before fork: {parent_duck_path}")
     from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
-    try:
-      with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
-        duck_conn.execute("CHECKPOINT")
-        logger.info(f"✅ Parent DuckDB checkpointed for {parent_graph_id}")
-    except Exception as cp_err:
-      logger.warning(f"Could not checkpoint parent DuckDB: {cp_err}")
 
-    # Get list of tables from parent DuckDB
+    # Get list of tables and create views (excluding file_id column)
     with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
+      duck_conn.execute("CHECKPOINT")
+      logger.info(f"✅ Parent DuckDB checkpointed for {parent_graph_id}")
+
       result = duck_conn.execute("SHOW TABLES").fetchall()
       available_tables = [row[0] for row in result]
 
@@ -273,61 +319,82 @@ async def fork_from_parent_duckdb(
         detail="No tables to copy",
       )
 
-    # Connect to subgraph Kuzu and attach parent DuckDB
-    total_rows = 0
-    tables_copied = []
+    # Create temp physical tables in parent DuckDB for each table (excluding file_id)
+    temp_tables = []
+    try:
+      with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
+        for table_name in tables_to_copy:
+          temp_table = f"{table_name}_temp_fork"
+          temp_tables.append(temp_table)
 
-    with cluster_service.db_manager.connection_pool.get_connection(subgraph_id) as conn:
-      try:
-        conn.execute(f"LOAD EXTENSION '{duckdb_extension_path}'")
-        logger.info(f"Loaded DuckDB extension from {duckdb_extension_path}")
-      except Exception as e:
-        if "already loaded" not in str(e).lower():
-          logger.warning(f"Failed to load DuckDB extension: {e}")
-          raise
+          # Drop if exists from previous failed run
+          duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
 
-      # Detach first if already attached
-      try:
-        conn.execute("DETACH parent_duck")
-      except Exception:
-        pass
+          # Create physical temp table without file_id
+          duck_conn.execute(
+            f"CREATE TABLE {temp_table} AS SELECT * EXCLUDE (file_id) FROM {table_name}"
+          )
+        logger.info(f"Created {len(temp_tables)} temp tables in parent DuckDB for fork")
 
-      # Attach parent DuckDB as 'parent_duck'
-      conn.execute(f"ATTACH '{parent_duck_path}' AS parent_duck (DBTYPE duckdb)")
-      logger.info(f"Attached parent DuckDB: {parent_duck_path}")
+      # Connect to subgraph Kuzu and attach parent DuckDB
+      total_rows = 0
+      tables_copied = []
 
-      # Copy each table
-      for table_name in tables_to_copy:
+      with cluster_service.db_manager.connection_pool.get_connection(
+        subgraph_id
+      ) as conn:
         try:
-          if request.ignore_errors:
-            copy_query = (
-              f"COPY {table_name} FROM parent_duck.{table_name} (ignore_errors=true)"
-            )
-          else:
-            copy_query = f"COPY {table_name} FROM parent_duck.{table_name}"
-
-          logger.info(f"Copying {table_name} from parent to subgraph")
-          result = conn.execute(copy_query)
-
-          rows_ingested = 0
-          if result and hasattr(result, "get_as_arrow"):
-            arrow_table = result.get_as_arrow()
-            if arrow_table.num_rows > 0 and arrow_table.num_columns > 0:
-              result_msg = str(arrow_table.column(0)[0].as_py())
-              import re
-
-              match = re.search(r"(\d+)\s+tuples?", result_msg)
-              if match:
-                rows_ingested = int(match.group(1))
-
-          total_rows += rows_ingested
-          tables_copied.append(table_name)
-          logger.info(f"✅ Copied {table_name}: {rows_ingested} rows")
-
-        except Exception as table_err:
-          logger.error(f"Failed to copy {table_name}: {table_err}")
-          if not request.ignore_errors:
+          conn.execute(f"LOAD EXTENSION '{duckdb_extension_path}'")
+          logger.info(f"Loaded DuckDB extension from {duckdb_extension_path}")
+        except Exception as e:
+          if "already loaded" not in str(e).lower():
+            logger.warning(f"Failed to load DuckDB extension: {e}")
             raise
+
+        # Detach first if already attached
+        try:
+          conn.execute("DETACH parent_duck")
+        except Exception:
+          pass
+
+        # Attach parent DuckDB as 'parent_duck'
+        conn.execute(f"ATTACH '{parent_duck_path}' AS parent_duck (DBTYPE duckdb)")
+        logger.info(f"Attached parent DuckDB: {parent_duck_path}")
+
+        # Copy each table from the temp tables we created in parent DuckDB
+        for idx, table_name in enumerate(tables_to_copy):
+          try:
+            temp_table = temp_tables[idx]
+
+            if request.ignore_errors:
+              copy_query = (
+                f"COPY {table_name} FROM parent_duck.{temp_table} (ignore_errors=true)"
+              )
+            else:
+              copy_query = f"COPY {table_name} FROM parent_duck.{temp_table}"
+
+            logger.info(f"Copying {table_name} from parent to subgraph")
+            result = conn.execute(copy_query)
+
+            rows_ingested = 0
+            if result and hasattr(result, "get_as_arrow"):
+              arrow_table = result.get_as_arrow()
+              if arrow_table.num_rows > 0 and arrow_table.num_columns > 0:
+                result_msg = str(arrow_table.column(0)[0].as_py())
+                import re
+
+                match = re.search(r"(\d+)\s+tuples?", result_msg)
+                if match:
+                  rows_ingested = int(match.group(1))
+
+            total_rows += rows_ingested
+            tables_copied.append(table_name)
+            logger.info(f"✅ Copied {table_name}: {rows_ingested} rows")
+
+          except Exception as table_err:
+            logger.error(f"Failed to copy {table_name}: {table_err}")
+            if not request.ignore_errors:
+              raise
 
       # Detach parent DuckDB
       try:
@@ -335,27 +402,44 @@ async def fork_from_parent_duckdb(
       except Exception:
         pass
 
-    execution_time_ms = (time.time() - start_time) * 1000
+      execution_time_ms = (time.time() - start_time) * 1000
 
-    logger.info(
-      f"Fork completed: {len(tables_copied)} tables, {total_rows:,} rows in {execution_time_ms:.2f}ms"
-    )
+      logger.info(
+        f"Fork completed: {len(tables_copied)} tables, {total_rows:,} rows in {execution_time_ms:.2f}ms"
+      )
 
-    return ForkFromParentResponse(
-      status="success",
-      parent_graph_id=parent_graph_id,
-      subgraph_id=subgraph_id,
-      tables_copied=tables_copied,
-      total_rows=total_rows,
-      execution_time_ms=execution_time_ms,
-    )
+      return ForkFromParentResponse(
+        status="success",
+        parent_graph_id=parent_graph_id,
+        subgraph_id=subgraph_id,
+        tables_copied=tables_copied,
+        total_rows=total_rows,
+        execution_time_ms=execution_time_ms,
+      )
 
-  except HTTPException:
-    raise
-  except Exception as e:
-    logger.error(f"Failed to fork from {parent_graph_id} to {subgraph_id}: {e}")
+    except HTTPException:
+      raise
+    except Exception as e:
+      logger.error(f"Failed to fork from {parent_graph_id} to {subgraph_id}: {e}")
+      raise HTTPException(
+        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to fork data: {str(e)}",
+      )
 
+    finally:
+      # Clean up temp tables
+      if temp_tables:
+        try:
+          with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
+            for temp_table in temp_tables:
+              duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
+            logger.info(f"Cleaned up {len(temp_tables)} temp tables from parent DuckDB")
+        except Exception as cleanup_err:
+          logger.warning(f"Failed to clean up temp tables: {cleanup_err}")
+
+  except Exception as outer_err:
+    logger.error(f"Failed during fork preparation: {outer_err}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to fork data: {str(e)}",
+      detail=f"Failed to fork data: {str(outer_err)}",
     )
