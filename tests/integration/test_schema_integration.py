@@ -4,6 +4,7 @@ Integration tests for schema management functionality.
 
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
+from tests.conftest import VALID_TEST_GRAPH_ID
 
 
 @pytest.mark.integration
@@ -89,8 +90,8 @@ class TestSchemaManagementIntegration:
       # Create a proper mock database session
       mock_db = MagicMock()
 
-      # Mock GraphUser query
-      mock_user_graph_instance = MagicMock(graph_id="test_graph", user_id=test_user.id)
+      # Mock GraphUser query (use valid graph_id format)
+      mock_user_graph_instance = MagicMock(graph_id=VALID_TEST_GRAPH_ID, user_id=test_user.id)
       mock_user_graph_query = MagicMock()
       mock_user_graph_query.filter_by.return_value.first.return_value = (
         mock_user_graph_instance
@@ -126,13 +127,18 @@ class TestSchemaManagementIntegration:
 
         # Validate the schema
         response = client_with_mocked_auth.post(
-          "/v1/graphs/test_graph/schema/validate",
+          f"/v1/graphs/{VALID_TEST_GRAPH_ID}/schema/validate",
           json={
             "schema_definition": schema_def,
             "format": "json",
             "check_compatibility": ["roboledger"],
           },
         )
+
+        # Debug output if validation fails
+        if response.status_code != 200:
+          print(f"Validation Response status: {response.status_code}")
+          print(f"Validation Response body: {response.json()}")
 
         assert response.status_code == 200
         validation_result = response.json()
