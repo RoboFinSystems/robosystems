@@ -27,6 +27,14 @@ MAIN_API_TAGS = [
     "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
   },
   {
+    "name": "Materialization",
+    "description": "🔄 Graph materialization - Rebuild graph from DuckDB staging tables (materialized view pattern)",
+  },
+  {
+    "name": "Files",
+    "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
+  },
+  {
     "name": "Schema",
     "description": "📐 Schema management - Validate and manage custom graph schemas",
   },

@@ -53,7 +53,14 @@ from robosystems.config.valkey_registry import (
   create_async_redis_client,
 )
 
-router = APIRouter()
+router = APIRouter(
+  tags=["Materialization"],
+  responses={
+    401: {"description": "Not authenticated"},
+    403: {"description": "Access denied to graph"},
+    404: {"description": "Graph not found"},
+  },
+)
 
 circuit_breaker = CircuitBreakerManager()
 
