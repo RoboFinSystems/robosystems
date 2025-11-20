@@ -18,10 +18,22 @@ def ses_service(mock_ses_client):
   """Create SES email service with mocked client."""
   with patch("robosystems.adapters.ses.boto3") as mock_boto3:
     mock_boto3.client.return_value = mock_ses_client
-    service = SESEmailService()
-    service.ses_client = mock_ses_client
-    service.from_address = "noreply@example.com"
-    return service
+
+    with patch("robosystems.adapters.ses.env") as mock_env:
+      mock_env.AWS_REGION = "us-east-1"
+      mock_env.EMAIL_FROM_ADDRESS = "noreply@example.com"
+      mock_env.EMAIL_FROM_NAME = "Test"
+      mock_env.ENVIRONMENT = "test"
+      mock_env.ROBOLEDGER_URL = "https://roboledger.ai"
+      mock_env.ROBOINVESTOR_URL = "https://roboinvestor.ai"
+      mock_env.ROBOSYSTEMS_URL = "https://robosystems.ai"
+      mock_env.EMAIL_TOKEN_EXPIRY_HOURS = 48
+      mock_env.PASSWORD_RESET_TOKEN_EXPIRY_HOURS = 2
+
+      service = SESEmailService()
+      service.ses_client = mock_ses_client
+      service.from_address = "noreply@example.com"
+      return service
 
 
 class TestSESEmailService:
@@ -218,7 +230,7 @@ class TestSESEmailService:
     assert "roboledger" in message["Body"]["Html"]["Data"].lower()
 
   @pytest.mark.asyncio
-  async def test_email_environment_included(self, ses_service, mock_ses_client):
+  async def test_email_environment_included(self, mock_ses_client):
     """Test that environment is included in SES tags."""
     with patch("robosystems.adapters.ses.env") as mock_env:
       mock_env.ENVIRONMENT = "staging"

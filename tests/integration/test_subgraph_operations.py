@@ -76,20 +76,21 @@ class TestSubgraphOperations:
       mock_kuzu_client, "test_db", ["financial", "quickbooks"]
     )
 
-    # Should install base schema once
-    assert mock_kuzu_client.install_schema.call_count == 3  # base + 2 extensions
+    # Should install base schema + extensions in a single call
+    assert mock_kuzu_client.install_schema.call_count == 1
 
-    # Check that base schema was installed first
-    first_call = mock_kuzu_client.install_schema.call_args_list[0]
-    assert first_call[1]["graph_id"] == "test_db"
-    assert first_call[1]["extensions"] == []
+    # Check that schema was installed with extensions
+    call_args = mock_kuzu_client.install_schema.call_args
+    assert call_args[1]["graph_id"] == "test_db"
+    assert call_args[1]["base_schema"] == "entity"
+    assert call_args[1]["extensions"] == ["financial", "quickbooks"]
 
   async def test_install_base_schema(self, subgraph_service, mock_kuzu_client):
     """Test base schema installation."""
     await subgraph_service._install_base_schema(mock_kuzu_client, "test_db")
 
     mock_kuzu_client.install_schema.assert_called_once_with(
-      graph_id="test_db", base_schema="base", extensions=[]
+      graph_id="test_db", base_schema="entity", extensions=[]
     )
 
   async def test_check_database_has_data(self, subgraph_service, mock_kuzu_client):
@@ -166,8 +167,8 @@ class TestSubgraphOperations:
       mock_kuzu_client, "test_db", "instance_123"
     )
 
-    # Should still return a location even if backup not implemented
-    assert "s3://robosystems-backups" in backup_location
+    # Should return None when backup method is not implemented
+    assert backup_location is None
 
   async def test_stats_error_handling(self, subgraph_service, mock_kuzu_client):
     """Test statistics collection error handling."""
