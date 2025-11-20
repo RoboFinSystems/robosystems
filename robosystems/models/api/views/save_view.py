@@ -1,23 +1,58 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SaveViewRequest(BaseModel):
   report_id: Optional[str] = Field(
-    None,
+    default=None,
     description="Existing report ID to update (if provided, deletes existing facts/structures and creates new ones)",
+    max_length=100,
+    pattern=r"^[a-zA-Z0-9_-]+$",
   )
   report_type: str = Field(
-    ...,
     description="Type of report (e.g., 'Annual Report', 'Quarterly Report', '10-K')",
+    max_length=200,
   )
-  period_start: str = Field(..., description="Period start date (YYYY-MM-DD)")
-  period_end: str = Field(..., description="Period end date (YYYY-MM-DD)")
+  period_start: str = Field(
+    description="Period start date (YYYY-MM-DD)",
+    pattern=r"^\d{4}-\d{2}-\d{2}$",
+  )
+  period_end: str = Field(
+    description="Period end date (YYYY-MM-DD)",
+    pattern=r"^\d{4}-\d{2}-\d{2}$",
+  )
   entity_id: Optional[str] = Field(
-    None, description="Entity identifier (defaults to primary entity)"
+    default=None,
+    description="Entity identifier (defaults to primary entity)",
+    max_length=100,
+    pattern=r"^[a-zA-Z0-9_-]+$",
   )
-  include_presentation: bool = Field(True, description="Create presentation structures")
-  include_calculation: bool = Field(True, description="Create calculation structures")
+  include_presentation: bool = Field(
+    default=True, description="Create presentation structures"
+  )
+  include_calculation: bool = Field(
+    default=True, description="Create calculation structures"
+  )
+
+  @field_validator("report_type")
+  @classmethod
+  def validate_report_type(cls, v: str) -> str:
+    if "\n" in v or "\r" in v:
+      raise ValueError("Report type cannot contain newline characters")
+    if len(v.strip()) == 0:
+      raise ValueError("Report type cannot be empty or whitespace only")
+    return v.strip()
+
+  @field_validator("period_start", "period_end")
+  @classmethod
+  def validate_date_format(cls, v: str) -> str:
+    try:
+      from datetime import datetime
+
+      datetime.strptime(v, "%Y-%m-%d")
+    except ValueError as e:
+      raise ValueError(f"Date must be in YYYY-MM-DD format: {e}")
+    return v
 
 
 class FactDetail(BaseModel):

@@ -180,6 +180,11 @@ class FactGridBuilder:
     - Element hierarchies with subtotals
     - Custom member ordering and labels
     - ViewConfig-driven axis configuration
+
+    Memory Warning:
+    Creates DataFrame copies for pivot operations. For datasets > 100k rows,
+    consider streaming or batching approaches to avoid memory pressure.
+    Memory usage scales approximately O(rows * columns) for the pivot table.
     """
     if fact_grid.facts_df is None or fact_grid.facts_df.empty:
       return {

@@ -402,11 +402,12 @@ async def materialize_graph(
   lock_key = f"materialization_lock:{graph_id}"
   lock_ttl = env.INGESTION_LOCK_TTL
   lock_acquired = False
+  lock_token = f"{current_user.id}:{start_time_dt.isoformat()}"
 
   try:
     lock_acquired = await redis_client.set(
       lock_key,
-      f"{current_user.id}:{start_time_dt.isoformat()}",
+      lock_token,
       nx=True,
       ex=lock_ttl,
     )
@@ -803,18 +804,39 @@ async def materialize_graph(
   finally:
     if lock_acquired:
       try:
-        await redis_client.delete(lock_key)
-        api_logger.info(
-          "Materialization lock released",
-          extra={
-            "component": "materialize_api",
-            "action": "lock_released",
-            "user_id": str(current_user.id),
-            "graph_id": graph_id,
-            "duration_ms": (datetime.now(timezone.utc) - start_time_dt).total_seconds()
-            * 1000,
-          },
-        )
+        lua_script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+        released = await redis_client.eval(lua_script, 1, lock_key, lock_token)
+
+        if released:
+          api_logger.info(
+            "Materialization lock released",
+            extra={
+              "component": "materialize_api",
+              "action": "lock_released",
+              "user_id": str(current_user.id),
+              "graph_id": graph_id,
+              "duration_ms": (
+                datetime.now(timezone.utc) - start_time_dt
+              ).total_seconds()
+              * 1000,
+            },
+          )
+        else:
+          logger.warning(
+            f"Lock for graph {graph_id} was already released or owned by another process",
+            extra={
+              "component": "materialize_api",
+              "action": "lock_already_released",
+              "user_id": str(current_user.id),
+              "graph_id": graph_id,
+            },
+          )
       except Exception as lock_error:
         logger.error(
           f"Failed to release materialization lock for graph {graph_id}: {lock_error}",

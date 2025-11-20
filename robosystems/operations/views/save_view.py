@@ -106,29 +106,31 @@ async def query_view_facts(graph_id: str) -> List[Dict[str, Any]]:
 
 async def check_report_exists(graph_id: str, report_id: str) -> bool:
   """Check if a report with the given ID already exists"""
-  query = f"""
-    MATCH (r:Report {{identifier: '{report_id}'}})
+  query = """
+    MATCH (r:Report {identifier: $report_id})
     RETURN r.identifier as report_id
     LIMIT 1
     """
 
   repository = await get_universal_repository(graph_id)
-  results = await repository.execute_query(query, {})
+  params = {"report_id": report_id}
+  results = await repository.execute_query(query, params)
   return results is not None and len(results) > 0
 
 
 async def delete_report_data(graph_id: str, report_id: str) -> Dict[str, int]:
   """Delete all facts, structures, and relationships associated with a report"""
-  delete_facts_query = f"""
-    MATCH (r:Report {{identifier: '{report_id}'}})-[:REPORT_HAS_FACT]->(f:Fact)
+  delete_facts_query = """
+    MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact)
     WITH count(f) as fact_count
-    MATCH (r:Report {{identifier: '{report_id}'}})-[:REPORT_HAS_FACT]->(f:Fact)
+    MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact)
     DETACH DELETE f
     RETURN fact_count
     """
 
   repository = await get_universal_repository(graph_id)
-  facts_results = await repository.execute_query(delete_facts_query, {})
+  params = {"report_id": report_id}
+  facts_results = await repository.execute_query(delete_facts_query, params)
 
   return {
     "facts_deleted": facts_results[0]["fact_count"]
@@ -148,22 +150,30 @@ async def create_report_node(
   period_end: str,
   report_type: str,
 ) -> bool:
-  query = f"""
-    CREATE (r:Report {{
-        identifier: '{report_id}',
-        name: '{report_type} - {entity_name}',
-        uri: 'internal:{report_id}',
-        report_date: '{period_end}',
-        period_end_date: '{period_end}',
-        updated_at: '{datetime.utcnow().isoformat()}',
+  query = """
+    CREATE (r:Report {
+        identifier: $report_id,
+        name: $name,
+        uri: $uri,
+        report_date: $report_date,
+        period_end_date: $period_end_date,
+        updated_at: $updated_at,
         processed: true,
         failed: false
-    }})
+    })
     RETURN r.identifier as report_id
     """
 
   repository = await get_universal_repository(graph_id)
-  results = await repository.execute_query(query, {})
+  params = {
+    "report_id": report_id,
+    "name": f"{report_type} - {entity_name}",
+    "uri": f"internal:{report_id}",
+    "report_date": period_end,
+    "period_end_date": period_end,
+    "updated_at": datetime.utcnow().isoformat(),
+  }
+  results = await repository.execute_query(query, params)
   return results is not None and len(results) > 0
 
 
@@ -177,17 +187,24 @@ async def update_report_metadata(
   report_type: str,
 ) -> bool:
   """Update existing report metadata"""
-  query = f"""
-    MATCH (r:Report {{identifier: '{report_id}'}})
-    SET r.name = '{report_type} - {entity_name}',
-        r.report_date = '{period_end}',
-        r.period_end_date = '{period_end}',
-        r.updated_at = '{datetime.utcnow().isoformat()}'
+  query = """
+    MATCH (r:Report {identifier: $report_id})
+    SET r.name = $name,
+        r.report_date = $report_date,
+        r.period_end_date = $period_end_date,
+        r.updated_at = $updated_at
     RETURN r.identifier as report_id
     """
 
   repository = await get_universal_repository(graph_id)
-  results = await repository.execute_query(query, {})
+  params = {
+    "report_id": report_id,
+    "name": f"{report_type} - {entity_name}",
+    "report_date": period_end,
+    "period_end_date": period_end,
+    "updated_at": datetime.utcnow().isoformat(),
+  }
+  results = await repository.execute_query(query, params)
   return results is not None and len(results) > 0
 
 
@@ -206,27 +223,37 @@ async def create_fact_nodes(
   for fact_data in facts:
     fact_id = str(uuid.uuid4())
 
-    query = f"""
-        MATCH (r:Report {{identifier: '{report_id}'}})
-        MATCH (e:Element {{uri: '{fact_data["element_uri"]}'}})
-        MATCH (ent:Entity {{identifier: '{entity_id}'}})
-        CREATE (f:Fact {{
-            identifier: '{fact_id}',
-            uri: '{fact_data["element_uri"]}#{fact_id}',
-            value: '{fact_data["numeric_value"]}',
-            numeric_value: {fact_data["numeric_value"]},
-            fact_type: '{fact_data["fact_type"]}',
+    query = """
+        MATCH (r:Report {identifier: $report_id})
+        MATCH (e:Element {uri: $element_uri})
+        MATCH (ent:Entity {identifier: $entity_id})
+        CREATE (f:Fact {
+            identifier: $fact_id,
+            uri: $uri,
+            value: $value,
+            numeric_value: $numeric_value,
+            fact_type: $fact_type,
             decimals: '2',
             value_type: 'numeric',
             content_type: 'monetary'
-        }})
+        })
         CREATE (r)-[:REPORT_HAS_FACT]->(f)
         CREATE (f)-[:FACT_HAS_ELEMENT]->(e)
         CREATE (f)-[:FACT_HAS_ENTITY]->(ent)
         RETURN f.identifier as fact_id
         """
 
-    results = await repository.execute_query(query, {})
+    params = {
+      "report_id": report_id,
+      "element_uri": fact_data["element_uri"],
+      "entity_id": entity_id,
+      "fact_id": fact_id,
+      "uri": f"{fact_data['element_uri']}#{fact_id}",
+      "value": str(fact_data["numeric_value"]),
+      "numeric_value": fact_data["numeric_value"],
+      "fact_type": fact_data["fact_type"],
+    }
+    results = await repository.execute_query(query, params)
 
     if results and len(results) > 0:
       created_facts.append(
@@ -254,19 +281,26 @@ async def create_presentation_structure(
   structure_id = str(uuid.uuid4())
   repository = await get_universal_repository(graph_id)
 
-  query = f"""
-    CREATE (s:Structure {{
-        identifier: '{structure_id}',
-        uri: '{role_uri}',
-        network_uri: '{role_uri}',
+  query = """
+    CREATE (s:Structure {
+        identifier: $identifier,
+        uri: $uri,
+        network_uri: $network_uri,
         type: 'presentation',
-        name: '{structure_name}',
-        definition: 'Presentation structure for {structure_name}'
-    }})
+        name: $name,
+        definition: $definition
+    })
     RETURN s.identifier as structure_id
     """
 
-  results = await repository.execute_query(query, {})
+  params = {
+    "identifier": structure_id,
+    "uri": role_uri,
+    "network_uri": role_uri,
+    "name": structure_name,
+    "definition": f"Presentation structure for {structure_name}",
+  }
+  results = await repository.execute_query(query, params)
 
   if not results or len(results) == 0:
     return None
@@ -289,19 +323,26 @@ async def create_calculation_structure(
   structure_id = str(uuid.uuid4())
   repository = await get_universal_repository(graph_id)
 
-  query = f"""
-    CREATE (s:Structure {{
-        identifier: '{structure_id}',
-        uri: '{parent_element}',
-        network_uri: '{parent_element}',
+  query = """
+    CREATE (s:Structure {
+        identifier: $identifier,
+        uri: $uri,
+        network_uri: $network_uri,
         type: 'calculation',
-        name: '{structure_name}',
-        definition: 'Calculation structure for {parent_element}'
-    }})
+        name: $name,
+        definition: $definition
+    })
     RETURN s.identifier as structure_id
     """
 
-  results = await repository.execute_query(query, {})
+  params = {
+    "identifier": structure_id,
+    "uri": parent_element,
+    "network_uri": parent_element,
+    "name": structure_name,
+    "definition": f"Calculation structure for {parent_element}",
+  }
+  results = await repository.execute_query(query, params)
 
   if not results or len(results) == 0:
     return None

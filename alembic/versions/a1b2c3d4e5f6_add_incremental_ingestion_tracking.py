@@ -150,6 +150,10 @@ def downgrade() -> None:
 
   # Graph: Remove staleness tracking
   op.drop_index("idx_graphs_stale", table_name="graphs")
+
+  # Restore server_default before dropping column (for completeness, though column will be dropped)
+  op.alter_column("graphs", "graph_stale", server_default="false")
+
   op.drop_column("graphs", "graph_stale_at")
   op.drop_column("graphs", "graph_stale_reason")
   op.drop_column("graphs", "graph_stale")
@@ -157,6 +161,11 @@ def downgrade() -> None:
   # GraphFile: Remove file tracking columns
   op.drop_index("idx_graph_files_graph_status", table_name="graph_files")
   op.drop_index("idx_graph_files_duckdb_status", table_name="graph_files")
+
+  # Restore server_default before dropping columns (for completeness, though columns will be dropped)
+  op.alter_column("graph_files", "duckdb_status", server_default="pending")
+  op.alter_column("graph_files", "graph_status", server_default="pending")
+
   op.drop_column("graph_files", "celery_task_id")
   op.drop_column("graph_files", "graph_ingested_at")
   op.drop_column("graph_files", "graph_status")

@@ -71,8 +71,27 @@ async def materialize_table(
     # Check if table exists, create temp copy without file_id
     try:
       with duckdb_pool.get_connection(graph_id) as duck_conn:
-        duck_conn.execute("CHECKPOINT")
-        logger.info(f"✅ DuckDB checkpointed successfully for {graph_id}")
+        max_retries = 3
+        for attempt in range(max_retries):
+          try:
+            duck_conn.execute("CHECKPOINT")
+            logger.info(f"✅ DuckDB checkpointed successfully for {graph_id}")
+            break
+          except Exception as e:
+            if attempt == max_retries - 1:
+              logger.error(
+                f"Failed to checkpoint DuckDB after {max_retries} attempts: {e}"
+              )
+              raise HTTPException(
+                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to checkpoint DuckDB after {max_retries} attempts: {str(e)}",
+              )
+            logger.warning(
+              f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
+            )
+            import time
+
+            time.sleep(1)
 
         # Check if table exists
         result = duck_conn.execute(
@@ -290,8 +309,27 @@ async def fork_from_parent_duckdb(
 
     # Get list of tables and create views (excluding file_id column)
     with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
-      duck_conn.execute("CHECKPOINT")
-      logger.info(f"✅ Parent DuckDB checkpointed for {parent_graph_id}")
+      max_retries = 3
+      for attempt in range(max_retries):
+        try:
+          duck_conn.execute("CHECKPOINT")
+          logger.info(f"✅ Parent DuckDB checkpointed for {parent_graph_id}")
+          break
+        except Exception as e:
+          if attempt == max_retries - 1:
+            logger.error(
+              f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {e}"
+            )
+            raise HTTPException(
+              status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+              detail=f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {str(e)}",
+            )
+          logger.warning(
+            f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
+          )
+          import time
+
+          time.sleep(1)
 
       result = duck_conn.execute("SHOW TABLES").fetchall()
       available_tables = [row[0] for row in result]
