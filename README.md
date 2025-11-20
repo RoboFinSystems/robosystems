@@ -144,7 +144,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - **Financial Analysis**: Natural language queries across entity and benchmark data
 - **Cross-Database Queries**: Compare entity data against SEC public data
-- **Credit Tracking**: AI operations consume credits based on actual token usage
+- **Tools**: Rich toolkit for graph queries, schema introspection, fact discovery, and cross-database financial analysis
 - **Handler Pool**: Managed MCP handler instances with resource limits
 
 ### Agent System
@@ -158,6 +158,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - **AI-Focused**: Credits consumed only by AI operations (Anthropic/OpenAI API calls)
 - **Token-Based Billing**: Actual token usage determines credit consumption
+- **Sustainable Operations**: Credit-based model enables transparent cost tracking and predictable billing aligned with actual usage
 
 ## Client Libraries
 

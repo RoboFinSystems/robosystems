@@ -39,6 +39,10 @@ MAIN_API_TAGS = [
     "description": "📐 Schema management - Validate and manage custom graph schemas",
   },
   {
+    "name": "Views",
+    "description": "👁️ Views - Create and manage multi-dimensional fact grids with XBRL-style hypercubes",
+  },
+  {
     "name": "Backup",
     "description": "💾 Database backup - Create, restore, and manage graph database backups",
   },
