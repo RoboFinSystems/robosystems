@@ -200,13 +200,55 @@ class TestDeleteWorkspaceTool:
     """Test successful workspace deletion."""
     tool = DeleteWorkspaceTool(mock_kuzu_client)
 
-    mock_db_session.query.return_value.filter.return_value.first.return_value = (
-      mock_subgraph_model
+    # Mock subgraph_info
+    from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
+
+    mock_subgraph_info = SubgraphInfo(
+      graph_id="kg1234567890abcdef_dev",
+      parent_graph_id="kg1234567890abcdef",
+      subgraph_name="dev",
+      database_name="kg1234567890abcdef_dev",
     )
 
-    with patch(
-      "robosystems.middleware.mcp.tools.workspace.SubgraphService"
-    ) as mock_service_class:
+    # Mock is_subgraph property
+    mock_subgraph_model.is_subgraph = True
+
+    # Mock GraphUser for authorization
+    mock_user_graph = MagicMock()
+    mock_user_graph.role = "admin"
+
+    # Setup query mock to return different values on consecutive calls
+    # First call: query Graph for workspace
+    # Second call: query GraphUser for authorization
+    mock_graph_query = MagicMock()
+    mock_graph_query.filter.return_value.first.return_value = mock_subgraph_model
+
+    mock_user_query = MagicMock()
+    mock_user_query.filter.return_value.first.return_value = mock_user_graph
+
+    # Setup multiple database sessions (authorization check + deletion)
+    # First session: for authorization checks (2 queries)
+    mock_db_session.query.side_effect = [mock_graph_query, mock_user_query]
+
+    # Second session: for deletion from PostgreSQL
+    mock_db_session2 = MagicMock()
+    mock_delete_query = MagicMock()
+    mock_delete_query.filter.return_value.first.return_value = mock_subgraph_model
+    mock_db_session2.query.return_value = mock_delete_query
+
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.workspace.SubgraphService"
+      ) as mock_service_class,
+      patch(
+        "robosystems.middleware.graph.subgraph_utils.parse_subgraph_id",
+        return_value=mock_subgraph_info,
+      ),
+      patch("robosystems.database.get_db_session") as mock_get_db,
+    ):
+      # Mock get_db_session to return two different sessions
+      mock_get_db.side_effect = [iter([mock_db_session]), iter([mock_db_session2])]
+
       mock_service = AsyncMock()
       mock_service_class.return_value = mock_service
 
@@ -228,13 +270,55 @@ class TestDeleteWorkspaceTool:
     """Test workspace deletion with force flag."""
     tool = DeleteWorkspaceTool(mock_kuzu_client)
 
-    mock_db_session.query.return_value.filter.return_value.first.return_value = (
-      mock_subgraph_model
+    # Mock subgraph_info
+    from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
+
+    mock_subgraph_info = SubgraphInfo(
+      graph_id="kg1234567890abcdef_dev",
+      parent_graph_id="kg1234567890abcdef",
+      subgraph_name="dev",
+      database_name="kg1234567890abcdef_dev",
     )
 
-    with patch(
-      "robosystems.middleware.mcp.tools.workspace.SubgraphService"
-    ) as mock_service_class:
+    # Mock is_subgraph property
+    mock_subgraph_model.is_subgraph = True
+
+    # Mock GraphUser for authorization
+    mock_user_graph = MagicMock()
+    mock_user_graph.role = "admin"
+
+    # Setup query mock to return different values on consecutive calls
+    # First call: query Graph for workspace
+    # Second call: query GraphUser for authorization
+    mock_graph_query = MagicMock()
+    mock_graph_query.filter.return_value.first.return_value = mock_subgraph_model
+
+    mock_user_query = MagicMock()
+    mock_user_query.filter.return_value.first.return_value = mock_user_graph
+
+    # Setup multiple database sessions (authorization check + deletion)
+    # First session: for authorization checks (2 queries)
+    mock_db_session.query.side_effect = [mock_graph_query, mock_user_query]
+
+    # Second session: for deletion from PostgreSQL
+    mock_db_session2 = MagicMock()
+    mock_delete_query = MagicMock()
+    mock_delete_query.filter.return_value.first.return_value = mock_subgraph_model
+    mock_db_session2.query.return_value = mock_delete_query
+
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.workspace.SubgraphService"
+      ) as mock_service_class,
+      patch(
+        "robosystems.middleware.graph.subgraph_utils.parse_subgraph_id",
+        return_value=mock_subgraph_info,
+      ),
+      patch("robosystems.database.get_db_session") as mock_get_db,
+    ):
+      # Mock get_db_session to return two different sessions
+      mock_get_db.side_effect = [iter([mock_db_session]), iter([mock_db_session2])]
+
       mock_service = AsyncMock()
       mock_service_class.return_value = mock_service
 
@@ -274,20 +358,41 @@ class TestDeleteWorkspaceTool:
     """Test deletion fails when workspace not found."""
     tool = DeleteWorkspaceTool(mock_kuzu_client)
 
-    mock_db_session.query.return_value.filter.return_value.first.return_value = None
+    # Mock parse_subgraph_id to return valid info
+    from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
 
-    with patch(
-      "robosystems.middleware.mcp.tools.workspace.SubgraphService"
-    ) as mock_service_class:
+    mock_subgraph_info = SubgraphInfo(
+      graph_id="kg1234567890abcdef_missing",
+      parent_graph_id="kg1234567890abcdef",
+      subgraph_name="missing",
+      database_name="kg1234567890abcdef_missing",
+    )
+
+    # Mock database query to return None (workspace not found)
+    mock_graph_query = MagicMock()
+    mock_graph_query.filter.return_value.first.return_value = None
+    mock_db_session.query.return_value = mock_graph_query
+
+    with (
+      patch(
+        "robosystems.middleware.mcp.tools.workspace.SubgraphService"
+      ) as mock_service_class,
+      patch(
+        "robosystems.middleware.graph.subgraph_utils.parse_subgraph_id",
+        return_value=mock_subgraph_info,
+      ),
+      patch(
+        "robosystems.database.get_db_session",
+        return_value=iter([mock_db_session]),
+      ),
+    ):
       mock_service = AsyncMock()
       mock_service_class.return_value = mock_service
-      mock_service.delete_subgraph_database.side_effect = Exception(
-        "Workspace not found"
-      )
 
       result = await tool.execute({"workspace_id": "kg1234567890abcdef_missing"})
 
-    assert result["error"] == "deletion_failed"
+    # Now returns workspace_not_found instead of deletion_failed (improved error handling)
+    assert result["error"] == "workspace_not_found"
     assert "not found" in result["message"].lower()
 
 

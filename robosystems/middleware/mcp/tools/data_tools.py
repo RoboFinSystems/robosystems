@@ -10,9 +10,11 @@ Provides tools for:
 """
 
 from typing import Any, Dict
-import pandas as pd
 
 from robosystems.logger import logger
+
+MAX_ASSOCIATION_PREVIEW = 50
+MAX_STAGING_QUERY_LIMIT = 10000
 
 
 class BuildFactGridTool:
@@ -82,18 +84,37 @@ class BuildFactGridTool:
     if not periods:
       return {"error": "missing_periods", "message": "At least one period is required"}
 
+    # Validate rows and columns structure
+    if rows and not isinstance(rows, list):
+      return {"error": "invalid_rows", "message": "Rows must be a list"}
+
+    if columns and not isinstance(columns, list):
+      return {"error": "invalid_columns", "message": "Columns must be a list"}
+
+    # Validate each row/column config is a dict with required fields
+    for i, row in enumerate(rows):
+      if not isinstance(row, dict):
+        return {
+          "error": "invalid_row_config",
+          "message": f"Row {i} must be a dictionary with axis configuration",
+        }
+
+    for i, col in enumerate(columns):
+      if not isinstance(col, dict):
+        return {
+          "error": "invalid_column_config",
+          "message": f"Column {i} must be a dictionary with axis configuration",
+        }
+
     try:
       graph_id = self.client.graph_id
 
-      # Build Cypher query to retrieve facts
-      element_filter = ", ".join([f"'{e}'" for e in elements])
-      period_filter = ", ".join([f"'{p}'" for p in periods])
-
-      query = f"""
+      # Build parameterized Cypher query to prevent injection
+      query = """
       MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
       MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
-      WHERE el.uri IN [{element_filter}]
-        AND p.period_end IN [{period_filter}]
+      WHERE el.uri IN $elements
+        AND p.period_end IN $periods
       OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
       RETURN
         el.uri as element_id,
@@ -103,13 +124,16 @@ class BuildFactGridTool:
         d.value as dimension_member
       """
 
-      # Execute query through Graph API
+      # Execute query through Graph API with parameters
       from robosystems.middleware.graph import get_universal_repository
 
       repository = await get_universal_repository(graph_id, "read")
-      result = await repository.execute_query(query)
+      parameters = {"elements": elements, "periods": periods}
+      result = await repository.execute_query(query, parameters)
 
-      # Convert to DataFrame
+      # Convert to DataFrame (lazy import pandas)
+      import pandas as pd
+
       if not result:
         fact_data = pd.DataFrame()
       else:
@@ -316,7 +340,9 @@ class MapElementsTool:
               "aggregation": assoc.aggregation_method.value,
               "weight": assoc.weight,
             }
-            for assoc in mapping_response.structure.associations[:50]
+            for assoc in mapping_response.structure.associations[
+              :MAX_ASSOCIATION_PREVIEW
+            ]
           ],
           "message": f"Retrieved {mapping_response.association_count} element associations",
         }
@@ -388,12 +414,22 @@ class QueryStagingTool:
     if not sql:
       return {"error": "missing_sql", "message": "SQL query is required"}
 
+    # Validate limit is an integer within safe bounds
+    if not isinstance(limit, int) or limit < 1 or limit > MAX_STAGING_QUERY_LIMIT:
+      return {
+        "error": "invalid_limit",
+        "message": f"Limit must be an integer between 1 and {MAX_STAGING_QUERY_LIMIT}",
+      }
+
     try:
       graph_id = self.client.graph_id
 
-      # Add LIMIT if not present
-      if "LIMIT" not in sql.upper():
-        sql = f"{sql} LIMIT {limit}"
+      # Safely add LIMIT clause if not present
+      sql_upper = sql.upper()
+      if "LIMIT" not in sql_upper:
+        # Validate limit as integer to prevent injection
+        # limit is already validated above, so this is safe
+        sql = f"{sql.rstrip().rstrip(';')} LIMIT {int(limit)}"
 
       # Execute via Graph API client
       from robosystems.graph_api.client.factory import get_graph_client
@@ -461,6 +497,15 @@ class MaterializeGraphTool:
     if not table_name:
       return {"error": "missing_table_name", "message": "table_name is required"}
 
+    # Validate table name format (alphanumeric and underscores only)
+    import re
+
+    if not re.match(r"^[a-zA-Z0-9_]+$", table_name):
+      return {
+        "error": "invalid_table_name",
+        "message": "Table name must contain only letters, numbers, and underscores",
+      }
+
     try:
       graph_id = self.client.graph_id
 
@@ -468,7 +513,8 @@ class MaterializeGraphTool:
       from robosystems.database import get_db_session
       from robosystems.models.iam import GraphTable, GraphFile
 
-      db = next(get_db_session())
+      db_gen = get_db_session()
+      db = next(db_gen)
       try:
         table = (
           db.query(GraphTable)
@@ -546,7 +592,10 @@ class MaterializeGraphTool:
         }
 
       finally:
-        db.close()
+        try:
+          next(db_gen)
+        except StopIteration:
+          pass
 
     except Exception as e:
       logger.error(f"Failed to materialize graph: {e}")

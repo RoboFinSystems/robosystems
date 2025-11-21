@@ -81,7 +81,8 @@ class CreateWorkspaceTool:
       from robosystems.database import get_db_session
       from robosystems.models.iam.graph import Graph
 
-      db = next(get_db_session())
+      db_gen = get_db_session()
+      db = next(db_gen)
       try:
         parent_graph = db.query(Graph).filter(Graph.graph_id == parent_graph_id).first()
         if not parent_graph:
@@ -120,7 +121,10 @@ class CreateWorkspaceTool:
         }
 
       finally:
-        db.close()
+        try:
+          next(db_gen)
+        except StopIteration:
+          pass
 
     except Exception as e:
       logger.error(f"Failed to create workspace: {e}")
@@ -174,23 +178,77 @@ class DeleteWorkspaceTool:
     workspace_id = arguments.get("workspace_id")
     force = arguments.get("force", False)
 
-    # Extract parent_graph_id and workspace name from workspace_id
-    # Format: {parent_graph_id}_{name}
+    # Validate workspace_id format and extract parent_graph_id
     if not workspace_id or "_" not in workspace_id:
       return {
         "error": "invalid_workspace_id",
         "message": f"Invalid workspace ID format: {workspace_id}. Expected format: parent_name",
       }
 
-    parent_graph_id = self.client.graph_id
+    # Parse workspace_id to extract parent_graph_id
+    from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
 
-    # Can't delete primary graph
-    if workspace_id == parent_graph_id:
+    subgraph_info = parse_subgraph_id(workspace_id)
+    if not subgraph_info:
       return {
-        "error": "cannot_delete_primary",
-        "message": "Cannot delete the primary graph. Only workspaces can be deleted.",
-        "workspace_id": workspace_id,
+        "error": "invalid_workspace_id",
+        "message": f"{workspace_id} is not a valid subgraph identifier",
       }
+
+    # Verify the workspace belongs to the current graph (prevent cross-tenant access)
+    current_graph_id = self.client.graph_id
+    if subgraph_info.parent_graph_id != current_graph_id:
+      return {
+        "error": "authorization_failed",
+        "message": f"Workspace {workspace_id} does not belong to graph {current_graph_id}",
+        "hint": "You can only delete workspaces that belong to your current graph",
+      }
+
+    # Get user from context
+    user = getattr(self.client, "user", None)
+    if not user:
+      return {
+        "error": "authentication_required",
+        "message": "User context required for workspace deletion",
+      }
+
+    # Verify user has admin access to parent graph
+    from robosystems.database import get_db_session
+    from robosystems.models.iam.graph import Graph
+    from robosystems.models.iam.graph_user import GraphUser
+
+    db_gen = get_db_session()
+    db = next(db_gen)
+    try:
+      # Verify workspace exists and belongs to parent
+      workspace = db.query(Graph).filter(Graph.graph_id == workspace_id).first()
+      if not workspace or not workspace.is_subgraph:
+        return {
+          "error": "workspace_not_found",
+          "message": f"Workspace {workspace_id} not found",
+        }
+
+      # Verify user has admin access to parent graph
+      user_graph = (
+        db.query(GraphUser)
+        .filter(
+          GraphUser.user_id == user.id,
+          GraphUser.graph_id == subgraph_info.parent_graph_id,
+        )
+        .first()
+      )
+
+      if not user_graph or user_graph.role != "admin":
+        return {
+          "error": "insufficient_permissions",
+          "message": "Admin access to parent graph required to delete workspaces",
+          "hint": "Only users with admin role can delete workspaces",
+        }
+    finally:
+      try:
+        next(db_gen)
+      except StopIteration:
+        pass
 
     try:
       # Delete subgraph using SubgraphService (same as API routers)
@@ -200,17 +258,18 @@ class DeleteWorkspaceTool:
       )
 
       # Also delete from PostgreSQL
-      from robosystems.database import get_db_session
-      from robosystems.models.iam.graph import Graph
-
-      db = next(get_db_session())
+      db_gen2 = get_db_session()
+      db2 = next(db_gen2)
       try:
-        subgraph = db.query(Graph).filter(Graph.graph_id == workspace_id).first()
+        subgraph = db2.query(Graph).filter(Graph.graph_id == workspace_id).first()
         if subgraph:
-          db.delete(subgraph)
-          db.commit()
+          db2.delete(subgraph)
+          db2.commit()
       finally:
-        db.close()
+        try:
+          next(db_gen2)
+        except StopIteration:
+          pass
 
       logger.info(f"Deleted workspace {workspace_id} (force={force})")
 
@@ -260,7 +319,8 @@ class ListWorkspacesTool:
 
       parent_graph_id = self.client.graph_id
 
-      db = next(get_db_session())
+      db_gen = get_db_session()
+      db = next(db_gen)
       try:
         # Get all subgraphs for the parent graph
         subgraphs = (
@@ -304,7 +364,10 @@ class ListWorkspacesTool:
         }
 
       finally:
-        db.close()
+        try:
+          next(db_gen)
+        except StopIteration:
+          pass
 
     except Exception as e:
       logger.error(f"Failed to list workspaces: {e}")
