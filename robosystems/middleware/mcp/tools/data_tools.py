@@ -26,7 +26,7 @@ class BuildFactGridTool:
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
       "name": "build-fact-grid",
-      "description": "Construct multidimensional fact grid from graph data. Retrieves facts based on elements, periods, and optional dimensions, then builds a structured grid for analysis.",
+      "description": "Construct multidimensional fact grid from graph data. Retrieves facts based on elements, periods, and optional dimensions. Returns structured data with element names, values, and periods. Use include_summary=true to add aggregated statistics (count, total, avg, min, max) by element.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -55,6 +55,11 @@ class BuildFactGridTool:
             "description": "Optional axis configuration for columns",
             "default": [],
           },
+          "include_summary": {
+            "type": "boolean",
+            "description": "Include summary statistics (count, total, avg, min, max) by element",
+            "default": false,
+          },
         },
         "required": ["elements", "periods"],
       },
@@ -74,6 +79,7 @@ class BuildFactGridTool:
     periods = arguments.get("periods", [])
     rows = arguments.get("rows", [])
     columns = arguments.get("columns", [])
+    include_summary = arguments.get("include_summary", False)
 
     if not elements:
       return {
@@ -113,15 +119,16 @@ class BuildFactGridTool:
       query = """
       MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(el:Element)
       MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
+      MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
       WHERE el.uri IN $elements
-        AND p.period_end IN $periods
-      OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:Dimension)
+        AND p.end_date IN $periods
       RETURN
         el.uri as element_id,
-        p.period_end as period_end,
+        el.name as element_name,
+        p.end_date as period_end,
         f.numeric_value as value,
-        f.unit_ref as unit,
-        d.value as dimension_member
+        u.value as unit,
+        NULL as dimension_member
       """
 
       # Execute query through Graph API with parameters
@@ -158,21 +165,48 @@ class BuildFactGridTool:
         f"Built fact grid with {fact_grid.metadata.fact_count} facts across {fact_grid.metadata.dimension_count} dimensions"
       )
 
-      return {
+      # Convert DataFrame to serializable format
+      data_records = []
+      if fact_grid.facts_df is not None and not fact_grid.facts_df.empty:
+        # Convert to records (list of dicts)
+        data_records = fact_grid.facts_df.to_dict(orient="records")
+
+      # Build response
+      response = {
         "success": True,
         "fact_count": fact_grid.metadata.fact_count,
         "dimension_count": fact_grid.metadata.dimension_count,
         "dimensions": [
           {
-            "type": d.type.value,
-            "values": d.values[:10] if len(d.values) > 10 else d.values,
-            "total_values": len(d.values),
+            "name": d.name,
+            "type": d.type,
+            "members": d.members[:10] if len(d.members) > 10 else d.members,
+            "total_members": len(d.members),
           }
           for d in fact_grid.dimensions
         ],
+        "data": data_records,
         "construction_time_ms": fact_grid.metadata.construction_time_ms,
         "message": f"Built fact grid with {fact_grid.metadata.fact_count} facts",
       }
+
+      # Optionally include summary statistics
+      if include_summary and fact_grid.facts_df is not None and not fact_grid.facts_df.empty:
+        df = fact_grid.facts_df
+        if "element_name" in df.columns and "value" in df.columns:
+          summary = {}
+          for element_name in df["element_name"].unique():
+            element_data = df[df["element_name"] == element_name]
+            summary[element_name] = {
+              "count": len(element_data),
+              "total": float(element_data["value"].sum()),
+              "average": float(element_data["value"].mean()),
+              "min": float(element_data["value"].min()),
+              "max": float(element_data["value"].max()),
+            }
+          response["summary"] = summary
+
+      return response
 
     except Exception as e:
       logger.error(f"Failed to build fact grid: {e}")

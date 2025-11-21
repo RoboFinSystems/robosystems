@@ -29,10 +29,6 @@ from . import (
   ListWorkspacesTool,
   SwitchWorkspaceTool,
   BuildFactGridTool,
-  IngestFileTool,
-  MapElementsTool,
-  QueryStagingTool,
-  MaterializeGraphTool,
 )
 
 
@@ -65,10 +61,6 @@ class KuzuMCPTools:
     self.list_workspaces_tool = ListWorkspacesTool(kuzu_client)
     self.switch_workspace_tool = SwitchWorkspaceTool(kuzu_client)
     self.build_fact_grid_tool = BuildFactGridTool(kuzu_client)
-    self.ingest_file_tool = IngestFileTool(kuzu_client)
-    self.map_elements_tool = MapElementsTool(kuzu_client)
-    self.query_staging_tool = QueryStagingTool(kuzu_client)
-    self.materialize_graph_tool = MaterializeGraphTool(kuzu_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
@@ -115,10 +107,6 @@ class KuzuMCPTools:
     """
     return [
       self.build_fact_grid_tool.get_tool_definition(),
-      self.ingest_file_tool.get_tool_definition(),
-      self.map_elements_tool.get_tool_definition(),
-      self.query_staging_tool.get_tool_definition(),
-      self.materialize_graph_tool.get_tool_definition(),
     ]
 
   def get_tool_definitions_as_dict(self) -> List[Dict[str, Any]]:
@@ -237,22 +225,6 @@ class KuzuMCPTools:
       # Data operation tools
       elif name == "build-fact-grid":
         result = await self.build_fact_grid_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "ingest-file":
-        result = await self.ingest_file_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "map-elements":
-        result = await self.map_elements_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "query-staging":
-        result = await self.query_staging_tool.execute(arguments)
-        return result if return_raw else json.dumps(result, indent=2)
-
-      elif name == "materialize-graph":
-        result = await self.materialize_graph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       else:
