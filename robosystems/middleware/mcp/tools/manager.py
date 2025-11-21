@@ -24,6 +24,15 @@ from . import (
   StructureTool,
   ElementsTool,
   FactsTool,
+  CreateWorkspaceTool,
+  DeleteWorkspaceTool,
+  ListWorkspacesTool,
+  SwitchWorkspaceTool,
+  BuildFactGridTool,
+  IngestFileTool,
+  MapElementsTool,
+  QueryStagingTool,
+  MaterializeGraphTool,
 )
 
 
@@ -51,6 +60,15 @@ class KuzuMCPTools:
     self.structure_tool = StructureTool(kuzu_client)
     self.elements_tool = ElementsTool(kuzu_client)
     self.facts_tool = FactsTool(kuzu_client)
+    self.create_workspace_tool = CreateWorkspaceTool(kuzu_client)
+    self.delete_workspace_tool = DeleteWorkspaceTool(kuzu_client)
+    self.list_workspaces_tool = ListWorkspacesTool(kuzu_client)
+    self.switch_workspace_tool = SwitchWorkspaceTool(kuzu_client)
+    self.build_fact_grid_tool = BuildFactGridTool(kuzu_client)
+    self.ingest_file_tool = IngestFileTool(kuzu_client)
+    self.map_elements_tool = MapElementsTool(kuzu_client)
+    self.query_staging_tool = QueryStagingTool(kuzu_client)
+    self.materialize_graph_tool = MaterializeGraphTool(kuzu_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
@@ -73,6 +91,35 @@ class KuzuMCPTools:
     # but that requires a query which we want to avoid in __init__
     # So we'll include it by default and let the tool handle the check
     return False
+
+  def _get_workspace_tool_definitions(self) -> List[Dict[str, Any]]:
+    """
+    Get workspace management tool definitions from actual tool implementations.
+
+    Returns:
+        List of workspace tool definitions
+    """
+    return [
+      self.create_workspace_tool.get_tool_definition(),
+      self.switch_workspace_tool.get_tool_definition(),
+      self.delete_workspace_tool.get_tool_definition(),
+      self.list_workspaces_tool.get_tool_definition(),
+    ]
+
+  def _get_data_tool_definitions(self) -> List[Dict[str, Any]]:
+    """
+    Get data operation tool definitions from actual tool implementations.
+
+    Returns:
+        List of data tool definitions
+    """
+    return [
+      self.build_fact_grid_tool.get_tool_definition(),
+      self.ingest_file_tool.get_tool_definition(),
+      self.map_elements_tool.get_tool_definition(),
+      self.query_staging_tool.get_tool_definition(),
+      self.materialize_graph_tool.get_tool_definition(),
+    ]
 
   def get_tool_definitions_as_dict(self) -> List[Dict[str, Any]]:
     """
@@ -97,6 +144,13 @@ class KuzuMCPTools:
           self.facts_tool.get_tool_definition(),
         ]
       )
+
+    # Add workspace management tools
+    # Note: switch-workspace is client-side only, others execute server-side
+    tools.extend(self._get_workspace_tool_definitions())
+
+    # Add data operation tools
+    tools.extend(self._get_data_tool_definitions())
 
     return tools
 
@@ -160,6 +214,45 @@ class KuzuMCPTools:
 
       elif name == "discover-facts":
         result = await self.facts_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Workspace management tools
+      elif name == "create-workspace":
+        result = await self.create_workspace_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "delete-workspace":
+        result = await self.delete_workspace_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "list-workspaces":
+        result = await self.list_workspaces_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "switch-workspace":
+        # This is client-side only - should be intercepted by client
+        result = await self.switch_workspace_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      # Data operation tools
+      elif name == "build-fact-grid":
+        result = await self.build_fact_grid_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "ingest-file":
+        result = await self.ingest_file_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "map-elements":
+        result = await self.map_elements_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "query-staging":
+        result = await self.query_staging_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name == "materialize-graph":
+        result = await self.materialize_graph_tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       else:

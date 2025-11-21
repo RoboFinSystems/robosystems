@@ -13,6 +13,19 @@ from .properties_tool import PropertiesTool
 from .structure_tool import StructureTool
 from .elements_tool import ElementsTool
 from .facts_tool import FactsTool
+from .workspace import (
+  CreateWorkspaceTool,
+  DeleteWorkspaceTool,
+  ListWorkspacesTool,
+  SwitchWorkspaceTool,
+)
+from .data_tools import (
+  BuildFactGridTool,
+  IngestFileTool,
+  MapElementsTool,
+  QueryStagingTool,
+  MaterializeGraphTool,
+)
 from .manager import KuzuMCPTools
 
 __all__ = [
@@ -24,5 +37,14 @@ __all__ = [
   "StructureTool",
   "ElementsTool",
   "FactsTool",
+  "CreateWorkspaceTool",
+  "DeleteWorkspaceTool",
+  "ListWorkspacesTool",
+  "SwitchWorkspaceTool",
+  "BuildFactGridTool",
+  "IngestFileTool",
+  "MapElementsTool",
+  "QueryStagingTool",
+  "MaterializeGraphTool",
   "KuzuMCPTools",
 ]

@@ -91,7 +91,9 @@ class TestSchemaManagementIntegration:
       mock_db = MagicMock()
 
       # Mock GraphUser query (use valid graph_id format)
-      mock_user_graph_instance = MagicMock(graph_id=VALID_TEST_GRAPH_ID, user_id=test_user.id)
+      mock_user_graph_instance = MagicMock(
+        graph_id=VALID_TEST_GRAPH_ID, user_id=test_user.id
+      )
       mock_user_graph_query = MagicMock()
       mock_user_graph_query.filter_by.return_value.first.return_value = (
         mock_user_graph_instance

@@ -54,7 +54,7 @@ from robosystems.config.valkey_registry import (
 )
 
 router = APIRouter(
-  tags=["Materialization"],
+  tags=["Materialize"],
   responses={
     401: {"description": "Not authenticated"},
     403: {"description": "Access denied to graph"},
