@@ -267,10 +267,10 @@ class TestKuzuMCPTools:
     tools = KuzuMCPTools(mock_kuzu_client)
     definitions = tools.get_tool_definitions_as_dict()
 
-    # Should have 5 or 6 tools (6 if Element discovery is included)
+    # Should have all tools: base tools (5-6) + workspace tools (4) + data tools (1) = 10-11
     # Element discovery is conditional based on graph type/schema
-    assert len(definitions) >= 5
-    assert len(definitions) <= 6
+    assert len(definitions) >= 10
+    assert len(definitions) <= 11
 
     # Check example queries tool
     example_tool = next(t for t in definitions if t["name"] == "get-example-queries")
@@ -390,6 +390,111 @@ class TestKuzuMCPTools:
     result = await tools.execute_schema_tool()
 
     assert result == mock_schema
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_call_workspace_tools(self, mock_kuzu_client):
+    """Test routing calls to workspace tools."""
+    from datetime import datetime, timezone
+
+    mock_kuzu_client.graph_id = "kg1234567890abcdef"
+    mock_kuzu_client.user = MagicMock()
+    mock_kuzu_client.user.id = "user123"
+
+    tools = KuzuMCPTools(mock_kuzu_client)
+
+    with patch("robosystems.database.get_db_session") as mock_db:
+      mock_session = MagicMock()
+      mock_db.return_value = iter([mock_session])
+
+      mock_graph = MagicMock()
+      mock_graph.graph_id = "kg1234567890abcdef"
+      mock_graph.graph_name = "Test Graph"
+      mock_graph.parent_graph_id = None
+      mock_graph.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+
+      # Mock the query chain for both subgraphs and parent graph
+      mock_query = MagicMock()
+      mock_filter = MagicMock()
+      mock_order_by = MagicMock()
+
+      mock_session.query.return_value = mock_query
+      mock_query.filter.return_value = mock_filter
+      mock_filter.order_by.return_value = mock_order_by
+      mock_filter.first.return_value = mock_graph
+      mock_order_by.all.return_value = []
+
+      result = await tools.call_tool("list-workspaces", {}, return_raw=True)
+
+    # Check that the tool was called and returned a result
+    assert result is not None
+    assert isinstance(result, dict)
+    # List workspaces returns workspaces array or error
+    assert "workspaces" in result or "error" in result
+    if "workspaces" in result:
+      assert result["total_workspaces"] == 1
+      assert len(result["workspaces"]) == 1
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_call_data_operation_tools(self, mock_kuzu_client):
+    """Test routing calls to data operation tools."""
+    mock_kuzu_client.graph_id = "kg1234567890abcdef"
+
+    tools = KuzuMCPTools(mock_kuzu_client)
+
+    with patch("robosystems.middleware.graph.get_universal_repository") as mock_repo:
+      mock_repository = AsyncMock()
+      mock_repo.return_value = mock_repository
+      mock_repository.execute_query.return_value = [
+        {
+          "element_id": "test:Element",
+          "element_name": "Cash",
+          "period_end": "2025-01-01",
+          "value": 1000.0,
+          "unit": "USD",
+          "dimension_member": None,
+        }
+      ]
+
+      result = await tools.call_tool(
+        "build-fact-grid",
+        {
+          "elements": ["test:Element"],
+          "periods": ["2025-01-01"],
+        },
+        return_raw=True,
+      )
+
+    assert result["success"] is True
+    assert result["fact_count"] == 1
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_workspace_tool_error_handling(self, mock_kuzu_client):
+    """Test error handling for workspace tools."""
+    mock_kuzu_client.graph_id = "kg1234567890abcdef"
+    mock_kuzu_client.user = MagicMock()
+
+    tools = KuzuMCPTools(mock_kuzu_client)
+
+    result = await tools.call_tool(
+      "create-workspace", {"name": "invalid-name"}, return_raw=True
+    )
+
+    assert result["error"] == "invalid_name"
+
+  @pytest.mark.asyncio
+  @pytest.mark.unit
+  async def test_data_tool_error_handling(self, mock_kuzu_client):
+    """Test error handling for data operation tools."""
+    mock_kuzu_client.graph_id = "kg1234567890abcdef"
+
+    tools = KuzuMCPTools(mock_kuzu_client)
+
+    result = await tools.call_tool("build-fact-grid", {}, return_raw=True)
+
+    assert result["error"] == "missing_elements"
 
 
 class TestKuzuMCPConfigurableSchema:

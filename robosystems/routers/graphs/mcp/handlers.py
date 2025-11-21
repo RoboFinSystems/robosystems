@@ -98,6 +98,8 @@ class MCPHandler:
       self.kuzu_client = await create_kuzu_mcp_client(
         self.graph_id, api_base_url=repository_url
       )
+      # Attach user to client for workspace tools
+      self.kuzu_client.user = self.user
       self.mcp_tools = AdapterKuzuMCPTools(self.kuzu_client)
       logger.info(
         f"Initialized MCP handler with Kuzu adapter for graph {self.graph_id} at {repository_url or 'discovered endpoint'}"

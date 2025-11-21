@@ -9,7 +9,9 @@ from robosystems.tasks.graph_operations.create_graph import create_graph_task
 @pytest.fixture(autouse=True)
 def mock_celery_async_result():
   """Mock Celery AsyncResult to avoid Redis connection during tests."""
-  with patch("robosystems.tasks.graph_operations.create_graph.celery_app.AsyncResult") as mock_result_class:
+  with patch(
+    "robosystems.tasks.graph_operations.create_graph.celery_app.AsyncResult"
+  ) as mock_result_class:
     mock_result = Mock()
     mock_result.state = "PENDING"
     mock_result_class.return_value = mock_result

@@ -8,7 +8,7 @@ MAIN_API_TAGS = [
   },
   {
     "name": "Subgraphs",
-    "description": "🌳 Subgraphs - Manage subgraph databases for version control and memory context",
+    "description": "🌳 Subgraphs - Create and manage subgraph databases for workspace and data isolation",
   },
   {
     "name": "Query",
@@ -16,27 +16,23 @@ MAIN_API_TAGS = [
   },
   {
     "name": "MCP",
-    "description": "🔌 MCP - Model Context Protocol for AI interactions with graph databases",
+    "description": "🔌 MCP - Model Context Protocol for AI interactions with graph data",
   },
   {
     "name": "Agent",
-    "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph databases",
+    "description": "🤖 AI Agents - Intelligent AI agents for analyzing and managing graph data",
   },
   {
     "name": "Tables",
     "description": "🗃️ Staging tables - File upload, SQL queries, and data ingestion via DuckDB staging layer",
   },
   {
-    "name": "Materialization",
-    "description": "🔄 Graph materialization - Rebuild graph from DuckDB staging tables (materialized view pattern)",
-  },
-  {
     "name": "Files",
     "description": "📄 File management - Upload, track, and manage data files with multi-layer status",
   },
   {
-    "name": "Schema",
-    "description": "📐 Schema management - Validate and manage custom graph schemas",
+    "name": "Materialize",
+    "description": "🔄 Materialize graph - Rebuild graph from DuckDB staging tables",
   },
   {
     "name": "Views",
@@ -45,6 +41,10 @@ MAIN_API_TAGS = [
   {
     "name": "Backup",
     "description": "💾 Database backup - Create, restore, and manage graph database backups",
+  },
+  {
+    "name": "Schema",
+    "description": "📐 Schema management - Validate and manage custom graph schemas",
   },
   {
     "name": "Usage",

@@ -11,6 +11,8 @@ The MCP middleware:
 - Handles query validation and complexity management
 - Integrates with the Graph API for backend communication
 - Supports both shared repositories (SEC) and user graphs
+- Enables workspace management for isolated development environments
+- Provides data operation tools for staging, querying, and graph materialization
 
 ## Architecture
 
@@ -31,7 +33,9 @@ mcp/
     ├── elements_tool.py    # Element/taxonomy queries
     ├── facts_tool.py       # Financial fact queries
     ├── properties_tool.py  # Property discovery
-    └── example_queries_tool.py # Query examples and templates
+    ├── example_queries_tool.py # Query examples and templates
+    ├── workspace.py        # Workspace/subgraph management
+    └── data_tools.py       # Data operation tools (staging, materialization)
 ```
 
 ## Key Components
@@ -169,6 +173,99 @@ from robosystems.middleware.mcp.tools import ExampleQueriesTool
 tool = ExampleQueriesTool(client)
 examples = await tool.get_examples({
     "category": "financial_analysis"
+})
+```
+
+#### Workspace Tools (`workspace.py`)
+Manage workspaces (subgraphs) for isolated development and testing environments.
+
+**Available Operations:**
+- `create-workspace` - Create new workspace/subgraph
+- `delete-workspace` - Delete existing workspace
+- `list-workspaces` - List all workspaces for parent graph
+- `switch-workspace` - Switch active workspace context
+
+```python
+from robosystems.middleware.mcp.tools import CreateWorkspaceTool
+
+tool = CreateWorkspaceTool(client)
+result = await tool.execute({
+    "name": "dev",
+    "description": "Development workspace",
+    "fork_parent": False
+})
+```
+
+#### Data Operation Tools (`data_tools.py`)
+Tools for data ingestion, staging, and graph materialization workflows.
+
+##### Build Fact Grid Tool
+Construct multidimensional fact grids from graph data for analysis.
+
+```python
+from robosystems.middleware.mcp.tools import BuildFactGridTool
+
+tool = BuildFactGridTool(client)
+result = await tool.execute({
+    "elements": ["us-gaap:Assets", "us-gaap:Liabilities"],
+    "periods": ["2023-12-31", "2024-12-31"],
+    "dimensions": {},
+    "rows": [{"dimension": "element"}],
+    "columns": [{"dimension": "period"}]
+})
+```
+
+##### Ingest File Tool
+Upload and stage files in DuckDB for immediate querying before graph materialization.
+
+```python
+from robosystems.middleware.mcp.tools import IngestFileTool
+
+tool = IngestFileTool(client)
+result = await tool.execute({
+    "file_path": "/path/to/data.csv",
+    "table_name": "financial_data",
+    "ingest_to_graph": False
+})
+```
+
+##### Map Elements Tool
+Map Chart of Accounts elements to XBRL taxonomy elements (US-GAAP).
+
+```python
+from robosystems.middleware.mcp.tools import MapElementsTool
+
+tool = MapElementsTool(client)
+result = await tool.execute({
+    "structure_id": "mapping_123",
+    "source_elements": ["Revenue", "COGS"],
+    "target_taxonomy": "us-gaap"
+})
+```
+
+##### Query Staging Tool
+Execute SQL queries against DuckDB staging tables before materialization.
+
+```python
+from robosystems.middleware.mcp.tools import QueryStagingTool
+
+tool = QueryStagingTool(client)
+result = await tool.execute({
+    "sql": "SELECT * FROM financial_data WHERE amount > 1000",
+    "limit": 100
+})
+```
+
+##### Materialize Graph Tool
+Trigger materialization from DuckDB staging to Kuzu graph database.
+
+```python
+from robosystems.middleware.mcp.tools import MaterializeGraphTool
+
+tool = MaterializeGraphTool(client)
+result = await tool.execute({
+    "table_name": "financial_data",
+    "file_id": "optional_specific_file_id"
 })
 ```
 
