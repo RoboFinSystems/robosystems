@@ -58,7 +58,7 @@ class BuildFactGridTool:
           "include_summary": {
             "type": "boolean",
             "description": "Include summary statistics (count, total, avg, min, max) by element",
-            "default": false,
+            "default": False,
           },
         },
         "required": ["elements", "periods"],
@@ -191,7 +191,11 @@ class BuildFactGridTool:
       }
 
       # Optionally include summary statistics
-      if include_summary and fact_grid.facts_df is not None and not fact_grid.facts_df.empty:
+      if (
+        include_summary
+        and fact_grid.facts_df is not None
+        and not fact_grid.facts_df.empty
+      ):
         df = fact_grid.facts_df
         if "element_name" in df.columns and "value" in df.columns:
           summary = {}

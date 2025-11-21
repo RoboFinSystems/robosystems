@@ -267,10 +267,10 @@ class TestKuzuMCPTools:
     tools = KuzuMCPTools(mock_kuzu_client)
     definitions = tools.get_tool_definitions_as_dict()
 
-    # Should have all tools: base tools (5-6) + workspace tools (4) + data tools (5) = 14-15
+    # Should have all tools: base tools (5-6) + workspace tools (4) + data tools (1) = 10-11
     # Element discovery is conditional based on graph type/schema
-    assert len(definitions) >= 14
-    assert len(definitions) <= 15
+    assert len(definitions) >= 10
+    assert len(definitions) <= 11
 
     # Check example queries tool
     example_tool = next(t for t in definitions if t["name"] == "get-example-queries")
@@ -443,23 +443,31 @@ class TestKuzuMCPTools:
 
     tools = KuzuMCPTools(mock_kuzu_client)
 
-    with patch(
-      "robosystems.graph_api.client.factory.get_graph_client"
-    ) as mock_client_factory:
-      mock_client = AsyncMock()
-      mock_client_factory.return_value = mock_client
-      mock_client.query_table.return_value = {
-        "columns": ["test"],
-        "rows": [[1]],
-        "execution_time_ms": 10,
-      }
+    with patch("robosystems.middleware.graph.get_universal_repository") as mock_repo:
+      mock_repository = AsyncMock()
+      mock_repo.return_value = mock_repository
+      mock_repository.execute_query.return_value = [
+        {
+          "element_id": "test:Element",
+          "element_name": "Cash",
+          "period_end": "2025-01-01",
+          "value": 1000.0,
+          "unit": "USD",
+          "dimension_member": None,
+        }
+      ]
 
       result = await tools.call_tool(
-        "query-staging", {"sql": "SELECT 1 as test"}, return_raw=True
+        "build-fact-grid",
+        {
+          "elements": ["test:Element"],
+          "periods": ["2025-01-01"],
+        },
+        return_raw=True,
       )
 
     assert result["success"] is True
-    assert result["row_count"] == 1
+    assert result["fact_count"] == 1
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -484,9 +492,9 @@ class TestKuzuMCPTools:
 
     tools = KuzuMCPTools(mock_kuzu_client)
 
-    result = await tools.call_tool("query-staging", {}, return_raw=True)
+    result = await tools.call_tool("build-fact-grid", {}, return_raw=True)
 
-    assert result["error"] == "missing_sql"
+    assert result["error"] == "missing_elements"
 
 
 class TestKuzuMCPConfigurableSchema:
