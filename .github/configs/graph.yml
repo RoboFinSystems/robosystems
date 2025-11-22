@@ -1,11 +1,11 @@
 # Graph Database Deployment Configuration
 # This file defines all graph database writer configurations for both environments
 #
-# ARCHITECTURE: Kuzu-only graph tier system
-# - All tiers use Kuzu backend (embedded graph database)
+# ARCHITECTURE: LadybugDB-only graph tier system
+# - All tiers use LadybugDB backend (embedded graph database)
 # - Tiers differentiated by: instance isolation, subgraph support, resource allocation
 # - Platform metadata stored in PostgreSQL, graphs contain only business data
-# - Supports "MotherDuck for Graphs" pattern: DuckDB staging → Kuzu materialization
+# - Supports "MotherDuck for Graphs" pattern: DuckDB staging → LadybugDB materialization
 #
 # TIER PHILOSOPHY:
 # - Standard: Multi-tenant, single database, cost-efficient entry
@@ -16,13 +16,13 @@
 production:
   writers:
     # =========================================================================
-    # KUZU STANDARD TIER - Multi-tenant
+    # LADYBUGDB STANDARD TIER - Multi-tenant
     # =========================================================================
-    - name: kuzu-standard
-      description: Multi-tenant Kuzu tier for cost-efficient entry (scalable instance size)
-      backend: kuzu
-      stack_suffix: KuzuStandard
-      tier: kuzu-standard
+    - name: ladybug-standard
+      description: Multi-tenant LadybugDB tier for cost-efficient entry (scalable instance size)
+      backend: ladybug
+      stack_suffix: LadybugStandard
+      tier: ladybug-standard
 
       # Subgraph configuration
       max_subgraphs: 0 # Single database only, no subgraph support
@@ -53,7 +53,7 @@ production:
         max_memory_mb: 14336 # 14GB available (16GB - 2GB OS overhead)
         memory_per_db_mb: 2048 # 2GB per database (intentional oversubscription for cost efficiency)
 
-        # Kuzu-specific performance settings
+        # LadybugDB-specific performance settings
         chunk_size: 1000 # Batch operation chunk size
         query_timeout: 30 # Query timeout in seconds
         max_query_length: 10000 # Maximum query size in characters
@@ -62,18 +62,18 @@ production:
 
       # Deployment configuration
       deployment:
-        enable_var: KUZU_STANDARD_ENABLED_PROD
+        enable_var: LBUG_STANDARD_ENABLED_PROD
         enabled_default: true
-        always_enabled: true # Kuzu standard tier is the foundation - always available
+        always_enabled: true # LadybugDB standard tier is the foundation - always available
 
     # =========================================================================
-    # KUZU LARGE TIER - Dedicated r7g.large
+    # LADYBUGDB LARGE TIER - Dedicated r7g.large
     # =========================================================================
-    - name: kuzu-large
+    - name: ladybug-large
       description: Dedicated r7g.large with subgraph support (10 subgraphs)
-      backend: kuzu
-      stack_suffix: KuzuLarge
-      tier: kuzu-large
+      backend: ladybug
+      stack_suffix: LadybugLarge
+      tier: ladybug-large
 
       # Subgraph configuration
       max_subgraphs: 10 # Support up to 10 subgraphs (1 parent + 10 children = 11 databases total)
@@ -105,7 +105,7 @@ production:
         memory_per_db_mb: 1300 # ~1.3GB average per database (14GB / 11 databases)
         # Note: Memory is dynamically shared among parent and subgraphs
 
-        # Kuzu-specific performance settings
+        # LadybugDB-specific performance settings
         chunk_size: 1500 # Larger chunks for better performance
         query_timeout: 60 # 60 second timeout for complex queries
         max_query_length: 25000 # Support more complex queries
@@ -114,17 +114,17 @@ production:
 
       # Deployment configuration
       deployment:
-        enable_var: KUZU_LARGE_ENABLED_PROD
+        enable_var: LBUG_LARGE_ENABLED_PROD
         enabled_default: false
 
     # =========================================================================
-    # KUZU XLARGE TIER - Dedicated r7g.xlarge
+    # LADYBUGDB XLARGE TIER - Dedicated r7g.xlarge
     # =========================================================================
-    - name: kuzu-xlarge
+    - name: ladybug-xlarge
       description: Dedicated r7g.xlarge with maximum subgraph support (25 subgraphs)
-      backend: kuzu
-      stack_suffix: KuzuXlarge
-      tier: kuzu-xlarge
+      backend: ladybug
+      stack_suffix: LadybugXlarge
+      tier: ladybug-xlarge
 
       # Subgraph configuration
       max_subgraphs: 25 # Practical limit of 25 subgraphs (marketed as "unlimited")
@@ -157,7 +157,7 @@ production:
         memory_per_db_mb: 1180 # ~1.2GB average per database (30GB / 26 databases)
         # Note: Memory is dynamically shared, some databases can use more when needed
 
-        # Kuzu-specific performance settings
+        # LadybugDB-specific performance settings
         chunk_size: 2000 # Maximum chunk size for best performance
         query_timeout: 120 # 2 minute timeout for complex analytical queries
         max_query_length: 50000 # Support very complex queries
@@ -166,17 +166,17 @@ production:
 
       # Deployment configuration
       deployment:
-        enable_var: KUZU_XLARGE_ENABLED_PROD
+        enable_var: LBUG_XLARGE_ENABLED_PROD
         enabled_default: false
 
     # =========================================================================
-    # KUZU SHARED TIER - Public Data Repositories
+    # LADYBUGDB SHARED TIER - Public Data Repositories
     # =========================================================================
-    - name: kuzu-shared
-      description: Shared public data repositories (SEC, industry, economic) - Kuzu backend
-      backend: kuzu
-      stack_suffix: KuzuShared
-      tier: kuzu-shared
+    - name: ladybug-shared
+      description: Shared public data repositories (SEC, industry, economic) - LadybugDB backend
+      backend: ladybug
+      stack_suffix: LadybugShared
+      tier: ladybug-shared
 
       # Repository configuration
       shared_repositories: "sec,industry,economic" # Comma-separated list of public repositories
@@ -209,7 +209,7 @@ production:
         max_memory_mb: 14336 # 14GB available for repository
         memory_per_db_mb: 14336 # Full instance memory for single repository
 
-        # Kuzu-specific performance settings (optimized for read-heavy analytical queries)
+        # LadybugDB-specific performance settings (optimized for read-heavy analytical queries)
         chunk_size: 2500 # Large chunks for bulk operations
         query_timeout: 300 # 5 minute timeout for complex analytical queries on public data
         max_query_length: 100000 # Very large queries supported for analytics
@@ -218,7 +218,7 @@ production:
 
       # Deployment configuration
       deployment:
-        enable_var: KUZU_SHARED_ENABLED_PROD
+        enable_var: LBUG_SHARED_ENABLED_PROD
         enabled_default: true
 
     # =========================================================================
@@ -328,13 +328,13 @@ production:
 staging:
   writers:
     # =========================================================================
-    # KUZU STANDARD TIER - Staging (reduced resources)
+    # LADYBUGDB STANDARD TIER - Staging (reduced resources)
     # =========================================================================
-    - name: kuzu-standard
-      description: Multi-tenant Kuzu tier for staging (reduced resources)
-      backend: kuzu
-      stack_suffix: KuzuStandard
-      tier: kuzu-standard
+    - name: ladybug-standard
+      description: Multi-tenant LadybugDB tier for staging (reduced resources)
+      backend: ladybug
+      stack_suffix: LadybugStandard
+      tier: ladybug-standard
 
       max_subgraphs: 0
       api_rate_multiplier: 1.0
@@ -365,18 +365,18 @@ staging:
         connection_pool_size: 10
 
       deployment:
-        enable_var: KUZU_STANDARD_ENABLED_STAGING
+        enable_var: LBUG_STANDARD_ENABLED_STAGING
         enabled_default: true
         always_enabled: true
 
     # =========================================================================
-    # KUZU LARGE TIER - Staging (testing subgraph features)
+    # LADYBUGDB LARGE TIER - Staging (testing subgraph features)
     # =========================================================================
-    - name: kuzu-large
+    - name: ladybug-large
       description: Dedicated r7g.medium with subgraph support for staging (10 subgraphs)
-      backend: kuzu
-      stack_suffix: KuzuLarge
-      tier: kuzu-large
+      backend: ladybug
+      stack_suffix: LadybugLarge
+      tier: ladybug-large
 
       max_subgraphs: 10
       api_rate_multiplier: 2.5
@@ -405,17 +405,56 @@ staging:
         connection_pool_size: 15
 
       deployment:
-        enable_var: KUZU_LARGE_ENABLED_STAGING
+        enable_var: LBUG_LARGE_ENABLED_STAGING
         enabled_default: false
 
     # =========================================================================
-    # KUZU SHARED TIER - Staging (testing public repositories)
+    # LADYBUGDB XLARGE TIER - Staging (testing advanced subgraph features)
     # =========================================================================
-    - name: kuzu-shared
-      description: Shared repositories for staging environment (Kuzu backend)
-      backend: kuzu
-      stack_suffix: KuzuShared
-      tier: kuzu-shared
+    - name: ladybug-xlarge
+      description: Dedicated r7g.large with maximum subgraph support for staging (25 subgraphs)
+      backend: ladybug
+      stack_suffix: LadybugXlarge
+      tier: ladybug-xlarge
+
+      max_subgraphs: 25
+      api_rate_multiplier: 5.0
+
+      copy_operations:
+        max_file_size_gb: 5.0
+        timeout_seconds: 1800
+        concurrent_operations: 3
+        max_files_per_operation: 1000
+        daily_copy_operations: 100
+
+      backup_limits:
+        max_backup_size_gb: 100
+        backup_retention_days: 30
+        max_backups_per_day: 10
+
+      instance:
+        type: r7g.large # Use r7g.large instead of xlarge for staging cost savings
+        databases_per_instance: 1
+        max_memory_mb: 14336 # 14GB total (16GB - 2GB OS)
+        memory_per_db_mb: 550 # ~550MB per database (14GB / 26 databases)
+        chunk_size: 1500
+        query_timeout: 120
+        max_query_length: 50000
+        ingestion_batch_size: 3000
+        connection_pool_size: 30
+
+      deployment:
+        enable_var: LBUG_XLARGE_ENABLED_STAGING
+        enabled_default: false
+
+    # =========================================================================
+    # LADYBUGDB SHARED TIER - Staging (testing public repositories)
+    # =========================================================================
+    - name: ladybug-shared
+      description: Shared repositories for staging environment (LadybugDB backend)
+      backend: ladybug
+      stack_suffix: LadybugShared
+      tier: ladybug-shared
 
       shared_repositories: "sec" # Only SEC in staging for testing
       max_subgraphs: null
@@ -445,7 +484,7 @@ staging:
         connection_pool_size: 50
 
       deployment:
-        enable_var: KUZU_SHARED_ENABLED_STAGING
+        enable_var: LBUG_SHARED_ENABLED_STAGING
         enabled_default: true
 
     # =========================================================================
@@ -537,13 +576,13 @@ staging:
 development:
   writers:
     # =========================================================================
-    # KUZU STANDARD TIER - Development (subgraphs enabled for testing)
+    # LADYBUGDB STANDARD TIER - Development (subgraphs enabled for testing)
     # =========================================================================
-    - name: kuzu-standard
-      description: Kuzu standard tier for local development with subgraph support
-      backend: kuzu
-      stack_suffix: KuzuDev
-      tier: kuzu-standard
+    - name: ladybug-standard
+      description: LadybugDB standard tier for local development with subgraph support
+      backend: ladybug
+      stack_suffix: LadybugDev
+      tier: ladybug-standard
 
       max_subgraphs: 2
       api_rate_multiplier: 1.0

@@ -22,7 +22,7 @@ class AdmissionDecision(str, Enum):
   REJECT_CONNECTIONS = "reject_connections"
 
 
-class KuzuAdmissionController:
+class LadybugAdmissionController:
   """
   Admission controller for Graph API server.
 
@@ -38,7 +38,7 @@ class KuzuAdmissionController:
     check_interval: float = 1.0,
   ):
     """
-    Initialize Kuzu admission controller.
+    Initialize LadybugDB admission controller.
 
     Args:
         memory_threshold: Max memory usage percent before rejecting
@@ -60,7 +60,7 @@ class KuzuAdmissionController:
     self._connections_per_db: dict[str, int] = {}
 
     logger.info(
-      f"KuzuAdmissionController initialized - Memory: {memory_threshold}%, "
+      f"LadybugAdmissionController initialized - Memory: {memory_threshold}%, "
       f"CPU: {cpu_threshold}%, Max connections/DB: {max_connections_per_db}"
     )
 
@@ -161,20 +161,20 @@ class KuzuAdmissionController:
 
 
 # Global admission controller instance
-_admission_controller: Optional[KuzuAdmissionController] = None
+_admission_controller: Optional[LadybugAdmissionController] = None
 
 
-def get_admission_controller() -> KuzuAdmissionController:
+def get_admission_controller() -> LadybugAdmissionController:
   """Get or create the global admission controller."""
   global _admission_controller
   if _admission_controller is None:
     from robosystems.config import env
 
     # Use centralized config (which handles env vars and defaults properly)
-    _admission_controller = KuzuAdmissionController(
-      memory_threshold=env.KUZU_ADMISSION_MEMORY_THRESHOLD,
-      cpu_threshold=env.KUZU_ADMISSION_CPU_THRESHOLD,
-      max_connections_per_db=env.KUZU_MAX_CONNECTIONS_PER_DB,
+    _admission_controller = LadybugAdmissionController(
+      memory_threshold=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
+      cpu_threshold=env.LBUG_ADMISSION_CPU_THRESHOLD,
+      max_connections_per_db=env.LBUG_MAX_CONNECTIONS_PER_DB,
     )
 
   return _admission_controller

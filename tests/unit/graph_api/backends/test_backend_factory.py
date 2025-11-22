@@ -1,22 +1,22 @@
 import pytest
-from robosystems.graph_api.backends import get_backend, KuzuBackend, Neo4jBackend
+from robosystems.graph_api.backends import get_backend, LadybugBackend, Neo4jBackend
 
 
-def test_backend_factory_kuzu(monkeypatch, tmp_path):
+def test_backend_factory_lbug(monkeypatch, tmp_path):
   from unittest.mock import MagicMock
 
-  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "kuzu")
+  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "ladybug")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
 
   # Mock the global ConnectionPool
   mock_pool = MagicMock()
   monkeypatch.setattr(
-    "robosystems.graph_api.backends.kuzu.get_connection_pool", lambda: mock_pool
+    "robosystems.graph_api.backends.lbug.get_connection_pool", lambda: mock_pool
   )
 
   backend = get_backend()
 
-  assert isinstance(backend, KuzuBackend)
+  assert isinstance(backend, LadybugBackend)
   assert backend.connection_pool is mock_pool
 
 
@@ -66,13 +66,13 @@ def test_backend_factory_invalid_type(monkeypatch):
 def test_backend_factory_singleton(monkeypatch, tmp_path):
   from unittest.mock import MagicMock
 
-  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "kuzu")
+  monkeypatch.setenv("GRAPH_BACKEND_TYPE", "ladybug")
   monkeypatch.setattr("robosystems.graph_api.backends._backend_instance", None)
 
   # Mock the global ConnectionPool
   mock_pool = MagicMock()
   monkeypatch.setattr(
-    "robosystems.graph_api.backends.kuzu.get_connection_pool", lambda: mock_pool
+    "robosystems.graph_api.backends.lbug.get_connection_pool", lambda: mock_pool
   )
 
   backend1 = get_backend()

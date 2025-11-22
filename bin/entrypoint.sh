@@ -136,32 +136,32 @@ case $DOCKER_PROFILE in
       -s /tmp/celerybeat-schedule \
       --pidfile=/tmp/celerybeat.pid
     ;;
-  "kuzu-writer")
-    echo "Starting Kuzu Writer API..."
+  "lbug-writer")
+    echo "Starting LadybugDB Writer API..."
     # max-databases will be loaded from tier configuration based on CLUSTER_TIER
     exec uv run python -m robosystems.graph_api \
       --node-type writer \
       --repository-type entity \
-      --port ${KUZU_PORT:-8001} \
-      --base-path ${KUZU_DATABASE_PATH:-/app/data/kuzu-dbs}
+      --port ${LBUG_PORT:-8001} \
+      --base-path ${LBUG_DATABASE_PATH:-/app/data/lbug-dbs}
     ;;
-  "kuzu-shared-writer")
-    # Determine if this is a master or replica based on KUZU_ROLE
-    if [[ "${KUZU_ROLE:-master}" == "replica" ]]; then
-      echo "Starting Kuzu Shared Replica API..."
-      KUZU_NODE_TYPE="shared_replica"
+  "lbug-shared-writer")
+    # Determine if this is a master or replica based on LBUG_ROLE
+    if [[ "${LBUG_ROLE:-master}" == "replica" ]]; then
+      echo "Starting LadybugDB Shared Replica API..."
+      LBUG_NODE_TYPE="shared_replica"
       READONLY_FLAG="--read-only"
     else
-      echo "Starting Kuzu Shared Master API..."
-      KUZU_NODE_TYPE="shared_master"
+      echo "Starting LadybugDB Shared Master API..."
+      LBUG_NODE_TYPE="shared_master"
       READONLY_FLAG=""
     fi
     # max-databases will be loaded from tier configuration based on CLUSTER_TIER
     exec uv run python -m robosystems.graph_api \
-      --node-type ${KUZU_NODE_TYPE} \
+      --node-type ${LBUG_NODE_TYPE} \
       --repository-type shared \
-      --port ${KUZU_PORT:-8002} \
-      --base-path ${KUZU_DATABASE_PATH:-/app/data/kuzu-dbs} \
+      --port ${LBUG_PORT:-8002} \
+      --base-path ${LBUG_DATABASE_PATH:-/app/data/lbug-dbs} \
       ${READONLY_FLAG}
     ;;
   "neo4j-writer")

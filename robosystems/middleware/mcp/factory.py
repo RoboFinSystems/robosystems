@@ -1,7 +1,7 @@
 """
-Factory module for creating Kuzu MCP clients.
+Factory module for creating Graph MCP clients.
 
-This module provides factory functions for creating KuzuMCPClient instances
+This module provides factory functions for creating GraphMCPClient instances
 with proper configuration and environment discovery.
 """
 
@@ -10,22 +10,22 @@ from contextlib import asynccontextmanager
 
 from robosystems.logger import logger
 from robosystems.config import env
-from .client import KuzuMCPClient
+from .client import GraphMCPClient
 from .pool import get_connection_pool
 
 
-async def create_kuzu_mcp_client(
+async def create_graph_mcp_client(
   graph_id: str = "sec", api_base_url: Optional[str] = None
-) -> KuzuMCPClient:
+) -> GraphMCPClient:
   """
-  Create a Kuzu MCP client with environment-based configuration and timeout controls.
+  Create a Graph MCP client with environment-based configuration and timeout controls.
 
   Args:
       graph_id: Graph database identifier
       api_base_url: Override API URL (uses env var if None)
 
   Returns:
-      Configured KuzuMCPClient instance with appropriate timeouts
+      Configured GraphMCPClient instance with appropriate timeouts
   """
   # If URL not provided, use GraphClientFactory to discover the proper endpoint
   if not api_base_url:
@@ -42,17 +42,17 @@ async def create_kuzu_mcp_client(
     # The factory handles routing appropriately:
     # - Shared repos: Routes to shared_master/shared_replica infrastructure
     # - User graphs: Looks up the tier from the database
-    kuzu_client = await GraphClientFactory.create_client(
+    graph_client = await GraphClientFactory.create_client(
       graph_id=graph_id, operation_type=operation_type
     )
 
     # Extract the base URL from the client
-    if hasattr(kuzu_client, "config") and hasattr(kuzu_client.config, "base_url"):
-      api_base_url = kuzu_client.config.base_url
-    elif hasattr(kuzu_client, "_base_url"):
-      api_base_url = kuzu_client._base_url
-    elif hasattr(kuzu_client, "base_url"):
-      api_base_url = kuzu_client.base_url
+    if hasattr(graph_client, "config") and hasattr(graph_client.config, "base_url"):
+      api_base_url = graph_client.config.base_url
+    elif hasattr(graph_client, "_base_url"):
+      api_base_url = graph_client._base_url
+    elif hasattr(graph_client, "base_url"):
+      api_base_url = graph_client.base_url
     else:
       # Fallback to environment variable
       api_base_url = env.GRAPH_API_URL or "http://localhost:8001"
@@ -72,7 +72,7 @@ async def create_kuzu_mcp_client(
     env.GRAPH_MAX_QUERY_LENGTH if hasattr(env, "GRAPH_MAX_QUERY_LENGTH") else 50000
   )  # 50KB queries max
 
-  return KuzuMCPClient(
+  return GraphMCPClient(
     api_base_url=api_base_url,
     graph_id=graph_id,
     timeout=timeout,
@@ -82,11 +82,11 @@ async def create_kuzu_mcp_client(
 
 
 @asynccontextmanager
-async def acquire_kuzu_mcp_client(
+async def acquire_graph_mcp_client(
   graph_id: str = "sec", api_base_url: Optional[str] = None, use_pool: bool = True
 ):
   """
-  Acquire a Kuzu MCP client from the connection pool.
+  Acquire a Graph MCP client from the connection pool.
 
   This is the preferred method for getting MCP clients as it reuses
   connections to reduce initialization overhead.
@@ -97,10 +97,10 @@ async def acquire_kuzu_mcp_client(
       use_pool: Whether to use connection pooling (default: True)
 
   Yields:
-      Configured KuzuMCPClient instance
+      Configured GraphMCPClient instance
 
   Example:
-      async with acquire_kuzu_mcp_client("sec") as client:
+      async with acquire_graph_mcp_client("sec") as client:
           result = await client.execute_query("MATCH (n) RETURN n LIMIT 1")
   """
   if use_pool:
@@ -110,7 +110,7 @@ async def acquire_kuzu_mcp_client(
       yield client
   else:
     # Create a new client without pooling (for testing or special cases)
-    client = await create_kuzu_mcp_client(graph_id, api_base_url)
+    client = await create_graph_mcp_client(graph_id, api_base_url)
     try:
       yield client
     finally:

@@ -2,7 +2,7 @@
 Graph API Client - Async client for graph database access.
 
 This module provides an asynchronous client for interacting with graph database
-backends (Kuzu and Neo4j) via the Graph API.
+backends via the Graph API with multi-backend support.
 """
 
 from .client import GraphClient

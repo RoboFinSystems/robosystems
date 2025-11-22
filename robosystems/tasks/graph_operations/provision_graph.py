@@ -79,7 +79,7 @@ def provision_graph_task(
 
     # Determine graph type and prepare appropriate task data
     graph_type = graph_config.get("graph_type", "generic")
-    tier = graph_config.get("tier", "kuzu-standard")
+    tier = graph_config.get("tier", "ladybug-standard")
 
     # Validate tier against subscription plan to prevent tier mismatch exploits
     if tier != subscription.plan_name:
@@ -130,7 +130,7 @@ def provision_graph_task(
       entity_data = {
         **initial_entity,
         "graph_tier": tier,
-        "subscription_tier": "kuzu-standard",
+        "subscription_tier": "ladybug-standard",
         "extensions": graph_config.get("schema_extensions", []),
         "graph_name": graph_config.get("graph_name"),
         "graph_description": graph_config.get("description"),

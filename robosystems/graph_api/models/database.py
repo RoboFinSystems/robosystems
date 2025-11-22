@@ -57,7 +57,7 @@ class BackupRequest(BaseModel):
 
   backup_format: str = Field(
     default="full_dump",
-    description="Backup format: 'full_dump' (complete .kuzu database file)",
+    description="Backup format: 'full_dump' (complete .lbug database file)",
     pattern="^full_dump$",  # Only allow full_dump for now
   )
   include_metadata: bool = Field(
@@ -128,9 +128,9 @@ class DatabaseCreateRequest(BaseModel):
     description="Whether this is a subgraph (bypasses max_databases check for higher tiers)",
   )
   tenant_tier: str = Field(
-    default="kuzu-standard",
+    default="ladybug-standard",
     description="Tenant tier affecting resource allocation",
-    pattern=r"^(free|kuzu-standard|kuzu-large|kuzu-xlarge|kuzu-shared|neo4j-community-large|neo4j-enterprise-xlarge)$",
+    pattern=r"^(free|ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared|neo4j-community-large|neo4j-enterprise-xlarge)$",
   )
 
 

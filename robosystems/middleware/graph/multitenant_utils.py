@@ -101,7 +101,7 @@ class MultiTenantUtils:
       raise ValueError("graph_id cannot start or end with underscore")
 
     # Check for reserved names
-    reserved_names = {"system", "kuzu", "default", "sec"}
+    reserved_names = {"system", "ladybug", "default", "sec"}
     if graph_id.lower() in reserved_names:
       raise ValueError(f"graph_id '{graph_id}' is a reserved name")
 
@@ -167,7 +167,7 @@ class MultiTenantUtils:
     Check if the current number of databases exceeds the configured limit.
 
     Currently implemented as a no-op. Database limits are enforced at the
-    instance level based on KUZU_MAX_DATABASES_PER_NODE.
+    instance level based on LBUG_MAX_DATABASES_PER_NODE.
 
     Raises:
         RuntimeError: If database limit would be exceeded (future implementation)
@@ -504,11 +504,11 @@ class MultiTenantUtils:
     Returns:
         AccessPattern: The access pattern to use
     """
-    pattern = env.KUZU_ACCESS_PATTERN.lower()
+    pattern = env.LBUG_ACCESS_PATTERN.lower()
     try:
       return AccessPattern(pattern)
     except ValueError:
-      logger.warning(f"Invalid KUZU_ACCESS_PATTERN: {pattern}, using api_auto")
+      logger.warning(f"Invalid LBUG_ACCESS_PATTERN: {pattern}, using api_auto")
       return AccessPattern.API_AUTO
 
   @staticmethod
@@ -519,23 +519,23 @@ class MultiTenantUtils:
     Returns:
         int: Maximum databases per node
     """
-    return env.KUZU_MAX_DATABASES_PER_NODE
+    return env.LBUG_MAX_DATABASES_PER_NODE
 
   @staticmethod
   def get_database_path_for_graph(graph_id: str) -> str:
     """
-    Get the database file path for a graph (Kuzu 0.11.x single-file format).
+    Get the database file path for a graph (LadybugDB single-file format).
 
     Args:
         graph_id: Graph identifier
 
     Returns:
-        str: Database file path (.kuzu extension)
+        str: Database file path (.lbug extension)
     """
-    from ...operations.kuzu.path_utils import get_kuzu_database_path
+    from ...operations.lbug.path_utils import get_lbug_database_path
 
     # Use the centralized path utility for consistent handling
-    db_path = get_kuzu_database_path(graph_id)
+    db_path = get_lbug_database_path(graph_id)
     return str(db_path)
 
   @staticmethod
@@ -570,7 +570,7 @@ class MultiTenantUtils:
       "access_pattern": MultiTenantUtils.get_access_pattern().value,
       "max_databases_per_node": MultiTenantUtils.get_max_databases_per_node(),
       "shared_repositories": {
-        "sec_engine": "kuzu",
+        "sec_engine": "ladybug",
       },
       "environment": env.ENVIRONMENT,
     }
@@ -581,7 +581,7 @@ class MultiTenantUtils:
 
   @staticmethod
   async def ensure_database_with_schema(
-    kuzu_url: str,
+    graph_url: str,
     db_name: str,
     schema_name: str,
     api_key: Optional[str] = None,
@@ -591,7 +591,7 @@ class MultiTenantUtils:
     Ensure database exists with proper schema.
 
     Args:
-        kuzu_url: Graph API endpoint URL
+        graph_url: Graph API endpoint URL
         db_name: Database name to create
         schema_name: Schema name to apply (e.g., "sec", "entity")
         api_key: Optional API key for authentication
@@ -609,7 +609,7 @@ class MultiTenantUtils:
     if api_key:
       headers["Authorization"] = f"Bearer {api_key}"
 
-    async with GraphClient(base_url=kuzu_url, headers=headers) as client:
+    async with GraphClient(base_url=graph_url, headers=headers) as client:
       # Check if database already exists
       try:
         db_info = await client.get_database_info(db_name)
@@ -620,7 +620,7 @@ class MultiTenantUtils:
         if "not found" in str(e).lower():
           logger.info(f"Database {db_name} not found, will create")
         else:
-          logger.error(f"KuzuClient error checking database: {e}")
+          logger.error(f"LadybugClient error checking database: {e}")
           raise RuntimeError(f"Failed to check database existence: {e}")
       except HTTPStatusError as e:
         if e.response.status_code == 404:
@@ -696,7 +696,7 @@ class MultiTenantUtils:
 
   @staticmethod
   def ensure_database_with_schema_sync(
-    kuzu_url: str,
+    graph_url: str,
     db_name: str,
     schema_name: str,
     api_key: Optional[str] = None,
@@ -706,7 +706,7 @@ class MultiTenantUtils:
     Synchronous wrapper for ensure_database_with_schema.
 
     Args:
-        kuzu_url: Graph API endpoint URL
+        graph_url: Graph API endpoint URL
         db_name: Database name to create
         schema_name: Schema name to apply
         api_key: Optional API key for authentication
@@ -721,7 +721,7 @@ class MultiTenantUtils:
     try:
       return loop.run_until_complete(
         MultiTenantUtils.ensure_database_with_schema(
-          kuzu_url=kuzu_url, db_name=db_name, schema_name=schema_name, api_key=api_key
+          graph_url=graph_url, db_name=db_name, schema_name=schema_name, api_key=api_key
         )
       )
     finally:

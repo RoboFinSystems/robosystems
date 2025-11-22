@@ -8,7 +8,7 @@ import re
 import time
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-import kuzu
+import real_ladybug as lbug
 from .base import GraphEngineInterface, GraphOperation
 from robosystems.logger import logger, log_db_query, log_app_error
 from robosystems.config import env
@@ -54,12 +54,12 @@ class Engine(GraphEngineInterface):
 
   @property
   def conn(self):
-    """Get the Kuzu connection object."""
+    """Get the LadybugDB connection object."""
     return self._conn
 
   @property
   def db(self):
-    """Get the Kuzu database object."""
+    """Get the LadybugDB database object."""
     return self._db
 
   def _connect(self) -> None:
@@ -77,13 +77,13 @@ class Engine(GraphEngineInterface):
 
       # Create database with auto_checkpoint enabled
       # This is CRITICAL for ensuring data is visible after ingestion
-      self._db = kuzu.Database(
+      self._db = lbug.Database(
         self.database_path,
         read_only=self.read_only,
         auto_checkpoint=True,
         checkpoint_threshold=checkpoint_threshold,
       )
-      self._conn = kuzu.Connection(self._db)
+      self._conn = lbug.Connection(self._db)
       logger.info(f"Successfully connected to graph database: {self.database_path}")
     except Exception as e:
       logger.error(f"Failed to connect to graph database {self.database_path}: {e}")
@@ -149,7 +149,7 @@ class Engine(GraphEngineInterface):
       # Validate parameters before execution
       self._validate_parameters(params)
 
-      # Use Kuzu's native parameter binding (much safer than string substitution)
+      # Use LadybugDB's native parameter binding (much safer than string substitution)
       if params:
         logger.debug(f"Executing query with {len(params)} parameters")
         result = self._conn.execute(cypher, params)
@@ -180,7 +180,7 @@ class Engine(GraphEngineInterface):
       # Use structured error logging
       log_app_error(
         error=e,
-        component="kuzu_engine",
+        component="lbug_engine",
         action="execute_query",
         error_category="database",
         metadata={
@@ -228,7 +228,7 @@ class Engine(GraphEngineInterface):
     Raises:
         QueryError: If parameters are invalid
 
-    NOTE: With native parameter binding, Kuzu handles type conversion and escaping,
+    NOTE: With native parameter binding, LadybugDB handles type conversion and escaping,
     but we still validate for reasonable limits and basic security.
     """
     if not params:
@@ -316,7 +316,7 @@ class Engine(GraphEngineInterface):
     """
     Execute multiple operations in a single transaction.
 
-    Note: Kuzu doesn't have explicit transactions like traditional databases, but we can
+    Note: LadybugDB doesn't have explicit transactions like traditional databases, but we can
     simulate this by executing operations sequentially and rolling back
     on failure.
 
@@ -342,7 +342,7 @@ class Engine(GraphEngineInterface):
     except Exception as e:
       logger.error(f"Graph transaction failed: {e}")
       logger.error(f"Operations: {[op.description for op in operations]}")
-      # Note: Kuzu doesn't support rollback like traditional databases
+      # Note: LadybugDB doesn't support rollback like traditional databases
       raise
 
   def health_check(self) -> Dict[str, Any]:
@@ -356,7 +356,7 @@ class Engine(GraphEngineInterface):
       result = self.execute_single("RETURN 1 as test")
       return {
         "database": self.database_path,
-        "engine": "kuzu",
+        "engine": "ladybug",
         "status": "healthy",
         "test_result": result["test"] if result else None,
         "read_only": self.read_only,
@@ -364,7 +364,7 @@ class Engine(GraphEngineInterface):
     except Exception as e:
       return {
         "database": self.database_path,
-        "engine": "kuzu",
+        "engine": "ladybug",
         "status": "unhealthy",
         "error": str(e),
       }
@@ -382,7 +382,7 @@ class Engine(GraphEngineInterface):
     except Exception as e:
       logger.warning(f"Error closing graph connection: {e}")
 
-  # NOTE: _format_query_with_params method removed - we now use Kuzu's native parameter binding
+  # NOTE: _format_query_with_params method removed - we now use LadybugDB's native parameter binding
   # which is much safer than manual string substitution and prevents injection attacks
 
   def _convert_result_to_dict_list(self, result) -> List[Dict[str, Any]]:

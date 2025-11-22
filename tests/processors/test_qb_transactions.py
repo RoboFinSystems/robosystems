@@ -1,4 +1,4 @@
-"""Tests for QuickBooks integration with Kuzu database."""
+"""Tests for QuickBooks integration with LadybugDB database."""
 
 import pytest
 from unittest.mock import Mock, patch
@@ -29,7 +29,7 @@ def sample_qb_entity_data():
 
 
 class TestQBClientIntegration:
-  """Test QuickBooks client integration with Kuzu database."""
+  """Test QuickBooks client integration with LadybugDB database."""
 
   @patch("robosystems.adapters.qb.AuthClient")
   @patch("robosystems.adapters.qb.QuickBooks")
@@ -85,14 +85,14 @@ class TestQBClientIntegration:
 
 
 class TestQBDataIntegration:
-  """Test integration of QuickBooks data with Kuzu database."""
+  """Test integration of QuickBooks data with LadybugDB database."""
 
   def test_entity_data_mapping(
-    self, kuzu_repository_with_schema, sample_qb_entity_data
+    self, lbug_repository_with_schema, sample_qb_entity_data
   ):
-    """Test mapping QuickBooks entity data to Kuzu database."""
+    """Test mapping QuickBooks entity data to LadybugDB database."""
     # Create QB-specific entity schema with extended fields
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE NODE TABLE QBEntity(
         identifier STRING,
         name STRING,
@@ -122,7 +122,7 @@ class TestQBDataIntegration:
       "updated_at": "2023-01-01 00:00:00",
     }
 
-    # Store in Kuzu database
+    # Store in LadybugDB database
     cypher = """
     CREATE (c:QBEntity {
       identifier: $identifier,
@@ -138,7 +138,7 @@ class TestQBDataIntegration:
     }) RETURN c
     """
 
-    result = kuzu_repository_with_schema.execute_single(cypher, entity_data)
+    result = lbug_repository_with_schema.execute_single(cypher, entity_data)
     assert result is not None
 
     entity = result["c"]
@@ -146,10 +146,10 @@ class TestQBDataIntegration:
     assert entity["legal_name"] == sample_qb_entity_data["LegalName"]
     assert entity["city"] == "San Francisco"
 
-  def test_qb_connection_mapping(self, kuzu_repository_with_schema):
-    """Test mapping QuickBooks connection data to Kuzu database."""
+  def test_qb_connection_mapping(self, lbug_repository_with_schema):
+    """Test mapping QuickBooks connection data to LadybugDB database."""
     # Create QB-specific connection schema with extended fields
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE NODE TABLE QBConnection(
         identifier STRING,
         provider STRING,
@@ -189,7 +189,7 @@ class TestQBDataIntegration:
     }) RETURN conn
     """
 
-    result = kuzu_repository_with_schema.execute_single(cypher, connection_data)
+    result = lbug_repository_with_schema.execute_single(cypher, connection_data)
     assert result is not None
 
     connection = result["conn"]
@@ -198,11 +198,11 @@ class TestQBDataIntegration:
     assert connection["status"] == "connected"
 
   def test_entity_connection_relationship(
-    self, kuzu_repository_with_schema, sample_qb_entity_data
+    self, lbug_repository_with_schema, sample_qb_entity_data
   ):
     """Test relationship between entity and QuickBooks connection."""
     # Create QB-specific entity schema
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE NODE TABLE QBEntity(
         identifier STRING,
         name STRING,
@@ -229,13 +229,13 @@ class TestQBDataIntegration:
     }) RETURN c
     """
 
-    entity_result = kuzu_repository_with_schema.execute_single(
+    entity_result = lbug_repository_with_schema.execute_single(
       entity_cypher, entity_data
     )
     assert entity_result is not None
 
     # Create QB connection schema
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE NODE TABLE QBConnection(
         identifier STRING,
         provider STRING,
@@ -269,13 +269,13 @@ class TestQBDataIntegration:
     }) RETURN conn
     """
 
-    connection_result = kuzu_repository_with_schema.execute_single(
+    connection_result = lbug_repository_with_schema.execute_single(
       connection_cypher, connection_data
     )
     assert connection_result is not None
 
     # Create relationship table (unique name to avoid conflicts)
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE REL TABLE ENTITY_HAS_QB_CONNECTION(FROM QBEntity TO QBConnection)
     """)
 
@@ -287,7 +287,7 @@ class TestQBDataIntegration:
     RETURN r
     """
 
-    rel_result = kuzu_repository_with_schema.execute_single(
+    rel_result = lbug_repository_with_schema.execute_single(
       rel_cypher,
       {
         "entity_id": entity_data["identifier"],
@@ -303,7 +303,7 @@ class TestQBDataIntegration:
     RETURN c, conn
     """
 
-    verify_result = kuzu_repository_with_schema.execute_single(
+    verify_result = lbug_repository_with_schema.execute_single(
       verify_cypher, {"entity_id": entity_data["identifier"]}
     )
 
@@ -317,10 +317,10 @@ class TestQBDataIntegration:
 class TestQBTransactionProcessing:
   """Test QuickBooks transaction processing patterns."""
 
-  def test_transaction_data_structure(self, kuzu_repository_with_schema):
-    """Test QuickBooks transaction data structure in Kuzu database."""
+  def test_transaction_data_structure(self, lbug_repository_with_schema):
+    """Test QuickBooks transaction data structure in LadybugDB database."""
     # Create transaction schema
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE NODE TABLE QBTransaction(
         identifier STRING,
         qb_id STRING,
@@ -335,7 +335,7 @@ class TestQBTransactionProcessing:
       )
     """)
 
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE NODE TABLE QBEntity(
         identifier STRING,
         name STRING,
@@ -343,7 +343,7 @@ class TestQBTransactionProcessing:
       )
     """)
 
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE REL TABLE ENTITY_HAS_QB_TRANSACTION(FROM QBEntity TO QBTransaction)
     """)
 
@@ -374,7 +374,7 @@ class TestQBTransactionProcessing:
     }) RETURN txn
     """
 
-    result = kuzu_repository_with_schema.execute_single(cypher, transaction_data)
+    result = lbug_repository_with_schema.execute_single(cypher, transaction_data)
     assert result is not None
 
     transaction = result["txn"]
@@ -382,11 +382,11 @@ class TestQBTransactionProcessing:
     assert transaction["amount"] == 1500.00
     assert transaction["description"] == "Customer payment received"
 
-  def test_bulk_transaction_processing(self, kuzu_repository_with_schema):
+  def test_bulk_transaction_processing(self, lbug_repository_with_schema):
     """Test bulk processing of QuickBooks transactions."""
     # Create transaction schema if not exists
     try:
-      kuzu_repository_with_schema.execute_query("""
+      lbug_repository_with_schema.execute_query("""
         CREATE NODE TABLE QBTransaction(
           identifier STRING,
           qb_id STRING,
@@ -426,12 +426,12 @@ class TestQBTransactionProcessing:
       }) RETURN txn
       """
 
-      result = kuzu_repository_with_schema.execute_single(cypher, transaction)
+      result = lbug_repository_with_schema.execute_single(cypher, transaction)
       assert result is not None
 
     # Verify all transactions were created
     count_cypher = "MATCH (txn:QBTransaction) RETURN count(txn) as count"
-    count_result = kuzu_repository_with_schema.execute_single(count_cypher)
+    count_result = lbug_repository_with_schema.execute_single(count_cypher)
     assert count_result["count"] >= 10
 
     # Test aggregation queries
@@ -439,7 +439,7 @@ class TestQBTransactionProcessing:
     MATCH (txn:QBTransaction {transaction_type: 'Sale'})
     RETURN sum(txn.amount) as total_sales, count(txn) as sale_count
     """
-    sales_result = kuzu_repository_with_schema.execute_single(sales_cypher)
+    sales_result = lbug_repository_with_schema.execute_single(sales_cypher)
     assert sales_result is not None
     assert sales_result["sale_count"] == 5  # Half are sales
     assert sales_result["total_sales"] > 0
@@ -458,15 +458,15 @@ class TestQBErrorHandling:
     with pytest.raises(ValueError):
       QBClient(realm_id="", qb_credentials=mock_qb_credentials)
 
-  def test_connection_timeout_simulation(self, kuzu_repository_with_schema):
+  def test_connection_timeout_simulation(self, lbug_repository_with_schema):
     """Test simulation of connection timeout scenarios."""
     # This would test how the system handles QB API timeouts
-    # For now, just verify the Kuzu database can handle connection issues gracefully
+    # For now, just verify the LadybugDB database can handle connection issues gracefully
     try:
-      result = kuzu_repository_with_schema.execute_single("RETURN 1 as test")
+      result = lbug_repository_with_schema.execute_single("RETURN 1 as test")
       assert result["test"] == 1
     except Exception as e:
-      pytest.fail(f"Kuzu database should handle queries gracefully: {e}")
+      pytest.fail(f"LadybugDB database should handle queries gracefully: {e}")
 
 
 if __name__ == "__main__":

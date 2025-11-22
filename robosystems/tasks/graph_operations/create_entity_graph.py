@@ -60,7 +60,7 @@ def create_entity_with_new_graph_task(
         session = next(get_db_session())
         try:
           subscription_service = GraphSubscriptionService(session)
-          plan_name = entity_data_dict.get("graph_tier", "kuzu-standard")
+          plan_name = entity_data_dict.get("graph_tier", "ladybug-standard")
           graph_id = result.get("graph_id")
 
           subscription = subscription_service.create_graph_subscription(
@@ -174,7 +174,7 @@ def create_entity_with_new_graph_sse_task(
       session = next(get_db_session())
       try:
         subscription_service = GraphSubscriptionService(session)
-        plan_name = entity_data_dict.get("graph_tier", "kuzu-standard")
+        plan_name = entity_data_dict.get("graph_tier", "ladybug-standard")
         graph_id = result.get("graph_id")
 
         subscription = subscription_service.create_graph_subscription(

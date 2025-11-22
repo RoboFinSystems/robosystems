@@ -26,7 +26,7 @@ from .data_tools import (
   QueryStagingTool,
   MaterializeGraphTool,
 )
-from .manager import KuzuMCPTools
+from .manager import GraphMCPTools
 
 __all__ = [
   "BaseTool",
@@ -46,5 +46,5 @@ __all__ = [
   "MapElementsTool",
   "QueryStagingTool",
   "MaterializeGraphTool",
-  "KuzuMCPTools",
+  "GraphMCPTools",
 ]

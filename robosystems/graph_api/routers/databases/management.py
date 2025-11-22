@@ -2,7 +2,7 @@
 Database management endpoints for Graph API.
 
 This module provides endpoints for creating, listing, retrieving,
-and deleting Kuzu graph databases.
+and deleting LadybugDB graph databases.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -42,7 +42,7 @@ async def create_database(
   """
   Create a new database with schema.
 
-  Creates a new Kuzu database with the specified schema type.
+  Creates a new LadybugDB database with the specified schema type.
   Different node types support different schema types:
   - Writer nodes: entity, custom
   - Shared master nodes: shared (requires repository_name)

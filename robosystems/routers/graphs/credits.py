@@ -603,7 +603,7 @@ and associated credit costs.""",
         "application/json": {
           "example": {
             "graph_id": "kg1a2b3c",
-            "graph_tier": "kuzu-large",
+            "graph_tier": "ladybug-large",
             "storage_multiplier": 1.0,
             "current_period": {
               "start_date": "2024-01-01",

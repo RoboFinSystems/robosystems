@@ -1,11 +1,11 @@
 #!/bin/bash
 # Universal Graph Database Instance Registration in DynamoDB
-# Supports both Kuzu and Neo4j with backend_type tracking
+# Supports both LadybugDB and Neo4j with backend_type tracking
 
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (kuzu|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${ENVIRONMENT:?"ENVIRONMENT must be set"}
 : ${INSTANCE_ID:?"INSTANCE_ID must be set"}

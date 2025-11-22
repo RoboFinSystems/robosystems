@@ -21,7 +21,7 @@ if TYPE_CHECKING:
   from ...graph_api.client.client import GraphClient
 
 from ...config import env
-from ...middleware.graph.allocation_manager import KuzuAllocationManager
+from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...middleware.graph.types import GraphTypeRegistry
 from ...middleware.graph.subgraph_utils import (
   construct_subgraph_id,
@@ -45,7 +45,7 @@ class SubgraphService:
 
   def __init__(self):
     """Initialize the subgraph service."""
-    self.allocation_manager = KuzuAllocationManager(environment=env.ENVIRONMENT)
+    self.allocation_manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
     self.shared_repositories = list(GraphTypeRegistry.SHARED_REPOSITORIES.keys())
 
   async def create_subgraph_database(
@@ -168,10 +168,10 @@ class SubgraphService:
           instance_id: str
           private_ip: str
 
-        # For local dev, use the graph-api-kuzu service name
+        # For local dev, use the graph-api service name
         parent_location = LocalGraphLocation(
           instance_id=parent_graph_record.graph_instance_id,
-          private_ip="graph-api-kuzu" if env.ENVIRONMENT == "dev" else "localhost",
+          private_ip="graph-api" if env.ENVIRONMENT == "dev" else "localhost",
         )
         logger.info(
           f"Using local graph instance: {parent_location.instance_id} at {parent_location.private_ip}"
@@ -260,7 +260,7 @@ class SubgraphService:
     Create a subgraph including both the database and PostgreSQL metadata.
 
     This method:
-    1. Creates the actual Kuzu database on the parent's instance
+    1. Creates the actual LadybugDB database on the parent's instance
     2. Installs schema (base + extensions from parent)
     3. Creates PostgreSQL metadata records
     4. Creates user-graph relationship
@@ -285,9 +285,9 @@ class SubgraphService:
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
 
-    # Step 1: Create the actual Kuzu database on the parent's instance
+    # Step 1: Create the actual LadybugDB database on the parent's instance
     logger.info(
-      f"Creating Kuzu database for subgraph {subgraph_id} on parent {parent_graph.graph_id}'s instance"
+      f"Creating LadybugDB database for subgraph {subgraph_id} on parent {parent_graph.graph_id}'s instance"
     )
 
     try:
@@ -297,9 +297,9 @@ class SubgraphService:
         subgraph_name=name,
         schema_extensions=parent_graph.schema_extensions or [],
       )
-      logger.info(f"Kuzu database created: {db_creation_result}")
+      logger.info(f"LadybugDB database created: {db_creation_result}")
     except Exception as e:
-      logger.error(f"Failed to create Kuzu database for subgraph: {e}")
+      logger.error(f"Failed to create LadybugDB database for subgraph: {e}")
       raise
 
     # Step 2: Create PostgreSQL metadata records
@@ -392,7 +392,7 @@ class SubgraphService:
 
       if db_creation_result.get("status") == "created":
         logger.warning(
-          f"Cleaning up orphaned Kuzu database {subgraph_id} due to metadata creation failure"
+          f"Cleaning up orphaned LadybugDB database {subgraph_id} due to metadata creation failure"
         )
         try:
           await self.delete_subgraph_database(
@@ -453,10 +453,9 @@ class SubgraphService:
       from ...config import env
 
       # Local development mode: use GRAPH_API_URL directly
-      # Check for localhost or docker container hostnames (graph-api-kuzu, etc.)
+      # Check for localhost or docker container hostnames (graph-api, etc.)
       is_local = env.GRAPH_API_URL and any(
-        host in env.GRAPH_API_URL
-        for host in ["localhost", "graph-api-kuzu", "127.0.0.1"]
+        host in env.GRAPH_API_URL for host in ["localhost", "graph-api", "127.0.0.1"]
       )
 
       parent_location = None
@@ -491,7 +490,7 @@ class SubgraphService:
 
       # Get instance_id for logging and response
       if is_local:
-        instance_id = "local-kuzu-writer"
+        instance_id = "local-lbug-writer"
       else:
         instance_id = parent_location.instance_id if parent_location else "unknown"
 
@@ -764,9 +763,7 @@ class SubgraphService:
     """
     try:
       timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-      backup_location = (
-        f"s3://{env.KUZU_S3_BUCKET}/{instance_id}/{database_name}_{timestamp}.backup"
-      )
+      backup_location = f"s3://{env.GRAPH_DATABASES_BUCKET}/{instance_id}/{database_name}_{timestamp}.backup"
 
       # Use the backup endpoint if available
       backup_response = await client.backup(
@@ -836,7 +833,7 @@ class SubgraphService:
     Fork data from parent graph to subgraph by calling Graph API fork endpoint.
 
     This method calls the Graph API's fork endpoint which attaches the parent graph's
-    DuckDB staging database and copies tables directly to the subgraph's Kuzu database.
+    DuckDB staging database and copies tables directly to the subgraph's LadybugDB database.
     All operations happen on the EC2 instance where both databases live.
 
     Args:
@@ -877,10 +874,9 @@ class SubgraphService:
         progress_callback("Connecting to Graph API", 20)
 
       # Local development mode: use GRAPH_API_URL directly
-      # Check for localhost or docker container hostnames (graph-api-kuzu, etc.)
+      # Check for localhost or docker container hostnames (graph-api, etc.)
       is_local = env.GRAPH_API_URL and any(
-        host in env.GRAPH_API_URL
-        for host in ["localhost", "graph-api-kuzu", "127.0.0.1"]
+        host in env.GRAPH_API_URL for host in ["localhost", "graph-api", "127.0.0.1"]
       )
 
       if is_local:

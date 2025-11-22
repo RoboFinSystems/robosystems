@@ -1,7 +1,7 @@
 """
 Graph API Client Exceptions.
 
-Defines exception hierarchy for Graph API operations (Kuzu, Neo4j).
+Defines exception hierarchy for Graph API operations across all backends.
 """
 
 from typing import Optional, Dict, Any

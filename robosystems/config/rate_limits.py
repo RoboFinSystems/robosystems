@@ -112,7 +112,7 @@ class RateLimitConfig:
       EndpointCategory.TABLE_MANAGEMENT: (10, RateLimitPeriod.MINUTE),
     },
     # Technical tier names (primary)
-    "kuzu-standard": {
+    "ladybug-standard": {
       # Non-graph endpoints - generous burst limits
       EndpointCategory.AUTH: (20, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (600, RateLimitPeriod.MINUTE),
@@ -143,7 +143,7 @@ class RateLimitConfig:
         RateLimitPeriod.MINUTE,
       ),  # 1.8k/hour possible
     },
-    "kuzu-large": {
+    "ladybug-large": {
       # Non-graph endpoints - very high burst limits
       EndpointCategory.AUTH: (50, RateLimitPeriod.MINUTE),
       EndpointCategory.USER_MANAGEMENT: (1000, RateLimitPeriod.MINUTE),
@@ -174,7 +174,7 @@ class RateLimitConfig:
         RateLimitPeriod.MINUTE,
       ),  # 9k/hour possible
     },
-    "kuzu-xlarge": {
+    "ladybug-xlarge": {
       # XLarge tier gets extreme burst limits - essentially unlimited
       # Only safety limits to prevent complete system abuse
       EndpointCategory.AUTH: (100, RateLimitPeriod.MINUTE),

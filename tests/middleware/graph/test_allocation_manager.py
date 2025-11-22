@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from robosystems.middleware.graph.allocation_manager import (
-  KuzuAllocationManager,
+  LadybugAllocationManager,
   DatabaseStatus,
   InstanceStatus,
   DatabaseLocation,
@@ -15,7 +15,7 @@ from robosystems.middleware.graph.allocation_manager import (
 
 
 class TestAllocationManagerBasic:
-  """Basic tests for KuzuAllocationManager."""
+  """Basic tests for LadybugAllocationManager."""
 
   @pytest.fixture
   def mock_dynamodb(self):
@@ -31,15 +31,15 @@ class TestAllocationManagerBasic:
 
   @pytest.fixture
   def allocation_manager(self, mock_dynamodb):
-    """Create a KuzuAllocationManager instance."""
+    """Create a LadybugAllocationManager instance."""
     with patch("robosystems.middleware.graph.allocation_manager.boto3") as mock_boto3:
       mock_boto3.client.return_value = mock_dynamodb
 
       # Mock the initialization properly
       with patch.object(
-        KuzuAllocationManager, "__init__", lambda x, environment="test": None
+        LadybugAllocationManager, "__init__", lambda x, environment="test": None
       ):
-        manager = KuzuAllocationManager(environment="test")
+        manager = LadybugAllocationManager(environment="test")
         manager.dynamodb_client = mock_dynamodb
         manager.table_name = "test-allocations"
         manager.instances = {}
@@ -96,23 +96,23 @@ class TestAllocationManagerBasic:
 
 
 class TestMultiBackendSupport:
-  """Test multi-backend support (Kuzu, Neo4j Community, Neo4j Enterprise)."""
+  """Test multi-backend support (LadybugDB, Neo4j Community, Neo4j Enterprise)."""
 
   @pytest.fixture
   def allocation_manager(self):
-    """Create a KuzuAllocationManager instance with tier configs."""
+    """Create a LadybugAllocationManager instance with tier configs."""
     with patch("robosystems.middleware.graph.allocation_manager.boto3"):
       with patch.object(
-        KuzuAllocationManager, "__init__", lambda x, environment="test": None
+        LadybugAllocationManager, "__init__", lambda x, environment="test": None
       ):
-        manager = KuzuAllocationManager(environment="test")
+        manager = LadybugAllocationManager(environment="test")
         manager.environment = "test"
 
         # Set up tier configurations matching allocation_manager.py
         manager.tier_configs = {
-          GraphTier.KUZU_STANDARD: {
-            "backend": "kuzu",
-            "backend_type": "kuzu",
+          GraphTier.LADYBUG_STANDARD: {
+            "backend": "ladybug",
+            "backend_type": "ladybug",
             "databases_per_instance": 10,
           },
           GraphTier.NEO4J_COMMUNITY_LARGE: {
@@ -134,7 +134,7 @@ class TestMultiBackendSupport:
   @pytest.mark.parametrize(
     "tier,expected_backend,expected_backend_type,expected_edition,expected_capacity",
     [
-      (GraphTier.KUZU_STANDARD, "kuzu", "kuzu", None, 10),
+      (GraphTier.LADYBUG_STANDARD, "ladybug", "ladybug", None, 10),
       (GraphTier.NEO4J_COMMUNITY_LARGE, "neo4j", "neo4j", "community", 1),
       (GraphTier.NEO4J_ENTERPRISE_XLARGE, "neo4j", "neo4j", "enterprise", 1),
     ],
@@ -160,12 +160,12 @@ class TestMultiBackendSupport:
     else:
       assert "neo4j_edition" not in config
 
-  def test_kuzu_backend_standard_tier(self, allocation_manager):
-    """Test Kuzu backend is used for Standard tier."""
-    config = allocation_manager.tier_configs[GraphTier.KUZU_STANDARD]
+  def test_lbug_backend_standard_tier(self, allocation_manager):
+    """Test LadybugDB backend is used for Standard tier."""
+    config = allocation_manager.tier_configs[GraphTier.LADYBUG_STANDARD]
 
-    assert config["backend"] == "kuzu"
-    assert config["backend_type"] == "kuzu"
+    assert config["backend"] == "ladybug"
+    assert config["backend_type"] == "ladybug"
     assert config["databases_per_instance"] == 10
     assert "neo4j_edition" not in config
 
@@ -190,7 +190,7 @@ class TestMultiBackendSupport:
   @pytest.mark.parametrize(
     "tier,expected_isolation",
     [
-      (GraphTier.KUZU_STANDARD, False),  # Shared resources
+      (GraphTier.LADYBUG_STANDARD, False),  # Shared resources
       (GraphTier.NEO4J_COMMUNITY_LARGE, True),  # Isolated resources
       (GraphTier.NEO4J_ENTERPRISE_XLARGE, True),  # Isolated resources
     ],
@@ -208,7 +208,7 @@ class TestMultiBackendSupport:
     """Test that all tiers have backend_type attribute for DynamoDB."""
     for tier, config in allocation_manager.tier_configs.items():
       assert "backend_type" in config, f"Tier {tier} missing backend_type"
-      assert config["backend_type"] in ["kuzu", "neo4j"], (
+      assert config["backend_type"] in ["ladybug", "neo4j"], (
         f"Invalid backend_type for tier {tier}"
       )
 
@@ -218,14 +218,14 @@ class TestMultiBackendSupport:
       backend = config["backend"]
       backend_type = config["backend_type"]
 
-      # Both should match (both "kuzu" or both "neo4j")
+      # Both should match (both "ladybug" or both "neo4j")
       assert backend == backend_type, (
         f"Tier {tier} has inconsistent backend ({backend}) and backend_type ({backend_type})"
       )
 
 
 class TestAllocationManagerRegression:
-  """Regression tests for KuzuAllocationManager critical bugs."""
+  """Regression tests for LadybugAllocationManager critical bugs."""
 
   def test_identify_graph_named_parameter_in_code(self):
     """

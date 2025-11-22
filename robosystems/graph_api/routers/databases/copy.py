@@ -1,5 +1,5 @@
 """
-Direct S3 → Kuzu copy endpoint for internal/legacy operations.
+Direct S3 → LadybugDB copy endpoint for internal/legacy operations.
 
 This module provides:
 - Direct COPY FROM S3 with user-provided credentials
@@ -42,7 +42,7 @@ import redis.asyncio as redis_async
 # Default list is empty - specific implementations (like SEC) should define their own
 import os
 
-_large_tables_env = os.getenv("KUZU_LARGE_TABLES_REQUIRING_CLEANUP", "")
+_large_tables_env = os.getenv("LBUG_LARGE_TABLES_REQUIRING_CLEANUP", "")
 LARGE_TABLES_REQUIRING_CLEANUP = (
   [t.strip() for t in _large_tables_env.split(",") if t.strip()]
   if _large_tables_env
@@ -104,12 +104,12 @@ class IngestionTaskManager:
   async def get_redis(self) -> redis_async.Redis:
     """Get async Redis client for task storage."""
     if not self._redis_client:
-      # Use dedicated database for Kuzu tasks
+      # Use dedicated database for LadybugDB tasks
       # Use async factory method to handle SSL params correctly
       from robosystems.config.valkey_registry import create_async_redis_client
 
       self._redis_client = create_async_redis_client(
-        ValkeyDatabase.KUZU_CACHE, decode_responses=True
+        ValkeyDatabase.LBUG_CACHE, decode_responses=True
       )
     return self._redis_client
 
@@ -145,7 +145,7 @@ class IngestionTaskManager:
     # Store in Redis with 24-hour TTL
     redis_client = await self.get_redis()
     await redis_client.setex(
-      f"kuzu:task:{task_id}",
+      f"lbug:task:{task_id}",
       86400,  # 24 hours
       json.dumps(task_data),
     )
@@ -157,7 +157,7 @@ class IngestionTaskManager:
     redis_client = await self.get_redis()
 
     # Get existing task
-    task_json = await redis_client.get(f"kuzu:task:{task_id}")
+    task_json = await redis_client.get(f"lbug:task:{task_id}")
     if not task_json:
       raise ValueError(f"Task {task_id} not found")
 
@@ -169,7 +169,7 @@ class IngestionTaskManager:
 
     # Store back in Redis
     await redis_client.setex(
-      f"kuzu:task:{task_id}",
+      f"lbug:task:{task_id}",
       86400,  # 24 hours
       json.dumps(task_data),
     )
@@ -177,7 +177,7 @@ class IngestionTaskManager:
   async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
     """Get task status."""
     redis_client = await self.get_redis()
-    task_json = await redis_client.get(f"kuzu:task:{task_id}")
+    task_json = await redis_client.get(f"lbug:task:{task_id}")
 
     if task_json:
       return json.loads(task_json)
@@ -200,7 +200,7 @@ async def perform_ingestion(
   """
   Perform the actual ingestion in the background.
   Updates task status in Redis for SSE monitoring.
-  Uses backend abstraction to support both Kuzu and Neo4j.
+  Uses backend abstraction to support both LadybugDB and Neo4j.
   """
   try:
     # Update task status to running
@@ -227,11 +227,12 @@ async def perform_ingestion(
     duration = result.get("duration_seconds", 0)
     query = result.get("query", "N/A")
 
-    # For Kuzu backends, perform aggressive cleanup for large tables
-    from robosystems.graph_api.backends.kuzu import KuzuBackend
+    # For LadybugDB backends, perform aggressive cleanup for large tables
+    from robosystems.graph_api.backends.lbug import LadybugBackend
 
     if (
-      isinstance(backend, KuzuBackend) and table_name in LARGE_TABLES_REQUIRING_CLEANUP
+      isinstance(backend, LadybugBackend)
+      and table_name in LARGE_TABLES_REQUIRING_CLEANUP
     ):
       logger.info(
         f"[Task {task_id}] Starting aggressive memory cleanup for large table: {table_name}"
@@ -275,7 +276,7 @@ async def perform_ingestion(
     try:
       redis_client = await task_manager.get_redis()
       instance_id = env.EC2_INSTANCE_ID or "unknown"
-      ingestion_key = f"kuzu:ingestion:active:{instance_id}"
+      ingestion_key = f"lbug:ingestion:active:{instance_id}"
       await redis_client.delete(ingestion_key)
       logger.info(f"[Task {task_id}] Cleared ingestion flag for instance {instance_id}")
     except Exception as flag_error:
@@ -316,7 +317,7 @@ async def perform_ingestion(
     try:
       redis_client = await task_manager.get_redis()
       instance_id = env.EC2_INSTANCE_ID or "unknown"
-      ingestion_key = f"kuzu:ingestion:active:{instance_id}"
+      ingestion_key = f"lbug:ingestion:active:{instance_id}"
       await redis_client.delete(ingestion_key)
       logger.info(
         f"[Task {task_id}] Cleared ingestion flag for instance {instance_id} after failure"
@@ -382,7 +383,7 @@ async def start_background_copy(
   # This prevents the instance from being marked unhealthy during heavy operations
   redis_client = await task_manager.get_redis()
   instance_id = env.EC2_INSTANCE_ID or "unknown"
-  ingestion_key = f"kuzu:ingestion:active:{instance_id}"
+  ingestion_key = f"lbug:ingestion:active:{instance_id}"
 
   # Store ingestion metadata with 1-hour TTL (in case cleanup fails)
   ingestion_data = {

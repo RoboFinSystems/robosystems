@@ -133,7 +133,7 @@ def test_client():
   try:
     # Initialize cluster service
     init_cluster_service(
-      base_path="/tmp/test_kuzu",
+      base_path="/tmp/test_lbug",
       max_databases=10,
       read_only=False,
       node_type=NodeType.WRITER,

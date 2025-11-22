@@ -329,7 +329,7 @@ class TestTasksRouter:
       result = await manager.get_task("test_123")
 
       assert result == mock_task
-      mock_redis.get.assert_called_once_with("kuzu:task:test_123")
+      mock_redis.get.assert_called_once_with("lbug:task:test_123")
 
   @pytest.mark.asyncio
   async def test_unified_task_manager_get_task_fallback(self):
@@ -376,7 +376,7 @@ class TestTasksRouter:
     with patch.object(manager, "get_redis") as mock_get_redis:
       mock_redis = AsyncMock()
       mock_redis.keys = AsyncMock(
-        return_value=["kuzu:task:ingest_001", "kuzu:task:backup_001"]
+        return_value=["lbug:task:ingest_001", "lbug:task:backup_001"]
       )
       mock_redis.get = AsyncMock(
         side_effect=[json.dumps(tasks[0]), json.dumps(tasks[1])]

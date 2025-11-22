@@ -188,7 +188,7 @@ def test_restore_initiates_task_with_metadata(restore_client):
 @pytest.mark.asyncio
 async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
-  db_file = tmp_path / "graph1.kuzu"
+  db_file = tmp_path / "graph1.lbug"
   db_file.write_bytes(b"neo4j-data")
 
   monkeypatch.setattr(
@@ -208,10 +208,10 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
   assert isinstance(backup_bytes, bytes)
 
   with zipfile.ZipFile(io.BytesIO(backup_bytes), "r") as zf:
-    # Should contain the single .kuzu file with matching contents
+    # Should contain the single .lbug file with matching contents
     namelist = zf.namelist()
-    assert namelist == ["graph1.kuzu"]
-    extracted = zf.read("graph1.kuzu")
+    assert namelist == ["graph1.lbug"]
+    extracted = zf.read("graph1.lbug")
     assert extracted == b"neo4j-data"
 
 
@@ -220,7 +220,7 @@ async def test_download_backup_missing_path_returns_404(monkeypatch):
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
   monkeypatch.setattr(
     "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.get_database_path_for_graph",
-    lambda graph_id: "/nonexistent/path/graph1.kuzu",
+    lambda graph_id: "/nonexistent/path/graph1.lbug",
   )
 
   with pytest.raises(HTTPException) as exc:

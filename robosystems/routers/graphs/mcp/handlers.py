@@ -18,13 +18,13 @@ from robosystems.logger import logger
 # Import timeout utilities
 from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
 
-# Import Kuzu MCP components
+# Import Graph MCP components
 from robosystems.middleware.mcp import (
-  create_kuzu_mcp_client,
-  KuzuMCPTools as AdapterKuzuMCPTools,
-  KuzuQueryTimeoutError,
-  KuzuQueryComplexityError,
-  KuzuAPIError,
+  create_graph_mcp_client,
+  GraphMCPTools as AdapterGraphMCPTools,
+  GraphQueryTimeoutError,
+  GraphQueryComplexityError,
+  GraphAPIError,
 )
 
 # MCP package is no longer used - always use adapter
@@ -86,8 +86,8 @@ class MCPHandler:
       repository_url = repository.api_base_url
 
     # Initialize client asynchronously with lock to prevent race conditions
-    self.kuzu_client = None
-    self.mcp_tools: Optional[AdapterKuzuMCPTools] = None
+    self.graph_client = None
+    self.mcp_tools: Optional[AdapterGraphMCPTools] = None
     self.database = None
     self._init_lock = asyncio.Lock()
     self._init_task = asyncio.create_task(self._init_async(repository_url))
@@ -95,14 +95,14 @@ class MCPHandler:
   async def _init_async(self, repository_url: Optional[str]):
     """Initialize the MCP client asynchronously."""
     try:
-      self.kuzu_client = await create_kuzu_mcp_client(
+      self.graph_client = await create_graph_mcp_client(
         self.graph_id, api_base_url=repository_url
       )
       # Attach user to client for workspace tools
-      self.kuzu_client.user = self.user
-      self.mcp_tools = AdapterKuzuMCPTools(self.kuzu_client)
+      self.graph_client.user = self.user
+      self.mcp_tools = AdapterGraphMCPTools(self.graph_client)
       logger.info(
-        f"Initialized MCP handler with Kuzu adapter for graph {self.graph_id} at {repository_url or 'discovered endpoint'}"
+        f"Initialized MCP handler with Graph adapter for graph {self.graph_id} at {repository_url or 'discovered endpoint'}"
       )
     except Exception as e:
       logger.error(f"Failed to initialize MCP client for {self.graph_id}: {e}")
@@ -120,7 +120,7 @@ class MCPHandler:
   @property
   def backend_type(self) -> str:
     """Get the backend type being used."""
-    return "kuzu"
+    return "ladybug"
 
   async def get_tools(self) -> List[Dict[str, Any]]:
     """Get available MCP tools with backend-specific customizations."""
@@ -131,7 +131,7 @@ class MCPHandler:
 
     # Determine if this is a shared repository or user graph
     is_shared_repo = MultiTenantUtils.is_shared_repository(self.graph_id)
-    backend_name = "Kuzu"
+    backend_name = "Graph Database"
 
     # Add graph-specific context to descriptions
     for tool in tools:
@@ -220,12 +220,12 @@ class MCPHandler:
       logger.error(error_msg)
       return {"type": "text", "text": f"Error: {error_msg}"}
 
-    except (KuzuQueryTimeoutError, KuzuQueryComplexityError) as e:
+    except (GraphQueryTimeoutError, GraphQueryComplexityError) as e:
       # Handle specific timeout/complexity errors with user-friendly messages
       logger.warning(f"Query constraint violation for {name}: {e}")
       return {"type": "text", "text": f"Query Error: {str(e)}"}
 
-    except KuzuAPIError as e:
+    except GraphAPIError as e:
       # Handle Graph API errors with their enhanced messages
       # These already include helpful context from the MCP adapter
       logger.error(f"Graph API error in tool '{name}': {e}")
@@ -290,11 +290,11 @@ class MCPHandler:
         yield {"data": [], "columns": [], "error": str(e)}
 
   async def _get_graph_info(self) -> Dict[str, Any]:
-    """Get basic graph statistics using Kuzu."""
+    """Get basic graph statistics."""
     try:
-      if self.kuzu_client:
-        # Use Kuzu adapter for graph info
-        info = await self.kuzu_client.get_graph_info()
+      if self.graph_client:
+        # Use Graph adapter for graph info
+        info = await self.graph_client.get_graph_info()
       else:
         # Ensure MCP tools are initialized
         await self._ensure_initialized()
@@ -316,8 +316,8 @@ class MCPHandler:
           "graph_id": self.graph_id,
           "node_table_count": node_count,
           "relationship_table_count": rel_count,
-          "backend": "kuzu",
-          "mode": "adapter" if self.kuzu_client else "direct",
+          "backend": "ladybug",
+          "mode": "adapter" if self.graph_client else "direct",
         }
 
       return {"type": "text", "text": json.dumps(info, indent=2)}
@@ -329,8 +329,8 @@ class MCPHandler:
     """Get natural language description of graph structure."""
     try:
       # Use describe-graph-structure if available
-      if self.kuzu_client and hasattr(self.kuzu_client, "describe_graph_structure"):
-        description = await self.kuzu_client.describe_graph_structure()
+      if self.graph_client and hasattr(self.graph_client, "describe_graph_structure"):
+        description = await self.graph_client.describe_graph_structure()
       else:
         # Ensure MCP tools are initialized
         await self._ensure_initialized()
@@ -375,9 +375,9 @@ class MCPHandler:
 
     errors = []
     try:
-      if self.kuzu_client:
+      if self.graph_client:
         try:
-          await self.kuzu_client.close()
+          await self.graph_client.close()
           logger.debug(f"Closed Graph client for graph {self.graph_id}")
         except Exception as e:
           error_msg = f"Failed to close Graph client for graph {self.graph_id}: {e}"

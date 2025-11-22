@@ -56,6 +56,6 @@ class QueryQueueConfig:
   @classmethod
   def get_priority_for_user(cls, user_tier: Optional[str]) -> int:
     """Get priority based on user tier."""
-    if user_tier in ["kuzu-xlarge", "kuzu-large"]:
+    if user_tier in ["ladybug-xlarge", "ladybug-large"]:
       return cls.DEFAULT_PRIORITY + cls.PRIORITY_BOOST_PREMIUM
     return cls.DEFAULT_PRIORITY

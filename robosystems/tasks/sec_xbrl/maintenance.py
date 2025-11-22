@@ -2,7 +2,7 @@
 SEC XBRL Pipeline Maintenance Tasks
 
 Provides maintenance operations for the SEC pipeline including:
-- Resetting/recreating the SEC graph database (supports Kuzu and Neo4j backends)
+- Resetting/recreating the SEC graph database (supports LadybugDB and Neo4j backends)
 - Clearing S3 processed data for a specific year
 - Future: data integrity checks, etc.
 """
@@ -22,7 +22,7 @@ from robosystems.graph_api.client.factory import GraphClientFactory
   name="sec_xbrl.reset_sec_database",
   max_retries=1,
 )
-def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
+def reset_sec_database(confirm: bool = False, backend: str = "ladybug") -> Dict:
   """
   Completely reset the SEC database by deleting and recreating it with schema.
 
@@ -33,7 +33,7 @@ def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
 
   Args:
       confirm: Must be True to actually perform the reset
-      backend: Backend type for context/logging ("kuzu" or "neo4j")
+      backend: Backend type for context/logging ("ladybug" or "neo4j")
 
   Returns:
       Status of the reset operation
@@ -108,7 +108,7 @@ def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
       repo_result = await service.create_shared_repository(
         repository_name=repository_name,
         created_by="system",
-        instance_id="kuzu-shared-prod",
+        instance_id="ladybug-shared-prod",
       )
       logger.info(f"✅ SEC repository metadata ensured: {repo_result.get('graph_id')}")
 
@@ -188,7 +188,7 @@ def reset_sec_database(confirm: bool = False, backend: str = "kuzu") -> Dict:
   max_retries=1,
 )
 def full_reset_for_year(
-  year: int, confirm: bool = False, backend: str = "kuzu"
+  year: int, confirm: bool = False, backend: str = "ladybug"
 ) -> Dict:
   """
   Clear all processed S3 data for a specific year and reset the SEC database.
@@ -200,7 +200,7 @@ def full_reset_for_year(
   Args:
       year: Year of data to clear
       confirm: Must be True to actually perform the reset
-      backend: Backend type for context/logging ("kuzu" or "neo4j")
+      backend: Backend type for context/logging ("ladybug" or "neo4j")
 
   Returns:
       Status of the reset operation

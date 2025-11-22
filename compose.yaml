@@ -34,29 +34,29 @@ services:
           cpus: "0.5"
     profiles: ["api", "robosystems", "all"]
 
-  # Kuzu Graph API - Graph API with Kuzu Backend
-  graph-api-kuzu:
-    container_name: robosystems-graph-api-kuzu
+  # Graph API - Default LadybugDB Backend
+  graph-api:
+    container_name: robosystems-graph-api
     build:
       context: .
       dockerfile: Dockerfile
     command: /app/bin/entrypoint.sh
     environment:
-      - DOCKER_PROFILE=kuzu-writer
+      - DOCKER_PROFILE=lbug-writer
       - ENVIRONMENT=dev
-      - GRAPH_BACKEND_TYPE=kuzu
-      - KUZU_PORT=8001
-      - KUZU_DATABASE_PATH=/app/data/kuzu-dbs
-      - KUZU_NODE_TYPE=writer
-      - CLUSTER_TIER=kuzu-standard
-      - KUZU_DATABASES_PER_INSTANCE=${KUZU_DATABASES_PER_INSTANCE:-50}
+      - GRAPH_BACKEND_TYPE=ladybug
+      - LBUG_PORT=8001
+      - LBUG_DATABASE_PATH=/app/data/lbug-dbs
+      - LBUG_NODE_TYPE=writer
+      - CLUSTER_TIER=ladybug-standard
+      - LBUG_DATABASES_PER_INSTANCE=${LBUG_DATABASES_PER_INSTANCE:-50}
     env_file:
       - .env
     ports:
       - "8001:8001"
     volumes:
       - ./robosystems:/app/robosystems # Mount code for hot reload
-      - ./data/kuzu-dbs:/app/data/kuzu-dbs # Kuzu embedded database for graph storage
+      - ./data/lbug-dbs:/app/data/lbug-dbs # LadybugDB embedded database for graph storage
       - ./data/staging:/app/data/staging # DuckDB embedded database for staging tables
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -73,9 +73,9 @@ services:
         reservations:
           memory: 1g
           cpus: "1"
-    profiles: ["kuzu", "graph-dbs", "robosystems", "all"]
+    profiles: ["graph-api", "graph-dbs", "robosystems", "all"]
 
-  # Neo4j Graph API - Graph API with Neo4j Backend
+  # Graph API (Neo4j) - Alternative Neo4j Backend (Optional)
   graph-api-neo4j:
     container_name: robosystems-graph-api-neo4j
     build:

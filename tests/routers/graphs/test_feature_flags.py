@@ -610,7 +610,7 @@ class TestGraphOperationFeatureFlags:
         ):
           # Mock parent graph
           mock_parent_graph = MagicMock()
-          mock_parent_graph.graph_tier = "kuzu-large"
+          mock_parent_graph.graph_tier = "ladybug-large"
           mock_verify_access.return_value = mock_parent_graph
 
           # Mock subgraph service
@@ -671,7 +671,7 @@ class TestGraphOperationFeatureFlags:
           # Mock os.path.exists and os.walk for database size calculation
           with (
             patch("os.path.exists", return_value=True),
-            patch("os.walk", return_value=[("/tmp/test/path", [], ["file1.kuzu"])]),
+            patch("os.walk", return_value=[("/tmp/test/path", [], ["file1.lbug"])]),
             patch("os.path.getsize", return_value=1024),
           ):
             # Mock request data

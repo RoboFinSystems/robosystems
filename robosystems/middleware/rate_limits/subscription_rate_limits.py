@@ -15,7 +15,7 @@ def get_subscription_rate_limit(
   Get rate limit for a subscription tier and endpoint category.
 
   Args:
-      tier: Subscription tier (kuzu-standard, kuzu-large, kuzu-xlarge)
+      tier: Subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge)
       category: Endpoint category
 
   Returns:

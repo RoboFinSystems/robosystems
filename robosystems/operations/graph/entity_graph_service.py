@@ -23,7 +23,7 @@ from ...models.iam import GraphUser, OrgUser, OrgLimits
 from ...config import env
 from ...models.api import EntityCreate, EntityResponse
 from ...graph_api.client import GraphClient, get_graph_client_for_instance
-from ...middleware.graph.allocation_manager import KuzuAllocationManager
+from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...config.graph_tier import GraphTier
 from ...exceptions import (
   InsufficientPermissionsError,
@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 SUBSCRIPTION_TO_GRAPH_TIER = {
-  "kuzu-standard": GraphTier.KUZU_STANDARD,
-  "kuzu-large": GraphTier.KUZU_LARGE,
-  "kuzu-xlarge": GraphTier.KUZU_XLARGE,
+  "ladybug-standard": GraphTier.LADYBUG_STANDARD,
+  "ladybug-large": GraphTier.LADYBUG_LARGE,
+  "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
 }
 
 
@@ -69,11 +69,11 @@ class EntityGraphService:
     progress_callback: Optional[Callable] = None,
   ) -> Dict[str, Any]:
     """
-    Create a new entity with its own Kuzu graph database.
+    Create a new entity with its own graph database.
 
-    This method creates a entity graph using the Kuzu cluster architecture:
+    This method creates a entity graph using the graph cluster architecture:
     1. Validates user limits
-    2. Selects optimal Kuzu writer cluster
+    2. Selects optimal graph writer cluster
     3. Creates database via API
     4. Installs schema via API
     5. Creates entity node
@@ -82,7 +82,7 @@ class EntityGraphService:
     Args:
         entity_data_dict: Entity creation data as dictionary
         user_id: ID of the user creating the entity
-        tier: Service tier (kuzu-shared, kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: Service tier (ladybug-shared, ladybug-standard, ladybug-large, ladybug-xlarge)
         cancellation_callback: Optional callback to check for cancellation
 
     Returns:
@@ -134,7 +134,7 @@ class EntityGraphService:
 
     # Determine graph tier from subscription
     graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
-      tier if tier else "kuzu-standard", GraphTier.KUZU_STANDARD
+      tier if tier else "ladybug-standard", GraphTier.LADYBUG_STANDARD
     )
 
     logger.info(f"Graph tier: {graph_tier.value}")
@@ -145,15 +145,15 @@ class EntityGraphService:
 
     # Initialize resource tracking variables
     db_location = None
-    kuzu_client = None
+    graph_client = None
     allocation_manager = None
 
     try:
-      # Allocate database using KuzuAllocationManager
+      # Allocate database using LadybugAllocationManager
       if progress_callback:
         progress_callback("Allocating database cluster...", 30)
 
-      allocation_manager = KuzuAllocationManager(environment=env.ENVIRONMENT)
+      allocation_manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
 
       logger.info(f"Allocating database {graph_id} for entity {entity_data.name}")
 
@@ -170,10 +170,10 @@ class EntityGraphService:
         f"Database allocated to instance {db_location.instance_id} at {db_location.private_ip}"
       )
 
-      # Create KuzuClient directly with the allocated instance endpoint
+      # Create LadybugClient directly with the allocated instance endpoint
       # For database creation, we need direct instance access
       # Create client with direct instance access
-      kuzu_client = await get_graph_client_for_instance(db_location.private_ip)
+      graph_client = await get_graph_client_for_instance(db_location.private_ip)
 
       logger.info(f"Creating graph database: {graph_id} on allocated instance")
 
@@ -186,12 +186,12 @@ class EntityGraphService:
         progress_callback("Creating graph database...", 40)
 
       try:
-        await kuzu_client.get_database(graph_id)
+        await graph_client.get_database(graph_id)
         logger.info(f"Database {graph_id} already exists")
       except Exception as e:
         if getattr(e, "status_code", None) == 404:
           # Database doesn't exist, create it
-          await kuzu_client.create_database(graph_id, schema_type="entity")
+          await graph_client.create_database(graph_id, schema_type="entity")
           logger.info(f"Created database {graph_id}")
         else:
           raise
@@ -200,9 +200,9 @@ class EntityGraphService:
       # This must happen before GraphSchema and GraphTable creation
       from ...models.iam.graph import Graph
 
-      graph_tier_str = entity_data_dict.get("graph_tier", "kuzu-standard")
+      graph_tier_str = entity_data_dict.get("graph_tier", "ladybug-standard")
       graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
-        graph_tier_str, GraphTier.KUZU_STANDARD
+        graph_tier_str, GraphTier.LADYBUG_STANDARD
       )
       schema_extensions = entity_data.extensions or []
 
@@ -225,12 +225,12 @@ class EntityGraphService:
       logger.info(f"Graph metadata created for {graph_id}")
 
       # Install entity graph schema with selected extensions
-      # Use the KuzuClient directly instead of repository
+      # Use the LadybugClient directly instead of repository
       if progress_callback:
         progress_callback("Installing schema extensions...", 60)
 
-      schema_ddl = await self._install_entity_schema_kuzu(
-        kuzu_client, graph_id, entity_data.extensions
+      schema_ddl = await self._install_entity_schema(
+        graph_client, graph_id, entity_data.extensions
       )
 
       # Persist schema DDL to PostgreSQL for validation and versioning
@@ -275,14 +275,14 @@ class EntityGraphService:
         if progress_callback:
           progress_callback("Creating entity node...", 70)
 
-        entity_response = await self._create_entity_in_graph_kuzu(
-          kuzu_client, entity_data, graph_id, user_id, org_id
+        entity_response = await self._create_entity_in_graph_lbug(
+          graph_client, entity_data, graph_id, user_id, org_id
         )
       else:
         logger.info("Skipping entity node creation (create_entity=False)")
 
       # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
-      # stored exclusively in PostgreSQL, not in the Kuzu graph database.
+      # stored exclusively in PostgreSQL, not in the graph database.
       # This keeps the graph focused on business data only.
 
       # Create user-graph relationship in PostgreSQL
@@ -315,19 +315,19 @@ class EntityGraphService:
 
         # Get graph tier from entity data (passed from the request)
         # This determines credit costs and allocation
-        graph_tier_str = entity_data_dict.get("graph_tier", "kuzu-standard")
+        graph_tier_str = entity_data_dict.get("graph_tier", "ladybug-standard")
         credit_graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
-          graph_tier_str, GraphTier.KUZU_STANDARD
+          graph_tier_str, GraphTier.LADYBUG_STANDARD
         )
 
         # Map graph tier directly to subscription tier (1:1 mapping)
         # This determines the monthly credit allocation for the graph
-        if credit_graph_tier == GraphTier.KUZU_XLARGE:
-          subscription_tier = "kuzu-xlarge"
-        elif credit_graph_tier == GraphTier.KUZU_LARGE:
-          subscription_tier = "kuzu-large"
+        if credit_graph_tier == GraphTier.LADYBUG_XLARGE:
+          subscription_tier = "ladybug-xlarge"
+        elif credit_graph_tier == GraphTier.LADYBUG_LARGE:
+          subscription_tier = "ladybug-large"
         else:
-          subscription_tier = "kuzu-standard"
+          subscription_tier = "ladybug-standard"
 
         # Create credit pool
         if progress_callback:
@@ -361,9 +361,9 @@ class EntityGraphService:
           f"Graph: {graph_id}, Instance: {db_location.instance_id}"
         )
 
-      # Close KuzuClient connection
-      if kuzu_client:
-        await kuzu_client.close()
+      # Close LadybugClient connection
+      if graph_client:
+        await graph_client.close()
 
       return {
         "graph_id": graph_id,
@@ -384,8 +384,8 @@ class EntityGraphService:
       else:
         logger.error(f"Database allocation failed for graph: {graph_id}")
 
-      if kuzu_client:
-        logger.error("KuzuClient was created but operation failed")
+      if graph_client:
+        logger.error("LadybugClient was created but operation failed")
 
       # Cleanup on failure
       try:
@@ -395,11 +395,11 @@ class EntityGraphService:
           await allocation_manager.deallocate_database(graph_id)
           logger.info(f"Successfully deallocated database {graph_id}")
 
-        # Close KuzuClient if it was created
-        if kuzu_client:
-          logger.info("Closing KuzuClient for failed operation")
-          await kuzu_client.close()
-          logger.info("Successfully closed KuzuClient")
+        # Close LadybugClient if it was created
+        if graph_client:
+          logger.info("Closing LadybugClient for failed operation")
+          await graph_client.close()
+          logger.info("Successfully closed LadybugClient")
       except Exception as cleanup_error:
         logger.error(
           f"Cleanup failed for {graph_id}: {type(cleanup_error).__name__}: {cleanup_error}"
@@ -428,13 +428,13 @@ class EntityGraphService:
     graph_id = f"kg{base_id}{entity_hash}"
     return graph_id
 
-  async def _install_entity_schema_kuzu(
-    self, kuzu_client: GraphClient, graph_id: str, extensions: Optional[list] = None
+  async def _install_entity_schema(
+    self, graph_client: GraphClient, graph_id: str, extensions: Optional[list] = None
   ) -> str:
     """
-    Install entity graph schema via KuzuClient API using selected extensions.
+    Install entity graph schema via Graph API using selected extensions.
 
-    This is a direct version that uses KuzuClient instead of repository.
+    This is a direct version that uses GraphClient instead of repository.
 
     Returns:
         str: The generated DDL that was installed
@@ -467,7 +467,7 @@ class EntityGraphService:
       logger.debug(f"DDL preview (first 200 chars): {ddl[:200]}...")
 
       # Install schema using DDL
-      result = await kuzu_client.install_schema(graph_id=graph_id, custom_ddl=ddl)
+      result = await graph_client.install_schema(graph_id=graph_id, custom_ddl=ddl)
       logger.info("Schema installation completed successfully")
       logger.info(f"Result: {result}")
       logger.info(
@@ -479,161 +479,8 @@ class EntityGraphService:
       logger.error(f"Failed to install schema: {e}")
       raise
 
-  async def _install_entity_schema(
-    self, repository: GraphClient, graph_id: str, extensions: Optional[list] = None
-  ) -> None:
-    """
-    Install entity graph schema via API using selected extensions.
-
-    This creates the schema for a entity graph based on the selected extensions:
-    - Uses dynamic schema loading with specified extensions
-    - Creates all node tables and relationship tables from schema
-    - Includes proper indexes and constraints
-
-    Args:
-        repository: Graph repository for API calls
-        graph_id: Graph database identifier
-        extensions: List of extension names to enable, or None for all extensions
-    """
-    logger.info(f"Installing entity schema for graph: {graph_id}")
-
-    if extensions:
-      logger.info(f"Using selective extensions: {extensions}")
-      # Validate extensions are available
-      from ...schemas.manager import SchemaManager
-
-      manager = SchemaManager()
-      available_extensions = {
-        ext["name"] for ext in manager.list_available_extensions() if ext["available"]
-      }
-      unknown_extensions = set(extensions) - available_extensions
-      if unknown_extensions:
-        raise ValueError(
-          f"Unknown extensions: {', '.join(unknown_extensions)}. Available: {', '.join(sorted(available_extensions))}"
-        )
-
-      # Check compatibility
-      compatibility = manager.check_schema_compatibility(extensions)
-      if not compatibility.compatible:
-        raise ValueError(
-          f"Schema extensions are not compatible: {'; '.join(compatibility.conflicts)}"
-        )
-
-    elif extensions is None:
-      # Default to base schema only for maximum stability when none specified
-      extensions = []  # Use base schema only by default
-      logger.info("Using base schema only (no extensions) for stability")
-    else:
-      # extensions is an empty list - use base schema only
-      logger.info("Using base schema only (no extensions)")
-
-    try:
-      from ...schemas.loader import get_schema_loader
-
-      # Get schema loader with specified extensions
-      schema_loader = get_schema_loader(extensions=extensions)
-
-      # Get all schema types
-      node_types = schema_loader.list_node_types()
-      relationship_types = schema_loader.list_relationship_types()
-
-      logger.info(
-        f"Installing schema: {len(node_types)} node types, {len(relationship_types)} relationship types"
-      )
-
-      # Generate DDL statements dynamically from schema
-      schema_statements = []
-
-      # Create node tables
-      for node_name in node_types:
-        node_schema = schema_loader.get_node_schema(node_name)
-        if not node_schema:
-          logger.warning(f"No schema found for node type: {node_name}")
-          continue
-
-        # Build column definitions from schema
-        columns = []
-        primary_key = None
-
-        for prop in node_schema.properties:
-          kuzu_type = self._map_schema_type_to_kuzu(prop.type)
-          columns.append(f"{prop.name} {kuzu_type}")
-
-          if prop.is_primary_key:
-            primary_key = prop.name
-
-        if not primary_key:
-          logger.warning(f"No primary key defined for {node_name}, skipping")
-          continue
-
-        columns_str = ",\n                ".join(columns)
-
-        create_sql = f"""CREATE NODE TABLE IF NOT EXISTS {node_name} (
-                {columns_str},
-                PRIMARY KEY ({primary_key})
-            )"""
-
-        schema_statements.append(create_sql)
-
-      # Create relationship tables
-      for rel_name in relationship_types:
-        rel_schema = schema_loader.get_relationship_schema(rel_name)
-        if not rel_schema:
-          logger.warning(f"No schema found for relationship type: {rel_name}")
-          continue
-
-        # Build relationship definition
-        from_node = rel_schema.from_node
-        to_node = rel_schema.to_node
-
-        # Check if from/to nodes exist in our schema
-        if from_node not in node_types or to_node not in node_types:
-          logger.debug(
-            f"Skipping relationship {rel_name}: missing nodes {from_node} or {to_node}"
-          )
-          continue
-
-        # Build property definitions if any
-        if rel_schema.properties:
-          prop_definitions = []
-          for prop in rel_schema.properties:
-            kuzu_type = self._map_schema_type_to_kuzu(prop.type)
-            prop_definitions.append(f"{prop.name} {kuzu_type}")
-
-          props_str = ",\n                " + ",\n                ".join(
-            prop_definitions
-          )
-          create_sql = f"""CREATE REL TABLE IF NOT EXISTS {rel_name} (
-                FROM {from_node} TO {to_node}{props_str}
-            )"""
-        else:
-          create_sql = f"""CREATE REL TABLE IF NOT EXISTS {rel_name} (
-                FROM {from_node} TO {to_node}
-            )"""
-
-        schema_statements.append(create_sql)
-
-      # Execute all schema statements
-      logger.info(f"Executing {len(schema_statements)} schema statements...")
-
-      for i, statement in enumerate(schema_statements):
-        try:
-          # All repositories should have async methods in the new architecture
-          await repository.execute_query(statement.strip())
-          logger.debug(f"Executed schema statement {i + 1}/{len(schema_statements)}")
-        except Exception as e:
-          if "already exists" not in str(e).lower():
-            logger.warning(f"Schema statement {i + 1} failed: {e}")
-            logger.debug(f"Failed statement: {statement}")
-
-      logger.info(f"Entity schema installation completed for graph: {graph_id}")
-
-    except Exception as e:
-      logger.error(f"Failed to install entity schema: {e}")
-      raise
-
-  def _map_schema_type_to_kuzu(self, schema_type: str) -> str:
-    """Map schema property types to Kuzu types."""
+  def _map_schema_type_to_lbug(self, schema_type: str) -> str:
+    """Map schema property types to LadybugDB types."""
     type_mapping = {
       "STRING": "STRING",
       "INT64": "INT64",
@@ -691,9 +538,9 @@ class EntityGraphService:
       "updated_at": current_time,
     }
 
-  async def _create_entity_in_graph_kuzu(
+  async def _create_entity_in_graph_lbug(
     self,
-    kuzu_client: GraphClient,
+    graph_client: GraphClient,
     entity_data: EntityCreate,
     graph_id: str,
     user_id: str,
@@ -806,12 +653,12 @@ class EntityGraphService:
       s3_pattern = f"s3://{env.AWS_S3_BUCKET}/user-staging/{user_id}/{graph_id}/Entity/**/*.parquet"
 
       logger.info(f"Creating DuckDB staging table with pattern: {s3_pattern}")
-      await kuzu_client.create_table(
+      await graph_client.create_table(
         graph_id=graph_id, table_name="Entity", s3_pattern=s3_pattern
       )
 
-      logger.info("Materializing Entity table to Kuzu graph database")
-      ingest_response = await kuzu_client.materialize_table(
+      logger.info("Materializing Entity table to LadybugDB graph database")
+      ingest_response = await graph_client.materialize_table(
         graph_id=graph_id,
         table_name="Entity",
         ignore_errors=False,
@@ -855,7 +702,7 @@ class EntityGraphService:
     cluster_id: str,
     org_id: str,
     extensions: Optional[list] = None,
-    graph_tier_str: str = "kuzu-standard",
+    graph_tier_str: str = "ladybug-standard",
   ) -> None:
     """Create user-graph relationship in PostgreSQL."""
     logger.info(f"Creating user-graph relationship: {user_id} -> {graph_id}")
@@ -870,7 +717,7 @@ class EntityGraphService:
 
       # Convert tier string to GraphTier enum
       graph_tier = SUBSCRIPTION_TO_GRAPH_TIER.get(
-        graph_tier_str, GraphTier.KUZU_STANDARD
+        graph_tier_str, GraphTier.LADYBUG_STANDARD
       )
 
       graph = Graph.create(

@@ -1,4 +1,4 @@
-"""Comprehensive tests for KuzuConnectionPool."""
+"""Comprehensive tests for LadybugConnectionPool."""
 
 import pytest
 import tempfile
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta, timezone
 
 from robosystems.graph_api.core.connection_pool import (
-  KuzuConnectionPool,
+  LadybugConnectionPool,
   ConnectionInfo,
   initialize_connection_pool,
   get_connection_pool,
@@ -43,8 +43,8 @@ class TestConnectionInfo:
     assert info.is_healthy is True
 
 
-class TestKuzuConnectionPool:
-  """Test KuzuConnectionPool class."""
+class TestLadybugConnectionPool:
+  """Test LadybugConnectionPool class."""
 
   def setup_method(self):
     """Set up test fixtures."""
@@ -57,7 +57,7 @@ class TestKuzuConnectionPool:
 
   def test_initialization(self):
     """Test connection pool initialization."""
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       max_connections_per_db=5,
       connection_ttl_minutes=20,
@@ -89,18 +89,18 @@ class TestKuzuConnectionPool:
 
   def test_initialization_defaults(self):
     """Test connection pool initialization with default parameters."""
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     assert pool.max_connections_per_db == 3
     assert pool.connection_ttl == timedelta(minutes=30)
     assert pool.health_check_interval == timedelta(minutes=5)
     assert pool.cleanup_interval == timedelta(minutes=10)
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_get_connection_context_manager(self, mock_conn_class, mock_db_class):
     """Test connection retrieval using context manager."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_db = MagicMock()
     mock_conn = MagicMock()
     mock_db_class.return_value = mock_db
@@ -110,13 +110,13 @@ class TestKuzuConnectionPool:
     mock_result = MagicMock()
     mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     with pool.get_connection("test_db", read_only=True) as conn:
       assert conn == mock_conn
 
-    # Verify Kuzu objects were created correctly (Kuzu 0.11.0 uses .kuzu files)
-    expected_db_path = str(Path(self.base_path) / "test_db.kuzu")
+    # Verify LadybugDB objects were created correctly (LadybugDB 0.11.0 uses .lbug files)
+    expected_db_path = str(Path(self.base_path) / "test_db.lbug")
     # Check that database was called with expected parameters (buffer_pool_size is now included)
     mock_db_class.assert_called_once()
     call_args = mock_db_class.call_args
@@ -157,11 +157,11 @@ class TestKuzuConnectionPool:
 
     mock_result.close.assert_called_once()
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_connection_reuse(self, mock_conn_class, mock_db_class):
     """Test connection reuse from pool."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_db = MagicMock()
     mock_conn = MagicMock()
     mock_db_class.return_value = mock_db
@@ -171,7 +171,7 @@ class TestKuzuConnectionPool:
     mock_result = MagicMock()
     mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     # First connection - should create new
     with pool.get_connection("test_db") as conn1:
@@ -193,11 +193,11 @@ class TestKuzuConnectionPool:
     assert pool._stats["connections_created"] == 1
     assert pool._stats["connections_reused"] == 1
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_max_connections_per_database(self, mock_conn_class, mock_db_class):
     """Test connection limit enforcement per database."""
-    # Mock Kuzu classes to return different instances
+    # Mock LadybugDB classes to return different instances
     mock_dbs = [MagicMock() for _ in range(5)]
     mock_conns = [MagicMock() for _ in range(5)]
     mock_db_class.side_effect = mock_dbs
@@ -208,7 +208,7 @@ class TestKuzuConnectionPool:
       mock_result = MagicMock()
       mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       max_connections_per_db=2,
     )
@@ -239,11 +239,11 @@ class TestKuzuConnectionPool:
     close_calls = sum(1 for mock_conn in mock_conns if mock_conn.close.called)
     assert close_calls >= 1
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_connection_ttl_expiry(self, mock_conn_class, mock_db_class):
     """Test connection TTL expiry and cleanup."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_db = MagicMock()
     mock_conn = MagicMock()
     mock_db_class.return_value = mock_db
@@ -253,7 +253,7 @@ class TestKuzuConnectionPool:
     mock_result = MagicMock()
     mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       connection_ttl_minutes=1,  # Very short TTL for testing
     )
@@ -267,7 +267,7 @@ class TestKuzuConnectionPool:
     for conn_info in db_pool.values():
       conn_info.created_at = datetime.now(timezone.utc) - timedelta(minutes=2)
 
-    # Mock new Kuzu objects for the replacement connection
+    # Mock new LadybugDB objects for the replacement connection
     mock_db_new = MagicMock()
     mock_conn_new = MagicMock()
     mock_db_class.return_value = mock_db_new
@@ -285,11 +285,11 @@ class TestKuzuConnectionPool:
     mock_conn.close.assert_called()
     # Database is not closed until all connections are closed or invalidated
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_connection_health_check_failure(self, mock_conn_class, mock_db_class):
     """Test connection health check failure and recovery."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_db = MagicMock()
     mock_conn = MagicMock()
     mock_db_class.return_value = mock_db
@@ -299,7 +299,7 @@ class TestKuzuConnectionPool:
     mock_result = MagicMock()
     mock_conn.execute.side_effect = [mock_result, Exception("Connection lost")]
 
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     # Create a connection
     with pool.get_connection("test_db"):
@@ -315,7 +315,7 @@ class TestKuzuConnectionPool:
 
   def test_database_lock_creation(self):
     """Test database-specific lock creation."""
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     # Get locks for different databases
     lock1 = pool._get_database_lock("db1")
@@ -332,11 +332,11 @@ class TestKuzuConnectionPool:
     assert "db1" in pool._locks
     assert "db2" in pool._locks
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_connection_validity_check(self, mock_conn_class, mock_db_class):
     """Test connection validity checking."""
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       connection_ttl_minutes=30,
     )
@@ -382,11 +382,11 @@ class TestKuzuConnectionPool:
     assert pool._is_connection_valid(expired_conn_info) is False
     assert pool._is_connection_valid(unhealthy_conn_info) is False
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_cleanup_expired_connections(self, mock_conn_class, mock_db_class):
     """Test cleanup of expired connections."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_db = MagicMock()
     mock_conn = MagicMock()
     mock_db_class.return_value = mock_db
@@ -396,7 +396,7 @@ class TestKuzuConnectionPool:
     mock_result = MagicMock()
     mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       connection_ttl_minutes=30,
     )
@@ -418,11 +418,11 @@ class TestKuzuConnectionPool:
     # Database is not closed until all connections are closed or invalidated
     assert len(pool._pools.get("test_db", {})) == 0
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_maintenance_task_scheduling(self, mock_conn_class, mock_db_class):
     """Test automatic maintenance task scheduling."""
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       cleanup_interval_minutes=1,  # Very short for testing
       health_check_interval_minutes=1,
@@ -443,11 +443,11 @@ class TestKuzuConnectionPool:
     pool._cleanup_expired_connections.assert_called_once()
     pool._check_connection_health.assert_called_once()
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_get_stats(self, mock_conn_class, mock_db_class):
     """Test connection pool statistics retrieval."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_db = MagicMock()
     mock_conn = MagicMock()
     mock_db_class.return_value = mock_db
@@ -457,7 +457,7 @@ class TestKuzuConnectionPool:
     mock_result = MagicMock()
     mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       max_connections_per_db=5,
       connection_ttl_minutes=30,
@@ -482,11 +482,11 @@ class TestKuzuConnectionPool:
     assert stats["configuration"]["max_connections_per_db"] == 5
     assert stats["configuration"]["connection_ttl_minutes"] == 30
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_close_database_connections(self, mock_conn_class, mock_db_class):
     """Test closing all connections for a specific database."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_dbs = [MagicMock() for _ in range(3)]
     mock_conns = [MagicMock() for _ in range(3)]
     mock_db_class.side_effect = mock_dbs
@@ -497,7 +497,7 @@ class TestKuzuConnectionPool:
       mock_result = MagicMock()
       mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     # Create connections for different databases
     with pool.get_connection("db1"):
@@ -516,11 +516,11 @@ class TestKuzuConnectionPool:
     assert "db2" in pool._pools
     assert len(pool._pools.get("db1", {})) == 0
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_close_all_connections(self, mock_conn_class, mock_db_class):
     """Test closing all connections in the pool."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_dbs = [MagicMock() for _ in range(2)]
     mock_conns = [MagicMock() for _ in range(2)]
     mock_db_class.side_effect = mock_dbs
@@ -531,7 +531,7 @@ class TestKuzuConnectionPool:
       mock_result = MagicMock()
       mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     # Create connections
     with pool.get_connection("db1"):
@@ -552,13 +552,13 @@ class TestKuzuConnectionPool:
     assert len(pool._pools) == 0
     assert len(pool._locks) == 0
 
-  @patch("kuzu.Database")
+  @patch("real_ladybug.Database")
   def test_connection_creation_error_handling(self, mock_db_class):
     """Test error handling during connection creation."""
-    # Mock Kuzu database creation failure
+    # Mock LadybugDB database creation failure
     mock_db_class.side_effect = Exception("Database connection failed")
 
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     # Attempting to get connection should raise the original exception
     with pytest.raises(Exception, match="Database connection failed"):
@@ -567,7 +567,7 @@ class TestKuzuConnectionPool:
 
   def test_thread_safety(self):
     """Test thread safety of connection pool operations."""
-    pool = KuzuConnectionPool(base_path=self.base_path)
+    pool = LadybugConnectionPool(base_path=self.base_path)
 
     # This is a basic test - more comprehensive thread safety testing
     # would require complex scenarios with actual threading
@@ -591,11 +591,11 @@ class TestKuzuConnectionPool:
     # Verify locks were created correctly
     assert len(pool._locks) == 3  # db_0, db_1, db_2
 
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_lru_connection_selection(self, mock_conn_class, mock_db_class):
     """Test least recently used connection selection."""
-    # Mock Kuzu classes
+    # Mock LadybugDB classes
     mock_dbs = [MagicMock() for _ in range(3)]
     mock_conns = [MagicMock() for _ in range(3)]
     mock_db_class.side_effect = mock_dbs
@@ -606,7 +606,7 @@ class TestKuzuConnectionPool:
       mock_result = MagicMock()
       mock_conn.execute.return_value = mock_result
 
-    pool = KuzuConnectionPool(
+    pool = LadybugConnectionPool(
       base_path=self.base_path,
       max_connections_per_db=2,
     )
@@ -655,7 +655,7 @@ class TestConnectionPoolGlobals:
       connection_ttl_minutes=45,
     )
 
-    assert isinstance(pool, KuzuConnectionPool)
+    assert isinstance(pool, LadybugConnectionPool)
     assert pool.base_path == Path(self.temp_dir)
     assert pool.max_connections_per_db == 10
     assert pool.connection_ttl == timedelta(minutes=45)
@@ -687,8 +687,8 @@ class TestConnectionPoolGlobals:
 class TestConnectionPoolIntegration:
   """Integration tests for connection pool."""
 
-  def test_connection_pool_integration_with_mocked_kuzu(self):
-    """Test connection pool integration with mocked Kuzu to avoid segfaults."""
+  def test_connection_pool_integration_with_mocked_lbug(self):
+    """Test connection pool integration with mocked LadybugDB to avoid segfaults."""
     import tempfile
     import shutil
     from unittest.mock import patch, MagicMock
@@ -697,10 +697,10 @@ class TestConnectionPoolIntegration:
     temp_base = tempfile.mkdtemp()
     pool = None
     try:
-      # Mock Kuzu to avoid segmentation faults
+      # Mock LadybugDB to avoid segmentation faults
       with (
-        patch("kuzu.Database") as mock_db_class,
-        patch("kuzu.Connection") as mock_conn_class,
+        patch("real_ladybug.Database") as mock_db_class,
+        patch("real_ladybug.Connection") as mock_conn_class,
       ):
         # Setup mocks
         mock_db = MagicMock()
@@ -715,7 +715,7 @@ class TestConnectionPoolIntegration:
         mock_result.has_next.side_effect = [True, False]  # One row then done
         mock_result.get_next.return_value = ["test1", "Test Node 1"]
 
-        pool = KuzuConnectionPool(
+        pool = LadybugConnectionPool(
           base_path=temp_base,
           max_connections_per_db=2,
           connection_ttl_minutes=1,
@@ -777,7 +777,7 @@ class TestConnectionPoolIntegration:
         pass  # Ignore cleanup errors in tests
 
   def test_high_concurrency_stress_test(self):
-    """Test connection pool under high concurrency with mocked Kuzu."""
+    """Test connection pool under high concurrency with mocked LadybugDB."""
     import threading
     import time
     import concurrent.futures
@@ -790,10 +790,10 @@ class TestConnectionPoolIntegration:
     temp_base = tempfile.mkdtemp()
     pool = None
     try:
-      # Mock Kuzu to avoid segmentation faults
+      # Mock LadybugDB to avoid segmentation faults
       with (
-        patch("kuzu.Database") as mock_db_class,
-        patch("kuzu.Connection") as mock_conn_class,
+        patch("real_ladybug.Database") as mock_db_class,
+        patch("real_ladybug.Connection") as mock_conn_class,
       ):
         # Setup mocks
         mock_db = MagicMock()
@@ -804,7 +804,7 @@ class TestConnectionPoolIntegration:
         mock_conn_class.return_value = mock_conn
         mock_conn.execute.return_value = mock_result
 
-        pool = KuzuConnectionPool(
+        pool = LadybugConnectionPool(
           base_path=temp_base,
           max_connections_per_db=3,
           connection_ttl_minutes=2,

@@ -1,5 +1,5 @@
 """
-RoboInvestor Schema Extension for Kuzu
+RoboInvestor Schema Extension for LadybugDB
 
 Portfolio management, investment tracking, and securities analysis.
 Extends the base schema with investment-specific entities.

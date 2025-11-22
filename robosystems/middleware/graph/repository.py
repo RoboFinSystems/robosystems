@@ -348,7 +348,7 @@ def create_universal_repository(
   if tier is None:
     from .types import GraphTier
 
-    tier = GraphTier.KUZU_STANDARD
+    tier = GraphTier.LADYBUG_STANDARD
 
   # Note: get_graph_repository is async, but this is a sync function
   # This should ideally be an async function, but keeping for compatibility

@@ -4,12 +4,12 @@ SEC XBRL Processing and Ingestion Pipeline
 This package contains all SEC-specific tasks for the XBRL processing pipeline:
 - Entity discovery and filing collection
 - XBRL processing (parallel)
-- Kuzu database ingestion (direct from processed files)
+- LadybugDB database ingestion (direct from processed files)
 
 The pipeline follows this architecture:
 1. Entity discovery and filing collection
 2. XBRL processing (parallel) → processed/year={year}/
-3. Kuzu ingestion (direct from processed files using wildcards)
+3. LadybugDB ingestion (direct from processed files using wildcards)
 """
 
 from .ingestion import ingest_sec_data

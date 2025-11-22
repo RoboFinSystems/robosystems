@@ -33,7 +33,7 @@ class GraphPricingService:
 
     customer = BillingCustomer.get_by_user_id(user_id, self.session)
     if not customer:
-      return BillingConfig.get_subscription_plan("kuzu-standard")
+      return BillingConfig.get_subscription_plan("ladybug-standard")
 
     subscription = (
       self.session.query(BillingSubscription)
@@ -49,8 +49,8 @@ class GraphPricingService:
     if subscription and subscription.plan_name:
       return BillingConfig.get_subscription_plan(subscription.plan_name)
 
-    # Default to kuzu-standard plan if no subscription
-    return BillingConfig.get_subscription_plan("kuzu-standard")
+    # Default to ladybug-standard plan if no subscription
+    return BillingConfig.get_subscription_plan("ladybug-standard")
 
   def calculate_graph_monthly_bill(
     self,

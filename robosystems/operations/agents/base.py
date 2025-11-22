@@ -124,7 +124,7 @@ class BaseAgent(ABC):
     self.db_session = db_session
     self.logger = logger
     self.total_tokens_used = {"input": 0, "output": 0}
-    self.kuzu_client = None
+    self.graph_client = None
     self.mcp_tools = None
 
   @property
@@ -183,12 +183,12 @@ class BaseAgent(ABC):
     """Initialize MCP tools for the agent."""
     try:
       from robosystems.middleware.mcp import (
-        create_kuzu_mcp_client,
-        KuzuMCPTools,
+        create_graph_mcp_client,
+        GraphMCPTools,
       )
 
-      self.kuzu_client = await create_kuzu_mcp_client(graph_id=self.graph_id)
-      self.mcp_tools = KuzuMCPTools(self.kuzu_client)
+      self.graph_client = await create_graph_mcp_client(graph_id=self.graph_id)
+      self.mcp_tools = GraphMCPTools(self.graph_client)
       self.logger.info(f"Initialized MCP tools for agent in graph {self.graph_id}")
     except Exception as e:
       self.logger.error(f"Failed to initialize MCP tools: {str(e)}")
@@ -196,9 +196,9 @@ class BaseAgent(ABC):
 
   async def close(self):
     """Clean up agent resources."""
-    if self.kuzu_client:
+    if self.graph_client:
       try:
-        await self.kuzu_client.close()
+        await self.graph_client.close()
         self.logger.debug("Closed Graph client connection")
       except Exception as e:
         self.logger.error(f"Error closing Graph client: {str(e)}")

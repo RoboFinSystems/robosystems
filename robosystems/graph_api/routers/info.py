@@ -1,5 +1,5 @@
 """
-Cluster information endpoints for Kuzu nodes.
+Cluster information endpoints for LadybugDB nodes.
 
 This module provides endpoints for retrieving detailed information
 about the cluster node and its capabilities.

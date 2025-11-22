@@ -656,4 +656,4 @@ class SchemaInfoResponse(BaseModel):
   )
 
 
-# New API models for Kuzu database operations
+# New API models for LadybugDB database operations

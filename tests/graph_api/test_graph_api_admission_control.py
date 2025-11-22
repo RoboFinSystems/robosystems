@@ -6,7 +6,7 @@ import pytest
 
 from robosystems.graph_api.core.admission_control import (
   AdmissionDecision,
-  KuzuAdmissionController,
+  LadybugAdmissionController,
   get_admission_controller,
 )
 
@@ -30,7 +30,7 @@ def set_resource_usage(monkeypatch):
 
 def test_check_admission_accepts_when_under_thresholds(set_resource_usage):
   """Requests should be accepted when metrics are healthy."""
-  controller = KuzuAdmissionController(
+  controller = LadybugAdmissionController(
     memory_threshold=80.0,
     cpu_threshold=90.0,
     max_connections_per_db=2,
@@ -46,7 +46,7 @@ def test_check_admission_accepts_when_under_thresholds(set_resource_usage):
 
 def test_check_admission_rejects_on_memory_pressure(set_resource_usage):
   """Ensure high memory usage triggers load shedding."""
-  controller = KuzuAdmissionController(
+  controller = LadybugAdmissionController(
     memory_threshold=70.0,
     cpu_threshold=95.0,
     max_connections_per_db=2,
@@ -63,7 +63,7 @@ def test_check_admission_rejects_on_memory_pressure(set_resource_usage):
 
 def test_check_admission_rejects_on_cpu_for_ingestion(set_resource_usage):
   """CPU limits are stricter for ingestion workloads."""
-  controller = KuzuAdmissionController(
+  controller = LadybugAdmissionController(
     memory_threshold=90.0,
     cpu_threshold=80.0,
     max_connections_per_db=2,
@@ -81,7 +81,7 @@ def test_check_admission_rejects_on_cpu_for_ingestion(set_resource_usage):
 
 def test_check_admission_rejects_when_connections_exceeded(set_resource_usage):
   """Connection pool guard should reject once max connections reached."""
-  controller = KuzuAdmissionController(
+  controller = LadybugAdmissionController(
     memory_threshold=90.0,
     cpu_threshold=90.0,
     max_connections_per_db=1,
@@ -99,7 +99,7 @@ def test_check_admission_rejects_when_connections_exceeded(set_resource_usage):
 
 def test_get_metrics_includes_live_counters(set_resource_usage):
   """Metrics payload should include latest resource values and totals."""
-  controller = KuzuAdmissionController(
+  controller = LadybugAdmissionController(
     memory_threshold=85.0,
     cpu_threshold=90.0,
     max_connections_per_db=3,
@@ -128,13 +128,13 @@ def test_get_admission_controller_uses_env_configuration(monkeypatch):
   )
 
   monkeypatch.setattr(
-    "robosystems.config.env.KUZU_ADMISSION_MEMORY_THRESHOLD", 77.0, raising=False
+    "robosystems.config.env.LBUG_ADMISSION_MEMORY_THRESHOLD", 77.0, raising=False
   )
   monkeypatch.setattr(
-    "robosystems.config.env.KUZU_ADMISSION_CPU_THRESHOLD", 88.0, raising=False
+    "robosystems.config.env.LBUG_ADMISSION_CPU_THRESHOLD", 88.0, raising=False
   )
   monkeypatch.setattr(
-    "robosystems.config.env.KUZU_MAX_CONNECTIONS_PER_DB", 5, raising=False
+    "robosystems.config.env.LBUG_MAX_CONNECTIONS_PER_DB", 5, raising=False
   )
 
   controller_one = get_admission_controller()

@@ -5,14 +5,14 @@ This router provides graph database access with pluggable backend support,
 using the enhanced client factory for all routing decisions.
 
 Supported backends:
-- Kuzu: Embedded graph database (Standard tier)
-- Neo4j Community: Client-server architecture (Professional/Enterprise tiers)
-- Neo4j Enterprise: Full enterprise features (Premium tier, future)
+- LadybugDB: Embedded graph database (ladybug-standard, ladybug-large, ladybug-xlarge tiers)
+- Neo4j Community: Client-server architecture (neo4j-community-large tier)
+- Neo4j Enterprise: Full enterprise features (neo4j-enterprise-xlarge tier)
 
 Key features:
 - Backend-agnostic routing based on tier and allocation
 - Delegates routing to the enhanced client factory
-- Supports direct file access for development (Kuzu only)
+- Supports direct file access for development (LadybugDB only)
 - Maintains backward compatibility with existing code
 """
 
@@ -38,7 +38,7 @@ class GraphRouter:
   - Shared repositories: SEC, industry, economic data
   - Dev environment: Single local backend instance
   - Production: Distributed instances with tier-based routing
-  - Backend selection: Automatic based on tier (Kuzu/Neo4j)
+  - Backend selection: Automatic based on tier (LadybugDB/Neo4j)
   """
 
   def __init__(self):
@@ -51,7 +51,7 @@ class GraphRouter:
     self,
     graph_id: str,
     operation_type: str = "write",
-    tier: GraphTier = GraphTier.KUZU_STANDARD,
+    tier: GraphTier = GraphTier.LADYBUG_STANDARD,
   ) -> Union[Repository, Any]:
     """
     Get a repository for the specified graph.
@@ -64,14 +64,14 @@ class GraphRouter:
     Returns:
         Configured Repository instance
     """
-    # Check KUZU_ACCESS_PATTERN to force direct file access if requested
-    access_pattern = env.KUZU_ACCESS_PATTERN
+    # Check LBUG_ACCESS_PATTERN to force direct file access if requested
+    access_pattern = env.LBUG_ACCESS_PATTERN
 
     if access_pattern == "direct_file":
       # Force direct file access regardless of cluster configuration
       from .engine import Repository
 
-      db_path = env.KUZU_DATABASE_PATH
+      db_path = env.LBUG_DATABASE_PATH
       database_path = f"{db_path}/{graph_id}"
       logger.debug(f"Creating direct file Repository for {graph_id}: {database_path}")
       return Repository(database_path)
@@ -174,7 +174,7 @@ def get_graph_router() -> GraphRouter:
 async def get_graph_repository(
   graph_id: str,
   operation_type: str = "write",
-  tier: GraphTier = GraphTier.KUZU_STANDARD,
+  tier: GraphTier = GraphTier.LADYBUG_STANDARD,
 ) -> Union[Repository, Any]:
   """
   Get a graph repository for the specified database.
@@ -196,7 +196,7 @@ async def get_graph_repository(
 async def get_universal_repository(
   graph_id: str,
   operation_type: str = "write",
-  tier: GraphTier = GraphTier.KUZU_STANDARD,
+  tier: GraphTier = GraphTier.LADYBUG_STANDARD,
 ):
   """
   Get a universal repository wrapper for the specified database.

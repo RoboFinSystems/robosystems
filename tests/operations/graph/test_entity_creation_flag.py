@@ -50,7 +50,7 @@ class TestEntityCreationFlag:
           mock_get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.operations.graph.entity_graph_service.KuzuAllocationManager"
+            "robosystems.operations.graph.entity_graph_service.LadybugAllocationManager"
           ) as mock_allocation_mgr:
             mock_mgr_instance = AsyncMock()
             mock_location = Mock()
@@ -62,19 +62,19 @@ class TestEntityCreationFlag:
             with patch(
               "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance"
             ) as mock_get_client:
-              mock_kuzu_client = AsyncMock()
+              mock_lbug_client = AsyncMock()
 
               # Create a mock exception that looks like a 404
               not_found_error = Exception("Not found")
               not_found_error.status_code = 404
 
-              mock_kuzu_client.get_database = AsyncMock(side_effect=not_found_error)
-              mock_kuzu_client.create_database = AsyncMock()
-              mock_kuzu_client.install_schema = AsyncMock(
+              mock_lbug_client.get_database = AsyncMock(side_effect=not_found_error)
+              mock_lbug_client.create_database = AsyncMock()
+              mock_lbug_client.install_schema = AsyncMock(
                 return_value={"status": "success"}
               )
-              mock_kuzu_client.close = AsyncMock()
-              mock_get_client.return_value = mock_kuzu_client
+              mock_lbug_client.close = AsyncMock()
+              mock_get_client.return_value = mock_lbug_client
 
               with patch(
                 "robosystems.models.iam.graph.Graph.create"
@@ -90,13 +90,13 @@ class TestEntityCreationFlag:
                   ):
                     with patch.object(
                       entity_service,
-                      "_install_entity_schema_kuzu",
+                      "_install_entity_schema",
                       new_callable=AsyncMock,
                       return_value="CREATE NODE TABLE Entity(...);",
                     ):
                       with patch.object(
                         entity_service,
-                        "_create_entity_in_graph_kuzu",
+                        "_create_entity_in_graph_lbug",
                         new_callable=AsyncMock,
                       ) as mock_create_entity:
                         mock_entity_response = Mock()
@@ -115,7 +115,7 @@ class TestEntityCreationFlag:
                           result = await entity_service.create_entity_with_new_graph(
                             entity_data_dict=entity_data,
                             user_id="user_123",
-                            tier="kuzu-standard",
+                            tier="ladybug-standard",
                           )
 
                           mock_create_entity.assert_called_once()
@@ -153,7 +153,7 @@ class TestEntityCreationFlag:
           mock_get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.operations.graph.entity_graph_service.KuzuAllocationManager"
+            "robosystems.operations.graph.entity_graph_service.LadybugAllocationManager"
           ) as mock_allocation_mgr:
             mock_mgr_instance = AsyncMock()
             mock_location = Mock()
@@ -165,19 +165,19 @@ class TestEntityCreationFlag:
             with patch(
               "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance"
             ) as mock_get_client:
-              mock_kuzu_client = AsyncMock()
+              mock_lbug_client = AsyncMock()
 
               # Create a mock exception that looks like a 404
               not_found_error = Exception("Not found")
               not_found_error.status_code = 404
 
-              mock_kuzu_client.get_database = AsyncMock(side_effect=not_found_error)
-              mock_kuzu_client.create_database = AsyncMock()
-              mock_kuzu_client.install_schema = AsyncMock(
+              mock_lbug_client.get_database = AsyncMock(side_effect=not_found_error)
+              mock_lbug_client.create_database = AsyncMock()
+              mock_lbug_client.install_schema = AsyncMock(
                 return_value={"status": "success"}
               )
-              mock_kuzu_client.close = AsyncMock()
-              mock_get_client.return_value = mock_kuzu_client
+              mock_lbug_client.close = AsyncMock()
+              mock_get_client.return_value = mock_lbug_client
 
               with patch(
                 "robosystems.models.iam.graph.Graph.create"
@@ -193,13 +193,13 @@ class TestEntityCreationFlag:
                   ):
                     with patch.object(
                       entity_service,
-                      "_install_entity_schema_kuzu",
+                      "_install_entity_schema",
                       new_callable=AsyncMock,
                       return_value="CREATE NODE TABLE Entity(...);",
                     ):
                       with patch.object(
                         entity_service,
-                        "_create_entity_in_graph_kuzu",
+                        "_create_entity_in_graph_lbug",
                         new_callable=AsyncMock,
                       ) as mock_create_entity:
                         with patch(
@@ -208,7 +208,7 @@ class TestEntityCreationFlag:
                           result = await entity_service.create_entity_with_new_graph(
                             entity_data_dict=entity_data,
                             user_id="user_123",
-                            tier="kuzu-standard",
+                            tier="ladybug-standard",
                           )
 
                           mock_create_entity.assert_not_called()
@@ -244,7 +244,7 @@ class TestEntityCreationFlag:
           mock_get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.operations.graph.entity_graph_service.KuzuAllocationManager"
+            "robosystems.operations.graph.entity_graph_service.LadybugAllocationManager"
           ) as mock_allocation_mgr:
             mock_mgr_instance = AsyncMock()
             mock_location = Mock()
@@ -256,19 +256,19 @@ class TestEntityCreationFlag:
             with patch(
               "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance"
             ) as mock_get_client:
-              mock_kuzu_client = AsyncMock()
+              mock_lbug_client = AsyncMock()
 
               # Create a mock exception that looks like a 404
               not_found_error = Exception("Not found")
               not_found_error.status_code = 404
 
-              mock_kuzu_client.get_database = AsyncMock(side_effect=not_found_error)
-              mock_kuzu_client.create_database = AsyncMock()
-              mock_kuzu_client.install_schema = AsyncMock(
+              mock_lbug_client.get_database = AsyncMock(side_effect=not_found_error)
+              mock_lbug_client.create_database = AsyncMock()
+              mock_lbug_client.install_schema = AsyncMock(
                 return_value={"status": "success"}
               )
-              mock_kuzu_client.close = AsyncMock()
-              mock_get_client.return_value = mock_kuzu_client
+              mock_lbug_client.close = AsyncMock()
+              mock_get_client.return_value = mock_lbug_client
 
               with patch(
                 "robosystems.models.iam.graph.Graph.create"
@@ -284,13 +284,13 @@ class TestEntityCreationFlag:
                   ):
                     with patch.object(
                       entity_service,
-                      "_install_entity_schema_kuzu",
+                      "_install_entity_schema",
                       new_callable=AsyncMock,
                       return_value="CREATE NODE TABLE Entity(...);",
                     ):
                       with patch.object(
                         entity_service,
-                        "_create_entity_in_graph_kuzu",
+                        "_create_entity_in_graph_lbug",
                         new_callable=AsyncMock,
                       ) as mock_create_entity:
                         mock_entity_response = Mock()
@@ -309,7 +309,7 @@ class TestEntityCreationFlag:
                           result = await entity_service.create_entity_with_new_graph(
                             entity_data_dict=entity_data,
                             user_id="user_123",
-                            tier="kuzu-standard",
+                            tier="ladybug-standard",
                           )
 
                           mock_create_entity.assert_called_once()

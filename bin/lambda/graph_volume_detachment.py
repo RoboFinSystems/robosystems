@@ -4,7 +4,7 @@ Graph Volume Detachment Lambda Function
 Handles the safe detachment of EBS volumes when EC2 instances are terminated.
 This function is triggered by Auto Scaling lifecycle hooks to ensure volumes
 are properly unmounted and detached before instance termination.
-Supports both Kuzu and Neo4j backends.
+Supports both LadybugDB and Neo4j backends.
 """
 
 import json
@@ -102,9 +102,9 @@ def handler(event, context):
             DocumentName="AWS-RunShellScript",
             Parameters={
               "commands": [
-                "# Unmount Kuzu data volume",
+                "# Unmount LadybugDB data volume",
                 "sync",  # Flush any pending writes
-                "umount /mnt/kuzu-data || true",
+                "umount /mnt/lbug-data || true",
                 "umount /data || true",  # Legacy mount point
               ]
             },

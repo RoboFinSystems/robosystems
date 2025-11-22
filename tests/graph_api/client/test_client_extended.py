@@ -17,7 +17,7 @@ from robosystems.graph_api.client.exceptions import (
 )
 
 
-class TestKuzuClientExtended:
+class TestLadybugClientExtended:
   """Extended test cases for async GraphClient."""
 
   @pytest.fixture
@@ -520,7 +520,7 @@ class TestKuzuClientExtended:
     assert error.response_data == {"detail": "Bad request"}
 
   @pytest.mark.asyncio
-  async def test_kuzu_timeout_error_retry(self, client):
+  async def test_lbug_timeout_error_retry(self, client):
     """Test that GraphTimeoutError triggers retry."""
     attempt_count = 0
 
@@ -537,7 +537,7 @@ class TestKuzuClientExtended:
     assert attempt_count == 2
 
   @pytest.mark.asyncio
-  async def test_kuzu_transient_error_retry(self, client):
+  async def test_lbug_transient_error_retry(self, client):
     """Test that GraphTransientError triggers retry."""
     attempt_count = 0
 
@@ -554,7 +554,7 @@ class TestKuzuClientExtended:
     assert attempt_count == 3
 
   @pytest.mark.asyncio
-  async def test_kuzu_syntax_error_no_retry(self, client):
+  async def test_lbug_syntax_error_no_retry(self, client):
     """Test that GraphSyntaxError does not trigger retry."""
     attempt_count = 0
 
@@ -569,7 +569,7 @@ class TestKuzuClientExtended:
     assert attempt_count == 1  # Should not retry
 
   @pytest.mark.asyncio
-  async def test_kuzu_server_error_retry(self, client):
+  async def test_lbug_server_error_retry(self, client):
     """Test that GraphServerError triggers retry."""
     attempt_count = 0
 

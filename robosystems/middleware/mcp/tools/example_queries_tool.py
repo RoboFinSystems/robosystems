@@ -187,7 +187,7 @@ LIMIT 10""",
               "query": """MATCH (f:Fact)
 WHERE f.numeric_value IS NOT NULL
 RETURN 'Fact' as type, sum(f.numeric_value) as total, count(f) as count""",
-              "explanation": "Kuzu supports aggregation functions like sum(), avg(), count()",
+              "explanation": "LadybugDB supports aggregation functions like sum(), avg(), count()",
             },
             {
               "category": "aggregations",

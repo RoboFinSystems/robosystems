@@ -1,5 +1,5 @@
 """
-RoboReport Schema Extension for Kuzu
+RoboReport Schema Extension for LadybugDB
 
 Regulatory filing, compliance, and submission management.
 Extends the base schema with regulatory-specific entities.

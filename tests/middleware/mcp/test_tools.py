@@ -20,8 +20,8 @@ from robosystems.middleware.mcp.tools.data_tools import (
 
 
 @pytest.fixture
-def mock_kuzu_client():
-  """Mock KuzuMCPClient for tool initialization."""
+def mock_graph_client():
+  """Mock GraphMCPClient for tool initialization."""
   client = MagicMock()
   client.graph_id = "kg1234567890abcdef"
   client.user = MagicMock()
@@ -66,10 +66,10 @@ class TestCreateWorkspaceTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_create_workspace_success(
-    self, mock_kuzu_client, mock_db_session, mock_graph_model
+    self, mock_graph_client, mock_db_session, mock_graph_model
   ):
     """Test successful workspace creation."""
-    tool = CreateWorkspaceTool(mock_kuzu_client)
+    tool = CreateWorkspaceTool(mock_graph_client)
 
     # Mock database query
     mock_db_session.query.return_value.filter.return_value.first.return_value = (
@@ -96,10 +96,10 @@ class TestCreateWorkspaceTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_create_workspace_with_fork(
-    self, mock_kuzu_client, mock_db_session, mock_graph_model
+    self, mock_graph_client, mock_db_session, mock_graph_model
   ):
     """Test workspace creation with parent fork."""
-    tool = CreateWorkspaceTool(mock_kuzu_client)
+    tool = CreateWorkspaceTool(mock_graph_client)
 
     mock_db_session.query.return_value.filter.return_value.first.return_value = (
       mock_graph_model
@@ -130,10 +130,10 @@ class TestCreateWorkspaceTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_create_workspace_parent_not_found(
-    self, mock_kuzu_client, mock_db_session
+    self, mock_graph_client, mock_db_session
   ):
     """Test workspace creation when parent graph not found."""
-    tool = CreateWorkspaceTool(mock_kuzu_client)
+    tool = CreateWorkspaceTool(mock_graph_client)
 
     mock_db_session.query.return_value.filter.return_value.first.return_value = None
 
@@ -144,9 +144,9 @@ class TestCreateWorkspaceTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_create_workspace_invalid_name_format(self, mock_kuzu_client):
+  async def test_create_workspace_invalid_name_format(self, mock_graph_client):
     """Test workspace creation with invalid name format."""
-    tool = CreateWorkspaceTool(mock_kuzu_client)
+    tool = CreateWorkspaceTool(mock_graph_client)
 
     result = await tool.execute({"name": "dev-test"})
 
@@ -155,9 +155,9 @@ class TestCreateWorkspaceTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_create_workspace_name_too_long(self, mock_kuzu_client):
+  async def test_create_workspace_name_too_long(self, mock_graph_client):
     """Test workspace creation with name too long."""
-    tool = CreateWorkspaceTool(mock_kuzu_client)
+    tool = CreateWorkspaceTool(mock_graph_client)
 
     result = await tool.execute({"name": "a" * 21})
 
@@ -167,10 +167,10 @@ class TestCreateWorkspaceTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_create_workspace_service_error(
-    self, mock_kuzu_client, mock_db_session, mock_graph_model
+    self, mock_graph_client, mock_db_session, mock_graph_model
   ):
     """Test workspace creation when SubgraphService fails."""
-    tool = CreateWorkspaceTool(mock_kuzu_client)
+    tool = CreateWorkspaceTool(mock_graph_client)
 
     mock_db_session.query.return_value.filter.return_value.first.return_value = (
       mock_graph_model
@@ -195,10 +195,10 @@ class TestDeleteWorkspaceTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_delete_workspace_success(
-    self, mock_kuzu_client, mock_db_session, mock_subgraph_model
+    self, mock_graph_client, mock_db_session, mock_subgraph_model
   ):
     """Test successful workspace deletion."""
-    tool = DeleteWorkspaceTool(mock_kuzu_client)
+    tool = DeleteWorkspaceTool(mock_graph_client)
 
     # Mock subgraph_info
     from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
@@ -265,10 +265,10 @@ class TestDeleteWorkspaceTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_delete_workspace_with_force(
-    self, mock_kuzu_client, mock_db_session, mock_subgraph_model
+    self, mock_graph_client, mock_db_session, mock_subgraph_model
   ):
     """Test workspace deletion with force flag."""
-    tool = DeleteWorkspaceTool(mock_kuzu_client)
+    tool = DeleteWorkspaceTool(mock_graph_client)
 
     # Mock subgraph_info
     from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
@@ -332,9 +332,9 @@ class TestDeleteWorkspaceTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_delete_workspace_is_primary_graph(self, mock_kuzu_client):
+  async def test_delete_workspace_is_primary_graph(self, mock_graph_client):
     """Test deletion fails with invalid format when trying to delete primary graph."""
-    tool = DeleteWorkspaceTool(mock_kuzu_client)
+    tool = DeleteWorkspaceTool(mock_graph_client)
 
     result = await tool.execute({"workspace_id": "kg1234567890abcdef"})
 
@@ -343,9 +343,9 @@ class TestDeleteWorkspaceTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_delete_workspace_invalid_format(self, mock_kuzu_client):
+  async def test_delete_workspace_invalid_format(self, mock_graph_client):
     """Test deletion fails with invalid workspace ID format."""
-    tool = DeleteWorkspaceTool(mock_kuzu_client)
+    tool = DeleteWorkspaceTool(mock_graph_client)
 
     result = await tool.execute({"workspace_id": "invalid"})
 
@@ -354,9 +354,9 @@ class TestDeleteWorkspaceTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_delete_workspace_not_found(self, mock_kuzu_client, mock_db_session):
+  async def test_delete_workspace_not_found(self, mock_graph_client, mock_db_session):
     """Test deletion fails when workspace not found."""
-    tool = DeleteWorkspaceTool(mock_kuzu_client)
+    tool = DeleteWorkspaceTool(mock_graph_client)
 
     # Mock parse_subgraph_id to return valid info
     from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
@@ -402,10 +402,10 @@ class TestListWorkspacesTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_list_workspaces_includes_primary(
-    self, mock_kuzu_client, mock_db_session, mock_graph_model
+    self, mock_graph_client, mock_db_session, mock_graph_model
   ):
     """Test listing workspaces includes primary graph."""
-    tool = ListWorkspacesTool(mock_kuzu_client)
+    tool = ListWorkspacesTool(mock_graph_client)
 
     mock_db_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
     mock_db_session.query.return_value.filter.return_value.first.return_value = (
@@ -421,10 +421,10 @@ class TestListWorkspacesTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_list_workspaces_includes_subgraphs(
-    self, mock_kuzu_client, mock_db_session, mock_graph_model, mock_subgraph_model
+    self, mock_graph_client, mock_db_session, mock_graph_model, mock_subgraph_model
   ):
     """Test listing workspaces includes subgraphs."""
-    tool = ListWorkspacesTool(mock_kuzu_client)
+    tool = ListWorkspacesTool(mock_graph_client)
 
     mock_db_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
       mock_subgraph_model
@@ -443,10 +443,10 @@ class TestListWorkspacesTool:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_list_workspaces_parent_not_found(
-    self, mock_kuzu_client, mock_db_session
+    self, mock_graph_client, mock_db_session
   ):
     """Test listing workspaces when parent not found (returns generic description)."""
-    tool = ListWorkspacesTool(mock_kuzu_client)
+    tool = ListWorkspacesTool(mock_graph_client)
 
     mock_db_session.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
     mock_db_session.query.return_value.filter.return_value.first.return_value = None
@@ -463,9 +463,9 @@ class TestSwitchWorkspaceTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_switch_workspace_returns_client_side_error(self, mock_kuzu_client):
+  async def test_switch_workspace_returns_client_side_error(self, mock_graph_client):
     """Test that switch-workspace returns client-side error (tool is client-only)."""
-    tool = SwitchWorkspaceTool(mock_kuzu_client)
+    tool = SwitchWorkspaceTool(mock_graph_client)
 
     result = await tool.execute({"workspace_id": "kg1234567890abcdef_dev"})
 
@@ -474,9 +474,9 @@ class TestSwitchWorkspaceTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_switch_to_primary_returns_client_side_error(self, mock_kuzu_client):
+  async def test_switch_to_primary_returns_client_side_error(self, mock_graph_client):
     """Test that switch to primary also returns client-side error."""
-    tool = SwitchWorkspaceTool(mock_kuzu_client)
+    tool = SwitchWorkspaceTool(mock_graph_client)
 
     result = await tool.execute({"workspace_id": "kg1234567890abcdef"})
 
@@ -489,9 +489,9 @@ class TestBuildFactGridTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_build_fact_grid_success(self, mock_kuzu_client):
+  async def test_build_fact_grid_success(self, mock_graph_client):
     """Test successful fact grid building."""
-    tool = BuildFactGridTool(mock_kuzu_client)
+    tool = BuildFactGridTool(mock_graph_client)
 
     with (
       patch("robosystems.middleware.graph.get_universal_repository") as mock_repo,
@@ -528,9 +528,9 @@ class TestBuildFactGridTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_build_fact_grid_missing_elements(self, mock_kuzu_client):
+  async def test_build_fact_grid_missing_elements(self, mock_graph_client):
     """Test fact grid building fails without elements."""
-    tool = BuildFactGridTool(mock_kuzu_client)
+    tool = BuildFactGridTool(mock_graph_client)
 
     result = await tool.execute({"periods": ["2023-12-31"]})
 
@@ -538,9 +538,9 @@ class TestBuildFactGridTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_build_fact_grid_missing_periods(self, mock_kuzu_client):
+  async def test_build_fact_grid_missing_periods(self, mock_graph_client):
     """Test fact grid building fails without periods."""
-    tool = BuildFactGridTool(mock_kuzu_client)
+    tool = BuildFactGridTool(mock_graph_client)
 
     result = await tool.execute({"elements": ["us-gaap:Assets"]})
 
@@ -548,9 +548,9 @@ class TestBuildFactGridTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_build_fact_grid_query_failure(self, mock_kuzu_client):
+  async def test_build_fact_grid_query_failure(self, mock_graph_client):
     """Test fact grid building handles query errors."""
-    tool = BuildFactGridTool(mock_kuzu_client)
+    tool = BuildFactGridTool(mock_graph_client)
 
     with patch("robosystems.middleware.graph.get_universal_repository") as mock_repo:
       mock_repository = AsyncMock()
@@ -570,9 +570,9 @@ class TestQueryStagingTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_query_staging_success(self, mock_kuzu_client):
+  async def test_query_staging_success(self, mock_graph_client):
     """Test successful staging query."""
-    tool = QueryStagingTool(mock_kuzu_client)
+    tool = QueryStagingTool(mock_graph_client)
 
     with patch(
       "robosystems.graph_api.client.factory.get_graph_client"
@@ -594,9 +594,9 @@ class TestQueryStagingTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_query_staging_with_limit(self, mock_kuzu_client):
+  async def test_query_staging_with_limit(self, mock_graph_client):
     """Test staging query with custom limit."""
-    tool = QueryStagingTool(mock_kuzu_client)
+    tool = QueryStagingTool(mock_graph_client)
 
     with patch(
       "robosystems.graph_api.client.factory.get_graph_client"
@@ -616,9 +616,9 @@ class TestQueryStagingTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_query_staging_auto_limit_injection(self, mock_kuzu_client):
+  async def test_query_staging_auto_limit_injection(self, mock_graph_client):
     """Test staging query auto-adds LIMIT if missing."""
-    tool = QueryStagingTool(mock_kuzu_client)
+    tool = QueryStagingTool(mock_graph_client)
 
     with patch(
       "robosystems.graph_api.client.factory.get_graph_client"
@@ -634,9 +634,9 @@ class TestQueryStagingTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_query_staging_missing_sql(self, mock_kuzu_client):
+  async def test_query_staging_missing_sql(self, mock_graph_client):
     """Test staging query fails without SQL."""
-    tool = QueryStagingTool(mock_kuzu_client)
+    tool = QueryStagingTool(mock_graph_client)
 
     result = await tool.execute({})
 
@@ -644,9 +644,9 @@ class TestQueryStagingTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_query_staging_query_failure(self, mock_kuzu_client):
+  async def test_query_staging_query_failure(self, mock_graph_client):
     """Test staging query handles execution errors."""
-    tool = QueryStagingTool(mock_kuzu_client)
+    tool = QueryStagingTool(mock_graph_client)
 
     with patch(
       "robosystems.graph_api.client.factory.get_graph_client"
@@ -665,9 +665,9 @@ class TestMaterializeGraphTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_materialize_single_file(self, mock_kuzu_client):
+  async def test_materialize_single_file(self, mock_graph_client):
     """Test materializing a single file."""
-    tool = MaterializeGraphTool(mock_kuzu_client)
+    tool = MaterializeGraphTool(mock_graph_client)
 
     with (
       patch("robosystems.database.get_db_session") as mock_db,
@@ -705,9 +705,9 @@ class TestMaterializeGraphTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_materialize_all_files(self, mock_kuzu_client):
+  async def test_materialize_all_files(self, mock_graph_client):
     """Test materializing all files for a table."""
-    tool = MaterializeGraphTool(mock_kuzu_client)
+    tool = MaterializeGraphTool(mock_graph_client)
 
     with (
       patch("robosystems.database.get_db_session") as mock_db,
@@ -746,9 +746,9 @@ class TestMaterializeGraphTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_materialize_table_not_found(self, mock_kuzu_client):
+  async def test_materialize_table_not_found(self, mock_graph_client):
     """Test materialization fails when table not found."""
-    tool = MaterializeGraphTool(mock_kuzu_client)
+    tool = MaterializeGraphTool(mock_graph_client)
 
     with patch("robosystems.database.get_db_session") as mock_db:
       mock_session = MagicMock()
@@ -761,9 +761,9 @@ class TestMaterializeGraphTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_materialize_no_staged_files(self, mock_kuzu_client):
+  async def test_materialize_no_staged_files(self, mock_graph_client):
     """Test materialization fails when no staged files exist."""
-    tool = MaterializeGraphTool(mock_kuzu_client)
+    tool = MaterializeGraphTool(mock_graph_client)
 
     with patch("robosystems.database.get_db_session") as mock_db:
       mock_session = MagicMock()
@@ -788,9 +788,9 @@ class TestMapElementsTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_map_elements_retrieve_structure(self, mock_kuzu_client):
+  async def test_map_elements_retrieve_structure(self, mock_graph_client):
     """Test retrieving existing mapping structure."""
-    tool = MapElementsTool(mock_kuzu_client)
+    tool = MapElementsTool(mock_graph_client)
 
     with patch(
       "robosystems.operations.views.element_mapping.get_mapping_structure"
@@ -815,9 +815,9 @@ class TestMapElementsTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_map_elements_structure_not_found(self, mock_kuzu_client):
+  async def test_map_elements_structure_not_found(self, mock_graph_client):
     """Test retrieving non-existent mapping structure."""
-    tool = MapElementsTool(mock_kuzu_client)
+    tool = MapElementsTool(mock_graph_client)
 
     with patch(
       "robosystems.operations.views.element_mapping.get_mapping_structure"
@@ -830,9 +830,9 @@ class TestMapElementsTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_map_elements_suggests_client_sdk(self, mock_kuzu_client):
+  async def test_map_elements_suggests_client_sdk(self, mock_graph_client):
     """Test tool suggests client SDK for mapping creation."""
-    tool = MapElementsTool(mock_kuzu_client)
+    tool = MapElementsTool(mock_graph_client)
 
     result = await tool.execute(
       {
@@ -850,9 +850,9 @@ class TestIngestFileTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_ingest_file_suggests_client_sdk(self, mock_kuzu_client):
+  async def test_ingest_file_suggests_client_sdk(self, mock_graph_client):
     """Test tool suggests client SDK for file upload."""
-    tool = IngestFileTool(mock_kuzu_client)
+    tool = IngestFileTool(mock_graph_client)
 
     result = await tool.execute(
       {
@@ -868,9 +868,9 @@ class TestIngestFileTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_ingest_file_missing_file_path(self, mock_kuzu_client):
+  async def test_ingest_file_missing_file_path(self, mock_graph_client):
     """Test ingest fails without file path."""
-    tool = IngestFileTool(mock_kuzu_client)
+    tool = IngestFileTool(mock_graph_client)
 
     result = await tool.execute({"table_name": "financial_data"})
 
@@ -878,9 +878,9 @@ class TestIngestFileTool:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_ingest_file_missing_table_name(self, mock_kuzu_client):
+  async def test_ingest_file_missing_table_name(self, mock_graph_client):
     """Test ingest fails without table name."""
-    tool = IngestFileTool(mock_kuzu_client)
+    tool = IngestFileTool(mock_graph_client)
 
     result = await tool.execute({"file_path": "/path/to/data.csv"})
 

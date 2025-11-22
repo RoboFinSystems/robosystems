@@ -13,7 +13,7 @@ Key Features:
 - Complete file lifecycle management
 
 Architecture Alignment:
-- S3 (Immutable Source) → DuckDB (Mutable Staging) → Kuzu (Immutable View)
+- S3 (Immutable Source) → DuckDB (Mutable Staging) → LadybugDB (Immutable View)
 - file_id is the primary key across all layers
 - Operations work on file_id directly, independent of table context
 

@@ -11,7 +11,7 @@ Storage Collection Process:
    - Calculate storage using StorageCalculator:
      * Files: S3 user-uploaded files (GraphFile table)
      * Tables: S3 CSV/Parquet imports (GraphTable table)
-     * Graphs: EBS Kuzu database files (filesystem walk)
+     * Graphs: EBS LadybugDB database files (filesystem walk)
      * Subgraphs: EBS subgraph data
    - Get instance metadata from Graph API (instance_id, region)
    - Record snapshot with full breakdown in GraphUsage
@@ -70,7 +70,7 @@ def graph_usage_collector(self):
       for graph_info in user_graphs:
         graph_id = graph_info["graph_id"]
         user_id = graph_info["user_id"]
-        graph_tier = graph_info.get("graph_tier", "kuzu-standard")
+        graph_tier = graph_info.get("graph_tier", "ladybug-standard")
 
         logger.debug(f"Collecting metrics for graph {graph_id} (user: {user_id})")
 
@@ -198,7 +198,7 @@ def get_user_graphs_with_details(session: Session) -> List[Dict]:
       {
         "graph_id": row.graph_id,
         "user_id": row.user_id,
-        "graph_tier": row.graph_tier or "kuzu-standard",
+        "graph_tier": row.graph_tier or "ladybug-standard",
       }
     )
 

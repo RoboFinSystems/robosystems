@@ -7,9 +7,9 @@ API resources (Anthropic Claude 4/4.1, OpenAI GPT, etc.).
 BILLING PHILOSOPHY:
 ===================
 Credits are ONLY consumed for operations that incur external API costs.
-Operations using pre-provisioned Kuzu instance resources don't consume credits.
+Operations using pre-provisioned LadybugDB instance resources don't consume credits.
 
-When a user provisions a Kuzu instance, they get:
+When a user provisions a LadybugDB instance, they get:
 - Dedicated or shared compute (CPU/Memory)
 - Storage allocation
 - Network bandwidth

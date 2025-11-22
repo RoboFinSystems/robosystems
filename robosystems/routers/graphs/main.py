@@ -318,7 +318,7 @@ connection details for monitoring progress via Server-Sent Events (SSE).
 
 **Required Fields:**
 - `metadata.graph_name`: Unique name for the graph
-- `instance_tier`: Resource tier (kuzu-standard, kuzu-large, kuzu-xlarge)
+- `instance_tier`: Resource tier (ladybug-standard, ladybug-large, ladybug-xlarge)
 
 **Optional Fields:**
 - `metadata.description`: Human-readable description of the graph's purpose
@@ -409,11 +409,13 @@ async def create_graph(
 
       # Map tier to GraphTier enum
       tier_map = {
-        "kuzu-standard": GraphTier.KUZU_STANDARD,
-        "kuzu-large": GraphTier.KUZU_LARGE,
-        "kuzu-xlarge": GraphTier.KUZU_XLARGE,
+        "ladybug-standard": GraphTier.LADYBUG_STANDARD,
+        "ladybug-large": GraphTier.LADYBUG_LARGE,
+        "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
       }
-      graph_tier = tier_map.get(request.instance_tier.lower(), GraphTier.KUZU_STANDARD)
+      graph_tier = tier_map.get(
+        request.instance_tier.lower(), GraphTier.LADYBUG_STANDARD
+      )
 
       # Check billing before allowing graph creation
       can_provision, billing_error = check_can_provision_graph(
@@ -449,7 +451,7 @@ async def create_graph(
           "entity_data": {
             **request.initial_entity.model_dump(),
             "graph_tier": graph_tier.value,
-            "subscription_tier": "kuzu-standard",  # Default for tracking
+            "subscription_tier": "ladybug-standard",  # Default for tracking
             "extensions": request.metadata.schema_extensions,  # EntityCreate expects 'extensions' not 'schema_extensions'
             "graph_name": request.metadata.graph_name,
             "graph_description": request.metadata.description,
@@ -717,9 +719,9 @@ Each tier includes:
 - Availability status
 
 **Available Tiers:**
-- **kuzu-standard**: Multi-tenant entry-level tier
-- **kuzu-large**: Dedicated professional tier with subgraph support
-- **kuzu-xlarge**: Enterprise tier with maximum resources
+- **ladybug-standard**: Multi-tenant entry-level tier
+- **ladybug-large**: Dedicated professional tier with subgraph support
+- **ladybug-xlarge**: Enterprise tier with maximum resources
 - **neo4j-community-large**: Neo4j Community Edition (optional, if enabled)
 - **neo4j-enterprise-xlarge**: Neo4j Enterprise Edition (optional, if enabled)
 
@@ -740,11 +742,11 @@ Tier listing is included - no credit consumption required.""",
           "example": {
             "tiers": [
               {
-                "tier": "kuzu-standard",
-                "name": "kuzu-standard",
-                "display_name": "Kuzu Standard",
-                "description": "Multi-tenant Kuzu tier for cost-efficient entry",
-                "backend": "kuzu",
+                "tier": "ladybug-standard",
+                "name": "ladybug-standard",
+                "display_name": "LadybugDB Standard",
+                "description": "Multi-tenant LadybugDB tier for cost-efficient entry",
+                "backend": "ladybug",
                 "enabled": True,
                 "max_subgraphs": 0,
                 "storage_limit_gb": 500,
@@ -811,7 +813,11 @@ async def get_available_graph_tiers(
     tiers = GraphTierConfig.get_available_tiers(include_disabled=include_disabled)
 
     # Filter out internal-only and not-yet-available tiers
-    excluded_tiers = ["kuzu-shared", "neo4j-community-large", "neo4j-enterprise-xlarge"]
+    excluded_tiers = [
+      "ladybug-shared",
+      "neo4j-community-large",
+      "neo4j-enterprise-xlarge",
+    ]
     tiers = [tier for tier in tiers if tier.get("tier") not in excluded_tiers]
 
     # Try to add pricing information from billing config
@@ -821,9 +827,9 @@ async def get_available_graph_tiers(
 
       # Map old tier names to new tier names for pricing
       pricing_mapping = {
-        "kuzu-standard": "standard",
-        "kuzu-large": "enterprise",
-        "kuzu-xlarge": "premium",
+        "ladybug-standard": "standard",
+        "ladybug-large": "enterprise",
+        "ladybug-xlarge": "premium",
       }
 
       for tier in tiers:
@@ -835,9 +841,9 @@ async def get_available_graph_tiers(
         else:
           # Default pricing if not found
           default_prices = {
-            "kuzu-standard": 49.99,
-            "kuzu-large": 199.99,
-            "kuzu-xlarge": 499.99,
+            "ladybug-standard": 49.99,
+            "ladybug-large": 199.99,
+            "ladybug-xlarge": 499.99,
             "neo4j-community-large": 299.99,
             "neo4j-enterprise-xlarge": 999.99,
           }

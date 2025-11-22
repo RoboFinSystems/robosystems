@@ -3,7 +3,7 @@ Staging Tables SQL Query Endpoint.
 
 This module provides SQL query capabilities for DuckDB staging tables,
 enabling direct data inspection and validation before ingestion into
-the Kuzu graph database.
+the LadybugDB graph database.
 
 Key Features:
 - Direct SQL query execution on DuckDB staging tables

@@ -16,23 +16,23 @@ from .graph.metrics_service import GraphMetricsService
 from .graph.entity_graph_service import EntityGraphService, EntityGraphServiceSync
 from .graph.repository_subscription_service import RepositorySubscriptionService
 
-# Kuzu operations (low-level database management)
+# LadybugDB operations (low-level database management)
 from ..middleware.graph.allocation_manager import (
-  KuzuAllocationManager,
+  LadybugAllocationManager,
   DatabaseLocation,
   InstanceInfo,
   DatabaseStatus,
   InstanceStatus,
 )
 from ..middleware.graph.multitenant_utils import MultiTenantUtils, AccessPattern
-from .kuzu.backup_manager import (
+from .lbug.backup_manager import (
   BackupManager,
   BackupJob,
   RestoreJob,
   BackupFormat,
   BackupType,
 )
-from .kuzu.backup import KuzuGraphBackupService, KuzuGraphBackupError
+from .lbug.backup import LadybugGraphBackupService, LadybugGraphBackupError
 
 # Provider registry
 from .providers.registry import ProviderRegistry, ConnectionProvider
@@ -52,8 +52,8 @@ __all__ = [
   "CreditService",
   "GraphPricingService",
   "GraphMetricsService",
-  # Kuzu operations
-  "KuzuAllocationManager",
+  # LadybugDB operations
+  "LadybugAllocationManager",
   "DatabaseLocation",
   "InstanceInfo",
   "DatabaseStatus",
@@ -65,8 +65,8 @@ __all__ = [
   "RestoreJob",
   "BackupFormat",
   "BackupType",
-  "KuzuGraphBackupService",
-  "KuzuGraphBackupError",
+  "LadybugGraphBackupService",
+  "LadybugGraphBackupError",
   # Providers
   "ProviderRegistry",
   "ConnectionProvider",

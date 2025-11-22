@@ -174,12 +174,12 @@ class ListSubgraphsResponse(BaseModel):
   )
 
   parent_graph_tier: str = Field(
-    ..., description="Parent graph tier", examples=["kuzu-large", "kuzu-xlarge"]
+    ..., description="Parent graph tier", examples=["ladybug-large", "ladybug-xlarge"]
   )
 
   subgraphs_enabled: bool = Field(
     ...,
-    description="Whether subgraphs are enabled for this tier (requires Kuzu Large/XLarge or Neo4j Enterprise XLarge)",
+    description="Whether subgraphs are enabled for this tier (requires LadybugDB Large/XLarge or Neo4j Enterprise XLarge)",
   )
 
   subgraph_count: int = Field(..., description="Total number of subgraphs", ge=0)
@@ -235,7 +235,7 @@ class SubgraphQuotaResponse(BaseModel):
   parent_graph_id: str = Field(..., description="Parent graph identifier")
 
   tier: str = Field(
-    ..., description="Graph tier", examples=["kuzu-large", "kuzu-xlarge"]
+    ..., description="Graph tier", examples=["ladybug-large", "ladybug-xlarge"]
   )
 
   current_count: int = Field(..., description="Current number of subgraphs", ge=0)

@@ -40,8 +40,8 @@ class MCPToolAnalyzer(BaseAnalyzer):
   """Analyze MCP tool calls to determine optimal execution strategy."""
 
   # Tool categories
-  QUERY_TOOLS = ["read-graph-cypher", "read-neo4j-cypher", "read-kuzu-cypher"]
-  SCHEMA_TOOLS = ["get-graph-schema", "get-neo4j-schema", "get-kuzu-schema"]
+  QUERY_TOOLS = ["read-graph-cypher", "read-neo4j-cypher", "read-ladybug-cypher"]
+  SCHEMA_TOOLS = ["get-graph-schema", "get-neo4j-schema", "get-ladybug-schema"]
   INFO_TOOLS = ["get-graph-info", "describe-graph-structure"]
 
   def analyze(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Universal Graph Database Lifecycle Management Script
-# Handles graceful shutdown and database migration for both Kuzu and Neo4j
+# Handles graceful shutdown and database migration for both LadybugDB and Neo4j
 # Supports: instance termination, database migration, volume snapshots
 
 set -e
@@ -8,7 +8,7 @@ set -e
 # ==================================================================================
 # ENVIRONMENT VALIDATION
 # ==================================================================================
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (kuzu|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 
 INSTANCE_ID=$(ec2-metadata --instance-id | cut -d " " -f 2)
@@ -21,11 +21,11 @@ INSTANCE_REGISTRY_TABLE="${INSTANCE_REGISTRY_TABLE:-robosystems-graph-${ENVIRONM
 # DATABASE-SPECIFIC CONFIGURATION
 # ==================================================================================
 case "${DATABASE_TYPE}" in
-    kuzu)
+    ladybug)
         if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="kuzu-shared-writer"
+            CONTAINER_NAME="lbug-shared-writer"
         else
-            CONTAINER_NAME="kuzu-writer"
+            CONTAINER_NAME="lbug-writer"
         fi
         GRAPH_API_PORT="8001"
         DRAIN_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/drain"
@@ -85,8 +85,8 @@ handle_termination() {
                 docker exec ${CONTAINER_NAME} cypher-shell -u neo4j -p "${NEO4J_PASSWORD}" \
                     "CALL dbms.setConfigValue('dbms.read_only', 'true')" 2>/dev/null || true
                 ;;
-            kuzu)
-                # Kuzu: No specific drain command needed, Graph API handles it
+            ladybug)
+                # LadybugDB: No specific drain command needed, Graph API handles it
                 ;;
         esac
     }
@@ -150,9 +150,9 @@ handle_termination() {
             }
             sleep 5
             ;;
-        kuzu)
-            log "Performing Kuzu graceful shutdown..."
-            # Kuzu embedded database - just ensure connections are closed (done above)
+        ladybug)
+            log "Performing LadybugDB graceful shutdown..."
+            # LadybugDB embedded database - just ensure connections are closed (done above)
             ;;
     esac
 

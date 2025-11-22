@@ -1,4 +1,4 @@
-High-performance REST API for graph database operations with pluggable backend support. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure (shared, dedicated, and enterprise instances), optional subgraph support for data partitioning, and shared repositories for public datasets (SEC filings, industry, economic data). Built-in health monitoring, streaming query results, and flexible deployment with Kuzu (primary) or optional Neo4j backends.
+High-performance REST API for graph database operations with pluggable backend support. Provides multi-tenant database management with isolated instances, OpenCypher query execution, DuckDB-powered data ingestion from S3 and Parquet sources, and comprehensive backup/restore capabilities. Features tiered infrastructure (shared, dedicated, and enterprise instances), optional subgraph support for data partitioning, and shared repositories for public datasets (SEC filings, industry, economic data). Built-in health monitoring, streaming query results, and flexible deployment with LadybugDB (primary) or optional Neo4j backends.
 
 ## Core Features
 
@@ -7,7 +7,7 @@ High-performance REST API for graph database operations with pluggable backend s
 - **Data Ingestion**: Direct Parquet imports from S3, DuckDB ingestion from queries and tables
 - **Backup & Restore**: Full database backups with encryption and point-in-time recovery
 - **Health & Monitoring**: Real-time health checks, metrics, and task tracking
-- **Pluggable Backends**: Kuzu (primary) with optional Neo4j support
+- **Pluggable Backends**: LadybugDB (primary) with optional Neo4j support
 
 ## API Operations
 
@@ -48,7 +48,7 @@ High-performance REST API for graph database operations with pluggable backend s
 
 **Backend Support**:
 
-- **Kuzu** (default): Embedded graph database, optimal for most workloads
+- **LadybugDB** (default): Embedded graph database, optimal for most workloads
 - **Neo4j** (optional): Available on port 8002, disabled by default
 
 ### Multi-Tenancy
@@ -68,12 +68,12 @@ Shared data repositories (SEC filings, industry data) are available as read-only
 
 The API supports multiple infrastructure tiers optimized for different workload requirements:
 
-**Kuzu Tiers** (default, always available):
+**LadybugDB Tiers** (default, always available):
 
-- **kuzu-standard**: Multi-tenant shared instances (r7g.large, 10 databases per instance)
-- **kuzu-large**: Dedicated instances with subgraph support (r7g.large, 10 subgraphs)
-- **kuzu-xlarge**: High-performance dedicated instances (r7g.xlarge, 25 subgraphs)
-- **kuzu-shared**: Dedicated infrastructure for shared repositories (SEC, industry, economic)
+- **ladybug-standard**: Multi-tenant shared instances (r7g.large, 10 databases per instance)
+- **ladybug-large**: Dedicated instances with subgraph support (r7g.large, 10 subgraphs)
+- **ladybug-xlarge**: High-performance dedicated instances (r7g.xlarge, 25 subgraphs)
+- **ladybug-shared**: Dedicated infrastructure for shared repositories (SEC, industry, economic)
 
 **Neo4j Tiers** (optional, disabled by default):
 

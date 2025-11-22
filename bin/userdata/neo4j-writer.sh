@@ -42,9 +42,8 @@ NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-7474}"
 NEO4J_BOLT_PORT="${NEO4J_BOLT_PORT:-7687}"
 SHARED_INSTANCE_NAME="${SHARED_INSTANCE_NAME:-shared-writer}"
 
-# Set CloudWatch namespace with environment suffix (unified for all graph backends)
-ENV_CAPITALIZED=$(echo "${ENVIRONMENT}" | awk '{print toupper(substr($0,1,1)) tolower(substr($0,2))}')
-CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystemsGraph/${ENV_CAPITALIZED}/Neo4j}"
+# Set CloudWatch namespace (environment is dimensionalized in metrics)
+CLOUDWATCH_NAMESPACE="${CloudWatchNamespace:-RoboSystems/Graph}"
 
 # ==================================================================================
 # SYSTEM SETUP
@@ -399,7 +398,7 @@ echo "NEO4J_BOLT_PORT=${NEO4J_BOLT_PORT}" >> /etc/environment
 # Run shared container runner
 /usr/local/bin/run-graph-container.sh
 
-# Update instance status to healthy (uses shared Kuzu registry)
+# Update instance status to healthy (uses shared graph registry)
 echo "Marking instance as healthy..."
 aws dynamodb update-item \
   --table-name robosystems-graph-${ENVIRONMENT}-instance-registry \
@@ -484,4 +483,4 @@ echo "  - setup-cloudwatch-graph.sh"
 echo "  - register-graph-instance.sh"
 echo "  - run-graph-container.sh"
 echo "  - graph-health-check.sh"
-echo "  - graph-lifecycle.sh (universal for Kuzu and Neo4j)"
+echo "  - graph-lifecycle.sh (universal for LadybugDB and Neo4j)"

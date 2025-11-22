@@ -61,7 +61,7 @@ The test suite is organized by component, mirroring the application structure:
 - **`operations/`** - Business logic services
   - `agents/` - AI agent operations and orchestration
   - `graph/` - Graph database operations (credit service, entity service)
-  - `kuzu/` - Kuzu-specific operations (backup, health monitoring)
+  - `lbug/` - LadybugDB-specific operations (backup, health monitoring)
   - `pipeline/` - Data processing pipelines
   - `providers/` - External provider integrations
 
@@ -87,7 +87,7 @@ The test suite is organized by component, mirroring the application structure:
   - `sec_xbrl/` - SEC filing ingestion and processing
 
 ### Infrastructure
-- **`graph_api/`** - Kuzu database cluster services
+- **`graph_api/`** - Graph API cluster services (multi-backend support)
   - `client/` - Graph API client functionality
   - `routers/` - Graph API HTTP endpoints
 - **`schemas/`** - Dynamic schema management
@@ -105,7 +105,7 @@ Tests are marked with pytest markers to categorize them. Use these markers to ru
 ### Primary Markers
 
 - **`@pytest.mark.unit`** - Fast, isolated unit tests (no external dependencies)
-- **`@pytest.mark.integration`** - Integration tests (may use databases, create Kuzu instances)
+- **`@pytest.mark.integration`** - Integration tests (may use databases, create LadybugDB instances)
 - **`@pytest.mark.celery`** - Celery task tests
 - **`@pytest.mark.slow`** - Long-running tests (XBRL processing, large datasets)
 - **`@pytest.mark.security`** - Security-focused tests
@@ -276,8 +276,8 @@ Tests run in an isolated environment with specific configuration:
 
 - **LocalStack**: AWS services (S3, etc.) on `http://localhost:4566`
 - **Valkey/Redis**: Cache and queues on `localhost:6379`
-- **Graph API**: Kuzu service on `localhost:8001`
-- **Kuzu Databases**: Test databases in `./data/kuzu-dbs`
+- **Graph API**: LadybugDB service on `localhost:8001`
+- **LadybugDB Databases**: Test databases in `./data/lbug-dbs`
 
 ### Mock Services
 
@@ -296,7 +296,7 @@ Key test environment variables (from `pytest.ini`):
 ENVIRONMENT=test
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/robosystems_test
 GRAPH_API_URL=http://localhost:8001
-KUZU_DATABASE_PATH=./data/kuzu-dbs
+LBUG_DATABASE_PATH=./data/lbug-dbs
 
 # Feature flags (mostly enabled for testing)
 RATE_LIMIT_ENABLED=false           # Disabled for easier testing

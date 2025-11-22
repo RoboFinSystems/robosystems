@@ -1,5 +1,5 @@
 """
-Kuzu Query Validator for MCP Tools.
+Graph Query Validator for MCP Tools.
 
 Validates queries before execution to prevent common errors, detect Neo4j patterns,
 and provide helpful suggestions for AI agents.
@@ -26,8 +26,8 @@ class ValidationResult:
   fixed_query: Optional[str] = None
 
 
-class KuzuQueryValidator:
-  """Validates Kuzu queries before execution."""
+class GraphQueryValidator:
+  """Validates graph database queries before execution."""
 
   # Compiled regex patterns for performance
   COMPILED_PATTERNS = {
@@ -53,7 +53,7 @@ class KuzuQueryValidator:
     "date_format": re.compile(r"\d{4}-\d{2}-\d{2}"),
   }
 
-  # Neo4j to Kuzu function mappings
+  # Neo4j to graph database function mappings
   NEO4J_FUNCTION_MAPPINGS = {
     "toInteger": "cast(value, 'INT64')",
     "toFloat": "cast(value, 'DOUBLE')",
@@ -61,7 +61,7 @@ class KuzuQueryValidator:
     "toBoolean": "cast(value, 'BOOL')",
     "size": "len",  # for collections
     "length": "len",  # for strings
-    "labels": "label",  # single label in Kuzu
+    "labels": "label",  # single label support
     "type": "label",  # for relationships
     "keys": "properties",
     "timestamp": "epoch_ms",
@@ -157,7 +157,7 @@ class KuzuQueryValidator:
           self._properties[label] = prop_names
 
   def validate(self, query: str, params: Optional[Dict] = None) -> ValidationResult:
-    """Validate a Kuzu query comprehensively."""
+    """Validate a graph database query comprehensively."""
     result = ValidationResult(is_valid=True)
 
     # Skip validation for metadata queries
@@ -250,7 +250,7 @@ class KuzuQueryValidator:
     return errors
 
   def _detect_neo4j_patterns(self, query: str) -> List[Dict[str, str]]:
-    """Detect Neo4j-specific patterns that will fail in Kuzu."""
+    """Detect Neo4j-specific patterns that will fail in graph database."""
     issues = []
 
     # Pattern 1: Unbounded paths
@@ -258,7 +258,7 @@ class KuzuQueryValidator:
       issues.append(
         {
           "pattern": "unbounded_path",
-          "error": f"Unbounded path '{match.group()}' not allowed in Kuzu",
+          "error": f"Unbounded path '{match.group()}' not allowed",
           "fix": "Replace with bounded path like '[*1..5]' or '[*1..10]'",
         }
       )
@@ -300,24 +300,24 @@ class KuzuQueryValidator:
     for match in self.COMPILED_PATTERNS["type_check"].finditer(query):
       expr = match.group(1)
       type_name = match.group(2)
-      kuzu_type = self._map_neo4j_type(type_name)
+      lbug_type = self._map_neo4j_type(type_name)
       issues.append(
         {
           "pattern": "type_check",
           "error": f"Neo4j type check '{expr} IS :: {type_name}'",
-          "fix": f"Use: typeOf({expr}) = '{kuzu_type}'",
+          "fix": f"Use: typeOf({expr}) = '{lbug_type}'",
         }
       )
 
     # Pattern 6: Neo4j functions
-    for neo4j_func, kuzu_func in self.NEO4J_FUNCTION_MAPPINGS.items():
+    for neo4j_func, lbug_func in self.NEO4J_FUNCTION_MAPPINGS.items():
       pattern = rf"\b{neo4j_func}\s*\("
       if re.search(pattern, query, re.IGNORECASE):
         issues.append(
           {
             "pattern": "neo4j_function",
             "error": f"Neo4j function '{neo4j_func}()' not available",
-            "fix": f"Use: {kuzu_func}",
+            "fix": f"Use: {lbug_func}",
           }
         )
 
@@ -343,7 +343,7 @@ class KuzuQueryValidator:
       issues.append(
         {
           "pattern": "foreach",
-          "error": "FOREACH not supported in Kuzu",
+          "error": "FOREACH not supported",
           "fix": "Use UNWIND instead. Example: UNWIND list AS item CREATE ...",
         }
       )
@@ -361,7 +361,7 @@ class KuzuQueryValidator:
     return issues
 
   def _map_neo4j_type(self, neo4j_type: str) -> str:
-    """Map Neo4j types to Kuzu types."""
+    """Map Neo4j types to graph database types."""
     type_mappings = {
       "INTEGER": "INT64",
       "INT": "INT64",

@@ -80,7 +80,7 @@ class CypherAgent(BaseAgent):
     try:
       self.validate_mode(mode)
 
-      if not self.kuzu_client:
+      if not self.graph_client:
         await self.initialize_tools()
 
       enhanced_context = await self.prepare_context(query, context)

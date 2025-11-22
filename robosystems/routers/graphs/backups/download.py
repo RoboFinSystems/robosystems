@@ -36,7 +36,7 @@ router = APIRouter()
   response_model=BackupDownloadUrlResponse,
   operation_id="getBackupDownloadUrl",
   summary="Get temporary download URL for backup",
-  description="Generate a temporary download URL for a backup (unencrypted, compressed .kuzu files only)",
+  description="Generate a temporary download URL for a backup (unencrypted, compressed .lbug files only)",
   status_code=status.HTTP_200_OK,
   responses={
     200: {"description": "Download URL generated successfully"},
@@ -65,11 +65,11 @@ async def get_backup_download_url(
   Generate a temporary download URL for a backup.
 
   This endpoint provides a secure, time-limited URL that allows direct download
-  of compressed .kuzu backup files without going through the API.
+  of compressed .lbug backup files without going through the API.
 
   Requirements:
   - Only unencrypted backups can be downloaded
-  - Backup must be in full_dump format (complete .kuzu file)
+  - Backup must be in full_dump format (complete .lbug file)
   - File will be compressed
 
   Args:

@@ -133,7 +133,7 @@ class DuckDBTableManager:
   DuckDB table manager for staging tables.
 
   All tables are external views over S3 - zero local storage, used only
-  for transformation/staging before ingestion into Kuzu graph database.
+  for transformation/staging before ingestion into LadybugDB graph database.
   """
 
   def __init__(self):
@@ -142,7 +142,9 @@ class DuckDBTableManager:
 
     The connection pool manages all database paths automatically.
     """
-    logger.info("Initialized DuckDB Table Manager (staging layer for Kuzu ingestion)")
+    logger.info(
+      "Initialized DuckDB Table Manager (staging layer for LadybugDB ingestion)"
+    )
 
   def _build_table_sql(
     self,
@@ -182,7 +184,7 @@ class DuckDBTableManager:
       """
     elif has_from_to:
       # Relationship table: deduplicate on (from, to) and rename to src/dst
-      # IMPORTANT: Kuzu expects columns in order: src, dst, then properties
+      # IMPORTANT: LadybugDB expects columns in order: src, dst, then properties
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
         SELECT
@@ -294,15 +296,15 @@ class DuckDBTableManager:
     """
     Create an external table (materialized from S3 files).
 
-    DuckDB tables are materialized (not views) to enable Kuzu ingestion.
+    DuckDB tables are materialized (not views) to enable LadybugDB ingestion.
 
     CRITICAL: We use CREATE TABLE (not CREATE VIEW) because:
     - S3 credentials are session-level in DuckDB, not persisted in .duckdb file
-    - When Kuzu's DuckDB extension attaches the database, it creates a new session
+    - When LadybugDB's DuckDB extension attaches the database, it creates a new session
     - New session = no S3 config = views fail with "Unsupported duckdb type: NULL"
     - Materialized tables contain the actual data, so no S3 access needed during ingestion
 
-    This is a staging layer for Kuzu ingestion - tables are dropped after use.
+    This is a staging layer for LadybugDB ingestion - tables are dropped after use.
 
     Supports both:
     - s3_pattern as string: wildcard pattern (e.g., "s3://bucket/path/*.parquet")

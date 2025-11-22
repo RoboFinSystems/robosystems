@@ -109,7 +109,7 @@ class CreateGraphRequest(BaseModel):
               "description": "Professional consulting services with full accounting integration",
               "schema_extensions": ["roboledger"],
             },
-            "instance_tier": "kuzu-standard",
+            "instance_tier": "ladybug-standard",
             "initial_entity": {
               "name": "Acme Consulting LLC",
               "uri": "https://acmeconsulting.com",
@@ -130,7 +130,7 @@ class CreateGraphRequest(BaseModel):
               "description": "Knowledge graph for tracking investment portfolios and holdings",
               "schema_extensions": ["roboinvestor"],
             },
-            "instance_tier": "kuzu-standard",
+            "instance_tier": "ladybug-standard",
             "initial_entity": None,
             "create_entity": False,
             "tags": ["investments", "portfolio-management"],
@@ -145,7 +145,7 @@ class CreateGraphRequest(BaseModel):
               "description": "Custom graph demo with people, companies, and projects",
               "schema_extensions": [],
             },
-            "instance_tier": "kuzu-standard",
+            "instance_tier": "ladybug-standard",
             "custom_schema": {
               "name": "custom_graph_demo",
               "version": "1.0.0",
@@ -191,7 +191,7 @@ class CreateGraphRequest(BaseModel):
               "description": "Inventory management system",
               "schema_extensions": [],
             },
-            "instance_tier": "kuzu-standard",
+            "instance_tier": "ladybug-standard",
             "custom_schema": {
               "name": "inventory_management",
               "version": "1.0.0",
@@ -236,7 +236,7 @@ class CreateGraphRequest(BaseModel):
               "description": "Graph database for customer relationship and behavior analysis",
               "schema_extensions": [],
             },
-            "instance_tier": "kuzu-standard",
+            "instance_tier": "ladybug-standard",
             "tags": ["analytics", "customers", "marketing"],
           },
         },
@@ -248,9 +248,9 @@ class CreateGraphRequest(BaseModel):
     ..., description="Graph metadata including name, description, and schema extensions"
   )
   instance_tier: str = Field(
-    "kuzu-standard",
-    description="Instance tier: kuzu-standard, kuzu-large, kuzu-xlarge, neo4j-community-large, neo4j-enterprise-xlarge",
-    pattern="^(kuzu-standard|kuzu-large|kuzu-xlarge|neo4j-community-large|neo4j-enterprise-xlarge)$",
+    "ladybug-standard",
+    description="Instance tier: ladybug-standard, ladybug-large, ladybug-xlarge, neo4j-community-large, neo4j-enterprise-xlarge",
+    pattern="^(ladybug-standard|ladybug-large|ladybug-xlarge|neo4j-community-large|neo4j-enterprise-xlarge)$",
   )
   custom_schema: Optional[CustomSchemaDefinition] = Field(
     None,

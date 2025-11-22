@@ -92,8 +92,8 @@ async def test_create_subgraph_with_fork():
   mock_graph = Mock(
     graph_id="kg1234567890abcdef",
     graph_name="Test Graph",
-    graph_tier="kuzu-large",
-    graph_type="kuzu",
+    graph_tier="ladybug-large",
+    graph_type="ladybug",
     base_schema="entity",
     schema_extensions=["roboledger"],
     graph_instance_id="i-12345",

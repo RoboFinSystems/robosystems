@@ -1,8 +1,8 @@
 """
-Kuzu Schema Loader
+LadybugDB Schema Loader
 
 Loads schema definitions from robosystems.schemas and provides
-utilities for creating Kuzu models from schema definitions.
+utilities for creating LadybugDB models from schema definitions.
 
 Supports context-aware loading for unified schemas like RoboLedger.
 """
@@ -19,8 +19,8 @@ import robosystems.schemas.extensions as extensions_pkg
 logger = logging.getLogger(__name__)
 
 
-class KuzuSchemaLoader:
-  """Loads and manages Kuzu schema definitions with selective extension loading."""
+class LadybugSchemaLoader:
+  """Loads and manages LadybugDB schema definitions with selective extension loading."""
 
   def __init__(self, extensions: Optional[List[str]] = None):
     """
@@ -157,7 +157,7 @@ class KuzuSchemaLoader:
 
   def get_node_properties(self, node_name: str) -> Dict[str, Dict[str, Any]]:
     """
-    Get properties for a node type in a format suitable for Kuzu models.
+    Get properties for a node type in a format suitable for LadybugDB models.
 
     Returns:
         Dict mapping property names to property metadata
@@ -277,7 +277,7 @@ class KuzuSchemaLoader:
     return True
 
   def _check_type_compatibility(self, value: Any, expected_type: str) -> bool:
-    """Check if value is compatible with expected Kuzu type."""
+    """Check if value is compatible with expected LadybugDB type."""
     if value is None:
       return True  # NULL values are generally allowed
 
@@ -314,11 +314,11 @@ class KuzuSchemaLoader:
 
 
 # Global schema loader instances (cache by extension configuration)
-_schema_loader_cache: Dict[str, KuzuSchemaLoader] = {}
+_schema_loader_cache: Dict[str, LadybugSchemaLoader] = {}
 _default_schema_loader = None
 
 
-def get_schema_loader(extensions: Optional[List[str]] = None) -> KuzuSchemaLoader:
+def get_schema_loader(extensions: Optional[List[str]] = None) -> LadybugSchemaLoader:
   """
   Get a schema loader instance with specified extensions.
 
@@ -334,7 +334,7 @@ def get_schema_loader(extensions: Optional[List[str]] = None) -> KuzuSchemaLoade
   # If no extensions specified, use the default global instance
   if extensions is None:
     if _default_schema_loader is None:
-      _default_schema_loader = KuzuSchemaLoader()
+      _default_schema_loader = LadybugSchemaLoader()
     return _default_schema_loader
 
   # Create cache key from sorted extensions
@@ -345,13 +345,13 @@ def get_schema_loader(extensions: Optional[List[str]] = None) -> KuzuSchemaLoade
     return _schema_loader_cache[cache_key]
 
   # Create new instance with specified extensions
-  loader = KuzuSchemaLoader(extensions=extensions)
+  loader = LadybugSchemaLoader(extensions=extensions)
   _schema_loader_cache[cache_key] = loader
 
   return loader
 
 
-def get_sec_schema_loader() -> KuzuSchemaLoader:
+def get_sec_schema_loader() -> LadybugSchemaLoader:
   """
   Get schema loader configured for SEC repository.
 
@@ -361,7 +361,7 @@ def get_sec_schema_loader() -> KuzuSchemaLoader:
   return get_contextual_schema_loader("repository", "sec")
 
 
-def get_entity_schema_loader(entity_type: Optional[str] = None) -> KuzuSchemaLoader:
+def get_entity_schema_loader(entity_type: Optional[str] = None) -> LadybugSchemaLoader:
   """
   Get schema loader configured for entity databases based on entity type.
 
@@ -387,7 +387,7 @@ def get_contextual_schema_loader(
   context_type: str,
   context_name: str,
   additional_extensions: Optional[List[str]] = None,
-) -> KuzuSchemaLoader:
+) -> LadybugSchemaLoader:
   """
   Get schema loader based on context (repository, application, custom).
 
@@ -400,7 +400,7 @@ def get_contextual_schema_loader(
       additional_extensions: Extra extensions to include beyond defaults
 
   Returns:
-      KuzuSchemaLoader configured for the context
+      LadybugSchemaLoader configured for the context
   """
   # Special handling for RoboLedger unified schema contexts
   if context_type == "repository" and context_name == "sec":
@@ -429,7 +429,7 @@ def get_contextual_schema_loader(
     return get_schema_loader(extensions=extensions if extensions else None)
 
 
-class ContextAwareSchemaLoader(KuzuSchemaLoader):
+class ContextAwareSchemaLoader(LadybugSchemaLoader):
   """
   Schema loader that supports context-aware loading for unified schemas.
 
@@ -449,7 +449,7 @@ class ContextAwareSchemaLoader(KuzuSchemaLoader):
     # For SEC repository, filter out base nodes and relationships that aren't populated
     if context == "sec_repository":
       # NOTE: User, GraphMetadata, and Connection nodes have been removed from base.py
-      # They are now managed exclusively in PostgreSQL, not in Kuzu graphs.
+      # They are now managed exclusively in PostgreSQL, not in LadybugDB graphs.
       # These exclusions are kept for backward compatibility but are no longer needed.
       excluded_base_nodes = (
         set()

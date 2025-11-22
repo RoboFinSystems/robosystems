@@ -1639,7 +1639,7 @@
           "metricEditorMode": 0,
           "metricName": "QueueSize",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsCelery",
+          "namespace": "RoboSystems/Worker",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -1665,7 +1665,7 @@
           "metricEditorMode": 0,
           "metricName": "QueueSize",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsCelery",
+          "namespace": "RoboSystems/Worker",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "B",
@@ -1691,7 +1691,7 @@
           "metricEditorMode": 0,
           "metricName": "QueueSize",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsCelery",
+          "namespace": "RoboSystems/Worker",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "F",
@@ -1717,7 +1717,7 @@
           "metricEditorMode": 0,
           "metricName": "QueueSize",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsCelery",
+          "namespace": "RoboSystems/Worker",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "C",
@@ -1743,7 +1743,7 @@
           "metricEditorMode": 0,
           "metricName": "QueueSize",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsCelery",
+          "namespace": "RoboSystems/Worker",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "D",
@@ -1769,7 +1769,7 @@
           "metricEditorMode": 0,
           "metricName": "QueueSize",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsCelery",
+          "namespace": "RoboSystems/Worker",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "E",
@@ -1800,7 +1800,7 @@
           "showLineNumbers": false,
           "showMiniMap": false
         },
-        "content": "# Kuzu Clusters",
+        "content": "# LadybugDB Clusters",
         "mode": "markdown"
       },
       "pluginVersion": "10.4.1",
@@ -1906,7 +1906,7 @@
           "metricEditorMode": 0,
           "metricName": "CPU_USAGE_ACTIVE",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -1920,7 +1920,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsKuzuWritersStandardProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphWritersStandardProd-writers-asg"
           },
           "expression": "",
           "hide": false,
@@ -1940,7 +1940,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "Kuzu CPU Utilization",
+      "title": "LadybugDB CPU Utilization",
       "type": "timeseries"
     },
     {
@@ -2040,7 +2040,7 @@
           "metricEditorMode": 0,
           "metricName": "mem_used_percent",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -2049,7 +2049,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "Kuzu Memory Used",
+      "title": "LadybugDB Memory Used",
       "type": "timeseries"
     },
     {
@@ -2149,7 +2149,7 @@
           "metricEditorMode": 0,
           "metricName": "DISK_USED_PERCENT",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -2158,7 +2158,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "Kuzu Disk Utilization",
+      "title": "LadybugDB Disk Utilization",
       "type": "timeseries"
     },
     {
@@ -2257,7 +2257,7 @@
           "metricEditorMode": 0,
           "metricName": "disk_used",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -2266,7 +2266,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "Kuzu Disk Used",
+      "title": "LadybugDB Disk Used",
       "type": "timeseries"
     },
     {
@@ -2367,7 +2367,7 @@
           "metricEditorMode": 0,
           "metricName": "diskio_read_bytes",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -2393,7 +2393,7 @@
           "metricEditorMode": 0,
           "metricName": "diskio_write_bytes",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "B",
@@ -2402,7 +2402,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "Kuzu Disk IO",
+      "title": "LadybugDB Disk IO",
       "type": "timeseries"
     },
     {
@@ -2491,7 +2491,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsKuzuWritersStandardProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphWritersStandardProd-writers-asg"
           },
           "expression": "",
           "id": "",
@@ -2515,7 +2515,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsKuzuWritersStandardProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphWritersStandardProd-writers-asg"
           },
           "expression": "",
           "hide": false,
@@ -2535,7 +2535,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "Kuzu Network Bandwidth",
+      "title": "LadybugDB Network Bandwidth",
       "type": "timeseries"
     },
     {
@@ -2635,7 +2635,7 @@
           "metricEditorMode": 0,
           "metricName": "InstanceDatabaseCount",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -2745,7 +2745,7 @@
           "metricEditorMode": 0,
           "metricName": "VolumeMonitorErrors",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "A",
@@ -2770,7 +2770,7 @@
           "metricEditorMode": 0,
           "metricName": "VolumesExpanded",
           "metricQueryType": 0,
-          "namespace": "RoboSystemsKuzu/Prod",
+          "namespace": "RoboSystems/Graph",
           "period": "300",
           "queryMode": "Metrics",
           "refId": "B",
