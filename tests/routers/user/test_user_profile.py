@@ -268,16 +268,25 @@ class TestUserGraphs:
     mock_graph1.graph_name = "Test Graph 1"
     mock_graph1.graph_tier = "ladybug-standard"
     mock_graph1.graph_type = "entity"
+    mock_graph1.schema_extensions = []
+    mock_graph1.is_subgraph = False
+    mock_graph1.parent_graph_id = None
 
     mock_graph2 = Mock()
     mock_graph2.graph_name = "Test Graph 2"
     mock_graph2.graph_tier = "ladybug-standard"
     mock_graph2.graph_type = "entity"
+    mock_graph2.schema_extensions = []
+    mock_graph2.is_subgraph = False
+    mock_graph2.parent_graph_id = None
 
     mock_graph3 = Mock()
     mock_graph3.graph_name = "Test Graph 3"
     mock_graph3.graph_tier = "ladybug-standard"
     mock_graph3.graph_type = "entity"
+    mock_graph3.schema_extensions = []
+    mock_graph3.is_subgraph = False
+    mock_graph3.parent_graph_id = None
 
     mock_graphs = [
       Mock(

@@ -2,8 +2,8 @@
 Main subgraph routes (list and create operations).
 """
 
+import asyncio
 import json
-import os
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,7 +19,6 @@ from robosystems.models.api.graphs.subgraphs import (
 )
 from robosystems.models.iam.graph import Graph
 from robosystems.models.iam.user import User
-from robosystems.models.iam.graph_user import GraphUser
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.logger import logger, api_logger, log_metric
@@ -43,7 +42,11 @@ router = APIRouter()
 
 
 async def get_database_size_mb(graph_id: str) -> float | None:
-  """Get the size of a database in MB from Graph API metrics."""
+  """Get the size of a database in MB from Graph API metrics.
+
+  Returns None if size cannot be determined. This is expected for some graphs
+  and the function gracefully handles errors without failing the listing operation.
+  """
   try:
     from robosystems.graph_api.client.factory import GraphClientFactory
 
@@ -58,9 +61,10 @@ async def get_database_size_mb(graph_id: str) -> float | None:
     if metrics and "size_mb" in metrics:
       return metrics["size_mb"]
 
+    logger.debug(f"Size metric not available for database {graph_id}")
     return None
   except Exception as e:
-    logger.debug(f"Could not get size for database {graph_id}: {e}")
+    logger.warning(f"Failed to get size for database {graph_id}: {e}")
     return None
 
 
@@ -123,22 +127,25 @@ async def list_subgraphs(
       .all()
     )
 
+    # Get all sizes concurrently for better performance
+    size_tasks = [get_database_size_mb(sg.graph_id) for sg in subgraphs]
+    sizes = await asyncio.gather(*size_tasks)
+
     subgraph_summaries = []
     total_size_mb = 0.0
-    for subgraph in subgraphs:
+    for subgraph, size_mb in zip(subgraphs, sizes):
       # Extract subgraph name from graph_id (format: {parent_id}_{subgraph_name})
       subgraph_name = subgraph.subgraph_name
       if not subgraph_name and "_" in subgraph.graph_id:
         # Fallback: extract from graph_id if subgraph_name is not set
         subgraph_name = subgraph.graph_id.split("_", 1)[1]
 
-      # Get database size from Graph API
-      size_mb = await get_database_size_mb(subgraph.graph_id)
+      # Sum sizes
       if size_mb:
         total_size_mb += size_mb
 
       # Determine status from graph_stale field
-      status = "stale" if subgraph.graph_stale else "active"
+      subgraph_status = "stale" if subgraph.graph_stale else "active"
 
       # Extract subgraph_type from metadata, default to "static"
       subgraph_type_str = "static"
@@ -157,10 +164,10 @@ async def list_subgraphs(
           subgraph_name=subgraph_name or subgraph.graph_name,
           display_name=subgraph.graph_name,
           subgraph_type=subgraph_type,
-          status=status,
+          status=subgraph_status,
           created_at=subgraph.created_at,
           size_mb=size_mb,
-          last_accessed=None,  # GraphUser doesn't have last_accessed field
+          last_accessed=None,
         )
       )
 
