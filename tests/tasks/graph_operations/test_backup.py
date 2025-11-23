@@ -50,7 +50,7 @@ class TestCleanupExpiredBackupsTask:
 class TestBackupHealthCheckTask:
   """Test cases for backup health check task."""
 
-  @patch("robosystems.operations.kuzu.backup_manager.BackupManager")
+  @patch("robosystems.operations.lbug.backup_manager.BackupManager")
   @patch("robosystems.tasks.graph_operations.backup.GraphBackup")
   @patch("robosystems.tasks.graph_operations.backup.S3BackupAdapter")
   @patch("robosystems.tasks.graph_operations.backup.session")

@@ -244,7 +244,9 @@ def subscriptions():
 
 @subscriptions.command("list")
 @click.option("--status", help="Filter by status (ACTIVE, PAUSED, CANCELED)")
-@click.option("--tier", help="Filter by tier (KUZU_STANDARD, KUZU_LARGE, KUZU_XLARGE)")
+@click.option(
+  "--tier", help="Filter by tier (LADYBUG_STANDARD, LADYBUG_LARGE, LADYBUG_XLARGE)"
+)
 @click.option("--email", help="Filter by owner email")
 @click.option("--include-canceled", is_flag=True, help="Include canceled subscriptions")
 @click.option("--limit", default=100, help="Maximum number of results")
@@ -349,7 +351,7 @@ def get_subscription(client, subscription_id):
 @click.option(
   "--plan-name",
   required=True,
-  help="Plan name (e.g., kuzu-standard, kuzu-large, kuzu-xlarge)",
+  help="Plan name (e.g., ladybug-standard, ladybug-large, ladybug-xlarge)",
 )
 @click.option(
   "--resource-type",
@@ -396,7 +398,7 @@ def create_subscription(
 )
 @click.option(
   "--plan-name",
-  help="New plan name (e.g., kuzu-standard, kuzu-large, kuzu-xlarge)",
+  help="New plan name (e.g., ladybug-standard, ladybug-large, ladybug-xlarge)",
 )
 @click.option("--price", type=float, help="New base price in dollars")
 @click.pass_obj

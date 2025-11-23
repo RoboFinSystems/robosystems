@@ -1,7 +1,7 @@
 """
-FastAPI dependency functions for multi-tenant Kuzu graph database resolution.
+FastAPI dependency functions for multi-tenant graph database resolution.
 
-Simplified for graph databases-only architecture.
+Simplified for graph databases-only architecture with multi-backend support.
 """
 
 from typing import Optional
@@ -319,7 +319,7 @@ async def get_main_repository(
     # Use "default" as the main database identifier
     repository = await get_graph_repository("default", operation_type="write")
 
-    logger.debug("Created main Kuzu repository")
+    logger.debug("Created main graph repository")
     return repository
 
   except Exception as e:
@@ -474,7 +474,7 @@ async def get_sec_repository() -> Repository:
     # SEC database is a shared repository
     repository = await get_graph_repository("sec", operation_type="read")
 
-    logger.debug("Created SEC Kuzu repository")
+    logger.debug("Created SEC graph repository")
     return repository
 
   except Exception as e:

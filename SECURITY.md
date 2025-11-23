@@ -41,7 +41,7 @@ RoboSystems implements security controls at the infrastructure, application, and
 ### Multi-Tenant Access Control
 
 - Role-based access control (Read, Write, Admin)
-- Complete tenant isolation via separate Kuzu databases
+- Complete tenant isolation via separate LadybugDB databases
 - API endpoints scoped by graph_id parameter
 
 ## Data Security
@@ -51,7 +51,7 @@ RoboSystems implements security controls at the infrastructure, application, and
 **Database Encryption:**
 
 - PostgreSQL: AES-256 encryption via AWS RDS
-- Kuzu: EBS volume encryption
+- LadybugDB: EBS volume encryption
 - All backups encrypted
 
 **File Storage:**

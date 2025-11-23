@@ -1,5 +1,5 @@
 """
-RoboHRM Schema Extension for Kuzu
+RoboHRM Schema Extension for LadybugDB
 
 Human resource management, employees, payroll, and benefits.
 Extends the base schema with HR-specific entities.

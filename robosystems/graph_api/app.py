@@ -45,7 +45,7 @@ def create_app() -> FastAPI:
   """Create FastAPI application with all endpoints."""
 
   # Set appropriate service name based on node type (only if OTEL is enabled)
-  node_type = env.KUZU_NODE_TYPE
+  node_type = env.LBUG_NODE_TYPE
   if env.OTEL_ENABLED:
     os.environ["OTEL_SERVICE_NAME"] = f"graph-api-{node_type}"
 
@@ -148,10 +148,10 @@ def create_app() -> FastAPI:
     app.openapi = custom_openapi
 
   # Add CORS middleware - restrictive for VPC-internal API
-  kuzu_cors_origins = env.get_kuzu_cors_origins()
+  lbug_cors_origins = env.get_lbug_cors_origins()
   app.add_middleware(
     CORSMiddleware,
-    allow_origins=kuzu_cors_origins,
+    allow_origins=lbug_cors_origins,
     allow_credentials=False,  # No credentials needed for server-to-server API
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Graph-API-Key"],
@@ -168,12 +168,12 @@ def create_app() -> FastAPI:
 
   # Add authentication middleware (only for prod/staging)
   try:
-    from .middleware import KuzuAuthMiddleware
+    from .middleware import LadybugAuthMiddleware
 
-    app.add_middleware(KuzuAuthMiddleware)
-    logger.info("Kuzu authentication middleware enabled")
+    app.add_middleware(LadybugAuthMiddleware)
+    logger.info("LadybugDB authentication middleware enabled")
   except Exception as e:
-    logger.warning(f"Kuzu authentication middleware not loaded: {e}")
+    logger.warning(f"LadybugDB authentication middleware not loaded: {e}")
 
   # Setup OpenTelemetry instrumentation (only if enabled)
   if env.OTEL_ENABLED and setup_telemetry is not None:
@@ -199,9 +199,9 @@ def create_app() -> FastAPI:
   async def custom_docs():
     """Custom Swagger docs with dark theme."""
     try:
-      from robosystems.utils.docs_template import generate_kuzu_docs
+      from robosystems.utils.docs_template import generate_lbug_docs
 
-      return HTMLResponse(content=generate_kuzu_docs())
+      return HTMLResponse(content=generate_lbug_docs())
     except ImportError:
       # Fallback to default FastAPI docs
       from fastapi.openapi.docs import get_swagger_ui_html
@@ -235,7 +235,7 @@ def create_app() -> FastAPI:
   app.include_router(databases.restore.router)
   app.include_router(
     databases.copy.router
-  )  # Direct S3 → Kuzu copy (legacy/internal for SEC workers)
+  )  # Direct S3 → LadybugDB copy (legacy/internal for SEC workers)
   app.include_router(databases.metrics.router)
 
   # Task management (generic for all task types)

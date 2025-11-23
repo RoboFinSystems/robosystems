@@ -15,7 +15,7 @@ from robosystems.config.graph_tier import (
 GRAPH_CONFIG_YAML = """
 production:
   writers:
-    - tier: kuzu-standard
+    - tier: ladybug-standard
       max_subgraphs: 5
       storage_limit_gb: 250
       monthly_credits: 1500
@@ -35,19 +35,19 @@ production:
         max_memory_mb: 4096
         chunk_size: 256
         query_timeout: 120
-    - tier: kuzu-large
+    - tier: ladybug-large
       monthly_credits: 5000
       instance:
         memory_per_db_mb: 2048
 staging:
   writers:
-    - tier: kuzu-standard
+    - tier: ladybug-standard
       monthly_credits: 900
       instance:
         query_timeout: 90
 development:
   writers:
-    - tier: kuzu-standard
+    - tier: ladybug-standard
       monthly_credits: 900
       instance:
         query_timeout: 90
@@ -101,50 +101,50 @@ def mock_graph_config(monkeypatch):
 
 
 def test_tier_config_loads_once_when_cached(mock_graph_config):
-  config = GraphTierConfig.get_tier_config("kuzu-standard")
-  assert config["tier"] == "kuzu-standard"
+  config = GraphTierConfig.get_tier_config("ladybug-standard")
+  assert config["tier"] == "ladybug-standard"
   assert mock_graph_config["open_calls"] == [mock_graph_config["dev_path"]]
 
   # Cached result should not trigger additional loads
-  GraphTierConfig.get_tier_config("kuzu-standard")
+  GraphTierConfig.get_tier_config("ladybug-standard")
   assert len(mock_graph_config["open_calls"]) == 1
 
   # Clearing cache should force reload
   GraphTierConfig.clear_cache()
-  GraphTierConfig.get_tier_config("kuzu-standard")
+  GraphTierConfig.get_tier_config("ladybug-standard")
   assert len(mock_graph_config["open_calls"]) == 2
 
 
 def test_accessors_return_configured_values(mock_graph_config):
-  assert get_tier_max_subgraphs("kuzu-standard") == 5
-  assert get_tier_api_rate_multiplier("kuzu-standard") == 1.5
+  assert get_tier_max_subgraphs("ladybug-standard") == 5
+  assert get_tier_api_rate_multiplier("ladybug-standard") == 1.5
 
-  copy_limits = get_tier_copy_operation_limits("kuzu-standard")
+  copy_limits = get_tier_copy_operation_limits("ladybug-standard")
   assert copy_limits["max_file_size_gb"] == 3
   assert copy_limits["timeout_seconds"] == 600
   assert copy_limits["daily_copy_operations"] == 20
 
-  backup_limits = get_tier_backup_limits("kuzu-standard")
+  backup_limits = get_tier_backup_limits("ladybug-standard")
   assert backup_limits["max_backup_size_gb"] == 20
   assert backup_limits["max_backups_per_day"] == 4
 
-  instance_config = GraphTierConfig.get_instance_config("kuzu-standard")
+  instance_config = GraphTierConfig.get_instance_config("ladybug-standard")
   assert instance_config["memory_per_db_mb"] == 512
   assert instance_config["max_memory_mb"] == 4096
-  assert GraphTierConfig.get_query_timeout("kuzu-standard") == 120
-  assert GraphTierConfig.get_chunk_size("kuzu-standard") == 256
+  assert GraphTierConfig.get_query_timeout("ladybug-standard") == 120
+  assert GraphTierConfig.get_chunk_size("ladybug-standard") == 256
 
 
 def test_accessors_fall_back_to_defaults_when_missing(mock_graph_config):
-  # kuzu-large is missing multiplier/copy settings so defaults apply
+  # ladybug-large is missing multiplier/copy settings so defaults apply
   assert GraphTierConfig.get_tier_config("unknown-tier") == {}
-  assert get_tier_api_rate_multiplier("kuzu-large") == 1.0
+  assert get_tier_api_rate_multiplier("ladybug-large") == 1.0
 
-  default_copy = get_tier_copy_operation_limits("kuzu-large")
+  default_copy = get_tier_copy_operation_limits("ladybug-large")
   assert default_copy["max_file_size_gb"] == 1.0
   assert default_copy["concurrent_operations"] == 1
 
-  default_backup = get_tier_backup_limits("kuzu-large")
+  default_backup = get_tier_backup_limits("ladybug-large")
   assert default_backup["max_backup_size_gb"] == 10
   assert default_backup["max_backups_per_day"] == 2
 
@@ -153,6 +153,6 @@ def test_environment_default_switches_to_staging(monkeypatch, mock_graph_config)
   monkeypatch.setattr("robosystems.config.graph_tier.env.ENVIRONMENT", "dev")
   GraphTierConfig.clear_cache()
 
-  staging_config = GraphTierConfig.get_tier_config("kuzu-standard")
+  staging_config = GraphTierConfig.get_tier_config("ladybug-standard")
   assert staging_config["monthly_credits"] == 900
-  assert GraphTierConfig.get_query_timeout("kuzu-standard") == 90
+  assert GraphTierConfig.get_query_timeout("ladybug-standard") == 90

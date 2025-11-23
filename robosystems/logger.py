@@ -59,7 +59,7 @@ if env.is_development():
 # Specialized loggers for different components (structured logging enabled)
 api_logger = get_logger("robosystems.api")
 worker_logger = get_logger("robosystems.workers")
-kuzu_logger = get_logger("robosystems.kuzu")
+lbug_logger = get_logger("robosystems.lbug")
 security_logger = get_logger("robosystems.security")
 
 
@@ -89,7 +89,7 @@ def log_db_query(
 ) -> None:
   """Log database queries with performance tracking."""
   log_database_query(
-    kuzu_logger, database, query_type, duration_ms, row_count, user_id, entity_id
+    lbug_logger, database, query_type, duration_ms, row_count, user_id, entity_id
   )
 
 
@@ -137,7 +137,7 @@ __all__ = [
   "logger",  # Main backward-compatible logger
   "api_logger",  # API-specific structured logger
   "worker_logger",  # Worker-specific structured logger
-  "kuzu_logger",  # Database-specific structured logger
+  "lbug_logger",  # Database-specific structured logger
   "security_logger",  # Security-specific structured logger
   # Convenience functions
   "log_api",

@@ -9,15 +9,15 @@ from fastapi.responses import JSONResponse
 from starlette.datastructures import Headers
 
 from robosystems.graph_api.middleware.auth import (
-  KuzuAuthMiddleware,
+  LadybugAuthMiddleware,
   get_api_key_from_secrets_manager,
   clear_api_key_cache,
   create_api_key,
 )
 
 
-class TestKuzuAuthMiddleware:
-  """Test cases for Kuzu authentication middleware."""
+class TestLadybugAuthMiddleware:
+  """Test cases for LadybugDB authentication middleware."""
 
   @pytest.fixture
   def mock_request(self):
@@ -36,11 +36,11 @@ class TestKuzuAuthMiddleware:
   @pytest.mark.asyncio
   async def test_middleware_exempt_paths(self, mock_app, mock_request):
     """Test that exempt paths bypass authentication."""
-    middleware = KuzuAuthMiddleware(mock_app, api_key="test-key")
+    middleware = LadybugAuthMiddleware(mock_app, api_key="test-key")
     call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
 
     # Test various exempt paths
-    for path in KuzuAuthMiddleware.EXEMPT_PATHS:
+    for path in LadybugAuthMiddleware.EXEMPT_PATHS:
       mock_request.url.path = path
       response = await middleware.dispatch(mock_request, call_next)
       assert response.status_code == 200
@@ -53,7 +53,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "dev"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app)
+      middleware = LadybugAuthMiddleware(mock_app)
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
 
       response = await middleware.dispatch(mock_request, call_next)
@@ -67,7 +67,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app, api_key="valid-key-123")
+      middleware = LadybugAuthMiddleware(mock_app, api_key="valid-key-123")
       mock_request.headers = Headers({"X-Graph-API-Key": "valid-key-123"})
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
 
@@ -82,7 +82,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "staging"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app, api_key="bearer-key-456")
+      middleware = LadybugAuthMiddleware(mock_app, api_key="bearer-key-456")
       mock_request.headers = Headers({"Authorization": "Bearer bearer-key-456"})
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
 
@@ -97,7 +97,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app, api_key="secret-key")
+      middleware = LadybugAuthMiddleware(mock_app, api_key="secret-key")
       call_next = AsyncMock()
 
       response = await middleware.dispatch(mock_request, call_next)
@@ -113,7 +113,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "staging"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
+      middleware = LadybugAuthMiddleware(mock_app, api_key="correct-key")
       mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
       call_next = AsyncMock()
 
@@ -130,7 +130,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
+      middleware = LadybugAuthMiddleware(mock_app, api_key="correct-key")
       middleware.max_failed_attempts = 3  # Lower for testing
       mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
       call_next = AsyncMock()
@@ -153,7 +153,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
+      middleware = LadybugAuthMiddleware(mock_app, api_key="correct-key")
       middleware.max_failed_attempts = 2
       middleware.lockout_duration = 0.1  # 100ms for testing
       mock_request.headers = Headers({"X-Graph-API-Key": "wrong-key"})
@@ -183,7 +183,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = None
 
-      middleware = KuzuAuthMiddleware(mock_app, api_key="correct-key")
+      middleware = LadybugAuthMiddleware(mock_app, api_key="correct-key")
       call_next = AsyncMock(return_value=JSONResponse({"status": "ok"}))
 
       # Make a failed attempt
@@ -203,7 +203,7 @@ class TestKuzuAuthMiddleware:
       mock_env.ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = "env-api-key"
 
-      middleware = KuzuAuthMiddleware(mock_app)
+      middleware = LadybugAuthMiddleware(mock_app)
       assert middleware.api_key == "env-api-key"
       assert middleware.auth_enabled is True
 
@@ -219,11 +219,11 @@ class TestKuzuAuthMiddleware:
         mock_get_key.return_value = None
 
         with pytest.raises(ValueError, match="GRAPH_API_KEY must be set"):
-          KuzuAuthMiddleware(mock_app)
+          LadybugAuthMiddleware(mock_app)
 
   def test_constant_time_compare(self, mock_app):
     """Test constant-time string comparison."""
-    middleware = KuzuAuthMiddleware(mock_app, api_key="test")
+    middleware = LadybugAuthMiddleware(mock_app, api_key="test")
 
     # Test equal strings
     assert middleware._constant_time_compare("test123", "test123") is True
@@ -236,7 +236,7 @@ class TestKuzuAuthMiddleware:
 
   def test_cleanup_failed_attempts(self, mock_app):
     """Test cleanup of expired failed attempts."""
-    middleware = KuzuAuthMiddleware(mock_app, api_key="test")
+    middleware = LadybugAuthMiddleware(mock_app, api_key="test")
     middleware.lockout_duration = 0.1  # 100ms for testing
 
     # Add some failed attempts
@@ -338,7 +338,7 @@ class TestAPIKeyGeneration:
     mock_bcrypt.gensalt.return_value = mock_salt
     mock_bcrypt.hashpw.return_value = mock_hash
 
-    api_key, key_hash = create_api_key(prefix="kuzu")
+    api_key, key_hash = create_api_key(prefix="ladybug")
 
     # Verify bcrypt was called correctly
     mock_bcrypt.gensalt.assert_called_once_with(rounds=12)

@@ -1,5 +1,5 @@
 """
-RoboSCM Schema Extension for Kuzu
+RoboSCM Schema Extension for LadybugDB
 
 Supply chain management, procurement, inventory, and logistics.
 Extends the base schema with supply chain-specific entities.

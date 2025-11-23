@@ -42,9 +42,9 @@ def validate_graph_id(graph_id: str) -> str:
   return graph_id
 
 
-def get_kuzu_database_path(graph_id: str, base_path: Optional[str] = None) -> Path:
+def get_lbug_database_path(graph_id: str, base_path: Optional[str] = None) -> Path:
   """
-  Get validated Kuzu database path for a graph_id.
+  Get validated LadybugDB database path for a graph_id.
 
   This function provides centralized path construction with security validation
   to prevent path traversal attacks.
@@ -54,7 +54,7 @@ def get_kuzu_database_path(graph_id: str, base_path: Optional[str] = None) -> Pa
       base_path: Optional override for base directory (defaults to env config)
 
   Returns:
-      Validated Path object for the Kuzu database
+      Validated Path object for the LadybugDB database
 
   Raises:
       HTTPException: If graph_id is invalid or path is outside base directory
@@ -63,8 +63,8 @@ def get_kuzu_database_path(graph_id: str, base_path: Optional[str] = None) -> Pa
 
   validated_id = validate_graph_id(graph_id)
 
-  base = Path(base_path if base_path else env.KUZU_DATABASE_PATH)
-  db_path = base / f"{validated_id}.kuzu"
+  base = Path(base_path if base_path else env.LBUG_DATABASE_PATH)
+  db_path = base / f"{validated_id}.lbug"
 
   try:
     resolved_path = db_path.resolve()

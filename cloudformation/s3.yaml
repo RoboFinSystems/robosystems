@@ -87,7 +87,7 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # SEC Processed Data Bucket (Kuzu ingestion source)
+  # SEC Processed Data Bucket (graph database ingestion source)
   S3BucketSECProcessed:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -352,8 +352,8 @@ Resources:
         HostedZoneId: Z2FDTNDATAQYW2 # CloudFront's hosted zone ID
         EvaluateTargetHealth: false
 
-  # Kuzu Database Sync Bucket (reader synchronization)
-  S3BucketKuzuDatabases:
+  # Graph Database Sync Bucket (reader synchronization)
+  S3BucketGraphDatabases:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
@@ -363,7 +363,7 @@ Resources:
         IgnorePublicAcls: true
         BlockPublicPolicy: true
         BlockPublicAcls: true
-      BucketName: !Sub robosystems-kuzu-databases-${Environment}
+      BucketName: !Sub robosystems-graph-databases-${Environment}
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
@@ -386,13 +386,13 @@ Resources:
         Status: Enabled
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-${Environment}-kuzu-databases-bucket
+          Value: !Sub ${AWS::StackName}-${Environment}-graph-databases-bucket
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
           Value: !Ref ServiceTag
         - Key: Component
-          Value: KuzuBackups
+          Value: GraphBackups
         - Key: CreatedBy
           Value: CloudFormation
 
@@ -444,14 +444,14 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # IAM Managed Policy for Kuzu Writers (read SEC processed, write sync buckets)
-  KuzuWriterS3Policy:
+  # IAM Managed Policy for Graph Writers (read SEC processed, write sync buckets)
+  GraphWriterS3Policy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      ManagedPolicyName: !Sub ${AWS::StackName}-kuzu-writer-s3-policy-${Environment}
-      Description: S3 access policy for Kuzu writer instances
+      ManagedPolicyName: !Sub ${AWS::StackName}-graph-writer-s3-policy-${Environment}
+      Description: S3 access policy for graph writer instances
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -471,8 +471,8 @@ Resources:
               - s3:DeleteObject
               - s3:ListBucket
             Resource:
-              - !GetAtt S3BucketKuzuDatabases.Arn
-              - !Sub ${S3BucketKuzuDatabases.Arn}/*
+              - !GetAtt S3BucketGraphDatabases.Arn
+              - !Sub ${S3BucketGraphDatabases.Arn}/*
           - Effect: Allow
             Action:
               - s3:PutObject
@@ -483,14 +483,14 @@ Resources:
               - !GetAtt S3BucketPublicData.Arn
               - !Sub ${S3BucketPublicData.Arn}/*
 
-  # IAM Managed Policy for Kuzu Readers (read-only access to sync bucket)
-  KuzuReaderS3Policy:
+  # IAM Managed Policy for Graph Readers (read-only access to sync bucket)
+  GraphReaderS3Policy:
     Type: AWS::IAM::ManagedPolicy
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      ManagedPolicyName: !Sub ${AWS::StackName}-kuzu-reader-s3-policy-${Environment}
-      Description: S3 read-only access policy for Kuzu reader instances
+      ManagedPolicyName: !Sub ${AWS::StackName}-graph-reader-s3-policy-${Environment}
+      Description: S3 read-only access policy for graph reader instances
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -499,8 +499,8 @@ Resources:
               - s3:GetObject
               - s3:ListBucket
             Resource:
-              - !GetAtt S3BucketKuzuDatabases.Arn
-              - !Sub ${S3BucketKuzuDatabases.Arn}/*
+              - !GetAtt S3BucketGraphDatabases.Arn
+              - !Sub ${S3BucketGraphDatabases.Arn}/*
 
   # AWS Secrets Manager Secret for S3
   S3Secret:
@@ -517,7 +517,7 @@ Resources:
           "SEC_PROCESSED_BUCKET":"${S3BucketSECProcessed}",
           "PUBLIC_DATA_BUCKET":"${S3BucketPublicData}",
           "PUBLIC_DATA_CDN_URL":"https://${CloudFrontDistribution.DomainName}",
-          "KUZU_S3_BUCKET":"${S3BucketKuzuDatabases}",
+          "GRAPH_DATABASES_BUCKET":"${S3BucketGraphDatabases}",
           "DEPLOYMENT_BUCKET":"${S3BucketDeployment}",
           "AWS_REGION":"${AwsRegion}"
         }
@@ -588,31 +588,31 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-SECProcessedBucketArn
 
-  # Kuzu Database Sync Bucket Outputs
-  KuzuDatabasesBucketName:
-    Description: Name of the Kuzu databases sync bucket
-    Value: !Ref S3BucketKuzuDatabases
+  # Graph Database Sync Bucket Outputs
+  GraphDatabasesBucketName:
+    Description: Name of the graph databases sync bucket
+    Value: !Ref S3BucketGraphDatabases
     Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-KuzuDatabasesBucketName
+      Name: !Sub ${AWS::StackName}-${Environment}-GraphDatabasesBucketName
 
-  KuzuDatabasesBucketArn:
-    Description: ARN of the Kuzu databases sync bucket
-    Value: !GetAtt S3BucketKuzuDatabases.Arn
+  GraphDatabasesBucketArn:
+    Description: ARN of the graph databases sync bucket
+    Value: !GetAtt S3BucketGraphDatabases.Arn
     Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-KuzuDatabasesBucketArn
+      Name: !Sub ${AWS::StackName}-${Environment}-GraphDatabasesBucketArn
 
   # Policy ARNs for use by other stacks
-  KuzuWriterS3PolicyArn:
-    Description: ARN of the Kuzu writer S3 policy
-    Value: !Ref KuzuWriterS3Policy
+  GraphWriterS3PolicyArn:
+    Description: ARN of the graph writer S3 policy
+    Value: !Ref GraphWriterS3Policy
     Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-KuzuWriterS3PolicyArn
+      Name: !Sub ${AWS::StackName}-${Environment}-GraphWriterS3PolicyArn
 
-  KuzuReaderS3PolicyArn:
-    Description: ARN of the Kuzu reader S3 policy
-    Value: !Ref KuzuReaderS3Policy
+  GraphReaderS3PolicyArn:
+    Description: ARN of the graph reader S3 policy
+    Value: !Ref GraphReaderS3Policy
     Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-KuzuReaderS3PolicyArn
+      Name: !Sub ${AWS::StackName}-${Environment}-GraphReaderS3PolicyArn
 
   # Deployment Bucket Outputs
   DeploymentBucketName:

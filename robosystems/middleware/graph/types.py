@@ -131,7 +131,7 @@ class GraphIdentity(BaseModel):
         "access_mode": access.value,
         "cache_enabled": True,
         "ttl_seconds": 3600,  # Cache for 1 hour
-        "graph_tier": GraphTier.KUZU_STANDARD,
+        "graph_tier": GraphTier.LADYBUG_STANDARD,
       }
     elif self.is_user_graph:
       return {
@@ -139,14 +139,14 @@ class GraphIdentity(BaseModel):
         "access_mode": access.value,
         "cache_enabled": False,
         "requires_allocation": True,
-        "graph_tier": self.graph_tier or GraphTier.KUZU_STANDARD,
+        "graph_tier": self.graph_tier or GraphTier.LADYBUG_STANDARD,
       }
     else:
       return {
         "cluster_type": "system",
         "access_mode": access.value,
         "cache_enabled": False,
-        "graph_tier": GraphTier.KUZU_STANDARD,
+        "graph_tier": GraphTier.LADYBUG_STANDARD,
       }
 
 
@@ -218,13 +218,15 @@ class GraphTypeRegistry:
         if graph.is_repository:
           try:
             tier = (
-              GraphTier(graph.graph_tier) if graph.graph_tier else GraphTier.KUZU_SHARED
+              GraphTier(graph.graph_tier)
+              if graph.graph_tier
+              else GraphTier.LADYBUG_SHARED
             )
           except ValueError:
             logger.warning(
-              f"Invalid graph_tier '{graph.graph_tier}' for {graph_id}, using KUZU_SHARED"
+              f"Invalid graph_tier '{graph.graph_tier}' for {graph_id}, using LADYBUG_SHARED"
             )
-            tier = GraphTier.KUZU_SHARED
+            tier = GraphTier.LADYBUG_SHARED
 
           return GraphIdentity(
             graph_id=graph_id,
@@ -241,13 +243,13 @@ class GraphTypeRegistry:
             tier = (
               GraphTier(graph.graph_tier)
               if graph.graph_tier
-              else graph_tier or GraphTier.KUZU_STANDARD
+              else graph_tier or GraphTier.LADYBUG_STANDARD
             )
           except ValueError:
             logger.warning(
               f"Invalid graph_tier '{graph.graph_tier}' for {graph_id}, using fallback"
             )
-            tier = graph_tier or GraphTier.KUZU_STANDARD
+            tier = graph_tier or GraphTier.LADYBUG_STANDARD
 
           return GraphIdentity(
             graph_id=graph_id,
@@ -266,7 +268,7 @@ class GraphTypeRegistry:
         graph_id=graph_id,
         category=GraphCategory.SHARED,
         graph_type=cls.SHARED_REPOSITORIES[graph_id].value,
-        graph_tier=GraphTier.KUZU_SHARED,
+        graph_tier=GraphTier.LADYBUG_SHARED,
         access_pattern=AccessPattern.READ_ONLY,
       )
 
@@ -276,7 +278,7 @@ class GraphTypeRegistry:
         graph_id=graph_id,
         category=GraphCategory.SYSTEM,
         graph_type="internal",
-        graph_tier=GraphTier.KUZU_STANDARD,
+        graph_tier=GraphTier.LADYBUG_STANDARD,
         access_pattern=AccessPattern.RESTRICTED,
       )
 
@@ -285,7 +287,7 @@ class GraphTypeRegistry:
       graph_id=graph_id,
       category=GraphCategory.USER,
       graph_type=UserGraphType.CUSTOM.value,
-      graph_tier=graph_tier or GraphTier.KUZU_STANDARD,
+      graph_tier=graph_tier or GraphTier.LADYBUG_STANDARD,
       access_pattern=AccessPattern.READ_WRITE,
     )
 

@@ -19,7 +19,7 @@ def parse_cypher_schema(ddl: str) -> List[NodeType]:
   """
   Parse Cypher DDL to extract node types and their properties.
 
-  Handles CREATE NODE TABLE statements from Kuzu schema.
+  Handles CREATE NODE TABLE statements from LadybugDB schema.
 
   Example DDL:
       CREATE NODE TABLE Customer(name STRING, sector STRING, PRIMARY KEY(name));

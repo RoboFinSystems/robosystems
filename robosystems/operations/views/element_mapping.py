@@ -25,7 +25,7 @@ from robosystems.models.iam.graph import GraphTier
 async def get_mapping_structure(
   graph_id: str,
   structure_id: str,
-  tier: GraphTier = GraphTier.KUZU_STANDARD,
+  tier: GraphTier = GraphTier.LADYBUG_STANDARD,
 ) -> Optional[MappingResponse]:
   """
   Get a mapping structure from the main graph (backward compatibility).

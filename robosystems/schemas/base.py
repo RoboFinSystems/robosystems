@@ -1,5 +1,5 @@
 """
-Base Schema for Kuzu
+Base Schema for LadybugDB
 
 Defines common nodes and relationships shared across all applications.
 This serves as the foundation that all application-specific schemas extend.
@@ -9,7 +9,7 @@ from .models import Node, Relationship, Property
 
 # Base Schema Definition - Common Foundation
 # NOTE: Platform metadata (users, connections, graph metadata) are stored in PostgreSQL,
-# not in the Kuzu graph database. This schema contains only business domain concepts.
+# not in the LadybugDB graph database. This schema contains only business domain concepts.
 BASE_NODES = [
   Node(
     name="Entity",

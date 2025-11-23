@@ -6,21 +6,21 @@ import re
 
 # Import secure write operation detection
 
-# Neo4j to Kuzu query translation patterns
+# Neo4j to LadybugDB query translation patterns
 NEO4J_DB_COMMANDS = re.compile(
   r"CALL\s+db\.(schema|labels|relationships|relationshipTypes|propertyKeys|indexes|constraints)\s*\(\s*\)",
   re.IGNORECASE | re.MULTILINE,
 )
 
-# Mapping of Neo4j commands to Kuzu equivalents
-NEO4J_TO_KUZU_MAPPING = {
+# Mapping of Neo4j commands to LadybugDB equivalents
+NEO4J_TO_LADYBUG_MAPPING = {
   "db.schema": "SHOW_TABLES()",
   "db.labels": "SHOW_TABLES()",
   "db.relationships": "SHOW_TABLES()",
   "db.relationshipTypes": "SHOW_TABLES()",
   "db.propertyKeys": "TABLE_INFO",
-  "db.indexes": "SHOW_TABLES()",  # Kuzu doesn't have explicit indexes like Neo4j
-  "db.constraints": "SHOW_TABLES()",  # Kuzu doesn't have constraints like Neo4j
+  "db.indexes": "SHOW_TABLES()",  # LadybugDB doesn't have explicit indexes like Neo4j
+  "db.constraints": "SHOW_TABLES()",  # LadybugDB doesn't have constraints like Neo4j
 }
 
 # Constants
@@ -28,15 +28,15 @@ MAX_QUERY_LENGTH = 50000
 DEFAULT_QUERY_TIMEOUT = 60
 
 
-def translate_neo4j_to_kuzu(query: str) -> str:
+def translate_neo4j_to_lbug(query: str) -> str:
   """
-  Translate Neo4j-style db.* commands to Kuzu equivalents.
+  Translate Neo4j-style db.* commands to LadybugDB equivalents.
 
   Args:
       query: The original Cypher query
 
   Returns:
-      Translated query compatible with Kuzu
+      Translated query compatible with LadybugDB
   """
   # Check if query contains Neo4j db.* commands
   match = NEO4J_DB_COMMANDS.search(query)
@@ -48,7 +48,7 @@ def translate_neo4j_to_kuzu(query: str) -> str:
 
   # Handle different command types
   if command in ["schema", "labels", "relationships", "relationshiptypes"]:
-    # Replace with Kuzu SHOW_TABLES
+    # Replace with LadybugDB SHOW_TABLES
     translated = NEO4J_DB_COMMANDS.sub("CALL SHOW_TABLES()", query)
 
     # If there's no RETURN statement after the CALL, add it

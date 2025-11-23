@@ -3,7 +3,7 @@ Authentication middleware for Graph API with environment-based security.
 
 Provides API key authentication for production/staging environments while
 allowing unrestricted access in development and from bastion hosts.
-Supports both Kuzu and Neo4j backends.
+Supports both LadybugDB and Neo4j backends.
 """
 
 import time
@@ -29,7 +29,7 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
   - Bypassed for requests from bastion hosts
   - Bypassed for health check endpoints
   - Rate limiting for failed auth attempts
-  - Works with both Kuzu and Neo4j backends
+  - Works with both LadybugDB and Neo4j backends
   """
 
   # Endpoints that don't require authentication
@@ -228,7 +228,7 @@ def clear_api_key_cache():
     logger.warning(f"Failed to clear API key cache: {e}")
 
 
-def create_api_key(prefix: str = "kuzu") -> tuple[str, str]:
+def create_api_key(prefix: str = "ladybug") -> tuple[str, str]:
   """
   Generate a secure API key with bcrypt hashing.
 
@@ -259,4 +259,4 @@ def create_api_key(prefix: str = "kuzu") -> tuple[str, str]:
   return api_key, key_hash
 
 
-KuzuAuthMiddleware = GraphAuthMiddleware
+LadybugAuthMiddleware = GraphAuthMiddleware

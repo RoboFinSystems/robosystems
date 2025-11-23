@@ -4,7 +4,7 @@ Thread-Safe DuckDB Connection Pool
 This module provides a production-ready connection pool for DuckDB staging databases
 with proper thread safety, connection limits, TTL, and health checking.
 
-Inspired by the successful KuzuConnectionPool implementation.
+Inspired by the successful LadybugConnectionPool implementation.
 
 Key features:
 - Thread-safe connection management using locks

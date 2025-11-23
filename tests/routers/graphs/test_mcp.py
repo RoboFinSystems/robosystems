@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from robosystems.models.iam import User
 from robosystems.models.api.graphs.mcp import MCPToolCall
 from robosystems.middleware.auth.jwt import create_jwt_token
-from robosystems.middleware.mcp.client import KuzuMCPClient
+from robosystems.middleware.mcp.client import GraphMCPClient
 from robosystems.routers.graphs.mcp.strategies import (
   MCPExecutionStrategy,
   MCPClientDetector,
@@ -33,7 +33,7 @@ class CircuitBreakerState(Enum):
 @pytest.fixture
 def mock_mcp_client():
   """Mock MCP client for tests."""
-  client = AsyncMock(spec=KuzuMCPClient)
+  client = AsyncMock(spec=GraphMCPClient)
   client.graph_id = VALID_TEST_GRAPH_ID
   client.api_base_url = "http://test:8001"
   client.timeout = 30

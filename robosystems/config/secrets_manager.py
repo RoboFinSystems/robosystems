@@ -19,7 +19,7 @@ Secrets are organized in AWS Secrets Manager with the following structure:
 - Extension secrets: `robosystems/{environment}/{type}`
   - `/postgres`: DATABASE_URL and other PostgreSQL configuration
   - `/s3`: AWS_S3_ACCESS_KEY_ID, AWS_S3_SECRET_ACCESS_KEY, bucket names
-  - `/graph-api`: GRAPH_API_KEY and other graph database secrets (unified for Kuzu/Neo4j)
+  - `/graph-api`: GRAPH_API_KEY and other graph database secrets (unified for LadybugDB/Neo4j)
 
 ## Usage
 
@@ -180,7 +180,7 @@ class SecretsManager:
     if self.environment not in ["prod", "staging"]:
       return {
         "aws_s3": f"robosystems-{self.environment}",
-        "kuzu": f"robosystems-kuzu-databases-{self.environment}",
+        "ladybug": f"robosystems-graph-databases-{self.environment}",
         "sec_raw": f"robosystems-sec-raw-{self.environment}",
         "sec_processed": f"robosystems-sec-processed-{self.environment}",
         "public_data": f"robosystems-public-data-{self.environment}",
@@ -193,8 +193,8 @@ class SecretsManager:
     # Extract bucket names with environment suffix handling
     buckets = {
       "aws_s3": secrets.get("AWS_S3_BUCKET", f"robosystems-{self.environment}"),
-      "kuzu": secrets.get(
-        "KUZU_S3_BUCKET", f"robosystems-kuzu-databases-{self.environment}"
+      "ladybug": secrets.get(
+        "GRAPH_DATABASES_BUCKET", f"robosystems-graph-databases-{self.environment}"
       ),
       "sec_raw": secrets.get(
         "SEC_RAW_BUCKET", f"robosystems-sec-raw-{self.environment}"
@@ -295,7 +295,7 @@ def get_s3_bucket_name(purpose: str) -> str:
   Get an S3 bucket name for a specific purpose.
 
   Args:
-      purpose: The purpose of the bucket (e.g., "sec_processed", "sec_raw", "kuzu")
+      purpose: The purpose of the bucket (e.g., "sec_processed", "sec_raw", "ladybug")
 
   Returns:
       The bucket name with proper environment suffix.
@@ -307,7 +307,7 @@ def get_s3_bucket_name(purpose: str) -> str:
   purpose_map = {
     "sec_processed": "sec_processed",
     "sec_raw": "sec_raw",
-    "kuzu": "kuzu",
+    "ladybug": "ladybug",
     "aws_s3": "aws_s3",
     "public": "public_data",
     "deployment": "deployment",
@@ -360,22 +360,24 @@ SECRET_MAPPINGS = {
   "STRIPE_PUBLISHABLE_KEY": (None, "STRIPE_PUBLISHABLE_KEY"),
   "STRIPE_WEBHOOK_SECRET": (None, "STRIPE_WEBHOOK_SECRET"),
   # Feature flags
+  "AGENT_POST_ENABLED": (None, "AGENT_POST_ENABLED"),
+  "BACKUP_CREATION_ENABLED": (None, "BACKUP_CREATION_ENABLED"),
   "BILLING_ENABLED": (None, "BILLING_ENABLED"),
   "CAPTCHA_ENABLED": (None, "CAPTCHA_ENABLED"),
   "CONNECTION_PLAID_ENABLED": (None, "CONNECTION_PLAID_ENABLED"),
   "CONNECTION_QUICKBOOKS_ENABLED": (None, "CONNECTION_QUICKBOOKS_ENABLED"),
   "CONNECTION_SEC_ENABLED": (None, "CONNECTION_SEC_ENABLED"),
+  "CSP_TRUSTED_TYPES_ENABLED": (None, "CSP_TRUSTED_TYPES_ENABLED"),
   "EMAIL_VERIFICATION_ENABLED": (None, "EMAIL_VERIFICATION_ENABLED"),
   "LOAD_SHEDDING_ENABLED": (None, "LOAD_SHEDDING_ENABLED"),
   "OTEL_ENABLED": (None, "OTEL_ENABLED"),
+  "ORG_MEMBER_INVITATIONS_ENABLED": (None, "ORG_MEMBER_INVITATIONS_ENABLED"),
   "RATE_LIMIT_ENABLED": (None, "RATE_LIMIT_ENABLED"),
   "SECURITY_AUDIT_ENABLED": (None, "SECURITY_AUDIT_ENABLED"),
+  "SHARED_MASTER_READS_ENABLED": (None, "SHARED_MASTER_READS_ENABLED"),
   "SSE_ENABLED": (None, "SSE_ENABLED"),
-  "USER_REGISTRATION_ENABLED": (None, "USER_REGISTRATION_ENABLED"),
   "SUBGRAPH_CREATION_ENABLED": (None, "SUBGRAPH_CREATION_ENABLED"),
-  "BACKUP_CREATION_ENABLED": (None, "BACKUP_CREATION_ENABLED"),
-  "AGENT_POST_ENABLED": (None, "AGENT_POST_ENABLED"),
-  "ORG_MEMBER_INVITATIONS_ENABLED": (None, "ORG_MEMBER_INVITATIONS_ENABLED"),
+  "USER_REGISTRATION_ENABLED": (None, "USER_REGISTRATION_ENABLED"),
   # Default configuration
   "ORG_GRAPHS_DEFAULT_LIMIT": (None, "ORG_GRAPHS_DEFAULT_LIMIT"),
 }

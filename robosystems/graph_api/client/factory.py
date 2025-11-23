@@ -2,12 +2,12 @@
 Graph Client Factory - Intelligent routing for all graph database backends.
 
 This module provides a factory for creating GraphClient instances that properly
-route to the correct graph database instance (Kuzu or Neo4j) based on the graph ID,
+route to the correct graph database instance (LadybugDB or Neo4j) based on the graph ID,
 operation type, and tier.
 
 Routing targets:
 1. User Graph Writers - Tier-based routing (Standard/Enterprise/Premium)
-   - Standard: Kuzu backend
+   - Standard: LadybugDB backend
    - Enterprise: Neo4j Community backend
    - Premium: Neo4j Enterprise backend
 2. Shared Repository Master - Primary source of truth for shared data (writes + fallback reads)
@@ -27,7 +27,7 @@ from robosystems.graph_api.client import GraphClient
 from robosystems.config import env
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.logger import logger
-from robosystems.middleware.graph.allocation_manager import KuzuAllocationManager
+from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
 from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
@@ -184,8 +184,8 @@ class GraphClientFactory:
   Factory for creating properly routed graph database clients.
 
   Handles intelligent routing to different backends:
-  - User graph writers (tier-based routing to Kuzu or Neo4j)
-    - Standard tier: Kuzu
+  - User graph writers (tier-based routing to LadybugDB or Neo4j)
+    - Standard tier: LadybugDB
     - Enterprise tier: Neo4j Community
     - Premium tier: Neo4j Enterprise
   - Shared repository master (writes + fallback reads)
@@ -247,7 +247,7 @@ class GraphClientFactory:
       from robosystems.config.valkey_registry import create_async_redis_client
 
       client = create_async_redis_client(
-        ValkeyDatabase.KUZU_CACHE,
+        ValkeyDatabase.LBUG_CACHE,
         decode_responses=True,
         max_connections=10,
         socket_keepalive=True,
@@ -287,7 +287,7 @@ class GraphClientFactory:
     Create a graph database client with intelligent routing.
 
     Routes to the appropriate backend based on tier:
-    - Standard tier: Kuzu
+    - Standard tier: LadybugDB
     - Enterprise tier: Neo4j Community
     - Premium tier: Neo4j Enterprise
 
@@ -359,9 +359,9 @@ class GraphClientFactory:
       # Priority hierarchy for backend selection in dev:
       # 1. GRAPH_SHARED_REPOSITORY_BACKEND env var (explicit override)
       # 2. graph.yml tier config (fallback for consistency with AWS)
-      # 3. Default to kuzu
+      # 3. Default to ladybug
 
-      backend = "kuzu"  # Default
+      backend = "ladybug"  # Default
 
       # Check env var first (highest priority in dev)
       if env.GRAPH_SHARED_REPOSITORY_BACKEND:
@@ -371,7 +371,7 @@ class GraphClientFactory:
         # Fall back to tier config (for consistency with AWS environments)
         from robosystems.config.graph_tier import GraphTierConfig
 
-        tier_config = GraphTierConfig.get_tier_config("kuzu-shared", "staging")
+        tier_config = GraphTierConfig.get_tier_config("ladybug-shared", "staging")
         if tier_config.get("backend"):
           backend = tier_config.get("backend")
           logger.info(f"Using backend from graph.yml tier config: {backend}")
@@ -385,9 +385,9 @@ class GraphClientFactory:
           f"Dev environment: Routing {graph_id} {operation_type} to Neo4j at {api_url}"
         )
       else:
-        api_url = env.GRAPH_API_URL or "http://localhost:8001"  # Kuzu instance
+        api_url = env.GRAPH_API_URL or "http://localhost:8001"  # LadybugDB instance
         logger.info(
-          f"Dev environment: Routing {graph_id} {operation_type} to Kuzu at {api_url}"
+          f"Dev environment: Routing {graph_id} {operation_type} to LadybugDB at {api_url}"
         )
 
       api_key = env.GRAPH_API_KEY
@@ -434,7 +434,7 @@ class GraphClientFactory:
         Tuple of (target, api_url, api_key)
     """
 
-    if env.ALLOW_SHARED_MASTER_READS:
+    if env.SHARED_MASTER_READS_ENABLED:
       logger.info(f"Routing {graph_id} READ to shared master")
       return (
         RouteTarget.SHARED_MASTER,
@@ -452,7 +452,7 @@ class GraphClientFactory:
     """
     Get the shared master URL by discovering from DynamoDB.
 
-    The shared master is deployed using the same kuzu-writers stack with tier="shared".
+    The shared master is deployed using the same graph-ladybug stack with tier="shared".
     It registers in DynamoDB with node_type="shared_master" and is auto-discoverable.
 
     Priority:
@@ -544,7 +544,7 @@ class GraphClientFactory:
       if redis_client:
         try:
           # Scan for ingestion flags
-          pattern = "kuzu:ingestion:active:*"
+          pattern = "lbug:ingestion:active:*"
           async for key in redis_client.scan_iter(match=pattern, count=100):
             # Extract instance ID from key
             instance_id = (
@@ -624,7 +624,7 @@ class GraphClientFactory:
     - Dev: Routes to single local graph instance
     - Prod/Staging: Uses allocation manager to find the appropriate instance
       based on the graph's tier:
-      - Standard: Kuzu backend
+      - Standard: LadybugDB backend
       - Enterprise: Neo4j Community backend
       - Premium: Neo4j Enterprise backend
     - Subgraphs: Routes to parent's instance but uses subgraph database
@@ -679,7 +679,7 @@ class GraphClientFactory:
 
     # If not cached, look it up - use actual_graph_id for routing
     if not db_location:
-      allocation_manager = KuzuAllocationManager(
+      allocation_manager = LadybugAllocationManager(
         environment=environment or env.ENVIRONMENT
       )
       db_location = await allocation_manager.find_database_location(actual_graph_id)
@@ -873,7 +873,7 @@ async def get_graph_client(
   Convenience function to get a properly routed graph database client.
 
   This is the preferred method for getting a graph client in async contexts.
-  Routes to appropriate backend (Kuzu or Neo4j) based on tier.
+  Routes to appropriate backend (LadybugDB or Neo4j) based on tier.
 
   Args:
       graph_id: Graph database identifier
@@ -903,7 +903,7 @@ def get_graph_client_sync(
   Convenience function to get a properly routed graph database client (sync version).
 
   This is the preferred method for getting a graph client in sync contexts.
-  Routes to appropriate backend (Kuzu or Neo4j) based on tier.
+  Routes to appropriate backend (LadybugDB or Neo4j) based on tier.
 
   Args:
       graph_id: Graph database identifier
@@ -931,7 +931,7 @@ async def get_graph_client_for_instance(
 
   This bypasses all routing and connects directly to a specific instance.
   Used for allocation operations where we need to target a specific instance.
-  Works with both Kuzu and Neo4j backends via Graph API.
+  Works with both LadybugDB and Neo4j backends via Graph API.
 
   Args:
       instance_ip: Private IP address of the graph database instance

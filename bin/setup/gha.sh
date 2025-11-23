@@ -239,35 +239,37 @@ function setup_minimum_config() {
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_PROD --body "7"
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
 
-    # Kuzu Writer Configuration - Standard Tier
-    gh variable set KUZU_STANDARD_ENABLED_PROD --body "true"
-    gh variable set KUZU_STANDARD_ENABLED_STAGING --body "true"
-    gh variable set KUZU_STANDARD_MIN_INSTANCES_PROD --body "1"
-    gh variable set KUZU_STANDARD_MAX_INSTANCES_PROD --body "10"
-    gh variable set KUZU_STANDARD_MIN_INSTANCES_STAGING --body "1"
-    gh variable set KUZU_STANDARD_MAX_INSTANCES_STAGING --body "5"
+    # LadybugDB Writer Configuration - Standard Tier
+    gh variable set LBUG_STANDARD_ENABLED_PROD --body "true"
+    gh variable set LBUG_STANDARD_ENABLED_STAGING --body "true"
+    gh variable set LBUG_STANDARD_MIN_INSTANCES_PROD --body "1"
+    gh variable set LBUG_STANDARD_MAX_INSTANCES_PROD --body "10"
+    gh variable set LBUG_STANDARD_MIN_INSTANCES_STAGING --body "1"
+    gh variable set LBUG_STANDARD_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Writer Configuration - Large Tier
-    gh variable set KUZU_LARGE_ENABLED_PROD --body "false"
-    gh variable set KUZU_LARGE_ENABLED_STAGING --body "false"
-    gh variable set KUZU_LARGE_MIN_INSTANCES_PROD --body "0"
-    gh variable set KUZU_LARGE_MAX_INSTANCES_PROD --body "20"
-    gh variable set KUZU_LARGE_MIN_INSTANCES_STAGING --body "0"
-    gh variable set KUZU_LARGE_MAX_INSTANCES_STAGING --body "5"
+    # LadybugDB Writer Configuration - Large Tier
+    gh variable set LBUG_LARGE_ENABLED_PROD --body "false"
+    gh variable set LBUG_LARGE_ENABLED_STAGING --body "false"
+    gh variable set LBUG_LARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set LBUG_LARGE_MAX_INSTANCES_PROD --body "20"
+    gh variable set LBUG_LARGE_MIN_INSTANCES_STAGING --body "0"
+    gh variable set LBUG_LARGE_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Writer Configuration - XLarge Tier
-    gh variable set KUZU_XLARGE_ENABLED_PROD --body "false"
-    gh variable set KUZU_XLARGE_ENABLED_STAGING --body "false"
-    gh variable set KUZU_XLARGE_MIN_INSTANCES_PROD --body "0"
-    gh variable set KUZU_XLARGE_MAX_INSTANCES_PROD --body "10"
+    # LadybugDB Writer Configuration - XLarge Tier
+    gh variable set LBUG_XLARGE_ENABLED_PROD --body "false"
+    gh variable set LBUG_XLARGE_ENABLED_STAGING --body "false"
+    gh variable set LBUG_XLARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set LBUG_XLARGE_MAX_INSTANCES_PROD --body "10"
+    gh variable set LBUG_XLARGE_MIN_INSTANCES_STAGING --body "0"
+    gh variable set LBUG_XLARGE_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Writer Configuration - Shared Repository
-    gh variable set KUZU_SHARED_ENABLED_PROD --body "false"
-    gh variable set KUZU_SHARED_ENABLED_STAGING --body "false"
-    gh variable set KUZU_SHARED_MIN_INSTANCES_PROD --body "1"
-    gh variable set KUZU_SHARED_MAX_INSTANCES_PROD --body "3"
-    gh variable set KUZU_SHARED_MIN_INSTANCES_STAGING --body "1"
-    gh variable set KUZU_SHARED_MAX_INSTANCES_STAGING --body "2"
+    # LadybugDB Writer Configuration - Shared Repository
+    gh variable set LBUG_SHARED_ENABLED_PROD --body "false"
+    gh variable set LBUG_SHARED_ENABLED_STAGING --body "false"
+    gh variable set LBUG_SHARED_MIN_INSTANCES_PROD --body "1"
+    gh variable set LBUG_SHARED_MAX_INSTANCES_PROD --body "3"
+    gh variable set LBUG_SHARED_MIN_INSTANCES_STAGING --body "1"
+    gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "2"
 
     # Neo4j Writer Configuration (optional backend)
     gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_PROD --body "false"
@@ -458,35 +460,37 @@ function setup_full_config() {
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_PROD --body "7"
     gh variable set VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING --body "0"
 
-    # Kuzu Writer Configuration - Standard Tier
-    gh variable set KUZU_STANDARD_ENABLED_PROD --body "true"
-    gh variable set KUZU_STANDARD_ENABLED_STAGING --body "true"
-    gh variable set KUZU_STANDARD_MIN_INSTANCES_PROD --body "1"
-    gh variable set KUZU_STANDARD_MAX_INSTANCES_PROD --body "10"
-    gh variable set KUZU_STANDARD_MIN_INSTANCES_STAGING --body "1"
-    gh variable set KUZU_STANDARD_MAX_INSTANCES_STAGING --body "5"
+    # LadybugDB Writer Configuration - Standard Tier
+    gh variable set LBUG_STANDARD_ENABLED_PROD --body "true"
+    gh variable set LBUG_STANDARD_ENABLED_STAGING --body "true"
+    gh variable set LBUG_STANDARD_MIN_INSTANCES_PROD --body "1"
+    gh variable set LBUG_STANDARD_MAX_INSTANCES_PROD --body "10"
+    gh variable set LBUG_STANDARD_MIN_INSTANCES_STAGING --body "1"
+    gh variable set LBUG_STANDARD_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Writer Configuration - Large Tier
-    gh variable set KUZU_LARGE_ENABLED_PROD --body "false"
-    gh variable set KUZU_LARGE_ENABLED_STAGING --body "false"
-    gh variable set KUZU_LARGE_MIN_INSTANCES_PROD --body "0"
-    gh variable set KUZU_LARGE_MAX_INSTANCES_PROD --body "20"
-    gh variable set KUZU_LARGE_MIN_INSTANCES_STAGING --body "0"
-    gh variable set KUZU_LARGE_MAX_INSTANCES_STAGING --body "5"
+    # LadybugDB Writer Configuration - Large Tier
+    gh variable set LBUG_LARGE_ENABLED_PROD --body "false"
+    gh variable set LBUG_LARGE_ENABLED_STAGING --body "false"
+    gh variable set LBUG_LARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set LBUG_LARGE_MAX_INSTANCES_PROD --body "20"
+    gh variable set LBUG_LARGE_MIN_INSTANCES_STAGING --body "0"
+    gh variable set LBUG_LARGE_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Writer Configuration - XLarge Tier
-    gh variable set KUZU_XLARGE_ENABLED_PROD --body "false"
-    gh variable set KUZU_XLARGE_ENABLED_STAGING --body "false"
-    gh variable set KUZU_XLARGE_MIN_INSTANCES_PROD --body "0"
-    gh variable set KUZU_XLARGE_MAX_INSTANCES_PROD --body "10"
+    # LadybugDB Writer Configuration - XLarge Tier
+    gh variable set LBUG_XLARGE_ENABLED_PROD --body "false"
+    gh variable set LBUG_XLARGE_ENABLED_STAGING --body "false"
+    gh variable set LBUG_XLARGE_MIN_INSTANCES_PROD --body "0"
+    gh variable set LBUG_XLARGE_MAX_INSTANCES_PROD --body "10"
+    gh variable set LBUG_XLARGE_MIN_INSTANCES_STAGING --body "0"
+    gh variable set LBUG_XLARGE_MAX_INSTANCES_STAGING --body "5"
 
-    # Kuzu Writer Configuration - Shared Repository
-    gh variable set KUZU_SHARED_ENABLED_PROD --body "true"
-    gh variable set KUZU_SHARED_ENABLED_STAGING --body "true"
-    gh variable set KUZU_SHARED_MIN_INSTANCES_PROD --body "1"
-    gh variable set KUZU_SHARED_MAX_INSTANCES_PROD --body "3"
-    gh variable set KUZU_SHARED_MIN_INSTANCES_STAGING --body "1"
-    gh variable set KUZU_SHARED_MAX_INSTANCES_STAGING --body "2"
+    # LadybugDB Writer Configuration - Shared Repository
+    gh variable set LBUG_SHARED_ENABLED_PROD --body "true"
+    gh variable set LBUG_SHARED_ENABLED_STAGING --body "true"
+    gh variable set LBUG_SHARED_MIN_INSTANCES_PROD --body "1"
+    gh variable set LBUG_SHARED_MAX_INSTANCES_PROD --body "3"
+    gh variable set LBUG_SHARED_MIN_INSTANCES_STAGING --body "1"
+    gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "2"
 
     # Neo4j Writer Configuration (optional backend)
     gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_PROD --body "false"

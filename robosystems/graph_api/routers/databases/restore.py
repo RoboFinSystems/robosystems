@@ -1,7 +1,7 @@
 """
 Database restore endpoints for Graph API.
 
-This module provides endpoints for restoring Kuzu databases
+This module provides endpoints for restoring LadybugDB databases
 from encrypted backups.
 """
 
@@ -22,7 +22,7 @@ from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.task_manager import restore_task_manager
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
-from robosystems.operations.kuzu.backup_manager import (
+from robosystems.operations.lbug.backup_manager import (
   create_backup_manager,
   RestoreJob,
   BackupFormat,
@@ -47,7 +47,7 @@ async def perform_restore(
   Updates task status for monitoring.
 
   Args:
-      connection_pool: Kuzu connection pool for closing connections before restore
+      connection_pool: LadybugDB connection pool for closing connections before restore
   """
   try:
     # Update task status to running
@@ -85,9 +85,9 @@ async def perform_restore(
 
       logger.info(f"[Task {task_id}] Deleting existing database for {graph_id}")
 
-      # Close all Kuzu connections first
+      # Close all LadybugDB connections first
       connection_pool.close_database_connections(graph_id)
-      logger.info(f"[Task {task_id}] Closed Kuzu connections")
+      logger.info(f"[Task {task_id}] Closed LadybugDB connections")
 
       # Delete the database files
       db_path = Path(MultiTenantUtils.get_database_path_for_graph(graph_id))
@@ -150,7 +150,7 @@ async def restore_database(
   """
   Restore a database from S3 backup.
 
-  This endpoint restores a complete Kuzu database from S3:
+  This endpoint restores a complete LadybugDB database from S3:
   - Downloads backup from S3
   - Decrypts if encrypted
   - Decompresses if compressed
@@ -270,7 +270,7 @@ async def download_backup(
       # Copy database files
       if os.path.isfile(db_path):
         # Single file database
-        shutil.copy2(db_path, temp_path / f"{graph_id}.kuzu")
+        shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
       else:
         # Directory-based database
         shutil.copytree(db_path, temp_path / graph_id)
@@ -279,7 +279,7 @@ async def download_backup(
       zip_file = temp_path / f"{graph_id}_backup.zip"
       with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
         if os.path.isfile(db_path):
-          zf.write(temp_path / f"{graph_id}.kuzu", f"{graph_id}.kuzu")
+          zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
         else:
           for root, dirs, files in os.walk(temp_path / graph_id):
             for file in files:

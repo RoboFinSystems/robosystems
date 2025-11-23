@@ -44,7 +44,7 @@ async def get_schema_info(repository: Any) -> Dict[str, Any]:
   schema_info = {"node_labels": [], "relationship_types": [], "node_properties": {}}
 
   try:
-    # Execute Kuzu-specific schema queries
+    # Execute LadybugDB-specific schema queries
     if hasattr(repository, "execute_query") and asyncio.iscoroutinefunction(
       repository.execute_query
     ):
@@ -70,7 +70,7 @@ async def get_schema_info(repository: Any) -> Dict[str, Any]:
     schema_info["relationship_types"] = rel_tables
 
     # For node properties, we need to query each table individually
-    # This is a limitation of Kuzu compared to Neo4j
+    # This is a limitation of LadybugDB compared to Neo4j
     # CALL TABLE_INFO is a catalog query (metadata only), so it's fast even for many tables
     for node_label in node_tables:
       try:

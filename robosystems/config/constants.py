@@ -62,7 +62,7 @@ DEFAULT_CREDIT_ALLOCATION_HOUR = 3  # 3 AM UTC
 MIN_PORT = 1
 MAX_PORT = 65535
 DEFAULT_API_PORT = 8000
-DEFAULT_KUZU_PORT = 8001
+DEFAULT_GRAPH_API_PORT = 8001
 
 # Percentage Thresholds
 ADMISSION_MEMORY_THRESHOLD_DEFAULT = 85.0  # percent (of total instance memory)
@@ -74,7 +74,7 @@ MAX_QUERY_LENGTH = 10000  # characters
 MAX_ERROR_MESSAGE_LENGTH = 1000  # characters
 
 # Batch Processing
-DEFAULT_BATCH_SIZE = 5000  # Optimized for Kuzu bulk ingestion
+DEFAULT_BATCH_SIZE = 5000  # Optimized for Graph API bulk ingestion
 MIN_BATCH_SIZE = 1
 MAX_BATCH_SIZE = 10000  # Increased for large-scale operations
 
@@ -97,9 +97,9 @@ MIN_QUEUE_SIZE = 10
 DEFAULT_MAX_CONCURRENT = 50
 MAX_CONCURRENT_DOWNLOADS = 5
 MAX_DATABASES_PER_NODE = (
-  10  # Default for standard tier (can be overridden per tier in kuzu.yml)
-  # Standard: 10 databases with 2GB each (oversubscribed on 14GB instance)
-  # Enterprise/Premium: 1 database (dedicated instance)
+  10  # Default for standard tier (can be overridden per tier in graph.yml)
+  # ladybug-standard: 10 databases with 2GB each (multi-tenant on 14GB instance)
+  # ladybug-large/xlarge: 1 database (dedicated instance)
   # Future upgrade path: Increase instance size, keep same DB allocation
 )
 
@@ -128,34 +128,20 @@ AUTH_RATE_LIMIT_WINDOW_LOGIN = 300  # 5 minutes for login rate limiting
 AUTH_RATE_LIMIT_WINDOW_REGISTER = 3600  # 1 hour for registration rate limiting
 
 # =============================================================================
-# FIXED TECHNICAL LIMITS - Not configurable per environment
+# GRAPH API CONFIGURATION (Backend-Agnostic)
 # =============================================================================
+# Configuration that applies to all graph database backends (LadybugDB, Neo4j, etc.)
 
-# Kuzu Fixed Limits
-KUZU_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
-KUZU_CONNECT_TIMEOUT = 5.0  # seconds
-KUZU_READ_TIMEOUT = 30.0  # seconds
+# Graph API Fixed Limits
+GRAPH_MAX_REQUEST_SIZE = 10 * 1024 * 1024  # 10MB
+GRAPH_CONNECT_TIMEOUT = 5.0  # seconds
+GRAPH_READ_TIMEOUT = 30.0  # seconds
 
-# Arelle (XBRL Processing) Fixed Limits
-ARELLE_MIN_SCHEMA_COUNT = 10
-ARELLE_DOWNLOAD_TIMEOUT = 10  # seconds
-
-# XBRL Fixed Limits
-XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
-
-# =============================================================================
-# RESILIENCY AND CIRCUIT BREAKER DEFAULTS
-# =============================================================================
-
-# Kuzu Circuit Breaker/Resiliency
-KUZU_ALB_HEALTH_CACHE_TTL = 30  # seconds
-KUZU_INSTANCE_CACHE_TTL = 60  # seconds
-KUZU_CIRCUIT_BREAKER_THRESHOLD = 5  # failures before opening
-KUZU_CIRCUIT_BREAKER_TIMEOUT = 60  # seconds before retry
-
-# =============================================================================
-# QUEUE CONFIGURATION DEFAULTS
-# =============================================================================
+# Graph API Circuit Breaker/Resiliency
+GRAPH_ALB_HEALTH_CACHE_TTL = 30  # seconds
+GRAPH_INSTANCE_CACHE_TTL = 60  # seconds
+GRAPH_CIRCUIT_BREAKER_THRESHOLD = 5  # failures before opening
+GRAPH_CIRCUIT_BREAKER_TIMEOUT = 60  # seconds before retry
 
 # Query Queue Defaults
 QUERY_QUEUE_MAX_PER_USER = 10
@@ -170,8 +156,33 @@ ADMISSION_CHECK_INTERVAL = 1.0  # seconds
 LOAD_SHED_START_PRESSURE_DEFAULT = 0.8  # 80% pressure
 LOAD_SHED_STOP_PRESSURE_DEFAULT = 0.6  # 60% pressure
 
+# Tier-Specific Instance Memory Limits (MB)
+# Tiers: ladybug-standard, ladybug-large, ladybug-xlarge
+GRAPH_STANDARD_MAX_MEMORY_MB = 14336  # 14GB for r7g.large
+GRAPH_LARGE_MAX_MEMORY_MB = 14336  # 14GB for r7g.large (dedicated)
+GRAPH_XLARGE_MAX_MEMORY_MB = 28672  # 28GB for r7g.xlarge (dedicated)
+
+# Tier-Specific Per-Database Memory Limits (MB)
+GRAPH_STANDARD_MEMORY_PER_DB_MB = 2048  # 2GB per database (multi-tenant)
+GRAPH_LARGE_MEMORY_PER_DB_MB = 14336  # Full instance memory (dedicated)
+GRAPH_XLARGE_MEMORY_PER_DB_MB = 28672  # Full instance memory (dedicated)
+
+# Tier-Specific Streaming Chunk Sizes
+GRAPH_STANDARD_CHUNK_SIZE = 1000  # rows
+GRAPH_LARGE_CHUNK_SIZE = 5000  # rows
+GRAPH_XLARGE_CHUNK_SIZE = 10000  # rows
+
 # =============================================================================
-# RETRY CONFIGURATION
+# BACKEND-SPECIFIC CONFIGURATION
+# =============================================================================
+# Configuration specific to individual graph database backends
+
+# DuckDB (Staging/Materialization Backend)
+DUCKDB_MAX_THREADS = 4  # Limit threads to prevent oversubscription
+DUCKDB_MEMORY_LIMIT = "2GB"  # Per-connection memory limit
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION
 # =============================================================================
 
 # SEC Pipeline Retries
@@ -181,6 +192,20 @@ SEC_PIPELINE_MAX_RETRIES = 3
 OPENFIGI_RETRY_MIN_WAIT = 10000  # milliseconds (10 seconds)
 OPENFIGI_RETRY_MAX_WAIT = 30000  # milliseconds (30 seconds)
 
+# Arelle (XBRL Processing) Fixed Limits
+ARELLE_MIN_SCHEMA_COUNT = 10
+ARELLE_DOWNLOAD_TIMEOUT = 10  # seconds
+
+# XBRL Fixed Limits
+XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
+
+# XBRL graph large nodes that require aggressive memory cleanup after LadybugDB ingestion
+# These tables contain millions of rows and consume significant memory
+XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,FactDimension,Report"
+
+# SEC API Rate Limiting
+SEC_RATE_LIMIT = 10  # requests per second (SEC.gov requirement)
+
 # =============================================================================
 # FIXED BUSINESS RULES
 # =============================================================================
@@ -188,40 +213,6 @@ OPENFIGI_RETRY_MAX_WAIT = 30000  # milliseconds (30 seconds)
 # Credit Allocation Schedule
 CREDIT_ALLOCATION_DAY = 1  # 1st of month
 CREDIT_ALLOCATION_HOUR = 3  # 3 AM UTC
-
-# SEC API Rate Limiting
-SEC_RATE_LIMIT = 10  # requests per second (SEC.gov requirement)
-
-# =============================================================================
-# TIER-SPECIFIC MEMORY ALLOCATIONS
-# =============================================================================
-
-# Instance Memory Limits by Tier (MB)
-KUZU_STANDARD_MAX_MEMORY_MB = 14336  # 14GB for r7g.large
-KUZU_ENTERPRISE_MAX_MEMORY_MB = 14336  # 14GB for r7g.large
-KUZU_PREMIUM_MAX_MEMORY_MB = 28672  # 28GB for r7g.xlarge
-
-# Per-Database Memory Limits by Tier (MB)
-KUZU_STANDARD_MEMORY_PER_DB_MB = 2048  # 2GB per database
-KUZU_ENTERPRISE_MEMORY_PER_DB_MB = 14336  # Full instance memory (dedicated)
-KUZU_PREMIUM_MEMORY_PER_DB_MB = 28672  # Full instance memory (dedicated)
-
-# =============================================================================
-# TIER-SPECIFIC STREAMING CHUNK SIZES
-# =============================================================================
-
-# Streaming Chunk Sizes by Tier
-KUZU_STANDARD_CHUNK_SIZE = 1000  # rows
-KUZU_ENTERPRISE_CHUNK_SIZE = 5000  # rows
-KUZU_PREMIUM_CHUNK_SIZE = 10000  # rows
-
-# =============================================================================
-# DUCKDB CONFIGURATION
-# =============================================================================
-
-# DuckDB Performance Settings
-DUCKDB_MAX_THREADS = 4  # Limit threads to prevent oversubscription
-DUCKDB_MEMORY_LIMIT = "2GB"  # Per-connection memory limit
 
 # =============================================================================
 # STATIC STRING/URI CONSTANTS

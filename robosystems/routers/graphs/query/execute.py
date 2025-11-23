@@ -243,9 +243,9 @@ async def execute_cypher_query(
   if chunk_size is None:
     if graph and graph.graph_tier:
       tier_chunk_sizes = {
-        "kuzu-standard": env.KUZU_STANDARD_CHUNK_SIZE,
-        "kuzu-large": env.KUZU_ENTERPRISE_CHUNK_SIZE,
-        "kuzu-xlarge": env.KUZU_PREMIUM_CHUNK_SIZE,
+        "ladybug-standard": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
+        "ladybug-large": env.GRAPH_LARGE_CHUNK_SIZE_OVERRIDE,
+        "ladybug-xlarge": env.GRAPH_XLARGE_CHUNK_SIZE_OVERRIDE,
       }
       chunk_size = tier_chunk_sizes.get(graph.graph_tier.lower(), 1000)
       logger.debug(f"Using tier-based chunk size for {graph.graph_tier}: {chunk_size}")
@@ -335,15 +335,15 @@ async def execute_cypher_query(
 
     # Get repository with auth
     # Convert graph tier string to GraphTier enum
-    tier = GraphTier.KUZU_STANDARD
+    tier = GraphTier.LADYBUG_STANDARD
     if graph and graph.graph_tier:
       tier_map = {
-        "kuzu-standard": GraphTier.KUZU_STANDARD,
-        "kuzu-large": GraphTier.KUZU_LARGE,
-        "kuzu-xlarge": GraphTier.KUZU_XLARGE,
-        "kuzu-shared": GraphTier.KUZU_SHARED,
+        "ladybug-standard": GraphTier.LADYBUG_STANDARD,
+        "ladybug-large": GraphTier.LADYBUG_LARGE,
+        "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
+        "ladybug-shared": GraphTier.LADYBUG_SHARED,
       }
-      tier = tier_map.get(graph.graph_tier.lower(), GraphTier.KUZU_STANDARD)
+      tier = tier_map.get(graph.graph_tier.lower(), GraphTier.LADYBUG_STANDARD)
 
     try:
       repository = await get_universal_repository(graph_id, access_type, tier)
@@ -911,7 +911,7 @@ async def _check_shared_repository_limits(
     limiter = DualLayerRateLimiter(redis_client)
 
     # Get user's subscription tier (for burst protection)
-    user_tier = getattr(user, "subscription_tier", "kuzu-standard")
+    user_tier = getattr(user, "subscription_tier", "ladybug-standard")
 
     # Get user's repository access plan
     repo_access = UserRepository.get_by_user_and_repository(user.id, graph_id, session)

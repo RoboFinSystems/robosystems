@@ -194,7 +194,7 @@ Resources:
     Properties:
       FunctionName: !Sub ${AWS::StackName}-postgres-rotation
       Description: "Rotates PostgreSQL database passwords - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt PostgresSecretRotationRole.Arn
       Timeout: 300
@@ -740,7 +740,7 @@ Resources:
       Description: "Updates PostgreSQL secrets - auto-updates via S3 key hash"
       Handler: index.lambda_handler
       Role: !GetAtt PostgresSecretsUpdateLambdaRole.Arn
-      Runtime: python3.12
+      Runtime: python3.13
       Timeout: 300
       Environment:
         Variables:

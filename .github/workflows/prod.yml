@@ -461,23 +461,23 @@ jobs:
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       # Container Configuration
       ecr_image_tag: latest
-      # Infrastructure inputs from kuzu infrastructure jobs
+      # Infrastructure inputs from graph infrastructure jobs
       secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
       volume_manager_function_arn: ${{ needs.deploy-graph-volumes.outputs.volume_manager_function_arn }}
       volume_detachment_topic_arn: ${{ needs.deploy-graph-volumes.outputs.volume_detachment_topic_arn }}
-      # Kuzu Tier Configuration
-      kuzu_large_enabled: ${{ vars.KUZU_LARGE_ENABLED_PROD }}
-      kuzu_xlarge_enabled: ${{ vars.KUZU_XLARGE_ENABLED_PROD }}
-      # Kuzu Scaling Configuration
-      kuzu_standard_min_instances: ${{ vars.KUZU_STANDARD_MIN_INSTANCES_PROD }}
-      kuzu_standard_max_instances: ${{ vars.KUZU_STANDARD_MAX_INSTANCES_PROD }}
-      kuzu_large_min_instances: ${{ vars.KUZU_LARGE_MIN_INSTANCES_PROD }}
-      kuzu_large_max_instances: ${{ vars.KUZU_LARGE_MAX_INSTANCES_PROD }}
-      kuzu_xlarge_min_instances: ${{ vars.KUZU_XLARGE_MIN_INSTANCES_PROD }}
-      kuzu_xlarge_max_instances: ${{ vars.KUZU_XLARGE_MAX_INSTANCES_PROD }}
-      kuzu_shared_min_instances: ${{ vars.KUZU_SHARED_MIN_INSTANCES_PROD }}
-      kuzu_shared_max_instances: ${{ vars.KUZU_SHARED_MAX_INSTANCES_PROD }}
+      # Graph Tier Configuration
+      lbug_large_enabled: ${{ vars.LBUG_LARGE_ENABLED_PROD }}
+      lbug_xlarge_enabled: ${{ vars.LBUG_XLARGE_ENABLED_PROD }}
+      # Graph Scaling Configuration
+      lbug_standard_min_instances: ${{ vars.LBUG_STANDARD_MIN_INSTANCES_PROD }}
+      lbug_standard_max_instances: ${{ vars.LBUG_STANDARD_MAX_INSTANCES_PROD }}
+      lbug_large_min_instances: ${{ vars.LBUG_LARGE_MIN_INSTANCES_PROD }}
+      lbug_large_max_instances: ${{ vars.LBUG_LARGE_MAX_INSTANCES_PROD }}
+      lbug_xlarge_min_instances: ${{ vars.LBUG_XLARGE_MIN_INSTANCES_PROD }}
+      lbug_xlarge_max_instances: ${{ vars.LBUG_XLARGE_MAX_INSTANCES_PROD }}
+      lbug_shared_min_instances: ${{ vars.LBUG_SHARED_MIN_INSTANCES_PROD }}
+      lbug_shared_max_instances: ${{ vars.LBUG_SHARED_MAX_INSTANCES_PROD }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:

@@ -209,7 +209,7 @@ def generate_robosystems_docs() -> str:
   return generate_swagger_docs(title="RoboSystems API")
 
 
-def generate_kuzu_docs() -> str:
+def generate_lbug_docs() -> str:
   """Generate docs for RoboSystems Graph API."""
   return generate_swagger_docs(title="RoboSystems Graph API")
 

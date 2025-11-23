@@ -13,7 +13,7 @@ from ...logger import logger
 from ...config import env
 from ...models.iam import GraphUser
 from ...database import get_db_session
-from ...middleware.graph.allocation_manager import KuzuAllocationManager
+from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...config.graph_tier import GraphTier
 
 
@@ -48,7 +48,7 @@ class GenericGraphService:
         graph_id: Requested graph ID (auto-generated if None)
         schema_extensions: List of schema extensions to install
         metadata: Graph metadata (name, description, type, tags)
-        tier: Service tier (kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: Service tier (ladybug-standard, ladybug-large, ladybug-xlarge)
         initial_data: Optional initial data to populate
         user_id: ID of the user creating the graph
         cancellation_callback: Optional callback to check for cancellation
@@ -96,17 +96,17 @@ class GenericGraphService:
     if cancellation_callback:
       cancellation_callback()
 
-    # Step 2: Allocate database on Kuzu cluster
+    # Step 2: Allocate database on LadybugDB cluster
     if progress_callback:
       progress_callback("Allocating database cluster...", 20)
 
     logger.info(f"Allocating database for graph {graph_id}")
 
     # Get environment from centralized config
-    allocation_manager = KuzuAllocationManager(environment=env.ENVIRONMENT)
+    allocation_manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
 
     # Parse tier string to GraphTier enum
-    # Tier should already be a valid GraphTier value (e.g., "kuzu-standard")
+    # Tier should already be a valid GraphTier value (e.g., "ladybug-standard")
     graph_tier = GraphTier(tier.lower()) if tier else None
 
     cluster_info = await allocation_manager.allocate_database(
@@ -177,16 +177,16 @@ class GenericGraphService:
     if progress_callback:
       progress_callback("Creating graph database...", 40)
 
-    logger.info(f"Creating database {graph_id} on Kuzu writer")
+    logger.info(f"Creating database {graph_id} on LadybugDB writer")
 
-    # Use KuzuClient with proper API key
+    # Use LadybugClient with proper API key
     from ...graph_api.client import get_graph_client_for_instance
 
-    kuzu_client = await get_graph_client_for_instance(cluster_info.private_ip)
+    graph_client = await get_graph_client_for_instance(cluster_info.private_ip)
 
     try:
       schema_type = "custom" if custom_schema else "entity"
-      result = await kuzu_client.create_database(
+      result = await graph_client.create_database(
         graph_id=graph_id,
         schema_type=schema_type,
         custom_schema_ddl=custom_ddl if custom_schema else None,
@@ -195,7 +195,7 @@ class GenericGraphService:
 
       # Persist custom schema DDL to PostgreSQL if provided
     finally:
-      await kuzu_client.close()
+      await graph_client.close()
 
     # Step 5: Handle schema extensions (if no custom schema)
     if not custom_schema and schema_extensions:
@@ -217,12 +217,12 @@ class GenericGraphService:
       schema = manager.load_and_compile_schema(config)
       extensions_ddl = schema.to_cypher()
 
-      # Use KuzuClient for schema installation with proper API key
-      kuzu_client = await get_graph_client_for_instance(cluster_info.private_ip)
+      # Use LadybugClient for schema installation with proper API key
+      graph_client = await get_graph_client_for_instance(cluster_info.private_ip)
 
       try:
         # Use the new install_schema method
-        result = await kuzu_client.install_schema(
+        result = await graph_client.install_schema(
           graph_id=graph_id, base_schema="base", extensions=schema_extensions
         )
         logger.info("Schema installation completed successfully")
@@ -244,14 +244,14 @@ class GenericGraphService:
         logger.error(f"Failed to install schema extensions: {e}")
         raise RuntimeError(f"Schema installation failed: {e}")
       finally:
-        await kuzu_client.close()
+        await graph_client.close()
 
     # Check for cancellation
     if cancellation_callback:
       cancellation_callback()
 
     # NOTE: Platform metadata (GraphMetadata, User, Connection nodes) are now
-    # stored exclusively in PostgreSQL, not in the Kuzu graph database.
+    # stored exclusively in PostgreSQL, not in the LadybugDB graph database.
     # This keeps the graph focused on business data only.
     logger.info(
       f"Skipping GraphMetadata node creation for {graph_id} - "

@@ -125,11 +125,11 @@ class XBRLDuckDBGraphProcessor:
       total_files = sum(len(files) for files in tables_info.values())
       logger.info(f"Total files: {total_files}")
 
-      # Step 2: Handle Kuzu database rebuild BEFORE creating DuckDB tables
+      # Step 2: Handle LadybugDB database rebuild BEFORE creating DuckDB tables
       if rebuild:
-        logger.info("Step 2: Rebuilding Kuzu database...")
+        logger.info("Step 2: Rebuilding LadybugDB database...")
         logger.info(
-          f"Rebuild requested - regenerating entire Kuzu database for {self.graph_id}"
+          f"Rebuild requested - regenerating entire LadybugDB database for {self.graph_id}"
         )
         from robosystems.database import SessionFactory
         from robosystems.models.iam import GraphSchema
@@ -137,7 +137,7 @@ class XBRLDuckDBGraphProcessor:
         db = SessionFactory()
         try:
           await client.delete_database(self.graph_id)
-          logger.info(f"Deleted Kuzu database: {self.graph_id}")
+          logger.info(f"Deleted LadybugDB database: {self.graph_id}")
 
           schema = GraphSchema.get_active_schema(self.graph_id, db)
           if not schema:
@@ -153,7 +153,9 @@ class XBRLDuckDBGraphProcessor:
             create_db_kwargs["repository_name"] = self.graph_id
 
           await client.create_database(**create_db_kwargs)
-          logger.info(f"Recreated Kuzu database with schema type: {schema.schema_type}")
+          logger.info(
+            f"Recreated LadybugDB database with schema type: {schema.schema_type}"
+          )
         finally:
           db.close()
 
@@ -333,7 +335,7 @@ class XBRLDuckDBGraphProcessor:
     rebuild: bool = False,
   ) -> Dict[str, Any]:
     """
-    Trigger ingestion for all tables into Kuzu graph via Graph API.
+    Trigger ingestion for all tables into LadybugDB graph via Graph API.
 
     Args:
         table_names: List of table names to ingest

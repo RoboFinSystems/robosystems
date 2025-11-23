@@ -2,7 +2,7 @@ RoboSystems is a knowledge graph platform for enterprise financial and operation
 
 ## Core Features
 
-- **Graph Database**: Build knowledge graphs with Kuzu for modeling financial relationships and multi-dimensional analytics
+- **Graph Database**: Build knowledge graphs with LadybugDB for modeling financial relationships and multi-dimensional analytics
 - **Multi-Tenant Architecture**: Isolated database instances with tier-based resource allocation
 - **AI Agent Integration**: MCP (Model Context Protocol) support enables AI agents to query and analyze your knowledge graphs
 - **DuckDB Staging**: High-performance data validation and bulk ingestion pipeline with Parquet optimization

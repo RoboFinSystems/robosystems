@@ -238,7 +238,7 @@ async def get_schema(
     )
 
   try:
-    # Get schema information using Kuzu's SHOW_TABLES
+    # Get schema information using LadybugDB's SHOW_TABLES
     schema_info = {
       "database": validated_graph_id,
       "tables": [],

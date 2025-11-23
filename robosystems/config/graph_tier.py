@@ -22,10 +22,10 @@ class GraphTier(str, Enum):
   Update both when adding or removing tiers.
   """
 
-  KUZU_STANDARD = "kuzu-standard"
-  KUZU_LARGE = "kuzu-large"
-  KUZU_XLARGE = "kuzu-xlarge"
-  KUZU_SHARED = "kuzu-shared"
+  LADYBUG_STANDARD = "ladybug-standard"
+  LADYBUG_LARGE = "ladybug-large"
+  LADYBUG_XLARGE = "ladybug-xlarge"
+  LADYBUG_SHARED = "ladybug-shared"
   NEO4J_COMMUNITY_LARGE = "neo4j-community-large"
   NEO4J_ENTERPRISE_XLARGE = "neo4j-enterprise-xlarge"
 
@@ -82,7 +82,7 @@ class GraphTierConfig:
     """Get configuration for a specific tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared, neo4j-community-large, neo4j-enterprise-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -114,7 +114,7 @@ class GraphTierConfig:
     """Get maximum subgraphs allowed for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -128,7 +128,7 @@ class GraphTierConfig:
     """Get query timeout for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -143,7 +143,7 @@ class GraphTierConfig:
     """Get memory allocation per database for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -158,7 +158,7 @@ class GraphTierConfig:
     """Get total memory allocation for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -173,7 +173,7 @@ class GraphTierConfig:
     """Get chunk size for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -190,7 +190,7 @@ class GraphTierConfig:
     """Get complete instance configuration for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -206,7 +206,7 @@ class GraphTierConfig:
     """Get rate limit multiplier for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -222,7 +222,7 @@ class GraphTierConfig:
     """Get copy operation limits for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -245,7 +245,7 @@ class GraphTierConfig:
     """Get backup limits for a tier.
 
     Args:
-        tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, etc.)
         environment: Environment (defaults to current env)
 
     Returns:
@@ -428,10 +428,10 @@ class GraphTierConfig:
 
       # Add display name based on tier
       display_names = {
-        "kuzu-standard": "Kuzu Standard",
-        "kuzu-large": "Kuzu Professional",
-        "kuzu-xlarge": "Kuzu Enterprise",
-        "kuzu-shared": "Shared Repository",
+        "ladybug-standard": "LadybugDB Standard",
+        "ladybug-large": "LadybugDB Professional",
+        "ladybug-xlarge": "LadybugDB Enterprise",
+        "ladybug-shared": "Shared Repository",
         "neo4j-community-large": "Neo4j Community",
         "neo4j-enterprise-xlarge": "Neo4j Enterprise",
       }
@@ -456,7 +456,7 @@ def get_tier_max_subgraphs(
   """Get max subgraphs for a tier.
 
   Args:
-      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
+      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, etc.)
       environment: Environment (defaults to current env)
 
   Returns:
@@ -470,7 +470,7 @@ def get_tier_api_rate_multiplier(tier: str, environment: Optional[str] = None) -
   """Cached function to get rate limit multiplier for a tier.
 
   Args:
-      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
+      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
       environment: Environment (defaults to current env)
 
   Returns:
@@ -486,7 +486,7 @@ def get_tier_copy_operation_limits(
   """Cached function to get copy operation limits for a tier.
 
   Args:
-      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge)
+      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge)
       environment: Environment (defaults to current env)
 
   Returns:
@@ -502,7 +502,7 @@ def get_tier_backup_limits(
   """Cached function to get backup limits for a tier.
 
   Args:
-      tier: The tier name (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
+      tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, etc.)
       environment: Environment (defaults to current env)
 
   Returns:

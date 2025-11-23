@@ -599,7 +599,7 @@ RoboSystems Infrastructure Operations - Production/Staging Bastion Commands
 ======================================================================
 
 SEC Operations:
-  sec-load --ticker TICKER [--year YEAR] [--backend kuzu]
+  sec-load --ticker TICKER [--year YEAR] [--backend ladybug]
   sec-health [--verbose] [--json]
   sec-reset
   sec-plan --start-year YEAR --end-year YEAR [--max-companies N]

@@ -45,7 +45,7 @@ router = APIRouter()
 - Last access time (when available)
 
 **Statistics:**
-Real-time statistics queried from Kuzu:
+Real-time statistics queried from LadybugDB:
 - Node count
 - Edge count
 - Database size on disk
@@ -97,7 +97,7 @@ async def get_subgraph_info(
         detail=f"{subgraph.graph_id} is not a subgraph. Use the regular graph info endpoint.",
       )
 
-    # TODO: Get actual metrics from Kuzu
+    # TODO: Get actual metrics from LadybugDB
     size_mb = None
     node_count = None
     edge_count = None

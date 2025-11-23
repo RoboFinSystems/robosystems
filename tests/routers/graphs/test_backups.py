@@ -140,7 +140,7 @@ class TestBackupEndpoints:
       mock_is_shared.return_value = False  # Not a shared repository
 
       # Mock database path - returns the database path for the graph
-      mock_get_database_path.return_value = f"/tmp/kuzu/{VALID_TEST_GRAPH_ID}"
+      mock_get_database_path.return_value = f"/tmp/lbug-dbs/{VALID_TEST_GRAPH_ID}"
 
       # Mock os.path.exists to return False (database doesn't exist yet, size will be 0)
       mock_path_exists.return_value = False

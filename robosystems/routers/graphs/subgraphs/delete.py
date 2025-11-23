@@ -54,8 +54,8 @@ Deletion is permanent unless backup is created.
 All data in the subgraph will be lost.
 
 **Backup Location:**
-If backup requested, stored in S3 Kuzu database bucket at:
-`s3://{kuzu_s3_bucket}/{instance_id}/{database_name}_{timestamp}.backup`
+If backup requested, stored in S3 graph database bucket at:
+`s3://{graph_s3_bucket}/{instance_id}/{database_name}_{timestamp}.backup`
 
 **Notes:**
 - Use the subgraph name (e.g., 'dev', 'staging') not the full subgraph ID

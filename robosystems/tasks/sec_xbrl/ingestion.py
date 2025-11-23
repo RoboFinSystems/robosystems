@@ -5,7 +5,7 @@ Handles the final stage of the SEC pipeline - ingesting processed
 parquet files directly from the processed folder using native S3 bulk loading.
 
 Key features:
-- Supports both Kuzu and Neo4j backends via Graph API
+- Supports both LadybugDB and Neo4j backends via Graph API
 - Uses native S3 COPY FROM with glob patterns
 - Processes nodes before relationships (dependency order)
 - Single-threaded to prevent overwhelming the database
@@ -142,12 +142,12 @@ def ingest_sec_data(
   incremental: bool = False,  # Only load new batches
   timestamp_after: Optional[str] = None,  # Load batches after this timestamp
   use_consolidated: bool = False,  # Use consolidated files instead of raw processed
-  backend: str = "kuzu",  # Backend type ("kuzu" or "neo4j")
+  backend: str = "ladybug",  # Backend type ("ladybug" or "neo4j")
 ) -> Dict[str, Any]:
   """
   Ingest SEC data from S3 to graph database using native bulk loading.
 
-  Supports both Kuzu and Neo4j backends via the Graph API.
+  Supports both LadybugDB and Neo4j backends via the Graph API.
 
   Expects data organized as either:
   - processed/year={year}/nodes/{type}/*.parquet (raw processed files)
@@ -170,7 +170,7 @@ def ingest_sec_data(
       incremental: Only load new batches since last run
       timestamp_after: Only load batches with timestamp after this
       use_consolidated: Use consolidated files for better performance (default: False)
-      backend: Backend type for context/logging ("kuzu" or "neo4j")
+      backend: Backend type for context/logging ("ladybug" or "neo4j")
 
   Returns:
       Dict with ingestion results
@@ -181,11 +181,11 @@ def ingest_sec_data(
     f"Starting SEC data ingestion with {backend} backend for year {year} (pipeline: {pipeline_run_id})"
   )
 
-  # Set environment variable for large tables requiring cleanup in Kuzu ingestion
-  # This is used by the generic Kuzu ingestion API to handle memory management
+  # Set environment variable for large tables requiring cleanup in LadybugDB ingestion
+  # This is used by the generic LadybugDB ingestion API to handle memory management
   import os
 
-  os.environ["KUZU_LARGE_TABLES_REQUIRING_CLEANUP"] = env.XBRL_GRAPH_LARGE_NODES
+  os.environ["LBUG_LARGE_TABLES_REQUIRING_CLEANUP"] = env.XBRL_GRAPH_LARGE_NODES
 
   # Ensure schema is loaded (only happens once, on first SEC task execution)
   _ensure_schema_loaded()
@@ -212,7 +212,7 @@ def ingest_sec_data(
       """
       try:
         # Get a client for the SEC database - this will route correctly
-        # In dev: goes to local Kuzu instance
+        # In dev: goes to local LadybugDB instance
         # In prod: goes to shared master for writes
         client = await GraphClientFactory.create_client(
           graph_id=graph_id, operation_type="write"
@@ -239,7 +239,7 @@ def ingest_sec_data(
                   schema.get("rel_tables", schema.get("relationships", []))
                 )
               elif isinstance(schema, list):
-                # KuzuClient returns tables array - count NODE and REL types
+                # LadybugClient returns tables array - count NODE and REL types
                 node_count = len([s for s in schema if s.get("type") == "NODE"])
                 rel_count = len([s for s in schema if s.get("type") == "REL"])
               else:
@@ -635,7 +635,7 @@ def ingest_sec_data(
         logger.error(f"  - {node['type']}: {node['warnings']} warnings")
       for rel in critical_rels:
         logger.error(f"  - {rel['type']}: {rel['warnings']} warnings")
-      logger.error("Check parquet file data types match Kuzu schema!")
+      logger.error("Check parquet file data types match LadybugDB schema!")
       logger.error("=" * 80)
 
     # Mark as complete
@@ -711,7 +711,7 @@ async def _bulk_load_node_type(
 
   start_time = datetime.now()
 
-  # Get client for Kuzu operations
+  # Get client for LadybugDB operations
   client = await GraphClientFactory.create_client(
     graph_id=db_name, operation_type="write"
   )
@@ -856,7 +856,7 @@ async def _bulk_load_node_type(
         if not ignore_errors:
           logger.error(
             f"🔴 CRITICAL: {node_type} data is being REJECTED! "
-            f"Check parquet file types match Kuzu schema."
+            f"Check parquet file types match LadybugDB schema."
           )
       else:
         # Enhanced success logging with throughput metrics
@@ -915,7 +915,7 @@ async def _bulk_load_relationship_type(
 
   start_time = datetime.now()
 
-  # Get client for Kuzu operations
+  # Get client for LadybugDB operations
   client = await GraphClientFactory.create_client(
     graph_id=db_name, operation_type="write"
   )
@@ -1056,7 +1056,7 @@ async def _bulk_load_relationship_type(
         if not ignore_errors:
           logger.error(
             f"🔴 CRITICAL: {rel_type} data is being REJECTED! "
-            f"Check parquet file types match Kuzu schema."
+            f"Check parquet file types match LadybugDB schema."
           )
       else:
         # Enhanced success logging with throughput metrics

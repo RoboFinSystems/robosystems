@@ -176,15 +176,6 @@ Parameters:
     AllowedPattern: ^sg-[0-9a-f]+$
     ConstraintDescription: Must be a valid security group ID
 
-  # Kuzu Configuration
-  AllowSharedMasterReads:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Allow fallback read operations from shared master when replicas unavailable
-
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -310,7 +301,7 @@ Resources:
                   # Wildcard access to all environment-specific secrets
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
-              # DynamoDB permissions for Kuzu instance, volume, and graph registries
+              # DynamoDB permissions for LadybugDB instance, volume, and graph registries
               - Effect: Allow
                 Action:
                   - dynamodb:Scan
@@ -323,12 +314,12 @@ Resources:
                   - dynamodb:BatchWriteItem
                   - dynamodb:DescribeTable
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry/index/*"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-graph-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-graph-registry/index/*"
               # Amazon Managed Prometheus permissions (only if observability stack is configured)
               - !If
                 - HasObservabilityStack
@@ -353,8 +344,8 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-kuzu-databases-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-kuzu-databases-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}/*"
               # Read/Write access to public data bucket for API serving
               - Effect: Allow
                 Action:
@@ -606,9 +597,6 @@ Resources:
             # AWS & Container Configuration
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            # Kuzu Routing Configuration
-            - Name: ALLOW_SHARED_MASTER_READS
-              Value: !Ref AllowSharedMasterReads
             # Cache & Message Queue Configuration
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl

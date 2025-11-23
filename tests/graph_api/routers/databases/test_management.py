@@ -35,7 +35,7 @@ class TestDatabaseManagementRouter:
     """Create mock database info."""
     return DatabaseInfo(
       graph_id="kg1a2b3c4d5",
-      database_path="/data/kuzu/kg1a2b3c4d5",
+      database_path="/data/lbug-dbs/kg1a2b3c4d5",
       created_at="2024-01-15T10:30:00Z",
       size_bytes=268697600,  # 256.5 MB in bytes
       read_only=False,
@@ -111,7 +111,7 @@ class TestDatabaseManagementRouter:
     expected_response = DatabaseCreateResponse(
       status="created",
       graph_id="kg9z8y7x6w5",
-      database_path="/data/kuzu/kg9z8y7x6w5",
+      database_path="/data/lbug-dbs/kg9z8y7x6w5",
       schema_applied=True,
       execution_time_ms=150.5,
     )
@@ -130,7 +130,7 @@ class TestDatabaseManagementRouter:
     assert data["graph_id"] == "kg9z8y7x6w5"
     assert data["status"] == "created"
     assert data["schema_applied"] is True
-    assert data["database_path"] == "/data/kuzu/kg9z8y7x6w5"
+    assert data["database_path"] == "/data/lbug-dbs/kg9z8y7x6w5"
 
   def test_create_database_shared_schema(self, client):
     """Test creating database with shared schema."""
@@ -143,7 +143,7 @@ class TestDatabaseManagementRouter:
     expected_response = DatabaseCreateResponse(
       status="created",
       graph_id="sec",
-      database_path="/data/kuzu/sec",
+      database_path="/data/lbug-dbs/sec",
       schema_applied=True,
       execution_time_ms=200.0,
     )
@@ -207,7 +207,7 @@ class TestDatabaseManagementRouter:
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["graph_id"] == "kg1a2b3c4d5"
-    assert data["database_path"] == "/data/kuzu/kg1a2b3c4d5"
+    assert data["database_path"] == "/data/lbug-dbs/kg1a2b3c4d5"
     assert data["size_bytes"] == 268697600
     assert data["read_only"] is False
     assert data["is_healthy"] is True
@@ -282,7 +282,7 @@ class TestDatabaseManagementRouter:
     expected_response = DatabaseCreateResponse(
       status="created",
       graph_id="kg5t6y7u8i9",
-      database_path="/data/kuzu/kg5t6y7u8i9",
+      database_path="/data/lbug-dbs/kg5t6y7u8i9",
       schema_applied=True,
       execution_time_ms=180.0,
     )
@@ -308,7 +308,7 @@ class TestDatabaseManagementRouter:
     databases = [
       DatabaseInfo(
         graph_id=f"kg{i}a2b3c4d5",
-        database_path=f"/data/kuzu/kg{i}a2b3c4d5",
+        database_path=f"/data/lbug-dbs/kg{i}a2b3c4d5",
         created_at="2024-01-15T10:30:00Z",
         size_bytes=100000000 * i,
         read_only=False,
@@ -346,7 +346,7 @@ class TestDatabaseManagementRouter:
     """Test retrieving database with unhealthy status."""
     unhealthy_db_info = DatabaseInfo(
       graph_id="unhealthy_db",
-      database_path="/data/kuzu/unhealthy_db",
+      database_path="/data/lbug-dbs/unhealthy_db",
       created_at="2024-01-01T00:00:00Z",
       size_bytes=1024000000,
       read_only=False,

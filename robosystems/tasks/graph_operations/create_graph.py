@@ -25,7 +25,7 @@ def create_graph_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
           - graph_id: Optional requested graph ID
           - schema_extensions: List of schema extensions to install
           - metadata: Graph metadata (name, description, type, tags)
-          - tier: Service tier (kuzu-standard, kuzu-large, kuzu-xlarge, etc.)
+          - tier: Service tier (ladybug-standard, ladybug-large, ladybug-xlarge, etc.)
           - initial_data: Optional initial data to populate
           - user_id: ID of the user creating the graph
           - custom_schema: Optional custom schema definition
@@ -59,7 +59,7 @@ def create_graph_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
       graph_id=task_data.get("graph_id"),
       schema_extensions=task_data.get("schema_extensions", []),
       metadata=task_data.get("metadata", {}),
-      tier=task_data.get("tier", "kuzu-standard"),
+      tier=task_data.get("tier", "ladybug-standard"),
       initial_data=task_data.get("initial_data"),
       user_id=user_id,
       custom_schema=task_data.get("custom_schema"),
@@ -73,7 +73,7 @@ def create_graph_task(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
         session = next(get_db_session())
         try:
           subscription_service = GraphSubscriptionService(session)
-          plan_name = task_data.get("tier", "kuzu-standard")
+          plan_name = task_data.get("tier", "ladybug-standard")
           graph_id = result.get("graph_id")
 
           subscription = subscription_service.create_graph_subscription(
@@ -176,7 +176,7 @@ def create_graph_sse_task(
       graph_id=task_data.get("graph_id"),
       schema_extensions=task_data.get("schema_extensions", []),
       metadata=task_data.get("metadata", {}),
-      tier=task_data.get("tier", "kuzu-standard"),
+      tier=task_data.get("tier", "ladybug-standard"),
       initial_data=task_data.get("initial_data"),
       user_id=user_id,
       custom_schema=task_data.get("custom_schema"),
@@ -190,7 +190,7 @@ def create_graph_sse_task(
       session = next(get_db_session())
       try:
         subscription_service = GraphSubscriptionService(session)
-        plan_name = task_data.get("tier", "kuzu-standard")
+        plan_name = task_data.get("tier", "ladybug-standard")
         graph_id = result.get("graph_id")
 
         subscription = subscription_service.create_graph_subscription(

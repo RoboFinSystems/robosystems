@@ -7,7 +7,7 @@ with type conversions, validation, and default values.
 Organization:
 - Helper functions for type-safe env var access
 - Core application settings
-- Database configuration (PostgreSQL, Kuzu)
+- Database configuration (PostgreSQL, LadybugDB)
 - External service integrations
 - Security and authentication
 - Performance and scaling
@@ -68,16 +68,17 @@ from .constants import (
   ADMISSION_QUEUE_THRESHOLD_DEFAULT,
   ADMISSION_CHECK_INTERVAL,
   # Fixed technical limits
-  KUZU_MAX_REQUEST_SIZE,
-  KUZU_CONNECT_TIMEOUT,
-  KUZU_READ_TIMEOUT,
+  GRAPH_MAX_REQUEST_SIZE,
+  GRAPH_CONNECT_TIMEOUT,
+  GRAPH_READ_TIMEOUT,
   ARELLE_MIN_SCHEMA_COUNT,
   ARELLE_DOWNLOAD_TIMEOUT,
   XBRL_EXTERNALIZATION_THRESHOLD,
+  XBRL_GRAPH_LARGE_NODES,
   # Resiliency and circuit breaker
-  KUZU_INSTANCE_CACHE_TTL,
-  KUZU_CIRCUIT_BREAKER_THRESHOLD,
-  KUZU_CIRCUIT_BREAKER_TIMEOUT,
+  GRAPH_INSTANCE_CACHE_TTL,
+  GRAPH_CIRCUIT_BREAKER_THRESHOLD,
+  GRAPH_CIRCUIT_BREAKER_TIMEOUT,
   # Queue configuration
   QUERY_QUEUE_MAX_PER_USER,
   QUERY_DEFAULT_PRIORITY,
@@ -95,16 +96,16 @@ from .constants import (
   CREDIT_ALLOCATION_HOUR,
   SEC_RATE_LIMIT,
   # Tier-specific memory allocations
-  KUZU_STANDARD_MAX_MEMORY_MB,
-  KUZU_ENTERPRISE_MAX_MEMORY_MB,
-  KUZU_PREMIUM_MAX_MEMORY_MB,
-  KUZU_STANDARD_MEMORY_PER_DB_MB,
-  KUZU_ENTERPRISE_MEMORY_PER_DB_MB,
-  KUZU_PREMIUM_MEMORY_PER_DB_MB,
+  GRAPH_STANDARD_MAX_MEMORY_MB,
+  GRAPH_LARGE_MAX_MEMORY_MB,
+  GRAPH_XLARGE_MAX_MEMORY_MB,
+  GRAPH_STANDARD_MEMORY_PER_DB_MB,
+  GRAPH_LARGE_MEMORY_PER_DB_MB,
+  GRAPH_XLARGE_MEMORY_PER_DB_MB,
   # Tier-specific chunk sizes
-  KUZU_STANDARD_CHUNK_SIZE,
-  KUZU_ENTERPRISE_CHUNK_SIZE,
-  KUZU_PREMIUM_CHUNK_SIZE,
+  GRAPH_STANDARD_CHUNK_SIZE,
+  GRAPH_LARGE_CHUNK_SIZE,
+  GRAPH_XLARGE_CHUNK_SIZE,
   # DuckDB configuration
   DUCKDB_MAX_THREADS,
   DUCKDB_MEMORY_LIMIT,
@@ -265,7 +266,6 @@ class EnvConfig:
     "CSP_TRUSTED_TYPES_ENABLED",
     bool(get_secret_value("CSP_TRUSTED_TYPES_ENABLED", "true").lower() == "true"),
   )
-  MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
     "ORG_MEMBER_INVITATIONS_ENABLED",
     bool(get_secret_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true"),
@@ -305,7 +305,10 @@ class EnvConfig:
   GRAPH_REDIS_CACHE_ENABLED = get_bool_env("GRAPH_REDIS_CACHE_ENABLED", True)
   GRAPH_RETRY_LOGIC_ENABLED = get_bool_env("GRAPH_RETRY_LOGIC_ENABLED", True)
   GRAPH_HEALTH_CHECKS_ENABLED = get_bool_env("GRAPH_HEALTH_CHECKS_ENABLED", True)
-  ALLOW_SHARED_MASTER_READS = get_bool_env("ALLOW_SHARED_MASTER_READS", True)
+  SHARED_MASTER_READS_ENABLED = get_bool_env(
+    "SHARED_MASTER_READS_ENABLED",
+    bool(get_secret_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true"),
+  )
 
   # Graph backup encryption and compression are always enabled for security and efficiency
 
@@ -354,53 +357,45 @@ class EnvConfig:
   )
 
   # ==========================================================================
-  # DATABASE CONFIGURATION - POSTGRESQL
-  # ==========================================================================
-
-  DATABASE_URL = get_secret_value(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
-  )
-  DATABASE_POOL_SIZE = get_int_env("DATABASE_POOL_SIZE", DEFAULT_POOL_SIZE)
-  DATABASE_MAX_OVERFLOW = get_int_env("DATABASE_MAX_OVERFLOW", DEFAULT_MAX_OVERFLOW)
-  DATABASE_POOL_TIMEOUT = get_int_env("DATABASE_POOL_TIMEOUT", DEFAULT_POOL_TIMEOUT)
-  DATABASE_POOL_RECYCLE = get_int_env("DATABASE_POOL_RECYCLE", DEFAULT_POOL_RECYCLE)
-  DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
-
-  # ==========================================================================
-  # DATABASE CONFIGURATION - GRAPH DATABASES (MULTI-BACKEND: KUZU AND NEO4J)
+  # DATABASE CONFIGURATION - GRAPH DATABASES (MULTI-BACKEND: LADYBUGDB AND NEO4J)
   # ==========================================================================
 
   # Graph Backend Selection
   GRAPH_BACKEND_TYPE = get_str_env(
-    "GRAPH_BACKEND_TYPE", "kuzu"
-  )  # Options: kuzu, neo4j_community, neo4j_enterprise
+    "GRAPH_BACKEND_TYPE", "ladybug"
+  )  # Options: ladybug, neo4j_community, neo4j_enterprise
 
-  # Graph API Configuration (applies to all backends - unified access layer)
+  # ===========================================================================
+  # GRAPH API CONFIGURATION (Backend-Agnostic)
+  # ===========================================================================
+  # Configuration that applies to all graph database backends (LadybugDB, Neo4j)
+
+  # Graph API Endpoint
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
   GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
 
   # Shared repository backend selection (dev/local only)
   # In AWS environments, backend is determined by graph.yml tier configuration
-  # Values: "kuzu" or "neo4j"
+  # Values: "ladybug" or "neo4j"
   GRAPH_SHARED_REPOSITORY_BACKEND = get_str_env("GRAPH_SHARED_REPOSITORY_BACKEND", "")
 
-  # Graph API Timeouts and Limits (applies to all backends)
+  # Graph API Timeouts and Limits
   GRAPH_HTTP_TIMEOUT = get_int_env("GRAPH_HTTP_TIMEOUT", DEFAULT_HTTP_TIMEOUT)
   GRAPH_QUERY_TIMEOUT = get_int_env("GRAPH_QUERY_TIMEOUT", DEFAULT_QUERY_TIMEOUT)
   GRAPH_MAX_QUERY_LENGTH = get_int_env("GRAPH_MAX_QUERY_LENGTH", MAX_QUERY_LENGTH)
-  GRAPH_MAX_REQUEST_SIZE = get_int_env("GRAPH_MAX_REQUEST_SIZE", KUZU_MAX_REQUEST_SIZE)
-  GRAPH_CONNECT_TIMEOUT = get_float_env("GRAPH_CONNECT_TIMEOUT", KUZU_CONNECT_TIMEOUT)
-  GRAPH_READ_TIMEOUT = get_float_env("GRAPH_READ_TIMEOUT", KUZU_READ_TIMEOUT)
+  GRAPH_MAX_REQUEST_SIZE = get_int_env("GRAPH_MAX_REQUEST_SIZE", GRAPH_MAX_REQUEST_SIZE)
+  GRAPH_CONNECT_TIMEOUT = get_float_env("GRAPH_CONNECT_TIMEOUT", GRAPH_CONNECT_TIMEOUT)
+  GRAPH_READ_TIMEOUT = get_float_env("GRAPH_READ_TIMEOUT", GRAPH_READ_TIMEOUT)
 
   # Graph Resiliency and Circuit Breaker Configuration (applies to all backends)
   GRAPH_INSTANCE_CACHE_TTL = get_int_env(
-    "GRAPH_INSTANCE_CACHE_TTL", KUZU_INSTANCE_CACHE_TTL
+    "GRAPH_INSTANCE_CACHE_TTL", GRAPH_INSTANCE_CACHE_TTL
   )
   GRAPH_CIRCUIT_BREAKER_THRESHOLD = get_int_env(
-    "GRAPH_CIRCUIT_BREAKER_THRESHOLD", KUZU_CIRCUIT_BREAKER_THRESHOLD
+    "GRAPH_CIRCUIT_BREAKER_THRESHOLD", GRAPH_CIRCUIT_BREAKER_THRESHOLD
   )
   GRAPH_CIRCUIT_BREAKER_TIMEOUT = get_int_env(
-    "GRAPH_CIRCUIT_BREAKER_TIMEOUT", KUZU_CIRCUIT_BREAKER_TIMEOUT
+    "GRAPH_CIRCUIT_BREAKER_TIMEOUT", GRAPH_CIRCUIT_BREAKER_TIMEOUT
   )
   GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
     "GRAPH_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
@@ -421,69 +416,73 @@ class EnvConfig:
     "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
   )
 
-  # Kuzu-Specific Configuration (when GRAPH_BACKEND_TYPE=kuzu)
-  KUZU_DATABASE_PATH = get_str_env("KUZU_DATABASE_PATH", "./data/kuzu-dbs")
-  KUZU_ACCESS_PATTERN = get_str_env("KUZU_ACCESS_PATTERN", "api_auto")
-  KUZU_NODE_TYPE = get_str_env("KUZU_NODE_TYPE", "writer")
-  KUZU_S3_BUCKET = get_str_env("KUZU_S3_BUCKET", "")
-  KUZU_HOME = get_str_env("KUZU_HOME", "/app/data/.kuzu")
+  # ===========================================================================
+  # BACKEND-SPECIFIC CONFIGURATION
+  # ===========================================================================
 
-  # DuckDB Staging Configuration
+  # LadybugDB-Specific Configuration (when GRAPH_BACKEND_TYPE=ladybug)
+  LBUG_DATABASE_PATH = get_str_env("LBUG_DATABASE_PATH", "./data/lbug-dbs")
+  LBUG_ACCESS_PATTERN = get_str_env("LBUG_ACCESS_PATTERN", "api_auto")
+  LBUG_NODE_TYPE = get_str_env("LBUG_NODE_TYPE", "writer")
+  GRAPH_DATABASES_BUCKET = get_str_env("GRAPH_DATABASES_BUCKET", "")
+  LBUG_HOME = get_str_env("LBUG_HOME", "/app/data/.ladybug")
+
+  # DuckDB Staging Configuration (for data ingestion/materialization)
   DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
 
-  # Kuzu Capacity and Performance
-  KUZU_MAX_DATABASES_PER_NODE = get_int_env(
-    "KUZU_MAX_DATABASES_PER_NODE", MAX_DATABASES_PER_NODE
+  # LadybugDB Capacity and Performance
+  LBUG_MAX_DATABASES_PER_NODE = get_int_env(
+    "LBUG_MAX_DATABASES_PER_NODE", MAX_DATABASES_PER_NODE
   )
 
-  # Kuzu Memory Configuration (can be overridden per-tier)
-  KUZU_MAX_MEMORY_MB = get_int_env("KUZU_MAX_MEMORY_MB", 2048)
-  KUZU_MAX_MEMORY_PER_DB_MB = get_int_env("KUZU_MAX_MEMORY_PER_DB_MB", 0)
+  # LadybugDB Memory Configuration (can be overridden per-tier)
+  LBUG_MAX_MEMORY_MB = get_int_env("LBUG_MAX_MEMORY_MB", 2048)
+  LBUG_MAX_MEMORY_PER_DB_MB = get_int_env("LBUG_MAX_MEMORY_PER_DB_MB", 0)
 
   # Tier-specific memory allocations (with environment variable overrides)
-  KUZU_STANDARD_MAX_MEMORY_MB = get_int_env(
-    "KUZU_STANDARD_MAX_MEMORY_MB", KUZU_STANDARD_MAX_MEMORY_MB
+  GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE = get_int_env(
+    "GRAPH_STANDARD_MAX_MEMORY_MB", GRAPH_STANDARD_MAX_MEMORY_MB
   )
-  KUZU_ENTERPRISE_MAX_MEMORY_MB = get_int_env(
-    "KUZU_ENTERPRISE_MAX_MEMORY_MB", KUZU_ENTERPRISE_MAX_MEMORY_MB
+  GRAPH_LARGE_MAX_MEMORY_MB_OVERRIDE = get_int_env(
+    "GRAPH_LARGE_MAX_MEMORY_MB", GRAPH_LARGE_MAX_MEMORY_MB
   )
-  KUZU_PREMIUM_MAX_MEMORY_MB = get_int_env(
-    "KUZU_PREMIUM_MAX_MEMORY_MB", KUZU_PREMIUM_MAX_MEMORY_MB
+  GRAPH_XLARGE_MAX_MEMORY_MB_OVERRIDE = get_int_env(
+    "GRAPH_XLARGE_MAX_MEMORY_MB", GRAPH_XLARGE_MAX_MEMORY_MB
   )
-  KUZU_STANDARD_MEMORY_PER_DB_MB = get_int_env(
-    "KUZU_STANDARD_MEMORY_PER_DB_MB", KUZU_STANDARD_MEMORY_PER_DB_MB
+  GRAPH_STANDARD_MEMORY_PER_DB_MB_OVERRIDE = get_int_env(
+    "GRAPH_STANDARD_MEMORY_PER_DB_MB", GRAPH_STANDARD_MEMORY_PER_DB_MB
   )
-  KUZU_ENTERPRISE_MEMORY_PER_DB_MB = get_int_env(
-    "KUZU_ENTERPRISE_MEMORY_PER_DB_MB", KUZU_ENTERPRISE_MEMORY_PER_DB_MB
+  GRAPH_LARGE_MEMORY_PER_DB_MB_OVERRIDE = get_int_env(
+    "GRAPH_LARGE_MEMORY_PER_DB_MB", GRAPH_LARGE_MEMORY_PER_DB_MB
   )
-  KUZU_PREMIUM_MEMORY_PER_DB_MB = get_int_env(
-    "KUZU_PREMIUM_MEMORY_PER_DB_MB", KUZU_PREMIUM_MEMORY_PER_DB_MB
+  GRAPH_XLARGE_MEMORY_PER_DB_MB_OVERRIDE = get_int_env(
+    "GRAPH_XLARGE_MEMORY_PER_DB_MB", GRAPH_XLARGE_MEMORY_PER_DB_MB
   )
 
   # Tier-specific chunk sizes (with environment variable overrides)
-  KUZU_STANDARD_CHUNK_SIZE = get_int_env(
-    "KUZU_STANDARD_CHUNK_SIZE", KUZU_STANDARD_CHUNK_SIZE
+  GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE = get_int_env(
+    "GRAPH_STANDARD_CHUNK_SIZE", GRAPH_STANDARD_CHUNK_SIZE
   )
-  KUZU_ENTERPRISE_CHUNK_SIZE = get_int_env(
-    "KUZU_ENTERPRISE_CHUNK_SIZE", KUZU_ENTERPRISE_CHUNK_SIZE
+  GRAPH_LARGE_CHUNK_SIZE_OVERRIDE = get_int_env(
+    "GRAPH_LARGE_CHUNK_SIZE", GRAPH_LARGE_CHUNK_SIZE
   )
-  KUZU_PREMIUM_CHUNK_SIZE = get_int_env(
-    "KUZU_PREMIUM_CHUNK_SIZE", KUZU_PREMIUM_CHUNK_SIZE
+  GRAPH_XLARGE_CHUNK_SIZE_OVERRIDE = get_int_env(
+    "GRAPH_XLARGE_CHUNK_SIZE", GRAPH_XLARGE_CHUNK_SIZE
   )
 
   # DuckDB Configuration (with environment variable overrides)
   DUCKDB_MAX_THREADS = get_int_env("DUCKDB_MAX_THREADS", DUCKDB_MAX_THREADS)
   DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", DUCKDB_MEMORY_LIMIT)
 
-  # Kuzu-specific admission control
-  KUZU_ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "KUZU_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  # LadybugDB-specific admission control
+  LBUG_ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
   )
-  KUZU_ADMISSION_CPU_THRESHOLD = get_float_env(
-    "KUZU_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
+  LBUG_ADMISSION_CPU_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
   )
-  KUZU_MAX_CONNECTIONS_PER_DB = get_int_env("KUZU_MAX_CONNECTIONS_PER_DB", 10)
-  KUZU_CONNECTION_TTL_MINUTES = get_float_env("KUZU_CONNECTION_TTL_MINUTES", 30.0)
+  LBUG_MAX_CONNECTIONS_PER_DB = get_int_env("LBUG_MAX_CONNECTIONS_PER_DB", 10)
+  LBUG_CONNECTION_TTL_MINUTES = get_float_env("LBUG_CONNECTION_TTL_MINUTES", 30.0)
 
   # Neo4j-Specific Configuration (when GRAPH_BACKEND_TYPE=neo4j_*)
   NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
@@ -506,6 +505,19 @@ class EnvConfig:
   EC2_INSTANCE_ID = get_str_env("INSTANCE_ID", "")
   INSTANCE_ID = get_str_env("INSTANCE_ID", "")
   CLUSTER_TIER = get_str_env("CLUSTER_TIER", "")
+  # ==========================================================================
+  # DATABASE CONFIGURATION - POSTGRESQL
+  # ==========================================================================
+
+  DATABASE_URL = get_secret_value(
+    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
+  )
+  DATABASE_POOL_SIZE = get_int_env("DATABASE_POOL_SIZE", DEFAULT_POOL_SIZE)
+  DATABASE_MAX_OVERFLOW = get_int_env("DATABASE_MAX_OVERFLOW", DEFAULT_MAX_OVERFLOW)
+  DATABASE_POOL_TIMEOUT = get_int_env("DATABASE_POOL_TIMEOUT", DEFAULT_POOL_TIMEOUT)
+  DATABASE_POOL_RECYCLE = get_int_env("DATABASE_POOL_RECYCLE", DEFAULT_POOL_RECYCLE)
+  DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
+
   # ==========================================================================
   # CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
   # ==========================================================================
@@ -575,6 +587,71 @@ class EnvConfig:
 
   # Distributed lock TTLs
   INGESTION_LOCK_TTL = get_int_env("INGESTION_LOCK_TTL", 3600)  # 1 hour
+
+  # ==========================================================================
+  # PERFORMANCE AND SCALING
+  # ==========================================================================
+
+  # Query queue configuration
+  QUERY_QUEUE_MAX_SIZE = get_int_env("QUERY_QUEUE_MAX_SIZE", DEFAULT_QUEUE_SIZE)
+  QUERY_QUEUE_MAX_CONCURRENT = get_int_env(
+    "QUERY_QUEUE_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT
+  )
+  QUERY_QUEUE_MAX_PER_USER = get_int_env(
+    "QUERY_QUEUE_MAX_PER_USER", QUERY_QUEUE_MAX_PER_USER
+  )
+  QUERY_QUEUE_TIMEOUT = get_int_env("QUERY_QUEUE_TIMEOUT", QUERY_QUEUE_TIMEOUT)
+  QUERY_DEFAULT_PRIORITY = get_int_env("QUERY_DEFAULT_PRIORITY", QUERY_DEFAULT_PRIORITY)
+  QUERY_PRIORITY_BOOST_PREMIUM = get_int_env(
+    "QUERY_PRIORITY_BOOST_PREMIUM", QUERY_PRIORITY_BOOST_PREMIUM
+  )
+
+  # Admission control
+  ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  )
+  ADMISSION_CPU_THRESHOLD = get_float_env(
+    "ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
+  )
+  ADMISSION_QUEUE_THRESHOLD = get_float_env(
+    "ADMISSION_QUEUE_THRESHOLD", ADMISSION_QUEUE_THRESHOLD_DEFAULT
+  )
+  ADMISSION_CHECK_INTERVAL = get_float_env(
+    "ADMISSION_CHECK_INTERVAL", ADMISSION_CHECK_INTERVAL
+  )
+
+  # LadybugDB-specific admission control (can override general settings)
+  LBUG_ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD
+  )
+  LBUG_ADMISSION_CPU_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD
+  )
+  LBUG_MAX_CONNECTIONS_PER_DB = get_int_env("LBUG_MAX_CONNECTIONS_PER_DB", 10)
+  LBUG_CONNECTION_TTL_MINUTES = get_float_env(
+    "LBUG_CONNECTION_TTL_MINUTES", 30.0
+  )  # 30 minutes default
+  LBUG_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
+    "LBUG_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
+  )  # 5 minutes default
+
+  # Load shedding
+  LOAD_SHED_START_PRESSURE = get_float_env(
+    "LOAD_SHED_START_PRESSURE", LOAD_SHED_START_PRESSURE_DEFAULT
+  )
+  LOAD_SHED_STOP_PRESSURE = get_float_env(
+    "LOAD_SHED_STOP_PRESSURE", LOAD_SHED_STOP_PRESSURE_DEFAULT
+  )
+
+  # SSE (Server-Sent Events)
+  MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
+  SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
+  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
+  # SSE Rate limiting
+  RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
+  RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
+    "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
+  )
 
   # ==========================================================================
   # AWS CONFIGURATION
@@ -715,21 +792,14 @@ class EnvConfig:
     "XBRL_EXTERNALIZATION_THRESHOLD", XBRL_EXTERNALIZATION_THRESHOLD
   )
 
-  # XBRL graph large nodes that require aggressive memory cleanup after Kuzu ingestion
+  # XBRL graph large nodes (imported from constants.py - not configurable via env)
   # These tables contain millions of rows and consume significant memory
-  XBRL_GRAPH_LARGE_NODES = get_str_env(
-    "XBRL_GRAPH_LARGE_NODES",
-    "Fact,Element,Label,Association,Structure,FactDimension,Report",
-  )
+  XBRL_GRAPH_LARGE_NODES = XBRL_GRAPH_LARGE_NODES
 
   # MCP (Model Context Protocol)
+  MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
   MCP_MAX_RESULT_ROWS = get_int_env("MCP_MAX_RESULT_ROWS", DEFAULT_QUERY_LIMIT)
   MCP_MAX_RESULT_SIZE_MB = get_float_env("MCP_MAX_RESULT_SIZE_MB", 5.0)
-
-  # Agent memory configuration
-  AGENT_MEMORY_BACKEND = get_str_env(
-    "AGENT_MEMORY_BACKEND", "memory"
-  )  # Options: memory, subgraph, hybrid
 
   # ==========================================================================
   # BILLING AND SUBSCRIPTIONS
@@ -738,71 +808,6 @@ class EnvConfig:
   # Credit allocation schedule
   CREDIT_ALLOCATION_DAY = get_int_env("CREDIT_ALLOCATION_DAY", CREDIT_ALLOCATION_DAY)
   CREDIT_ALLOCATION_HOUR = get_int_env("CREDIT_ALLOCATION_HOUR", CREDIT_ALLOCATION_HOUR)
-
-  # ==========================================================================
-  # PERFORMANCE AND SCALING
-  # ==========================================================================
-
-  # Query queue configuration
-  QUERY_QUEUE_MAX_SIZE = get_int_env("QUERY_QUEUE_MAX_SIZE", DEFAULT_QUEUE_SIZE)
-  QUERY_QUEUE_MAX_CONCURRENT = get_int_env(
-    "QUERY_QUEUE_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT
-  )
-  QUERY_QUEUE_MAX_PER_USER = get_int_env(
-    "QUERY_QUEUE_MAX_PER_USER", QUERY_QUEUE_MAX_PER_USER
-  )
-  QUERY_QUEUE_TIMEOUT = get_int_env("QUERY_QUEUE_TIMEOUT", QUERY_QUEUE_TIMEOUT)
-  QUERY_DEFAULT_PRIORITY = get_int_env("QUERY_DEFAULT_PRIORITY", QUERY_DEFAULT_PRIORITY)
-  QUERY_PRIORITY_BOOST_PREMIUM = get_int_env(
-    "QUERY_PRIORITY_BOOST_PREMIUM", QUERY_PRIORITY_BOOST_PREMIUM
-  )
-
-  # Admission control
-  ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
-  )
-  ADMISSION_CPU_THRESHOLD = get_float_env(
-    "ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
-  )
-  ADMISSION_QUEUE_THRESHOLD = get_float_env(
-    "ADMISSION_QUEUE_THRESHOLD", ADMISSION_QUEUE_THRESHOLD_DEFAULT
-  )
-  ADMISSION_CHECK_INTERVAL = get_float_env(
-    "ADMISSION_CHECK_INTERVAL", ADMISSION_CHECK_INTERVAL
-  )
-
-  # Kuzu-specific admission control (can override general settings)
-  KUZU_ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "KUZU_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD
-  )
-  KUZU_ADMISSION_CPU_THRESHOLD = get_float_env(
-    "KUZU_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD
-  )
-  KUZU_MAX_CONNECTIONS_PER_DB = get_int_env("KUZU_MAX_CONNECTIONS_PER_DB", 10)
-  KUZU_CONNECTION_TTL_MINUTES = get_float_env(
-    "KUZU_CONNECTION_TTL_MINUTES", 30.0
-  )  # 30 minutes default
-  KUZU_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
-    "KUZU_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
-  )  # 5 minutes default
-
-  # Load shedding
-  LOAD_SHED_START_PRESSURE = get_float_env(
-    "LOAD_SHED_START_PRESSURE", LOAD_SHED_START_PRESSURE_DEFAULT
-  )
-  LOAD_SHED_STOP_PRESSURE = get_float_env(
-    "LOAD_SHED_STOP_PRESSURE", LOAD_SHED_STOP_PRESSURE_DEFAULT
-  )
-
-  # SSE (Server-Sent Events)
-  MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
-  SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
-  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
-  # SSE Rate limiting
-  RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
-  RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
-    "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
-  )
 
   # ==========================================================================
   # OBSERVABILITY
@@ -919,12 +924,12 @@ class EnvConfig:
     return errors
 
   @classmethod
-  def get_kuzu_tier_config(cls) -> Dict[str, Any]:
+  def get_lbug_tier_config(cls) -> Dict[str, Any]:
     """
-    Get Kuzu tier-specific configuration, with overrides from kuzu.yml.
+    Get LadybugDB tier-specific configuration, with overrides from graph.yml.
 
     This allows the container to override environment variables with
-    tier-specific configuration from the kuzu.yml file, including:
+    tier-specific configuration from the graph.yml file, including:
     - Memory settings (max_memory_mb, memory_per_db_mb)
     - Performance settings (chunk_size, query_timeout, max_query_length)
     - Connection settings (connection_pool_size, databases_per_instance)
@@ -937,17 +942,17 @@ class EnvConfig:
       from robosystems.config.graph_tier import GraphTierConfig
 
       # Determine tier from environment
-      # CLUSTER_TIER is set by CloudFormation to the actual tier (e.g., "kuzu-standard")
-      # KUZU_NODE_TYPE is the node role ("writer", "shared_master") - only used as fallback
-      tier = cls.CLUSTER_TIER or cls.KUZU_NODE_TYPE
+      # CLUSTER_TIER is set by CloudFormation to the actual tier (e.g., "ladybug-standard")
+      # LBUG_NODE_TYPE is the node role ("writer", "shared_master") - only used as fallback
+      tier = cls.CLUSTER_TIER or cls.LBUG_NODE_TYPE
 
       # Map NODE TYPES to tiers (when CLUSTER_TIER is not set)
-      # This is for cases where only KUZU_NODE_TYPE is available
+      # This is for cases where only LBUG_NODE_TYPE is available
       node_type_to_tier = {
-        "shared_master": "kuzu-shared",
-        "shared_replica": "kuzu-shared",
-        "shared_repository": "kuzu-shared",
-        "writer": "kuzu-standard",  # Default writer tier
+        "shared_master": "ladybug-shared",
+        "shared_replica": "ladybug-shared",
+        "shared_repository": "ladybug-shared",
+        "writer": "ladybug-standard",  # Default writer tier
       }
 
       # If we got a node type instead of a tier, map it
@@ -955,7 +960,7 @@ class EnvConfig:
         tier = node_type_to_tier[tier]
 
       if tier:
-        # Get instance config from kuzu.yml
+        # Get instance config from graph.yml
         instance_config = GraphTierConfig.get_instance_config(tier)
 
         if instance_config:
@@ -966,10 +971,10 @@ class EnvConfig:
           return {
             # Memory settings
             "max_memory_mb": instance_config.get(
-              "max_memory_mb", cls.KUZU_MAX_MEMORY_MB
+              "max_memory_mb", cls.LBUG_MAX_MEMORY_MB
             ),
             "memory_per_db_mb": instance_config.get(
-              "memory_per_db_mb", cls.KUZU_MAX_MEMORY_PER_DB_MB
+              "memory_per_db_mb", cls.LBUG_MAX_MEMORY_PER_DB_MB
             ),
             # Performance settings
             "chunk_size": instance_config.get("chunk_size", 1000),
@@ -982,17 +987,17 @@ class EnvConfig:
             "connection_pool_size": instance_config.get("connection_pool_size", 10),
             # Database settings - prioritize environment variable in dev
             "databases_per_instance": (
-              get_int_env("KUZU_DATABASES_PER_INSTANCE", 0)
+              get_int_env("LBUG_DATABASES_PER_INSTANCE", 0)
               if cls.ENVIRONMENT == "dev"
-              and get_int_env("KUZU_DATABASES_PER_INSTANCE", 0) > 0
+              and get_int_env("LBUG_DATABASES_PER_INSTANCE", 0) > 0
               else instance_config.get("databases_per_instance", 10)
             ),
             "max_databases": (
-              get_int_env("KUZU_DATABASES_PER_INSTANCE", 0)
+              get_int_env("LBUG_DATABASES_PER_INSTANCE", 0)
               if cls.ENVIRONMENT == "dev"
-              and get_int_env("KUZU_DATABASES_PER_INSTANCE", 0) > 0
+              and get_int_env("LBUG_DATABASES_PER_INSTANCE", 0) > 0
               else instance_config.get(
-                "databases_per_instance", cls.KUZU_MAX_DATABASES_PER_NODE
+                "databases_per_instance", cls.LBUG_MAX_DATABASES_PER_NODE
               )
             ),
             # Tier-level settings from full config
@@ -1010,18 +1015,18 @@ class EnvConfig:
     # Fall back to environment variables
     return {
       # Memory settings
-      "max_memory_mb": cls.KUZU_MAX_MEMORY_MB,
-      "memory_per_db_mb": cls.KUZU_MAX_MEMORY_PER_DB_MB,
+      "max_memory_mb": cls.LBUG_MAX_MEMORY_MB,
+      "memory_per_db_mb": cls.LBUG_MAX_MEMORY_PER_DB_MB,
       # Performance settings
-      "chunk_size": get_int_env("KUZU_CHUNK_SIZE", 1000),
+      "chunk_size": get_int_env("LBUG_CHUNK_SIZE", 1000),
       "query_timeout": cls.GRAPH_QUERY_TIMEOUT,
       "max_query_length": cls.GRAPH_MAX_QUERY_LENGTH,
-      "connection_pool_size": get_int_env("KUZU_CONNECTION_POOL_SIZE", 10),
+      "connection_pool_size": get_int_env("LBUG_CONNECTION_POOL_SIZE", 10),
       # Database settings
-      "databases_per_instance": get_int_env("KUZU_DATABASES_PER_INSTANCE", 10),
-      "max_databases": cls.KUZU_MAX_DATABASES_PER_NODE,
+      "databases_per_instance": get_int_env("LBUG_DATABASES_PER_INSTANCE", 10),
+      "max_databases": cls.LBUG_MAX_DATABASES_PER_NODE,
       # Default tier settings
-      "tier": "kuzu-standard",
+      "tier": "ladybug-standard",
       "storage_limit_gb": 500,
       "monthly_credits": 10000,
       "api_rate_multiplier": 1.0,
@@ -1029,9 +1034,9 @@ class EnvConfig:
     }
 
   @classmethod
-  def get_kuzu_memory_config(cls) -> Dict[str, Any]:
+  def get_lbug_memory_config(cls) -> Dict[str, Any]:
     """Alias for backward compatibility with existing code."""
-    return cls.get_kuzu_tier_config()
+    return cls.get_lbug_tier_config()
 
   @classmethod
   def get_database_url(cls, database_name: Optional[str] = None) -> str:
@@ -1123,7 +1128,7 @@ class EnvConfig:
       ]
 
   @classmethod
-  def get_kuzu_cors_origins(cls) -> List[str]:
+  def get_lbug_cors_origins(cls) -> List[str]:
     """Get CORS origins for Graph API (VPC-internal)."""
     if cls.is_production() or cls.is_staging():
       # VPC-internal APIs don't need CORS for browsers

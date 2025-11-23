@@ -93,7 +93,7 @@ class FinancialAgent(BaseAgent):
       self.validate_mode(mode)
 
       # Initialize tools if not already done
-      if not self.kuzu_client:
+      if not self.graph_client:
         await self.initialize_tools()
 
       # Initialize credit consumption tracking
@@ -135,7 +135,7 @@ class FinancialAgent(BaseAgent):
         mode_used=mode,
         metadata=enhanced_context,
         tokens_used=self.total_tokens_used,
-        tools_called=["kuzu_query", "financial_analysis"],
+        tools_called=["lbug_query", "financial_analysis"],
         confidence_score=self._calculate_confidence(query, response_content),
       )
 

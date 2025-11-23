@@ -1,5 +1,5 @@
 """
-RoboEPM Schema Extension for Kuzu
+RoboEPM Schema Extension for LadybugDB
 
 Enterprise performance management, KPIs, budgets, and forecasts.
 Extends the base schema with performance management-specific entities.

@@ -1,4 +1,4 @@
-Description: RoboSystems Kuzu Volume Management - EBS, DynamoDB, and Lambda
+Description: RoboSystems Graph Volume Management - EBS, DynamoDB, and Lambda
 
 Parameters:
   # Environment
@@ -20,13 +20,13 @@ Parameters:
   # Infrastructure & Networking
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC ID for Kuzu volumes
+    Description: VPC ID for LadybugDB volumes
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Private subnet IDs for Lambda functions (multi-AZ for redundancy)
 
   # Secrets Configuration
-  KuzuSecretArn:
+  GraphApiSecretArn:
     Type: String
     Description: ARN of the Graph API secret in Secrets Manager
     Default: ""
@@ -71,17 +71,10 @@ Parameters:
     Description: Service tag for resource identification
   ComponentTag:
     Type: String
-    Default: KuzuVolumeManager
+    Default: LadybugVolumeManager
     Description: Component tag for resource identification
 
 Mappings:
-  # Map environment names to their capitalized versions for CloudWatch namespace
-  EnvironmentNamespace:
-    prod:
-      Name: Prod
-    staging:
-      Name: Staging
-
   # Environment-specific volume defaults
   VolumeDefaults:
     prod:
@@ -97,13 +90,13 @@ Mappings:
 
 Conditions:
   UseProvidedVolumeRegistry: !Not [!Equals [!Ref VolumeRegistryTable, ""]]
-  HasKuzuSecret: !Not [!Equals [!Ref KuzuSecretArn, ""]]
+  HasGraphApiSecret: !Not [!Equals [!Ref GraphApiSecretArn, ""]]
   HasSnapshotCreatorCode: !Not [!Equals [!Ref SnapshotCreatorCodeKey, ""]]
   HasSnapshotSelectorCode: !Not [!Equals [!Ref SnapshotSelectorCodeKey, ""]]
 
 Resources:
   # ========================================
-  # NOTE: VolumeRegistry table has been moved to kuzu-infra.yaml
+  # NOTE: VolumeRegistry table has been moved to graph-infra.yaml
   # to keep all registry tables together
   # ========================================
 
@@ -118,7 +111,7 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       TopicName: !Sub "robosystems-graph-volumes-${Environment}-alerts"
-      DisplayName: !Sub "RoboSystems Kuzu Volumes ${Environment} Alerts"
+      DisplayName: !Sub "RoboSystems Graph Volumes ${Environment} Alerts"
       Subscription:
         - Endpoint: !Ref SNSAlertEmail
           Protocol: email
@@ -227,7 +220,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-manager"
       Description: "Volume manager Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Timeout: 300
       MemorySize: 256
@@ -402,15 +395,15 @@ Resources:
                   - logs:PutLogEvents
                 Resource: "*"
               - !If
-                - HasKuzuSecret
+                - HasGraphApiSecret
                 - Effect: Allow
                   Action:
                     - secretsmanager:GetSecretValue
-                  Resource: !Ref KuzuSecretArn
+                  Resource: !Ref GraphApiSecretArn
                 - !Ref AWS::NoValue
               # KMS permissions for decrypting secrets
               - !If
-                - HasKuzuSecret
+                - HasGraphApiSecret
                 - Effect: Allow
                   Action:
                     - kms:Decrypt
@@ -436,7 +429,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-monitor"
       Description: "Volume monitor Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Role: !GetAtt VolumeMonitorLambdaRole.Arn
       Timeout: 300
@@ -456,8 +449,8 @@ Resources:
           MAX_VOLUME_SIZE_GB: "16384"
           GRAPH_API_PORT: "8001"
           GRAPH_API_KEY: !If
-            - HasKuzuSecret
-            - !Sub "{{resolve:secretsmanager:${KuzuSecretArn}:SecretString:GRAPH_API_KEY}}"
+            - HasGraphApiSecret
+            - !Sub "{{resolve:secretsmanager:${GraphApiSecretArn}:SecretString:GRAPH_API_KEY}}"
             - ""
       Code:
         S3Bucket: !Ref LambdaCodeBucket
@@ -505,7 +498,7 @@ Resources:
     Condition: HasSnapshotCreatorCode
     Properties:
       FunctionName: !Sub "${AWS::StackName}-snapshot-creator"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt SnapshotLambdaRole.Arn
       Timeout: 300
@@ -572,7 +565,7 @@ Resources:
     Condition: HasSnapshotSelectorCode
     Properties:
       FunctionName: !Sub "${AWS::StackName}-snapshot-selector"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt SnapshotSelectorLambdaRole.Arn
       Timeout: 300
@@ -605,9 +598,10 @@ Resources:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-orphaned"
       AlarmDescription: Alert when orphaned volumes are detected
       MetricName: OrphanedVolumes
-      Namespace: !Sub
-        - "RoboSystemsKuzu/${EnvName}"
-        - EnvName: !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+      Namespace: RoboSystems/Graph
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
       Statistic: Maximum
       Period: 3600
       EvaluationPeriods: 1
@@ -646,20 +640,19 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-warning"
-      AlarmDescription: Disk usage exceeded 70% on any Kuzu instance at /mnt/kuzu-data
+      AlarmDescription: Disk usage exceeded 70% on any graph database instance at /mnt/lbug-data
       Metrics:
         - Id: m1
           ReturnData: false
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: !Sub
-                - "RoboSystemsKuzu/${EnvName}"
-                - EnvName:
-                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Namespace: RoboSystems/Graph
               Dimensions:
+                - Name: Environment
+                  Value: !Ref Environment
                 - Name: path
-                  Value: /mnt/kuzu-data
+                  Value: /mnt/lbug-data
             Stat: Maximum
             Period: 300
         - Id: max_across_all
@@ -674,20 +667,19 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-critical"
-      AlarmDescription: CRITICAL - Disk usage exceeded 85% on any Kuzu instance at /mnt/kuzu-data
+      AlarmDescription: CRITICAL - Disk usage exceeded 85% on any graph database instance at /mnt/lbug-data
       Metrics:
         - Id: m1
           ReturnData: false
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: !Sub
-                - "RoboSystemsKuzu/${EnvName}"
-                - EnvName:
-                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Namespace: RoboSystems/Graph
               Dimensions:
+                - Name: Environment
+                  Value: !Ref Environment
                 - Name: path
-                  Value: /mnt/kuzu-data
+                  Value: /mnt/lbug-data
             Stat: Maximum
             Period: 300
         - Id: max_across_all
@@ -705,20 +697,19 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-disk-usage-emergency"
-      AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any Kuzu instance at /mnt/kuzu-data - Database operations at risk!
+      AlarmDescription: EMERGENCY - Disk usage exceeded 95% on any graph database instance at /mnt/lbug-data - Database operations at risk!
       Metrics:
         - Id: m1
           ReturnData: false
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: !Sub
-                - "RoboSystemsKuzu/${EnvName}"
-                - EnvName:
-                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Namespace: RoboSystems/Graph
               Dimensions:
+                - Name: Environment
+                  Value: !Ref Environment
                 - Name: path
-                  Value: /mnt/kuzu-data
+                  Value: /mnt/lbug-data
             Stat: Maximum
             Period: 60
         - Id: max_across_all
@@ -745,13 +736,12 @@ Resources:
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: !Sub
-                - "RoboSystemsKuzu/${EnvName}"
-                - EnvName:
-                    !FindInMap [EnvironmentNamespace, !Ref Environment, Name]
+              Namespace: RoboSystems/Graph
               Dimensions:
+                - Name: Environment
+                  Value: !Ref Environment
                 - Name: path
-                  Value: /mnt/kuzu-data
+                  Value: /mnt/lbug-data
             Period: 1800 # 30 minutes
             Stat: Average
       EvaluationPeriods: 1
@@ -958,7 +948,7 @@ Resources:
               time: "$.time"
             InputTemplate: !Sub |
               {
-                "AUTO_SCALING_GROUP_NAME": "robosystems-kuzu-shared-replicas-${Environment}-replicas-asg",
+                "AUTO_SCALING_GROUP_NAME": "robosystems-ladybug-shared-replicas-${Environment}-replicas-asg",
                 "time": <time>
               }
 
@@ -983,7 +973,7 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       TopicName: !Sub "robosystems-graph-volumes-${Environment}-detachment"
-      DisplayName: !Sub "RoboSystems Kuzu Volumes ${Environment} Detachment Notifications"
+      DisplayName: !Sub "RoboSystems Graph Volumes ${Environment} Detachment Notifications"
       Subscription:
         - Endpoint: !GetAtt VolumeDetachmentFunction.Arn
           Protocol: lambda
@@ -1001,7 +991,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-detachment"
       Description: "Volume detachment Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Timeout: 300
       Role: !GetAtt VolumeDetachmentRole.Arn

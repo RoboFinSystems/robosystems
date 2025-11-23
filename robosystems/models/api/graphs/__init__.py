@@ -1,7 +1,7 @@
 from .query import (
   MAX_QUERY_LENGTH,
   DEFAULT_QUERY_TIMEOUT,
-  translate_neo4j_to_kuzu,
+  translate_neo4j_to_lbug,
   CypherQueryRequest,
   CypherQueryResponse,
 )
@@ -128,7 +128,7 @@ from .connections import (
 __all__ = [
   "MAX_QUERY_LENGTH",
   "DEFAULT_QUERY_TIMEOUT",
-  "translate_neo4j_to_kuzu",
+  "translate_neo4j_to_lbug",
   "CypherQueryRequest",
   "CypherQueryResponse",
   "GraphMetricsResponse",

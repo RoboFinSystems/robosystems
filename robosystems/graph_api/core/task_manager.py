@@ -42,12 +42,12 @@ class GenericTaskManager:
   async def get_redis(self) -> redis_async.Redis:
     """Get async Redis client for task storage."""
     if not self._redis_client:
-      # Use dedicated database for Kuzu tasks
+      # Use dedicated database for LadybugDB tasks
       # Use async factory method to handle SSL params correctly
       from robosystems.config.valkey_registry import create_async_redis_client
 
       self._redis_client = create_async_redis_client(
-        ValkeyDatabase.KUZU_CACHE, decode_responses=True
+        ValkeyDatabase.LBUG_CACHE, decode_responses=True
       )
     return self._redis_client
 
@@ -88,7 +88,7 @@ class GenericTaskManager:
     # Store in Redis with 24-hour TTL
     redis_client = await self.get_redis()
     await redis_client.setex(
-      f"kuzu:task:{task_id}",
+      f"lbug:task:{task_id}",
       86400,  # 24 hours
       json.dumps(task_data),
     )
@@ -106,7 +106,7 @@ class GenericTaskManager:
     redis_client = await self.get_redis()
 
     # Get existing task
-    task_json = await redis_client.get(f"kuzu:task:{task_id}")
+    task_json = await redis_client.get(f"lbug:task:{task_id}")
     if not task_json:
       raise ValueError(f"Task {task_id} not found")
 
@@ -118,7 +118,7 @@ class GenericTaskManager:
 
     # Store back in Redis
     await redis_client.setex(
-      f"kuzu:task:{task_id}",
+      f"lbug:task:{task_id}",
       86400,  # 24 hours
       json.dumps(task_data),
     )
@@ -134,7 +134,7 @@ class GenericTaskManager:
         Task data or None if not found
     """
     redis_client = await self.get_redis()
-    task_json = await redis_client.get(f"kuzu:task:{task_id}")
+    task_json = await redis_client.get(f"lbug:task:{task_id}")
 
     if task_json:
       return json.loads(task_json)

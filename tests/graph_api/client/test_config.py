@@ -56,17 +56,17 @@ class TestGraphClientConfig:
   def test_from_env_with_all_values(self):
     """Test creating config from environment with all values set."""
     env_vars = {
-      "KUZU_CLIENT_BASE_URL": "http://api.example.com",
-      "KUZU_CLIENT_TIMEOUT": "120",
-      "KUZU_CLIENT_MAX_RETRIES": "10",
-      "KUZU_CLIENT_RETRY_DELAY": "2.5",
-      "KUZU_CLIENT_RETRY_BACKOFF": "3.0",
-      "KUZU_CLIENT_MAX_CONNECTIONS": "200",
-      "KUZU_CLIENT_MAX_KEEPALIVE_CONNECTIONS": "50",
-      "KUZU_CLIENT_KEEPALIVE_EXPIRY": "10.0",
-      "KUZU_CLIENT_CIRCUIT_BREAKER_THRESHOLD": "10",
-      "KUZU_CLIENT_CIRCUIT_BREAKER_TIMEOUT": "120",
-      "KUZU_CLIENT_VERIFY_SSL": "false",
+      "GRAPH_CLIENT_BASE_URL": "http://api.example.com",
+      "GRAPH_CLIENT_TIMEOUT": "120",
+      "GRAPH_CLIENT_MAX_RETRIES": "10",
+      "GRAPH_CLIENT_RETRY_DELAY": "2.5",
+      "GRAPH_CLIENT_RETRY_BACKOFF": "3.0",
+      "GRAPH_CLIENT_MAX_CONNECTIONS": "200",
+      "GRAPH_CLIENT_MAX_KEEPALIVE_CONNECTIONS": "50",
+      "GRAPH_CLIENT_KEEPALIVE_EXPIRY": "10.0",
+      "GRAPH_CLIENT_CIRCUIT_BREAKER_THRESHOLD": "10",
+      "GRAPH_CLIENT_CIRCUIT_BREAKER_TIMEOUT": "120",
+      "GRAPH_CLIENT_VERIFY_SSL": "false",
     }
 
     with patch.dict(os.environ, env_vars):
@@ -87,13 +87,13 @@ class TestGraphClientConfig:
   def test_from_env_with_custom_prefix(self):
     """Test creating config from environment with custom prefix."""
     env_vars = {
-      "MY_KUZU_BASE_URL": "http://custom.example.com",
-      "MY_KUZU_TIMEOUT": "90",
-      "MY_KUZU_MAX_RETRIES": "7",
+      "MY_GRAPH_BASE_URL": "http://custom.example.com",
+      "MY_GRAPH_TIMEOUT": "90",
+      "MY_GRAPH_MAX_RETRIES": "7",
     }
 
     with patch.dict(os.environ, env_vars):
-      config = GraphClientConfig.from_env(prefix="MY_KUZU_")
+      config = GraphClientConfig.from_env(prefix="MY_GRAPH_")
 
       assert config.base_url == "http://custom.example.com"
       assert config.timeout == 90
@@ -118,15 +118,15 @@ class TestGraphClientConfig:
     ]
 
     for value, expected in test_cases:
-      with patch.dict(os.environ, {"KUZU_CLIENT_VERIFY_SSL": value}):
+      with patch.dict(os.environ, {"GRAPH_CLIENT_VERIFY_SSL": value}):
         config = GraphClientConfig.from_env()
         assert config.verify_ssl is expected, f"Failed for value: {value}"
 
   def test_from_env_partial_values(self):
     """Test creating config from environment with partial values."""
     env_vars = {
-      "KUZU_CLIENT_BASE_URL": "http://partial.example.com",
-      "KUZU_CLIENT_MAX_RETRIES": "8",
+      "GRAPH_CLIENT_BASE_URL": "http://partial.example.com",
+      "GRAPH_CLIENT_MAX_RETRIES": "8",
       # Other values should use defaults
     }
 
@@ -197,7 +197,7 @@ class TestGraphClientConfig:
   def test_invalid_env_values(self):
     """Test handling of invalid environment variable values."""
     env_vars = {
-      "KUZU_CLIENT_TIMEOUT": "not_a_number",
+      "GRAPH_CLIENT_TIMEOUT": "not_a_number",
     }
 
     with patch.dict(os.environ, env_vars):
@@ -207,9 +207,9 @@ class TestGraphClientConfig:
   def test_float_env_parsing(self):
     """Test float parsing from environment variables."""
     env_vars = {
-      "KUZU_CLIENT_RETRY_DELAY": "1.5",
-      "KUZU_CLIENT_RETRY_BACKOFF": "2.75",
-      "KUZU_CLIENT_KEEPALIVE_EXPIRY": "7.25",
+      "GRAPH_CLIENT_RETRY_DELAY": "1.5",
+      "GRAPH_CLIENT_RETRY_BACKOFF": "2.75",
+      "GRAPH_CLIENT_KEEPALIVE_EXPIRY": "7.25",
     }
 
     with patch.dict(os.environ, env_vars):

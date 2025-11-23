@@ -49,7 +49,7 @@ Orchestrates graph database clusters across multiple instances with intelligent 
 - **Auto-Scaling Support** - Integrates with EC2 auto-scaling groups
 
 **Primary Classes**:
-- `KuzuClusterService` - Main cluster orchestration service
+- `LadybugDBClusterService` - Main cluster orchestration service
 - `BackendClusterManager` - Backend-agnostic cluster management
 
 **Usage**:
@@ -73,13 +73,13 @@ Manages database lifecycle operations including creation, deletion, schema manag
 - **Backup/Restore** - Database snapshot and recovery operations
 - **Multi-Database Support** - Handle multiple databases per instance
 
-**Primary Class**: `KuzuDatabaseManager`
+**Primary Class**: `LadybugDBDatabaseManager`
 
 **Usage**:
 ```python
-from robosystems.graph_api.core import KuzuDatabaseManager
+from robosystems.graph_api.core import LadybugDBDatabaseManager
 
-db_manager = KuzuDatabaseManager(database_dir="/data/kuzu")
+db_manager = LadybugDBDatabaseManager(database_dir="/data/lbug-dbs")
 db_manager.create_database(graph_id, schema_ddl)
 result = db_manager.execute_query(graph_id, "MATCH (n) RETURN n LIMIT 10")
 ```
@@ -97,13 +97,13 @@ Efficient connection pooling for graph databases with automatic lifecycle manage
 - **Configurable Limits** - Max connections, idle timeout, TTL
 - **Health Checks** - Connection validation before use
 
-**Primary Class**: `KuzuConnectionPool`
+**Primary Class**: `LadybugDBConnectionPool`
 
 **Usage**:
 ```python
-from robosystems.graph_api.core import KuzuConnectionPool
+from robosystems.graph_api.core import LadybugDBConnectionPool
 
-pool = KuzuConnectionPool(database_dir="/data/kuzu", max_connections=10)
+pool = LadybugDBConnectionPool(database_dir="/data/lbug-dbs", max_connections=10)
 with pool.get_connection(graph_id) as conn:
     result = conn.execute("MATCH (n) RETURN n LIMIT 10")
 ```
@@ -200,13 +200,13 @@ Performance monitoring and observability for graph operations:
 - **System Metrics** - CPU, memory, disk usage
 - **Time-Series Data** - Historical performance tracking
 
-**Primary Class**: `KuzuMetricsCollector`
+**Primary Class**: `LadybugDBMetricsCollector`
 
 **Usage**:
 ```python
-from robosystems.graph_api.core import KuzuMetricsCollector
+from robosystems.graph_api.core import LadybugDBMetricsCollector
 
-metrics = KuzuMetricsCollector()
+metrics = LadybugDBMetricsCollector()
 metrics.record_query(graph_id, query, execution_time, row_count)
 stats = metrics.get_database_stats(graph_id)
 ```
@@ -231,7 +231,7 @@ cluster_service = init_cluster_service(
 
 # Initialize connection pool
 connection_pool = initialize_connection_pool(
-    database_dir="/data/kuzu",
+    database_dir="/data/lbug-dbs",
     max_connections=10
 )
 ```
@@ -266,7 +266,7 @@ HEALTH_CHECK_INTERVAL=30
 
 ### Database Management
 ```bash
-KUZU_DATABASE_DIR=/data/kuzu
+LBUG_DATABASE_DIR=/data/lbug-dbs
 MAX_DATABASES_PER_INSTANCE=10
 ```
 

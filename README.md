@@ -38,7 +38,7 @@ just start
 
 This initializes the `.env` file and starts the complete RoboSystems stack with:
 
-- Graph database (Kuzu by default, Neo4j optional)
+- Graph database (LadybugDB by default, Neo4j optional)
 - PostgreSQL with automatic migrations
 - Valkey message broker
 - All development services
@@ -117,7 +117,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 **Graph Database System:**
 
-- Pluggable backends (Kuzu by default, Neo4j optional)
+- Pluggable backends (LadybugDB by default, Neo4j optional)
 - Multi-tenant isolation with dedicated databases per entity
 - DuckDB staging system for high-performance data ingestion
 - Tiered infrastructure from multi-tenant to dedicated instances

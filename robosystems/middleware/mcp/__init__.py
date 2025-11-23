@@ -1,38 +1,38 @@
 """
-Kuzu MCP (Model Context Protocol) module.
+Graph MCP (Model Context Protocol) module.
 
-This module provides MCP functionality for interacting with Kuzu graph databases
-through the RoboSystems API infrastructure.
+This module provides MCP functionality for interacting with graph databases
+through the RoboSystems Graph API infrastructure.
 """
 
 from .exceptions import (
-  KuzuAPIError,
-  KuzuQueryTimeoutError,
-  KuzuQueryComplexityError,
-  KuzuValidationError,
-  KuzuAuthenticationError,
-  KuzuAuthorizationError,
-  KuzuConnectionError,
-  KuzuResourceNotFoundError,
-  KuzuRateLimitError,
-  KuzuSchemaError,
+  GraphAPIError,
+  GraphQueryTimeoutError,
+  GraphQueryComplexityError,
+  GraphValidationError,
+  GraphAuthenticationError,
+  GraphAuthorizationError,
+  GraphConnectionError,
+  GraphResourceNotFoundError,
+  GraphRateLimitError,
+  GraphSchemaError,
 )
-from .client import KuzuMCPClient
-from .tools import KuzuMCPTools
-from .factory import create_kuzu_mcp_client
+from .client import GraphMCPClient
+from .tools import GraphMCPTools
+from .factory import create_graph_mcp_client
 
 __all__ = [
-  "KuzuAPIError",
-  "KuzuQueryTimeoutError",
-  "KuzuQueryComplexityError",
-  "KuzuValidationError",
-  "KuzuAuthenticationError",
-  "KuzuAuthorizationError",
-  "KuzuConnectionError",
-  "KuzuResourceNotFoundError",
-  "KuzuRateLimitError",
-  "KuzuSchemaError",
-  "KuzuMCPClient",
-  "KuzuMCPTools",
-  "create_kuzu_mcp_client",
+  "GraphAPIError",
+  "GraphQueryTimeoutError",
+  "GraphQueryComplexityError",
+  "GraphValidationError",
+  "GraphAuthenticationError",
+  "GraphAuthorizationError",
+  "GraphConnectionError",
+  "GraphResourceNotFoundError",
+  "GraphRateLimitError",
+  "GraphSchemaError",
+  "GraphMCPClient",
+  "GraphMCPTools",
+  "create_graph_mcp_client",
 ]

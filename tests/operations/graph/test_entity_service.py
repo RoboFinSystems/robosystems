@@ -27,7 +27,7 @@ class TestEntityGraphService:
     )  # "kg" + 12 char UUID + 4 char entity hash + 2 char timestamp hash
 
   def test_is_multitenant_mode_always_true(self):
-    """Test multitenant mode is always True for Kuzu databases."""
+    """Test multitenant mode is always True for LadybugDB databases."""
     from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
 
     # MultiTenantUtils.is_multitenant_mode() always returns True
@@ -92,7 +92,7 @@ class TestEntityGraphService:
     """Test successful entity creation with new graph using controlled ingestion."""
     # Mock dependencies
     mock_session = mocker.MagicMock()
-    mock_kuzu_client = mocker.AsyncMock()
+    mock_lbug_client = mocker.AsyncMock()
     mock_allocation_manager = mocker.AsyncMock()
 
     # Setup mocks
@@ -109,19 +109,19 @@ class TestEntityGraphService:
       return_value=mock_user_limits,
     )
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.KuzuAllocationManager",
+      "robosystems.operations.graph.entity_graph_service.LadybugAllocationManager",
       return_value=mock_allocation_manager,
     )
     mocker.patch(
       "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance",
-      return_value=mock_kuzu_client,
+      return_value=mock_lbug_client,
     )
 
     # Mock database and schema installation
     mock_404_error = Exception("Database not found")
     mock_404_error.status_code = 404
-    mock_kuzu_client.get_database.side_effect = mock_404_error
-    mock_kuzu_client.create_database.return_value = {"success": True}
+    mock_lbug_client.get_database.side_effect = mock_404_error
+    mock_lbug_client.create_database.return_value = {"success": True}
 
     # Mock S3 client for file upload (imported locally in the method)
     mock_s3_client = mocker.MagicMock()
@@ -170,8 +170,8 @@ class TestEntityGraphService:
     mocker.patch("robosystems.models.iam.graph_user.GraphUser.create")
 
     # Mock controlled materialization responses
-    mock_kuzu_client.create_table.return_value = {"success": True}
-    mock_kuzu_client.materialize_table.return_value = {"rows_ingested": 1}
+    mock_lbug_client.create_table.return_value = {"success": True}
+    mock_lbug_client.materialize_table.return_value = {"rows_ingested": 1}
 
     # Create service and run test
     service = EntityGraphService(session=mock_session)
@@ -199,10 +199,10 @@ class TestEntityGraphService:
 
     # Verify controlled materialization flow was used
     mock_allocation_manager.allocate_database.assert_called_once()
-    mock_kuzu_client.create_database.assert_called_once()
+    mock_lbug_client.create_database.assert_called_once()
     mock_s3_client.s3_client.upload_fileobj.assert_called_once()
-    mock_kuzu_client.create_table.assert_called()
-    mock_kuzu_client.materialize_table.assert_called_once()
+    mock_lbug_client.create_table.assert_called()
+    mock_lbug_client.materialize_table.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_create_entity_allocation_failure(self, mocker):
@@ -222,7 +222,7 @@ class TestEntityGraphService:
       return_value=mock_user_limits,
     )
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.KuzuAllocationManager",
+      "robosystems.operations.graph.entity_graph_service.LadybugAllocationManager",
       return_value=mock_allocation_manager,
     )
 
@@ -243,19 +243,19 @@ class TestEntityGraphService:
     # Mock dependencies
     mock_session = mocker.MagicMock()
     mock_allocation_manager = mocker.AsyncMock()
-    mock_kuzu_client = mocker.AsyncMock()
+    mock_lbug_client = mocker.AsyncMock()
 
     # Setup mocks
     mock_allocation_manager.allocate_database.return_value = mocker.MagicMock(
       instance_id="i-12345", instance_ip="10.0.0.1", database_id="kg12345678ab"
     )
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.KuzuAllocationManager",
+      "robosystems.operations.graph.entity_graph_service.LadybugAllocationManager",
       return_value=mock_allocation_manager,
     )
     mocker.patch(
       "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance",
-      return_value=mock_kuzu_client,
+      return_value=mock_lbug_client,
     )
 
     # Create cancellation callback
@@ -270,7 +270,7 @@ class TestEntityGraphService:
     entity_data = {"name": "Test Company"}
 
     # Simulate cancellation during database creation
-    mock_kuzu_client.create_database.side_effect = (
+    mock_lbug_client.create_database.side_effect = (
       lambda *args, **kwargs: setattr(
         cancelled, "__class__", type("cancelled", (), {"__bool__": lambda self: True})()
       )
@@ -290,29 +290,29 @@ class TestEntityGraphService:
   @pytest.mark.asyncio
   async def test_install_entity_schema_with_extensions(self, mocker):
     """Test schema installation with custom extensions."""
-    mock_kuzu_client = mocker.AsyncMock()
-    mock_kuzu_client.install_schema.return_value = {"success": True}
+    mock_lbug_client = mocker.AsyncMock()
+    mock_lbug_client.install_schema.return_value = {"success": True}
 
     service = EntityGraphService(session=mocker.MagicMock())
 
     # Test with roboledger extension
-    await service._install_entity_schema_kuzu(
-      kuzu_client=mock_kuzu_client, graph_id="kg12345", extensions=["roboledger"]
+    await service._install_entity_schema(
+      graph_client=mock_lbug_client, graph_id="kg12345", extensions=["roboledger"]
     )
 
     # Verify schema creation was called
-    assert mock_kuzu_client.install_schema.called
+    assert mock_lbug_client.install_schema.called
 
   @pytest.mark.asyncio
   async def test_install_entity_schema_unknown_extension(self, mocker):
     """Test schema installation with unknown extension."""
-    mock_kuzu_client = mocker.AsyncMock()
+    mock_lbug_client = mocker.AsyncMock()
     service = EntityGraphService(session=mocker.MagicMock())
 
     # Test with unknown extension - should raise error
     with pytest.raises(ValueError) as exc_info:
-      await service._install_entity_schema_kuzu(
-        kuzu_client=mock_kuzu_client,
+      await service._install_entity_schema(
+        graph_client=mock_lbug_client,
         graph_id="kg12345",
         extensions=["unknown_extension"],
       )
@@ -344,7 +344,7 @@ class TestEntityGraphService:
     # Mock dependencies
     mock_session = mocker.MagicMock()
     mock_allocation_manager = mocker.AsyncMock()
-    mock_kuzu_client = mocker.AsyncMock()
+    mock_lbug_client = mocker.AsyncMock()
 
     # Setup successful allocation
     mock_allocation_manager.allocate_database.return_value = mocker.MagicMock(
@@ -355,11 +355,11 @@ class TestEntityGraphService:
     )
 
     # But fail during schema installation
-    mock_kuzu_client.install_schema.side_effect = Exception("Schema error")
+    mock_lbug_client.install_schema.side_effect = Exception("Schema error")
     mock_404_error = Exception("Database not found")
     mock_404_error.status_code = 404
-    mock_kuzu_client.get_database.side_effect = mock_404_error  # Database doesn't exist
-    mock_kuzu_client.create_database.return_value = {"success": True}
+    mock_lbug_client.get_database.side_effect = mock_404_error  # Database doesn't exist
+    mock_lbug_client.create_database.return_value = {"success": True}
 
     mock_user_limits = mocker.MagicMock()
     mock_user_limits.can_create_graph.return_value = (True, "Can create graph")
@@ -368,12 +368,12 @@ class TestEntityGraphService:
       return_value=mock_user_limits,
     )
     mocker.patch(
-      "robosystems.operations.graph.entity_graph_service.KuzuAllocationManager",
+      "robosystems.operations.graph.entity_graph_service.LadybugAllocationManager",
       return_value=mock_allocation_manager,
     )
     mocker.patch(
       "robosystems.operations.graph.entity_graph_service.get_graph_client_for_instance",
-      return_value=mock_kuzu_client,
+      return_value=mock_lbug_client,
     )
 
     service = EntityGraphService(session=mock_session)

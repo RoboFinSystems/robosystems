@@ -96,7 +96,7 @@ def handle_instance_launch(event: Dict[str, Any]) -> Dict[str, Any]:
 
   instance_id = event["instance_id"]
   node_type = event["node_type"]  # writer, shared_master, shared_replica
-  tier = event.get("tier", "kuzu-standard")
+  tier = event.get("tier", "ladybug-standard")
   databases = event.get("databases", [])  # List of databases this instance should have
 
   # Always fetch the actual AZ from the instance - don't trust what's provided
@@ -126,7 +126,9 @@ def handle_instance_launch(event: Dict[str, Any]) -> Dict[str, Any]:
 
   # For shared repositories, always look for existing SEC volume first
   # Even if databases list is empty on instance launch, we want to reattach SEC data
-  if node_type == "shared_master" or (node_type == "writer" and tier == "kuzu-shared"):
+  if node_type == "shared_master" or (
+    node_type == "writer" and tier == "ladybug-shared"
+  ):
     # Look for existing SEC volume
     existing_volume = find_volume_with_database("sec", az, tier)
     if existing_volume:
@@ -329,10 +331,10 @@ def create_and_attach_volume(
   """Create a new volume and attach it to the instance"""
   # Tier configurations (updated to match .github/configs/graph.yml)
   tier_config = {
-    "kuzu-standard": {"size": 50, "iops": 3000},
-    "kuzu-large": {"size": 50, "iops": 3000},
-    "kuzu-xlarge": {"size": 50, "iops": 3000},
-    "kuzu-shared": {"size": 50, "iops": 3000},
+    "ladybug-standard": {"size": 50, "iops": 3000},
+    "ladybug-large": {"size": 50, "iops": 3000},
+    "ladybug-xlarge": {"size": 50, "iops": 3000},
+    "ladybug-shared": {"size": 50, "iops": 3000},
     "neo4j-community-large": {"size": 50, "iops": 3000},
     "neo4j-enterprise-xlarge": {"size": 50, "iops": 3000},
   }
@@ -544,12 +546,13 @@ def cleanup_orphaned_volumes() -> Dict[str, Any]:
 
   # Publish metric
   cloudwatch.put_metric_data(
-    Namespace=f"RoboSystemsGraph/{ENVIRONMENT}",
+    Namespace="RoboSystems/Graph",
     MetricData=[
       {
         "MetricName": "OrphanedVolumes",
         "Value": len(orphaned),
         "Unit": "Count",
+        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       }
     ],
   )
@@ -743,7 +746,7 @@ def restore_from_snapshot(event: Dict[str, Any]) -> Dict[str, Any]:
       "volume_id": volume_id,
       "instance_id": "unattached",
       "availability_zone": az,
-      "tier": "kuzu-standard",  # Default tier
+      "tier": "ladybug-standard",  # Default tier
       "status": "available",
       "databases": databases,
       "created_at": datetime.now(timezone.utc).isoformat(),
@@ -758,7 +761,7 @@ def register_volume(event: Dict[str, Any]) -> Dict[str, Any]:
   """Register an existing volume in the registry"""
   volume_id = event["volume_id"]
   databases = event.get("databases", [])
-  tier = event.get("tier", "kuzu-standard")
+  tier = event.get("tier", "ladybug-standard")
 
   # Get volume info from EC2
   response = ec2.describe_volumes(VolumeIds=[volume_id])
@@ -884,7 +887,7 @@ def sync_registry_with_ec2(event: Dict[str, Any]) -> Dict[str, Any]:
       # Extract info from tags
       tags = {tag["Key"]: tag["Value"] for tag in volume.get("Tags", [])}
       databases = json.loads(tags.get("Databases", "[]"))
-      tier = tags.get("Tier", "kuzu-standard")
+      tier = tags.get("Tier", "ladybug-standard")
       node_type = tags.get("NodeType", "writer")
 
       table.put_item(
@@ -944,22 +947,25 @@ Updated {len(corrections_applied["updated"])} mismatched entries: {corrections_a
 
   # Publish metrics
   cloudwatch.put_metric_data(
-    Namespace=f"RoboSystemsGraph/{ENVIRONMENT}",
+    Namespace="RoboSystems/Graph",
     MetricData=[
       {
         "MetricName": "RegistryStaleEntries",
         "Value": len(corrections_applied["removed"]),
         "Unit": "Count",
+        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
       {
         "MetricName": "RegistryMissingEntries",
         "Value": len(corrections_applied["added"]),
         "Unit": "Count",
+        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
       {
         "MetricName": "RegistryMismatchedEntries",
         "Value": len(corrections_applied["updated"]),
         "Unit": "Count",
+        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
     ],
   )

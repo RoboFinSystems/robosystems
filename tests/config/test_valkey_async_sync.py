@@ -63,7 +63,7 @@ class TestAsyncSyncClientUsage:
       mock_client.keys.return_value = ["key1", "key2"]
       mock_from_url.return_value = mock_client
 
-      client = create_async_redis_client(ValkeyDatabase.KUZU_CACHE)
+      client = create_async_redis_client(ValkeyDatabase.LBUG_CACHE)
 
       # All these operations should be awaitable
       get_result = await client.get("test_key")

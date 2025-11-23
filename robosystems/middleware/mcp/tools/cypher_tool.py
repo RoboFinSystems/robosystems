@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from .base_tool import BaseTool
 from robosystems.logger import logger
-from ..exceptions import KuzuAPIError
+from ..exceptions import GraphAPIError
 
 
 class CypherTool(BaseTool):
@@ -116,7 +116,7 @@ LIMIT 20
     except Exception as e:
       # Sanitize error message
       error_message = self._sanitize_error_message(str(e))
-      raise KuzuAPIError(f"Query execution failed: {error_message}")
+      raise GraphAPIError(f"Query execution failed: {error_message}")
 
   def _sanitize_error_message(self, error_msg: str) -> str:
     """

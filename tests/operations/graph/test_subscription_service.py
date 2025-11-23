@@ -81,7 +81,7 @@ class TestGraphSubscriptionService:
     graph_id = "graph456"
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "base_price_cents": 4999}
+    plan_config = {"name": "ladybug-standard", "base_price_cents": 4999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -91,7 +91,7 @@ class TestGraphSubscriptionService:
       mock_session.query.return_value.filter.return_value.count.return_value = 0
 
       result = subscription_service.create_graph_subscription(
-        user_id, graph_id, plan_name="kuzu-standard"
+        user_id, graph_id, plan_name="ladybug-standard"
       )
 
       # Verify subscription creation
@@ -100,7 +100,7 @@ class TestGraphSubscriptionService:
       assert result.org_id is not None
       assert result.resource_type == "graph"
       assert result.resource_id == graph_id
-      assert result.plan_name == "kuzu-standard"
+      assert result.plan_name == "ladybug-standard"
       assert result.status == SubscriptionStatus.ACTIVE.value
 
   def test_create_graph_subscription_new(
@@ -109,10 +109,10 @@ class TestGraphSubscriptionService:
     """Test creating a new graph subscription."""
     user_id = "user123"
     graph_id = "graph456"
-    plan_name = "kuzu-standard"  # Use a plan that's in the available plans
+    plan_name = "ladybug-standard"  # Use a plan that's in the available plans
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "base_price_cents": 1999}
+    plan_config = {"name": "ladybug-standard", "base_price_cents": 1999}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -132,7 +132,7 @@ class TestGraphSubscriptionService:
       assert result.org_id is not None
       assert result.resource_type == "graph"
       assert result.resource_id == graph_id
-      assert result.plan_name == "kuzu-standard"
+      assert result.plan_name == "ladybug-standard"
       assert result.status == SubscriptionStatus.ACTIVE.value
 
   def test_create_graph_subscription_existing(self, subscription_service, mock_session):
@@ -141,7 +141,7 @@ class TestGraphSubscriptionService:
     graph_id = "graph456"
 
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "base_price_cents": 0}
+    plan_config = {"name": "ladybug-standard", "base_price_cents": 0}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -166,8 +166,8 @@ class TestGraphSubscriptionService:
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=None,
     ):
-      # Since "invalid" will be downgraded to "kuzu-xlarge" (max tier), the error will mention kuzu-xlarge
-      with pytest.raises(ValueError, match="Billing plan 'kuzu-xlarge' not found"):
+      # Since "invalid" will be downgraded to "ladybug-xlarge" (max tier), the error will mention ladybug-xlarge
+      with pytest.raises(ValueError, match="Billing plan 'ladybug-xlarge' not found"):
         subscription_service.create_graph_subscription("user123", "graph456", "invalid")
 
   def test_create_graph_subscription_commit_failure(
@@ -175,7 +175,7 @@ class TestGraphSubscriptionService:
   ):
     """Test handling database commit failure."""
     # Mock BillingConfig.get_subscription_plan
-    plan_config = {"name": "kuzu-standard", "base_price_cents": 0}
+    plan_config = {"name": "ladybug-standard", "base_price_cents": 0}
     with patch(
       "robosystems.operations.graph.subscription_service.BillingConfig.get_subscription_plan",
       return_value=plan_config,
@@ -198,10 +198,10 @@ class TestSubscriptionHelperFunctions:
     import robosystems.operations.graph.subscription_service as sub_service
 
     plans = sub_service.get_available_plans()
-    assert plans == ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
+    assert plans == ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
 
   def test_get_max_plan_tier(self):
     """Test max plan tier returns last plan from centralized config."""
     import robosystems.operations.graph.subscription_service as sub_service
 
-    assert sub_service.get_max_plan_tier() == "kuzu-xlarge"
+    assert sub_service.get_max_plan_tier() == "ladybug-xlarge"

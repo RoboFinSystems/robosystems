@@ -67,7 +67,7 @@ class TestCreditService:
     credits.billing_admin_id = "user123"
     credits.current_balance = Decimal("1000.0")
     credits.monthly_allocation = Decimal("1000.0")
-    credits.graph_tier = GraphTier.KUZU_STANDARD.value
+    credits.graph_tier = GraphTier.LADYBUG_STANDARD.value
     credits.is_active = True
     credits.last_allocation_date = datetime.now(timezone.utc)
     return credits
@@ -87,8 +87,8 @@ class TestCreditService:
         graph_id="graph123",
         user_id="user123",
         billing_admin_id="user123",
-        subscription_tier="kuzu-standard",
-        graph_tier=GraphTier.KUZU_STANDARD,
+        subscription_tier="ladybug-standard",
+        graph_tier=GraphTier.LADYBUG_STANDARD,
       )
 
       # Verify the result
@@ -110,7 +110,7 @@ class TestCreditService:
         user_id="user123",
         billing_admin_id="user123",
         subscription_tier="invalid",
-        graph_tier=GraphTier.KUZU_STANDARD,
+        graph_tier=GraphTier.LADYBUG_STANDARD,
       )
 
   def test_consume_ai_credits_success(
@@ -223,7 +223,7 @@ class TestCreditService:
     # Create graph credits with low balance
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.current_balance = Decimal("5.0")
-    mock_credits.graph_tier = GraphTier.KUZU_STANDARD
+    mock_credits.graph_tier = GraphTier.LADYBUG_STANDARD
 
     # Mock cache import
     with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
@@ -292,7 +292,7 @@ class TestCreditService:
         sample_graph_credits.get_usage_summary = Mock(
           return_value={
             "graph_id": "graph123",
-            "graph_tier": "kuzu-standard",
+            "graph_tier": "ladybug-standard",
             "credit_multiplier": 1.0,
             "current_balance": 1000.0,
             "monthly_allocation": 1000.0,
@@ -378,7 +378,7 @@ class TestCreditService:
     # Attempt to upgrade tier
     result = credit_service.upgrade_graph_tier(
       graph_id="graph123",
-      new_tier=GraphTier.KUZU_LARGE,
+      new_tier=GraphTier.LADYBUG_LARGE,
       user_subscription_tier="enterprise",
     )
 
@@ -416,13 +416,13 @@ class TestCreditService:
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.current_balance = Decimal("750.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
-    mock_credits.graph_tier = GraphTier.KUZU_LARGE.value
+    mock_credits.graph_tier = GraphTier.LADYBUG_LARGE.value
     mock_credits.last_allocation_date = datetime.now(timezone.utc)
     mock_credits.get_usage_summary = Mock(
       return_value={
         "current_balance": 750.0,
         "monthly_allocation": 1000.0,
-        "graph_tier": "kuzu-large",
+        "graph_tier": "ladybug-large",
         "credit_multiplier": 0.9,
       }
     )
@@ -439,7 +439,7 @@ class TestCreditService:
 
     assert result["current_balance"] == 750.0
     assert result["monthly_allocation"] == 1000.0
-    assert result["graph_tier"] == "kuzu-large"
+    assert result["graph_tier"] == "ladybug-large"
 
   def test_allocate_monthly_credits_recent(self, credit_service, mock_session):
     """Test monthly allocation when already allocated recently."""

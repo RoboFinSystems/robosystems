@@ -88,7 +88,7 @@ Parameters:
     Description: CPU utilization threshold for scale-in (%). Scale-in occurs below this value
   WorkerQueueCloudWatchNamespace:
     Type: String
-    Default: RoboSystemsCelery
+    Default: RoboSystems/Worker
     Description: Worker queue monitoring CloudWatch namespace for metrics
     ConstraintDescription: Must be a valid CloudWatch namespace
   QueueMetricName:
@@ -270,15 +270,6 @@ Parameters:
     AllowedPattern: ^sg-[0-9a-f]+$
     ConstraintDescription: Must be a valid security group ID
 
-  # Kuzu Configuration
-  AllowSharedMasterReads:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Allow fallback read operations from shared master when replicas unavailable
-
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -391,7 +382,7 @@ Resources:
                   # Wildcard access to all environment-specific secrets
                   # Base secret: robosystems/prod or robosystems/staging
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
-                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/kuzu, etc.
+                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/ladybug, etc.
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
               # KMS permissions for AWS managed keys with service conditions
               - Effect: Allow
@@ -424,12 +415,12 @@ Resources:
                   - dynamodb:BatchWriteItem
                   - dynamodb:DescribeTable
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-instance-registry/index/*"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-volume-registry/index/*"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-kuzu-${Environment}-graph-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instance-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-volume-registry/index/*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-graph-registry"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-graph-registry/index/*"
         - PolicyName: AutoScalingAccess
           PolicyDocument:
             Version: "2012-10-17"
@@ -477,7 +468,7 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-raw-${Environment}/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
-              # Read/Write access to Kuzu databases for backup/restore operations
+              # Read/Write access to LadybugDB databases for backup/restore operations
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -485,8 +476,8 @@ Resources:
                   - s3:DeleteObject
                   - s3:ListBucket
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-kuzu-databases-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-kuzu-databases-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}/*"
               # Read-only access to deployment bucket and public data
               - Effect: Allow
                 Action:
@@ -595,7 +586,7 @@ Resources:
                   # Wildcard access to all environment-specific secrets
                   # Base secret: robosystems/prod or robosystems/staging
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
-                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/kuzu, etc.
+                  # Extension secrets: robosystems/prod/s3, robosystems/prod/postgres, robosystems/prod/ladybug, etc.
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
               # KMS permissions for decrypting secrets during container startup
               - Effect: Allow
@@ -703,9 +694,6 @@ Resources:
             # AWS & Container Configuration
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            # Kuzu Routing Configuration
-            - Name: ALLOW_SHARED_MASTER_READS
-              Value: !Ref AllowSharedMasterReads
             # Cache & Message Queue Configuration
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl
@@ -910,7 +898,7 @@ Resources:
       AlarmName: !Sub robosystems-${WorkerName}-${Environment}-dlq-warning
       AlarmDescription: Dead Letter Queue has failed tasks (warning threshold)
       MetricName: DLQSize
-      Namespace: RoboSystemsCelery
+      Namespace: RoboSystems/Worker
       Dimensions:
         - Name: Queue
           Value: dead_letter
@@ -939,7 +927,7 @@ Resources:
       AlarmName: !Sub robosystems-${WorkerName}-${Environment}-dlq-critical
       AlarmDescription: Dead Letter Queue has many failed tasks (critical threshold)
       MetricName: DLQSize
-      Namespace: RoboSystemsCelery
+      Namespace: RoboSystems/Worker
       Dimensions:
         - Name: Queue
           Value: dead_letter
@@ -970,7 +958,7 @@ Resources:
       AlarmName: !Sub robosystems-${WorkerName}-${Environment}-dlq-status-critical
       AlarmDescription: Dead Letter Queue status is critical
       MetricName: DLQStatus
-      Namespace: RoboSystemsCelery
+      Namespace: RoboSystems/Worker
       Dimensions:
         - Name: Queue
           Value: dead_letter

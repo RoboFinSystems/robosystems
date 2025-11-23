@@ -76,8 +76,8 @@ def mock_sec_pipeline():
 
 
 @pytest.fixture
-def mock_kuzu_client():
-  """Mock Kuzu client for database operations."""
+def mock_lbug_client():
+  """Mock LadybugDB client for database operations."""
   client = AsyncMock()
 
   # Mock database operations
@@ -108,10 +108,10 @@ def mock_kuzu_client():
 
 
 @pytest.fixture
-def mock_kuzu_factory(mock_kuzu_client):
+def mock_lbug_factory(mock_lbug_client):
   """Mock GraphClientFactory."""
   with patch("robosystems.graph_api.client.factory.GraphClientFactory") as mock_factory:
-    mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
+    mock_factory.create_client = AsyncMock(return_value=mock_lbug_client)
     yield mock_factory
 
 

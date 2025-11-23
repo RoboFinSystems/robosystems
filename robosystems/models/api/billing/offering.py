@@ -15,7 +15,7 @@ class GraphSubscriptionTier(BaseModel):
   """
 
   name: str = Field(
-    ..., description="Infrastructure tier identifier (e.g., kuzu-standard)"
+    ..., description="Infrastructure tier identifier (e.g., ladybug-standard)"
   )
   display_name: str = Field(..., description="Display name for UI")
   description: str = Field(..., description="Tier description")
@@ -38,7 +38,7 @@ class GraphSubscriptionTier(BaseModel):
   max_queries_per_hour: int | None = Field(None, description="Maximum queries per hour")
   max_subgraphs: int = Field(0, description="Maximum subgraphs supported")
   api_rate_multiplier: float = Field(..., description="API rate multiplier")
-  backend: str = Field(..., description="Database backend (kuzu or neo4j)")
+  backend: str = Field(..., description="Database backend (ladybug or neo4j)")
   instance_type: str | None = Field(None, description="Instance type")
 
 

@@ -98,7 +98,7 @@ class TestS3BackupAdapter:
       "node_count": 4,
       "relationship_count": 2,
       "backup_duration_seconds": 1.5,
-      "kuzu_version": "0.10.1",
+      "lbug_version": "0.10.1",
     }
 
     # Upload backup
@@ -185,11 +185,11 @@ class TestS3BackupAdapter:
       key_parts = backup_key.split("/")
       if len(key_parts) >= 5:
         timestamp_part = key_parts[4].replace("backup-", "")
-        # Handle both old (.cypher) and new (.kuzu) extensions, with and without encryption
+        # Handle both old (.cypher) and new (.lbug) extensions, with and without encryption
         timestamp_part = (
           timestamp_part.replace(".cypher.gz.enc", "")
-          .replace(".kuzu.gz.enc", "")
-          .replace(".kuzu.gz", "")  # New format without encryption
+          .replace(".lbug.gz.enc", "")
+          .replace(".lbug.gz", "")  # New format without encryption
           .replace(".cypher.gz", "")
         )
         try:
@@ -258,8 +258,8 @@ class TestS3BackupAdapter:
           key_parts[4]
           .replace("backup-", "")
           .replace(".cypher.gz.enc", "")
-          .replace(".kuzu.gz.enc", "")
-          .replace(".kuzu.gz", "")  # New format without encryption
+          .replace(".lbug.gz.enc", "")
+          .replace(".lbug.gz", "")  # New format without encryption
           .replace(".cypher.gz", "")
         )
         try:

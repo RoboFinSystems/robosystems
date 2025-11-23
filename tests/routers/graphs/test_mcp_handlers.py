@@ -39,7 +39,7 @@ async def mcp_handler(mock_repository):
   with patch("asyncio.create_task", return_value=completed_task):
     handler = MCPHandler(mock_repository, graph_id="test_graph", user=mock_user)
     # Mock the necessary attributes to avoid initialization issues
-    handler.kuzu_client = Mock()
+    handler.lbug_client = Mock()
     handler._closed = False
 
     # Create a proper async mock for mcp_tools with call_tool method
@@ -339,8 +339,8 @@ class TestMCPErrorSanitization:
   def test_sanitize_database_paths(self, mcp_handler):
     """Test that database paths are sanitized from errors."""
     error_messages = [
-      "Error at /var/lib/kuzu/database.db",
-      "Cannot open /home/user/data/graph.kuzu",
+      "Error at /var/lib/lbug/database.db",
+      "Cannot open /home/user/data/graph.lbug",
       "File not found: /opt/robosystems/graphs/test.db",
     ]
 

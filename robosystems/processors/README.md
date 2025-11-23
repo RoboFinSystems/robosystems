@@ -61,7 +61,7 @@ Processors handle the "heavy lifting" of data transformation and business logic 
 
   - **`XBRLDuckDBGraphProcessor`** - Direct DuckDB staging to graph database ingestion
 
-    - Native DuckDB → Kuzu via database extensions
+    - Native DuckDB → LadybugDB via database extensions
     - Batch processing with comprehensive error handling
     - Progress tracking and monitoring integration
 
@@ -178,7 +178,7 @@ Parquet Files → S3 Storage
        ↓
 DuckDB Staging Table (Upload)
        ↓
-XBRLDuckDBGraphProcessor → Graph Database (Kuzu/Neo4j)
+XBRLDuckDBGraphProcessor → Graph Database (LadybugDB/Neo4j)
 ```
 
 ### Configuration

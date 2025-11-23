@@ -157,8 +157,8 @@ just admin dev subscriptions list --status active
 just admin dev subscriptions list --status pending_payment
 
 # Filter by tier
-just admin dev subscriptions list --tier kuzu-standard
-just admin dev subscriptions list --tier kuzu-enterprise
+just admin dev subscriptions list --tier ladybug-standard
+just admin dev subscriptions list --tier ladybug-enterprise
 
 # Filter by customer email
 just admin dev subscriptions list --email user@example.com
@@ -180,10 +180,10 @@ just admin dev subscriptions list --limit 50
 - `failed` - Provisioning failed
 
 **Available tiers:**
-- `kuzu-standard` - Standard shared infrastructure
-- `kuzu-large` - Dedicated large instance
-- `kuzu-xlarge` - Dedicated extra-large instance
-- `kuzu-enterprise` - Custom enterprise tier
+- `ladybug-standard` - Standard shared infrastructure
+- `ladybug-large` - Dedicated large instance
+- `ladybug-xlarge` - Dedicated extra-large instance
+- `ladybug-enterprise` - Custom enterprise tier
 
 #### Get Subscription
 
@@ -209,7 +209,7 @@ Create a new subscription for a user (admin-initiated).
 just admin dev subscriptions create USER_ID \
   --resource-type graph \
   --resource-id GRAPH_ID \
-  --plan-name kuzu-standard
+  --plan-name ladybug-standard
 ```
 
 #### Update Subscription
@@ -219,7 +219,7 @@ Modify an existing subscription.
 ```bash
 just admin dev subscriptions update SUBSCRIPTION_ID \
   --status active \
-  --plan-name kuzu-large
+  --plan-name ladybug-large
 ```
 
 #### Subscription Audit Log
@@ -324,7 +324,7 @@ just admin dev credits list
 just admin dev credits list --user-email user@example.com
 
 # Filter by tier
-just admin dev credits list --tier kuzu-standard
+just admin dev credits list --tier ladybug-standard
 
 # Show only low balance pools (< 10% remaining)
 just admin dev credits list --low-balance
@@ -381,7 +381,7 @@ View system-wide credit usage analytics.
 just admin dev credits analytics
 
 # Filter by tier
-just admin dev credits analytics --tier kuzu-enterprise
+just admin dev credits analytics --tier ladybug-enterprise
 ```
 
 **Output includes:**
@@ -420,10 +420,10 @@ just admin dev graphs list
 just admin dev graphs list --user-email user@example.com
 
 # Filter by tier
-just admin dev graphs list --tier kuzu-large
+just admin dev graphs list --tier ladybug-large
 
 # Filter by backend
-just admin dev graphs list --backend kuzu
+just admin dev graphs list --backend ladybug
 
 # Limit results
 just admin dev graphs list --limit 50
@@ -461,7 +461,7 @@ View cross-graph analytics and statistics.
 just admin dev graphs analytics
 
 # Filter by tier
-just admin dev graphs analytics --tier kuzu-standard
+just admin dev graphs analytics --tier ladybug-standard
 ```
 
 **Output includes:**

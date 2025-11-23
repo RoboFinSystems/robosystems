@@ -473,9 +473,9 @@ class UserRepository(Model):
       }
 
     return {
-      "instance_id": "kuzu-shared-prod",
+      "instance_id": "ladybug-shared-prod",
       "cluster_region": None,
-      "instance_tier": GraphTier.KUZU_SHARED,
+      "instance_tier": GraphTier.LADYBUG_SHARED,
       "repository_name": self.repository_name,
       "repository_type": self.repository_type.value,
     }

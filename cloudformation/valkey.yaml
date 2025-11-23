@@ -297,7 +297,7 @@ Resources:
     Properties:
       FunctionName: !Sub ${AWS::StackName}-valkey-rotation
       Description: "Rotates Valkey auth tokens - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt ValkeySecretRotationRole.Arn
       Timeout: !Ref LambdaRotationTimeout

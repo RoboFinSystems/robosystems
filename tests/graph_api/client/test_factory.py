@@ -1,4 +1,4 @@
-"""Tests for Kuzu client factory."""
+"""Tests for LadybugDB client factory."""
 
 import time
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -103,7 +103,7 @@ class TestCircuitBreaker:
 
 
 class TestGraphClientFactory:
-  """Test cases for Kuzu client factory."""
+  """Test cases for LadybugDB client factory."""
 
   @pytest.fixture
   def mock_env(self):
@@ -124,7 +124,7 @@ class TestGraphClientFactory:
     """Test creating client for user graph."""
     # Mock allocation manager
     with patch(
-      "robosystems.graph_api.client.factory.KuzuAllocationManager"
+      "robosystems.graph_api.client.factory.LadybugAllocationManager"
     ) as MockAllocationManager:
       mock_manager = AsyncMock()
       MockAllocationManager.return_value = mock_manager
@@ -132,7 +132,7 @@ class TestGraphClientFactory:
       mock_location = MagicMock()
       mock_location.graph_id = "kg123456"
       mock_location.database_name = "kg123456"
-      mock_location.tier = GraphTier.KUZU_STANDARD
+      mock_location.tier = GraphTier.LADYBUG_STANDARD
       mock_location.instance_id = "i-abc123"
       mock_location.endpoint = "http://instance.example.com"
       mock_manager.find_database_location.return_value = mock_location
@@ -186,7 +186,7 @@ class TestGraphClientFactory:
     """Test creating client for subgraph."""
     # Mock allocation for parent graph
     with patch(
-      "robosystems.graph_api.client.factory.KuzuAllocationManager"
+      "robosystems.graph_api.client.factory.LadybugAllocationManager"
     ) as MockAllocationManager:
       mock_manager = AsyncMock()
       MockAllocationManager.return_value = mock_manager
@@ -194,7 +194,7 @@ class TestGraphClientFactory:
       mock_location = MagicMock()
       mock_location.graph_id = "kg123456"
       mock_location.database_name = "kg123456"
-      mock_location.tier = GraphTier.KUZU_XLARGE
+      mock_location.tier = GraphTier.LADYBUG_XLARGE
       mock_location.instance_id = "i-xyz789"
       mock_location.endpoint = "http://parent.example.com"
       mock_manager.find_database_location.return_value = mock_location
@@ -234,7 +234,7 @@ class TestGraphClientFactory:
     mock_env.ENVIRONMENT = "dev"
 
     with patch(
-      "robosystems.graph_api.client.factory.KuzuAllocationManager"
+      "robosystems.graph_api.client.factory.LadybugAllocationManager"
     ) as MockAllocationManager:
       mock_manager = AsyncMock()
       MockAllocationManager.return_value = mock_manager
@@ -249,7 +249,7 @@ class TestGraphClientFactory:
   async def test_create_client_with_tier_override(self, mock_env):
     """Test creating client with tier override."""
     with patch(
-      "robosystems.graph_api.client.factory.KuzuAllocationManager"
+      "robosystems.graph_api.client.factory.LadybugAllocationManager"
     ) as MockAllocationManager:
       mock_manager = AsyncMock()
       MockAllocationManager.return_value = mock_manager
@@ -257,7 +257,7 @@ class TestGraphClientFactory:
       mock_location = MagicMock()
       mock_location.graph_id = "kg123456"
       mock_location.database_name = "kg123456"
-      mock_location.tier = GraphTier.KUZU_XLARGE
+      mock_location.tier = GraphTier.LADYBUG_XLARGE
       mock_location.instance_id = "i-premium"
       mock_location.endpoint = "http://premium.example.com"
       mock_manager.find_database_location.return_value = mock_location
@@ -272,7 +272,7 @@ class TestGraphClientFactory:
         MockClient.return_value = mock_client
 
         client = await GraphClientFactory.create_client(
-          "kg123456", tier=GraphTier.KUZU_XLARGE
+          "kg123456", tier=GraphTier.LADYBUG_XLARGE
         )
 
         assert client is not None

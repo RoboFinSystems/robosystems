@@ -104,8 +104,8 @@ class EnvValidator:
       # Plaid integration
       "PLAID_CLIENT_ID": "Plaid bank connections",
       "PLAID_CLIENT_SECRET": "Plaid bank connections",
-      # Kuzu database
-      "KUZU_DATABASE_PATH": "Kuzu database storage",
+      # LadybugDB database
+      "LBUG_DATABASE_PATH": "LadybugDB database storage",
     }
 
     # Only check GRAPH_API_URL in dev/local environments
@@ -157,7 +157,7 @@ class EnvValidator:
       ("CELERY_TASK_TIME_LIMIT", 60, 7200, "Task time limit"),
       ("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 1440, "JWT access token expiry"),
       ("RATE_LIMIT_API_KEY", 100, 1000000, "API key rate limit"),
-      ("KUZU_MAX_DATABASES_PER_NODE", 1, 1000, "Max databases per node"),
+      ("LBUG_MAX_DATABASES_PER_NODE", 1, 1000, "Max databases per node"),
     ]
 
     for var_name, min_val, max_val, description in validations:
@@ -217,7 +217,7 @@ class EnvValidator:
     import os
 
     path_vars = [
-      ("KUZU_DATABASE_PATH", "Kuzu database directory"),
+      ("LBUG_DATABASE_PATH", "LadybugDB database directory"),
       ("LOG_FILE_PATH", "Log file directory"),
     ]
 
@@ -278,9 +278,9 @@ class EnvValidator:
         "type": "postgresql",
         "configured": bool(env_config.DATABASE_URL),
       },
-      "kuzu": {
-        "access_pattern": env_config.KUZU_ACCESS_PATTERN,
-        "max_databases": env_config.KUZU_MAX_DATABASES_PER_NODE,
+      "ladybug": {
+        "access_pattern": env_config.LBUG_ACCESS_PATTERN,
+        "max_databases": env_config.LBUG_MAX_DATABASES_PER_NODE,
         "api_key_configured": bool(env_config.GRAPH_API_KEY),
       },
       "security": {

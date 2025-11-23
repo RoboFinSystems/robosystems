@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User, GraphUser
-from robosystems.operations.kuzu.backup_manager import create_backup_manager
+from robosystems.operations.lbug.backup_manager import create_backup_manager
 
 
 # Lazy initialization of backup manager to avoid S3 connection during import

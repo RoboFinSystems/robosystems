@@ -1,4 +1,4 @@
-Description: RoboSystems Graph Database Infrastructure - DynamoDB, Lambda, and Secrets Manager (Shared by Kuzu and Neo4j)
+Description: RoboSystems Graph Database Infrastructure - DynamoDB, Lambda, and Secrets Manager
 
 Parameters:
   # Environment
@@ -63,13 +63,10 @@ Parameters:
 
 Conditions:
   EnableRotation: !Equals [!Ref EnableSecretRotation, "true"]
-  IsProduction: !Equals [!Ref Environment, "prod"]
 
 Resources:
-  # ===== Security Groups =====
-
   # ===== DynamoDB Tables =====
-  # Single instance registry for all graph database instances (Kuzu and Neo4j)
+  # Single instance registry for all graph database instances (LadybugDB and Neo4j)
   InstanceRegistry:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
@@ -167,7 +164,7 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Volume registry for tracking graph database volumes (Kuzu and Neo4j)
+  # Volume registry for tracking graph database volumes (LadybugDB and Neo4j)
   VolumeRegistry:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
@@ -266,7 +263,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-key-generator"
       Description: "API Key Generator Lambda - inline code (no S3)"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt ApiKeyGeneratorRole.Arn
       Timeout: 60
@@ -301,7 +298,7 @@ Resources:
             Generate a secure API key with a given prefix.
 
             Args:
-                prefix: Prefix for the API key (e.g., 'kuzu_prod')
+                prefix: Prefix for the API key (e.g., 'lbug_prod')
                 length: Length of the random portion (default: 64)
 
             Returns:
@@ -399,7 +396,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-secret-rotation"
       Description: "Graph API Rotation Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt SecretRotationRole.Arn
       Timeout: 60
@@ -533,18 +530,21 @@ Resources:
       AlarmName: !Sub robosystems-graph-${Environment}-database-capacity
       AlarmDescription: RoboSystems graph database capacity is running low
       MetricName: DatabaseUtilizationPercent
-      Namespace: !Sub "RoboSystemsGraph/${Environment}"
+      Namespace: RoboSystems/Graph
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2
       Threshold: 85
       ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref InfraAlertTopic
 
   # ===== CloudWatch Log Groups =====
-  # Unified log group for ALL Graph API instances (Kuzu and Neo4j backends)
+  # Unified log group for ALL Graph API instances (LadybugDB and Neo4j backends)
   # Log streams are partitioned by: {cluster_tier}/{instance_id}/{node_type}
   # Examples:
   #   - standard/i-1234567890abcdef0/writer
@@ -576,7 +576,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-instance-monitor"
       Description: "Instance Monitor Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Timeout: 300
       MemorySize: 512
@@ -651,13 +651,7 @@ Resources:
                 Condition:
                   StringEquals:
                     cloudwatch:namespace:
-                      - !Sub "RoboSystemsGraph/${Environment}"
-                      - !Sub
-                        - "RoboSystemsGraph/${CapitalizedEnv}"
-                        - CapitalizedEnv: !If
-                            - IsProduction
-                            - "Prod"
-                            - "Staging"
+                      - "RoboSystems/Graph"
       Tags:
         - Key: Name
           Value: !Sub "robosystems-graph-${Environment}-instance-monitor-role"

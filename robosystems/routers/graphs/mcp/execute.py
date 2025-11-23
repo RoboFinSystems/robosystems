@@ -291,7 +291,11 @@ async def call_mcp_tool(
   try:
     # Validate write operations for Cypher tools
     is_write_query = False
-    if tool_call.name in ["read-graph-cypher", "read-neo4j-cypher", "read-kuzu-cypher"]:
+    if tool_call.name in [
+      "read-graph-cypher",
+      "read-neo4j-cypher",
+      "read-ladybug-cypher",
+    ]:
       query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]
       is_write_query = is_write_operation(query)
 
@@ -353,7 +357,7 @@ async def call_mcp_tool(
         limiter = DualLayerRateLimiter(redis_client)
 
         # Get user's subscription tier for burst protection
-        user_tier = "kuzu-standard"  # Default for authenticated users
+        user_tier = "ladybug-standard"  # Default for authenticated users
         if hasattr(current_user, "subscription") and current_user.subscription:
           if current_user.subscription.billing_plan:
             user_tier = current_user.subscription.billing_plan.name
@@ -450,7 +454,11 @@ async def call_mcp_tool(
     tool_stats = query_queue.get_stats()
 
     # For cypher queries, also check query queue
-    if tool_call.name in ["read-graph-cypher", "read-neo4j-cypher", "read-kuzu-cypher"]:
+    if tool_call.name in [
+      "read-graph-cypher",
+      "read-neo4j-cypher",
+      "read-ladybug-cypher",
+    ]:
       query_queue = get_query_queue()
       query_stats = query_queue.get_stats()
       system_state = {
@@ -596,7 +604,7 @@ async def call_mcp_tool(
         if tool_call.name in [
           "read-graph-cypher",
           "read-neo4j-cypher",
-          "read-kuzu-cypher",
+          "read-ladybug-cypher",
         ]:
           # Use query queue for cypher queries
           query: str = tool_call.arguments.get("query", "")  # type: ignore[assignment]

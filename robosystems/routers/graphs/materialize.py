@@ -2,7 +2,7 @@
 Graph Materialization Endpoint.
 
 This module provides graph-scoped materialization from DuckDB staging tables.
-Treats Kuzu graph as a materialized view of the mutable DuckDB data lake.
+Treats LadybugDB graph as a materialized view of the mutable DuckDB data lake.
 
 Key Features:
 - Full graph rebuild from all DuckDB staging tables
@@ -14,7 +14,7 @@ Key Features:
 Workflow:
 1. Discover all tables for the graph from PostgreSQL registry
 2. Sort tables (nodes before relationships)
-3. Ingest all tables from DuckDB to Kuzu in order
+3. Ingest all tables from DuckDB to LadybugDB in order
 4. Clear graph staleness flag on success
 5. Return detailed materialization report
 

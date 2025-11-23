@@ -2,11 +2,11 @@
 SEC XBRL Parquet File Consolidation Task
 
 Consolidates many small parquet files into fewer, optimally-sized files
-for efficient Kuzu ingestion.
+for efficient LadybugDB ingestion.
 
 Key features:
 - Streaming consolidation to avoid memory exhaustion
-- Target file size of 256MB for optimal Kuzu performance
+- Target file size of 256MB for optimal LadybugDB performance
 - Parallel processing across node/relationship types
 - Idempotent - can be re-run safely
 - Progress tracking via pipeline state
@@ -29,7 +29,7 @@ from robosystems.adapters.s3 import S3Client
 TARGET_FILE_SIZE = 256 * 1024 * 1024  # 256MB target file size
 MAX_MEMORY_PER_BATCH = 512 * 1024 * 1024  # 512MB max memory per batch
 MIN_FILES_TO_CONSOLIDATE = 1  # Consolidate everything (even single files)
-PARQUET_ROW_GROUP_SIZE = 50000  # Optimal for Kuzu
+PARQUET_ROW_GROUP_SIZE = 50000  # Optimal for LadybugDB
 
 
 def get_schema_types() -> tuple[List[str], List[str]]:
@@ -53,7 +53,7 @@ def get_enforced_schema(table_name: str, original_schema: pa.Schema) -> pa.Schem
 
   This prevents issues where PyArrow infers INT32 for fields that should be STRING,
   particularly for fields like EIN that may contain only numbers but need to preserve
-  leading zeros and be treated as strings in Kuzu.
+  leading zeros and be treated as strings in LadybugDB.
 
   Args:
       table_name: Name of the table (e.g., "Entity", "Report")

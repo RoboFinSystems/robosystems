@@ -72,7 +72,7 @@ class TestCreditSystemIntegration:
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("1000.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
-    mock_credits.graph_tier = GraphTier.KUZU_STANDARD.value
+    mock_credits.graph_tier = GraphTier.LADYBUG_STANDARD.value
 
     with patch.object(GraphCredits, "create_for_graph", return_value=mock_credits):
       # Create credits for graph
@@ -80,8 +80,8 @@ class TestCreditSystemIntegration:
         graph_id=graph_id,
         user_id=user_id,
         billing_admin_id=user_id,
-        subscription_tier="kuzu-standard",
-        graph_tier=GraphTier.KUZU_STANDARD,
+        subscription_tier="ladybug-standard",
+        graph_tier=GraphTier.LADYBUG_STANDARD,
       )
 
       # Verify credits were created
@@ -97,7 +97,7 @@ class TestCreditSystemIntegration:
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("1000.0")
     mock_credits.monthly_allocation = Decimal("5000.0")
-    mock_credits.graph_tier = GraphTier.KUZU_LARGE.value
+    mock_credits.graph_tier = GraphTier.LADYBUG_LARGE.value
 
     # Mock cache
     with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
@@ -183,7 +183,7 @@ class TestCreditSystemIntegration:
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("100.0")
-    mock_credits.graph_tier = GraphTier.KUZU_XLARGE.value
+    mock_credits.graph_tier = GraphTier.LADYBUG_XLARGE.value
 
     # Mock cache
     with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:
@@ -261,7 +261,7 @@ class TestCreditSystemIntegration:
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("750.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
-    mock_credits.graph_tier = GraphTier.KUZU_STANDARD.value
+    mock_credits.graph_tier = GraphTier.LADYBUG_STANDARD.value
     mock_credits.last_allocation_date = datetime.now(timezone.utc).date()
 
     # Mock cache miss then hit
@@ -274,7 +274,7 @@ class TestCreditSystemIntegration:
         mock_credits.get_usage_summary = Mock(
           return_value={
             "graph_id": graph_id,
-            "graph_tier": GraphTier.KUZU_STANDARD.value,
+            "graph_tier": GraphTier.LADYBUG_STANDARD.value,
             "current_balance": 750.0,
             "monthly_allocation": 1000.0,
             "consumed_this_month": 250.0,
@@ -301,7 +301,7 @@ class TestCreditSystemIntegration:
     mock_credits = Mock(spec=GraphCredits)
     mock_credits.graph_id = graph_id
     mock_credits.current_balance = Decimal("5.0")  # Only 5 credits left
-    mock_credits.graph_tier = GraphTier.KUZU_STANDARD.value
+    mock_credits.graph_tier = GraphTier.LADYBUG_STANDARD.value
 
     # Mock cache
     with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:

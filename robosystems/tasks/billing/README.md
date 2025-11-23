@@ -480,7 +480,7 @@ Configure alerts for:
 2. Calculate storage using `StorageCalculator`:
    - Files: S3 user uploads
    - Tables: S3 CSV/Parquet imports
-   - Graphs: EBS Kuzu database
+   - Graphs: EBS LadybugDB database
    - Subgraphs: EBS subgraph data
 3. Get instance metadata from Graph API
 4. Record snapshot in `GraphUsageTracking`

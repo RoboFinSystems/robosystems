@@ -184,7 +184,7 @@ jobs:
           # Add Graph API secret if provided
           if [ -n "${{ inputs.graph_api_secret_arn }}" ]; then
             STACK_PARAMS="$STACK_PARAMS \
-                  ParameterKey=KuzuSecretArn,ParameterValue=${{ inputs.graph_api_secret_arn }}"
+                  ParameterKey=GraphApiSecretArn,ParameterValue=${{ inputs.graph_api_secret_arn }}"
           fi
 
           # Deploy or update the stack

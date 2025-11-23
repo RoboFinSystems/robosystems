@@ -1,11 +1,11 @@
 #!/bin/bash
 # Universal Graph Database Health Check
-# Supports both Kuzu and Neo4j with ingestion-aware checking
+# Supports both LadybugDB and Neo4j with ingestion-aware checking
 
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (kuzu|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${CONTAINER_PORT:?"CONTAINER_PORT must be set"}
 : ${ENVIRONMENT:?"ENVIRONMENT must be set"}
@@ -19,11 +19,11 @@ INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.2
 
 # Determine container name based on database type and node type
 case "${DATABASE_TYPE}" in
-    kuzu)
+    ladybug)
         if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="kuzu-shared-writer"
+            CONTAINER_NAME="lbug-shared-writer"
         else
-            CONTAINER_NAME="kuzu-writer"
+            CONTAINER_NAME="lbug-writer"
         fi
         ;;
     neo4j)
