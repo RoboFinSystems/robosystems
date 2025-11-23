@@ -12,7 +12,7 @@ from robosystems.utils.docs_template import (
   _load_template_safely,
   generate_swagger_docs,
   generate_robosystems_docs,
-  generate_kuzu_docs,
+  generate_lbug_docs,
   generate_redoc_docs,
   generate_robosystems_redoc,
   _get_fallback_template,
@@ -269,13 +269,13 @@ class TestConvenienceFunctions:
     mock_generate.assert_called_once_with(title="RoboSystems API")
 
   @patch("robosystems.utils.docs_template.generate_swagger_docs")
-  def test_generate_kuzu_docs(self, mock_generate):
+  def test_generate_lbug_docs(self, mock_generate):
     """Test RoboSystems Graph API-specific Swagger generation."""
-    mock_generate.return_value = "kuzu swagger"
+    mock_generate.return_value = "lbug swagger"
 
-    result = generate_kuzu_docs()
+    result = generate_lbug_docs()
 
-    assert result == "kuzu swagger"
+    assert result == "lbug swagger"
     mock_generate.assert_called_once_with(title="RoboSystems Graph API")
 
   @patch("robosystems.utils.docs_template.generate_redoc_docs")

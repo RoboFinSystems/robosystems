@@ -18,7 +18,7 @@ RoboSystems includes built-in security controls and optional SOC 2 compliance fe
 **Data Protection:**
 
 - TLS 1.3 for all API communications
-- Database encryption at rest (PostgreSQL, Kuzu)
+- Database encryption at rest (PostgreSQL, LadybugDB)
 - AWS Secrets Manager for credential management
 - Multi-tenant database isolation
 

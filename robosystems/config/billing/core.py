@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 # NOTE: monthly_credit_allocation comes from TIER_CREDIT_ALLOCATIONS (single source of truth)
 DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
   {
-    "name": "kuzu-standard",
-    "display_name": "Kuzu Standard",
-    "description": "Multi-tenant Kuzu infrastructure - perfect for most applications",
+    "name": "ladybug-standard",
+    "display_name": "LadybugDB Standard",
+    "description": "Multi-tenant LadybugDB infrastructure - perfect for most applications",
     "base_price_cents": 4999,  # $49.99
     "included_gb": 100,  # 100 GB storage included
     "overage_price_cents_per_gb": 100,  # $1.00 per GB overage
@@ -30,8 +30,8 @@ DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
     "priority_support": True,
   },
   {
-    "name": "kuzu-large",
-    "display_name": "Kuzu Large",
+    "name": "ladybug-large",
+    "display_name": "LadybugDB Large",
     "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
     "base_price_cents": 19999,  # $199.99
     "included_gb": 500,  # 500 GB storage included
@@ -42,8 +42,8 @@ DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
     "priority_support": True,
   },
   {
-    "name": "kuzu-xlarge",
-    "display_name": "Kuzu XLarge",
+    "name": "ladybug-xlarge",
+    "display_name": "LadybugDB XLarge",
     "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
     "base_price_cents": 49999,  # $499.99
     "included_gb": 2000,  # 2 TB storage included
@@ -74,7 +74,7 @@ class BillingConfig:
     Get complete subscription plan information for a tier.
 
     Args:
-        tier: Subscription tier name (e.g., kuzu-standard, kuzu-large, kuzu-xlarge)
+        tier: Subscription tier name (e.g., ladybug-standard, ladybug-large, ladybug-xlarge)
 
     Returns:
         Dict with plan details or None if not found
@@ -237,7 +237,7 @@ class BillingConfig:
     return {
       "subscription_tiers": {
         tier: cls.get_subscription_plan(tier)
-        for tier in ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
+        for tier in ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
         if cls.get_subscription_plan(tier)
       },
       "ai_operation_costs": {
@@ -258,14 +258,14 @@ class BillingConfig:
       ],
       "storage_pricing": {
         "included_per_tier": {
-          "kuzu-standard": 100,  # GB
-          "kuzu-large": 500,  # GB
-          "kuzu-xlarge": 2000,  # GB
+          "ladybug-standard": 100,  # GB
+          "ladybug-large": 500,  # GB
+          "ladybug-xlarge": 2000,  # GB
         },
         "overage_per_gb_per_month": {
-          "kuzu-standard": 1.00,  # $1.00/GB
-          "kuzu-large": 0.50,  # $0.50/GB
-          "kuzu-xlarge": 0.25,  # $0.25/GB
+          "ladybug-standard": 1.00,  # $1.00/GB
+          "ladybug-large": 0.50,  # $0.50/GB
+          "ladybug-xlarge": 0.25,  # $0.25/GB
         },
       },
     }

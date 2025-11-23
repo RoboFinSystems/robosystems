@@ -1,7 +1,7 @@
 """
-Kuzu Database Metrics Collector
+LadybugDB Database Metrics Collector
 
-This module provides metrics collection for Kuzu databases, including:
+This module provides metrics collection for LadybugDB databases, including:
 - Database disk usage
 - Database count per instance
 - Query statistics
@@ -79,15 +79,15 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class KuzuMetricsCollector:
-  """Collects and exposes metrics for Kuzu databases."""
+class LadybugMetricsCollector:
+  """Collects and exposes metrics for LadybugDB databases."""
 
   def __init__(self, base_path: str, node_type: str = "entity_writer"):
     """
     Initialize the metrics collector.
 
     Args:
-        base_path: Base directory where Kuzu databases are stored
+        base_path: Base directory where LadybugDB databases are stored
         node_type: Type of node (writer, shared_master, shared_replica)
     """
     self.base_path = Path(base_path)
@@ -111,30 +111,30 @@ class KuzuMetricsCollector:
       callbacks = cast(List[CallbackT], [self._observe_database_metrics])
 
     self.database_size_bytes = meter.create_observable_gauge(
-      name="kuzu_database_size_bytes",
+      name="lbug_database_size_bytes",
       callbacks=callbacks,
-      description="Size of individual Kuzu databases in bytes",
+      description="Size of individual LadybugDB databases in bytes",
       unit="bytes",
     )
 
     self.total_disk_usage_bytes = meter.create_observable_gauge(
-      name="kuzu_total_disk_usage_bytes",
+      name="lbug_total_disk_usage_bytes",
       callbacks=callbacks,
-      description="Total disk usage for all Kuzu databases",
+      description="Total disk usage for all LadybugDB databases",
       unit="bytes",
     )
 
     self.database_count = meter.create_observable_gauge(
-      name="kuzu_database_count",
+      name="lbug_database_count",
       callbacks=callbacks,
-      description="Number of Kuzu databases on this instance",
+      description="Number of LadybugDB databases on this instance",
       unit="1",
     )
 
     # Create no-op counters if meter is no-op
     self.query_count = (
       meter.create_counter(
-        name="kuzu_query_count",
+        name="lbug_query_count",
         description="Number of queries executed",
         unit="1",
       )
@@ -143,7 +143,7 @@ class KuzuMetricsCollector:
 
     self.query_duration = (
       meter.create_histogram(
-        name="kuzu_query_duration_ms",
+        name="lbug_query_duration_ms",
         description="Query execution duration in milliseconds",
         unit="ms",
       )
@@ -152,7 +152,7 @@ class KuzuMetricsCollector:
 
     self.database_operation_count = (
       meter.create_counter(
-        name="kuzu_database_operation_count",
+        name="lbug_database_operation_count",
         description="Number of database operations (create, delete, etc)",
         unit="1",
       )
@@ -198,8 +198,8 @@ class KuzuMetricsCollector:
           db_name = item.name
           db_size = self._get_directory_size(item)
           new_cache[db_name] = db_size
-        elif item.is_file() and item.suffix == ".kuzu":
-          # It's a file-based database (Kuzu 0.11.x+ format)
+        elif item.is_file() and item.suffix == ".lbug":
+          # It's a file-based database (LadybugDB format)
           db_name = item.stem
           db_size = item.stat().st_size
           new_cache[db_name] = db_size
@@ -316,7 +316,7 @@ class KuzuMetricsCollector:
     import os
 
     # Get disk usage for the data volume
-    data_path = "/mnt/kuzu-data"
+    data_path = "/mnt/lbug-data"
     if os.path.exists(data_path):
       disk_usage = psutil.disk_usage(data_path)
       disk_metrics = {
@@ -327,7 +327,7 @@ class KuzuMetricsCollector:
         "mount_point": data_path,
       }
     else:
-      # Fallback to base path if /mnt/kuzu-data doesn't exist
+      # Fallback to base path if /mnt/lbug-data doesn't exist
       disk_usage = psutil.disk_usage(str(self.base_path))
       disk_metrics = {
         "total_gb": disk_usage.total / (1024**3),

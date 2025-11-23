@@ -137,9 +137,9 @@ def test_is_using_secrets_manager_false_when_unavailable(monkeypatch):
   assert not EnvConfig.is_using_secrets_manager()
 
 
-def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
+def test_get_lbug_tier_config_uses_tier_config_overrides(monkeypatch):
   def fake_get_instance_config(cls, tier, environment=None):
-    assert tier == "kuzu-shared"
+    assert tier == "ladybug-shared"
     return {
       "max_memory_mb": 4096,
       "memory_per_db_mb": 512,
@@ -159,10 +159,10 @@ def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
     }
 
   monkeypatch.setattr(EnvConfig, "CLUSTER_TIER", "shared_master", raising=False)
-  monkeypatch.setattr(EnvConfig, "KUZU_NODE_TYPE", "", raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_NODE_TYPE", "", raising=False)
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
-  monkeypatch.setattr(EnvConfig, "KUZU_MAX_MEMORY_MB", 2048, raising=False)
-  monkeypatch.setattr(EnvConfig, "KUZU_MAX_MEMORY_PER_DB_MB", 256, raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_MAX_MEMORY_MB", 2048, raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_MAX_MEMORY_PER_DB_MB", 256, raising=False)
   monkeypatch.setattr(EnvConfig, "GRAPH_QUERY_TIMEOUT", 60, raising=False)
   monkeypatch.setattr(EnvConfig, "GRAPH_MAX_QUERY_LENGTH", 1024, raising=False)
   monkeypatch.setattr(env, "get_int_env", lambda key, default: default, raising=False)
@@ -175,7 +175,7 @@ def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
     classmethod(fake_get_tier_config),
   )
 
-  config = EnvConfig.get_kuzu_tier_config()
+  config = EnvConfig.get_lbug_tier_config()
 
   assert config["max_memory_mb"] == 4096
   assert config["memory_per_db_mb"] == 512
@@ -185,34 +185,36 @@ def test_get_kuzu_tier_config_uses_tier_config_overrides(monkeypatch):
   assert config["connection_pool_size"] == 12
   assert config["databases_per_instance"] == 15
   assert config["max_databases"] == 15
-  assert config["tier"] == "kuzu-shared"
+  assert config["tier"] == "ladybug-shared"
   assert config["storage_limit_gb"] == 750
   assert config["monthly_credits"] == 2500
   assert config["api_rate_multiplier"] == 1.8
   assert config["max_subgraphs"] == 6
 
 
-def test_get_kuzu_tier_config_falls_back_on_errors(monkeypatch):
+def test_get_lbug_tier_config_falls_back_on_errors(monkeypatch):
   def raise_error(cls, *args, **kwargs):
     raise RuntimeError("fail")
 
   def fallback_get_int_env(key, default):
     overrides = {
-      "KUZU_CHUNK_SIZE": 321,
-      "KUZU_CONNECTION_POOL_SIZE": 17,
-      "KUZU_DATABASES_PER_INSTANCE": 13,
+      "LBUG_CHUNK_SIZE": 321,
+      "LBUG_CONNECTION_POOL_SIZE": 17,
+      "LBUG_DATABASES_PER_INSTANCE": 13,
     }
     return overrides.get(key, default)
 
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
-  monkeypatch.setattr(EnvConfig, "KUZU_MAX_MEMORY_MB", 5120, raising=False)
-  monkeypatch.setattr(EnvConfig, "KUZU_MAX_MEMORY_PER_DB_MB", 640, raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_MAX_MEMORY_MB", 5120, raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_MAX_MEMORY_PER_DB_MB", 640, raising=False)
   monkeypatch.setattr(EnvConfig, "GRAPH_QUERY_TIMEOUT", 45, raising=False)
   monkeypatch.setattr(EnvConfig, "GRAPH_MAX_QUERY_LENGTH", 9000, raising=False)
-  monkeypatch.setattr(EnvConfig, "KUZU_MAX_DATABASES_PER_NODE", 25, raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_MAX_DATABASES_PER_NODE", 25, raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_STANDARD_CHUNK_SIZE", 321, raising=False)
+  monkeypatch.setattr(EnvConfig, "LBUG_MAX_CONNECTIONS_PER_DB", 17, raising=False)
   monkeypatch.setattr(env, "get_int_env", fallback_get_int_env, raising=False)
   monkeypatch.setitem(
-    EnvConfig.get_kuzu_tier_config.__func__.__globals__,
+    EnvConfig.get_lbug_tier_config.__func__.__globals__,
     "get_int_env",
     fallback_get_int_env,
   )
@@ -225,7 +227,7 @@ def test_get_kuzu_tier_config_falls_back_on_errors(monkeypatch):
     classmethod(raise_error),
   )
 
-  config = EnvConfig.get_kuzu_tier_config()
+  config = EnvConfig.get_lbug_tier_config()
 
   assert config["max_memory_mb"] == 5120
   assert config["memory_per_db_mb"] == 640
@@ -233,7 +235,7 @@ def test_get_kuzu_tier_config_falls_back_on_errors(monkeypatch):
   assert config["connection_pool_size"] == 17
   assert config["databases_per_instance"] == 13
   assert config["max_databases"] == 25
-  assert config["tier"] == "kuzu-standard"
+  assert config["tier"] == "ladybug-standard"
   assert config["storage_limit_gb"] == 500
   assert config["monthly_credits"] == 10000
   assert config["api_rate_multiplier"] == 1.0
@@ -261,15 +263,15 @@ def test_get_main_cors_origins_respects_environment(monkeypatch):
   assert "https://roboledger.ai" in origins
 
 
-def test_get_kuzu_cors_origins(monkeypatch):
+def test_get_lbug_cors_origins(monkeypatch):
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
-  assert EnvConfig.get_kuzu_cors_origins() == []
+  assert EnvConfig.get_lbug_cors_origins() == []
 
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "staging", raising=False)
-  assert EnvConfig.get_kuzu_cors_origins() == []
+  assert EnvConfig.get_lbug_cors_origins() == []
 
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "dev", raising=False)
-  assert EnvConfig.get_kuzu_cors_origins() == ["*"]
+  assert EnvConfig.get_lbug_cors_origins() == ["*"]
 
 
 def test_get_celery_config_without_auth_token(monkeypatch):

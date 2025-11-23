@@ -32,7 +32,7 @@ async def get_metrics(
 
   This endpoint is designed for monitoring systems like Prometheus
   or custom dashboards to track the health and performance of the
-  Kuzu cluster.
+  LadybugDB cluster.
   """
   metrics_collector = cluster_service.metrics_collector
 

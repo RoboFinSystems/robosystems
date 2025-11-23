@@ -1,7 +1,7 @@
 """
-Kuzu Database Allocation Manager V2 - DynamoDB-based
+LadybugDB Allocation Manager V2 - DynamoDB-based
 
-Manages database allocation across Kuzu writer instances using DynamoDB for persistent state.
+Manages database allocation across LadybugDB writer instances using DynamoDB for persistent state.
 This replaces the in-memory registry with a reliable, distributed storage solution.
 
 Key features:
@@ -86,7 +86,7 @@ class DatabaseLocation:
   availability_zone: str
   created_at: datetime
   status: DatabaseStatus
-  backend_type: str = "kuzu"
+  backend_type: str = "ladybug"
 
 
 @dataclass
@@ -114,7 +114,7 @@ class InstanceInfo:
     )
 
 
-class KuzuAllocationManager:
+class LadybugAllocationManager:
   """DynamoDB-based allocation manager for graph databases."""
 
   def __init__(
@@ -132,36 +132,36 @@ class KuzuAllocationManager:
     )
 
     # Tier-based configuration for backend selection and database allocation
-    # Note: Backend-specific settings (Kuzu buffer pools, Neo4j JVM heap) are
+    # Note: Backend-specific settings (LadybugDB buffer pools, Neo4j JVM heap) are
     # configured in their respective userdata scripts, not here.
     self.tier_configs = {
-      GraphTier.KUZU_STANDARD: {
-        "backend": "kuzu",
-        "backend_type": "kuzu",
+      GraphTier.LADYBUG_STANDARD: {
+        "backend": "ladybug",
+        "backend_type": "ladybug",
         "databases_per_instance": self.max_databases_per_instance,  # Multi-tenant (10 per instance)
-        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
-        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
+        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,
+        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
-      GraphTier.KUZU_LARGE: {
-        "backend": "kuzu",
-        "backend_type": "kuzu",
+      GraphTier.LADYBUG_LARGE: {
+        "backend": "ladybug",
+        "backend_type": "ladybug",
         "databases_per_instance": 1,  # Dedicated instance (parent + subgraphs)
-        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,  # Same as standard (r7g.large)
-        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
+        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,  # Same as standard (r7g.large)
+        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
-      GraphTier.KUZU_XLARGE: {
-        "backend": "kuzu",
-        "backend_type": "kuzu",
+      GraphTier.LADYBUG_XLARGE: {
+        "backend": "ladybug",
+        "backend_type": "ladybug",
         "databases_per_instance": 1,  # Large dedicated instance (parent + subgraphs)
-        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,  # r7g.xlarge has more memory
-        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
+        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,  # r7g.xlarge has more memory
+        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
-      GraphTier.KUZU_SHARED: {
-        "backend": "kuzu",
-        "backend_type": "kuzu",
+      GraphTier.LADYBUG_SHARED: {
+        "backend": "ladybug",
+        "backend_type": "ladybug",
         "databases_per_instance": 1,  # One repository per instance
-        "kuzu_max_memory_mb": env.KUZU_STANDARD_MAX_MEMORY_MB,
-        "kuzu_chunk_size": env.KUZU_STANDARD_CHUNK_SIZE,
+        "lbug_max_memory_mb": env.GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE,
+        "lbug_chunk_size": env.GRAPH_STANDARD_CHUNK_SIZE_OVERRIDE,
       },
       GraphTier.NEO4J_COMMUNITY_LARGE: {
         "backend": "neo4j",
@@ -219,7 +219,9 @@ class KuzuAllocationManager:
       self.autoscaling = boto3.client("autoscaling", region_name=region)
       self.cloudwatch = boto3.client("cloudwatch", region_name=region)
 
-    logger.info(f"Initialized KuzuAllocationManagerV2 for environment: {environment}")
+    logger.info(
+      f"Initialized LadybugAllocationManagerV2 for environment: {environment}"
+    )
 
   def get_tier_config(self, tier: GraphTier) -> Dict[str, Any]:
     """
@@ -227,7 +229,7 @@ class KuzuAllocationManager:
 
     Returns memory limits and chunk sizes optimized for each tier.
     """
-    return self.tier_configs.get(tier, self.tier_configs[GraphTier.KUZU_STANDARD])
+    return self.tier_configs.get(tier, self.tier_configs[GraphTier.LADYBUG_STANDARD])
 
   async def allocate_database(
     self,
@@ -338,15 +340,15 @@ class KuzuAllocationManager:
       identity = GraphTypeRegistry.identify_graph(graph_id, graph_tier=instance_tier)
 
       # Get backend type for this tier
-      tier_config = self.get_tier_config(instance_tier or GraphTier.KUZU_STANDARD)
-      backend_type = tier_config.get("backend_type", "kuzu")
+      tier_config = self.get_tier_config(instance_tier or GraphTier.LADYBUG_STANDARD)
+      backend_type = tier_config.get("backend_type", "ladybug")
 
       # Find instance with capacity for the specified tier (do this first to fail fast)
       instance = await self._find_best_instance(instance_tier)
 
       if not instance:
         # No capacity - trigger scale up or provide tier-specific error
-        if instance_tier and instance_tier != GraphTier.KUZU_STANDARD:
+        if instance_tier and instance_tier != GraphTier.LADYBUG_STANDARD:
           # Dedicated tiers require manual provisioning
           tier_name = instance_tier.value.replace("-", " ").title()
           await self._publish_failure_metric(
@@ -364,7 +366,7 @@ class KuzuAllocationManager:
           # Publish allocation failure metric
           await self._publish_failure_metric("no_capacity", entity_id, None)
           raise Exception(
-            "No Kuzu Standard tier capacity available. Our system is automatically scaling up to meet demand. "
+            f"No {instance_tier} tier capacity available. Our system is automatically scaling up to meet demand. "
             "Please retry in 3-5 minutes. If this persists, contact support."
           )
 
@@ -471,7 +473,7 @@ class KuzuAllocationManager:
                   availability_zone=item.get("availability_zone", "unknown"),
                   created_at=datetime.fromisoformat(item["created_at"]),
                   status=DatabaseStatus(item.get("status", "active")),
-                  backend_type=item.get("backend_type", "kuzu"),
+                  backend_type=item.get("backend_type", "ladybug"),
                 )
               else:
                 # Shouldn't happen - conditional check failed but item doesn't exist
@@ -507,7 +509,7 @@ class KuzuAllocationManager:
 
       logger.info(
         f"Allocated {graph_id} to instance {instance.instance_id} ({instance.private_ip}) "
-        f"- tier: {instance_tier.value if instance_tier else 'kuzu-standard'}, "
+        f"- tier: {instance_tier.value if instance_tier else 'ladybug-standard'}, "
         f"entity: {entity_id}"
       )
 
@@ -621,7 +623,7 @@ class KuzuAllocationManager:
         availability_zone=item.get("availability_zone", "unknown"),
         created_at=datetime.fromisoformat(item["created_at"]),
         status=DatabaseStatus(item.get("status", "active")),
-        backend_type=item.get("backend_type", "kuzu"),
+        backend_type=item.get("backend_type", "ladybug"),
       )
 
     except ClientError as e:
@@ -917,16 +919,16 @@ class KuzuAllocationManager:
     try:
       # Default to standard tier if not specified
       target_tier = (
-        instance_tier.value if instance_tier else GraphTier.KUZU_STANDARD.value
+        instance_tier.value if instance_tier else GraphTier.LADYBUG_STANDARD.value
       )
 
       # Validate tier is supported in this environment
       if self.environment in ["prod", "staging"]:
         supported_tiers = [
-          "kuzu-standard",
-          "kuzu-large",
-          "kuzu-xlarge",
-          "kuzu-shared",
+          "ladybug-standard",
+          "ladybug-large",
+          "ladybug-xlarge",
+          "ladybug-shared",
           "neo4j-community-large",
           "neo4j-enterprise-xlarge",
         ]
@@ -1008,7 +1010,7 @@ class KuzuAllocationManager:
     """Trigger auto scaling group to add an instance for the specified tier."""
     try:
       # Determine ASG name based on tier
-      target_tier = instance_tier.value if instance_tier else "kuzu-standard"
+      target_tier = instance_tier.value if instance_tier else "ladybug-standard"
 
       # Rate limiting: Check if we've recently triggered scale-up for this tier
       now = datetime.now(timezone.utc)
@@ -1069,19 +1071,19 @@ class KuzuAllocationManager:
     """Get the CloudFormation stack name for a given tier and environment."""
     if self.environment == "prod":
       tier_map = {
-        "kuzu-standard": "RoboSystemsGraphWritersKuzuStandardProd",
-        "kuzu-large": "RoboSystemsGraphWritersKuzuLargeProd",
-        "kuzu-xlarge": "RoboSystemsGraphWritersKuzuXlargeProd",
-        "kuzu-shared": "RoboSystemsGraphWritersKuzuSharedProd",
+        "ladybug-standard": "RoboSystemsGraphWritersLadybugStandardProd",
+        "ladybug-large": "RoboSystemsGraphWritersLadybugLargeProd",
+        "ladybug-xlarge": "RoboSystemsGraphWritersLadybugXlargeProd",
+        "ladybug-shared": "RoboSystemsGraphWritersLadybugSharedProd",
         "neo4j-community-large": "RoboSystemsGraphWritersNeo4jCommunityLargeProd",
         "neo4j-enterprise-xlarge": "RoboSystemsGraphWritersNeo4jEnterpriseXlargeProd",
       }
     elif self.environment == "staging":
       tier_map = {
-        "kuzu-standard": "RoboSystemsGraphWritersKuzuStandardStaging",
-        "kuzu-large": "RoboSystemsGraphWritersKuzuLargeStaging",
-        "kuzu-xlarge": "RoboSystemsGraphWritersKuzuXlargeStaging",
-        "kuzu-shared": "RoboSystemsGraphWritersKuzuSharedStaging",
+        "ladybug-standard": "RoboSystemsGraphWritersLadybugStandardStaging",
+        "ladybug-large": "RoboSystemsGraphWritersLadybugLargeStaging",
+        "ladybug-xlarge": "RoboSystemsGraphWritersLadybugXlargeStaging",
+        "ladybug-shared": "RoboSystemsGraphWritersLadybugSharedStaging",
         "neo4j-community-large": "RoboSystemsGraphWritersNeo4jCommunityLargeStaging",
         "neo4j-enterprise-xlarge": "RoboSystemsGraphWritersNeo4jEnterpriseXlargeStaging",
       }
@@ -1109,7 +1111,7 @@ class KuzuAllocationManager:
         return f"{stack_name}-writers-asg"
 
       # Fallback: construct from tier and environment
-      cluster_tier = item.get("cluster_tier", "kuzu-standard")
+      cluster_tier = item.get("cluster_tier", "ladybug-standard")
       stack_name = self._get_stack_name_for_tier(cluster_tier)
       if stack_name:
         return f"{stack_name}-writers-asg"
@@ -1159,8 +1161,8 @@ class KuzuAllocationManager:
       # Also publish the capacity utilization metric that alarms use
       await self._publish_capacity_metric(utilization_percent)
 
-      # Use environment-specific namespace for better separation
-      namespace = f"RoboSystemsKuzu/{self.environment.capitalize()}"
+      # Publish to unified Graph namespace (environment is dimensionalized)
+      namespace = "RoboSystems/Graph"
       self.cloudwatch.put_metric_data(Namespace=namespace, MetricData=metric_data)
 
     except ClientError as e:
@@ -1175,7 +1177,7 @@ class KuzuAllocationManager:
       return
 
     try:
-      namespace = f"RoboSystemsKuzu/{self.environment.capitalize()}"
+      namespace = "RoboSystems/Graph"
       metric_data = [
         {
           "MetricName": "AllocationFailures",
@@ -1202,7 +1204,7 @@ class KuzuAllocationManager:
       return
 
     try:
-      namespace = f"RoboSystemsKuzu/{self.environment.capitalize()}"
+      namespace = "RoboSystems/Graph"
       metric_data = [
         {
           "MetricName": "CapacityUtilization",
@@ -1220,10 +1222,10 @@ class KuzuAllocationManager:
 
 
 # Factory function for compatibility
-def create_allocation_manager(environment: str = "prod") -> KuzuAllocationManager:
+def create_allocation_manager(environment: str = "prod") -> LadybugAllocationManager:
   """
   Create allocation manager for the specified environment.
 
   Always uses DynamoDB-based allocation (with LocalStack in development).
   """
-  return KuzuAllocationManager(environment=environment)
+  return LadybugAllocationManager(environment=environment)

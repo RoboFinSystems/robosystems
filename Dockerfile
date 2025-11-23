@@ -1,5 +1,9 @@
+# Stage 0: Extension Repository (pull LadybugDB extensions)
+FROM ghcr.io/ladybugdb/extension-repo:latest AS extensions
+
 # Stage 1: Builder
-FROM python:3.12.10-slim AS builder
+# Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
+FROM python:3.13-slim AS builder
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -14,68 +18,77 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     curl \
     unzip \
+    file \
     && rm -rf /var/lib/apt/lists/* \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/uv
 
-# Copy Kuzu extensions from local archive with architecture support
-# Extensions are bundled locally to eliminate network dependencies during build
+# Copy LadybugDB extensions from official extension repository
+# Extensions pulled from ghcr.io/ladybugdb/extension-repo:latest
 ARG TARGETARCH=arm64
-RUN mkdir -p /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs \
-             /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb
+ARG LADYBUG_VERSION=0.12.0
 
-# Copy httpfs extension
-COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension \
-    /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs/libhttpfs.kuzu_extension
+# Create extension directories
+RUN mkdir -p /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/httpfs \
+             /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb
 
-# Copy duckdb extension (required for DuckDB → Kuzu direct ingestion)
+# Copy httpfs extension from extension repository
+COPY --from=extensions \
+    /usr/share/nginx/html/v${LADYBUG_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/httpfs/libhttpfs.lbug_extension
+
+# Copy duckdb extension (required for DuckDB → LadybugDB direct ingestion)
 # DuckDB extension requires 3 files: main extension + installer + loader
-COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/duckdb/libduckdb.kuzu_extension \
-    /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb/libduckdb.kuzu_extension
-COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_installer.kuzu_extension \
-    /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_installer.kuzu_extension
-COPY bin/kuzu-extensions/v0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_loader.kuzu_extension \
-    /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb/libduckdb_loader.kuzu_extension
+COPY --from=extensions \
+    /usr/share/nginx/html/v${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb.lbug_extension
 
-# Download DuckDB shared library from official release (required by Kuzu DuckDB extension)
-# Architecture-specific URLs: amd64 vs aarch64 (arm64)
-RUN DUCKDB_VERSION=1.1.3 && \
+COPY --from=extensions \
+    /usr/share/nginx/html/v${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_installer.lbug_extension
+
+COPY --from=extensions \
+    /usr/share/nginx/html/v${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb/libduckdb_loader.lbug_extension
+
+# Download DuckDB shared library from official release (required by LadybugDB DuckDB extension)
+# DuckDB v1.4.2 changed architecture naming: arm64/amd64 (not aarch64)
+RUN DUCKDB_VERSION=1.4.2 && \
     if [ "${TARGETARCH}" = "arm64" ]; then \
-        DUCKDB_ARCH="aarch64"; \
-        DUCKDB_SHA256="45850fb50c72163cbf1c8840c4ecd140a00910d285c01cd1939361cb9422f79d"; \
+        DUCKDB_SHA256="46c5db4fb425e49834a2a5dd0625a2569e7d38b8b17718af0f97b980acc7e78a"; \
     elif [ "${TARGETARCH}" = "amd64" ]; then \
-        DUCKDB_ARCH="amd64"; \
-        DUCKDB_SHA256="cd7648e1eed7f7b125def72a3924eacc218c99c66e49e5be8ddd3c391f1fe466"; \
+        DUCKDB_SHA256="1aaed473524dfd6d2956910409e24dbf968cf23f261c7f361f586cd4bbdd6889"; \
     else \
         echo "ERROR: Unsupported architecture: ${TARGETARCH}" && exit 1; \
     fi && \
     curl -L -o /tmp/libduckdb.zip \
-        "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-${DUCKDB_ARCH}.zip" && \
+        "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-${TARGETARCH}.zip" && \
     unzip -j /tmp/libduckdb.zip "libduckdb.so" -d /usr/local/lib/ && \
     rm /tmp/libduckdb.zip && \
     echo "${DUCKDB_SHA256}  /usr/local/lib/libduckdb.so" | sha256sum -c - || \
         (echo "ERROR: libduckdb.so checksum verification failed!" && exit 1)
 
-# Verify Kuzu extension integrity with checksums
-RUN if [ "${TARGETARCH}" = "arm64" ]; then \
-        echo "ea1b8f35234e57e961e1e0ca540769fc0192ff2e360b825a7e7b0e532f0f696e  /kuzu-extension/0.11.3/linux_arm64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: ARM64 httpfs extension checksum verification failed!" && exit 1); \
-        echo "268150b3c5691febfe2f7ddd5a92270b9946a7053eec29613d385f60c7ee8e56  /kuzu-extension/0.11.3/linux_arm64/duckdb/libduckdb.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: ARM64 duckdb extension checksum verification failed!" && exit 1); \
-        echo "20dfdaed5f6820cc9c0b9aafaf09a5710a817c51d0be853898435bdbcc56125d  /kuzu-extension/0.11.3/linux_arm64/duckdb/libduckdb_installer.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: ARM64 duckdb_installer extension checksum verification failed!" && exit 1); \
-        echo "06f7ed5629d754d38fc69ae4e7e854ae82d52f5c836c59cfa826d7d31a424474  /kuzu-extension/0.11.3/linux_arm64/duckdb/libduckdb_loader.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: ARM64 duckdb_loader extension checksum verification failed!" && exit 1); \
-    elif [ "${TARGETARCH}" = "amd64" ]; then \
-        echo "f7ba3e34b801d8d023a5247f797b99f99fa6c4be104f6c9bbf4ae15d4c97d1da  /kuzu-extension/0.11.3/linux_amd64/httpfs/libhttpfs.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: AMD64 httpfs extension checksum verification failed!" && exit 1); \
-        echo "f3c118567f1806298ceb05f24c6f3fcd40b3f5b5ef76f2286658c1804b779523  /kuzu-extension/0.11.3/linux_amd64/duckdb/libduckdb.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: AMD64 duckdb extension checksum verification failed!" && exit 1); \
-        echo "cdf75357e259c82977068f0f03fe74da05a3ec2d90bab52172277a180e61adc3  /kuzu-extension/0.11.3/linux_amd64/duckdb/libduckdb_installer.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: AMD64 duckdb_installer extension checksum verification failed!" && exit 1); \
-        echo "6ef742cbfc21a329c67e9ad8f9f720e58defb3dd3fc1f8948b9974278a4f64d0  /kuzu-extension/0.11.3/linux_amd64/duckdb/libduckdb_loader.kuzu_extension" | sha256sum -c - || \
-        (echo "ERROR: AMD64 duckdb_loader extension checksum verification failed!" && exit 1); \
-    fi
+# Verify LadybugDB extension integrity
+# Basic integrity check: verify files exist, are non-empty, and are valid ELF binaries
+RUN echo "Verifying LadybugDB extension integrity..." && \
+    EXTENSIONS_FOUND=0 && \
+    for ext in /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/*/*.lbug_extension; do \
+        if [ ! -f "$ext" ]; then \
+            echo "ERROR: Extension file not found: $ext" && exit 1; \
+        fi; \
+        if [ ! -s "$ext" ]; then \
+            echo "ERROR: Extension file is empty: $ext" && exit 1; \
+        fi; \
+        if ! file "$ext" | grep -q "ELF.*shared object"; then \
+            echo "ERROR: Extension is not a valid ELF shared library: $ext" && exit 1; \
+        fi; \
+        echo "✓ Valid extension: $(basename $ext)"; \
+        EXTENSIONS_FOUND=$((EXTENSIONS_FOUND + 1)); \
+    done && \
+    if [ "$EXTENSIONS_FOUND" -lt 4 ]; then \
+        echo "ERROR: Expected 4 extension files, found $EXTENSIONS_FOUND" && exit 1; \
+    fi && \
+    echo "Extension integrity verification complete ($EXTENSIONS_FOUND extensions validated)"
 
 # Register libduckdb.so with the dynamic linker
 RUN ldconfig
@@ -115,17 +128,19 @@ RUN --mount=type=cache,target=/tmp/uv-cache \
     uv sync --frozen --no-dev
 
 # Stage 2: Runtime
-FROM python:3.12.10-slim
+# Using Python 3.13 slim (Debian Trixie/13) for GLIBC 2.38+ required by LadybugDB extensions
+FROM python:3.13-slim
 
 # Accept architecture argument in runtime stage
 ARG TARGETARCH=arm64
+ARG LADYBUG_VERSION=0.12.0
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/build/.venv/bin:$PATH" \
     ARELLE_CACHE_DIR="/app/robosystems/arelle/cache" \
-    KUZU_HOME="/app/data/.kuzu"
+    LADYBUG_HOME="/app/data/.ladybug"
 
 # Install runtime dependencies and uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -163,7 +178,7 @@ COPY .github/configs/stacks.yml /app/configs/stacks.yml
 # Make entrypoint script executable
 RUN chmod +x bin/entrypoint.sh
 
-# Copy DuckDB shared library from builder (required by Kuzu DuckDB extension)
+# Copy DuckDB shared library from builder (required by LadybugDB DuckDB extension)
 COPY --from=builder /usr/local/lib/libduckdb.so /usr/local/lib/libduckdb.so
 RUN ldconfig
 
@@ -171,21 +186,31 @@ RUN ldconfig
 RUN useradd -m appuser
 # Ensure uv is accessible by appuser
 RUN chown appuser:appuser /usr/local/bin/uv
-# Create data directory and Kuzu home directory, set ownership for XBRL processing
-RUN mkdir -p /app/data /app/data/.kuzu/extension && chown -R appuser:appuser /app/data
-# Also create extension directory in appuser's home (where Kuzu looks for extensions)
-RUN mkdir -p /home/appuser/.kuzu/extension && chown -R appuser:appuser /home/appuser/.kuzu
+# Create data directory and LadybugDB home directory, set ownership
+RUN mkdir -p /app/data /app/data/.ladybug/extension && chown -R appuser:appuser /app/data
+# Also create extension directory in appuser's home (where LadybugDB looks for extensions)
+RUN mkdir -p /home/appuser/.ladybug/extension && chown -R appuser:appuser /home/appuser/.ladybug
 # Give appuser write access to /app for log files
 RUN chown -R appuser:appuser /app
 
-# Copy pre-downloaded Kuzu extensions to user home directory
-# Kuzu expects extensions at ~/.kuzu/extension/<extension_name>/ without version/arch subdirs
-COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs /home/appuser/.kuzu/extension/httpfs
-COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb /home/appuser/.kuzu/extension/duckdb
+# Copy LadybugDB extensions to user home directory
+# LadybugDB expects extensions at ~/.ladybug/extension/<extension_name>/
+COPY --from=builder --chown=appuser:appuser \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/httpfs \
+    /home/appuser/.ladybug/extension/httpfs
 
-# Also copy to data location for consistency (optional, but keeps structure clean)
-COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/httpfs /app/data/.kuzu/extension/httpfs
-COPY --from=builder --chown=appuser:appuser /kuzu-extension/0.11.3/linux_${TARGETARCH}/duckdb /app/data/.kuzu/extension/duckdb
+COPY --from=builder --chown=appuser:appuser \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb \
+    /home/appuser/.ladybug/extension/duckdb
+
+# Also copy to data location for consistency
+COPY --from=builder --chown=appuser:appuser \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/httpfs \
+    /app/data/.ladybug/extension/httpfs
+
+COPY --from=builder --chown=appuser:appuser \
+    /ladybug-extension/${LADYBUG_VERSION}/linux_${TARGETARCH}/duckdb \
+    /app/data/.ladybug/extension/duckdb
 
 # Switch to non-root user
 USER appuser

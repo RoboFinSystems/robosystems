@@ -90,13 +90,13 @@ class TestCreditConfig:
   def test_get_monthly_allocation_valid_tiers(self):
     """Test getting monthly allocation for valid tiers."""
     # Test that valid tiers return positive allocations
-    kuzu_standard_allocation = CreditConfig.get_monthly_allocation("kuzu-standard")
-    kuzu_large_allocation = CreditConfig.get_monthly_allocation("kuzu-large")
-    kuzu_xlarge_allocation = CreditConfig.get_monthly_allocation("kuzu-xlarge")
+    lbug_standard_allocation = CreditConfig.get_monthly_allocation("ladybug-standard")
+    lbug_large_allocation = CreditConfig.get_monthly_allocation("ladybug-large")
+    lbug_xlarge_allocation = CreditConfig.get_monthly_allocation("ladybug-xlarge")
 
-    assert kuzu_standard_allocation > 0
-    assert kuzu_large_allocation > 0
-    assert kuzu_xlarge_allocation > 0
+    assert lbug_standard_allocation > 0
+    assert lbug_large_allocation > 0
+    assert lbug_xlarge_allocation > 0
 
   def test_get_monthly_allocation_invalid_tier(self):
     """Test getting monthly allocation for invalid tier."""

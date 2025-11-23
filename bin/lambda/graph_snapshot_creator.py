@@ -2,9 +2,9 @@
 Lambda function to create daily snapshots of Graph shared master volumes.
 
 This function:
-1. Finds the shared master writer instance (WriterTier=kuzu-shared)
+1. Finds the shared master writer instance (WriterTier=ladybug-shared)
 2. Creates a snapshot of its data volume
-3. Tags it with WriterTier=kuzu-shared and AllRepositories=true
+3. Tags it with WriterTier=ladybug-shared and AllRepositories=true
 4. Cleans up old snapshots (keeps last 7 days)
 """
 
@@ -31,7 +31,7 @@ def lambda_handler(event, context):
     filters = [
       {"Name": "instance-state-name", "Values": ["running"]},
       {"Name": "tag:aws:cloudformation:stack-name", "Values": [STACK_NAME]},
-      {"Name": "tag:WriterTier", "Values": ["kuzu-shared"]},
+      {"Name": "tag:WriterTier", "Values": ["ladybug-shared"]},
     ]
 
     response = ec2.describe_instances(Filters=filters)
@@ -61,16 +61,16 @@ def lambda_handler(event, context):
         {
           "ResourceType": "snapshot",
           "Tags": [
-            {"Key": "Name", "Value": f"{ENVIRONMENT}-kuzu-shared-{timestamp}"},
+            {"Key": "Name", "Value": f"{ENVIRONMENT}-ladybug-shared-{timestamp}"},
             {"Key": "Environment", "Value": ENVIRONMENT},
             {"Key": "Service", "Value": "RoboSystems"},
-            {"Key": "Component", "Value": "Kuzu"},
+            {"Key": "Component", "Value": "LadybugDB"},
             {"Key": "NodeType", "Value": "shared_writer"},
             {"Key": "RepositoryTypes", "Value": SHARED_REPOSITORIES},
             {"Key": "VolumeType", "Value": "data"},
             {"Key": "SourceInstance", "Value": instance_id},
             {"Key": "SnapshotType", "Value": "scheduled"},
-            {"Key": "WriterTier", "Value": "kuzu-shared"},
+            {"Key": "WriterTier", "Value": "ladybug-shared"},
             {
               "Key": "AllRepositories",
               "Value": "true",

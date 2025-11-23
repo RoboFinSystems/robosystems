@@ -50,7 +50,7 @@ async def query_tables(
   - Long-running aggregations over S3 data
 
   **Note:** External tables query S3 directly and can take minutes for thousands of files.
-  Use streaming to get progressive results. For repeated queries, ingest data into Kuzu graph.
+  Use streaming to get progressive results. For repeated queries, ingest data into LadybugDB graph.
   """
   start_time = datetime.now(timezone.utc)
 

@@ -124,7 +124,7 @@ class GraphCredits(Base):
     if self.graph:
       return self.graph.graph_tier
     # Fallback for backwards compatibility during migration
-    return GraphTier.KUZU_STANDARD.value
+    return GraphTier.LADYBUG_STANDARD.value
 
   @classmethod
   def get_by_graph_id(cls, graph_id: str, session: Session) -> Optional["GraphCredits"]:

@@ -36,7 +36,7 @@ secretsmanager = boto3.client("secretsmanager")
 # Environment variables
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "staging")
 VALKEY_CLUSTER_ID = os.environ.get("VALKEY_CLUSTER_ID")
-CLOUDWATCH_NAMESPACE = "RoboSystemsCelery"
+CLOUDWATCH_NAMESPACE = "RoboSystems/Worker"
 
 # Configurable DLQ threshold
 DLQ_CRITICAL_THRESHOLD = int(os.environ.get("DLQ_CRITICAL_THRESHOLD", "20"))
@@ -72,7 +72,7 @@ WORKER_QUEUE_CONFIGS = {
     "service_name": f"robosystems-worker-shared-processing-{ENVIRONMENT}-service",  # Fixed naming
   },
   "shared-ingestion": {
-    "queues": ["shared-ingestion", "kuzu-ingestion"],
+    "queues": ["shared-ingestion"],
     "metric_dimensions": {"WorkerType": "shared-ingestion"},
     "cluster_name": f"robosystems-worker-shared-ingestion-{ENVIRONMENT}-cluster",
     "service_name": f"robosystems-worker-shared-ingestion-{ENVIRONMENT}-service",  # Fixed naming
@@ -137,7 +137,7 @@ def get_redis_connection(database: int = 0) -> redis.Redis:
   - 5: Pipeline tracking
   - 6: Credits cache
   - 7: Rate limiting
-  - 8: Kuzu cache
+  - 8: LadybugDB cache
   """
   global _redis_connections
 

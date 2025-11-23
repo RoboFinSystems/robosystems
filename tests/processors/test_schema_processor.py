@@ -17,7 +17,7 @@ from robosystems.schemas.models import Node, Relationship, Property, Schema
 def mock_schema_builder():
   """Create a mock schema builder with test schema data."""
   with patch(
-    "robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder"
+    "robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder"
   ) as MockBuilder:
     builder_instance = MockBuilder.return_value
 
@@ -554,7 +554,7 @@ class TestXBRLTableMapping:
 class TestEdgeCases:
   """Test edge cases and error handling."""
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_empty_schema(self, mock_builder, basic_schema_config):
     """Test processor with empty schema."""
     builder_instance = mock_builder.return_value
@@ -571,7 +571,7 @@ class TestEdgeCases:
     assert len(processor.relationship_schemas) == 0
     assert processor.get_available_schemas() == []
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_node_with_no_properties(self, mock_builder, basic_schema_config):
     """Test node with no properties."""
     builder_instance = mock_builder.return_value
@@ -589,7 +589,7 @@ class TestEdgeCases:
     df = processor.create_schema_compatible_dataframe("EmptyNode")
     assert list(df.columns) == []
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_relationship_with_no_properties(self, mock_builder, basic_schema_config):
     """Test relationship with no properties."""
     builder_instance = mock_builder.return_value
@@ -615,7 +615,7 @@ class TestEdgeCases:
     df = processor.create_schema_compatible_dataframe("SIMPLE_REL")
     assert list(df.columns) == ["from", "to"]  # Only foreign keys
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_multiple_primary_keys(self, mock_builder, basic_schema_config):
     """Test node with multiple primary keys."""
     builder_instance = mock_builder.return_value

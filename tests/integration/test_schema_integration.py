@@ -179,7 +179,7 @@ class TestSchemaManagementIntegration:
             "description": "Production inventory tracking",
             "schema_extensions": [],
           },
-          "instance_tier": "kuzu-standard",  # Updated to new tier naming
+          "instance_tier": "ladybug-standard",  # Updated to new tier naming
           "custom_schema": schema_def,
           "tags": ["retail", "inventory", "production"],
         },

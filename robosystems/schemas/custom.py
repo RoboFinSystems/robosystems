@@ -1,5 +1,5 @@
 """
-Custom Schema Support for Kuzu
+Custom Schema Support for LadybugDB
 
 This module provides support for custom schema definitions via JSON/YAML,
 allowing users to define their own graph schemas without modifying code.
@@ -47,7 +47,7 @@ class CustomSchemaParser:
   Converts JSON/YAML schema definitions into Schema objects.
   """
 
-  # Supported Kuzu data types
+  # Supported LadybugDB data types
   VALID_TYPES = {
     "STRING",
     "INT8",
@@ -77,7 +77,7 @@ class CustomSchemaParser:
 
   # Reserved node names that cannot be used in custom schemas
   # NOTE: Platform metadata (GraphMetadata, User, Connection) are stored in PostgreSQL,
-  # not in the Kuzu graph database. These reserved names are for future system nodes.
+  # not in the LadybugDB graph database. These reserved names are for future system nodes.
   RESERVED_NODE_NAMES = {
     "SystemConfig",  # System configuration node
     "SchemaVersion",  # Schema versioning node

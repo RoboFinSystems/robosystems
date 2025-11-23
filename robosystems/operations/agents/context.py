@@ -533,9 +533,9 @@ class ContextEnricher:
         limit: Maximum number of documents
     """
     try:
-      from robosystems.middleware.mcp import create_kuzu_mcp_client
+      from robosystems.middleware.mcp import create_graph_mcp_client
 
-      client = await create_kuzu_mcp_client(graph_id=self.graph_id)
+      client = await create_graph_mcp_client(graph_id=self.graph_id)
 
       # Query for documents with parameterization
       if node_types:
@@ -582,9 +582,9 @@ class ContextEnricher:
   async def _get_graph_metadata(self) -> Dict[str, Any]:
     """Get metadata about the graph."""
     try:
-      from robosystems.middleware.mcp import create_kuzu_mcp_client
+      from robosystems.middleware.mcp import create_graph_mcp_client
 
-      client = await create_kuzu_mcp_client(graph_id=self.graph_id)
+      client = await create_graph_mcp_client(graph_id=self.graph_id)
 
       # Get basic statistics
       node_count = await client.execute_query("MATCH (n) RETURN count(n) as count")

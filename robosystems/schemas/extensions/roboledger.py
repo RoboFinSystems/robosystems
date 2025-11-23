@@ -1,5 +1,5 @@
 """
-RoboLedger Schema Extension for Kuzu
+RoboLedger Schema Extension for LadybugDB
 
 Complete accounting system with both transaction and reporting capabilities.
 

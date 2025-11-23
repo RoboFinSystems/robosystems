@@ -49,8 +49,8 @@ class TestGenericGraphService:
     return mock_info
 
   @pytest.fixture
-  def mock_kuzu_client(self):
-    """Mock Kuzu client."""
+  def mock_lbug_client(self):
+    """Mock LadybugDB client."""
     client = AsyncMock()
     client.create_database = AsyncMock(return_value={"status": "created"})
     client.install_schema = AsyncMock(return_value={"status": "installed"})
@@ -75,7 +75,7 @@ class TestGenericGraphService:
     mock_db_session,
     mock_user_limits,
     mock_cluster_info,
-    mock_kuzu_client,
+    mock_lbug_client,
     valid_metadata,
   ):
     """Test successful graph creation with schema extensions."""
@@ -99,7 +99,7 @@ class TestGenericGraphService:
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+            "robosystems.operations.graph.generic_graph_service.LadybugAllocationManager"
           ) as mock_alloc_class:
             mock_manager = AsyncMock()
             mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
@@ -108,7 +108,7 @@ class TestGenericGraphService:
             with patch(
               "robosystems.graph_api.client.get_graph_client_for_instance"
             ) as mock_get_client:
-              mock_get_client.return_value = mock_kuzu_client
+              mock_get_client.return_value = mock_lbug_client
 
               with patch("robosystems.models.iam.graph.Graph") as mock_graph_class:
                 mock_graph = Mock()
@@ -135,7 +135,7 @@ class TestGenericGraphService:
                           graph_id=None,
                           schema_extensions=["roboledger", "robofo"],
                           metadata=valid_metadata,
-                          tier="kuzu-standard",
+                          tier="ladybug-standard",
                           initial_data=None,
                           user_id="user123",
                           custom_schema=None,
@@ -144,7 +144,7 @@ class TestGenericGraphService:
                         assert result["status"] == "created"
                         assert result["graph_id"].startswith("kg")
                         assert len(result["graph_id"]) == 18
-                        assert result["tier"] == "kuzu-standard"
+                        assert result["tier"] == "ladybug-standard"
                         assert result["metadata"]["name"] == "Test Graph"
                         assert result["schema_info"]["type"] == "extensions"
                         assert result["schema_info"]["extensions"] == [
@@ -156,14 +156,14 @@ class TestGenericGraphService:
                         mock_manager.allocate_database.assert_called_once()
                       call_args = mock_manager.allocate_database.call_args
                       assert (
-                        call_args.kwargs["instance_tier"] == GraphTier.KUZU_STANDARD
+                        call_args.kwargs["instance_tier"] == GraphTier.LADYBUG_STANDARD
                       )
 
                       # Verify database creation
-                      mock_kuzu_client.create_database.assert_called_once()
+                      mock_lbug_client.create_database.assert_called_once()
 
                       # Verify schema installation
-                      mock_kuzu_client.install_schema.assert_called_once_with(
+                      mock_lbug_client.install_schema.assert_called_once_with(
                         graph_id=result["graph_id"],
                         base_schema="base",
                         extensions=["roboledger", "robofo"],
@@ -185,7 +185,7 @@ class TestGenericGraphService:
     mock_db_session,
     mock_user_limits,
     mock_cluster_info,
-    mock_kuzu_client,
+    mock_lbug_client,
     valid_metadata,
   ):
     """Test successful graph creation with custom schema."""
@@ -222,7 +222,7 @@ class TestGenericGraphService:
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+            "robosystems.operations.graph.generic_graph_service.LadybugAllocationManager"
           ) as mock_alloc_class:
             mock_manager = AsyncMock()
             mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
@@ -231,7 +231,7 @@ class TestGenericGraphService:
             with patch(
               "robosystems.graph_api.client.get_graph_client_for_instance"
             ) as mock_get_client:
-              mock_get_client.return_value = mock_kuzu_client
+              mock_get_client.return_value = mock_lbug_client
 
               with patch(
                 "robosystems.schemas.custom.CustomSchemaManager"
@@ -274,7 +274,7 @@ class TestGenericGraphService:
                             graph_id=None,
                             schema_extensions=[],
                             metadata=valid_metadata,
-                            tier="kuzu-xlarge",
+                            tier="ladybug-xlarge",
                             initial_data=None,
                             user_id="user123",
                             custom_schema=custom_schema,
@@ -297,13 +297,13 @@ class TestGenericGraphService:
                           mock_schema_instance.merge_with_base.assert_called_once()
 
                           # Verify database created with custom DDL
-                          mock_kuzu_client.create_database.assert_called_once()
-                          call_args = mock_kuzu_client.create_database.call_args
+                          mock_lbug_client.create_database.assert_called_once()
+                          call_args = mock_lbug_client.create_database.call_args
                           assert call_args.kwargs["schema_type"] == "custom"
                           assert call_args.kwargs["custom_schema_ddl"] is not None
 
                           # Verify no schema extensions installed for custom schema
-                          mock_kuzu_client.install_schema.assert_not_called()
+                          mock_lbug_client.install_schema.assert_not_called()
 
                           # Verify auto-table creation happened
                           mock_table_service.create_tables_from_schema.assert_called_once()
@@ -336,7 +336,7 @@ class TestGenericGraphService:
               graph_id=None,
               schema_extensions=[],
               metadata=valid_metadata,
-              tier="kuzu-standard",
+              tier="ladybug-standard",
               initial_data=None,
               user_id="user123",
             )
@@ -362,7 +362,7 @@ class TestGenericGraphService:
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+            "robosystems.operations.graph.generic_graph_service.LadybugAllocationManager"
           ) as mock_alloc_class:
             mock_manager = AsyncMock()
             mock_manager.allocate_database.return_value = None
@@ -373,7 +373,7 @@ class TestGenericGraphService:
                 graph_id=None,
                 schema_extensions=[],
                 metadata=valid_metadata,
-                tier="kuzu-standard",
+                tier="ladybug-standard",
                 initial_data=None,
                 user_id="user123",
               )
@@ -406,7 +406,7 @@ class TestGenericGraphService:
           mock_org_user_class.get_user_orgs.return_value = [mock_org_user]
 
           with patch(
-            "robosystems.operations.graph.generic_graph_service.KuzuAllocationManager"
+            "robosystems.operations.graph.generic_graph_service.LadybugAllocationManager"
           ) as mock_alloc_class:
             mock_manager = AsyncMock()
             mock_manager.allocate_database = AsyncMock(return_value=mock_cluster_info)
@@ -426,7 +426,7 @@ class TestGenericGraphService:
                   graph_id=None,
                   schema_extensions=[],
                   metadata=valid_metadata,
-                  tier="kuzu-standard",
+                  tier="ladybug-standard",
                   initial_data=None,
                   user_id="user123",
                   custom_schema=invalid_schema,
@@ -456,7 +456,7 @@ class TestGenericGraphServiceSync:
         graph_id=None,
         schema_extensions=["roboledger"],
         metadata={"name": "Test"},
-        tier="kuzu-standard",
+        tier="ladybug-standard",
         initial_data=None,
         user_id="user123",
       )

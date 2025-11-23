@@ -1,7 +1,7 @@
 """
 Base Graph API Client.
 
-Shared functionality for sync and async clients (works with all backends: Kuzu, Neo4j).
+Shared functionality for sync and async clients with multi-backend support.
 """
 
 import time

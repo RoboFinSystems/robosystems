@@ -32,7 +32,7 @@ def get_max_plan_tier() -> str:
   from ...config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
 
   if not DEFAULT_GRAPH_BILLING_PLANS:
-    return "kuzu-standard"
+    return "ladybug-standard"
   return DEFAULT_GRAPH_BILLING_PLANS[-1]["name"]
 
 
@@ -123,8 +123,8 @@ class GraphSubscriptionService:
     self,
     user_id: str,
     graph_id: str,
-    plan_name: str = "kuzu-standard",
-    tier: GraphTier = GraphTier.KUZU_STANDARD,
+    plan_name: str = "ladybug-standard",
+    tier: GraphTier = GraphTier.LADYBUG_STANDARD,
   ) -> BillingSubscription:
     """Create a billing subscription for a graph database.
 

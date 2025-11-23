@@ -1,11 +1,11 @@
 #!/bin/bash
 # Universal CloudWatch Agent Setup for Graph Databases
-# Supports both Kuzu and Neo4j with standardized monitoring
+# Supports both LadybugDB and Neo4j with standardized monitoring
 
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (kuzu|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${ENVIRONMENT:?"ENVIRONMENT must be set"}
 : ${CLOUDWATCH_NAMESPACE:?"CLOUDWATCH_NAMESPACE must be set"}

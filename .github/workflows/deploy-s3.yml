@@ -42,12 +42,12 @@ on:
       s3_secret_arn:
         description: "ARN of the S3 secret in Secrets Manager"
         value: ${{ jobs.action.outputs.s3_secret_arn }}
-      kuzu_writer_s3_policy_arn:
-        description: "ARN of the Kuzu writer S3 policy"
-        value: ${{ jobs.action.outputs.kuzu_writer_s3_policy_arn }}
-      kuzu_reader_s3_policy_arn:
-        description: "ARN of the Kuzu reader S3 policy"
-        value: ${{ jobs.action.outputs.kuzu_reader_s3_policy_arn }}
+      graph_writer_s3_policy_arn:
+        description: "ARN of the graph writer S3 policy"
+        value: ${{ jobs.action.outputs.graph_writer_s3_policy_arn }}
+      graph_reader_s3_policy_arn:
+        description: "ARN of the graph reader S3 policy"
+        value: ${{ jobs.action.outputs.graph_reader_s3_policy_arn }}
 
     secrets:
       ACTIONS_TOKEN:
@@ -63,8 +63,8 @@ jobs:
     timeout-minutes: 15
     outputs:
       s3_secret_arn: ${{ steps.stack-outputs.outputs.s3_secret_arn }}
-      kuzu_writer_s3_policy_arn: ${{ steps.stack-outputs.outputs.kuzu_writer_s3_policy_arn }}
-      kuzu_reader_s3_policy_arn: ${{ steps.stack-outputs.outputs.kuzu_reader_s3_policy_arn }}
+      graph_writer_s3_policy_arn: ${{ steps.stack-outputs.outputs.graph_writer_s3_policy_arn }}
+      graph_reader_s3_policy_arn: ${{ steps.stack-outputs.outputs.graph_reader_s3_policy_arn }}
 
     steps:
       - name: Checkout
@@ -188,30 +188,30 @@ jobs:
             echo "Warning: Could not retrieve S3 Secret ARN"
           fi
           
-          # Get Kuzu Writer S3 Policy ARN
-          KUZU_WRITER_S3_POLICY_ARN=$(aws cloudformation describe-stacks \
+          # Get Graph Writer S3 Policy ARN
+          GRAPH_WRITER_S3_POLICY_ARN=$(aws cloudformation describe-stacks \
             --stack-name ${{ inputs.stack_name }} \
-            --query "Stacks[0].Outputs[?OutputKey=='KuzuWriterS3PolicyArn'].OutputValue" \
+            --query "Stacks[0].Outputs[?OutputKey=='GraphWriterS3PolicyArn'].OutputValue" \
             --output text)
-          
-          if [ -n "$KUZU_WRITER_S3_POLICY_ARN" ]; then
-            echo "kuzu_writer_s3_policy_arn=$KUZU_WRITER_S3_POLICY_ARN" >> $GITHUB_OUTPUT
-            echo "Found Kuzu Writer S3 Policy ARN: $KUZU_WRITER_S3_POLICY_ARN"
+
+          if [ -n "$GRAPH_WRITER_S3_POLICY_ARN" ]; then
+            echo "graph_writer_s3_policy_arn=$GRAPH_WRITER_S3_POLICY_ARN" >> $GITHUB_OUTPUT
+            echo "Found Graph Writer S3 Policy ARN: $GRAPH_WRITER_S3_POLICY_ARN"
           else
-            echo "Warning: Could not retrieve Kuzu Writer S3 Policy ARN"
+            echo "Warning: Could not retrieve Graph Writer S3 Policy ARN"
           fi
           
-          # Get Kuzu Reader S3 Policy ARN
-          KUZU_READER_S3_POLICY_ARN=$(aws cloudformation describe-stacks \
+          # Get Graph Reader S3 Policy ARN
+          GRAPH_READER_S3_POLICY_ARN=$(aws cloudformation describe-stacks \
             --stack-name ${{ inputs.stack_name }} \
-            --query "Stacks[0].Outputs[?OutputKey=='KuzuReaderS3PolicyArn'].OutputValue" \
+            --query "Stacks[0].Outputs[?OutputKey=='GraphReaderS3PolicyArn'].OutputValue" \
             --output text)
-          
-          if [ -n "$KUZU_READER_S3_POLICY_ARN" ]; then
-            echo "kuzu_reader_s3_policy_arn=$KUZU_READER_S3_POLICY_ARN" >> $GITHUB_OUTPUT
-            echo "Found Kuzu Reader S3 Policy ARN: $KUZU_READER_S3_POLICY_ARN"
+
+          if [ -n "$GRAPH_READER_S3_POLICY_ARN" ]; then
+            echo "graph_reader_s3_policy_arn=$GRAPH_READER_S3_POLICY_ARN" >> $GITHUB_OUTPUT
+            echo "Found Graph Reader S3 Policy ARN: $GRAPH_READER_S3_POLICY_ARN"
           else
-            echo "Warning: Could not retrieve Kuzu Reader S3 Policy ARN"
+            echo "Warning: Could not retrieve Graph Reader S3 Policy ARN"
           fi
 
       - name: Update Deployment Status

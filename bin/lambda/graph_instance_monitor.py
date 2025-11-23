@@ -1,7 +1,7 @@
 """
 Graph Instance Monitor Lambda Function
 
-This Lambda handles infrastructure-level monitoring for Graph instances (Kuzu and Neo4j):
+This Lambda handles infrastructure-level monitoring for Graph instances (LadybugDB and Neo4j):
 - Health checks for EC2 instances
 - Registry cleanup for stale entries
 - CloudWatch metrics collection
@@ -29,7 +29,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "staging")
 INSTANCE_REGISTRY_TABLE = os.environ.get("INSTANCE_REGISTRY_TABLE")
 GRAPH_REGISTRY_TABLE = os.environ.get("GRAPH_REGISTRY_TABLE")
 VOLUME_REGISTRY_TABLE = os.environ.get("VOLUME_REGISTRY_TABLE")
-CLOUDWATCH_NAMESPACE = f"RoboSystemsGraph/{ENVIRONMENT.title()}"
+CLOUDWATCH_NAMESPACE = "RoboSystems/Graph"
 
 # Configuration
 STALE_GRAPH_DAYS = 7  # Days before deleted graphs are removed
@@ -39,10 +39,10 @@ STALE_VOLUME_DAYS = 30  # Days before unattached volumes are removed
 # IMPORTANT: These values must match the graph.yml configuration file
 # Update both locations if changing capacity values
 TIER_CAPACITY_MAP = {
-  "kuzu-standard": 10,  # 10 databases per instance (multi-tenant)
-  "kuzu-large": 1,  # 1 database per instance (dedicated r7g.large)
-  "kuzu-xlarge": 1,  # 1 database per instance (dedicated r7g.xlarge)
-  "kuzu-shared": 10,  # 10 shared repositories per instance
+  "ladybug-standard": 10,  # 10 databases per instance (multi-tenant)
+  "ladybug-large": 1,  # 1 database per instance (dedicated r7g.large)
+  "ladybug-xlarge": 1,  # 1 database per instance (dedicated r7g.xlarge)
+  "ladybug-shared": 10,  # 10 shared repositories per instance
   "neo4j-community-large": 1,  # 1 database per instance (Neo4j Community)
   "neo4j-enterprise-xlarge": 1,  # 1 database per instance (Neo4j Enterprise)
 }
@@ -66,12 +66,12 @@ def validate_tier_capacity(tier: str) -> int:
   """
   if not tier:
     logger.warning("No tier specified, using 'standard' as default")
-    return TIER_CAPACITY_MAP["kuzu-standard"]
+    return TIER_CAPACITY_MAP["ladybug-standard"]
 
   if tier not in TIER_CAPACITY_MAP:
     logger.error(f"Unknown tier: {tier}. Valid tiers: {list(TIER_CAPACITY_MAP.keys())}")
     # Fall back to standard tier for safety
-    return TIER_CAPACITY_MAP["kuzu-standard"]
+    return TIER_CAPACITY_MAP["ladybug-standard"]
 
   return TIER_CAPACITY_MAP[tier]
 
@@ -97,7 +97,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     elif action == "cleanup_graphs":
       return cleanup_stale_graph_entries()
     elif action == "collect_metrics":
-      return collect_kuzu_metrics()
+      return collect_lbug_metrics()
     elif action == "cleanup_volumes":
       return cleanup_stale_volume_entries()
     elif action == "full_maintenance":
@@ -105,7 +105,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
       results = {
         "health_check": check_instance_health(),
         "cleanup_graphs": cleanup_stale_graph_entries(),
-        "metrics": collect_kuzu_metrics(),
+        "metrics": collect_lbug_metrics(),
         "cleanup_volumes": cleanup_stale_volume_entries(),
       }
       return {
@@ -252,7 +252,7 @@ def check_instance_health() -> Dict[str, Any]:
           results["healthy"] += 1
 
           # Get tier to determine capacity with validation
-          tier = item.get("tier") or item.get("cluster_tier", "kuzu-standard")
+          tier = item.get("tier") or item.get("cluster_tier", "ladybug-standard")
           tier_capacity = validate_tier_capacity(tier)
 
           # Update health check timestamp while preserving critical fields using if_not_exists
@@ -334,7 +334,7 @@ def check_instance_health() -> Dict[str, Any]:
           results["unhealthy"] += 1
 
           # Get tier to determine capacity with validation
-          tier = item.get("tier") or item.get("cluster_tier", "kuzu-standard")
+          tier = item.get("tier") or item.get("cluster_tier", "ladybug-standard")
           tier_capacity = validate_tier_capacity(tier)
 
           # Update status but keep in registry, preserving all fields using if_not_exists
@@ -461,7 +461,7 @@ def cleanup_stale_graph_entries() -> Dict[str, int]:
   return results
 
 
-def collect_kuzu_metrics() -> Dict[str, int]:
+def collect_lbug_metrics() -> Dict[str, int]:
   """
   Collect and publish Graph cluster capacity metrics to CloudWatch.
 
@@ -508,10 +508,10 @@ def collect_kuzu_metrics() -> Dict[str, int]:
     instance_age_buckets = {"new": 0, "stabilizing": 0, "stable": 0}
     utilization_buckets = {}
     tier_counts = {
-      "kuzu-standard": 0,
-      "kuzu-large": 0,
-      "kuzu-xlarge": 0,
-      "kuzu-shared": 0,
+      "ladybug-standard": 0,
+      "ladybug-large": 0,
+      "ladybug-xlarge": 0,
+      "ladybug-shared": 0,
       "neo4j-community-large": 0,
       "neo4j-enterprise-xlarge": 0,
     }
@@ -523,7 +523,7 @@ def collect_kuzu_metrics() -> Dict[str, int]:
     for instance in instances:
       instance_id = instance.get("instance_id")
       # Use 'tier' field, fallback to 'cluster_tier' for compatibility
-      tier = instance.get("tier") or instance.get("cluster_tier", "kuzu-standard")
+      tier = instance.get("tier") or instance.get("cluster_tier", "ladybug-standard")
       # Use 'total_capacity' field, fallback to 'max_databases' for compatibility
       max_dbs = int(
         instance.get("total_capacity") or instance.get("max_databases", default_max_dbs)

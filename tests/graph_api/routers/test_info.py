@@ -36,7 +36,7 @@ class TestInfoRouter:
       max_databases=100,
       databases=["db1", "db2", "db3", "db4", "db5"],
       read_only=False,
-      base_path="/data/kuzu",
+      base_path="/data/lbug-dbs",
       configuration=None,
     )
 
@@ -124,7 +124,7 @@ class TestInfoRouter:
       max_databases=100,
       databases=[],
       read_only=False,
-      base_path="/data/kuzu",
+      base_path="/data/lbug-dbs",
       configuration=None,
     )
 
@@ -152,7 +152,7 @@ class TestInfoRouter:
       max_databases=100,
       databases=databases,
       read_only=False,
-      base_path="/data/kuzu",
+      base_path="/data/lbug-dbs",
       configuration=None,
     )
 
@@ -179,7 +179,7 @@ class TestInfoRouter:
       max_databases=200,
       databases=["test_db"],
       read_only=False,
-      base_path="/var/lib/kuzu",
+      base_path="/var/lib/lbug",
       configuration=None,
     )
 

@@ -29,7 +29,7 @@ def parent_graph_with_credits(db_session: Session) -> tuple[Graph, GraphCredits,
     graph_id=graph_id,
     graph_name="Test Parent Graph",
     graph_type="generic",
-    graph_tier=GraphTier.KUZU_STANDARD.value,
+    graph_tier=GraphTier.LADYBUG_STANDARD.value,
   )
   db_session.add(graph)
 

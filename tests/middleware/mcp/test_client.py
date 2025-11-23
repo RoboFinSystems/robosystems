@@ -1,13 +1,17 @@
-"""Tests for the Kuzu MCP client implementation."""
+"""Tests for the Graph MCP client implementation."""
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from robosystems.middleware.mcp import KuzuMCPClient, KuzuMCPTools, KuzuAPIError
+from robosystems.middleware.mcp import (
+  GraphMCPClient,
+  GraphMCPTools,
+  GraphAPIError,
+)
 
 
 @pytest.fixture
-def mock_async_kuzu_client():
+def mock_async_graph_client():
   """Mock the GraphClient."""
   with patch("robosystems.middleware.mcp.client.GraphClient") as mock:
     client_instance = AsyncMock()
@@ -24,8 +28,8 @@ def mock_httpx_client():
     yield client_instance
 
 
-class TestKuzuMCPClient:
-  """Unit tests for the KuzuMCPClient class."""
+class TestGraphMCPClient:
+  """Unit tests for the GraphMCPClient class."""
 
   @pytest.mark.unit
   def test_init_with_api_url(self):
@@ -34,7 +38,7 @@ class TestKuzuMCPClient:
       patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
     ):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
       assert client.api_base_url == "http://test:8001"
       assert client.graph_id == "test"
       assert client.timeout == 60  # Now uses env.GRAPH_HTTP_TIMEOUT default
@@ -46,24 +50,24 @@ class TestKuzuMCPClient:
       patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
     ):
-      client = KuzuMCPClient(
+      client = GraphMCPClient(
         api_base_url="http://test:8001", graph_id="test", timeout=60
       )
       assert client.timeout == 60
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_execute_query_success(self, mock_async_kuzu_client):
+  async def test_execute_query_success(self, mock_async_graph_client):
     """Test successful query execution."""
-    # Mock successful response from KuzuClient
-    mock_async_kuzu_client.query.return_value = {
+    # Mock successful response from GraphClient
+    mock_async_graph_client.query.return_value = {
       "data": [{"name": "Test Entity", "cik": "0000123456"}],
       "execution_time_ms": 15.5,
     }
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       result = await client.execute_query(
         "MATCH (c:Entity) RETURN c.name as name, c.cik as cik LIMIT 1"
@@ -75,7 +79,7 @@ class TestKuzuMCPClient:
 
       # Verify the correct API call was made
       # Note: Auto-LIMIT feature will modify queries without explicit LIMIT
-      mock_async_kuzu_client.query.assert_called_once_with(
+      mock_async_graph_client.query.assert_called_once_with(
         cypher="MATCH (c:Entity) RETURN c.name as name, c.cik as cik LIMIT 1",
         graph_id="test",
         parameters=None,
@@ -83,16 +87,16 @@ class TestKuzuMCPClient:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_execute_query_with_parameters(self, mock_async_kuzu_client):
+  async def test_execute_query_with_parameters(self, mock_async_graph_client):
     """Test query execution with parameters."""
-    mock_async_kuzu_client.query.return_value = {
+    mock_async_graph_client.query.return_value = {
       "data": [{"name": "Apple Inc", "cik": "0000320193"}],
       "execution_time_ms": 12.3,
     }
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       result = await client.execute_query(
         "MATCH (c:Entity {cik: $cik}) RETURN c.name as name, c.cik as cik",
@@ -104,7 +108,7 @@ class TestKuzuMCPClient:
 
       # Verify parameters were passed
       # Note: Auto-LIMIT of 1000 is appended to queries without explicit LIMIT
-      mock_async_kuzu_client.query.assert_called_once_with(
+      mock_async_graph_client.query.assert_called_once_with(
         cypher="MATCH (c:Entity {cik: $cik}) RETURN c.name as name, c.cik as cik LIMIT 1000",
         graph_id="test",
         parameters={"cik": "0000320193"},
@@ -112,7 +116,7 @@ class TestKuzuMCPClient:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_execute_query_http_error(self, mock_async_kuzu_client):
+  async def test_execute_query_http_error(self, mock_async_graph_client):
     """Test query execution with HTTP error."""
     from httpx import HTTPError
 
@@ -125,18 +129,18 @@ class TestKuzuMCPClient:
 
     http_error = HTTPError("HTTP Error")
     http_error.response = mock_response
-    mock_async_kuzu_client.query.side_effect = http_error
+    mock_async_graph_client.query.side_effect = http_error
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
-      with pytest.raises(KuzuAPIError, match="Invalid query"):
+      with pytest.raises(GraphAPIError, match="Invalid query"):
         await client.execute_query("INVALID QUERY")
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_get_schema(self, mock_async_kuzu_client):
+  async def test_get_schema(self, mock_async_graph_client):
     """Test schema retrieval."""
     # Mock responses for the various schema queries
     query_responses = [
@@ -164,13 +168,13 @@ class TestKuzuMCPClient:
     ]
 
     # Set up the GraphClient mock to return different responses for each call
-    mock_async_kuzu_client.query.side_effect = [
+    mock_async_graph_client.query.side_effect = [
       {"data": response, "execution_time_ms": 10} for response in query_responses
     ]
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       schema = await client.get_schema()
 
@@ -190,7 +194,7 @@ class TestKuzuMCPClient:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_get_graph_info(self, mock_async_kuzu_client, mock_httpx_client):
+  async def test_get_graph_info(self, mock_async_graph_client, mock_httpx_client):
     """Test graph info retrieval."""
     # Mock API info response
     info_response = MagicMock()
@@ -215,7 +219,7 @@ class TestKuzuMCPClient:
     ]
 
     mock_httpx_client.get.return_value = info_response
-    mock_async_kuzu_client.query.side_effect = [
+    mock_async_graph_client.query.side_effect = [
       {"data": response, "execution_time_ms": 10} for response in query_responses
     ]
 
@@ -223,8 +227,8 @@ class TestKuzuMCPClient:
       "robosystems.middleware.mcp.client.httpx.AsyncClient",
       return_value=mock_httpx_client,
     ):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       info = await client.get_graph_info()
 
@@ -236,35 +240,35 @@ class TestKuzuMCPClient:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_close(self, mock_async_kuzu_client, mock_httpx_client):
+  async def test_close(self, mock_async_graph_client, mock_httpx_client):
     """Test client close."""
     with patch(
       "robosystems.middleware.mcp.client.httpx.AsyncClient",
       return_value=mock_httpx_client,
     ):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       await client.close()
 
-      mock_async_kuzu_client.close.assert_called_once()
+      mock_async_graph_client.close.assert_called_once()
       mock_httpx_client.aclose.assert_called_once()
 
 
-class TestKuzuMCPTools:
-  """Unit tests for the KuzuMCPTools class."""
+class TestGraphMCPTools:
+  """Unit tests for the GraphMCPTools class."""
 
   @pytest.fixture
-  def mock_kuzu_client(self):
-    """Create mock KuzuMCPClient."""
-    return AsyncMock(spec=KuzuMCPClient)
+  def mock_graph_client(self):
+    """Create mock GraphMCPClient."""
+    return AsyncMock(spec=GraphMCPClient)
 
   @pytest.mark.unit
-  def test_get_tool_definitions(self, mock_kuzu_client):
+  def test_get_tool_definitions(self, mock_graph_client):
     """Test tool definitions retrieval."""
     # Set up mock client with required attributes
-    mock_kuzu_client.graph_id = "test_graph"
-    tools = KuzuMCPTools(mock_kuzu_client)
+    mock_graph_client.graph_id = "test_graph"
+    tools = GraphMCPTools(mock_graph_client)
     definitions = tools.get_tool_definitions_as_dict()
 
     # Should have all tools: base tools (5-6) + workspace tools (4) + data tools (1) = 10-11
@@ -308,14 +312,14 @@ class TestKuzuMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_tool_cypher_success(self, mock_kuzu_client):
+  async def test_call_tool_cypher_success(self, mock_graph_client):
     """Test successful Cypher tool execution."""
-    mock_kuzu_client.graph_id = "test_graph"  # Add missing graph_id attribute
-    mock_kuzu_client.execute_query.return_value = [
+    mock_graph_client.graph_id = "test_graph"  # Add missing graph_id attribute
+    mock_graph_client.execute_query.return_value = [
       {"name": "Apple Inc", "cik": "0000320193"}
     ]
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
     result = await tools.call_tool(
       "read-graph-cypher",
       {"query": "MATCH (c:Entity) RETURN c.name as name, c.cik as cik LIMIT 1"},
@@ -324,17 +328,17 @@ class TestKuzuMCPTools:
 
     assert len(result) == 1
     assert result[0]["name"] == "Apple Inc"
-    mock_kuzu_client.execute_query.assert_called_once()
+    mock_graph_client.execute_query.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_tool_cypher_write_blocked(self, mock_kuzu_client):
+  async def test_call_tool_cypher_write_blocked(self, mock_graph_client):
     """Test that write operations are blocked."""
-    mock_kuzu_client.graph_id = "test_graph"  # Add missing graph_id attribute
+    mock_graph_client.graph_id = "test_graph"  # Add missing graph_id attribute
     # Add the _is_read_only_query method to the mock
-    mock_kuzu_client._is_read_only_query = MagicMock(return_value=False)
+    mock_graph_client._is_read_only_query = MagicMock(return_value=False)
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
 
     result = await tools.call_tool(
       "read-graph-cypher", {"query": "CREATE (c:Entity {name: 'Test'})"}
@@ -345,34 +349,34 @@ class TestKuzuMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_tool_schema(self, mock_kuzu_client):
+  async def test_call_tool_schema(self, mock_graph_client):
     """Test schema tool execution."""
     mock_schema = [{"label": "Entity", "type": "node", "properties": []}]
-    mock_kuzu_client.get_schema.return_value = mock_schema
+    mock_graph_client.get_schema.return_value = mock_schema
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
     result = await tools.call_tool("get-graph-schema", {}, return_raw=True)
 
     assert result == mock_schema
-    mock_kuzu_client.get_schema.assert_called_once()
+    mock_graph_client.get_schema.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_tool_unknown(self, mock_kuzu_client):
+  async def test_call_tool_unknown(self, mock_graph_client):
     """Test unknown tool handling."""
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
 
     result = await tools.call_tool("unknown-tool", {})
     assert "Unknown tool" in result
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_execute_cypher_tool(self, mock_kuzu_client):
+  async def test_execute_cypher_tool(self, mock_graph_client):
     """Test Cypher tool wrapper method."""
-    mock_kuzu_client.graph_id = "test_graph"  # Add missing graph_id attribute
-    mock_kuzu_client.execute_query.return_value = [{"count": 5}]
+    mock_graph_client.graph_id = "test_graph"  # Add missing graph_id attribute
+    mock_graph_client.execute_query.return_value = [{"count": 5}]
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
     result = await tools.execute_cypher_tool(
       "MATCH (c:Entity) RETURN count(c) as count"
     )
@@ -381,27 +385,27 @@ class TestKuzuMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_execute_schema_tool(self, mock_kuzu_client):
+  async def test_execute_schema_tool(self, mock_graph_client):
     """Test schema tool wrapper method."""
     mock_schema = [{"label": "Entity", "type": "node"}]
-    mock_kuzu_client.get_schema.return_value = mock_schema
+    mock_graph_client.get_schema.return_value = mock_schema
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
     result = await tools.execute_schema_tool()
 
     assert result == mock_schema
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_workspace_tools(self, mock_kuzu_client):
+  async def test_call_workspace_tools(self, mock_graph_client):
     """Test routing calls to workspace tools."""
     from datetime import datetime, timezone
 
-    mock_kuzu_client.graph_id = "kg1234567890abcdef"
-    mock_kuzu_client.user = MagicMock()
-    mock_kuzu_client.user.id = "user123"
+    mock_graph_client.graph_id = "kg1234567890abcdef"
+    mock_graph_client.user = MagicMock()
+    mock_graph_client.user.id = "user123"
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
 
     with patch("robosystems.database.get_db_session") as mock_db:
       mock_session = MagicMock()
@@ -437,11 +441,11 @@ class TestKuzuMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_call_data_operation_tools(self, mock_kuzu_client):
+  async def test_call_data_operation_tools(self, mock_graph_client):
     """Test routing calls to data operation tools."""
-    mock_kuzu_client.graph_id = "kg1234567890abcdef"
+    mock_graph_client.graph_id = "kg1234567890abcdef"
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
 
     with patch("robosystems.middleware.graph.get_universal_repository") as mock_repo:
       mock_repository = AsyncMock()
@@ -471,12 +475,12 @@ class TestKuzuMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_workspace_tool_error_handling(self, mock_kuzu_client):
+  async def test_workspace_tool_error_handling(self, mock_graph_client):
     """Test error handling for workspace tools."""
-    mock_kuzu_client.graph_id = "kg1234567890abcdef"
-    mock_kuzu_client.user = MagicMock()
+    mock_graph_client.graph_id = "kg1234567890abcdef"
+    mock_graph_client.user = MagicMock()
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
 
     result = await tools.call_tool(
       "create-workspace", {"name": "invalid-name"}, return_raw=True
@@ -486,23 +490,23 @@ class TestKuzuMCPTools:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_data_tool_error_handling(self, mock_kuzu_client):
+  async def test_data_tool_error_handling(self, mock_graph_client):
     """Test error handling for data operation tools."""
-    mock_kuzu_client.graph_id = "kg1234567890abcdef"
+    mock_graph_client.graph_id = "kg1234567890abcdef"
 
-    tools = KuzuMCPTools(mock_kuzu_client)
+    tools = GraphMCPTools(mock_graph_client)
 
     result = await tools.call_tool("build-fact-grid", {}, return_raw=True)
 
     assert result["error"] == "missing_elements"
 
 
-class TestKuzuMCPConfigurableSchema:
+class TestGraphMCPConfigurableSchema:
   """Test configurable schema count tables."""
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_schema_all_tables_counted(self, mock_async_kuzu_client, monkeypatch):
+  async def test_schema_all_tables_counted(self, mock_async_graph_client, monkeypatch):
     """Test that all node tables are counted for schema information."""
 
     # Mock table response
@@ -519,7 +523,7 @@ class TestKuzuMCPConfigurableSchema:
       [{"count": 50}],  # OtherTable count
     ]
 
-    mock_async_kuzu_client.query.side_effect = [
+    mock_async_graph_client.query.side_effect = [
       {"data": tables_response, "execution_time_ms": 10},  # SHOW_TABLES
       {"data": count_responses[0], "execution_time_ms": 5},  # COUNT CustomTable1
       {"data": count_responses[1], "execution_time_ms": 5},  # COUNT CustomTable2
@@ -527,8 +531,8 @@ class TestKuzuMCPConfigurableSchema:
     ]
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       schema = await client.get_schema()
 
@@ -547,17 +551,17 @@ class TestKuzuMCPConfigurableSchema:
       assert other["count"] == 50
 
       # Verify query calls
-      query_calls = [call for call in mock_async_kuzu_client.query.call_args_list]
+      query_calls = [call for call in mock_async_graph_client.query.call_args_list]
       # Should have: 1 SHOW_TABLES + 3 COUNT queries (for all 3 tables)
       assert len(query_calls) == 4
 
 
-class TestKuzuMCPFactory:
-  """Test the factory function for creating Kuzu MCP clients."""
+class TestGraphMCPFactory:
+  """Test the factory function for creating Graph MCP clients."""
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_create_kuzu_mcp_client_default(self):
+  async def test_create_graph_mcp_client_default(self):
     """Test factory with default parameters."""
     with (
       patch("robosystems.middleware.mcp.client.GraphClient"),
@@ -571,26 +575,26 @@ class TestKuzuMCPFactory:
       ),
     ):
       # Mock the factory to return a client with config.base_url attribute
-      mock_kuzu_client = MagicMock()
-      mock_kuzu_client.config.base_url = "http://localhost:8001"
-      mock_kuzu_client.close = AsyncMock()
+      mock_graph_client = MagicMock()
+      mock_graph_client.config.base_url = "http://localhost:8001"
+      mock_graph_client.close = AsyncMock()
 
       # Mock factory returns the mock client directly (not a coroutine)
       async def create_client_async(*args, **kwargs):
-        return mock_kuzu_client
+        return mock_graph_client
 
       mock_factory.side_effect = create_client_async
 
       with patch.dict("os.environ", {"ENVIRONMENT": "dev"}):
-        from robosystems.middleware.mcp import create_kuzu_mcp_client
+        from robosystems.middleware.mcp import create_graph_mcp_client
 
-        client = await create_kuzu_mcp_client()
+        client = await create_graph_mcp_client()
         assert client.graph_id == "sec"
         assert "localhost" in client.api_base_url
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_create_kuzu_mcp_client_prod(self):
+  async def test_create_graph_mcp_client_prod(self):
     """Test factory with production environment."""
     with (
       patch("robosystems.middleware.mcp.client.GraphClient"),
@@ -604,49 +608,49 @@ class TestKuzuMCPFactory:
       ),
     ):
       # Mock the factory to return a client with production config.base_url
-      mock_kuzu_client = MagicMock()
-      mock_kuzu_client.config.base_url = "http://robosystems.internal:8001"
-      mock_kuzu_client.close = AsyncMock()
+      mock_graph_client = MagicMock()
+      mock_graph_client.config.base_url = "http://robosystems.internal:8001"
+      mock_graph_client.close = AsyncMock()
 
       # Mock factory returns the mock client directly (not a coroutine)
       async def create_client_async(*args, **kwargs):
-        return mock_kuzu_client
+        return mock_graph_client
 
       mock_factory.side_effect = create_client_async
 
       with patch(
         "robosystems.middleware.mcp.factory.env.is_production", return_value=True
       ):
-        from robosystems.middleware.mcp import create_kuzu_mcp_client
+        from robosystems.middleware.mcp import create_graph_mcp_client
 
-        client = await create_kuzu_mcp_client()
+        client = await create_graph_mcp_client()
         assert "robosystems.internal" in client.api_base_url
 
   @pytest.mark.unit
   @pytest.mark.asyncio
-  async def test_create_kuzu_mcp_client_custom_url(self):
+  async def test_create_graph_mcp_client_custom_url(self):
     """Test factory with custom URL override."""
     with (
       patch("robosystems.middleware.mcp.client.GraphClient"),
       patch("robosystems.middleware.mcp.client.httpx.AsyncClient"),
     ):
-      from robosystems.middleware.mcp import create_kuzu_mcp_client
+      from robosystems.middleware.mcp import create_graph_mcp_client
 
-      client = await create_kuzu_mcp_client(
+      client = await create_graph_mcp_client(
         api_base_url="http://custom:8001", graph_id="custom"
       )
       assert client.api_base_url == "http://custom:8001"
       assert client.graph_id == "custom"
 
 
-class TestKuzuMCPErrorSanitization:
+class TestGraphMCPErrorSanitization:
   """Test error message sanitization for security."""
 
   @pytest.mark.unit
   def test_sanitize_error_removes_sensitive_info(self):
     """Test that sensitive information is removed from errors."""
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
 
       # Test various error types with sensitive information
       test_cases = [
@@ -667,7 +671,7 @@ class TestKuzuMCPErrorSanitization:
         ),
         # Database files
         (
-          Exception("Cannot open database file test_entity.kuzu"),
+          Exception("Cannot open database file test_entity.lbug"),
           "Cannot open database file [REDACTED]",
         ),
       ]
@@ -682,7 +686,7 @@ class TestKuzuMCPErrorSanitization:
     from robosystems.config import env
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
 
       # Determine expected query error message based on environment
       # In production, query errors get generic messages for security
@@ -731,7 +735,7 @@ class TestKuzuMCPErrorSanitization:
   @pytest.mark.asyncio
   @pytest.mark.unit
   async def test_http_error_sanitization(
-    self, mock_async_kuzu_client, mock_httpx_client
+    self, mock_async_graph_client, mock_httpx_client
   ):
     """Test that HTTP errors are properly sanitized."""
     from httpx import HTTPError
@@ -740,36 +744,36 @@ class TestKuzuMCPErrorSanitization:
     mock_response = MagicMock()
     mock_response.status_code = 500
     mock_response.json.return_value = {
-      "detail": "Database error at /var/lib/kuzu/test.db: disk full"
+      "detail": "Database error at /var/lib/lbug/test.db: disk full"
     }
 
     http_error = HTTPError("Internal server error")
     http_error.response = mock_response
-    mock_async_kuzu_client.query.side_effect = http_error
+    mock_async_graph_client.query.side_effect = http_error
 
     with patch(
       "robosystems.middleware.mcp.client.httpx.AsyncClient",
       return_value=mock_httpx_client,
     ):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
-      with pytest.raises(KuzuAPIError) as exc_info:
+      with pytest.raises(GraphAPIError) as exc_info:
         await client.execute_query("MATCH (n) RETURN n")
 
       # Error should be sanitized - sensitive path should NOT be in the error
       error_msg = str(exc_info.value)
-      assert "/var/lib/kuzu/" not in error_msg
+      assert "/var/lib/lbug/" not in error_msg
       assert "test.db" not in error_msg
       # Should get generic 500 error message instead
       assert "server error" in error_msg.lower()
 
 
-class TestKuzuMCPReadOnlyValidation:
+class TestGraphMCPReadOnlyValidation:
   """Test the enhanced read-only query validation."""
 
   @pytest.fixture
-  def mock_async_kuzu_client(self):
+  def mock_async_graph_client(self):
     """Create a mock GraphClient."""
     mock = AsyncMock()
     return mock
@@ -778,7 +782,7 @@ class TestKuzuMCPReadOnlyValidation:
   def test_read_only_validation_allows_valid_queries(self):
     """Test that valid read-only queries are allowed."""
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
 
       valid_queries = [
         "MATCH (n) RETURN n",
@@ -799,7 +803,7 @@ class TestKuzuMCPReadOnlyValidation:
   def test_read_only_validation_blocks_write_queries(self):
     """Test that write operations are blocked."""
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
 
       write_queries = [
         "CREATE (n:Person {name: 'John'})",
@@ -823,7 +827,7 @@ class TestKuzuMCPReadOnlyValidation:
   def test_read_only_validation_handles_edge_cases(self):
     """Test edge cases and tricky patterns."""
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
 
       # These should be allowed (field names that look like keywords)
       allowed_edge_cases = [
@@ -850,34 +854,34 @@ class TestKuzuMCPReadOnlyValidation:
         )
 
 
-class TestKuzuMCPAutoLimit:
+class TestGraphMCPAutoLimit:
   """Test the auto-LIMIT functionality for MCP context safety."""
 
   @pytest.fixture
-  def mock_async_kuzu_client(self):
+  def mock_async_graph_client(self):
     """Create a mock GraphClient."""
     mock = AsyncMock()
     return mock
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_auto_limit_appended(self, mock_async_kuzu_client):
+  async def test_auto_limit_appended(self, mock_async_graph_client):
     """Test that LIMIT is automatically appended to queries without one."""
-    mock_async_kuzu_client.query.return_value = {
+    mock_async_graph_client.query.return_value = {
       "data": [{"id": i} for i in range(1000)],
       "execution_time_ms": 50,
     }
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       # Query without LIMIT should get one added
       result = await client.execute_query("MATCH (n) RETURN n")
 
       # Verify LIMIT was appended
-      mock_async_kuzu_client.query.assert_called_once()
-      actual_query = mock_async_kuzu_client.query.call_args[1]["cypher"]
+      mock_async_graph_client.query.assert_called_once()
+      actual_query = mock_async_graph_client.query.call_args[1]["cypher"]
       assert "LIMIT 1000" in actual_query
 
       # Check for truncation marker
@@ -886,23 +890,23 @@ class TestKuzuMCPAutoLimit:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_existing_limit_preserved(self, mock_async_kuzu_client):
+  async def test_existing_limit_preserved(self, mock_async_graph_client):
     """Test that queries with existing LIMIT are not modified."""
-    mock_async_kuzu_client.query.return_value = {
+    mock_async_graph_client.query.return_value = {
       "data": [{"id": i} for i in range(50)],
       "execution_time_ms": 20,
     }
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       # Query with existing LIMIT should not be modified
       original_query = "MATCH (n) RETURN n LIMIT 50"
       result = await client.execute_query(original_query)
 
       # Verify query was not modified
-      mock_async_kuzu_client.query.assert_called_once_with(
+      mock_async_graph_client.query.assert_called_once_with(
         cypher=original_query,
         graph_id="test",
         parameters=None,
@@ -914,24 +918,24 @@ class TestKuzuMCPAutoLimit:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_auto_limit_disabled(self, mock_async_kuzu_client, monkeypatch):
+  async def test_auto_limit_disabled(self, mock_async_graph_client, monkeypatch):
     """Test that auto-limit can be disabled via environment variable."""
     monkeypatch.setattr("robosystems.config.env.MCP_AUTO_LIMIT_ENABLED", False)
 
-    mock_async_kuzu_client.query.return_value = {
+    mock_async_graph_client.query.return_value = {
       "data": [{"id": i} for i in range(100)],
       "execution_time_ms": 30,
     }
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       original_query = "MATCH (n) RETURN n"
       result = await client.execute_query(original_query)
 
       # Verify query was not modified when auto-limit is disabled
-      mock_async_kuzu_client.query.assert_called_once_with(
+      mock_async_graph_client.query.assert_called_once_with(
         cypher=original_query,
         graph_id="test",
         parameters=None,
@@ -941,7 +945,7 @@ class TestKuzuMCPAutoLimit:
 
   @pytest.mark.asyncio
   @pytest.mark.unit
-  async def test_size_based_truncation(self, mock_async_kuzu_client, monkeypatch):
+  async def test_size_based_truncation(self, mock_async_graph_client, monkeypatch):
     """Test that results are truncated when exceeding size limit."""
     monkeypatch.setattr(
       "robosystems.config.env.MCP_MAX_RESULT_SIZE_MB", 0.001
@@ -953,14 +957,14 @@ class TestKuzuMCPAutoLimit:
       for i in range(100)
     ]
 
-    mock_async_kuzu_client.query.return_value = {
+    mock_async_graph_client.query.return_value = {
       "data": large_data,
       "execution_time_ms": 100,
     }
 
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
-      client.kuzu_client = mock_async_kuzu_client
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client.graph_client = mock_async_graph_client
 
       result = await client.execute_query("MATCH (n) RETURN n")
 
@@ -973,7 +977,7 @@ class TestKuzuMCPAutoLimit:
   def test_intelligent_limit_injection(self):
     """Test intelligent LIMIT injection for complex queries."""
     with patch("robosystems.middleware.mcp.client.httpx.AsyncClient"):
-      client = KuzuMCPClient(api_base_url="http://test:8001", graph_id="test")
+      client = GraphMCPClient(api_base_url="http://test:8001", graph_id="test")
 
       # Test simple query
       result = client._inject_limit_intelligently("MATCH (n) RETURN n", 100)

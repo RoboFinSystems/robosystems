@@ -14,16 +14,16 @@ class StorageBillingConfig:
 
   # Storage included by tier (in GB) - technical tier names
   STORAGE_INCLUDED = {
-    "kuzu-standard": 100,  # 100 GB included
-    "kuzu-large": 500,  # 500 GB included
-    "kuzu-xlarge": 2000,  # 2 TB included
+    "ladybug-standard": 100,  # 100 GB included
+    "ladybug-large": 500,  # 500 GB included
+    "ladybug-xlarge": 2000,  # 2 TB included
   }
 
   # Overage costs per GB per month (in dollars)
   OVERAGE_COSTS = {
-    "kuzu-standard": Decimal("1.00"),  # $1.00/GB/month
-    "kuzu-large": Decimal("0.50"),  # $0.50/GB/month
-    "kuzu-xlarge": Decimal("0.25"),  # $0.25/GB/month
+    "ladybug-standard": Decimal("1.00"),  # $1.00/GB/month
+    "ladybug-large": Decimal("0.50"),  # $0.50/GB/month
+    "ladybug-xlarge": Decimal("0.25"),  # $0.25/GB/month
   }
 
   # Storage types and their multipliers

@@ -234,7 +234,7 @@ class XBRLGraphProcessor:
       self.entity_data = None
       return None
 
-    # Include all fields from Kuzu Entity schema
+    # Include all fields from LadybugDB Entity schema
     # Generate a deterministic UUID for the identifier while keeping CIK for the cik field
     entity_uri = f"https://www.sec.gov/CIK{self.entityId.zfill(10)}"
     entity_identifier = create_entity_id(entity_uri)
@@ -337,7 +337,7 @@ class XBRLGraphProcessor:
     report_id = create_report_id(self.report_uri)
     logger.debug(f"Creating new report with ID: {report_id}")
 
-    # Include all fields from Kuzu Report schema (exactly match KuzuSchemaBuilder)
+    # Include all fields from LadybugDB Report schema (exactly match LadybugSchemaBuilder)
     report_data = {
       "identifier": report_id,  # Primary key - UUIDv7
       "uri": self.report_uri,

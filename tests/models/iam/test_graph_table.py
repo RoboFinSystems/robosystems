@@ -262,7 +262,7 @@ class TestGraphTableModel:
       graph_id="graph1",
       graph_name="Graph 1",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
       org_id=test_org.id,
       session=db_session,
     )
@@ -272,7 +272,7 @@ class TestGraphTableModel:
       graph_id="graph2",
       graph_name="Graph 2",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
       org_id=test_org.id,
       session=db_session,
     )

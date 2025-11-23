@@ -1,4 +1,4 @@
-"""Comprehensive tests for KuzuDatabaseManager."""
+"""Comprehensive tests for LadybugDatabaseManager."""
 
 import pytest
 import tempfile
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from datetime import datetime
 
 from robosystems.graph_api.core.database_manager import (
-  KuzuDatabaseManager,
+  LadybugDatabaseManager,
   DatabaseCreateRequest,
   DatabaseInfo,
   validate_database_path,
@@ -20,7 +20,7 @@ class TestDatabasePathValidation:
 
   def test_validate_database_path_valid(self):
     """Test valid database path validation."""
-    base_path = Path("/tmp/kuzu-dbs")
+    base_path = Path("/tmp/lbug-dbs-dbs")
 
     valid_names = [
       "kg1a2b3c",
@@ -32,14 +32,14 @@ class TestDatabasePathValidation:
 
     for name in valid_names:
       result = validate_database_path(base_path, name)
-      expected = base_path / f"{name}.kuzu"
+      expected = base_path / f"{name}.lbug"
       assert result == expected
 
   def test_validate_database_path_invalid(self):
     """Test invalid database path validation."""
     from fastapi import HTTPException
 
-    base_path = Path("/tmp/kuzu-dbs")
+    base_path = Path("/tmp/lbug-dbs-dbs")
 
     invalid_names = [
       "",
@@ -66,7 +66,7 @@ class TestDatabasePathValidation:
     """Test path traversal attack prevention."""
     from fastapi import HTTPException
 
-    base_path = Path("/tmp/kuzu-dbs")
+    base_path = Path("/tmp/lbug-dbs-dbs")
 
     # These should all be blocked
     malicious_names = [
@@ -82,8 +82,8 @@ class TestDatabasePathValidation:
       assert exc_info.value.status_code == 400
 
 
-class TestKuzuDatabaseManager:
-  """Test KuzuDatabaseManager class."""
+class TestLadybugDatabaseManager:
+  """Test LadybugDatabaseManager class."""
 
   def setup_method(self):
     """Set up test fixtures."""
@@ -101,7 +101,7 @@ class TestKuzuDatabaseManager:
     mock_pool = MagicMock()
     mock_init_pool.return_value = mock_pool
 
-    manager = KuzuDatabaseManager(
+    manager = LadybugDatabaseManager(
       base_path=str(self.base_path),
       max_databases=self.max_databases,
       max_connections_per_db=5,
@@ -120,8 +120,8 @@ class TestKuzuDatabaseManager:
     )
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_create_database_success_entity_schema(
     self, mock_conn_class, mock_db_class, mock_init_pool
   ):
@@ -133,7 +133,7 @@ class TestKuzuDatabaseManager:
     mock_db_class.return_value = mock_db
     mock_conn_class.return_value = mock_conn
 
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Mock list_databases to return empty (capacity check)
     manager.list_databases = MagicMock(return_value=[])
@@ -153,10 +153,10 @@ class TestKuzuDatabaseManager:
     assert response.graph_id == "test_entity"
     assert response.schema_applied is True
     assert response.execution_time_ms > 0
-    assert "test_entity.kuzu" in response.database_path
+    assert "test_entity.lbug" in response.database_path
 
-    # Verify Kuzu calls
-    expected_db_path = str(self.base_path / "test_entity.kuzu")
+    # Verify LadybugDB calls
+    expected_db_path = str(self.base_path / "test_entity.lbug")
     # Check that database was called with expected parameters (buffer_pool_size is now included)
     mock_db_class.assert_called_once()
     call_args = mock_db_class.call_args
@@ -174,8 +174,8 @@ class TestKuzuDatabaseManager:
     # New implementation uses connection pool, no direct database/connection storage
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
-  @patch("kuzu.Database")
-  @patch("kuzu.Connection")
+  @patch("real_ladybug.Database")
+  @patch("real_ladybug.Connection")
   def test_create_database_read_only(
     self, mock_conn_class, mock_db_class, mock_init_pool
   ):
@@ -187,7 +187,7 @@ class TestKuzuDatabaseManager:
     mock_db_class.return_value = mock_db
     mock_conn_class.return_value = mock_conn
 
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     manager.list_databases = MagicMock(return_value=[])
 
     request = DatabaseCreateRequest(
@@ -215,7 +215,7 @@ class TestKuzuDatabaseManager:
     from fastapi import HTTPException
 
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), max_databases=2)
+    manager = LadybugDatabaseManager(str(self.base_path), max_databases=2)
 
     # Mock list_databases to return max capacity
     manager.list_databases = MagicMock(return_value=["db1", "db2"])
@@ -239,11 +239,11 @@ class TestKuzuDatabaseManager:
     from fastapi import HTTPException
 
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     manager.list_databases = MagicMock(return_value=[])
 
-    # Create a database file to simulate existing database (Kuzu 0.11.0)
-    existing_db_path = self.base_path / "existing_db.kuzu"
+    # Create a database file to simulate existing database (LadybugDB 0.11.0)
+    existing_db_path = self.base_path / "existing_db.lbug"
     existing_db_path.touch()
 
     request = DatabaseCreateRequest(
@@ -260,16 +260,16 @@ class TestKuzuDatabaseManager:
     assert "already exists" in str(exc_info.value.detail)
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
-  @patch("kuzu.Database")
-  def test_create_database_kuzu_error_cleanup(self, mock_db_class, mock_init_pool):
+  @patch("real_ladybug.Database")
+  def test_create_database_lbug_error_cleanup(self, mock_db_class, mock_init_pool):
     """Test database creation error handling and cleanup."""
     from fastapi import HTTPException
 
     mock_init_pool.return_value = MagicMock()
-    # Make Kuzu raise an exception
-    mock_db_class.side_effect = Exception("Kuzu connection failed")
+    # Make LadybugDB raise an exception
+    mock_db_class.side_effect = Exception("LadybugDB connection failed")
 
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     manager.list_databases = MagicMock(return_value=[])
 
     request = DatabaseCreateRequest(
@@ -286,17 +286,17 @@ class TestKuzuDatabaseManager:
     assert "Database creation failed" in str(exc_info.value.detail)
 
     # Verify cleanup - database directory should not exist
-    db_path = self.base_path / "test_fail.kuzu"
+    db_path = self.base_path / "test_fail.lbug"
     assert not db_path.exists()
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
   def test_delete_database_success(self, mock_init_pool):
     """Test successful database deletion."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
-    # Create a test database file (Kuzu 0.11.0)
-    db_path = self.base_path / "test_db.kuzu"
+    # Create a test database file (LadybugDB 0.11.0)
+    db_path = self.base_path / "test_db.lbug"
     db_path.touch()
 
     # Mock connection pool cleanup method
@@ -322,7 +322,7 @@ class TestKuzuDatabaseManager:
     from fastapi import HTTPException
 
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     with pytest.raises(HTTPException) as exc_info:
       manager.delete_database("nonexistent_db")
@@ -334,24 +334,24 @@ class TestKuzuDatabaseManager:
   def test_list_databases(self, mock_init_pool):
     """Test database listing."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Create test database directories
-    (self.base_path / "db1.kuzu").touch()
-    (self.base_path / "db2.kuzu").touch()
+    (self.base_path / "db1.lbug").touch()
+    (self.base_path / "db2.lbug").touch()
     (self.base_path / "not_a_db").mkdir()  # Should be ignored
-    (self.base_path / "db3.kuzu").touch()
+    (self.base_path / "db3.lbug").touch()
 
     databases = manager.list_databases()
 
-    # Should return only .kuzu files, sorted
+    # Should return only .lbug files, sorted
     assert databases == ["db1", "db2", "db3"]
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
   def test_list_databases_empty(self, mock_init_pool):
     """Test database listing when no databases exist."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     databases = manager.list_databases()
 
@@ -361,10 +361,10 @@ class TestKuzuDatabaseManager:
   def test_get_database_info_success(self, mock_init_pool):
     """Test successful database info retrieval."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
-    # Create test database file (Kuzu 0.11.0 uses single files)
-    db_path = self.base_path / "test_db.kuzu"
+    # Create test database file (LadybugDB 0.11.0 uses single files)
+    db_path = self.base_path / "test_db.lbug"
     db_path.write_bytes(b"x" * 1024)  # 1KB file
 
     # Mock health check
@@ -389,7 +389,7 @@ class TestKuzuDatabaseManager:
     from fastapi import HTTPException
 
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     with pytest.raises(HTTPException) as exc_info:
       manager.get_database_info("nonexistent_db")
@@ -401,14 +401,14 @@ class TestKuzuDatabaseManager:
   def test_get_all_databases_info(self, mock_init_pool):
     """Test retrieval of all databases info."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), max_databases=100)
+    manager = LadybugDatabaseManager(str(self.base_path), max_databases=100)
 
     # Mock list_databases and get_database_info
     manager.list_databases = MagicMock(return_value=["db1", "db2"])
 
     mock_db_info_1 = DatabaseInfo(
       graph_id="db1",
-      database_path="/tmp/db1.kuzu",
+      database_path="/tmp/db1.lbug",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024,
       read_only=False,
@@ -417,7 +417,7 @@ class TestKuzuDatabaseManager:
     )
     mock_db_info_2 = DatabaseInfo(
       graph_id="db2",
-      database_path="/tmp/db2.kuzu",
+      database_path="/tmp/db2.lbug",
       created_at="2023-01-01T00:00:00",
       size_bytes=2048,
       read_only=True,
@@ -441,14 +441,14 @@ class TestKuzuDatabaseManager:
   def test_health_check_all(self, mock_init_pool):
     """Test health check for all databases."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Mock databases with different health status
     manager.list_databases = MagicMock(return_value=["healthy_db", "unhealthy_db"])
 
     healthy_info = DatabaseInfo(
       graph_id="healthy_db",
-      database_path="/tmp/healthy_db.kuzu",
+      database_path="/tmp/healthy_db.lbug",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024,
       read_only=False,
@@ -457,7 +457,7 @@ class TestKuzuDatabaseManager:
     )
     unhealthy_info = DatabaseInfo(
       graph_id="unhealthy_db",
-      database_path="/tmp/unhealthy_db.kuzu",
+      database_path="/tmp/unhealthy_db.lbug",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024,
       read_only=False,
@@ -477,10 +477,10 @@ class TestKuzuDatabaseManager:
   def test_check_database_health_success(self, mock_init_pool):
     """Test successful database health check (file existence only)."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Create test database directory
-    db_path = self.base_path / "test_db.kuzu"
+    db_path = self.base_path / "test_db.lbug"
     db_path.touch()
 
     is_healthy = manager._check_database_health("test_db")
@@ -491,7 +491,7 @@ class TestKuzuDatabaseManager:
   def test_check_database_health_failure(self, mock_init_pool):
     """Test database health check failure (file does not exist)."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Do not create test database directory to test file existence failure
     is_healthy = manager._check_database_health("test_db")
@@ -502,7 +502,7 @@ class TestKuzuDatabaseManager:
   def test_check_database_health_not_found(self, mock_init_pool):
     """Test database health check for non-existent database."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     is_healthy = manager._check_database_health("nonexistent_db")
 
@@ -512,7 +512,7 @@ class TestKuzuDatabaseManager:
   def test_apply_entity_schema(self, mock_init_pool):
     """Test entity schema application using dynamic schema loader."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     mock_conn = MagicMock()
 
@@ -543,7 +543,7 @@ class TestKuzuDatabaseManager:
   def test_apply_shared_schema(self, mock_init_pool):
     """Test shared schema application using dynamic schema loader."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     mock_conn = MagicMock()
 
@@ -564,7 +564,7 @@ class TestKuzuDatabaseManager:
   def test_apply_schema_unknown_type(self, mock_init_pool):
     """Test schema application with unknown schema type."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     mock_conn = MagicMock()
 
@@ -576,7 +576,7 @@ class TestKuzuDatabaseManager:
   def test_apply_fallback_entity_schema(self, mock_init_pool):
     """Test fallback entity schema application."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     mock_conn = MagicMock()
 
@@ -599,7 +599,7 @@ class TestKuzuDatabaseManager:
   def test_apply_fallback_entity_schema_with_error(self, mock_init_pool):
     """Test fallback entity schema application with database error."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     mock_conn = MagicMock()
     mock_conn.execute.side_effect = Exception("Database error")
@@ -609,26 +609,26 @@ class TestKuzuDatabaseManager:
     assert result is False
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
-  def test_map_schema_type_to_kuzu(self, mock_init_pool):
-    """Test schema type mapping to Kuzu types."""
+  def test_map_schema_type_to_lbug(self, mock_init_pool):
+    """Test schema type mapping to LadybugDB types."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     # Test known type mappings
-    assert manager._map_schema_type_to_kuzu("STRING") == "STRING"
-    assert manager._map_schema_type_to_kuzu("INT64") == "INT64"
-    assert manager._map_schema_type_to_kuzu("DOUBLE") == "DOUBLE"
-    assert manager._map_schema_type_to_kuzu("BOOLEAN") == "BOOLEAN"
-    assert manager._map_schema_type_to_kuzu("TIMESTAMP") == "TIMESTAMP"
-    assert manager._map_schema_type_to_kuzu("DATE") == "DATE"
+    assert manager._map_schema_type_to_lbug("STRING") == "STRING"
+    assert manager._map_schema_type_to_lbug("INT64") == "INT64"
+    assert manager._map_schema_type_to_lbug("DOUBLE") == "DOUBLE"
+    assert manager._map_schema_type_to_lbug("BOOLEAN") == "BOOLEAN"
+    assert manager._map_schema_type_to_lbug("TIMESTAMP") == "TIMESTAMP"
+    assert manager._map_schema_type_to_lbug("DATE") == "DATE"
 
     # Test case insensitivity
-    assert manager._map_schema_type_to_kuzu("string") == "STRING"
-    assert manager._map_schema_type_to_kuzu("int64") == "INT64"
+    assert manager._map_schema_type_to_lbug("string") == "STRING"
+    assert manager._map_schema_type_to_lbug("int64") == "INT64"
 
     # Test unknown type defaults to STRING
-    assert manager._map_schema_type_to_kuzu("UNKNOWN_TYPE") == "STRING"
-    assert manager._map_schema_type_to_kuzu("") == "STRING"
+    assert manager._map_schema_type_to_lbug("UNKNOWN_TYPE") == "STRING"
+    assert manager._map_schema_type_to_lbug("") == "STRING"
 
   @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
   @patch("robosystems.schemas.loader.get_schema_loader")
@@ -639,7 +639,7 @@ class TestKuzuDatabaseManager:
     mock_init_pool.return_value = MagicMock()
     mock_get_schema_loader.side_effect = ImportError("Schema loader not available")
 
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
     mock_conn = MagicMock()
 
     result = manager._apply_entity_schema(mock_conn)
@@ -654,7 +654,7 @@ class TestKuzuDatabaseManager:
   def test_apply_shared_schema_with_different_repositories(self, mock_init_pool):
     """Test shared schema application with different repository types."""
     mock_init_pool.return_value = MagicMock()
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     mock_conn = MagicMock()
 
@@ -675,7 +675,7 @@ class TestKuzuDatabaseManager:
     mock_pool = MagicMock()
     mock_init_pool.return_value = mock_pool
 
-    manager = KuzuDatabaseManager(str(self.base_path), self.max_databases)
+    manager = LadybugDatabaseManager(str(self.base_path), self.max_databases)
 
     manager.close_all_connections()
 
@@ -736,8 +736,8 @@ class TestKuzuDatabaseManager:
 
 
 @pytest.mark.integration
-class TestKuzuDatabaseManagerIntegration:
-  """Integration tests for KuzuDatabaseManager."""
+class TestLadybugDatabaseManagerIntegration:
+  """Integration tests for LadybugDatabaseManager."""
 
   def setup_method(self):
     """Set up test fixtures."""
@@ -750,15 +750,15 @@ class TestKuzuDatabaseManagerIntegration:
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
   def test_concurrent_database_operations(self):
-    """Test concurrent database creation and deletion with mocked Kuzu."""
+    """Test concurrent database creation and deletion with mocked LadybugDB."""
     import time
     import concurrent.futures
     from unittest.mock import patch, MagicMock
 
-    # Mock Kuzu to avoid segmentation faults while testing concurrency logic
+    # Mock LadybugDB to avoid segmentation faults while testing concurrency logic
     with (
-      patch("kuzu.Database") as mock_db_class,
-      patch("kuzu.Connection") as mock_conn_class,
+      patch("real_ladybug.Database") as mock_db_class,
+      patch("real_ladybug.Connection") as mock_conn_class,
     ):
       # Setup mocks
       mock_db = MagicMock()
@@ -771,7 +771,7 @@ class TestKuzuDatabaseManagerIntegration:
         "robosystems.schemas.loader.get_schema_loader",
         side_effect=ImportError("Mocked schema error"),
       ):
-        manager = KuzuDatabaseManager(str(self.base_path), max_databases=20)
+        manager = LadybugDatabaseManager(str(self.base_path), max_databases=20)
 
       # Track operations and errors
       results = {"created": [], "deleted": [], "errors": []}
@@ -815,7 +815,7 @@ class TestKuzuDatabaseManagerIntegration:
         # Wait for all to complete
         concurrent.futures.wait(create_futures)
 
-      # Since we're mocking Kuzu, we can't rely on filesystem directories
+      # Since we're mocking LadybugDB, we can't rely on filesystem directories
       # Instead, check that the creation operations succeeded
       created_count = len(results["created"])
 
@@ -826,7 +826,7 @@ class TestKuzuDatabaseManagerIntegration:
 
       # Test 2: Concurrent deletion - create actual directories first for this test
       for db_name in results["created"]:
-        db_path = self.base_path / f"{db_name}.kuzu"
+        db_path = self.base_path / f"{db_name}.lbug"
         db_path.touch(exist_ok=True)
 
       existing_dbs = results["created"][:3]  # Test with first 3 created databases
@@ -863,7 +863,7 @@ class TestKuzuDatabaseManagerIntegration:
         time.sleep(0.05)
         for i in range(3, 6):
           # Create directories for deletion tests
-          db_path = self.base_path / f"{mixed_db_names[i]}.kuzu"
+          db_path = self.base_path / f"{mixed_db_names[i]}.lbug"
           db_path.touch(exist_ok=True)
 
           futures.append(executor.submit(create_database, mixed_db_names[i]))
@@ -896,7 +896,7 @@ class TestKuzuDatabaseManagerIntegration:
         assert response.status == "success"
 
         # Create directory for cleanup test
-        integrity_path = self.base_path / "integrity_test.kuzu"
+        integrity_path = self.base_path / "integrity_test.lbug"
         integrity_path.touch(exist_ok=True)
 
         # Clean up
@@ -908,11 +908,11 @@ class TestKuzuDatabaseManagerIntegration:
           f"Database manager integrity compromised after concurrent operations: {e}"
         )
 
-      # Clean up any remaining test directories (since mocking doesn't create real Kuzu DBs)
+      # Clean up any remaining test directories (since mocking doesn't create real LadybugDB DBs)
       import shutil
 
       for pattern in ["concurrent_db_", "mixed_db_"]:
-        for path in self.base_path.glob(f"{pattern}*.kuzu"):
+        for path in self.base_path.glob(f"{pattern}*.lbug"):
           try:
             shutil.rmtree(path, ignore_errors=True)
           except Exception:

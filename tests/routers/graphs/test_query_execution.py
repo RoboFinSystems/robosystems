@@ -403,7 +403,7 @@ class TestErrorHandlingAndSanitization:
   async def test_database_error_sanitization(self, mock_repository):
     """Test that database errors are sanitized."""
     mock_repository.execute_query.side_effect = RuntimeError(
-      "Error at /var/lib/kuzu/database.db: Permission denied"
+      "Error at /var/lib/lbug/database.db: Permission denied"
     )
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -415,7 +415,7 @@ class TestErrorHandlingAndSanitization:
       )
 
     # Original error should be raised but logged version should be sanitized
-    assert "/var/lib/kuzu" in str(exc_info.value)
+    assert "/var/lib/lbug" in str(exc_info.value)
 
   @pytest.mark.asyncio
   async def test_syntax_error_handling(self, mock_repository):

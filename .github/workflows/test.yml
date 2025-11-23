@@ -6,7 +6,7 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.12"
+        default: "3.13"
       runner_config:
         required: true
         type: string
@@ -29,8 +29,8 @@ jobs:
       POSTGRES_PASSWORD: postgres
       # Graph API Configuration
       GRAPH_API_URL: http://localhost:8001
-      KUZU_DATABASE_PATH: ./data/kuzu-dbs
-      KUZU_MAX_DATABASES_PER_NODE: "50"
+      LBUG_DATABASE_PATH: ./data/lbug-dbs
+      LBUG_MAX_DATABASES_PER_NODE: "50"
       # JWT and security secrets for authentication (test environment)
       JWT_SECRET_KEY: test-jwt-secret-key-12345678901234567890abcdef
       CONNECTION_CREDENTIALS_KEY: test-connection-credentials-key-12345678901234567890abcdef
@@ -53,8 +53,8 @@ jobs:
       AWS_S3_ACCESS_KEY_ID: test
       AWS_S3_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
-      # Kuzu Backup Configuration
-      KUZU_BACKUP_ENCRYPTION_KEY: test-encryption-key-dev
+      # Graph Database Backup Configuration
+      LBUG_BACKUP_ENCRYPTION_KEY: test-encryption-key-dev
       # Queue Management Configuration (from pytest.ini)
       ADMISSION_MEMORY_THRESHOLD: "99.0"
       ADMISSION_CPU_THRESHOLD: "99.0"
@@ -63,9 +63,9 @@ jobs:
       QUERY_QUEUE_MAX_CONCURRENT: "100"
       QUERY_QUEUE_MAX_PER_USER: "100"
       QUERY_QUEUE_TIMEOUT: "600"
-      KUZU_HTTP_TIMEOUT: "60"
-      KUZU_QUERY_TIMEOUT: "60"
-      KUZU_MAX_QUERY_LENGTH: "100000"
+      LBUG_HTTP_TIMEOUT: "60"
+      LBUG_QUERY_TIMEOUT: "60"
+      LBUG_MAX_QUERY_LENGTH: "100000"
       # Feature Flags (test configuration)
       USER_REGISTRATION_ENABLED: "true"
       RATE_LIMIT_ENABLED: "false"
@@ -79,10 +79,10 @@ jobs:
       CONNECTION_PLAID_ENABLED: "true"
       BILLING_ENABLED: "true"
       SECURITY_AUDIT_ENABLED: "true"
-      KUZU_CIRCUIT_BREAKERS_ENABLED: "true"
-      KUZU_REDIS_CACHE_ENABLED: "true"
-      KUZU_RETRY_LOGIC_ENABLED: "true"
-      KUZU_HEALTH_CHECKS_ENABLED: "true"
+      LBUG_CIRCUIT_BREAKERS_ENABLED: "true"
+      LBUG_REDIS_CACHE_ENABLED: "true"
+      LBUG_RETRY_LOGIC_ENABLED: "true"
+      LBUG_HEALTH_CHECKS_ENABLED: "true"
       SUBGRAPH_CREATION_ENABLED: "true"
       BACKUP_CREATION_ENABLED: "true"
       AGENT_POST_ENABLED: "true"
@@ -102,8 +102,8 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-      # Kuzu runs as file-based database, no service container needed
-      # Graph databases are created in ./data/kuzu-dbs/ directory during tests
+      # Graph database (LadybugDB backend) runs as file-based database, no service container needed
+      # Graph databases are created in ./data/lbug-dbs/ directory during tests
       valkey:
         # Note: GitHub Actions doesn't support custom commands for service containers
         # We'll configure authentication in a setup step instead
@@ -146,7 +146,7 @@ jobs:
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ inputs.python-version || '3.12' }}
+          python-version: ${{ inputs.python-version || '3.13' }}
 
       - name: Install uv (GitHub-hosted runners only)
         if: runner.os == 'Linux' && !contains(runner.name, 'robosystems')
@@ -191,13 +191,13 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Kuzu databases and LocalStack
+      - name: Setup graph databases and LocalStack
         run: |
-          # Create Kuzu database directory structure
-          echo "Setting up Kuzu database directories..."
-          mkdir -p ./data/kuzu-dbs
-          chmod 755 ./data/kuzu-dbs
-          echo "✅ Kuzu database directory created: ./data/kuzu-dbs"
+          # Create graph database directory structure
+          echo "Setting up graph database directories..."
+          mkdir -p ./data/lbug-dbs
+          chmod 755 ./data/lbug-dbs
+          echo "✅ Graph database directory created: ./data/lbug-dbs"
 
           # Wait for LocalStack to be ready
           echo "Waiting for LocalStack to be ready..."
@@ -255,11 +255,11 @@ jobs:
           docker ps -q --filter "name=redis" | xargs -r docker rm -f || true
           docker ps -q --filter "name=localstack" | xargs -r docker rm -f || true
 
-          # Clean up Kuzu test databases
-          echo "🧹 Cleaning up Kuzu test databases..."
-          if [ -d "./data/kuzu-dbs" ]; then
-            rm -rf ./data/kuzu-dbs/*
-            echo "✅ Kuzu test databases cleaned up"
+          # Clean up graph test databases
+          echo "🧹 Cleaning up graph test databases..."
+          if [ -d "./data/lbug-dbs" ]; then
+            rm -rf ./data/lbug-dbs/*
+            echo "✅ Graph test databases cleaned up"
           fi
 
           # Wait for services to fully stop and ports to be released

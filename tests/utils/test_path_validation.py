@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from robosystems.utils.path_validation import (
   validate_graph_id,
-  get_kuzu_database_path,
+  get_lbug_database_path,
   get_duckdb_staging_path,
 )
 
@@ -83,16 +83,16 @@ class TestValidateGraphId:
     assert "only alphanumeric" in exc_info.value.detail
 
 
-class TestGetKuzuDatabasePath:
+class TestGetLadybugDatabasePath:
   def test_valid_graph_id_returns_path(self):
     with tempfile.TemporaryDirectory() as tmpdir:
-      result = get_kuzu_database_path("test_graph", base_path=tmpdir)
-      assert result == Path(tmpdir) / "test_graph.kuzu"
-      assert result.suffix == ".kuzu"
+      result = get_lbug_database_path("test_graph", base_path=tmpdir)
+      assert result == Path(tmpdir) / "test_graph.lbug"
+      assert result.suffix == ".lbug"
 
   def test_path_stays_within_base_directory(self):
     with tempfile.TemporaryDirectory() as tmpdir:
-      result = get_kuzu_database_path("my_graph_123", base_path=tmpdir)
+      result = get_lbug_database_path("my_graph_123", base_path=tmpdir)
       resolved = result.resolve()
       base_resolved = Path(tmpdir).resolve()
       assert str(resolved).startswith(str(base_resolved))
@@ -100,27 +100,27 @@ class TestGetKuzuDatabasePath:
   def test_invalid_graph_id_raises_error(self):
     with tempfile.TemporaryDirectory() as tmpdir:
       with pytest.raises(HTTPException) as exc_info:
-        get_kuzu_database_path("../etc/passwd", base_path=tmpdir)
+        get_lbug_database_path("../etc/passwd", base_path=tmpdir)
       assert exc_info.value.status_code == 400
 
   def test_empty_graph_id_raises_error(self):
     with tempfile.TemporaryDirectory() as tmpdir:
       with pytest.raises(HTTPException) as exc_info:
-        get_kuzu_database_path("", base_path=tmpdir)
+        get_lbug_database_path("", base_path=tmpdir)
       assert exc_info.value.status_code == 400
 
   def test_uses_env_config_when_no_base_path(self):
-    result = get_kuzu_database_path("test_graph")
-    assert "test_graph.kuzu" in str(result)
-    assert result.suffix == ".kuzu"
+    result = get_lbug_database_path("test_graph")
+    assert "test_graph.lbug" in str(result)
+    assert result.suffix == ".lbug"
 
   def test_path_format_consistency(self):
     with tempfile.TemporaryDirectory() as tmpdir:
-      result1 = get_kuzu_database_path("graph1", base_path=tmpdir)
-      result2 = get_kuzu_database_path("graph2", base_path=tmpdir)
+      result1 = get_lbug_database_path("graph1", base_path=tmpdir)
+      result2 = get_lbug_database_path("graph2", base_path=tmpdir)
       assert result1.parent == result2.parent
-      assert result1.name == "graph1.kuzu"
-      assert result2.name == "graph2.kuzu"
+      assert result1.name == "graph1.lbug"
+      assert result2.name == "graph2.lbug"
 
 
 class TestGetDuckDBStagingPath:
@@ -162,24 +162,24 @@ class TestGetDuckDBStagingPath:
       assert result1.name == "graph1.duckdb"
       assert result2.name == "graph2.duckdb"
 
-  def test_different_from_kuzu_path(self):
+  def test_different_from_lbug_path(self):
     with tempfile.TemporaryDirectory() as tmpdir:
-      kuzu_path = get_kuzu_database_path("graph", base_path=tmpdir)
+      lbug_path = get_lbug_database_path("graph", base_path=tmpdir)
       duckdb_path = get_duckdb_staging_path("graph", base_path=tmpdir)
-      assert kuzu_path != duckdb_path
-      assert kuzu_path.suffix == ".kuzu"
+      assert lbug_path != duckdb_path
+      assert lbug_path.suffix == ".lbug"
       assert duckdb_path.suffix == ".duckdb"
 
 
 class TestPathValidationIntegration:
   def test_same_graph_id_different_extensions(self):
     with tempfile.TemporaryDirectory() as tmpdir:
-      kuzu = get_kuzu_database_path("my_graph", base_path=tmpdir)
+      lbug = get_lbug_database_path("my_graph", base_path=tmpdir)
       duckdb = get_duckdb_staging_path("my_graph", base_path=tmpdir)
 
-      assert kuzu.parent == duckdb.parent
-      assert kuzu.stem == duckdb.stem == "my_graph"
-      assert kuzu.suffix == ".kuzu"
+      assert lbug.parent == duckdb.parent
+      assert lbug.stem == duckdb.stem == "my_graph"
+      assert lbug.suffix == ".lbug"
       assert duckdb.suffix == ".duckdb"
 
   def test_validation_applied_consistently(self):
@@ -187,7 +187,7 @@ class TestPathValidationIntegration:
       invalid_id = "../etc/passwd"
 
       with pytest.raises(HTTPException):
-        get_kuzu_database_path(invalid_id, base_path=tmpdir)
+        get_lbug_database_path(invalid_id, base_path=tmpdir)
 
       with pytest.raises(HTTPException):
         get_duckdb_staging_path(invalid_id, base_path=tmpdir)

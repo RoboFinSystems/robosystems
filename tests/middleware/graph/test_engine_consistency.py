@@ -1,7 +1,7 @@
 """
 Tests for graph engine consistency and interface compliance.
 
-This test suite validates that the current Kuzu engine implementation
+This test suite validates that the current LadybugDB engine implementation
 provides consistent behavior and implements the expected interface properly.
 """
 
@@ -16,8 +16,8 @@ from robosystems.middleware.graph import (
 
 
 @pytest.fixture
-def temp_kuzu_db():
-  """Create a temporary Kuzu database for testing."""
+def temp_lbug_db():
+  """Create a temporary LadybugDB database for testing."""
   with tempfile.TemporaryDirectory() as temp_dir:
     db_path = os.path.join(temp_dir, "test.db")
     yield db_path
@@ -26,9 +26,9 @@ def temp_kuzu_db():
 class TestEngineInterface:
   """Test that the engine implements the expected interface consistently."""
 
-  def test_engine_implements_required_methods(self, temp_kuzu_db):
+  def test_engine_implements_required_methods(self, temp_lbug_db):
     """Test that engine implements all required interface methods."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
 
     # Required methods
     interface_methods = [
@@ -45,9 +45,9 @@ class TestEngineInterface:
     # Cleanup
     engine.close()
 
-  def test_repository_implements_required_methods(self, temp_kuzu_db):
+  def test_repository_implements_required_methods(self, temp_lbug_db):
     """Test that repository implements all required interface methods."""
-    repo = Repository(temp_kuzu_db)
+    repo = Repository(temp_lbug_db)
 
     # Required methods
     repo_methods = [
@@ -67,9 +67,9 @@ class TestEngineInterface:
     # Cleanup
     repo.close()
 
-  def test_health_check_format_consistency(self, temp_kuzu_db):
+  def test_health_check_format_consistency(self, temp_lbug_db):
     """Test that health checks return consistent format."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
     health = engine.health_check()
 
     # Required fields
@@ -79,15 +79,15 @@ class TestEngineInterface:
       assert field in health
 
     # Engine should be identified correctly
-    assert health["engine"] == "kuzu"
+    assert health["engine"] == "ladybug"
     assert health["status"] in ["healthy", "degraded", "unhealthy"]
 
     # Cleanup
     engine.close()
 
-  def test_simple_query_consistency(self, temp_kuzu_db):
+  def test_simple_query_consistency(self, temp_lbug_db):
     """Test that simple queries work consistently."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
 
     # Test basic query
     result = engine.execute_query("RETURN 'test' as message, 42 as number")
@@ -108,9 +108,9 @@ class TestEngineInterface:
 class TestRepositoryConsistency:
   """Test that repository provides consistent behavior."""
 
-  def test_repository_execute_alias(self, temp_kuzu_db):
+  def test_repository_execute_alias(self, temp_lbug_db):
     """Test that execute method works as alias for execute_query."""
-    repo = Repository(temp_kuzu_db)
+    repo = Repository(temp_lbug_db)
 
     # Both methods should return the same result for the same query
     query = "RETURN 'alias_test' as test_value"
@@ -125,62 +125,62 @@ class TestRepositoryConsistency:
     # Cleanup
     repo.close()
 
-  def test_count_nodes_behavior(self, kuzu_repository_with_schema):
+  def test_count_nodes_behavior(self, lbug_repository_with_schema):
     """Test count_nodes method behavior."""
     # Create some test data first
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE (c1:Entity {identifier: 'count-test-1', name: 'Test Entity 1'}),
              (c2:Entity {identifier: 'count-test-2', name: 'Test Entity 2'})
     """)
 
     # Count entities
-    count = kuzu_repository_with_schema.count_nodes("Entity")
+    count = lbug_repository_with_schema.count_nodes("Entity")
     assert count >= 2  # At least the two we just created
 
-    # Count non-existent nodes - Kuzu will throw an error for non-existent tables
+    # Count non-existent nodes - LadybugDB will throw an error for non-existent tables
     try:
-      count_none = kuzu_repository_with_schema.count_nodes("NonExistentLabel")
+      count_none = lbug_repository_with_schema.count_nodes("NonExistentLabel")
       assert count_none == 0  # If method handles it gracefully
     except Exception:
-      # Expected behavior in Kuzu - non-existent tables throw errors
+      # Expected behavior in LadybugDB - non-existent tables throw errors
       pass
 
-  def test_node_exists_behavior(self, kuzu_repository_with_schema):
+  def test_node_exists_behavior(self, lbug_repository_with_schema):
     """Test node_exists method behavior."""
     # Create test data
-    kuzu_repository_with_schema.execute_query("""
+    lbug_repository_with_schema.execute_query("""
       CREATE (c:Entity {identifier: 'exists-test', name: 'Exists Test Entity'})
     """)
 
     # Test existing node
-    exists = kuzu_repository_with_schema.node_exists(
+    exists = lbug_repository_with_schema.node_exists(
       "Entity", {"identifier": "exists-test"}
     )
     assert exists is True
 
     # Test non-existent node
-    not_exists = kuzu_repository_with_schema.node_exists(
+    not_exists = lbug_repository_with_schema.node_exists(
       "Entity", {"identifier": "does-not-exist"}
     )
     assert not_exists is False
 
-    # Test non-existent label - Kuzu will throw an error for non-existent tables
+    # Test non-existent label - LadybugDB will throw an error for non-existent tables
     try:
-      no_label = kuzu_repository_with_schema.node_exists(
+      no_label = lbug_repository_with_schema.node_exists(
         "NonExistentLabel", {"id": "test"}
       )
       assert no_label is False  # If method handles it gracefully
     except Exception:
-      # Expected behavior in Kuzu - non-existent tables throw errors
+      # Expected behavior in LadybugDB - non-existent tables throw errors
       pass
 
 
 class TestEngineErrorHandling:
   """Test that engine handles errors consistently."""
 
-  def test_invalid_query_handling(self, temp_kuzu_db):
+  def test_invalid_query_handling(self, temp_lbug_db):
     """Test that invalid queries are handled properly."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
 
     # Test invalid syntax
     with pytest.raises(Exception):  # Should raise some form of query error
@@ -193,9 +193,9 @@ class TestEngineErrorHandling:
     # Cleanup
     engine.close()
 
-  def test_execute_single_no_results(self, temp_kuzu_db):
+  def test_execute_single_no_results(self, temp_lbug_db):
     """Test execute_single with no results."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
 
     # Create a table first
     engine.execute_query("CREATE NODE TABLE TestEmpty(id INT64, PRIMARY KEY (id))")
@@ -211,16 +211,16 @@ class TestEngineErrorHandling:
 class TestContextManagerSupport:
   """Test that engines support context manager protocol."""
 
-  def test_engine_context_manager(self, temp_kuzu_db):
+  def test_engine_context_manager(self, temp_lbug_db):
     """Test that engine supports context manager protocol."""
-    with Engine(temp_kuzu_db) as engine:
+    with Engine(temp_lbug_db) as engine:
       assert engine is not None
       health = engine.health_check()
       assert "status" in health
 
-  def test_repository_context_manager(self, temp_kuzu_db):
+  def test_repository_context_manager(self, temp_lbug_db):
     """Test that repository supports context manager protocol."""
-    with Repository(temp_kuzu_db) as repo:
+    with Repository(temp_lbug_db) as repo:
       assert repo is not None
       health = repo.health_check()
       assert "status" in health
@@ -229,9 +229,9 @@ class TestContextManagerSupport:
 class TestDatabaseOperations:
   """Test database operation consistency."""
 
-  def test_schema_creation_consistency(self, temp_kuzu_db):
+  def test_schema_creation_consistency(self, temp_lbug_db):
     """Test that schema creation works consistently."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
 
     # Create node tables
     engine.execute_query("""
@@ -271,9 +271,9 @@ class TestDatabaseOperations:
     # Cleanup
     engine.close()
 
-  def test_transaction_consistency(self, temp_kuzu_db):
+  def test_transaction_consistency(self, temp_lbug_db):
     """Test that transactions work consistently."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
 
     # Create schema
     engine.execute_query(
@@ -301,9 +301,9 @@ class TestDatabaseOperations:
 class TestPerformanceCharacteristics:
   """Test performance characteristics of the engine."""
 
-  def test_bulk_operations_performance(self, temp_kuzu_db):
+  def test_bulk_operations_performance(self, temp_lbug_db):
     """Test that bulk operations perform reasonably."""
-    engine = Engine(temp_kuzu_db)
+    engine = Engine(temp_lbug_db)
 
     # Create schema
     engine.execute_query(

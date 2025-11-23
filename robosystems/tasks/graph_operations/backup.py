@@ -15,7 +15,7 @@ from ...adapters.s3 import S3BackupAdapter
 from ...models.iam import GraphBackup, BackupStatus
 from ...database import session
 from ...logger import logger
-from ...operations.kuzu.backup_manager import BackupJob, BackupFormat, BackupType
+from ...operations.lbug.backup_manager import BackupJob, BackupFormat, BackupType
 from ...graph_api.client.factory import GraphClientFactory
 
 
@@ -126,7 +126,7 @@ def backup_retention_management(
   )
 
   try:
-    from robosystems.operations.kuzu.backup_manager import BackupManager
+    from robosystems.operations.lbug.backup_manager import BackupManager
 
     s3_adapter = S3BackupAdapter()
     backup_manager = BackupManager(s3_adapter=s3_adapter)
@@ -198,7 +198,7 @@ def backup_health_check(self) -> Dict[str, Any]:
   logger.info(f"Starting backup health check task {task_id}")
 
   try:
-    from robosystems.operations.kuzu.backup_manager import BackupManager
+    from robosystems.operations.lbug.backup_manager import BackupManager
 
     s3_adapter = S3BackupAdapter()
     backup_manager = BackupManager(s3_adapter=s3_adapter)
@@ -326,11 +326,11 @@ def restore_graph_backup(
     # Call Graph API to restore the backup
     logger.info(f"Calling Graph API to restore database for graph '{graph_id}'")
 
-    # Get properly routed Kuzu client
+    # Get properly routed LadybugDB client
     client = GraphClientFactory.create_client(graph_id, operation_type="write")
 
     try:
-      # Call restore endpoint on Kuzu instance
+      # Call restore endpoint on LadybugDB instance
       restore_result = asyncio.run(
         client.restore_backup(
           graph_id=graph_id,
@@ -653,9 +653,9 @@ def create_graph_backup(
       "csv": ".csv.zip",
       "json": ".json.zip",
       "parquet": ".parquet.zip",
-      "full_dump": ".kuzu.zip",
+      "full_dump": ".lbug.zip",
     }
-    extension = format_extensions.get(backup_format.lower(), ".kuzu.zip")
+    extension = format_extensions.get(backup_format.lower(), ".lbug.zip")
 
     if compression:
       extension += ".gz"
@@ -692,7 +692,7 @@ def create_graph_backup(
       {"status": "backing_up", "backup_id": str(backup_record.id)},
     )
 
-    from robosystems.operations.kuzu.backup_manager import create_backup_manager
+    from robosystems.operations.lbug.backup_manager import create_backup_manager
 
     backup_manager = create_backup_manager()
 
@@ -857,7 +857,7 @@ def restore_graph_backup_sse(
       )
 
       try:
-        from robosystems.operations.kuzu.backup_manager import create_backup_manager
+        from robosystems.operations.lbug.backup_manager import create_backup_manager
 
         backup_manager = create_backup_manager()
 

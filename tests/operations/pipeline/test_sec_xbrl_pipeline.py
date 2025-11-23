@@ -974,7 +974,7 @@ class TestInitializationEdgeCases:
     )
 
   # def test_check_completion_triggers_ingestion(self, pipeline):
-  #   """Test that pipeline completion triggers Kuzu ingestion."""
+  #   """Test that pipeline completion triggers LadybugDB ingestion."""
   #   # Set up pipeline state for completion
   #   pipeline.redis_client.hgetall.return_value = {
   #     "expected_tasks": "5",
@@ -990,7 +990,7 @@ class TestInitializationEdgeCases:
   #   with patch(
   #     "robosystems.operations.pipelines.sec_xbrl_filings.logger"
   #   ) as mock_logger:
-  #     with patch.object(pipeline, "_trigger_kuzu_ingestion") as mock_trigger:
+  #     with patch.object(pipeline, "_trigger_lbug_ingestion") as mock_trigger:
   #       is_complete = pipeline._check_completion()
 
   #       assert is_complete is True

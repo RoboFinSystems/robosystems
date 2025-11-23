@@ -69,7 +69,7 @@ def downgrade() -> None:
     sa.Column(
       "instance_tier",
       sa.VARCHAR(),
-      server_default="kuzu-shared",
+      server_default="ladybug-shared",
       autoincrement=False,
       nullable=False,
     ),

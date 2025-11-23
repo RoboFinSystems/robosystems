@@ -127,7 +127,7 @@ def stage_file_in_duckdb(
       f"Staging {len(s3_files)} files in DuckDB table {table.table_name} with file_id tracking"
     )
 
-    # Stage in DuckDB using Graph API client factory (ECS worker → EC2 Kuzu instance)
+    # Stage in DuckDB using Graph API client factory (ECS worker → EC2 LadybugDB instance)
     try:
       client = asyncio.run(
         GraphClientFactory.create_client(graph_id=graph_id, operation_type="write")

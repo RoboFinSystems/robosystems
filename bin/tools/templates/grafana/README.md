@@ -47,14 +47,14 @@ Monitors AWS costs broken down by:
 
 ### Non-Production Monitoring (nonprod.json)
 Monitors staging and development environments:
-- Kuzu database metrics
+- LadybugDB database metrics
 - API performance metrics
 - Worker queue metrics
 - Error rates and alerts
 
 ### Production Monitoring (prod.json)
 Production-specific monitoring with:
-- Enhanced Kuzu database metrics
+- Enhanced LadybugDB database metrics
 - API latency and throughput
 - Worker performance and backlogs
 - Critical error tracking
@@ -63,7 +63,7 @@ Production-specific monitoring with:
 ## Required Tags
 
 For proper cost allocation, ensure your AWS resources are tagged with:
-- `user:component` - Component identifier (e.g., "api", "worker", "kuzu")
+- `user:component` - Component identifier (e.g., "api", "worker", "ladybug")
 - `user:environment` - Environment name (e.g., "prod", "staging", "dev")
 
 ## Notes

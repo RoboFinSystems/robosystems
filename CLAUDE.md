@@ -144,7 +144,7 @@ robosystems/
 
 2. **Graph Database System**
 
-   - **Primary Backend**: Kuzu embedded graph database (all main tiers)
+   - **Primary Backend**: LadybugDB embedded graph database (all main tiers)
    - **Multi-Tenant**: Separate database per entity
    - **Tiered Infrastructure**: Multi-tenant shared instances to dedicated instances with increasing resources
    - **Shared Repositories**: SEC, industry, economic data
@@ -213,7 +213,7 @@ just demo-user                     # Create/reuse demo user (shared across all d
 
 **Backend:**
 
-- **Primary**: Kuzu embedded graph database (all main subscription tiers)
+- **Primary**: LadybugDB embedded graph database (all main subscription tiers)
 - **Optional**: Neo4j (disabled by default, available on request)
 
 **Infrastructure Tiers:**
@@ -231,13 +231,13 @@ just demo-user                     # Create/reuse demo user (shared across all d
 - **Shared Repositories**: r7g.medium instances for public data testing
 
 ```bash
-# Graph operations (works with both Kuzu and Neo4j backends)
+# Graph operations (works with both LadybugDB and Neo4j backends)
 just graph-query graph_id "MATCH (e:Entity) RETURN e"  # Execute Cypher query via API
 just graph-health                                       # Health check
 just graph-info graph_id                                # Database info
 
-# Kuzu direct database access (bypasses API)
-just kuzu-query graph_id "MATCH (e:Entity) RETURN e"  # Direct embedded database query
+# LadybugDB direct database access (bypasses API)
+just lbug-query graph_id "MATCH (e:Entity) RETURN e"  # Direct embedded database query
 
 # SEC shared database
 just sec-load NVDA 2025            # Load company data (year optional)
@@ -246,7 +246,7 @@ just sec-health                    # SEC database health
 
 ### Subgraph Management
 
-Subgraphs allow users on dedicated tiers (kuzu-large and kuzu-xlarge) to create isolated databases on their parent graph's instance. They share the parent's resources and credit pool while maintaining separate data.
+Subgraphs allow users on dedicated tiers (ladybug-large and ladybug-xlarge) to create isolated databases on their parent graph's instance. They share the parent's resources and credit pool while maintaining separate data.
 
 #### Key Concepts
 
@@ -259,9 +259,9 @@ Subgraphs allow users on dedicated tiers (kuzu-large and kuzu-xlarge) to create 
 
 #### Tier Limits
 
-- **kuzu-standard**: 0 subgraphs (not supported)
-- **kuzu-large**: 10 subgraphs maximum
-- **kuzu-xlarge**: 25 subgraphs maximum
+- **ladybug-standard**: 0 subgraphs (not supported)
+- **ladybug-large**: 10 subgraphs maximum
+- **ladybug-xlarge**: 25 subgraphs maximum
 
 #### Features
 
@@ -300,7 +300,7 @@ Database allocation:
 - 5: Pipeline tracking
 - 6: Credits cache
 - 7: Rate limiting
-- 8: Kuzu client caching
+- 8: LadybugDB client caching
 
 ## Infrastructure & Deployment
 
@@ -313,7 +313,7 @@ Database allocation:
 
 - **API/Workers**: ECS Fargate ARM64 (1-2 tasks, 99% Spot)
 - **PostgreSQL**: RDS (db.t4g.micro, 20-100GB auto-scaling)
-- **Kuzu**: EC2 ARM64 (r7g.medium/large/xlarge, auto-updated AMI)
+- **LadybugDB**: EC2 ARM64 (r7g.medium/large/xlarge, auto-updated AMI)
 - **Valkey**: ElastiCache (cache.t4g.micro)
 
 ### Configuration Management
@@ -343,7 +343,7 @@ just test-cov                      # Coverage report
 # Test markers
 @pytest.mark.unit                  # Unit tests
 @pytest.mark.integration           # Integration tests
-@pytest.mark.kuzu_integration      # Kuzu-specific integration
+@pytest.mark.lbug_integration      # LadybugDB-specific integration
 @pytest.mark.celery                # Celery task tests
 ```
 
@@ -359,7 +359,7 @@ just cf-lint template              # CloudFormation linting & validation
 
 **Standards:**
 
-- Python 3.12.10, uv package management
+- Python 3.13, uv package management
 - Ruff formatting (88-char, double quotes)
 - Type hints with basedpyright
 - **NO COMMENTS** unless explicitly requested
@@ -456,7 +456,7 @@ just logs-grep robosystems-worker ERROR        # Search worker logs
 ### Secret Management
 
 AWS Secrets Manager Base: `robosystems/{staging|prod}`
-Components: `robosystems/{staging|prod}/{postgres|s3|kuzu}`
+Components: `robosystems/{staging|prod}/{postgres|s3|ladybug}`
 
 Never commit secrets to code. Use environment variables or AWS Secrets Manager.
 

@@ -46,7 +46,7 @@ class UnifiedTaskManager:
       from robosystems.config.valkey_registry import create_async_redis_client
 
       self._redis_client = create_async_redis_client(
-        ValkeyDatabase.KUZU_CACHE, decode_responses=True
+        ValkeyDatabase.LBUG_CACHE, decode_responses=True
       )
     return self._redis_client
 
@@ -62,7 +62,7 @@ class UnifiedTaskManager:
     """
     # Try direct Redis lookup first
     redis_client = await self.get_redis()
-    task_json = await redis_client.get(f"kuzu:task:{task_id}")
+    task_json = await redis_client.get(f"lbug:task:{task_id}")
 
     if task_json:
       return json.loads(task_json)
@@ -91,7 +91,7 @@ class UnifiedTaskManager:
     redis_client = await self.get_redis()
 
     # Get all task keys
-    pattern = "kuzu:task:*"
+    pattern = "lbug:task:*"
     keys = await redis_client.keys(pattern)
 
     tasks = []

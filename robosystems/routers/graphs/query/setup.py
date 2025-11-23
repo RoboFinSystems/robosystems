@@ -18,7 +18,7 @@ def _get_query_operation_type(graph_id: str) -> str:
   """
   Determine the correct operation type for query operations.
 
-  For consistency with distributed Kuzu architecture:
+  For consistency with distributed LadybugDB architecture:
   - User graphs: Always use 'write' to ensure writer cluster routing
   - Shared repositories: Use 'read' for reader cluster routing
   """

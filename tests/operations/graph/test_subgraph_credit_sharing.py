@@ -35,7 +35,7 @@ def parent_graph(db_session: Session, test_user: User) -> Graph:
     graph_id=graph_id,
     graph_name="Test Parent Graph",
     graph_type="generic",
-    graph_tier=GraphTier.KUZU_STANDARD.value,
+    graph_tier=GraphTier.LADYBUG_STANDARD.value,
   )
   db_session.add(graph)
   db_session.commit()
@@ -129,7 +129,7 @@ class TestSubgraphCreditSharing:
 
     assert summary["monthly_allocation"] == 10000.0
     assert summary["current_balance"] > 0
-    assert summary["graph_tier"] == GraphTier.KUZU_STANDARD.value
+    assert summary["graph_tier"] == GraphTier.LADYBUG_STANDARD.value
 
   def test_multiple_subgraphs_share_same_pool(
     self,

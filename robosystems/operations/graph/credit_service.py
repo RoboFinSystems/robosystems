@@ -55,7 +55,7 @@ class CreditService:
     user_id: str,
     billing_admin_id: str,
     subscription_tier: str,
-    graph_tier: GraphTier = GraphTier.KUZU_STANDARD,
+    graph_tier: GraphTier = GraphTier.LADYBUG_STANDARD,
   ) -> GraphCredits:
     """
     Create credit pool for a new graph.
@@ -64,8 +64,8 @@ class CreditService:
         graph_id: Unique graph identifier
         user_id: Graph owner user ID
         billing_admin_id: User responsible for billing
-        subscription_tier: User's subscription tier (kuzu-standard/kuzu-large/kuzu-xlarge)
-        graph_tier: Database tier (kuzu-standard/kuzu-large/kuzu-xlarge)
+        subscription_tier: User's subscription tier (ladybug-standard/ladybug-large/ladybug-xlarge)
+        graph_tier: Database tier (ladybug-standard/ladybug-large/ladybug-xlarge)
 
     Returns:
         GraphCredits instance
@@ -565,12 +565,12 @@ class CreditService:
   def get_subscription_tier_limits(self, subscription_tier: str) -> Dict[str, Any]:
     """Get limits and features for a subscription tier."""
     allowed_tiers = {
-      "kuzu-standard": [GraphTier.KUZU_STANDARD],
-      "kuzu-large": [GraphTier.KUZU_STANDARD, GraphTier.KUZU_LARGE],
-      "kuzu-xlarge": [
-        GraphTier.KUZU_STANDARD,
-        GraphTier.KUZU_LARGE,
-        GraphTier.KUZU_XLARGE,
+      "ladybug-standard": [GraphTier.LADYBUG_STANDARD],
+      "ladybug-large": [GraphTier.LADYBUG_STANDARD, GraphTier.LADYBUG_LARGE],
+      "ladybug-xlarge": [
+        GraphTier.LADYBUG_STANDARD,
+        GraphTier.LADYBUG_LARGE,
+        GraphTier.LADYBUG_XLARGE,
         GraphTier.NEO4J_COMMUNITY_LARGE,
         GraphTier.NEO4J_ENTERPRISE_XLARGE,
       ],
@@ -647,12 +647,12 @@ class CreditService:
   ) -> bool:
     """Check if subscription tier allows creating a graph of the specified tier."""
     tier_restrictions = {
-      "kuzu-standard": [GraphTier.KUZU_STANDARD],
-      "kuzu-large": [GraphTier.KUZU_STANDARD, GraphTier.KUZU_LARGE],
-      "kuzu-xlarge": [
-        GraphTier.KUZU_STANDARD,
-        GraphTier.KUZU_LARGE,
-        GraphTier.KUZU_XLARGE,
+      "ladybug-standard": [GraphTier.LADYBUG_STANDARD],
+      "ladybug-large": [GraphTier.LADYBUG_STANDARD, GraphTier.LADYBUG_LARGE],
+      "ladybug-xlarge": [
+        GraphTier.LADYBUG_STANDARD,
+        GraphTier.LADYBUG_LARGE,
+        GraphTier.LADYBUG_XLARGE,
         GraphTier.NEO4J_COMMUNITY_LARGE,
         GraphTier.NEO4J_ENTERPRISE_XLARGE,
       ],

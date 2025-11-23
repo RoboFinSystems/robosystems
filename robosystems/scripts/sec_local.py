@@ -25,15 +25,15 @@ from robosystems.logger import logger
 class SECLocalPipeline:
   """Local SEC pipeline for testing and development."""
 
-  def __init__(self, backend: str = "kuzu"):
+  def __init__(self, backend: str = "ladybug"):
     """
     Initialize the local pipeline.
 
     Args:
-        backend: Database backend to use ("kuzu" or "neo4j")
+        backend: Database backend to use ("ladybug" or "neo4j")
     """
-    if backend not in ("kuzu", "neo4j"):
-      raise ValueError(f"Invalid backend: {backend}. Must be 'kuzu' or 'neo4j'")
+    if backend not in ("ladybug", "neo4j"):
+      raise ValueError(f"Invalid backend: {backend}. Must be 'ladybug' or 'neo4j'")
 
     self.backend = backend
     self.sec_database = "sec"
@@ -198,7 +198,7 @@ class SECLocalPipeline:
     1. Download - Fetch XBRL files from SEC
     2. Process - Convert XBRL to parquet format
     3. Consolidate - Combine small parquet files into larger ones
-    4. Ingest - Load consolidated files into graph database (Kuzu or Neo4j)
+    4. Ingest - Load consolidated files into graph database (LadybugDB or Neo4j)
 
     Note: Consolidation processes ALL available files across all years
     for optimal graph database ingestion performance.
@@ -321,7 +321,7 @@ class SECLocalPipeline:
         )
         self._clear_consolidated_files()
 
-        # Also reset the Kuzu database to avoid duplicates
+        # Also reset the LadybugDB database to avoid duplicates
         logger.info("🔄 Resetting SEC database to avoid duplicates...")
         if not self.reset_database(clear_s3=False):
           logger.error("Failed to reset database, continuing anyway...")
@@ -623,7 +623,7 @@ def main():
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-  # Reset Kuzu database and start fresh (default)
+  # Reset LadybugDB database and start fresh (default)
   %(prog)s reset
 
   # Reset Neo4j database
@@ -655,9 +655,9 @@ Examples:
   )
   reset_parser.add_argument(
     "--backend",
-    default="kuzu",
-    choices=["kuzu", "neo4j"],
-    help="Database backend to use (default: kuzu)",
+    default="ladybug",
+    choices=["ladybug", "neo4j"],
+    help="Database backend to use (default: ladybug)",
   )
 
   # Load command
@@ -683,9 +683,9 @@ Examples:
   )
   load_parser.add_argument(
     "--backend",
-    default="kuzu",
-    choices=["kuzu", "neo4j"],
-    help="Database backend to use (default: kuzu)",
+    default="ladybug",
+    choices=["ladybug", "neo4j"],
+    help="Database backend to use (default: ladybug)",
   )
 
   # Ingest API command
@@ -706,9 +706,9 @@ Examples:
   )
   ingest_api_parser.add_argument(
     "--backend",
-    default="kuzu",
-    choices=["kuzu", "neo4j"],
-    help="Database backend to use (default: kuzu)",
+    default="ladybug",
+    choices=["ladybug", "neo4j"],
+    help="Database backend to use (default: ladybug)",
   )
 
   args = parser.parse_args()

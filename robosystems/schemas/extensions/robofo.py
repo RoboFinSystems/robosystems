@@ -1,5 +1,5 @@
 """
-RoboFO Schema Extension for Kuzu
+RoboFO Schema Extension for LadybugDB
 
 Front office, CRM, sales, and marketing functionality.
 Extends the base schema with sales and marketing-specific entities.

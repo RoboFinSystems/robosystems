@@ -1,5 +1,5 @@
 """
-Integration tests for circuit breaker functionality in Kuzu client factory.
+Integration tests for circuit breaker functionality in LadybugDB client factory.
 """
 
 import asyncio

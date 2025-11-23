@@ -6,7 +6,7 @@ The Graph Client and Factory system provides the critical interface between the 
 
 **Backend Support:**
 
-- **Kuzu**: EC2-based instances with DynamoDB registry discovery
+- **LadybugDB**: EC2-based instances with DynamoDB registry discovery
 - **Neo4j**: EC2-based instances with Graph API HTTP interface
 
 ## Architecture
@@ -24,7 +24,7 @@ The Graph Client and Factory system provides the critical interface between the 
 ├─────────────────────────────────────────────────────────────────┤
 │              Backend-Specific Infrastructure                    │
 │                                                                 │
-│  Kuzu Backend:          │  Neo4j Backend:                       │
+│  LadybugDB Backend:          │  Neo4j Backend:                       │
 │  ┌──────────────────┐   │  ┌──────────────────┐                 │
 │  │ EC2 Instances    │   │  │ EC2 Instances    │                 │
 │  │ - Multi-Tenant   │   │  │ - Dedicated      │                 │
@@ -44,12 +44,12 @@ The factory is responsible for intelligent routing decisions based on:
 - **Graph Type**: User graphs vs shared repositories (SEC, industry, economic)
 - **Operation Type**: Read vs Write operations
 - **Environment**: Development, Staging, Production
-- **Tier**: kuzu-standard, kuzu-large, kuzu-xlarge for user graphs
-- **Backend Type**: Kuzu or Neo4j
+- **Tier**: ladybug-standard, ladybug-large, ladybug-xlarge for user graphs
+- **Backend Type**: LadybugDB or Neo4j
 
 #### Routing Logic
 
-##### Kuzu Backend
+##### LadybugDB Backend
 
 ```python
 # Shared Repositories (SEC, industry, economic)
@@ -58,7 +58,7 @@ The factory is responsible for intelligent routing decisions based on:
     ├── Production/Staging
     │   ├── Try Replica ALB first (if enabled)
     │   └── Fallback to Shared Master (if allowed)
-    └── Development → Local Kuzu Instance
+    └── Development → Local LadybugDB Instance
 
 # User Graphs (kg1a2b3c4d5 format)
 ├── All Operations → Discover from DynamoDB
@@ -169,7 +169,7 @@ from robosystems.config.graph_tier import GraphTier
 client = await GraphClientFactory.create_client(
     graph_id="kg1a2b3c4d5",           # User graph ID
     operation_type="write",            # Write operation
-    tier=GraphTier.KUZU_LARGE         # Tier determines routing
+    tier=GraphTier.LBUG_LARGE         # Tier determines routing
 )
 
 # Perform operations
@@ -232,9 +232,9 @@ except ServiceUnavailableError as e:
 
 ```bash
 # Backend Selection
-GRAPH_BACKEND_TYPE=kuzu                       # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=ladybug                       # ladybug|neo4j_community|neo4j_enterprise
 
-# API Endpoints (Kuzu Backend)
+# API Endpoints (LadybugDB Backend)
 GRAPH_API_URL=http://localhost:8001          # Default API URL (dev/fallback)
 GRAPH_API_KEY=graph_api_64chars...           # Authentication key
 
@@ -249,17 +249,17 @@ GRAPH_HEALTH_CHECKS_ENABLED=true             # Enable health checking
 GRAPH_REDIS_CACHE_ENABLED=true               # Enable Redis caching
 
 # Performance Tuning
-KUZU_CLIENT_TIMEOUT=30                       # Request timeout (seconds)
-KUZU_CLIENT_MAX_RETRIES=3                    # Maximum retry attempts
-KUZU_CIRCUIT_BREAKER_THRESHOLD=5             # Failures before opening
-KUZU_CIRCUIT_BREAKER_TIMEOUT=60              # Seconds before reset
-KUZU_CACHE_TTL=300                           # Cache TTL (seconds)
+LBUG_CLIENT_TIMEOUT=30                       # Request timeout (seconds)
+LBUG_CLIENT_MAX_RETRIES=3                    # Maximum retry attempts
+LBUG_CIRCUIT_BREAKER_THRESHOLD=5             # Failures before opening
+LBUG_CIRCUIT_BREAKER_TIMEOUT=60              # Seconds before reset
+LBUG_CACHE_TTL=300                           # Cache TTL (seconds)
 ```
 
 ### DynamoDB Configuration
 
 ```bash
-# For instance discovery (both Kuzu and Neo4j backends)
+# For instance discovery (both LadybugDB and Neo4j backends)
 INSTANCE_REGISTRY_TABLE=robosystems-graph-{env}-instance-registry
 GRAPH_REGISTRY_TABLE=robosystems-graph-{env}-graph-registry
 VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
@@ -267,7 +267,7 @@ VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
 
 ## Instance Discovery Flow
 
-### Kuzu Backend
+### LadybugDB Backend
 
 1. **Check Cache**: Redis cache with 5-minute TTL
 2. **Query DynamoDB**: Find instance hosting the graph
@@ -278,7 +278,7 @@ VOLUME_REGISTRY_TABLE=robosystems-graph-{env}-volume-registry
 ```python
 # Internal discovery flow (handled automatically)
 1. GraphClientFactory.create_client("kg1a2b3c4d5")
-2. → Check Redis: kuzu:prod:location:kg1a2b3c4d5
+2. → Check Redis: lbug:prod:location:kg1a2b3c4d5
 3. → Query DynamoDB: GraphRegistry[graph_id=kg1a2b3c4d5]
 4. → Get instance: i-1234567890 at 10.0.1.100
 5. → Create client: http://10.0.1.100:8001
@@ -419,7 +419,7 @@ result = await client.query(
 
 ```python
 # Match configuration to workload requirements
-# Configuration types are defined in deployment (e.g., kuzu-standard, kuzu-large, kuzu-xlarge)
+# Configuration types are defined in deployment (e.g., ladybug-standard, ladybug-large, ladybug-xlarge)
 # Consult your infrastructure setup for available tiers
 ```
 
@@ -529,7 +529,7 @@ async def process_graph_data(graph_id: str, data_files: list):
     client = await GraphClientFactory.create_client(
         graph_id=graph_id,
         operation_type="write",
-        tier=GraphTier.KUZU_STANDARD
+        tier=GraphTier.LBUG_STANDARD
     )
 
     # Ingest data

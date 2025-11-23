@@ -288,7 +288,7 @@ async def auth_integration_client(test_db):
   allowing real JWT/API key validation to occur. It DOES mock:
   - Rate limiting (disabled)
   - Database session (uses test_db)
-  - GraphClient/GraphClientFactory (to avoid Kuzu access)
+  - GraphClient/GraphClientFactory (to avoid LadybugDB access)
   """
   from robosystems.middleware.rate_limits import (
     auth_rate_limit_dependency,
@@ -337,7 +337,7 @@ async def auth_integration_client(test_db):
   app.dependency_overrides[get_db_session] = override_get_db
   app.dependency_overrides[get_async_db_session] = override_get_async_db
 
-  # Mock GraphClientFactory to avoid Kuzu database access
+  # Mock GraphClientFactory to avoid LadybugDB database access
   with patch(
     "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
   ) as mock_factory:
@@ -429,7 +429,7 @@ def sample_graph(test_db, test_org):
     session=test_db,
     base_schema="base",
     schema_extensions=["roboledger"],
-    graph_tier=GraphTier.KUZU_STANDARD,
+    graph_tier=GraphTier.LADYBUG_STANDARD,
     graph_instance_id="test-instance",
     graph_metadata={
       "purpose": "testing",
@@ -566,10 +566,10 @@ def sample_sec_submissions():
   return pd.DataFrame(data)
 
 
-# Kuzu Database Testing Fixtures
+# LadybugDB Database Testing Fixtures
 @pytest.fixture
-def temp_kuzu_db():
-  """Create a temporary Kuzu database for testing."""
+def temp_lbug_db():
+  """Create a temporary LadybugDB database for testing."""
   import tempfile
 
   with tempfile.TemporaryDirectory() as temp_dir:
@@ -578,21 +578,21 @@ def temp_kuzu_db():
 
 
 @pytest.fixture
-def kuzu_repository(temp_kuzu_db):
-  """Create a Kuzu Repository instance for testing."""
+def lbug_repository(temp_lbug_db):
+  """Create a LadybugDB Repository instance for testing."""
   from robosystems.middleware.graph import Repository
 
-  repo = Repository(temp_kuzu_db)
+  repo = Repository(temp_lbug_db)
   yield repo
   repo.close()
 
 
 @pytest.fixture
-def kuzu_repository_with_schema(temp_kuzu_db):
-  """Create a Kuzu Repository with the entity schema already applied."""
+def lbug_repository_with_schema(temp_lbug_db):
+  """Create a LadybugDB Repository with the entity schema already applied."""
   from robosystems.middleware.graph import Repository
 
-  repo = Repository(temp_kuzu_db)
+  repo = Repository(temp_lbug_db)
 
   # Apply entity schema
   schema_statements = [
@@ -754,12 +754,12 @@ def kuzu_repository_with_schema(temp_kuzu_db):
 
 
 @pytest.fixture
-def mock_kuzu_database_context():
-  """Mock kuzu database context manager for testing."""
+def mock_lbug_database_context():
+  """Mock lbug database context manager for testing."""
   from unittest.mock import Mock, patch
 
   with patch(
-    "robosystems.operations.multitenant_utils.kuzu_database_context"
+    "robosystems.operations.multitenant_utils.lbug_database_context"
   ) as mock_context:
     mock_repo = Mock()
     mock_repo.execute_query.return_value = []
@@ -812,15 +812,15 @@ def sample_fact_data():
   }
 
 
-def create_kuzu_node(repo, node_type: str, **properties):
-  """Helper function to create a node in Kuzu."""
+def create_lbug_node(repo, node_type: str, **properties):
+  """Helper function to create a node in LadybugDB."""
   props_str = ", ".join([f"{k}: '{v}'" for k, v in properties.items()])
   cypher = f"CREATE (n:{node_type} {{{props_str}}}) RETURN n"
   result = repo.execute_single(cypher)
   return result
 
 
-def create_kuzu_relationship(
+def create_lbug_relationship(
   repo,
   from_node_id: str,
   to_node_id: str,
@@ -828,7 +828,7 @@ def create_kuzu_relationship(
   from_label: str = None,
   to_label: str = None,
 ):
-  """Helper function to create a relationship in Kuzu."""
+  """Helper function to create a relationship in LadybugDB."""
   from_match = f"(a:{from_label})" if from_label else "(a)"
   to_match = f"(b:{to_label})" if to_label else "(b)"
 
@@ -843,11 +843,11 @@ def create_kuzu_relationship(
 
 
 @pytest.fixture
-def kuzu_helpers():
-  """Helper functions for Kuzu testing."""
+def lbug_helpers():
+  """Helper functions for LadybugDB testing."""
   return {
-    "create_node": create_kuzu_node,
-    "create_relationship": create_kuzu_relationship,
+    "create_node": create_lbug_node,
+    "create_relationship": create_lbug_relationship,
   }
 
 

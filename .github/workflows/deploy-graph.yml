@@ -40,7 +40,7 @@ on:
         required: true
         type: string
         description: ECR image tag
-      # Infrastructure inputs (from deploy-kuzu-infrastructure)
+      # Infrastructure inputs (from graph infrastructure deployment)
       secret_arn:
         required: true
         type: string
@@ -57,54 +57,54 @@ on:
         required: true
         type: string
         description: Volume detachment SNS topic ARN from infrastructure deployment
-      # Kuzu Tier Configuration
-      kuzu_large_enabled:
+      # Graph Tier Configuration
+      lbug_large_enabled:
         required: false
         type: string
-        description: Enable Kuzu large tier writers
+        description: Enable large tier writers
         default: ""
-      kuzu_xlarge_enabled:
+      lbug_xlarge_enabled:
         required: false
         type: string
-        description: Enable Kuzu xlarge tier writers
+        description: Enable xlarge tier writers
         default: ""
-      # Kuzu Scaling Configuration (passed from parent workflow)
-      kuzu_standard_min_instances:
+      # Graph Scaling Configuration (passed from parent workflow)
+      lbug_standard_min_instances:
         required: false
         type: string
         description: Standard tier minimum instances
         default: ""
-      kuzu_standard_max_instances:
+      lbug_standard_max_instances:
         required: false
         type: string
         description: Standard tier maximum instances
         default: ""
-      kuzu_large_min_instances:
+      lbug_large_min_instances:
         required: false
         type: string
         description: Large tier minimum instances
         default: ""
-      kuzu_large_max_instances:
+      lbug_large_max_instances:
         required: false
         type: string
         description: Large tier maximum instances
         default: ""
-      kuzu_xlarge_min_instances:
+      lbug_xlarge_min_instances:
         required: false
         type: string
         description: XLarge tier minimum instances
         default: ""
-      kuzu_xlarge_max_instances:
+      lbug_xlarge_max_instances:
         required: false
         type: string
         description: XLarge tier maximum instances
         default: ""
-      kuzu_shared_min_instances:
+      lbug_shared_min_instances:
         required: false
         type: string
         description: Shared tier minimum instances
         default: ""
-      kuzu_shared_max_instances:
+      lbug_shared_max_instances:
         required: false
         type: string
         description: Shared tier maximum instances
@@ -131,7 +131,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      kuzu_matrix: ${{ steps.set-matrix.outputs.kuzu_matrix }}
+      lbug_matrix: ${{ steps.set-matrix.outputs.lbug_matrix }}
       neo4j_matrix: ${{ steps.set-matrix.outputs.neo4j_matrix }}
     steps:
       - name: Checkout Code
@@ -155,31 +155,33 @@ jobs:
             ENV_SUFFIX="PROD"
             # Set environment variables for production
             export STANDARD_ENABLED_PROD="true"  # Always enabled
-            export KUZU_LARGE_ENABLED_PROD="${{ inputs.kuzu_large_enabled }}"
-            export KUZU_XLARGE_ENABLED_PROD="${{ inputs.kuzu_xlarge_enabled }}"
+            export LBUG_LARGE_ENABLED_PROD="${{ inputs.lbug_large_enabled }}"
+            export LBUG_XLARGE_ENABLED_PROD="${{ inputs.lbug_xlarge_enabled }}"
             # Export scaling variables for production (passed from parent workflow)
-            export KUZU_STANDARD_MIN_INSTANCES_PROD="${{ inputs.kuzu_standard_min_instances }}"
-            export KUZU_STANDARD_MAX_INSTANCES_PROD="${{ inputs.kuzu_standard_max_instances }}"
-            export KUZU_LARGE_MIN_INSTANCES_PROD="${{ inputs.kuzu_large_min_instances }}"
-            export KUZU_LARGE_MAX_INSTANCES_PROD="${{ inputs.kuzu_large_max_instances }}"
-            export KUZU_XLARGE_MIN_INSTANCES_PROD="${{ inputs.kuzu_xlarge_min_instances }}"
-            export KUZU_XLARGE_MAX_INSTANCES_PROD="${{ inputs.kuzu_xlarge_max_instances }}"
-            export KUZU_SHARED_MIN_INSTANCES_PROD="${{ inputs.kuzu_shared_min_instances }}"
-            export KUZU_SHARED_MAX_INSTANCES_PROD="${{ inputs.kuzu_shared_max_instances }}"
+            export LBUG_STANDARD_MIN_INSTANCES_PROD="${{ inputs.lbug_standard_min_instances }}"
+            export LBUG_STANDARD_MAX_INSTANCES_PROD="${{ inputs.lbug_standard_max_instances }}"
+            export LBUG_LARGE_MIN_INSTANCES_PROD="${{ inputs.lbug_large_min_instances }}"
+            export LBUG_LARGE_MAX_INSTANCES_PROD="${{ inputs.lbug_large_max_instances }}"
+            export LBUG_XLARGE_MIN_INSTANCES_PROD="${{ inputs.lbug_xlarge_min_instances }}"
+            export LBUG_XLARGE_MAX_INSTANCES_PROD="${{ inputs.lbug_xlarge_max_instances }}"
+            export LBUG_SHARED_MIN_INSTANCES_PROD="${{ inputs.lbug_shared_min_instances }}"
+            export LBUG_SHARED_MAX_INSTANCES_PROD="${{ inputs.lbug_shared_max_instances }}"
           else
             ENV_KEY="staging"
             ENV_SUFFIX="STAGING"
             # Set environment variables for staging
             export STANDARD_ENABLED_STAGING="true"  # Always enabled
-            export KUZU_LARGE_ENABLED_STAGING="${{ inputs.kuzu_large_enabled }}"
-            export KUZU_XLARGE_ENABLED_STAGING="${{ inputs.kuzu_xlarge_enabled }}"
+            export LBUG_LARGE_ENABLED_STAGING="${{ inputs.lbug_large_enabled }}"
+            export LBUG_XLARGE_ENABLED_STAGING="${{ inputs.lbug_xlarge_enabled }}"
             # Export scaling variables for staging (passed from parent workflow)
-            export KUZU_STANDARD_MIN_INSTANCES_STAGING="${{ inputs.kuzu_standard_min_instances }}"
-            export KUZU_STANDARD_MAX_INSTANCES_STAGING="${{ inputs.kuzu_standard_max_instances }}"
-            export KUZU_LARGE_MIN_INSTANCES_STAGING="${{ inputs.kuzu_large_min_instances }}"
-            export KUZU_LARGE_MAX_INSTANCES_STAGING="${{ inputs.kuzu_large_max_instances }}"
-            export KUZU_SHARED_MIN_INSTANCES_STAGING="${{ inputs.kuzu_shared_min_instances }}"
-            export KUZU_SHARED_MAX_INSTANCES_STAGING="${{ inputs.kuzu_shared_max_instances }}"
+            export LBUG_STANDARD_MIN_INSTANCES_STAGING="${{ inputs.lbug_standard_min_instances }}"
+            export LBUG_STANDARD_MAX_INSTANCES_STAGING="${{ inputs.lbug_standard_max_instances }}"
+            export LBUG_LARGE_MIN_INSTANCES_STAGING="${{ inputs.lbug_large_min_instances }}"
+            export LBUG_LARGE_MAX_INSTANCES_STAGING="${{ inputs.lbug_large_max_instances }}"
+            export LBUG_XLARGE_MIN_INSTANCES_STAGING="${{ inputs.lbug_xlarge_min_instances }}"
+            export LBUG_XLARGE_MAX_INSTANCES_STAGING="${{ inputs.lbug_xlarge_max_instances }}"
+            export LBUG_SHARED_MIN_INSTANCES_STAGING="${{ inputs.lbug_shared_min_instances }}"
+            export LBUG_SHARED_MAX_INSTANCES_STAGING="${{ inputs.lbug_shared_max_instances }}"
           fi
 
           echo "Loading Graph database writer configuration for: $ENV_KEY"
@@ -188,7 +190,7 @@ jobs:
           MATRIX_JSON=$(yq eval -o=json ".${ENV_KEY}.writers" .github/configs/graph.yml)
 
           # Filter based on enable variables - separate by backend
-          KUZU_FILTERED="[]"
+          LBUG_FILTERED="[]"
           NEO4J_FILTERED="[]"
 
           # Get number of writers
@@ -228,8 +230,8 @@ jobs:
             fi
 
             if [ "$SHOULD_DEPLOY" = "true" ]; then
-              # Get tier name for variable lookup (e.g., "kuzu-standard" → "KUZU_STANDARD")
-              TIER_NAME=$(echo "$writer" | jq -r '.tier | ascii_upcase | gsub("-"; "_")')
+              # Get tier name for variable lookup (e.g., "ladybug-standard" → "LBUG_STANDARD")
+              TIER_NAME=$(echo "$writer" | jq -r '.tier | ascii_upcase | gsub("LADYBUG"; "LBUG") | gsub("-"; "_")')
 
               # Build GitHub variable names based on environment
               MIN_VAR_NAME="${TIER_NAME}_MIN_INSTANCES_${ENV_SUFFIX}"
@@ -254,7 +256,7 @@ jobs:
               echo "     (MAX_VAR: $MAX_VAR_NAME=$MAX_INSTANCES)"
 
               # Build the matrix entry from writer config with nested instance specs
-              # Include backend field for routing to correct workflow (kuzu vs neo4j)
+              # Include backend field for routing to correct workflow (ladybug vs neo4j)
               # Override scaling with GitHub variables if present
               MATRIX_ENTRY=$(echo "$writer" | jq --arg min "$MIN_INSTANCES" --arg max "$MAX_INSTANCES" '{
                 name: .name,
@@ -279,8 +281,8 @@ jobs:
 
               # Append to backend-specific filtered array
               BACKEND=$(echo "$writer" | jq -r '.backend')
-              if [ "$BACKEND" = "kuzu" ]; then
-                KUZU_FILTERED=$(echo "$KUZU_FILTERED" | jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]')
+              if [ "$BACKEND" = "ladybug" ]; then
+                LBUG_FILTERED=$(echo "$LBUG_FILTERED" | jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]')
               elif [ "$BACKEND" = "neo4j" ]; then
                 NEO4J_FILTERED=$(echo "$NEO4J_FILTERED" | jq --argjson entry "$MATRIX_ENTRY" '. + [$entry]')
               fi
@@ -288,40 +290,40 @@ jobs:
           done
 
           # Output the matrices
-          KUZU_MATRIX=$(jq -nc --argjson filtered "$KUZU_FILTERED" '{"include": $filtered}')
+          LBUG_MATRIX=$(jq -nc --argjson filtered "$LBUG_FILTERED" '{"include": $filtered}')
           NEO4J_MATRIX=$(jq -nc --argjson filtered "$NEO4J_FILTERED" '{"include": $filtered}')
 
-          echo "kuzu_matrix=$KUZU_MATRIX" >> $GITHUB_OUTPUT
+          echo "lbug_matrix=$LBUG_MATRIX" >> $GITHUB_OUTPUT
           echo "neo4j_matrix=$NEO4J_MATRIX" >> $GITHUB_OUTPUT
 
           # Debug output
           echo ""
-          echo "Kuzu writer matrix:"
-          echo "$KUZU_FILTERED" | jq '.'
+          echo "Graph writer matrix (LadybugDB):"
+          echo "$LBUG_FILTERED" | jq '.'
           echo ""
           echo "Neo4j writer matrix:"
           echo "$NEO4J_FILTERED" | jq '.'
 
           # Summary
-          KUZU_COUNT=$(echo "$KUZU_FILTERED" | jq 'length')
+          LBUG_COUNT=$(echo "$LBUG_FILTERED" | jq 'length')
           NEO4J_COUNT=$(echo "$NEO4J_FILTERED" | jq 'length')
-          TOTAL_COUNT=$((KUZU_COUNT + NEO4J_COUNT))
+          TOTAL_COUNT=$((LBUG_COUNT + NEO4J_COUNT))
           echo ""
           echo "📊 Deployment Summary:"
-          echo "  - $KUZU_COUNT Kuzu writers"
+          echo "  - $LBUG_COUNT Graph writers (LadybugDB)"
           echo "  - $NEO4J_COUNT Neo4j writers"
           echo "  - $TOTAL_COUNT Total graph database writers"
 
-  # Step 2a: Deploy Kuzu Writers
-  deploy-kuzu-writers:
+  # Step 2a: Deploy Graph Writers (LadybugDB Backend)
+  deploy-graph-ladybug:
     needs: [prepare-writer-matrix]
-    if: needs.prepare-writer-matrix.outputs.kuzu_matrix != '{"include":[]}'
+    if: needs.prepare-writer-matrix.outputs.lbug_matrix != '{"include":[]}'
     permissions: {}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.kuzu_matrix) }}
+      matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix) }}
       max-parallel: 4 # Deploy up to 4 writers in parallel
-    uses: ./.github/workflows/deploy-kuzu-writers.yml
+    uses: ./.github/workflows/deploy-graph-ladybug.yml
     with:
       # Stack & Repository Configuration
       stack_name: RoboSystemsGraph${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
@@ -335,7 +337,7 @@ jobs:
       # Auto Scaling Configuration
       min_instances: "${{ matrix.min_instances }}"
       max_instances: "${{ matrix.max_instances }}"
-      # Kuzu Configuration
+      # Graph Writer Configuration
       writer_tier: ${{ matrix.tier }}
       shared_repositories: ${{ matrix.shared_repositories }}
       # Instance Configuration
@@ -353,7 +355,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
   # Step 2b: Deploy Neo4j Writers
-  deploy-neo4j-writers:
+  deploy-graph-neo4j:
     needs: [prepare-writer-matrix]
     if: needs.prepare-writer-matrix.outputs.neo4j_matrix != '{"include":[]}'
     permissions: {}
@@ -361,7 +363,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-writer-matrix.outputs.neo4j_matrix) }}
       max-parallel: 4 # Deploy up to 4 writers in parallel
-    uses: ./.github/workflows/deploy-neo4j-writers.yml
+    uses: ./.github/workflows/deploy-graph-neo4j.yml
     with:
       # Stack & Repository Configuration
       stack_name: RoboSystemsGraph${{ matrix.stack_suffix }}${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}

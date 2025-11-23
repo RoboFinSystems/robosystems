@@ -53,12 +53,12 @@ async def stream_mcp_tool_execution(
     }
 
     # Tool-specific streaming logic
-    if tool_name in ["read-graph-cypher", "read-neo4j-cypher", "read-kuzu-cypher"]:
+    if tool_name in ["read-graph-cypher", "read-neo4j-cypher", "read-ladybug-cypher"]:
       # Stream query results
       async for event in stream_cypher_query(handler, arguments, chunk_size):
         yield event
 
-    elif tool_name in ["get-graph-schema", "get-neo4j-schema", "get-kuzu-schema"]:
+    elif tool_name in ["get-graph-schema", "get-neo4j-schema", "get-ladybug-schema"]:
       # Stream schema in parts
       async for event in stream_schema_retrieval(handler, tool_name, arguments):
         yield event

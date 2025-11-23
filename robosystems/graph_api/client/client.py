@@ -1257,12 +1257,12 @@ class GraphClient(BaseGraphClient):
     ignore_errors: bool = True,
   ) -> Dict[str, Any]:
     """
-    Fork data from parent graph's DuckDB directly into subgraph's Kuzu.
+    Fork data from parent graph's DuckDB directly into subgraph's LadybugDB.
 
     This operation:
     1. Attaches parent graph's DuckDB staging database
-    2. Copies specified tables (or all tables) from parent DuckDB to subgraph Kuzu
-    3. Runs on the same EC2 instance where both DuckDB and Kuzu databases live
+    2. Copies specified tables (or all tables) from parent DuckDB to subgraph LadybugDB
+    3. Runs on the same EC2 instance where both DuckDB and LadybugDB databases live
 
     Args:
         parent_graph_id: Parent graph to copy data from

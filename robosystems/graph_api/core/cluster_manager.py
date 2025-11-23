@@ -1,7 +1,7 @@
 """
-Kuzu cluster management service.
+LadybugDB cluster management service.
 
-This module provides the core cluster service that manages multiple Kuzu databases
+This module provides the core cluster service that manages multiple LadybugDB databases
 on a single node, handling database operations, health monitoring, and metrics.
 """
 
@@ -17,8 +17,8 @@ import psutil
 from fastapi import HTTPException, status
 
 from robosystems.config import env
-from .database_manager import KuzuDatabaseManager
-from .metrics_collector import KuzuMetricsCollector
+from .database_manager import LadybugDatabaseManager
+from .metrics_collector import LadybugMetricsCollector
 from robosystems.graph_api.models.database import QueryRequest, QueryResponse
 from robosystems.graph_api.models.cluster import (
   ClusterHealthResponse,
@@ -29,7 +29,7 @@ from robosystems.graph_api.core.utils import (
   validate_query_parameters,
 )
 from robosystems.middleware.graph.clusters import NodeType, RepositoryType
-from robosystems.models.api.graphs.query import translate_neo4j_to_kuzu
+from robosystems.models.api.graphs.query import translate_neo4j_to_lbug
 from robosystems.logger import logger
 from robosystems.exceptions import (
   ConfigurationError,
@@ -84,7 +84,7 @@ def _extract_column_aliases_from_cypher(cypher_query: str) -> List[str]:
   Extract column aliases from RETURN clause in Cypher query.
 
   This function parses the RETURN clause to preserve custom column aliases
-  instead of relying on Kuzu's internal generic column names (col0, col1, etc.).
+  instead of relying on LadybugDB's internal generic column names (col0, col1, etc.).
 
   Args:
       cypher_query: The Cypher query to parse
@@ -189,8 +189,8 @@ def validate_cypher_query(cypher: str) -> None:
     )
 
 
-class KuzuClusterService:
-  """Kuzu cluster service with multi-database support."""
+class LadybugClusterService:
+  """LadybugDB cluster service with multi-database support."""
 
   def __init__(
     self,
@@ -209,10 +209,12 @@ class KuzuClusterService:
     self.last_activity: Optional[datetime] = None
 
     # Initialize database manager
-    self.db_manager = KuzuDatabaseManager(base_path, max_databases, read_only=read_only)
+    self.db_manager = LadybugDatabaseManager(
+      base_path, max_databases, read_only=read_only
+    )
 
     # Initialize metrics collector
-    self.metrics_collector = KuzuMetricsCollector(
+    self.metrics_collector = LadybugMetricsCollector(
       base_path=base_path, node_type=node_type.value
     )
 
@@ -250,7 +252,7 @@ class KuzuClusterService:
   @property
   def node_id(self) -> str:
     """Generate meaningful node ID based on type."""
-    return f"kuzu-{self.node_type.value}-{os.getpid()}"
+    return f"lbug-{self.node_type.value}-{os.getpid()}"
 
   def get_uptime(self) -> float:
     """Get node uptime in seconds."""
@@ -268,7 +270,7 @@ class KuzuClusterService:
         Dict containing chunk data
     """
     with tracer.start_as_current_span(
-      "kuzu.execute_query_streaming",
+      "lbug.execute_query_streaming",
       attributes={
         "database.name": request.database,
         "query.length": len(request.cypher),
@@ -290,8 +292,8 @@ class KuzuClusterService:
             detail=f"Database '{validated_graph_id}' not found",
           )
 
-        # Translate Neo4j-style queries to Kuzu equivalents
-        translated_cypher = translate_neo4j_to_kuzu(request.cypher)
+        # Translate Neo4j-style queries to LadybugDB equivalents
+        translated_cypher = translate_neo4j_to_lbug(request.cypher)
 
         logger.debug(
           f"Streaming query on {validated_graph_id}: {translated_cypher[:100]}..."
@@ -316,7 +318,7 @@ class KuzuClusterService:
 
           except RuntimeError as e:
             error_msg = str(e)
-            # Handle specific Kuzu errors gracefully
+            # Handle specific LadybugDB errors gracefully
             if "Binder exception" in error_msg:
               # Extract the specific binding error for cleaner logging
               logger.warning(
@@ -485,7 +487,7 @@ class KuzuClusterService:
   def execute_query(self, request: QueryRequest) -> QueryResponse:
     """Execute a query against a specific database."""
     with tracer.start_as_current_span(
-      "kuzu.execute_query",
+      "lbug.execute_query",
       attributes={
         "database.name": request.database,
         "query.length": len(request.cypher),
@@ -509,12 +511,12 @@ class KuzuClusterService:
             detail=f"Database '{validated_graph_id}' not found",
           )
 
-        # Translate Neo4j-style queries to Kuzu equivalents
-        translated_cypher = translate_neo4j_to_kuzu(request.cypher)
+        # Translate Neo4j-style queries to LadybugDB equivalents
+        translated_cypher = translate_neo4j_to_lbug(request.cypher)
 
         if translated_cypher != request.cypher:
           logger.info(
-            f"Translated Neo4j query to Kuzu: {request.cypher[:100]}... -> {translated_cypher[:100]}..."
+            f"Translated Neo4j query to LadybugDB: {request.cypher[:100]}... -> {translated_cypher[:100]}..."
           )
 
         logger.debug(
@@ -559,7 +561,7 @@ class KuzuClusterService:
                 logger.warning(
                   f"Query timeout for {validated_graph_id} after {query_timeout} seconds"
                 )
-                # Try to cancel the future (though Kuzu query may continue)
+                # Try to cancel the future (though LadybugDB query may continue)
                 future.cancel()
                 raise HTTPException(
                   status_code=status.HTTP_408_REQUEST_TIMEOUT,
@@ -568,7 +570,7 @@ class KuzuClusterService:
 
           except RuntimeError as e:
             error_msg = str(e)
-            # Handle specific Kuzu errors gracefully
+            # Handle specific LadybugDB errors gracefully
             if "Binder exception" in error_msg:
               # Extract the specific binding error for cleaner logging
               logger.warning(
@@ -619,7 +621,7 @@ class KuzuClusterService:
               detail=f"Unexpected error: {str(e)}",
             )
 
-          # Parse results based on Kuzu's output format
+          # Parse results based on LadybugDB's output format
           rows = []
           columns = []
 
@@ -777,21 +779,21 @@ class KuzuClusterService:
 
     # Build comprehensive configuration
     memory_config = MemoryConfiguration(
-      instance_max_mb=env.KUZU_MAX_MEMORY_MB,
-      per_database_max_mb=env.KUZU_MAX_MEMORY_PER_DB_MB,
-      admission_threshold_percent=env.KUZU_ADMISSION_MEMORY_THRESHOLD,
+      instance_max_mb=env.LBUG_MAX_MEMORY_MB,
+      per_database_max_mb=env.LBUG_MAX_MEMORY_PER_DB_MB,
+      admission_threshold_percent=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
     )
 
     query_config = QueryConfiguration(
       timeout_seconds=env.GRAPH_QUERY_TIMEOUT,
-      max_connections_per_db=env.KUZU_MAX_CONNECTIONS_PER_DB,
-      connection_ttl_minutes=env.KUZU_CONNECTION_TTL_MINUTES,
+      max_connections_per_db=env.LBUG_MAX_CONNECTIONS_PER_DB,
+      connection_ttl_minutes=env.LBUG_CONNECTION_TTL_MINUTES,
       health_check_interval_minutes=env.GRAPH_HEALTH_CHECK_INTERVAL_MINUTES,
     )
 
     admission_config = AdmissionControlConfig(
-      memory_threshold=env.KUZU_ADMISSION_MEMORY_THRESHOLD,
-      cpu_threshold=env.KUZU_ADMISSION_CPU_THRESHOLD,
+      memory_threshold=env.LBUG_ADMISSION_MEMORY_THRESHOLD,
+      cpu_threshold=env.LBUG_ADMISSION_CPU_THRESHOLD,
       queue_threshold=env.ADMISSION_QUEUE_THRESHOLD,
       check_interval=env.ADMISSION_CHECK_INTERVAL,
     )
@@ -828,12 +830,12 @@ class KuzuClusterService:
     """
     Background task to create a database backup.
 
-    Creates a complete backup of the Kuzu database file.
+    Creates a complete backup of the LadybugDB database file.
     """
     try:
       logger.info(f"Starting backup task {task_id} for database {graph_id}")
 
-      # For now, since we're just creating the backup locally on the Kuzu instance,
+      # For now, since we're just creating the backup locally on the LadybugDB instance,
       # we'll create a simple file-based backup that can be retrieved
       import os
       import tempfile
@@ -859,7 +861,7 @@ class KuzuClusterService:
         # Copy database files
         if os.path.isfile(db_path):
           # Single file database
-          shutil.copy2(db_path, temp_path / f"{graph_id}.kuzu")
+          shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
         else:
           # Directory-based database
           shutil.copytree(db_path, temp_path / graph_id)
@@ -867,7 +869,7 @@ class KuzuClusterService:
         # Create ZIP archive
         with zipfile.ZipFile(backup_file, "w", zipfile.ZIP_DEFLATED) as zf:
           if os.path.isfile(db_path):
-            zf.write(temp_path / f"{graph_id}.kuzu", f"{graph_id}.kuzu")
+            zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
           else:
             for root, dirs, files in os.walk(temp_path / graph_id):
               for file in files:
@@ -893,7 +895,7 @@ class KuzuClusterService:
     """
     Background task to restore a database from backup.
 
-    Restores a Kuzu database from the provided backup data.
+    Restores a LadybugDB database from the provided backup data.
     """
     try:
       logger.info(f"Starting restore task {task_id} for database {graph_id}")
@@ -927,14 +929,14 @@ class KuzuClusterService:
 
           # Copy existing database
           if os.path.isfile(db_path):
-            shutil.copy2(db_path, temp_path / f"{graph_id}.kuzu")
+            shutil.copy2(db_path, temp_path / f"{graph_id}.lbug")
           else:
             shutil.copytree(db_path, temp_path / graph_id)
 
           # Create system backup ZIP
           with zipfile.ZipFile(system_backup, "w", zipfile.ZIP_DEFLATED) as zf:
             if os.path.isfile(db_path):
-              zf.write(temp_path / f"{graph_id}.kuzu", f"{graph_id}.kuzu")
+              zf.write(temp_path / f"{graph_id}.lbug", f"{graph_id}.lbug")
             else:
               for root, dirs, files in os.walk(temp_path / graph_id):
                 for file in files:
@@ -965,9 +967,9 @@ class KuzuClusterService:
             shutil.rmtree(db_path)
 
         # Restore database files
-        if (temp_path / f"{graph_id}.kuzu").exists():
+        if (temp_path / f"{graph_id}.lbug").exists():
           # Single file database
-          shutil.copy2(temp_path / f"{graph_id}.kuzu", db_path)
+          shutil.copy2(temp_path / f"{graph_id}.lbug", db_path)
         elif (temp_path / graph_id).exists():
           # Directory-based database
           shutil.copytree(temp_path / graph_id, db_path)
@@ -987,11 +989,11 @@ class KuzuClusterService:
 
 
 # Global service instance with thread-safe initialization
-_cluster_service: Optional[KuzuClusterService] = None
+_cluster_service: Optional[LadybugClusterService] = None
 _cluster_service_lock = threading.Lock()
 
 
-def get_cluster_service() -> KuzuClusterService:
+def get_cluster_service() -> LadybugClusterService:
   """Get the global cluster service instance."""
   if _cluster_service is None:
     raise RuntimeError("Cluster service not initialized")
@@ -1004,7 +1006,7 @@ def init_cluster_service(
   read_only: bool = False,
   node_type: NodeType = NodeType.WRITER,
   repository_type: RepositoryType = RepositoryType.ENTITY,
-) -> KuzuClusterService:
+) -> LadybugClusterService:
   """Initialize the global cluster service instance with thread safety."""
   global _cluster_service
 
@@ -1013,7 +1015,7 @@ def init_cluster_service(
       logger.warning("Cluster service already initialized, returning existing instance")
       return _cluster_service
 
-    _cluster_service = KuzuClusterService(
+    _cluster_service = LadybugClusterService(
       base_path=base_path,
       max_databases=max_databases,
       read_only=read_only,

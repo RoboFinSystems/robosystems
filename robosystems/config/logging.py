@@ -193,7 +193,7 @@ def get_logging_config(environment: Optional[str] = None) -> Dict[str, Any]:
         "handlers": ["critical", "operational"] if env != "dev" else ["console"],
         "propagate": False,
       },
-      "robosystems.kuzu": {
+      "robosystems.lbug": {
         "level": default_level,
         "handlers": ["critical", "operational"] if env != "dev" else ["console"],
         "propagate": False,
@@ -247,7 +247,7 @@ def get_logging_config(environment: Optional[str] = None) -> Dict[str, Any]:
       "robosystems",
       "robosystems.api",
       "robosystems.workers",
-      "robosystems.kuzu",
+      "robosystems.lbug",
     ]:
       if env != "dev":
         config["loggers"][logger_name]["handlers"].append("debug")

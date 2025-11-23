@@ -39,7 +39,7 @@ def _get_mcp_operation_type(graph_id: str) -> str:
   """
   Determine the correct operation type for MCP operations based on graph type.
 
-  For consistency with distributed Kuzu architecture:
+  For consistency with distributed LadybugDB architecture:
   - User graphs: Always use 'write' to ensure writer cluster routing
   - Shared repositories: Use 'read' for reader cluster routing
   """
@@ -63,7 +63,7 @@ This endpoint returns a comprehensive list of MCP tools optimized for AI agents:
 The tool list is customized based on:
 - Graph type (shared repository vs user graph)
 - User permissions and subscription tier
-- Backend capabilities (Kuzu, Neo4j, etc.)
+- Backend capabilities (LadybugDB, Neo4j, etc.)
 
 **Subgraph Support:**
 This endpoint accepts both parent graph IDs and subgraph IDs.

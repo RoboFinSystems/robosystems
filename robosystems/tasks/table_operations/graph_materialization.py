@@ -2,7 +2,7 @@
 Graph Ingestion Task for v2 Incremental Ingestion
 
 Handles selective ingestion from DuckDB staging tables to graph database
-via Graph API. Works with any graph backend (Kuzu, Neo4j, etc.).
+via Graph API. Works with any graph backend (LadybugDB, Neo4j, etc.).
 Filters by file_id to enable surgical updates without reprocessing all data.
 
 Key features:

@@ -1,14 +1,14 @@
-# RoboSystems Kuzu Graph Schema System
+# RoboSystems LadybugDB Graph Schema System
 
 ## Overview
 
-The RoboSystems schema system provides a comprehensive, extensible framework for defining graph database structures in Kuzu. It implements a **base + extensions** architecture that enables modular, domain-specific data modeling while maintaining consistency and compatibility across different application contexts.
+The RoboSystems schema system provides a comprehensive, extensible framework for defining graph database structures in LadybugDB. It implements a **base + extensions** architecture that enables modular, domain-specific data modeling while maintaining consistency and compatibility across different application contexts.
 
 **Key Features:**
 
 - **Modular Architecture**: Base schema + pluggable extensions for different domains
 - **Context-Aware Loading**: Different views of the same schema based on use case
-- **Type-Safe Validation**: Strong typing with Kuzu-native data types
+- **Type-Safe Validation**: Strong typing with LadybugDB-native data types
 - **Custom Schema Support**: JSON/YAML-based custom schema definitions
 - **Production-Ready**: Used in multi-tenant enterprise deployments
 
@@ -203,7 +203,7 @@ loader = get_contextual_schema_loader("repository", "sec")
 ### Building Schemas
 
 ```python
-from robosystems.schemas.builder import KuzuSchemaBuilder
+from robosystems.schemas.builder import LadybugDBSchemaBuilder
 
 config = {
     "name": "My Financial Graph",
@@ -211,7 +211,7 @@ config = {
     "extensions": ["roboledger", "roboinvestor"]
 }
 
-builder = KuzuSchemaBuilder(config)
+builder = LadybugDBSchemaBuilder(config)
 builder.load_schemas()
 cypher_ddl = builder.generate_cypher()
 ```
@@ -219,9 +219,9 @@ cypher_ddl = builder.generate_cypher()
 ### Schema Validation
 
 ```python
-from robosystems.schemas.validator import KuzuSchemaValidator
+from robosystems.schemas.validator import LadybugDBSchemaValidator
 
-validator = KuzuSchemaValidator()
+validator = LadybugDBSchemaValidator()
 
 # Validate node properties
 validator.validate_node("Entity", {
@@ -285,7 +285,7 @@ merged = manager.merge_with_base(schema)
 
 ## Data Types
 
-### Supported Kuzu Types
+### Supported LadybugDB Types
 
 | Category     | Types                                    | Usage                    |
 | ------------ | ---------------------------------------- | ------------------------ |
@@ -381,7 +381,7 @@ The system uses `CREATE TABLE IF NOT EXISTS` to prevent data loss:
 # Safe addition of new nodes/relationships
 CREATE NODE TABLE IF NOT EXISTS NewNode(...)
 
-# For schema modifications, use Kuzu ALTER commands
+# For schema modifications, use LadybugDB ALTER commands
 ALTER TABLE Entity ADD COLUMN new_field STRING
 ```
 

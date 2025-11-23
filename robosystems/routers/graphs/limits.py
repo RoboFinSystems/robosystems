@@ -79,7 +79,7 @@ Returns all operational limits that apply to this graph including:
 
 This unified endpoint provides all limits in one place for easier client integration.
 
-**Note**: Limits vary based on subscription tier (kuzu-standard, kuzu-large, kuzu-xlarge).""",
+**Note**: Limits vary based on subscription tier (ladybug-standard, ladybug-large, ladybug-xlarge).""",
   operation_id="getGraphLimits",
   responses={
     200: {"description": "Limits retrieved successfully"},
@@ -134,21 +134,21 @@ async def get_graph_limits(
     from robosystems.config.billing.storage import StorageBillingConfig
 
     # Get user's subscription tier
-    user_tier = getattr(current_user, "subscription_tier", "kuzu-standard")
+    user_tier = getattr(current_user, "subscription_tier", "ladybug-standard")
 
     # Get graph information if it exists
     graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
 
     # Determine graph tier:
     # - User graphs: Use tier from database
-    # - Shared repositories: Use kuzu-shared tier
-    # - Fallback: kuzu-standard (shouldn't happen in practice)
+    # - Shared repositories: Use ladybug-shared tier
+    # - Fallback: ladybug-standard (shouldn't happen in practice)
     if graph:
       graph_tier = str(graph.graph_tier)
     elif MultiTenantUtils.is_shared_repository(graph_id):
-      graph_tier = "kuzu-shared"
+      graph_tier = "ladybug-shared"
     else:
-      graph_tier = "kuzu-standard"
+      graph_tier = "ladybug-standard"
 
     # Get storage information (based on graph tier from billing config)
     max_storage_gb = StorageBillingConfig.STORAGE_INCLUDED.get(graph_tier, 100)

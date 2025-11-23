@@ -23,8 +23,8 @@ class TestSharedRepositoryService:
     return SharedRepositoryService()
 
   @pytest.fixture
-  def mock_kuzu_client(self):
-    """Create a mock Kuzu client."""
+  def mock_lbug_client(self):
+    """Create a mock LadybugDB client."""
     client = AsyncMock()
 
     # Create a proper 404 exception with status_code
@@ -56,13 +56,13 @@ class TestSharedRepositoryService:
 
   @pytest.mark.asyncio
   async def test_create_shared_repository_sec(
-    self, service, mock_kuzu_client, mock_db_session
+    self, service, mock_lbug_client, mock_db_session
   ):
     """Test successful creation of SEC shared repository."""
     with patch(
       "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
     ) as mock_factory:
-      mock_factory.return_value = mock_kuzu_client
+      mock_factory.return_value = mock_lbug_client
 
       with patch("robosystems.database.get_db_session") as mock_db:
         mock_db.return_value = iter([mock_db_session])
@@ -83,7 +83,7 @@ class TestSharedRepositoryService:
           assert result["config"]["name"] == "SEC EDGAR Filings"
 
           mock_factory.assert_called_once_with(graph_id="sec", operation_type="write")
-          mock_kuzu_client.close.assert_called_once()
+          mock_lbug_client.close.assert_called_once()
 
   @pytest.mark.asyncio
   async def test_create_shared_repository_invalid_name(self, service):
@@ -96,7 +96,7 @@ class TestSharedRepositoryService:
 
   @pytest.mark.asyncio
   async def test_create_shared_repository_all_types(
-    self, service, mock_kuzu_client, mock_db_session
+    self, service, mock_lbug_client, mock_db_session
   ):
     """Test creation of all valid repository types."""
     valid_repos = ["sec", "industry", "economic"]
@@ -105,7 +105,7 @@ class TestSharedRepositoryService:
       with patch(
         "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
       ) as mock_factory:
-        mock_factory.return_value = mock_kuzu_client
+        mock_factory.return_value = mock_lbug_client
 
         with patch("robosystems.database.get_db_session") as mock_db:
           mock_db.return_value = iter([mock_db_session])
@@ -127,7 +127,7 @@ class TestEnsureSharedRepositoryExists:
 
   @pytest.fixture
   def mock_client(self):
-    """Create a mock Kuzu client."""
+    """Create a mock LadybugDB client."""
     client = AsyncMock()
     client.get_database_info = AsyncMock()
     client.close = AsyncMock()

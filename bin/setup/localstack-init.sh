@@ -34,14 +34,14 @@ awslocal s3api put-bucket-cors \
   --bucket robosystems-public-data \
   --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"MaxAge":3600}]}' || echo "CORS already configured"
 
-# Create Kuzu database buckets
+# Create graph database buckets
 awslocal s3api create-bucket \
-  --bucket robosystems-kuzu-databases \
-  --region us-east-1 || echo "Bucket robosystems-kuzu-databases already exists"
+  --bucket robosystems-graph-databases \
+  --region us-east-1 || echo "Bucket robosystems-graph-databases already exists"
 
 awslocal s3api create-bucket \
-  --bucket robosystems-kuzu-databases-dev \
-  --region us-east-1 || echo "Bucket robosystems-kuzu-databases-dev already exists"
+  --bucket robosystems-graph-databases-dev \
+  --region us-east-1 || echo "Bucket robosystems-graph-databases-dev already exists"
 
 echo "S3 buckets created successfully!"
 
@@ -50,7 +50,7 @@ echo "Available S3 buckets:"
 awslocal s3 ls
 
 echo ""
-echo "Creating DynamoDB tables for Kuzu allocation management..."
+echo "Creating DynamoDB tables for LadybugDB allocation management..."
 
 # Delete existing tables if they exist (to ensure clean schema)
 awslocal dynamodb delete-table --table-name robosystems-graph-dev-graph-registry 2>/dev/null || true
@@ -173,35 +173,35 @@ echo "Available DynamoDB tables:"
 awslocal dynamodb list-tables
 
 echo ""
-echo "Registering local Kuzu instance in DynamoDB..."
+echo "Registering local LadybugDB instance in DynamoDB..."
 
 # First, delete any existing registration to ensure clean state
 awslocal dynamodb delete-item \
   --table-name robosystems-graph-dev-instance-registry \
-  --key '{"instance_id": {"S": "local-kuzu-writer"}}' \
+  --key '{"instance_id": {"S": "local-lbug-writer"}}' \
   --region us-east-1 2>/dev/null || true
 
-# Register local Kuzu writer instance with regional fields
+# Register local LadybugDB writer instance with regional fields
 awslocal dynamodb put-item \
   --table-name robosystems-graph-dev-instance-registry \
   --item '{
-    "instance_id": {"S": "local-kuzu-writer"},
-    "private_ip": {"S": "graph-api-kuzu"},
+    "instance_id": {"S": "local-lbug-writer"},
+    "private_ip": {"S": "graph-api"},
     "availability_zone": {"S": "docker-local"},
     "status": {"S": "healthy"},
     "database_count": {"N": "0"},
-    "max_databases": {"N": "'${KUZU_DATABASES_PER_INSTANCE:-50}'"},
+    "max_databases": {"N": "'${LBUG_DATABASES_PER_INSTANCE:-50}'"},
     "created_at": {"S": "'$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"},
     "last_health_check": {"S": "'$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"},
     "node_type": {"S": "writer"},
-    "api_endpoint": {"S": "http://graph-api-kuzu:8001"},
+    "api_endpoint": {"S": "http://graph-api:8001"},
     "region": {"S": "docker-local"},
     "cluster_type": {"S": "writer"},
-    "cluster_tier": {"S": "kuzu-standard"},
+    "cluster_tier": {"S": "ladybug-standard"},
     "cluster_group": {"S": "docker-local-writers"},
     "available_capacity_pct": {"N": "100"},
-    "private_dns": {"S": "graph-api-kuzu.local"},
-    "endpoint_url": {"S": "http://graph-api-kuzu:8001"},
+    "private_dns": {"S": "graph-api.local"},
+    "endpoint_url": {"S": "http://graph-api:8001"},
     "launch_time": {"S": "'$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'"},
     "replication_role": {"S": "none"},
     "total_size_gb": {"N": "0"},
@@ -211,7 +211,7 @@ awslocal dynamodb put-item \
   }' \
   --region us-east-1 || echo "Local instance already registered"
 
-echo "Local Kuzu instance registered!"
+echo "Local LadybugDB instance registered!"
 
 echo ""
 echo "LocalStack initialization complete!"

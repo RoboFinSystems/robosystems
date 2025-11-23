@@ -15,10 +15,10 @@ on:
         required: true
         type: choice
         options:
-          - kuzu-standard
-          - kuzu-large
-          - kuzu-xlarge
-          - kuzu-shared
+          - ladybug-standard
+          - ladybug-large
+          - ladybug-xlarge
+          - ladybug-shared
           - neo4j-community-large
           - neo4j-enterprise-xlarge
       dry_run:

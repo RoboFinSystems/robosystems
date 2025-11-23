@@ -101,7 +101,7 @@ if env.ENVIRONMENT != "dev":
       # See worker-monitor Lambda in cloudformation/worker-infra.yaml1
       # ========== INFRASTRUCTURE TASKS ==========
       # Note: Instance monitoring tasks have been migrated to Lambda functions
-      # and are now scheduled via EventBridge rules in kuzu-infra.yaml
+      # and are now scheduled via EventBridge rules in graph-infra.yaml
       # ========== HEALTH CHECKS ==========
       # Weekly shared credit allocation health check
       "check-credit-allocation-health": {

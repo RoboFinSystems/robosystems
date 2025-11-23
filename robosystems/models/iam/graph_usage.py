@@ -85,7 +85,7 @@ class GraphUsage(Model):
   # Graph tier and infrastructure
   graph_tier = Column(
     String, nullable=False, index=True
-  )  # kuzu-standard, kuzu-large, kuzu-xlarge, etc.
+  )  # ladybug-standard, ladybug-large, ladybug-xlarge, etc.
   instance_id = Column(String, nullable=True)  # Infrastructure instance
   region = Column(String, nullable=True)  # AWS region
 
@@ -99,7 +99,7 @@ class GraphUsage(Model):
   # Storage breakdown by type (all in GB)
   files_storage_gb = Column(Float, nullable=True)  # S3: User-uploaded files
   tables_storage_gb = Column(Float, nullable=True)  # S3: CSV/Parquet table imports
-  graphs_storage_gb = Column(Float, nullable=True)  # EBS: Kuzu database files
+  graphs_storage_gb = Column(Float, nullable=True)  # EBS: LadybugDB database files
   subgraphs_storage_gb = Column(
     Float, nullable=True
   )  # EBS: Subgraph data (part of database)

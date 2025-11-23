@@ -293,7 +293,7 @@ class DataFrameManager:
   ) -> pd.DataFrame:
     """
     Ensure DataFrame has all schema-defined columns before saving to parquet.
-    This prevents missing columns during Kuzu ingestion.
+    This prevents missing columns during LadybugDB ingestion.
 
     Args:
         df: DataFrame to validate

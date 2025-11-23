@@ -1,8 +1,8 @@
 """
-Cypher query execution endpoints for Kuzu databases.
+Cypher query execution endpoints for LadybugDB databases.
 
 This module provides endpoints for executing Cypher queries against
-specific Kuzu graph databases with admission control.
+specific LadybugDB graph databases with admission control.
 """
 
 from fastapi import APIRouter, Depends, Path, HTTPException, status
@@ -126,7 +126,7 @@ async def execute_query(
           detail="Streaming not yet implemented for Neo4j backend",
         )
     else:
-      # Use existing Kuzu cluster service (sync)
+      # Use existing LadybugDB cluster service (sync)
       if not streaming:
         return cluster_service.execute_query(query_request)
 

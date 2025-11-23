@@ -21,7 +21,7 @@ class TestGraphUserIntegration:
       session=test_db,
       base_schema="base",
       schema_extensions=["roboledger"],
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
       graph_metadata={
         "created_by": test_user.id,
         "purpose": "integration testing",
@@ -45,7 +45,7 @@ class TestGraphUserIntegration:
     # Verify we can query through relationships
     graph_users = GraphUser.get_by_user_id(test_user.id, test_db)
     assert len(graph_users) == 1
-    assert graph_users[0].graph.graph_tier == GraphTier.KUZU_STANDARD.value
+    assert graph_users[0].graph.graph_tier == GraphTier.LADYBUG_STANDARD.value
 
   def test_graph_deletion_cascades(self, test_db, test_user, test_org):
     """Test that deleting a graph removes all GraphUser relationships."""
@@ -251,7 +251,7 @@ class TestGraphUserIntegration:
       graph_type="entity",
       org_id=test_org.id,
       session=test_db,
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
     )
 
     premium_graph = Graph.create(
@@ -260,7 +260,7 @@ class TestGraphUserIntegration:
       graph_type="entity",
       org_id=test_org.id,
       session=test_db,
-      graph_tier=GraphTier.KUZU_XLARGE,
+      graph_tier=GraphTier.LADYBUG_XLARGE,
     )
 
     # Grant access

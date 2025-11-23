@@ -183,7 +183,7 @@ production:
         fargate_spot_weight: 60
 
     - name: shared-ingestion
-      description: Kuzu database ingestion (lightweight API orchestrator)
+      description: LadybugDB database ingestion (lightweight API orchestrator)
       queue: shared-ingestion
       stack_suffix: Ingestion
       resources:
@@ -191,12 +191,12 @@ production:
         memory: 512
       scaling:
         min: 1
-        max: 1 # Limited to prevent overwhelming Kuzu
+        max: 1 # Limited to prevent overwhelming LadybugDB
         desired: 1
         cpu_scale_in: 10 # Standard threshold
       worker:
         autoscale: 1
-        concurrency: 1 # REQUIRED: Single-threaded for Kuzu
+        concurrency: 1 # REQUIRED: Single-threaded for LadybugDB
       queue_scaling:
         backlog: 5
         # No scaling - fixed at 1 worker
@@ -355,7 +355,7 @@ staging:
         enabled_default: false
 
     - name: shared-ingestion
-      description: Kuzu ingestion (lightweight API orchestrator)
+      description: LadybugDB ingestion (lightweight API orchestrator)
       queue: shared-ingestion
       stack_suffix: Ingestion
       resources:

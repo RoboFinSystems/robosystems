@@ -248,7 +248,7 @@ class TestClassifyException:
       Exception("Database connection failed"),
       Exception("SQL syntax error"),
       Exception("PostgreSQL connection timeout"),
-      Exception("Kuzu query failed"),
+      Exception("Ladybug query failed"),
       Exception("Connection to database lost"),
     ]
 

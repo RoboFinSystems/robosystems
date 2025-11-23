@@ -12,7 +12,7 @@ This function handles the 4-step rotation process:
 
 Supports both:
 - Graph API keys (GRAPH_API_KEY) - unified authentication for all backends
-- Neo4j credentials (NEO4J_PASSWORD for neo4j-writers)
+- Neo4j credentials (NEO4J_PASSWORD for graph-neo4j)
 """
 
 import boto3
@@ -30,7 +30,7 @@ logger.setLevel(logging.INFO)
 secrets_client = boto3.client("secretsmanager")
 
 
-def generate_api_key(prefix: str = "kuzu", length: int = 32) -> str:
+def generate_api_key(prefix: str = "lbug", length: int = 32) -> str:
   """
   Generate a secure API key.
 
@@ -127,7 +127,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> None:
 
 def create_secret(arn: str, token: str) -> None:
   """
-  Generate new credentials (API keys for Kuzu or password for Neo4j).
+  Generate new credentials (API keys for LadybugDB or password for Neo4j).
 
   This step generates new credentials and stores them as the AWSPENDING version.
   """

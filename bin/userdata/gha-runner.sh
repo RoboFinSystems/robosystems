@@ -19,21 +19,21 @@ dnf update -y --allowerasing || { echo "Failed to update system"; exit 1; }
 
 echo "Installing core dependencies..."
 dnf install -y --allowerasing libicu docker git jq dotnet-runtime-6.0 aspnetcore-runtime-6.0 \
-  openssl-libs krb5-libs zlib libstdc++ libgcc python3.12 python3.12-pip nodejs npm cronie || { echo "Failed to install dependencies"; exit 1; }
+  openssl-libs krb5-libs zlib libstdc++ libgcc python3.13 python3.13-pip nodejs npm cronie || { echo "Failed to install dependencies"; exit 1; }
 
 # Create symlinks for easier access
-ln -sf /usr/bin/python3.12 /usr/local/bin/python
-ln -sf /usr/bin/python3.12 /usr/local/bin/python3
-ln -sf /usr/bin/pip3.12 /usr/local/bin/pip
-ln -sf /usr/bin/pip3.12 /usr/local/bin/pip3
+ln -sf /usr/bin/python3.13 /usr/local/bin/python
+ln -sf /usr/bin/python3.13 /usr/local/bin/python3
+ln -sf /usr/bin/pip3.13 /usr/local/bin/pip
+ln -sf /usr/bin/pip3.13 /usr/local/bin/pip3
 
 # Install uv for Python package management globally
 echo "Installing uv package manager..."
-python3.12 -m pip install uv || { echo "Failed to install uv"; exit 1; }
+python3.13 -m pip install uv || { echo "Failed to install uv"; exit 1; }
 
 # Install PyYAML for configuration parsing in workflows
 echo "Installing PyYAML..."
-python3.12 -m pip install pyyaml || { echo "Failed to install PyYAML"; exit 1; }
+python3.13 -m pip install pyyaml || { echo "Failed to install PyYAML"; exit 1; }
 
 # Install CloudWatch agent for monitoring
 echo "Installing CloudWatch agent..."
@@ -214,7 +214,7 @@ cat << EOF > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
     "run_as_user": "cwagent"
   },
   "metrics": {
-    "namespace": "RoboSystemsGHARunner/${Environment}",
+    "namespace": "RoboSystems/Runner",
     "metrics_collected": {
       "cpu": {
         "measurement": [
@@ -333,7 +333,7 @@ cat << 'CRON_EOF' | crontab -
 # Log disk usage every 30 minutes for better monitoring with multiple runners
 */30 * * * * /bin/df -h > /var/log/disk-usage.log 2>&1
 # Clean up any orphaned test databases/containers every 6 hours
-0 */6 * * * /usr/bin/docker ps -q --filter "name=postgres" --filter "name=kuzu" | xargs -r docker rm -f
+0 */6 * * * /usr/bin/docker ps -q --filter "name=postgres" --filter "name=lbug" | xargs -r docker rm -f
 # Check disk space and alert if low (under 20%)
 */15 * * * * df -h / | awk 'NR==2 {if (100-$5+0 < 20) print "WARNING: Low disk space - only "100-$5"% free on /"}' | logger -t disk-alert
 CRON_EOF

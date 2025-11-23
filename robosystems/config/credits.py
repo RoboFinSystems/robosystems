@@ -5,7 +5,7 @@ SIMPLIFIED CREDIT MODEL:
 ========================
 Credits are now exclusively for AI operations that use external AI APIs
 (Anthropic Claude or OpenAI GPT). All other operations are included as they
-use resources already included with the Kuzu instance provisioning.
+use resources already included with the LadybugDB instance provisioning.
 
 AI CREDITS:
 -----------
@@ -30,7 +30,7 @@ INCLUDED OPERATIONS (No credit consumption):
 
 RATIONALE:
 ----------
-When a Kuzu database is provisioned, it comes with defined resource limits:
+When a LadybugDB database is provisioned, it comes with defined resource limits:
 - Memory allocation (based on tier)
 - CPU allocation (based on instance type)
 - Storage limits (configurable)
@@ -48,9 +48,9 @@ from decimal import Decimal
 # These are the monthly AI credit allocations for each subscription tier
 # Updated 2025-11-09: Reduced to sustainable levels (99% reduction from original)
 TIER_CREDIT_ALLOCATIONS = {
-  "kuzu-standard": 100,  # 100 credits/month = 333 complex queries (~11/day)
-  "kuzu-large": 300,  # 300 credits/month = 1,000 complex queries (~33/day)
-  "kuzu-xlarge": 800,  # 800 credits/month = 2,667 complex queries (~89/day)
+  "ladybug-standard": 100,  # 100 credits/month = 333 complex queries (~11/day)
+  "ladybug-large": 300,  # 300 credits/month = 1,000 complex queries (~33/day)
+  "ladybug-xlarge": 800,  # 800 credits/month = 2,667 complex queries (~89/day)
 }
 
 
@@ -95,9 +95,9 @@ class CreditConfig:
   # Monthly AI credit allocations by subscription tier
   # Sourced from TIER_CREDIT_ALLOCATIONS in billing/core.py (single source of truth)
   MONTHLY_ALLOCATIONS = {
-    "kuzu-standard": TIER_CREDIT_ALLOCATIONS.get("kuzu-standard", 100),
-    "kuzu-large": TIER_CREDIT_ALLOCATIONS.get("kuzu-large", 300),
-    "kuzu-xlarge": TIER_CREDIT_ALLOCATIONS.get("kuzu-xlarge", 800),
+    "ladybug-standard": TIER_CREDIT_ALLOCATIONS.get("ladybug-standard", 100),
+    "ladybug-large": TIER_CREDIT_ALLOCATIONS.get("ladybug-large", 300),
+    "ladybug-xlarge": TIER_CREDIT_ALLOCATIONS.get("ladybug-xlarge", 800),
   }
 
   # Credit balance thresholds for alerts

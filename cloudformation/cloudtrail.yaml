@@ -162,7 +162,7 @@ Resources:
                           - !Ref MonitoredBuckets
                   # Default critical buckets if none specified
                   - - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
-                    - !Sub "arn:${AWS::Partition}:s3:::robosystems-kuzu-databases-${Environment}/*"
+                    - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}/*"
             - !Ref AWS::NoValue
       Tags:
         - Key: Name

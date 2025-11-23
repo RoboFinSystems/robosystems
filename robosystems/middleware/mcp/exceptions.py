@@ -7,7 +7,7 @@ Custom exceptions for graph databases MCP client error handling with enhanced hi
 from typing import Optional
 
 
-class KuzuAPIError(Exception):
+class GraphAPIError(Exception):
   """Base exception for Graph API errors."""
 
   def __init__(
@@ -18,7 +18,7 @@ class KuzuAPIError(Exception):
     self.details = details or {}
 
 
-class KuzuQueryTimeoutError(KuzuAPIError):
+class GraphQueryTimeoutError(GraphAPIError):
   """Exception raised when query execution times out."""
 
   def __init__(
@@ -31,7 +31,7 @@ class KuzuQueryTimeoutError(KuzuAPIError):
       self.details["timeout_seconds"] = timeout_seconds
 
 
-class KuzuQueryComplexityError(KuzuAPIError):
+class GraphQueryComplexityError(GraphAPIError):
   """Exception raised when query is too complex or risky."""
 
   def __init__(
@@ -42,7 +42,7 @@ class KuzuQueryComplexityError(KuzuAPIError):
       self.details["complexity_score"] = complexity_score
 
 
-class KuzuValidationError(KuzuAPIError):
+class GraphValidationError(GraphAPIError):
   """Exception raised when query validation fails."""
 
   def __init__(
@@ -55,14 +55,14 @@ class KuzuValidationError(KuzuAPIError):
       self.details["validation_errors"] = validation_errors
 
 
-class KuzuAuthenticationError(KuzuAPIError):
+class GraphAuthenticationError(GraphAPIError):
   """Exception raised when authentication fails."""
 
   def __init__(self, message: str = "Authentication failed"):
     super().__init__(message, error_code="AUTH_FAILED")
 
 
-class KuzuAuthorizationError(KuzuAPIError):
+class GraphAuthorizationError(GraphAPIError):
   """Exception raised when authorization fails."""
 
   def __init__(
@@ -75,7 +75,7 @@ class KuzuAuthorizationError(KuzuAPIError):
       self.details["required_permission"] = required_permission
 
 
-class KuzuConnectionError(KuzuAPIError):
+class GraphConnectionError(GraphAPIError):
   """Exception raised when connection to Graph API fails."""
 
   def __init__(
@@ -86,7 +86,7 @@ class KuzuConnectionError(KuzuAPIError):
       self.details["endpoint"] = endpoint
 
 
-class KuzuResourceNotFoundError(KuzuAPIError):
+class GraphResourceNotFoundError(GraphAPIError):
   """Exception raised when requested resource is not found."""
 
   def __init__(
@@ -102,7 +102,7 @@ class KuzuResourceNotFoundError(KuzuAPIError):
       self.details["resource_id"] = resource_id
 
 
-class KuzuRateLimitError(KuzuAPIError):
+class GraphRateLimitError(GraphAPIError):
   """Exception raised when API rate limit is exceeded."""
 
   def __init__(
@@ -115,7 +115,7 @@ class KuzuRateLimitError(KuzuAPIError):
       self.details["retry_after_seconds"] = retry_after_seconds
 
 
-class KuzuSchemaError(KuzuAPIError):
+class GraphSchemaError(GraphAPIError):
   """Exception raised when there's a schema-related error."""
 
   def __init__(self, message: str = "Schema error", schema_item: Optional[str] = None):

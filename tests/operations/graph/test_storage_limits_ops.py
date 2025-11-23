@@ -250,7 +250,7 @@ class TestStorageViolationDetection:
       graph_type="generic",
       org_id=org.id,
       session=db_session,
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
     )
 
     # Create graph credits with limit
@@ -324,7 +324,7 @@ class TestStorageViolationDetection:
       graph_type="generic",
       org_id=org.id,
       session=db_session,
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
     )
 
     # Create graph credits
@@ -502,7 +502,7 @@ def sample_graph_credits(db_session, sample_user):
     graph_type="generic",
     org_id=org.id,
     session=db_session,
-    graph_tier=GraphTier.KUZU_STANDARD,
+    graph_tier=GraphTier.LADYBUG_STANDARD,
   )
 
   credits = GraphCredits.create_for_graph(

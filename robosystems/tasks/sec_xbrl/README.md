@@ -1,6 +1,6 @@
 # SEC XBRL Processing Pipeline
 
-This module contains all SEC-specific tasks for processing XBRL filings and ingesting them into the Kuzu graph database.
+This module contains all SEC-specific tasks for processing XBRL filings and ingesting them into the LadybugDB graph database.
 
 ## Module Structure
 
@@ -9,7 +9,7 @@ sec_xbrl/
 ├── __init__.py           # Module exports
 ├── orchestration.py      # Phase-based pipeline orchestration
 ├── consolidation.py      # Parquet file consolidation for performance
-├── ingestion.py          # Kuzu database ingestion
+├── ingestion.py          # LadybugDB database ingestion
 └── maintenance.py        # Database reset and cleanup tasks
 ```
 
@@ -22,7 +22,7 @@ The SEC pipeline processes XBRL filings through four stages:
 1. **Download** - Fetch XBRL files from SEC (rate-limited)
 2. **Process** - Convert XBRL to parquet (unlimited parallelism)
 3. **Consolidate** - Combine small parquet files into optimal sizes (parallel)
-4. **Ingestion** - Load into Kuzu from consolidated files
+4. **Ingestion** - Load into LadybugDB from consolidated files
 
 ### Stage Details
 
@@ -46,7 +46,7 @@ The SEC pipeline processes XBRL filings through four stages:
 - 100-1000x reduction in file count
 
 #### Stage 4: Ingestion
-- Uses Kuzu's native S3 COPY FROM with consolidated files
+- Uses LadybugDB's native S3 COPY FROM with consolidated files
 - Reads from `consolidated/` when use_consolidated=True
 - IGNORE_ERRORS=true handles any duplicates
 - Loads nodes first, then relationships
@@ -68,12 +68,12 @@ File consolidation for performance:
 - `consolidate_parquet_files()` - Consolidates files for a specific table/year
 - `orchestrate_consolidation_phase()` - Orchestrates all consolidation tasks
 - Streaming processing to avoid memory issues
-- Target file size: 256MB for optimal Kuzu performance
+- Target file size: 256MB for optimal LadybugDB performance
 
 ### ingestion.py
-Kuzu bulk loading:
+LadybugDB bulk loading:
 - `ingest_sec_data()` - Main ingestion task
-- Configures Kuzu httpfs extension for S3
+- Configures LadybugDB httpfs extension for S3
 - Handles LocalStack/production S3 endpoints
 - Ensures proper connection cleanup
 
@@ -141,7 +141,7 @@ robosystems-sec-processed/
 ### Queue Settings (workers.yml)
 - `shared-extraction`: Max 2 workers (SEC rate limiting)
 - `shared-processing`: Max 30 workers (heavy processing)
-- `shared-ingestion`: Max 1 worker (Kuzu single-threaded)
+- `shared-ingestion`: Max 1 worker (LadybugDB single-threaded)
 
 ### Environment Variables
 - `SEC_PROCESSED_BUCKET`: S3 bucket for processed files
@@ -155,13 +155,13 @@ robosystems-sec-processed/
 1. **Phase Synchronization**: Ensures phases complete in order
 2. **IGNORE_ERRORS**: Handles duplicates automatically during ingestion
 3. **Queue Management**: Separate queues prevent resource conflicts
-4. **Connection Cleanup**: Prevents Kuzu database locking
+4. **Connection Cleanup**: Prevents LadybugDB database locking
 5. **Error Isolation**: Failed companies don't block pipeline
 
 ## Performance
 
 - **Direct Ingestion**: Eliminates consolidation overhead
-- **Native S3 Loading**: Kuzu reads directly from S3 using wildcards
+- **Native S3 Loading**: LadybugDB reads directly from S3 using wildcards
 - **Unlimited Parallelism**: Process phase has no concurrency limits
 - **Deduplication**: IGNORE_ERRORS handles duplicates efficiently
 

@@ -5,7 +5,7 @@ Architecture:
 - Phase 1: Download (rate-limited, shared-extraction queue)
 - Phase 2: Process (unlimited parallelism, shared-processing queue)
 - Phase 3: Consolidate (combine small parquet files into larger ones)
-- Phase 4: Ingest (shared-ingestion queue, supports both Kuzu and Neo4j backends)
+- Phase 4: Ingest (shared-ingestion queue, supports both LadybugDB and Neo4j backends)
 
 All state managed in Redis for distributed coordination.
 """
@@ -584,23 +584,23 @@ def cleanup_phase_connections(phase: str) -> Dict:
   try:
     logger.info(f"Starting connection cleanup after {phase} phase")
 
-    # Clear Kuzu client factory connection pools
+    # Clear LadybugDB client factory connection pools
     try:
       from robosystems.graph_api.client.factory import GraphClientFactory
 
       if hasattr(GraphClientFactory, "_connection_pools"):
         pool_count = len(GraphClientFactory._connection_pools)
         GraphClientFactory._connection_pools.clear()
-        logger.info(f"Cleared {pool_count} Kuzu connection pools")
+        logger.info(f"Cleared {pool_count} LadybugDB connection pools")
 
       if hasattr(GraphClientFactory, "_pool_stats"):
         GraphClientFactory._pool_stats.clear()
-        logger.info("Cleared Kuzu pool statistics")
+        logger.info("Cleared LadybugDB pool statistics")
 
     except ImportError:
-      logger.debug("Kuzu client factory not available")
+      logger.debug("LadybugDB client factory not available")
     except Exception as e:
-      logger.warning(f"Failed to clear Kuzu pools: {e}")
+      logger.warning(f"Failed to clear LadybugDB pools: {e}")
 
     # Clear any cached S3 clients
     try:
@@ -917,7 +917,7 @@ def plan_phased_processing(
   max_companies: Optional[int] = None,  # Limit companies for testing
   companies_per_batch: int = 50,  # For monitoring/checkpointing only
   cik_filter: Optional[str] = None,  # Filter to specific CIK for local testing
-  backend: str = "kuzu",  # Backend type for ingestion ("kuzu" or "neo4j")
+  backend: str = "ladybug",  # Backend type for ingestion ("ladybug" or "neo4j")
 ) -> Dict:
   """
   Plan phased SEC processing with optional company limit for testing.
@@ -928,7 +928,7 @@ def plan_phased_processing(
       max_companies: Maximum companies to process (None = all)
       companies_per_batch: Batch size for monitoring (not parallelism)
       cik_filter: Optional CIK to filter to a single company
-      backend: Backend type for ingestion ("kuzu" or "neo4j")
+      backend: Backend type for ingestion ("ladybug" or "neo4j")
   """
   from robosystems.adapters.sec import SECClient
 
@@ -1000,7 +1000,7 @@ def plan_phased_processing(
   max_retries=1,
 )
 def start_phase(
-  phase: str, resume: bool = False, retry_failed: bool = False, backend: str = "kuzu"
+  phase: str, resume: bool = False, retry_failed: bool = False, backend: str = "ladybug"
 ) -> Dict:
   """
   Start a specific processing phase with optional resume support.
@@ -1009,7 +1009,7 @@ def start_phase(
       phase: Phase to start (download, process, consolidate, ingest)
       resume: Resume from last checkpoint if available
       retry_failed: Include previously failed companies
-      backend: Backend type for ingestion ("kuzu" or "neo4j")
+      backend: Backend type for ingestion ("ladybug" or "neo4j")
   """
   orchestrator = SECOrchestrator()
   state = orchestrator._load_state()

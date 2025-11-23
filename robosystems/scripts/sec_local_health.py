@@ -9,7 +9,7 @@ the SEC database is properly accessible through all interfaces.
 import asyncio
 import sys
 from typing import Dict, Any
-import kuzu
+import real_ladybug as lbug
 import httpx
 import json
 from datetime import datetime
@@ -22,7 +22,7 @@ class SECHealthChecker:
 
   def __init__(self):
     """Initialize the health checker."""
-    self.database_path = "./data/kuzu-dbs/sec.kuzu"
+    self.database_path = "./data/lbug-dbs/sec.lbug"
     self.api_url = "http://localhost:8001"
     self.results = {
       "timestamp": datetime.now().isoformat(),
@@ -33,7 +33,7 @@ class SECHealthChecker:
 
   def check_direct_access(self) -> Dict[str, Any]:
     """
-    Check database health via direct Kuzu connection.
+    Check database health via direct LadybugDB connection.
 
     Returns:
         Dictionary with direct access test results
@@ -48,8 +48,8 @@ class SECHealthChecker:
 
     try:
       # Connect directly to database file
-      db = kuzu.Database(self.database_path)
-      conn = kuzu.Connection(db)
+      db = lbug.Database(self.database_path)
+      conn = lbug.Connection(db)
       results["connection"] = True
       logger.info(f"  ✅ Connected to {self.database_path}")
 

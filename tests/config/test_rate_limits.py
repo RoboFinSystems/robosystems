@@ -30,10 +30,10 @@ def test_rate_limit_with_multiplier_adjusts_value(monkeypatch):
   )
 
   adjusted_limit, window = RateLimitConfig.get_rate_limit_with_multiplier(
-    "kuzu-standard", EndpointCategory.GRAPH_READ
+    "ladybug-standard", EndpointCategory.GRAPH_READ
   )
 
-  base_limit = RateLimitConfig.SUBSCRIPTION_RATE_LIMITS["kuzu-standard"][
+  base_limit = RateLimitConfig.SUBSCRIPTION_RATE_LIMITS["ladybug-standard"][
     EndpointCategory.GRAPH_READ
   ][0]
   assert adjusted_limit == int(base_limit * 2.5)
@@ -47,11 +47,11 @@ def test_multiplier_can_be_skipped(monkeypatch):
   )
 
   limit_without_multiplier, window = RateLimitConfig.get_rate_limit_with_multiplier(
-    "kuzu-standard", EndpointCategory.GRAPH_READ, use_tier_config=False
+    "ladybug-standard", EndpointCategory.GRAPH_READ, use_tier_config=False
   )
 
   base_limit, expected_window = RateLimitConfig.get_rate_limit(
-    "kuzu-standard", EndpointCategory.GRAPH_READ
+    "ladybug-standard", EndpointCategory.GRAPH_READ
   )
   assert limit_without_multiplier == base_limit
   assert window == expected_window == RateLimitPeriod.MINUTE.to_seconds()

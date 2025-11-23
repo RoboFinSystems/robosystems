@@ -1,7 +1,7 @@
 """
-Kuzu Schema Validator
+LadybugDB Schema Validator
 
-Validates node and relationship operations against predefined Kuzu schema
+Validates node and relationship operations against predefined LadybugDB schema
 using the robosystems.schemas definitions as the source of truth.
 """
 
@@ -13,9 +13,9 @@ from .loader import get_schema_loader
 logger = logging.getLogger(__name__)
 
 
-class KuzuSchemaValidator:
+class LadybugSchemaValidator:
   """
-  Validates Kuzu operations against the robosystems schema.
+  Validates LadybugDB operations against the robosystems schema.
 
   Uses robosystems.schemas as the source of truth for all validation.
   """
@@ -23,7 +23,7 @@ class KuzuSchemaValidator:
   def __init__(self):
     self.schema_loader = get_schema_loader()
 
-    logger.debug("Initialized KuzuSchemaValidator")
+    logger.debug("Initialized LadybugSchemaValidator")
     logger.debug(
       f"Loaded schemas for {len(self.schema_loader.list_node_types())} node types"
     )

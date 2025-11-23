@@ -1,7 +1,7 @@
 """
-Kuzu Database Manager - Multi-database management for Graph API
+LadybugDB Database Manager - Multi-database management for Graph API
 
-This module provides database management capabilities for Kuzu clusters,
+This module provides database management capabilities for LadybugDB clusters,
 including creating, deleting, and managing multiple databases on a single node.
 
 Key features:
@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-import kuzu
+import real_ladybug as lbug
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
 import re
@@ -47,8 +47,8 @@ def validate_database_path(base_path: Path, db_name: str) -> Path:
       status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid database name"
     )
 
-  # Construct safe path (Kuzu 0.11.x uses .kuzu files)
-  db_path = base_path / f"{db_name}.kuzu"
+  # Construct safe path (LadybugDB uses .lbug files)
+  db_path = base_path / f"{db_name}.lbug"
 
   # Ensure the resolved path is still within base_path
   try:
@@ -135,9 +135,9 @@ class DatabaseHealthResponse(BaseModel):
   databases: List[DatabaseInfo] = Field(..., description="Database health details")
 
 
-class KuzuDatabaseManager:
+class LadybugDatabaseManager:
   """
-  Manages multiple Kuzu databases on a single node.
+  Manages multiple LadybugDB databases on a single node.
 
   This class handles the lifecycle of multiple databases including creation,
   deletion, schema management, and health monitoring. Now uses a thread-safe
@@ -177,12 +177,12 @@ class KuzuDatabaseManager:
     self.base_path.mkdir(parents=True, exist_ok=True)
 
     logger.info(
-      f"Initialized Kuzu Database Manager with connection pool: {base_path} (max: {max_databases})"
+      f"Initialized LadybugDB Database Manager with connection pool: {base_path} (max: {max_databases})"
     )
 
   def create_database(self, request: DatabaseCreateRequest) -> DatabaseCreateResponse:
     """
-    Create a new Kuzu database with schema.
+    Create a new LadybugDB database with schema.
 
     Args:
         request: Database creation request
@@ -227,7 +227,7 @@ class KuzuDatabaseManager:
       # Get memory configuration from environment
       from robosystems.config import env
 
-      max_memory_mb = env.KUZU_MAX_MEMORY_MB
+      max_memory_mb = env.LBUG_MAX_MEMORY_MB
       buffer_pool_size = max_memory_mb * 1024 * 1024
 
       # For SEC database, use explicit checkpoint threshold for large tables
@@ -240,16 +240,16 @@ class KuzuDatabaseManager:
         checkpoint_threshold = 536870912  # 512MB for regular databases
 
       # Create database with all optimizations
-      db = kuzu.Database(
+      db = lbug.Database(
         str(db_path),
         read_only=False,
         buffer_pool_size=buffer_pool_size,
-        compression=True,  # Safe: enabled by default in Kuzu
-        max_num_threads=0,  # Use all available threads (Kuzu decides)
+        compression=True,  # Safe: enabled by default in LadybugDB
+        max_num_threads=0,  # Use all available threads (LadybugDB decides)
         auto_checkpoint=True,  # Enable automatic checkpointing
         checkpoint_threshold=checkpoint_threshold,  # Adaptive based on database
       )
-      conn = kuzu.Connection(db)
+      conn = lbug.Connection(db)
       logger.info(
         f"Database created - buffer pool: {max_memory_mb} MB, "
         f"compression: enabled, auto_checkpoint: enabled, threshold: {checkpoint_threshold // (1024 * 1024)}MB"
@@ -322,7 +322,7 @@ class KuzuDatabaseManager:
     Returns:
         Deletion status
     """
-    db_path = self.base_path / f"{graph_id}.kuzu"
+    db_path = self.base_path / f"{graph_id}.lbug"
 
     if not db_path.exists():
       raise HTTPException(
@@ -336,14 +336,14 @@ class KuzuDatabaseManager:
       # Close any connections in the pool for this database
       self.connection_pool.close_database_connections(graph_id)
 
-      # Remove database file (single file in Kuzu 0.11.x)
+      # Remove database file (single file in LadybugDB)
       if db_path.is_file():
         db_path.unlink()
       elif db_path.is_dir():
         # Legacy cleanup for old .db directories
         shutil.rmtree(db_path)
 
-      # Clean up DuckDB staging database alongside Kuzu database
+      # Clean up DuckDB staging database alongside LadybugDB database
       from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
 
       try:
@@ -379,7 +379,7 @@ class KuzuDatabaseManager:
         read_only: Whether to open connection in read-only mode
 
     Returns:
-        Kuzu connection from the pool
+        LadybugDB connection from the pool
     """
     return self.connection_pool.get_connection(graph_id, read_only=read_only)
 
@@ -394,8 +394,8 @@ class KuzuDatabaseManager:
 
     try:
       for item in self.base_path.iterdir():
-        if item.is_file() and item.name.endswith(".kuzu"):
-          db_name = item.name[:-5]  # Remove .kuzu extension
+        if item.is_file() and item.name.endswith(".lbug"):
+          db_name = item.name[:-5]  # Remove .lbug extension
           databases.append(db_name)
 
       return sorted(databases)
@@ -427,7 +427,7 @@ class KuzuDatabaseManager:
     Returns:
         Database information
     """
-    db_path = self.base_path / f"{graph_id}.kuzu"
+    db_path = self.base_path / f"{graph_id}.lbug"
 
     if not db_path.exists():
       raise HTTPException(
@@ -436,7 +436,7 @@ class KuzuDatabaseManager:
       )
 
     try:
-      # Calculate database size (single file in Kuzu 0.11.x)
+      # Calculate database size (single file in LadybugDB)
       size_bytes = db_path.stat().st_size if db_path.is_file() else 0
 
       # Get creation time
@@ -527,7 +527,7 @@ class KuzuDatabaseManager:
 
   def _apply_schema(
     self,
-    conn: kuzu.Connection,
+    conn: lbug.Connection,
     schema_type: str,
     repository_name: Optional[str] = None,
     custom_ddl: Optional[str] = None,
@@ -559,7 +559,7 @@ class KuzuDatabaseManager:
       logger.error(f"Failed to apply {schema_type} schema: {e}")
       return False
 
-  def _apply_entity_schema(self, conn: kuzu.Connection) -> bool:
+  def _apply_entity_schema(self, conn: lbug.Connection) -> bool:
     """Apply entity graph schema using dynamic schema definitions."""
     try:
       from robosystems.schemas.loader import get_schema_loader
@@ -587,8 +587,8 @@ class KuzuDatabaseManager:
         primary_key = None
 
         for prop in node_schema.properties:
-          kuzu_type = self._map_schema_type_to_kuzu(prop.type)
-          columns.append(f"{prop.name} {kuzu_type}")
+          lbug_type = self._map_schema_type_to_lbug(prop.type)
+          columns.append(f"{prop.name} {lbug_type}")
 
           if prop.is_primary_key:
             primary_key = prop.name
@@ -634,8 +634,8 @@ class KuzuDatabaseManager:
         if rel_schema.properties:
           prop_definitions = []
           for prop in rel_schema.properties:
-            kuzu_type = self._map_schema_type_to_kuzu(prop.type)
-            prop_definitions.append(f"{prop.name} {kuzu_type}")
+            lbug_type = self._map_schema_type_to_lbug(prop.type)
+            prop_definitions.append(f"{prop.name} {lbug_type}")
 
           props_str = ",\n            " + ",\n            ".join(prop_definitions)
           create_sql = f"""
@@ -666,7 +666,7 @@ class KuzuDatabaseManager:
       logger.warning("Falling back to minimal hardcoded schema")
       return self._apply_fallback_entity_schema(conn)
 
-  def _apply_fallback_entity_schema(self, conn: kuzu.Connection) -> bool:
+  def _apply_fallback_entity_schema(self, conn: lbug.Connection) -> bool:
     """Fallback to minimal hardcoded schema if dynamic schema fails."""
     minimal_statements = [
       # Only create the absolute minimum for basic functionality
@@ -692,8 +692,8 @@ class KuzuDatabaseManager:
       logger.error(f"Failed to apply fallback schema: {e}")
       return False
 
-  def _map_schema_type_to_kuzu(self, schema_type: str) -> str:
-    """Map schema property types to Kuzu types."""
+  def _map_schema_type_to_lbug(self, schema_type: str) -> str:
+    """Map schema property types to LadybugDB types."""
     type_mapping = {
       "STRING": "STRING",
       "INT64": "INT64",
@@ -709,7 +709,7 @@ class KuzuDatabaseManager:
     return type_mapping.get(schema_type.upper(), "STRING")
 
   def _apply_custom_schema(
-    self, conn: kuzu.Connection, custom_ddl: Optional[str]
+    self, conn: lbug.Connection, custom_ddl: Optional[str]
   ) -> bool:
     """Apply custom schema DDL to database."""
     if not custom_ddl:
@@ -741,7 +741,7 @@ class KuzuDatabaseManager:
       return False
 
   def _apply_shared_schema(
-    self, conn: kuzu.Connection, repository_name: Optional[str]
+    self, conn: lbug.Connection, repository_name: Optional[str]
   ) -> bool:
     """Apply shared repository schema using appropriate extensions."""
     try:
@@ -780,8 +780,8 @@ class KuzuDatabaseManager:
         primary_key = None
 
         for prop in node_schema.properties:
-          kuzu_type = self._map_schema_type_to_kuzu(prop.type)
-          columns.append(f"{prop.name} {kuzu_type}")
+          lbug_type = self._map_schema_type_to_lbug(prop.type)
+          columns.append(f"{prop.name} {lbug_type}")
 
           if prop.is_primary_key:
             primary_key = prop.name
@@ -827,8 +827,8 @@ class KuzuDatabaseManager:
         if rel_schema.properties:
           prop_definitions = []
           for prop in rel_schema.properties:
-            kuzu_type = self._map_schema_type_to_kuzu(prop.type)
-            prop_definitions.append(f"{prop.name} {kuzu_type}")
+            lbug_type = self._map_schema_type_to_lbug(prop.type)
+            prop_definitions.append(f"{prop.name} {lbug_type}")
 
           props_str = ",\n            " + ",\n            ".join(prop_definitions)
           create_sql = f"""
@@ -870,7 +870,7 @@ class KuzuDatabaseManager:
         True if database is healthy
     """
     try:
-      db_path = self.base_path / f"{graph_id}.kuzu"
+      db_path = self.base_path / f"{graph_id}.lbug"
 
       # Basic file system check
       if not db_path.exists():
@@ -897,7 +897,7 @@ class KuzuDatabaseManager:
         # Log the specific error for debugging
         logger.warning(
           f"Health check connection failed for {graph_id}: {conn_error}. "
-          "This may be due to Docker volume permissions or Kuzu recovery issues."
+          "This may be due to Docker volume permissions or LadybugDB recovery issues."
         )
         # For now, if we can't connect but file exists, consider it "unhealthy but present"
         # This allows us to track problematic databases without crashing
@@ -928,14 +928,14 @@ class KuzuDatabaseManager:
         region_name="us-east-1",
       )
 
-      # Count databases (Kuzu 0.11.x uses .kuzu files)
-      db_count = len([f for f in self.base_path.glob("*.kuzu") if f.is_file()])
+      # Count databases (LadybugDB uses .lbug files)
+      db_count = len([f for f in self.base_path.glob("*.lbug") if f.is_file()])
       capacity_pct = int((db_count / self.max_databases) * 100)
 
       # Update the instance registry
       dynamodb.update_item(
         TableName=env.INSTANCE_REGISTRY_TABLE,
-        Key={"instance_id": {"S": "local-kuzu-writer"}},
+        Key={"instance_id": {"S": "local-lbug-writer"}},
         UpdateExpression="SET database_count = :count, available_capacity_pct = :cap",
         ExpressionAttributeValues={
           ":count": {"N": str(db_count)},

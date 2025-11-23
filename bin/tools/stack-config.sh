@@ -8,7 +8,7 @@
 #
 # Examples:
 #   ./get-stack-config.sh prod valkey
-#   ./get-stack-config.sh staging kuzu.writers.standard
+#   ./get-stack-config.sh staging ladybug.writers.standard
 #   ./get-stack-config.sh prod workers default
 #   ./get-stack-config.sh prod valkey - url
 

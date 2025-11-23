@@ -5,16 +5,16 @@ from unittest.mock import Mock, patch, AsyncMock
 from contextlib import asynccontextmanager
 
 from robosystems.middleware.mcp.factory import (
-  create_kuzu_mcp_client,
-  acquire_kuzu_mcp_client,
+  create_graph_mcp_client,
+  acquire_graph_mcp_client,
 )
 
 
-class TestCreateKuzuMCPClient:
-  """Test create_kuzu_mcp_client function."""
+class TestCreateGraphMCPClient:
+  """Test create_graph_mcp_client function."""
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   async def test_create_client_with_explicit_url(self, mock_client_class, mock_env):
     """Test creating client with explicit API URL."""
     mock_env.GRAPH_HTTP_TIMEOUT = 30
@@ -25,7 +25,7 @@ class TestCreateKuzuMCPClient:
     mock_client_class.return_value = mock_client
 
     api_url = "http://test-api.example.com"
-    client = await create_kuzu_mcp_client("test_graph", api_base_url=api_url)
+    client = await create_graph_mcp_client("test_graph", api_base_url=api_url)
 
     assert client == mock_client
     mock_client_class.assert_called_once_with(
@@ -37,7 +37,7 @@ class TestCreateKuzuMCPClient:
     )
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_with_discovery_shared_repo(
@@ -52,15 +52,15 @@ class TestCreateKuzuMCPClient:
     mock_utils.is_shared_repository.return_value = True
 
     # Mock client factory
-    mock_kuzu_client = Mock()
-    mock_kuzu_client.config.base_url = "http://discovered-url.com"
-    mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
+    mock_graph_client = Mock()
+    mock_graph_client.config.base_url = "http://discovered-url.com"
+    mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
     # Mock MCP client
     mock_mcp_client = AsyncMock()
     mock_client_class.return_value = mock_mcp_client
 
-    await create_kuzu_mcp_client("sec")
+    await create_graph_mcp_client("sec")
 
     # Verify shared repository detection
     mock_utils.is_shared_repository.assert_called_once_with("sec")
@@ -80,7 +80,7 @@ class TestCreateKuzuMCPClient:
     )
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_with_discovery_user_graph(
@@ -95,16 +95,16 @@ class TestCreateKuzuMCPClient:
     mock_utils.is_shared_repository.return_value = False
 
     # Mock client factory
-    mock_kuzu_client = Mock()
-    mock_kuzu_client.config = None  # No config attribute
-    mock_kuzu_client._base_url = "http://user-graph-url.com"
-    mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
+    mock_graph_client = Mock()
+    mock_graph_client.config = None  # No config attribute
+    mock_graph_client._base_url = "http://user-graph-url.com"
+    mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
     # Mock MCP client
     mock_mcp_client = AsyncMock()
     mock_client_class.return_value = mock_mcp_client
 
-    await create_kuzu_mcp_client("kg123abc")
+    await create_graph_mcp_client("kg123abc")
 
     # Verify user graph detection
     mock_utils.is_shared_repository.assert_called_once_with("kg123abc")
@@ -124,7 +124,7 @@ class TestCreateKuzuMCPClient:
     )
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_url_discovery_fallback_base_url(
@@ -138,16 +138,16 @@ class TestCreateKuzuMCPClient:
     mock_utils.is_shared_repository.return_value = False
 
     # Mock client with base_url attribute
-    mock_kuzu_client = Mock()
-    del mock_kuzu_client.config  # No config attribute
-    del mock_kuzu_client._base_url  # No _base_url attribute
-    mock_kuzu_client.base_url = "http://base-url-fallback.com"
-    mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
+    mock_graph_client = Mock()
+    del mock_graph_client.config  # No config attribute
+    del mock_graph_client._base_url  # No _base_url attribute
+    mock_graph_client.base_url = "http://base-url-fallback.com"
+    mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
     mock_mcp_client = AsyncMock()
     mock_client_class.return_value = mock_mcp_client
 
-    await create_kuzu_mcp_client("kg123abc")
+    await create_graph_mcp_client("kg123abc")
 
     mock_client_class.assert_called_once_with(
       api_base_url="http://base-url-fallback.com",
@@ -158,7 +158,7 @@ class TestCreateKuzuMCPClient:
     )
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_url_discovery_env_fallback(
@@ -173,16 +173,16 @@ class TestCreateKuzuMCPClient:
     mock_utils.is_shared_repository.return_value = False
 
     # Mock client with no URL attributes
-    mock_kuzu_client = Mock()
-    del mock_kuzu_client.config
-    del mock_kuzu_client._base_url
-    del mock_kuzu_client.base_url
-    mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
+    mock_graph_client = Mock()
+    del mock_graph_client.config
+    del mock_graph_client._base_url
+    del mock_graph_client.base_url
+    mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
     mock_mcp_client = AsyncMock()
     mock_client_class.return_value = mock_mcp_client
 
-    await create_kuzu_mcp_client("kg123abc")
+    await create_graph_mcp_client("kg123abc")
 
     mock_client_class.assert_called_once_with(
       api_base_url="http://env-fallback.com",
@@ -193,7 +193,7 @@ class TestCreateKuzuMCPClient:
     )
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_url_discovery_final_fallback(
@@ -208,16 +208,16 @@ class TestCreateKuzuMCPClient:
     mock_utils.is_shared_repository.return_value = False
 
     # Mock client with no URL attributes
-    mock_kuzu_client = Mock()
-    del mock_kuzu_client.config
-    del mock_kuzu_client._base_url
-    del mock_kuzu_client.base_url
-    mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
+    mock_graph_client = Mock()
+    del mock_graph_client.config
+    del mock_graph_client._base_url
+    del mock_graph_client.base_url
+    mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
     mock_mcp_client = AsyncMock()
     mock_client_class.return_value = mock_mcp_client
 
-    await create_kuzu_mcp_client("kg123abc")
+    await create_graph_mcp_client("kg123abc")
 
     mock_client_class.assert_called_once_with(
       api_base_url="http://localhost:8001",
@@ -228,18 +228,18 @@ class TestCreateKuzuMCPClient:
     )
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   async def test_create_client_env_defaults(self, mock_client_class, mock_env):
     """Test client creation with environment defaults."""
     mock_env.GRAPH_HTTP_TIMEOUT = 45
     mock_env.GRAPH_QUERY_TIMEOUT = 90
-    # No KUZU_MAX_QUERY_LENGTH attribute (testing hasattr fallback)
+    # No GRAPH_MAX_QUERY_LENGTH attribute (testing hasattr fallback)
     delattr(mock_env, "GRAPH_MAX_QUERY_LENGTH")
 
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client
 
-    await create_kuzu_mcp_client("test", api_base_url="http://test.com")
+    await create_graph_mcp_client("test", api_base_url="http://test.com")
 
     mock_client_class.assert_called_once_with(
       api_base_url="http://test.com",
@@ -250,7 +250,7 @@ class TestCreateKuzuMCPClient:
     )
 
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   async def test_create_client_default_graph_id(self, mock_client_class, mock_env):
     """Test client creation with default graph ID."""
     mock_env.GRAPH_HTTP_TIMEOUT = 30
@@ -261,7 +261,7 @@ class TestCreateKuzuMCPClient:
     mock_client_class.return_value = mock_client
 
     # Call without graph_id parameter (should default to "sec")
-    await create_kuzu_mcp_client(api_base_url="http://test.com")
+    await create_graph_mcp_client(api_base_url="http://test.com")
 
     mock_client_class.assert_called_once_with(
       api_base_url="http://test.com",
@@ -273,7 +273,7 @@ class TestCreateKuzuMCPClient:
 
   @patch("robosystems.middleware.mcp.factory.logger")
   @patch("robosystems.middleware.mcp.factory.env")
-  @patch("robosystems.middleware.mcp.factory.KuzuMCPClient")
+  @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
   async def test_create_client_logs_discovery(
@@ -286,22 +286,22 @@ class TestCreateKuzuMCPClient:
 
     mock_utils.is_shared_repository.return_value = True
 
-    mock_kuzu_client = Mock()
-    mock_kuzu_client.config.base_url = "http://discovered.com"
-    mock_factory.create_client = AsyncMock(return_value=mock_kuzu_client)
+    mock_graph_client = Mock()
+    mock_graph_client.config.base_url = "http://discovered.com"
+    mock_factory.create_client = AsyncMock(return_value=mock_graph_client)
 
     mock_mcp_client = AsyncMock()
     mock_client_class.return_value = mock_mcp_client
 
-    await create_kuzu_mcp_client("sec")
+    await create_graph_mcp_client("sec")
 
     mock_logger.info.assert_called_once_with(
       "GraphClientFactory discovered endpoint: http://discovered.com for graph sec"
     )
 
 
-class TestAcquireKuzuMCPClient:
-  """Test acquire_kuzu_mcp_client async context manager."""
+class TestAcquireGraphMCPClient:
+  """Test acquire_graph_mcp_client async context manager."""
 
   @patch("robosystems.middleware.mcp.factory.get_connection_pool")
   async def test_acquire_client_with_pool(self, mock_get_pool):
@@ -318,19 +318,19 @@ class TestAcquireKuzuMCPClient:
     mock_get_pool.return_value = mock_pool
 
     # Test the context manager
-    async with acquire_kuzu_mcp_client("test_graph", "http://test.com") as client:
+    async with acquire_graph_mcp_client("test_graph", "http://test.com") as client:
       assert client == mock_client
 
     mock_get_pool.assert_called_once()
 
-  @patch("robosystems.middleware.mcp.factory.create_kuzu_mcp_client")
+  @patch("robosystems.middleware.mcp.factory.create_graph_mcp_client")
   async def test_acquire_client_without_pool(self, mock_create_client):
     """Test acquiring client without connection pooling."""
     mock_client = AsyncMock()
     mock_client.close = AsyncMock()
     mock_create_client.return_value = mock_client
 
-    async with acquire_kuzu_mcp_client(
+    async with acquire_graph_mcp_client(
       "test_graph", "http://test.com", use_pool=False
     ) as client:
       assert client == mock_client
@@ -338,7 +338,7 @@ class TestAcquireKuzuMCPClient:
     mock_create_client.assert_called_once_with("test_graph", "http://test.com")
     mock_client.close.assert_called_once()
 
-  @patch("robosystems.middleware.mcp.factory.create_kuzu_mcp_client")
+  @patch("robosystems.middleware.mcp.factory.create_graph_mcp_client")
   async def test_acquire_client_without_pool_no_close_method(self, mock_create_client):
     """Test acquiring client without pool when client has no close method."""
     mock_client = AsyncMock()
@@ -346,7 +346,7 @@ class TestAcquireKuzuMCPClient:
     del mock_client.close
     mock_create_client.return_value = mock_client
 
-    async with acquire_kuzu_mcp_client(
+    async with acquire_graph_mcp_client(
       "test_graph", "http://test.com", use_pool=False
     ) as client:
       assert client == mock_client
@@ -355,7 +355,7 @@ class TestAcquireKuzuMCPClient:
     # Should not raise error even without close method
 
   @patch("robosystems.middleware.mcp.factory.logger")
-  @patch("robosystems.middleware.mcp.factory.create_kuzu_mcp_client")
+  @patch("robosystems.middleware.mcp.factory.create_graph_mcp_client")
   async def test_acquire_client_close_error_handling(
     self, mock_create_client, mock_logger
   ):
@@ -364,7 +364,7 @@ class TestAcquireKuzuMCPClient:
     mock_client.close = AsyncMock(side_effect=Exception("Close failed"))
     mock_create_client.return_value = mock_client
 
-    async with acquire_kuzu_mcp_client(
+    async with acquire_graph_mcp_client(
       "test_graph", "http://test.com", use_pool=False
     ) as client:
       assert client == mock_client
@@ -387,7 +387,7 @@ class TestAcquireKuzuMCPClient:
     mock_pool.acquire = mock_acquire
     mock_get_pool.return_value = mock_pool
 
-    async with acquire_kuzu_mcp_client() as client:
+    async with acquire_graph_mcp_client() as client:
       assert client == mock_client
 
   @patch("robosystems.middleware.mcp.factory.get_connection_pool")
@@ -405,7 +405,7 @@ class TestAcquireKuzuMCPClient:
     mock_pool.acquire = mock_acquire
     mock_get_pool.return_value = mock_pool
 
-    async with acquire_kuzu_mcp_client("custom_graph", "http://custom.com") as client:
+    async with acquire_graph_mcp_client("custom_graph", "http://custom.com") as client:
       assert client == mock_client
 
   @patch("robosystems.middleware.mcp.factory.get_connection_pool")
@@ -422,10 +422,10 @@ class TestAcquireKuzuMCPClient:
     mock_get_pool.return_value = mock_pool
 
     with pytest.raises(Exception, match="Pool error"):
-      async with acquire_kuzu_mcp_client("test"):
+      async with acquire_graph_mcp_client("test"):
         pass  # Should not reach here
 
-  @patch("robosystems.middleware.mcp.factory.create_kuzu_mcp_client")
+  @patch("robosystems.middleware.mcp.factory.create_graph_mcp_client")
   async def test_acquire_client_creation_exception_propagation(
     self, mock_create_client
   ):
@@ -433,7 +433,7 @@ class TestAcquireKuzuMCPClient:
     mock_create_client.side_effect = Exception("Creation failed")
 
     with pytest.raises(Exception, match="Creation failed"):
-      async with acquire_kuzu_mcp_client("test", use_pool=False):
+      async with acquire_graph_mcp_client("test", use_pool=False):
         pass  # Should not reach here
 
 
@@ -441,7 +441,7 @@ class TestFactoryIntegration:
   """Test integration between factory functions."""
 
   @patch("robosystems.middleware.mcp.factory.get_connection_pool")
-  @patch("robosystems.middleware.mcp.factory.create_kuzu_mcp_client")
+  @patch("robosystems.middleware.mcp.factory.create_graph_mcp_client")
   async def test_pool_vs_direct_creation_consistency(
     self, mock_create_client, mock_get_pool
   ):
@@ -461,11 +461,11 @@ class TestFactoryIntegration:
     mock_get_pool.return_value = mock_pool
 
     # Test direct creation
-    async with acquire_kuzu_mcp_client("test", use_pool=False) as client_direct:
+    async with acquire_graph_mcp_client("test", use_pool=False) as client_direct:
       assert client_direct == mock_client_direct
 
     # Test pooled creation
-    async with acquire_kuzu_mcp_client("test", use_pool=True) as client_pooled:
+    async with acquire_graph_mcp_client("test", use_pool=True) as client_pooled:
       assert client_pooled == mock_client_pooled
 
     # Verify both paths were taken
@@ -473,9 +473,9 @@ class TestFactoryIntegration:
     mock_get_pool.assert_called_once()
 
   async def test_context_manager_protocol(self):
-    """Test that acquire_kuzu_mcp_client follows async context manager protocol."""
+    """Test that acquire_graph_mcp_client follows async context manager protocol."""
     # This test verifies the function signature and async context manager behavior
-    func = acquire_kuzu_mcp_client
+    func = acquire_graph_mcp_client
 
     # Should be a function that returns an async context manager
     assert callable(func)

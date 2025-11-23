@@ -16,8 +16,8 @@ from robosystems.operations.graph.subgraph_service import SubgraphService
 class CreateWorkspaceTool:
   """Create an isolated workspace (subgraph)."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
@@ -141,8 +141,8 @@ class CreateWorkspaceTool:
 class DeleteWorkspaceTool:
   """Delete a workspace."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
@@ -296,8 +296,8 @@ class DeleteWorkspaceTool:
 class ListWorkspacesTool:
   """List all workspaces."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
@@ -385,8 +385,8 @@ class SwitchWorkspaceTool:
   The server provides the definition for discoverability.
   """
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {

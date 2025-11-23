@@ -1,7 +1,7 @@
 """
 Test Suite for SEC XBRL Consolidation Tasks
 
-Tests the parquet file consolidation functionality for optimized Kuzu ingestion.
+Tests the parquet file consolidation functionality for optimized LadybugDB ingestion.
 """
 
 from unittest.mock import MagicMock, patch

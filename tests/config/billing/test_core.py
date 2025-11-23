@@ -8,18 +8,18 @@ from robosystems.config.credits import CreditConfig
 
 def test_get_subscription_plan_injects_latest_credit_allocation(monkeypatch):
   credits = {
-    "kuzu-standard": 1234,
-    "kuzu-large": 4321,
-    "kuzu-xlarge": 9999,
+    "ladybug-standard": 1234,
+    "ladybug-large": 4321,
+    "ladybug-xlarge": 9999,
   }
   # Patch in both modules since core imports it at module load time
   monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
   monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
 
-  plan = BillingConfig.get_subscription_plan("kuzu-standard")
+  plan = BillingConfig.get_subscription_plan("ladybug-standard")
 
   assert plan is not None
-  assert plan["name"] == "kuzu-standard"
+  assert plan["name"] == "ladybug-standard"
   assert plan["monthly_credit_allocation"] == 1234
   assert plan is not DEFAULT_GRAPH_BILLING_PLANS[0]
 
@@ -30,15 +30,15 @@ def test_get_subscription_plan_returns_none_for_unknown_tier():
 
 def test_get_monthly_credits_returns_from_tier_allocations(monkeypatch):
   credits = {
-    "kuzu-standard": 100,
-    "kuzu-large": 777,
-    "kuzu-xlarge": 800,
+    "ladybug-standard": 100,
+    "ladybug-large": 777,
+    "ladybug-xlarge": 800,
   }
   # Patch in both modules since core imports it at module load time
   monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
   monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
 
-  assert BillingConfig.get_monthly_credits("kuzu-large") == 777
+  assert BillingConfig.get_monthly_credits("ladybug-large") == 777
 
 
 def test_get_operation_cost_uses_credit_config(monkeypatch):
@@ -56,7 +56,7 @@ def test_validate_configuration_reports_missing_plan(monkeypatch):
   monkeypatch.setattr(
     CreditConfig,
     "MONTHLY_ALLOCATIONS",
-    {"kuzu-standard": 500, "custom-tier": 50},
+    {"ladybug-standard": 500, "custom-tier": 50},
   )
   monkeypatch.setattr(CreditConfig, "OPERATION_COSTS", {"agent_call": Decimal("1")})
   warnings: list[str] = []
@@ -74,10 +74,10 @@ def test_validate_configuration_reports_missing_plan(monkeypatch):
 
 
 def test_validate_configuration_passes_when_allocations_match(monkeypatch):
-  credits = {"kuzu-standard": 111}
+  credits = {"ladybug-standard": 111}
   monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
   monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
-  monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"kuzu-standard": 111})
+  monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"ladybug-standard": 111})
   monkeypatch.setattr(
     CreditConfig,
     "OPERATION_COSTS",
@@ -99,9 +99,9 @@ def test_validate_configuration_passes_when_allocations_match(monkeypatch):
 
 def test_get_all_pricing_info_returns_expected_structure(monkeypatch):
   credits = {
-    "kuzu-standard": 100,
-    "kuzu-large": 200,
-    "kuzu-xlarge": 300,
+    "ladybug-standard": 100,
+    "ladybug-large": 200,
+    "ladybug-xlarge": 300,
   }
   monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
   monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
@@ -118,15 +118,17 @@ def test_get_all_pricing_info_returns_expected_structure(monkeypatch):
   pricing = BillingConfig.get_all_pricing_info()
 
   assert set(pricing["subscription_tiers"]) == {
-    "kuzu-standard",
-    "kuzu-large",
-    "kuzu-xlarge",
+    "ladybug-standard",
+    "ladybug-large",
+    "ladybug-xlarge",
   }
-  assert pricing["subscription_tiers"]["kuzu-large"]["monthly_credit_allocation"] == 200
+  assert (
+    pricing["subscription_tiers"]["ladybug-large"]["monthly_credit_allocation"] == 200
+  )
   assert pricing["ai_operation_costs"] == {
     "agent_call": 10.0,
     "mcp_call": 5.0,
     "ai_analysis": 20.0,
   }
   assert "query" in pricing["no_credit_operations"]
-  assert pricing["storage_pricing"]["included_per_tier"]["kuzu-standard"] == 100
+  assert pricing["storage_pricing"]["included_per_tier"]["ladybug-standard"] == 100

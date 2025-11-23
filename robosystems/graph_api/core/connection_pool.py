@@ -1,7 +1,7 @@
 """
-Thread-Safe Kuzu Connection Pool
+Thread-Safe LadybugDB Connection Pool
 
-This module provides a production-ready connection pool for Kuzu databases
+This module provides a production-ready connection pool for LadybugDB databases
 with proper thread safety, connection limits, TTL, and health checking.
 
 Key features:
@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import weakref
 
-import kuzu
+import real_ladybug as lbug
 from robosystems.logger import logger
 
 
@@ -29,8 +29,8 @@ from robosystems.logger import logger
 class ConnectionInfo:
   """Information about a connection in the pool."""
 
-  connection: kuzu.Connection
-  database: kuzu.Database
+  connection: lbug.Connection
+  database: lbug.Database
   created_at: datetime
   last_used: datetime
   use_count: int
@@ -38,9 +38,9 @@ class ConnectionInfo:
   read_only: bool = False  # Track if connection was opened read-only
 
 
-class KuzuConnectionPool:
+class LadybugConnectionPool:
   """
-  Thread-safe connection pool for Kuzu databases.
+  Thread-safe connection pool for LadybugDB databases.
 
   This pool manages connections with proper lifecycle management,
   health checking, and resource limits to prevent memory leaks
@@ -62,7 +62,7 @@ class KuzuConnectionPool:
     Initialize connection pool.
 
     Args:
-        base_path: Base directory for Kuzu databases
+        base_path: Base directory for LadybugDB databases
         max_connections_per_db: Maximum connections per database
         connection_ttl_minutes: Connection time-to-live in minutes
         health_check_interval_minutes: How often to check connection health
@@ -80,8 +80,8 @@ class KuzuConnectionPool:
     self._global_lock = threading.RLock()
 
     # Store Database objects to ensure all connections use the same one
-    # This is critical for transaction visibility in Kuzu
-    self._databases: Dict[str, kuzu.Database] = {}
+    # This is critical for transaction visibility in LadybugDB
+    self._databases: Dict[str, lbug.Database] = {}
 
     # Monitoring
     self._stats = {
@@ -100,7 +100,7 @@ class KuzuConnectionPool:
     weakref.finalize(self, self._cleanup_all_connections)
 
     logger.info(
-      f"Initialized Kuzu connection pool: {max_connections_per_db} max per DB, {connection_ttl_minutes}min TTL"
+      f"Initialized LadybugDB connection pool: {max_connections_per_db} max per DB, {connection_ttl_minutes}min TTL"
     )
 
   @contextmanager
@@ -113,7 +113,7 @@ class KuzuConnectionPool:
         read_only: Whether to open in read-only mode
 
     Yields:
-        kuzu.Connection: Database connection
+        lbug.Connection: Database connection
 
     Example:
         with pool.get_connection("my_db") as conn:
@@ -234,8 +234,8 @@ class KuzuConnectionPool:
         self._remove_oldest_connection(database_name)
 
     try:
-      # Construct database path safely (Kuzu 0.11.x uses .kuzu files)
-      db_path = self.base_path / f"{database_name}.kuzu"
+      # Construct database path safely (LadybugDB uses .lbug files)
+      db_path = self.base_path / f"{database_name}.lbug"
 
       # Get or create shared Database object
       # CRITICAL: All connections must use the same Database object for transaction visibility
@@ -246,8 +246,8 @@ class KuzuConnectionPool:
         # Use per-database memory limit if specified, otherwise fall back to total memory
         from robosystems.config import env
 
-        # Get tier configuration with overrides from kuzu.yml
-        tier_config = env.get_kuzu_tier_config()
+        # Get tier configuration with overrides from lbug.yml
+        tier_config = env.get_lbug_tier_config()
 
         memory_per_db_mb = tier_config.get("memory_per_db_mb", 0)
         if memory_per_db_mb > 0:
@@ -256,16 +256,16 @@ class KuzuConnectionPool:
           logger.info(f"Using per-database memory limit: {buffer_pool_mb} MB")
         else:
           # Fall back to total memory for single-database instances (enterprise/premium/shared)
-          # Note: This only applies to Kuzu databases (Standard tier uses this pool)
+          # Note: This only applies to LadybugDB databases (Standard tier uses this pool)
           buffer_pool_mb = tier_config.get(
-            "kuzu_max_memory_mb", tier_config.get("max_memory_mb", 2048)
+            "lbug_max_memory_mb", tier_config.get("max_memory_mb", 2048)
           )
           logger.info(
             f"Using total memory allocation: {buffer_pool_mb} MB (tier: {tier_config.get('tier', 'default')})"
           )
 
         # Create database with buffer pool size configuration
-        # Note: Kuzu Python API uses buffer_pool_size in bytes
+        # Note: LadybugDB Python API uses buffer_pool_size in bytes
         buffer_pool_size = buffer_pool_mb * 1024 * 1024
 
         # CRITICAL FIX: Always create Database objects with read_only=False
@@ -283,12 +283,12 @@ class KuzuConnectionPool:
           checkpoint_threshold = 536870912  # 512MB for regular databases
 
         # Create database with all optimizations
-        self._databases[database_name] = kuzu.Database(
+        self._databases[database_name] = lbug.Database(
           str(db_path),
           read_only=False,
           buffer_pool_size=buffer_pool_size,
-          compression=True,  # Safe: enabled by default in Kuzu
-          max_num_threads=0,  # Use all available threads (Kuzu decides)
+          compression=True,  # Safe: enabled by default in LadybugDB
+          max_num_threads=0,  # Use all available threads (LadybugDB decides)
           auto_checkpoint=True,  # Enable automatic checkpointing
           checkpoint_threshold=checkpoint_threshold,  # Adaptive based on database
         )
@@ -300,7 +300,7 @@ class KuzuConnectionPool:
       db = self._databases[database_name]
 
       # Create connection from shared Database object
-      conn = kuzu.Connection(db)
+      conn = lbug.Connection(db)
 
       # Test connection
       try:
@@ -319,7 +319,7 @@ class KuzuConnectionPool:
           # Set home directory to a shared location on the same volume as databases
           # This keeps temporary files on the same fast EBS volume
           # All databases can share this directory for scratch space
-          home_dir = str(self.base_path / ".kuzu")
+          home_dir = str(self.base_path / ".lbug")
 
           # Ensure the home directory exists
           import os
@@ -345,11 +345,11 @@ class KuzuConnectionPool:
           conn.execute("CALL warning_limit=1024;")
 
           # Enable spill to disk for large operations to prevent out-of-memory errors
-          # This allows Kuzu to use disk for temporary storage during large queries
+          # This allows LadybugDB to use disk for temporary storage during large queries
           conn.execute("CALL spill_to_disk=true;")
 
           logger.info(
-            f"Applied connection configuration for {database_name} (home_dir=.kuzu, progress_bar=false, timeout=120000ms, semi_mask=true, warning_limit=1024, spill_to_disk=true)"
+            f"Applied connection configuration for {database_name} (home_dir=.lbug, progress_bar=false, timeout=120000ms, semi_mask=true, warning_limit=1024, spill_to_disk=true)"
           )
         except Exception as config_error:
           # These settings are nice-to-have but not critical
@@ -539,7 +539,7 @@ class KuzuConnectionPool:
     """
     Force cleanup of all connections and optionally the database object for a specific database.
 
-    This is useful after large ingestion operations to release memory held by Kuzu's buffer pool.
+    This is useful after large ingestion operations to release memory held by LadybugDB's buffer pool.
     All existing connections will be closed and new ones will be created on next access.
 
     Args:
@@ -572,7 +572,7 @@ class KuzuConnectionPool:
           # This ensures all WAL data is flushed to disk
           if database_name == "sec" and hasattr(db, "execute"):
             try:
-              temp_conn = kuzu.Connection(db)
+              temp_conn = lbug.Connection(db)
               temp_conn.execute("CHECKPOINT;")
               temp_conn.close()
               logger.info(f"Executed final checkpoint for {database_name}")
@@ -689,15 +689,15 @@ class KuzuConnectionPool:
 
 
 # Global connection pool instance (initialized by the application)
-_connection_pool: Optional[KuzuConnectionPool] = None
+_connection_pool: Optional[LadybugConnectionPool] = None
 
 
 def initialize_connection_pool(
   base_path: str, max_connections_per_db: int = 3, connection_ttl_minutes: int = 30
-) -> KuzuConnectionPool:
+) -> LadybugConnectionPool:
   """Initialize the global connection pool."""
   global _connection_pool
-  _connection_pool = KuzuConnectionPool(
+  _connection_pool = LadybugConnectionPool(
     base_path=base_path,
     max_connections_per_db=max_connections_per_db,
     connection_ttl_minutes=connection_ttl_minutes,
@@ -705,7 +705,7 @@ def initialize_connection_pool(
   return _connection_pool
 
 
-def get_connection_pool() -> KuzuConnectionPool:
+def get_connection_pool() -> LadybugConnectionPool:
   """Get the global connection pool instance."""
   if _connection_pool is None:
     raise RuntimeError(

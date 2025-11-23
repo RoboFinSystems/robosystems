@@ -8,7 +8,7 @@ This module contains orchestrated multi-step data processing pipelines designed 
 
 - **First-class tracking**: Redis-based state management with real-time progress
 - **Distributed execution**: Work distribution across Celery workers
-- **Automatic ingestion**: Kuzu graph database ingestion upon completion
+- **Automatic ingestion**: LadybugDB graph database ingestion upon completion
 - **Production resilience**: Retry logic, error handling, and timeout management
 - **Full transparency**: Detailed progress tracking and status reporting
 
@@ -31,7 +31,7 @@ Pipeline Flow:
 
 4. Completion Phase
    → Detect pipeline completion automatically
-   → Trigger Kuzu ingestion
+   → Trigger LadybugDB ingestion
    → Clean up resources
 ```
 
@@ -58,10 +58,10 @@ The SEC XBRL pipeline (`sec_xbrl_filings.py`) processes SEC financial filings:
    - Converts to graph-ready parquet files
    - Uploads to S3 with date partitioning
 
-4. **Kuzu Ingestion**
+4. **LadybugDB Ingestion**
    - Automatically triggered on pipeline completion
-   - Ingests all parquet files into Kuzu graph database
-   - Runs asynchronously on Kuzu shared master
+   - Ingests all parquet files into LadybugDB graph database
+   - Runs asynchronously on LadybugDB shared master
 
 ### Usage
 
@@ -146,4 +146,4 @@ class MyPipeline:
 - **Retries**: Configure retry logic for transient failures
 - **Monitoring**: Use tracker status for monitoring and alerting
 - **Scaling**: Design for horizontal scaling across workers
-- **Cost**: Consider S3 storage and Kuzu compute costs
+- **Cost**: Consider S3 storage and LadybugDB compute costs

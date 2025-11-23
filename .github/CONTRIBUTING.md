@@ -188,7 +188,7 @@ Examples:
 
 ```
 feat(api): add portfolio analysis endpoint
-fix(kuzu): resolve connection pooling issue
+fix(graph): resolve connection pooling issue
 docs(readme): update deployment instructions
 ```
 

@@ -27,7 +27,7 @@ class TestGraphUsage:
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
       event_type=UsageEventType.API_CALL.value,
-      graph_tier="kuzu-standard",
+      graph_tier="ladybug-standard",
       billing_year=2024,
       billing_month=1,
       billing_day=15,
@@ -37,7 +37,7 @@ class TestGraphUsage:
     assert usage.user_id == self.test_user_id
     assert usage.graph_id == self.test_graph_id
     assert usage.event_type == "api_call"
-    assert usage.graph_tier == "kuzu-standard"
+    assert usage.graph_tier == "ladybug-standard"
     assert usage.recorded_at is None  # Not set until session add
 
     self.session.add(usage)
@@ -80,7 +80,7 @@ class TestGraphUsage:
     usage = GraphUsage.record_storage_usage(
       user_id=self.test_user_id,
       graph_id=self.test_graph_id,
-      graph_tier="kuzu-large",
+      graph_tier="ladybug-large",
       storage_bytes=storage_bytes,
       session=self.session,
       storage_delta_gb=0.5,

@@ -9,7 +9,7 @@
 # Examples:
 #   - RoboSystemsAPIProd
 #   - RoboSystemsWorkerDefaultStaging
-#   - RoboSystemsKuzuWritersStandardProd
+#   - RoboSystemsGraphLadybugStandardProd
 
 production:
   # Core Infrastructure (Shared VPC)
@@ -73,7 +73,7 @@ production:
       outputs:
         service_arn: WorkerServiceArn
   
-  # Graph Infrastructure (Multi-Backend: Kuzu and Neo4j)
+  # Graph Infrastructure (Multi-Backend: LadybugDB and Neo4j)
   graph:
     infra:
       stack_name: RoboSystemsGraphInfraProd
@@ -89,26 +89,26 @@ production:
         detachment_topic: VolumeDetachmentTopicArn
     
     writers:
-      kuzu_standard:
-        stack_name: RoboSystemsGraphKuzuStandardProd
+      ladybug_standard:
+        stack_name: RoboSystemsGraphLadybugStandardProd
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
 
-      kuzu_large:
-        stack_name: RoboSystemsGraphKuzuLargeProd
+      ladybug_large:
+        stack_name: RoboSystemsGraphLadybugLargeProd
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
 
-      kuzu_xlarge:
-        stack_name: RoboSystemsGraphKuzuXlargeProd
+      ladybug_xlarge:
+        stack_name: RoboSystemsGraphLadybugXlargeProd
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
 
-      kuzu_shared:
-        stack_name: RoboSystemsGraphKuzuSharedProd
+      ladybug_shared:
+        stack_name: RoboSystemsGraphLadybugSharedProd
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
@@ -237,7 +237,7 @@ staging:
       outputs:
         service_arn: WorkerServiceArn
   
-  # Graph Infrastructure (Multi-Backend: Kuzu and Neo4j)
+  # Graph Infrastructure (Multi-Backend: LadybugDB and Neo4j)
   graph:
     infra:
       stack_name: RoboSystemsGraphInfraStaging
@@ -253,20 +253,26 @@ staging:
         detachment_topic: VolumeDetachmentTopicArn
     
     writers:
-      kuzu_standard:
-        stack_name: RoboSystemsGraphKuzuStandardStaging
+      ladybug_standard:
+        stack_name: RoboSystemsGraphLadybugStandardStaging
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
 
-      kuzu_large:
-        stack_name: RoboSystemsGraphKuzuLargeStaging
+      ladybug_large:
+        stack_name: RoboSystemsGraphLadybugLargeStaging
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
 
-      kuzu_shared:
-        stack_name: RoboSystemsGraphKuzuSharedStaging
+      ladybug_xlarge:
+        stack_name: RoboSystemsGraphLadybugXlargeStaging
+        outputs:
+          asg_name: WriterAutoScalingGroupName
+          instance_ids: InstanceIds
+
+      ladybug_shared:
+        stack_name: RoboSystemsGraphLadybugSharedStaging
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
@@ -337,7 +343,7 @@ patterns:
   worker: "RoboSystemsWorker{name}{environment}"
 
   # Pattern for graph database writer stacks: RoboSystemsGraph{Backend}{Tier}{Environment}
-  # Both Kuzu and Neo4j use unified Graph prefix
+  # Both LadybugDB and Neo4j use unified Graph prefix
   graph_writer: "RoboSystemsGraph{backend}{tier}{environment}"
 
   # Pattern for general stacks: RoboSystems{Component}{Environment}

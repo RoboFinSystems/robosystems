@@ -18,7 +18,7 @@ operations/
 │   ├── pricing_service.py             # Pricing and billing logic
 │   ├── metrics_service.py             # Graph metrics and analytics
 │   └── repository_subscription_service.py # Repository access management
-├── kuzu/                              # Kuzu database infrastructure operations
+├── lbug/                              # LadybugDB database infrastructure operations
 │   ├── backup_manager.py              # Database backup operations
 │   ├── backup.py                      # Backup service interface
 │   └── ingest.py                      # Data ingestion operations
@@ -51,12 +51,12 @@ High-level business operations for graph database management:
 - **`GraphMetricsService`** - Analytics and performance metrics
 - **`RepositorySubscriptionService`** - Shared repository access management
 
-### **Infrastructure Operations** (`kuzu/`)
+### **Infrastructure Operations** (`lbug/`)
 
 Low-level database infrastructure management:
 
 - **`BackupManager`** - Database backup and restore operations
-- **`KuzuGraphBackupService`** - Backup service coordination
+- **`LadybugDBGraphBackupService`** - Backup service coordination
 - **Data Ingestion** - S3-based data ingestion pipelines using COPY operations
 
 ### **Core Business Services**
@@ -161,7 +161,7 @@ await credit_service.consume_credits("query_execution", cost_info["cost"])
 Operations work with multiple database types:
 
 - **PostgreSQL** - User accounts, subscriptions, billing
-- **Kuzu** - Graph data storage and querying
+- **LadybugDB** - Graph data storage and querying
 - **DynamoDB** - Database allocation and instance management
 - **Valkey** - Caching and session management
 
@@ -241,7 +241,7 @@ metrics = await service.get_performance_metrics()
 ### Subgraph Management
 
 ```python
-# Subgraph operations (requires kuzu-large or kuzu-xlarge tier)
+# Subgraph operations (requires ladybug-large or ladybug-xlarge tier)
 from robosystems.operations.graph.subgraph_service import SubgraphService
 
 service = SubgraphService()

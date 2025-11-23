@@ -13,7 +13,7 @@ The backend abstraction layer allows RoboSystems to support different graph data
 
 ## Supported Backends
 
-### Kuzu (Default)
+### LadybugDB (Default)
 
 **Type**: Embedded graph database based on columnar storage
 **Best For**: Multi-tenant and dedicated configurations, high-performance deployments
@@ -142,7 +142,7 @@ The backend factory in `__init__.py` provides singleton access to the configured
 ```python
 from robosystems.graph_api.backends import get_backend
 
-# Get the configured backend (singleton, automatically selects Kuzu or Neo4j)
+# Get the configured backend (singleton, automatically selects LadybugDB or Neo4j)
 backend = get_backend()
 
 # Use the backend (same interface regardless of backend type)
@@ -153,13 +153,13 @@ results = await backend.execute_query(
 ```
 
 Backend selection is controlled by the `GRAPH_BACKEND_TYPE` environment variable:
-- `kuzu` (default)
+- `ladybug` (default)
 - `neo4j_community`
 - `neo4j_enterprise`
 
 ## Implementation Details
 
-### Kuzu Backend (`kuzu.py`)
+### LadybugDB Backend (`lbug.py`)
 
 **Connection Management:**
 - Direct file system access to database directories
@@ -199,12 +199,12 @@ Backend selection is controlled by the `GRAPH_BACKEND_TYPE` environment variable
 
 ```bash
 # Backend Selection
-GRAPH_BACKEND_TYPE=kuzu                  # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=ladybug                  # ladybug|neo4j_community|neo4j_enterprise
 
-# Kuzu Configuration
-KUZU_DATABASE_PATH=/data/kuzu-dbs       # Database storage location
-KUZU_CONNECTION_POOL_SIZE=3              # Connections per database
-KUZU_QUERY_TIMEOUT=30                    # Query timeout (seconds)
+# LadybugDB Configuration
+LBUG_DATABASE_PATH=/data/lbug-dbs       # Database storage location
+LBUG_CONNECTION_POOL_SIZE=3              # Connections per database
+LBUG_QUERY_TIMEOUT=30                    # Query timeout (seconds)
 
 # Neo4j Configuration
 NEO4J_URI=bolt://neo4j-db:7687          # Bolt connection URI
@@ -221,14 +221,14 @@ NEO4J_MAX_CONNECTION_LIFETIME=3600      # Max connection lifetime
 Development environment supports both backends via profiles:
 
 ```bash
-# Start with Kuzu (default)
-docker-compose --profile kuzu up
+# Start with LadybugDB (default)
+docker-compose --profile ladybug up
 
 # Start with Neo4j
 docker-compose --profile neo4j up
 
 # Both
-docker-compose --profile kuzu --profile neo4j up
+docker-compose --profile ladybug --profile neo4j up
 ```
 
 ## Usage Patterns
@@ -298,8 +298,8 @@ if topology.mode == "cluster":
 # Test backend factory
 pytest tests/unit/graph_api/backends/test_backend_factory.py
 
-# Test Kuzu backend
-pytest tests/unit/graph_api/backends/test_kuzu_backend.py
+# Test LadybugDB backend
+pytest tests/unit/graph_api/backends/test_lbug_backend.py
 
 # Test Neo4j backend
 pytest tests/unit/graph_api/backends/test_neo4j_backend.py
@@ -312,13 +312,13 @@ pytest tests/unit/graph_api/backends/test_neo4j_backend.py
 pytest tests/integration/graph_api/ -m backend_integration
 
 # Test specific backend
-GRAPH_BACKEND_TYPE=kuzu pytest tests/integration/graph_api/
+GRAPH_BACKEND_TYPE=ladybug pytest tests/integration/graph_api/
 GRAPH_BACKEND_TYPE=neo4j_community pytest tests/integration/graph_api/
 ```
 
 ## Performance Characteristics
 
-### Kuzu Backend
+### LadybugDB Backend
 
 **Strengths:**
 - Extremely fast local queries (microsecond latency)
@@ -348,14 +348,14 @@ GRAPH_BACKEND_TYPE=neo4j_community pytest tests/integration/graph_api/
 
 ## Migration Guide
 
-### Kuzu to Neo4j
+### LadybugDB to Neo4j
 
-To migrate a graph from Kuzu to Neo4j:
+To migrate a graph from LadybugDB to Neo4j:
 
-1. Export data from Kuzu:
+1. Export data from LadybugDB:
 ```python
 # Export to CSV/Parquet
-await kuzu_backend.export_database(
+await lbug_backend.export_database(
     database_name="kg1a2b3c4d5",
     output_path="/tmp/export"
 )
@@ -376,9 +376,9 @@ CREATE (e:Entity {
 GRAPH_BACKEND_TYPE=neo4j_community
 ```
 
-### Neo4j to Kuzu
+### Neo4j to LadybugDB
 
-Reverse process using Neo4j export and Kuzu COPY operations.
+Reverse process using Neo4j export and LadybugDB COPY operations.
 
 ## Troubleshooting
 
@@ -386,7 +386,7 @@ Reverse process using Neo4j export and Kuzu COPY operations.
 
 #### Backend Factory Returns Wrong Backend
 
-**Symptom**: Getting KuzuBackend when expecting Neo4jBackend
+**Symptom**: Getting LadybugDBBackend when expecting Neo4jBackend
 
 **Solution**:
 - Verify `GRAPH_BACKEND_TYPE` environment variable
@@ -395,7 +395,7 @@ Reverse process using Neo4j export and Kuzu COPY operations.
 
 #### Connection Failures
 
-**Kuzu**:
+**LadybugDB**:
 - Check database path exists and is writable
 - Verify no file system corruption
 - Check available disk space
@@ -407,7 +407,7 @@ Reverse process using Neo4j export and Kuzu COPY operations.
 
 #### Performance Issues
 
-**Kuzu**:
+**LadybugDB**:
 - Monitor I/O wait times
 - Check EBS volume performance
 - Consider SSD-backed storage
@@ -450,6 +450,6 @@ When adding a new backend:
 ## Support
 
 For backend-specific issues:
-- **Kuzu**: Check `/robosystems/graph_api/README.md`
+- **LadybugDB**: Check `/robosystems/graph_api/README.md`
 - **Neo4j**: Consult Neo4j documentation at https://neo4j.com/docs/
 - **General**: Review this README and abstract interface

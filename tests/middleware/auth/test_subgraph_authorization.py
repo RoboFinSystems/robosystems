@@ -51,7 +51,7 @@ def user_graph(db_session: Session, auth_user: User) -> Graph:
     graph_id=graph_id,
     graph_name="User's Graph",
     graph_type="generic",
-    graph_tier=GraphTier.KUZU_STANDARD.value,
+    graph_tier=GraphTier.LADYBUG_STANDARD.value,
   )
   db_session.add(graph)
 

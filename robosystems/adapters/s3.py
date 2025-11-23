@@ -573,13 +573,13 @@ class S3BackupAdapter:
     """Generate S3 key path for backup file."""
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
-    # Use provided extension or default to .kuzu with optional compression
+    # Use provided extension or default to .lbug with optional compression
     if file_extension:
       # Extension explicitly provided - use as-is
       extension = file_extension
     else:
       # No extension provided - generate default with compression if enabled
-      extension = ".kuzu"
+      extension = ".lbug"
       if self.enable_compression:
         extension += ".gz"
 
@@ -847,7 +847,7 @@ class S3BackupAdapter:
         relationship_count=metadata.get("relationship_count", 0),
         backup_duration_seconds=metadata.get("backup_duration_seconds", 0.0),
         database_version=metadata.get("database_version")
-        or metadata.get("kuzu_version"),
+        or metadata.get("lbug_version"),
         backup_format="full_dump",
         s3_key=backup_path,
         is_encrypted=metadata.get("is_encrypted", False),
@@ -961,7 +961,7 @@ class S3BackupAdapter:
             # Check for backup files with various extensions
             if any(
               ext in key
-              for ext in ["/backup-", ".zip", ".cypher", ".json", ".parquet", ".kuzu"]
+              for ext in ["/backup-", ".zip", ".cypher", ".json", ".parquet", ".lbug"]
             ) and not key.endswith("/"):
               # Parse backup information from key
               parts = key.split("/")
@@ -1097,7 +1097,7 @@ class S3BackupAdapter:
     Get backup metadata by extracting info from S3 backup key.
 
     Args:
-        s3_key: S3 key of the backup file (e.g., graph-backups/databases/graph_id/full/backup-20241115_023045.kuzu.zip)
+        s3_key: S3 key of the backup file (e.g., graph-backups/databases/graph_id/full/backup-20241115_023045.lbug.zip)
 
     Returns:
         BackupMetadata object or None if metadata not found
@@ -1113,13 +1113,13 @@ class S3BackupAdapter:
       graph_id = parts[2]
       backup_filename = parts[4]
 
-      # Extract timestamp from filename (e.g., backup-20241115_023045.kuzu.zip -> 20241115_023045)
+      # Extract timestamp from filename (e.g., backup-20241115_023045.lbug.zip -> 20241115_023045)
       if not backup_filename.startswith("backup-"):
         logger.warning(f"Invalid backup filename format: {backup_filename}")
         return None
 
       timestamp_with_ext = backup_filename[7:]
-      # Remove all extensions (could be .kuzu.zip, .kuzu.zip.enc, etc.)
+      # Remove all extensions (could be .lbug.zip, .lbug.zip.enc, etc.)
       timestamp_str = timestamp_with_ext.split(".")[0]
 
       # Parse timestamp

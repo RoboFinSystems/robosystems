@@ -22,12 +22,12 @@ def main():
   # Get default base path from environment
   from robosystems.config import env
 
-  default_base_path = env.KUZU_DATABASE_PATH
+  default_base_path = env.LBUG_DATABASE_PATH
 
   parser.add_argument(
     "--base-path",
     default=default_base_path,
-    help=f"Base directory for Kuzu databases (default: {default_base_path})",
+    help=f"Base directory for LadybugDB databases (default: {default_base_path})",
   )
   parser.add_argument("--port", type=int, default=8001, help="Port to run server on")
   parser.add_argument("--host", default="0.0.0.0", help="Host to bind server to")
@@ -96,7 +96,7 @@ def main():
     # Get tier from environment using centralized config
     cluster_tier = env.CLUSTER_TIER
     if cluster_tier and cluster_tier != "unknown":
-      tier_config = env.get_kuzu_tier_config()
+      tier_config = env.get_lbug_tier_config()
       # Use databases_per_instance from tier config if available
       max_databases = tier_config.get("databases_per_instance", args.max_databases)
       logger.info(

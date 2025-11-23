@@ -19,14 +19,14 @@ class TestMultiTenantUtils:
 
   def test_get_max_databases_default(self):
     """Test that max databases uses the configured default."""
-    # The test environment sets KUZU_MAX_DATABASES_PER_NODE=50 in pytest.ini
+    # The test environment sets LBUG_MAX_DATABASES_PER_NODE=50 in pytest.ini
     # So we expect 50, not the constants.py default of 10
     assert MultiTenantUtils.get_max_databases_per_node() == 50
 
   def test_get_max_databases_custom(self):
     """Test custom max databases value."""
     with patch(
-      "robosystems.middleware.graph.multitenant_utils.env.KUZU_MAX_DATABASES_PER_NODE",
+      "robosystems.middleware.graph.multitenant_utils.env.LBUG_MAX_DATABASES_PER_NODE",
       500,
     ):
       assert MultiTenantUtils.get_max_databases_per_node() == 500
@@ -36,7 +36,7 @@ class TestMultiTenantUtils:
     # Since env.py handles the environment variable parsing and validation,
     # we don't need to test invalid values here - just that the config value is used
     with patch(
-      "robosystems.middleware.graph.multitenant_utils.env.KUZU_MAX_DATABASES_PER_NODE",
+      "robosystems.middleware.graph.multitenant_utils.env.LBUG_MAX_DATABASES_PER_NODE",
       100,
     ):
       assert MultiTenantUtils.get_max_databases_per_node() == 100
@@ -91,7 +91,7 @@ class TestMultiTenantUtils:
   def test_validate_graph_id_reserved_names(self):
     """Test validation rejects reserved names."""
     # Note: "sec" is a shared repository and is allowed through is_shared_repository() check
-    reserved_names = ["system", "kuzu", "default", "SYSTEM", "KUZU", "DEFAULT"]
+    reserved_names = ["system", "ladybug", "default", "SYSTEM", "LADYBUG", "DEFAULT"]
 
     for name in reserved_names:
       with pytest.raises(ValueError, match="reserved name"):
@@ -126,7 +126,7 @@ class TestMultiTenantUtils:
 
   def test_validate_database_creation_valid(self):
     """Test successful database creation validation."""
-    with patch.dict(os.environ, {"KUZU_MAX_DATABASES": "500"}):
+    with patch.dict(os.environ, {"LBUG_MAX_DATABASES": "500"}):
       result = MultiTenantUtils.validate_database_creation("kg1a2b3c")
       assert result == "kg1a2b3c"
 

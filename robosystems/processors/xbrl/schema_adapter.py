@@ -1,7 +1,7 @@
 """
 XBRL Schema Adapter
 
-Adapts XBRL DataFrame structures to match Kuzu schema definitions.
+Adapts XBRL DataFrame structures to match LadybugDB schema definitions.
 Handles schema validation, column mapping, and DataFrame structure compatibility
 for seamless XBRL data ingestion into the graph database.
 
@@ -12,12 +12,12 @@ This is XBRL-specific and handles the transformation of XBRL processor output
 import pandas as pd
 from typing import Dict, List, Any, Optional
 from robosystems.logger import logger
-from robosystems.schemas.builder import KuzuSchemaBuilder
+from robosystems.schemas.builder import LadybugSchemaBuilder
 
 
 class XBRLSchemaAdapter:
   """
-  Adapts XBRL DataFrame structures to ensure compatibility with Kuzu schemas.
+  Adapts XBRL DataFrame structures to ensure compatibility with LadybugDB schemas.
 
   This adapter bridges the gap between XBRL data extraction and graph ingestion by:
   - Validating DataFrame structures against schema definitions
@@ -60,7 +60,7 @@ class XBRLSchemaAdapter:
         schema_config: Configuration dict for schema building
     """
     self.schema_config = schema_config
-    self.schema_builder = KuzuSchemaBuilder(schema_config)
+    self.schema_builder = LadybugSchemaBuilder(schema_config)
     self.schema_builder.load_schemas()
 
     self.compiled_schema = self.schema_builder.schema

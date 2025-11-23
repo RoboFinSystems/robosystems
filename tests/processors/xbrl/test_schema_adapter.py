@@ -61,7 +61,7 @@ def mock_schema_builder():
 
 
 class TestXBRLSchemaAdapterInitialization:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_initialization(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -75,7 +75,7 @@ class TestXBRLSchemaAdapterInitialization:
     mock_builder_class.assert_called_once_with(mock_schema_config)
     mock_schema_builder.load_schemas.assert_called_once()
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_schema_extraction_nodes(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -89,7 +89,7 @@ class TestXBRLSchemaAdapterInitialization:
     assert adapter.node_schemas["Entity"]["primary_keys"] == ["identifier"]
     assert len(adapter.node_schemas["Entity"]["properties"]) == 2
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_schema_extraction_relationships(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -105,7 +105,7 @@ class TestXBRLSchemaAdapterInitialization:
     assert adapter.relationship_schemas["ENTITY_HAS_REPORT"]["to_node"] == "Report"
     assert len(adapter.relationship_schemas["ENTITY_HAS_REPORT"]["properties"]) == 1
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_schema_extraction_empty_schema(self, mock_builder_class, mock_schema_config):
     empty_builder = MagicMock()
     empty_builder.schema = None
@@ -118,7 +118,7 @@ class TestXBRLSchemaAdapterInitialization:
 
 
 class TestResolveSchemaName:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_resolve_mapped_table_name(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -130,7 +130,7 @@ class TestResolveSchemaName:
 
     assert result == "ENTITY_HAS_REPORT"
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_resolve_unmapped_table_name(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -144,7 +144,7 @@ class TestResolveSchemaName:
 
 
 class TestGetSchemaInfo:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_get_node_schema_info(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -158,7 +158,7 @@ class TestGetSchemaInfo:
     assert result["table_type"] == "node"
     assert "properties" in result
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_get_relationship_schema_info(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -173,7 +173,7 @@ class TestGetSchemaInfo:
     assert result["from_node"] == "Entity"
     assert result["to_node"] == "Report"
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_get_unknown_schema_info(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -187,7 +187,7 @@ class TestGetSchemaInfo:
 
 
 class TestBuildColumnList:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_build_node_column_list(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -200,7 +200,7 @@ class TestBuildColumnList:
 
     assert result == ["identifier", "name"]
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_build_relationship_column_list(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -215,7 +215,7 @@ class TestBuildColumnList:
 
 
 class TestGetDefaultValueForType:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_string_type_default(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -227,7 +227,7 @@ class TestGetDefaultValueForType:
     assert adapter._get_default_value_for_type("VARCHAR") == ""
     assert adapter._get_default_value_for_type("TEXT") == ""
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_int_type_default(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -240,7 +240,7 @@ class TestGetDefaultValueForType:
     assert adapter._get_default_value_for_type("INTEGER") == 0
     assert adapter._get_default_value_for_type("INT32") == 0
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_float_type_default(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -252,7 +252,7 @@ class TestGetDefaultValueForType:
     assert adapter._get_default_value_for_type("FLOAT") == 0.0
     assert adapter._get_default_value_for_type("DECIMAL") == 0.0
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_boolean_type_default(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -263,7 +263,7 @@ class TestGetDefaultValueForType:
     assert adapter._get_default_value_for_type("BOOLEAN") is False
     assert adapter._get_default_value_for_type("BOOL") is False
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_date_type_default(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -274,7 +274,7 @@ class TestGetDefaultValueForType:
     assert adapter._get_default_value_for_type("DATE") is None
     assert adapter._get_default_value_for_type("TIMESTAMP") is None
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_unknown_type_default(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -286,7 +286,7 @@ class TestGetDefaultValueForType:
 
 
 class TestCreateSchemaCompatibleDataFrame:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_create_node_dataframe(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -300,7 +300,7 @@ class TestCreateSchemaCompatibleDataFrame:
     assert list(result.columns) == ["identifier", "name"]
     assert len(result) == 0
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_create_relationship_dataframe(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -314,7 +314,7 @@ class TestCreateSchemaCompatibleDataFrame:
     assert list(result.columns) == ["from", "to", "relationship_id"]
     assert len(result) == 0
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_create_dataframe_with_mapping(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -327,7 +327,7 @@ class TestCreateSchemaCompatibleDataFrame:
     assert isinstance(result, pd.DataFrame)
     assert list(result.columns) == ["from", "to", "relationship_id"]
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_create_dataframe_unknown_schema(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -342,7 +342,7 @@ class TestCreateSchemaCompatibleDataFrame:
 
 
 class TestProcessDataFrameForSchema:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_process_complete_data(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -359,7 +359,7 @@ class TestProcessDataFrameForSchema:
     assert result["identifier"].iloc[0] == "entity123"
     assert result["name"].iloc[0] == "Test Company"
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_process_partial_data_with_defaults(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -376,7 +376,7 @@ class TestProcessDataFrameForSchema:
     assert result["identifier"].iloc[0] == "entity123"
     assert result["name"].iloc[0] == ""
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_process_relationship_data(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -394,7 +394,7 @@ class TestProcessDataFrameForSchema:
     assert result["to"].iloc[0] == "report456"
     assert result["relationship_id"].iloc[0] == "rel789"
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_process_unknown_schema(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -411,7 +411,7 @@ class TestProcessDataFrameForSchema:
 
 
 class TestValidateDataFrameSchema:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_validate_correct_dataframe(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -426,7 +426,7 @@ class TestValidateDataFrameSchema:
     assert result["valid"] is True
     assert "message" in result
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_validate_missing_columns(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -443,7 +443,7 @@ class TestValidateDataFrameSchema:
     assert "missing_columns" in result
     assert "name" in result["missing_columns"]
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_validate_extra_columns(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -466,7 +466,7 @@ class TestValidateDataFrameSchema:
     assert "extra_columns" in result
     assert "extra_field" in result["extra_columns"]
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_validate_wrong_column_names(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -483,7 +483,7 @@ class TestValidateDataFrameSchema:
     assert "missing_columns" in result
     assert "extra_columns" in result
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_validate_unknown_schema(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -500,7 +500,7 @@ class TestValidateDataFrameSchema:
 
 
 class TestGetSchemaInfoPublic:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_get_schema_info_node(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -515,7 +515,7 @@ class TestGetSchemaInfoPublic:
     assert result["schema_name"] == "Entity"
     assert result["original_name"] == "Entity"
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_get_schema_info_with_mapping(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -529,7 +529,7 @@ class TestGetSchemaInfoPublic:
     assert result["schema_name"] == "ENTITY_HAS_REPORT"
     assert result["original_name"] == "EntityReports"
 
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_get_schema_info_unknown(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):
@@ -545,7 +545,7 @@ class TestGetSchemaInfoPublic:
 
 
 class TestGetAvailableSchemas:
-  @patch("robosystems.processors.xbrl.schema_adapter.KuzuSchemaBuilder")
+  @patch("robosystems.processors.xbrl.schema_adapter.LadybugSchemaBuilder")
   def test_get_available_schemas(
     self, mock_builder_class, mock_schema_config, mock_schema_builder
   ):

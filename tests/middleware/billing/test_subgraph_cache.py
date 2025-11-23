@@ -27,7 +27,7 @@ def parent_graph_setup(db_session: Session) -> tuple[Graph, GraphCredits, User]:
     graph_id=graph_id,
     graph_name="Cache Test Graph",
     graph_type="generic",
-    graph_tier=GraphTier.KUZU_STANDARD.value,
+    graph_tier=GraphTier.LADYBUG_STANDARD.value,
   )
   db_session.add(graph)
 
@@ -92,7 +92,7 @@ class TestSubgraphCacheSharing:
     credit_cache.cache_graph_credit_balance(
       graph_id=parent_graph.graph_id,
       balance=Decimal("5000"),
-      graph_tier=GraphTier.KUZU_STANDARD.value,
+      graph_tier=GraphTier.LADYBUG_STANDARD.value,
     )
 
     cached_balance = credit_cache.get_cached_graph_credit_balance(parent_graph.graph_id)
@@ -261,7 +261,7 @@ class TestSubgraphCacheSharing:
     credit_cache.cache_graph_credit_balance(
       graph_id=parent_graph.graph_id,
       balance=Decimal("100"),
-      graph_tier=GraphTier.KUZU_STANDARD.value,
+      graph_tier=GraphTier.LADYBUG_STANDARD.value,
     )
 
     cached_before = credit_cache.get_cached_graph_credit_balance(parent_graph.graph_id)

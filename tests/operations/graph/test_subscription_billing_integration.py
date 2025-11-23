@@ -296,7 +296,7 @@ class TestSubscriptionBillingIntegration:
   def test_usage_tracking_for_multiple_instances(
     self, mock_db_session, sample_user_with_graphs
   ):
-    """Test tracking usage across multiple Kuzu instances."""
+    """Test tracking usage across multiple LadybugDB instances."""
     # Simulate usage data from multiple instances
     instance_usage = {
       "i-writer1": {

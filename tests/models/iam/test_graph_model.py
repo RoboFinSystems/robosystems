@@ -78,7 +78,9 @@ class TestGraphModel:
     # Default values are not set until the object is added to session
     assert graph.schema_extensions is None or graph.schema_extensions == []
     assert graph.graph_instance_id is None or graph.graph_instance_id == "default"
-    assert graph.graph_tier is None or graph.graph_tier == GraphTier.KUZU_STANDARD.value
+    assert (
+      graph.graph_tier is None or graph.graph_tier == GraphTier.LADYBUG_STANDARD.value
+    )
     assert graph.is_subgraph is None or graph.is_subgraph is False
     assert graph.parent_graph_id is None
 
@@ -169,7 +171,7 @@ class TestGraphModel:
       graph_id="kg1",
       graph_name="Standard",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_STANDARD.value,
+      graph_tier=GraphTier.LADYBUG_STANDARD.value,
     )
     assert standard_graph.can_have_subgraphs is False
 
@@ -178,7 +180,7 @@ class TestGraphModel:
       graph_id="kg2",
       graph_name="Enterprise",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_LARGE.value,
+      graph_tier=GraphTier.LADYBUG_LARGE.value,
     )
     assert enterprise_graph.can_have_subgraphs is True
 
@@ -187,7 +189,7 @@ class TestGraphModel:
       graph_id="kg3",
       graph_name="Premium",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_XLARGE.value,
+      graph_tier=GraphTier.LADYBUG_XLARGE.value,
     )
     assert premium_graph.can_have_subgraphs is True
 
@@ -224,7 +226,7 @@ class TestGraphModel:
       schema_extensions=["roboledger", "roboinvestor"],
       graph_instance_id="cluster1",
       graph_cluster_region="us-east-1",
-      graph_tier=GraphTier.KUZU_LARGE,
+      graph_tier=GraphTier.LADYBUG_LARGE,
       graph_metadata={"test": "metadata"},
     )
 
@@ -235,7 +237,7 @@ class TestGraphModel:
     assert graph.schema_extensions == ["roboledger", "roboinvestor"]
     assert graph.graph_instance_id == "cluster1"
     assert graph.graph_cluster_region == "us-east-1"
-    assert graph.graph_tier == GraphTier.KUZU_LARGE.value
+    assert graph.graph_tier == GraphTier.LADYBUG_LARGE.value
     assert graph.graph_metadata == {"test": "metadata"}
     assert graph.is_subgraph is False
     assert graph.created_at is not None
@@ -265,7 +267,7 @@ class TestGraphModel:
     assert graph.graph_type == "generic"
     assert graph.base_schema is None
     assert graph.schema_extensions == []
-    assert graph.graph_tier == GraphTier.KUZU_STANDARD.value
+    assert graph.graph_tier == GraphTier.LADYBUG_STANDARD.value
 
   def test_create_entity_graph_auto_base_schema(self, test_org, db_session):
     """Test that entity graphs automatically get base_schema if not provided."""
@@ -286,7 +288,7 @@ class TestGraphModel:
       graph_id="kg_parent",
       graph_name="Parent Graph",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_LARGE,
+      graph_tier=GraphTier.LADYBUG_LARGE,
       org_id=test_org.id,
       session=db_session,
     )
@@ -602,7 +604,7 @@ class TestGraphModel:
       graph_id="kg_parent",
       graph_name="Parent",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_LARGE,
+      graph_tier=GraphTier.LADYBUG_LARGE,
       org_id=test_org.id,
       session=db_session,
     )
@@ -745,22 +747,22 @@ class TestGraphModel:
       graph_id="kg_enum",
       graph_name="Enum Test",
       graph_type="entity",
-      graph_tier=GraphTier.KUZU_LARGE,
+      graph_tier=GraphTier.LADYBUG_LARGE,
       org_id=test_org.id,
       session=db_session,
     )
-    assert graph1.graph_tier == "kuzu-large"
+    assert graph1.graph_tier == "ladybug-large"
 
     # Create with string
     graph2 = Graph.create(
       graph_id="kg_string",
       graph_name="String Test",
       graph_type="entity",
-      graph_tier="kuzu-xlarge",
+      graph_tier="ladybug-xlarge",
       org_id=test_org.id,
       session=db_session,
     )
-    assert graph2.graph_tier == "kuzu-xlarge"
+    assert graph2.graph_tier == "ladybug-xlarge"
 
   def test_graph_constraints(self, test_org, db_session):
     """Test database constraints are enforced."""
@@ -820,7 +822,7 @@ class TestGraphRepositoryFeatures:
       data_source_type="sec_edgar",
       data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
       sync_frequency="daily",
-      graph_tier=GraphTier.KUZU_SHARED,
+      graph_tier=GraphTier.LADYBUG_SHARED,
     )
 
     assert result.graph_id == f"sec_{self.unique_id}"
@@ -831,7 +833,7 @@ class TestGraphRepositoryFeatures:
     assert result.data_source_url == "https://www.sec.gov/cgi-bin/browse-edgar"
     assert result.sync_frequency == "daily"
     assert result.sync_status == "active"
-    assert result.graph_tier == GraphTier.KUZU_SHARED.value
+    assert result.graph_tier == GraphTier.LADYBUG_SHARED.value
 
   def test_find_or_create_repository_existing(self, test_org, db_session):
     """Test that existing repository is returned without creating new one."""

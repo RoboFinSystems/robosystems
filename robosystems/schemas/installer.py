@@ -1,12 +1,12 @@
 """
-Schema installer for Kuzu databases.
+Schema installer for LadybugDB databases.
 
 This module handles installing both predefined schema extensions and
-custom custom schemas into Kuzu databases.
+custom custom schemas into LadybugDB databases.
 """
 
 from typing import Dict, Any, List, Optional
-import kuzu
+import real_ladybug as lbug
 
 from robosystems.logger import logger
 from .manager import SchemaManager
@@ -15,7 +15,7 @@ from .custom import CustomSchemaManager
 
 class SchemaInstaller:
   """
-  Handles schema installation for Kuzu databases.
+  Handles schema installation for LadybugDB databases.
 
   Supports both predefined extensions and custom user schemas.
   """
@@ -25,7 +25,7 @@ class SchemaInstaller:
     Initialize schema installer for a specific database.
 
     Args:
-        database_path: Path to the Kuzu database directory
+        database_path: Path to the LadybugDB database directory
     """
     self.database_path = database_path
     self.schema_manager = SchemaManager()
@@ -102,8 +102,8 @@ class SchemaInstaller:
         Installation result
     """
     # Connect to database
-    db = kuzu.Database(self.database_path)
-    conn = kuzu.Connection(db)
+    db = lbug.Database(self.database_path)
+    conn = lbug.Connection(db)
 
     try:
       # Generate DDL
@@ -168,13 +168,13 @@ class SchemaInstaller:
     """Get current schema information from database."""
     try:
       # Query node tables
-      node_result = conn.execute("CALL kuzu.node_table_names() RETURN *")
+      node_result = conn.execute("CALL lbug.node_table_names() RETURN *")
       nodes = []
       while node_result.has_next():
         nodes.append(node_result.get_next()[0])
 
       # Query rel tables
-      rel_result = conn.execute("CALL kuzu.rel_table_names() RETURN *")
+      rel_result = conn.execute("CALL lbug.rel_table_names() RETURN *")
       relationships = []
       while rel_result.has_next():
         relationships.append(rel_result.get_next()[0])

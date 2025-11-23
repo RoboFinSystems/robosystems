@@ -6,7 +6,7 @@ that are accessible across multiple companies. These repositories contain public
 and are created on dedicated shared instances.
 
 Follows the same pattern as EntityGraphService and GenericGraphService:
-1. Create Kuzu database via Graph API client
+1. Create LadybugDB database via Graph API client
 2. Install schema with extensions
 3. Create Graph metadata record in PostgreSQL
 4. Persist schema DDL (GraphSchema)
@@ -15,7 +15,7 @@ Follows the same pattern as EntityGraphService and GenericGraphService:
 7. No credit pool (repositories use UserRepositoryCredits per user)
 
 Key differences from user graphs:
-- Fixed instance routing (kuzu-shared-prod) instead of allocation
+- Fixed instance routing (ladybug-shared-prod) instead of allocation
 - System-managed, not user-created
 - Multiple users subscribe individually
 """
@@ -61,14 +61,14 @@ class SharedRepositoryService:
     self,
     repository_name: str,
     created_by: Optional[str] = None,
-    instance_id: str = "kuzu-shared-prod",
+    instance_id: str = "ladybug-shared-prod",
   ) -> Dict[str, Any]:
     """
     Create a shared repository following the same pattern as user graphs.
 
     This method:
     1. Validates repository configuration
-    2. Creates Kuzu database via Graph API
+    2. Creates LadybugDB database via Graph API
     3. Installs schema with extensions
     4. Creates Graph metadata record in PostgreSQL
     5. Persists schema DDL (GraphSchema)
@@ -77,7 +77,7 @@ class SharedRepositoryService:
     Args:
         repository_name: Name of the repository (e.g., 'sec', 'industry')
         created_by: Optional user ID who initiated creation
-        instance_id: Instance identifier (default: kuzu-shared-prod)
+        instance_id: Instance identifier (default: ladybug-shared-prod)
 
     Returns:
         Dictionary containing repository creation details
@@ -93,7 +93,7 @@ class SharedRepositoryService:
     config = self.REPOSITORY_CONFIG[repository_name]
     graph_id = repository_name
 
-    kuzu_client = None
+    graph_client = None
 
     try:
       from ...graph_api.client.factory import GraphClientFactory
@@ -102,15 +102,15 @@ class SharedRepositoryService:
       client = await GraphClientFactory.create_client(
         graph_id=graph_id, operation_type="write"
       )
-      kuzu_client = client
+      graph_client = client
 
       try:
-        await kuzu_client.get_database(graph_id)
+        await graph_client.get_database(graph_id)
         logger.info(f"Database {graph_id} already exists")
       except Exception as e:
         if getattr(e, "status_code", None) == 404:
           logger.info(f"Creating database {graph_id}")
-          await kuzu_client.create_database(
+          await graph_client.create_database(
             graph_id=graph_id,
             schema_type=config["schema_type"],
             repository_name=repository_name,
@@ -133,7 +133,7 @@ class SharedRepositoryService:
         schema = manager.load_and_compile_schema(schema_config)
         schema_ddl = schema.to_cypher()
 
-        result = await kuzu_client.install_schema(
+        result = await graph_client.install_schema(
           graph_id=graph_id, custom_ddl=schema_ddl
         )
         logger.info(f"Schema installed: {result}")
@@ -154,7 +154,7 @@ class SharedRepositoryService:
           data_source_type=config["data_source_type"],
           data_source_url=config["data_source_url"],
           sync_frequency=config["sync_frequency"],
-          graph_tier=GraphTier.KUZU_SHARED,
+          graph_tier=GraphTier.LADYBUG_SHARED,
           graph_instance_id=instance_id,
         )
         logger.info(f"Graph metadata created/verified: {repository_graph.graph_id}")
@@ -197,7 +197,7 @@ class SharedRepositoryService:
         except StopIteration:
           pass
 
-      db_info = await kuzu_client.get_database_info(graph_id)
+      db_info = await graph_client.get_database_info(graph_id)
 
       return {
         "repository_name": repository_name,
@@ -227,17 +227,17 @@ class SharedRepositoryService:
       raise
 
     finally:
-      if kuzu_client:
+      if graph_client:
         try:
-          await kuzu_client.close()
+          await graph_client.close()
         except Exception as e:
-          logger.warning(f"Error closing kuzu client: {e}")
+          logger.warning(f"Error closing lbug client: {e}")
 
 
 async def ensure_shared_repository_exists(
   repository_name: str,
   created_by: Optional[str] = None,
-  instance_id: str = "kuzu-shared-prod",
+  instance_id: str = "ladybug-shared-prod",
 ) -> Dict[str, Any]:
   """
   Ensure a shared repository exists, creating it if necessary.
@@ -248,7 +248,7 @@ async def ensure_shared_repository_exists(
   Args:
       repository_name: Name of the repository (e.g., 'sec')
       created_by: Optional user ID who initiated creation
-      instance_id: Instance identifier (default: kuzu-shared-prod)
+      instance_id: Instance identifier (default: ladybug-shared-prod)
 
   Returns:
       Dictionary with repository status

@@ -1,7 +1,7 @@
 """
 Graph Volume Monitor and Auto-Expansion Lambda Function
 
-This Lambda handles proactive volume monitoring and expansion for Graph instances (Kuzu and Neo4j):
+This Lambda handles proactive volume monitoring and expansion for Graph instances (LadybugDB and Neo4j):
 - Monitors disk usage across all instances
 - Automatically expands volumes when thresholds are exceeded
 - Grows filesystems after EBS expansion
@@ -113,7 +113,7 @@ def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
       results["errors"].append(f"Registry sync failed: {str(e)}")
 
     # Discover all Graph instances
-    instances = discover_kuzu_instances()
+    instances = discover_lbug_instances()
     results["instances_checked"] = len(instances)
 
     logger.info(f"Monitoring {len(instances)} Graph instances")
@@ -149,7 +149,7 @@ def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
   return results
 
 
-def discover_kuzu_instances() -> List[Dict]:
+def discover_lbug_instances() -> List[Dict]:
   """Discover all running Graph instances"""
 
   instances = []
@@ -160,7 +160,7 @@ def discover_kuzu_instances() -> List[Dict]:
       Filters=[
         {"Name": "tag:Service", "Values": ["RoboSystems"]},
         {
-          "Name": "tag:KuzuRole",
+          "Name": "tag:LadybugRole",
           "Values": ["writer", "shared_master", "shared_replica"],
         },
         {"Name": "instance-state-name", "Values": ["running"]},
@@ -180,7 +180,7 @@ def discover_kuzu_instances() -> List[Dict]:
           {
             "instance_id": instance_id,
             "private_ip": private_ip,
-            "kuzu_role": tags.get("KuzuRole", "unknown"),
+            "lbug_role": tags.get("LadybugRole", "unknown"),
             "tier": tags.get("WriterTier", tags.get("Tier", "unknown")),
             "tags": tags,
           }
@@ -500,7 +500,7 @@ def perform_volume_expansion(
 
     # Publish CloudWatch metric
     cloudwatch.put_metric_data(
-      Namespace=f"RoboSystemsGraph/{ENVIRONMENT.title()}",
+      Namespace="RoboSystems/Graph",
       MetricData=[
         {
           "MetricName": "VolumeExpansions",
@@ -646,11 +646,11 @@ def trigger_filesystem_growth(instance: Dict) -> Dict:
           '    echo "Attempt $i of $retries to grow filesystem"',
           "    ",
           "    # Get the device",
-          "    DEVICE=$(df /mnt/kuzu-data | tail -1 | awk '{print $1}')",
+          "    DEVICE=$(df /mnt/lbug-data | tail -1 | awk '{print $1}')",
           '    echo "Device detected: $DEVICE"',
           "    ",
           "    # Get current and available size",
-          "    CURRENT_SIZE=$(df -BG /mnt/kuzu-data | tail -1 | awk '{print $2}' | sed 's/G//')",
+          "    CURRENT_SIZE=$(df -BG /mnt/lbug-data | tail -1 | awk '{print $2}' | sed 's/G//')",
           "    DEVICE_SIZE=$(lsblk -b -n -o SIZE $DEVICE 2>/dev/null | head -1)",
           "    DEVICE_SIZE_GB=$((DEVICE_SIZE / 1024 / 1024 / 1024))",
           '    echo "Current filesystem: ${CURRENT_SIZE}GB, Device size: ${DEVICE_SIZE_GB}GB"',
@@ -662,13 +662,13 @@ def trigger_filesystem_growth(instance: Dict) -> Dict:
           "    fi",
           "    ",
           "    # Try to grow the filesystem",
-          "    if sudo xfs_growfs /mnt/kuzu-data 2>/dev/null; then",
+          "    if sudo xfs_growfs /mnt/lbug-data 2>/dev/null; then",
           '      echo "XFS filesystem grown successfully"',
-          "      df -h /mnt/kuzu-data",
+          "      df -h /mnt/lbug-data",
           "      return 0",
           "    elif sudo resize2fs $DEVICE 2>/dev/null; then",
           '      echo "EXT filesystem grown successfully"',
-          "      df -h /mnt/kuzu-data",
+          "      df -h /mnt/lbug-data",
           "      return 0",
           "    else",
           '      echo "Growth attempt $i failed, waiting ${wait_time}s..."',
@@ -683,7 +683,7 @@ def trigger_filesystem_growth(instance: Dict) -> Dict:
           'echo "Starting filesystem growth process..."',
           "",
           "# Get device for partition check",
-          "DEVICE=$(df /mnt/kuzu-data | tail -1 | awk '{print $1}')",
+          "DEVICE=$(df /mnt/lbug-data | tail -1 | awk '{print $1}')",
           "",
           "# Check if device has partitions",
           "if [[ $DEVICE =~ [0-9]+$ ]] || [[ $DEVICE =~ p[0-9]+$ ]]; then",
@@ -777,7 +777,7 @@ def monitor_single_instance(event: Dict) -> Dict:
     instance = {
       "instance_id": instance_id,
       "private_ip": instance_data.get("PrivateIpAddress"),
-      "kuzu_role": tags.get("KuzuRole", "unknown"),
+      "lbug_role": tags.get("LadybugRole", "unknown"),
       "tier": tags.get("WriterTier", tags.get("Tier", "unknown")),
       "tags": tags,
     }
@@ -843,7 +843,7 @@ def publish_monitoring_metrics(results: Dict):
   """Publish monitoring metrics to CloudWatch"""
 
   try:
-    namespace = f"RoboSystemsGraph/{ENVIRONMENT.title()}"
+    namespace = "RoboSystems/Graph"
 
     metric_data = [
       {
@@ -887,7 +887,7 @@ def send_expansion_alert(expansions: List[Dict]):
     return
 
   try:
-    message = "Kuzu Volume Auto-Expansion Report\n\n"
+    message = "LadybugDB Volume Auto-Expansion Report\n\n"
 
     for expansion in expansions:
       details = expansion.get("expansion_details", {})
@@ -901,7 +901,7 @@ def send_expansion_alert(expansions: List[Dict]):
 
     sns.publish(
       TopicArn=ALERT_TOPIC_ARN,
-      Subject=f"[{ENVIRONMENT.upper()}] Kuzu Volumes Auto-Expanded",
+      Subject=f"[{ENVIRONMENT.upper()}] LadybugDB Volumes Auto-Expanded",
       Message=message,
     )
 
@@ -916,7 +916,7 @@ def send_error_alert(errors: List[str]):
     return
 
   try:
-    message = "Kuzu Volume Monitoring Errors\n\n"
+    message = "LadybugDB Volume Monitoring Errors\n\n"
 
     for error in errors[:10]:  # Limit to first 10
       message += f"• {error}\n"
@@ -1208,7 +1208,7 @@ def sync_volume_registry():
 
       # Publish metric
       cloudwatch.put_metric_data(
-        Namespace=f"RoboSystemsGraph/{ENVIRONMENT.title()}",
+        Namespace="RoboSystems/Graph",
         MetricData=[
           {
             "MetricName": "RegistryUpdates",

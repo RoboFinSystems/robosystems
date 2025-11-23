@@ -1,24 +1,24 @@
 from typing import Optional, Union
 from robosystems.config import env
 from .base import GraphBackend
-from .kuzu import KuzuBackend
+from .lbug import LadybugBackend
 from .neo4j import Neo4jBackend
 from robosystems.logger import logger
 
 
-_backend_instance: Optional[Union[KuzuBackend, Neo4jBackend]] = None
+_backend_instance: Optional[Union[LadybugBackend, Neo4jBackend]] = None
 
 
-def get_backend() -> Union[KuzuBackend, Neo4jBackend]:
+def get_backend() -> Union[LadybugBackend, Neo4jBackend]:
   global _backend_instance
 
   if _backend_instance is None:
     backend_type = env.GRAPH_BACKEND_TYPE
 
-    if backend_type == "kuzu":
-      _backend_instance = KuzuBackend(data_path=env.KUZU_DATABASE_PATH)
+    if backend_type == "ladybug":
+      _backend_instance = LadybugBackend(data_path=env.LBUG_DATABASE_PATH)
       logger.info(
-        f"Initialized Kuzu backend (Standard tier) at {env.KUZU_DATABASE_PATH}"
+        f"Initialized LadybugDB backend (Standard tier) at {env.LBUG_DATABASE_PATH}"
       )
     elif backend_type == "neo4j_community":
       _backend_instance = Neo4jBackend(enterprise=False)
@@ -32,4 +32,4 @@ def get_backend() -> Union[KuzuBackend, Neo4jBackend]:
   return _backend_instance
 
 
-__all__ = ["get_backend", "KuzuBackend", "Neo4jBackend", "GraphBackend"]
+__all__ = ["get_backend", "LadybugBackend", "Neo4jBackend", "GraphBackend"]

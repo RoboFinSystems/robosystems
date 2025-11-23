@@ -27,7 +27,7 @@ class TestCreditCache:
     """Test caching and retrieving graph credit balance."""
     graph_id = "graph123"
     balance = Decimal("1000.0")
-    tier = "kuzu-large"
+    tier = "ladybug-large"
 
     # Cache the balance
     cache_instance.cache_graph_credit_balance(graph_id, balance, tier)
@@ -41,7 +41,7 @@ class TestCreditCache:
     # Parse the cached data
     cached_data = json.loads(call_args[0][2])
     assert cached_data["balance"] == "1000.0"
-    assert cached_data["graph_tier"] == "kuzu-large"
+    assert cached_data["graph_tier"] == "ladybug-large"
 
     # Test retrieval
     mock_redis.get.return_value = json.dumps(cached_data)

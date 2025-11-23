@@ -163,7 +163,7 @@ tracker = HealthTracker()
 # Register service
 tracker.register_service(
     name="graph_api",
-    health_check=lambda: check_kuzu_health(),
+    health_check=lambda: check_lbug_health(),
     interval=30  # Check every 30 seconds
 )
 

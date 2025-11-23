@@ -1,7 +1,7 @@
 """
-Kuzu Schema Models
+LadybugDB Schema Models
 
-Defines the data structures used to represent Kuzu schema elements.
+Defines the data structures used to represent LadybugDB schema elements.
 """
 
 from dataclasses import dataclass, field
@@ -19,13 +19,13 @@ class Property:
 
   def to_cypher(self) -> str:
     """Convert property to Cypher DDL syntax."""
-    # Primary keys are defined separately in Kuzu
+    # Primary keys are defined separately in LadybugDB
     return f"{self.name} {self.type}"
 
 
 @dataclass
 class Node:
-  """Represents a node table in Kuzu."""
+  """Represents a node table in LadybugDB."""
 
   name: str
   properties: List[Property]
@@ -66,7 +66,7 @@ class Node:
 
 @dataclass
 class Relationship:
-  """Represents a relationship table in Kuzu."""
+  """Represents a relationship table in LadybugDB."""
 
   name: str
   from_node: str

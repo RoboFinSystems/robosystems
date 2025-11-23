@@ -202,7 +202,7 @@ bastion-tunnel environment service key:
 # Admin CLI for remote administration via admin API
 # Examples: just admin dev stats
 #           just admin dev customers list
-#           just admin dev subscriptions list --status active --tier kuzu-standard
+#           just admin dev subscriptions list --status active --tier ladybug-standard
 admin environment="dev" *args="":
     UV_ENV_FILE={{_local_env}} uv run python -m robosystems.admin.cli -e {{environment}} {{args}}
 
@@ -213,9 +213,9 @@ admin environment="dev" *args="":
 api env=_local_env:
     UV_ENV_FILE={{env}} uv run uvicorn main:app --reload
 
-# Start Graph API server with Kuzu backend (configurable node type)
-graph-api backend="kuzu" type="writer" port="8001" env=_local_env:
-    UV_ENV_FILE={{env}} GRAPH_BACKEND_TYPE={{backend}} KUZU_NODE_TYPE={{type}} uv run python -m robosystems.graph_api --port {{port}}
+# Start Graph API server with LadybugDB backend (configurable node type)
+graph-api backend="ladybug" type="writer" port="8001" env=_local_env:
+    UV_ENV_FILE={{env}} GRAPH_BACKEND_TYPE={{backend}} LBUG_NODE_TYPE={{type}} uv run python -m robosystems.graph_api --port {{port}}
 
 # Start worker
 worker num_workers="1" queue="robosystems" env=_local_env:
@@ -278,9 +278,9 @@ graph-query graph_id query format="table" url="http://localhost:8001" env=_local
 tables-query graph_id query format="table" url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query --url {{url}} --graph-id {{graph_id}} --query "{{query}}" --format {{format}}
 
-# Kuzu embedded database direct query (bypasses API)
-kuzu-query graph_id query format="table" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu --query "{{query}}" --format {{format}}
+# LadybugDB embedded database direct query (bypasses API)
+lbug-query graph_id query format="table" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.lbug_query --db-path ./data/lbug-dbs/{{graph_id}}.lbug --query "{{query}}" --format {{format}}
 
 # DuckDB staging database direct query (bypasses API)
 duckdb-query graph_id query format="table" env=_local_env:
@@ -293,8 +293,8 @@ graph-query-i graph_id url="http://localhost:8001" env=_local_env:
 tables-query-i graph_id url="http://localhost:8001" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.tables_query --url {{url}} --graph-id {{graph_id}}
 
-kuzu-query-i graph_id env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.kuzu_query --db-path ./data/kuzu-dbs/{{graph_id}}.kuzu
+lbug-query-i graph_id env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.lbug_query --db-path ./data/lbug-dbs/{{graph_id}}.lbug
 
 duckdb-query-i graph_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb
@@ -306,11 +306,11 @@ duckdb-query-i graph_id env=_local_env:
 #   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
 #   - "copy": Consolidation → COPY-based ingestion (emulates production pipeline, uses consolidated files)
 # Examples:
-#   just sec-load NVDA 2025                              # Load NVIDIA 2025 data using defaults (duckdb, kuzu)
-#   just sec-load NVDA 2025 [duckdb|copy] [kuzu|neo4j]   # Specify ingestion method and/or backend
+#   just sec-load NVDA 2025                              # Load NVIDIA 2025 data using defaults (duckdb, ladybug)
+#   just sec-load NVDA 2025 [duckdb|copy] [ladybug|neo4j]   # Specify ingestion method and/or backend
 
 # SEC Local - Load single company by ticker and year(s)
-sec-load ticker year="" ingest_method="duckdb" backend="kuzu" env=_local_env:
+sec-load ticker year="" ingest_method="duckdb" backend="ladybug" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} {{ if ingest_method == "copy" { "--use-copy-pipeline" } else { "" } }}
 
 # SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
@@ -318,7 +318,7 @@ sec-health verbose="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local_health {{ if verbose == "v" { "--verbose" } else { "" } }}
 
 # SEC Local - Reset database with proper schema
-sec-reset backend="kuzu" env=_local_env:
+sec-reset backend="ladybug" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
 
 
@@ -411,7 +411,7 @@ clean:
 # Clean up development data (reset all local data)
 clean-data:
     @just clean
-    rm -rf ./data/kuzu-dbs
+    rm -rf ./data/lbug-dbs
     rm -rf ./data/staging
     rm -rf ./data/arelle
     rm -rf ./data/neo4j

@@ -26,10 +26,10 @@ External data source synchronization:
 
 #### `graph_operations/`
 
-Kuzu graph database operations:
+LadybugDB graph database operations:
 
 - `backup.py` - Graph backup creation and management
-- `ingestion.py` - Kuzu database ingestion and data loading
+- `ingestion.py` - LadybugDB database ingestion and data loading
 
 #### `infrastructure/`
 
@@ -37,7 +37,7 @@ Infrastructure maintenance and monitoring:
 
 - `auth_cleanup.py` - Expired API key and authentication cleanup (hourly)
 - Note: All infrastructure monitoring has been migrated to Lambda functions:
-  - Instance monitoring: `bin/lambda/kuzu_instance_monitor.py`
+  - Instance monitoring: `bin/lambda/lbug_instance_monitor.py`
   - Worker monitoring: `bin/lambda/worker_monitor.py` (queue metrics, task protection)
 
 #### `processing/`

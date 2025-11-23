@@ -6,7 +6,7 @@ This middleware layer provides the core graph database abstraction and routing l
 
 The graph middleware:
 
-- Routes graph operations to appropriate clusters (Kuzu or Neo4j)
+- Routes graph operations to appropriate clusters (LadybugDB or Neo4j)
 - Provides backend-agnostic database abstraction
 - Manages database connections and pooling
 - Handles query execution with caching and queuing
@@ -15,9 +15,9 @@ The graph middleware:
 
 **Supported Backends:**
 
-- **Kuzu**: Embedded graph database with EC2-based clusters
-- **Neo4j Community**: Client-server architecture for kuzu-large tier
-- **Neo4j Enterprise**: Multi-database support for kuzu-xlarge tier
+- **LadybugDB**: Embedded graph database with EC2-based clusters
+- **Neo4j Community**: Client-server architecture for ladybug-large tier
+- **Neo4j Enterprise**: Multi-database support for ladybug-xlarge tier
 
 ## Architecture
 
@@ -26,7 +26,7 @@ graph/
 ├── __init__.py              # Module exports
 ├── router.py                # Main routing logic
 ├── clusters.py              # Cluster configuration and management
-├── engine.py                # Direct Kuzu database access
+├── engine.py                # Direct LadybugDB database access
 ├── repository.py            # Repository pattern implementation
 ├── dependencies.py          # FastAPI dependency injection
 ├── types.py                 # Type definitions and enums
@@ -67,7 +67,7 @@ router = GraphRouter()
 repo = router.get_repository(
     graph_id="kg1a2b3c",
     operation_type="write",
-    tier=GraphTier.KUZU_STANDARD
+    tier=GraphTier.LBUG_STANDARD
 )
 result = await repo.execute_query("MATCH (n) RETURN n LIMIT 10")
 ```
@@ -103,7 +103,7 @@ class ClusterConfig:
 
 ### 3. Graph Engine (`engine.py`)
 
-Direct graph database access with connection management (Kuzu-specific).
+Direct graph database access with connection management (LadybugDB-specific).
 
 **Features:**
 
@@ -115,8 +115,8 @@ Direct graph database access with connection management (Kuzu-specific).
 **Usage:**
 
 ```python
-# Kuzu-specific direct access (development/legacy)
-engine = GraphEngine(database_path="/data/kuzu-dbs/kg1a2b3c")
+# LadybugDB-specific direct access (development/legacy)
+engine = GraphEngine(database_path="/data/lbug-dbs/kg1a2b3c")
 result = engine.execute_query("MATCH (c:Entity) RETURN c")
 engine.close()
 
@@ -226,33 +226,33 @@ Core type definitions and enums.
 **Key Types:**
 
 - `GraphType`: Enum for graph types (ENTITY, SHARED_REPOSITORY)
-- `GraphTier`: Enum for graph tiers (KUZU_STANDARD, KUZU_LARGE, KUZU_XLARGE)
+- `GraphTier`: Enum for graph tiers (LBUG_STANDARD, LBUG_LARGE, LBUG_XLARGE)
 - `OperationType`: Enum for operations (READ, WRITE, ADMIN)
 - `QueryPriority`: Priority levels (1-10)
 
 ### 9. Database Allocation (`allocation_manager.py`)
 
-DynamoDB-based allocation manager for graph databases across instances (Kuzu-specific).
+DynamoDB-based allocation manager for graph databases across instances (LadybugDB-specific).
 
 **Features:**
 
 - **DynamoDB Registry**: Persistent state storage for allocations
-- **Instance Management**: Tracks capacity and health of Kuzu instances
+- **Instance Management**: Tracks capacity and health of LadybugDB instances
 - **Atomic Allocation**: Race-condition-free database assignment
 - **Auto-scaling Integration**: Triggers capacity increases when needed
-- **Multi-tier Support**: kuzu-standard, kuzu-large, kuzu-xlarge instance tiers
+- **Multi-tier Support**: ladybug-standard, ladybug-large, ladybug-xlarge instance tiers
 - **Instance Protection**: Automatically enables scale-in protection for instances with allocated databases
 
 **Usage:**
 
 ```python
-from robosystems.middleware.graph.allocation_manager import KuzuAllocationManager
+from robosystems.middleware.graph.allocation_manager import LadybugDBAllocationManager
 from robosystems.config.graph_tier import GraphTier
 
-manager = KuzuAllocationManager(environment="prod")
+manager = LadybugDBAllocationManager(environment="prod")
 location = await manager.allocate_database(
     entity_id="kg1a2b3c",
-    instance_tier=GraphTier.KUZU_STANDARD
+    instance_tier=GraphTier.LBUG_STANDARD
 )
 print(f"Database allocated to {location.instance_id}")
 ```
@@ -313,10 +313,10 @@ subgraph_id = construct_subgraph_id("kg1234567890abcdef", "staging")
 
 **Allocation Manager Integration:**
 
-The `KuzuAllocationManager.find_database_location()` automatically resolves subgraphs to their parent's location:
+The `LadybugDBAllocationManager.find_database_location()` automatically resolves subgraphs to their parent's location:
 
 ```python
-manager = KuzuAllocationManager(environment="prod")
+manager = LadybugDBAllocationManager(environment="prod")
 
 # Requesting location for subgraph returns parent's instance location
 location = await manager.find_database_location("kg1234567890abcdef_dev")
@@ -342,10 +342,10 @@ Key environment variables:
 
 ```bash
 # Backend Configuration
-GRAPH_BACKEND_TYPE=kuzu             # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=ladybug             # ladybug|neo4j_community|neo4j_enterprise
 
-# Routing Configuration (Kuzu)
-KUZU_ACCESS_PATTERN=api_writer      # Access pattern (api_writer/api_reader/direct_file)
+# Routing Configuration (LadybugDB)
+LBUG_ACCESS_PATTERN=api_writer      # Access pattern (api_writer/api_reader/direct_file)
 GRAPH_API_URL=                       # Localhost endpoint for routing (dynamic lookup in prod)
 
 # Routing Configuration (Neo4j)
@@ -367,11 +367,11 @@ CONNECTION_POOL_SIZE=10             # Database connection pool size
 QUERY_TIMEOUT=30                    # Query timeout (seconds)
 NEO4J_MAX_CONNECTION_POOL_SIZE=50   # Neo4j connection pool size
 
-# Database Allocation (Kuzu)
-KUZU_MAX_DATABASES_PER_NODE=50     # Max databases per Kuzu instance
+# Database Allocation (LadybugDB)
+LBUG_MAX_DATABASES_PER_NODE=50     # Max databases per LadybugDB instance
 
 # Multi-tenant Configuration
-KUZU_ACCESS_PATTERN=api_auto       # Access pattern for graph operations
+LBUG_ACCESS_PATTERN=api_auto       # Access pattern for graph operations
 ```
 
 ## Usage Patterns

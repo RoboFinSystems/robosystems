@@ -147,7 +147,7 @@ class MCPConnectionPool:
         api_base_url: Override API URL (uses env var if None)
 
     Yields:
-        KuzuMCPClient instance
+        GraphMCPClient instance
 
     Example:
         async with pool.acquire("sec") as client:
@@ -167,10 +167,10 @@ class MCPConnectionPool:
     # Create new client if none available
     if not client:
       # Import here to avoid circular dependency
-      from .factory import create_kuzu_mcp_client
+      from .factory import create_graph_mcp_client
 
       logger.debug(f"Creating new connection for {graph_id}")
-      client = await create_kuzu_mcp_client(graph_id, api_base_url)
+      client = await create_graph_mcp_client(graph_id, api_base_url)
       created_at = datetime.now()
 
     try:

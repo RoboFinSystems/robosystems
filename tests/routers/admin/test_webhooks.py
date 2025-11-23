@@ -259,7 +259,7 @@ class TestCheckoutCompletedHandler:
     mock_subscription.resource_type = "graph"
     mock_subscription.subscription_metadata = {"resource_config": {}}
     mock_subscription.status = "pending_payment"
-    mock_subscription.plan_name = "kuzu-standard"
+    mock_subscription.plan_name = "ladybug-standard"
 
     mock_org_user = Mock()
     mock_org_user.user_id = "user_123"
@@ -405,7 +405,7 @@ class TestPaymentSucceededHandler:
     mock_subscription.resource_type = "graph"
     mock_subscription.subscription_metadata = {"resource_config": {}}
     mock_subscription.stripe_subscription_id = "sub_test456"
-    mock_subscription.plan_name = "kuzu-standard"
+    mock_subscription.plan_name = "ladybug-standard"
 
     mock_org_user = Mock()
     mock_org_user.user_id = "user_123"

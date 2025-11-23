@@ -22,7 +22,7 @@ class TestGraphCreationLimits:
     """Standard graph creation request."""
     return {
       "metadata": {"graph_name": "Test Graph", "description": "Testing graph limits"},
-      "instance_tier": "kuzu-standard",
+      "instance_tier": "ladybug-standard",
     }
 
   async def test_create_graph_with_zero_limit_blocked(

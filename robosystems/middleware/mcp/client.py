@@ -1,7 +1,7 @@
 """
-Kuzu MCP Client - Main client class for Model Context Protocol adapter.
+Graph MCP Client - Main client class for Model Context Protocol adapter.
 
-This module contains the KuzuMCPClient class which provides MCP functionality
+This module contains the GraphMCPClient class which provides MCP functionality
 using the Graph API instead of direct database connections.
 """
 
@@ -18,10 +18,14 @@ from robosystems.logger import logger
 from robosystems.config import env
 from robosystems.graph_api.client import GraphClient
 
-from .exceptions import KuzuAPIError, KuzuQueryTimeoutError, KuzuQueryComplexityError
+from .exceptions import (
+  GraphAPIError,
+  GraphQueryTimeoutError,
+  GraphQueryComplexityError,
+)
 
 
-class KuzuMCPClient:
+class GraphMCPClient:
   """
   MCP client that communicates with graph databases via REST API.
 
@@ -44,10 +48,10 @@ class KuzuMCPClient:
     **kwargs,
   ):
     """
-    Initialize Kuzu MCP client.
+    Initialize Graph MCP client.
 
     Args:
-        api_base_url: Base URL for Graph API (e.g., http://graph-api-kuzu:8001)
+        api_base_url: Base URL for Graph API (e.g., http://graph-api:8001)
         timeout: HTTP request timeout in seconds
         query_timeout: Maximum query execution time in seconds
         max_query_length: Maximum allowed query length in characters
@@ -66,10 +70,10 @@ class KuzuMCPClient:
     # This ensures we get the key from Secrets Manager in production
     api_key = env.GRAPH_API_KEY
 
-    self.kuzu_client = GraphClient(base_url=api_base_url, api_key=api_key)
-    self.kuzu_client.graph_id = graph_id  # Set the graph_id for queries
+    self.graph_client = GraphClient(base_url=api_base_url, api_key=api_key)
+    self.graph_client.graph_id = graph_id  # Set the graph_id for queries
 
-    # Keep the httpx client for any non-Kuzu HTTP operations if needed
+    # Keep the httpx client for any non-graph HTTP operations if needed
     timeout_config = httpx.Timeout(
       connect=10.0,  # Connection timeout
       read=max(self.timeout, query_timeout + 10),  # Read timeout (query + buffer)
@@ -79,7 +83,7 @@ class KuzuMCPClient:
     self.client = httpx.AsyncClient(timeout=timeout_config)
 
     logger.info(
-      f"Initialized Kuzu MCP client for graph '{graph_id}' at {api_base_url} "
+      f"Initialized Graph MCP client for graph '{graph_id}' at {api_base_url} "
       f"(query_timeout={query_timeout}s, max_length={max_query_length})"
     )
 
@@ -95,27 +99,27 @@ class KuzuMCPClient:
 
     # Check if we need to refresh the cache
     if (
-      KuzuMCPClient._config_cache is None
-      or current_time - KuzuMCPClient._config_cache_time
-      > KuzuMCPClient._config_cache_ttl
+      GraphMCPClient._config_cache is None
+      or current_time - GraphMCPClient._config_cache_time
+      > GraphMCPClient._config_cache_ttl
     ):
       # Load configuration from environment
-      KuzuMCPClient._config_cache = {
+      GraphMCPClient._config_cache = {
         "max_result_rows": env.MCP_MAX_RESULT_ROWS,
         "auto_limit_enabled": env.MCP_AUTO_LIMIT_ENABLED,
       }
-      KuzuMCPClient._config_cache_time = current_time
+      GraphMCPClient._config_cache_time = current_time
       logger.debug("Refreshed MCP configuration cache")
 
     # Apply cached configuration to instance
-    self.max_result_rows = KuzuMCPClient._config_cache["max_result_rows"]
-    self.auto_limit_enabled = KuzuMCPClient._config_cache["auto_limit_enabled"]
+    self.max_result_rows = GraphMCPClient._config_cache["max_result_rows"]
+    self.auto_limit_enabled = GraphMCPClient._config_cache["auto_limit_enabled"]
 
   async def close(self):
     """Close HTTP clients in proper order."""
     # Close the Graph client first (handles database connections, may need httpx for cleanup)
     try:
-      await self.kuzu_client.close()
+      await self.graph_client.close()
     except Exception as e:
       logger.error(f"Error closing Graph client: {e}")
 
@@ -146,12 +150,12 @@ class KuzuMCPClient:
         cypher: Cypher query string to validate
 
     Raises:
-        KuzuQueryComplexityError: If query violates hard limits or contains
+        GraphQueryComplexityError: If query violates hard limits or contains
                                   patterns likely to cause resource exhaustion
     """
     # Check query length
     if len(cypher) > self.max_query_length:
-      raise KuzuQueryComplexityError(
+      raise GraphQueryComplexityError(
         f"Query length {len(cypher)} exceeds maximum {self.max_query_length} characters"
       )
 
@@ -172,7 +176,7 @@ class KuzuMCPClient:
     # Count nested subqueries (basic heuristic)
     subquery_count = cypher_upper.count("CALL {") + cypher_upper.count("WITH ")
     if subquery_count > 10:
-      raise KuzuQueryComplexityError(
+      raise GraphQueryComplexityError(
         f"Query has {subquery_count} subqueries/WITH clauses, which may be too complex"
       )
 
@@ -194,9 +198,9 @@ class KuzuMCPClient:
         List of result dictionaries
 
     Raises:
-        KuzuAPIError: If query execution fails
-        KuzuQueryTimeoutError: If query times out
-        KuzuQueryComplexityError: If query is too complex
+        GraphAPIError: If query execution fails
+        GraphQueryTimeoutError: If query times out
+        GraphQueryComplexityError: If query is too complex
     """
     logger.info(f"MCP execute_query called with: {cypher[:100]}...")
     # Validate query complexity before execution
@@ -227,13 +231,13 @@ class KuzuMCPClient:
 
     try:
       logger.info(
-        f"MCP: Executing Kuzu query (timeout={self.query_timeout}s): {cypher[:200]}..."
+        f"MCP: Executing graph query (timeout={self.query_timeout}s): {cypher[:200]}..."
       )
 
-      # Use KuzuClient instead of direct HTTP calls
+      # Use GraphClient instead of direct HTTP calls
       try:
         result = await asyncio.wait_for(
-          self.kuzu_client.query(
+          self.graph_client.query(
             cypher=cypher, graph_id=self.graph_id, parameters=parameters
           ),
           timeout=self.query_timeout,
@@ -241,11 +245,13 @@ class KuzuMCPClient:
       except asyncio.TimeoutError:
         error_msg = f"Query execution timed out after {self.query_timeout} seconds"
         logger.error(error_msg)
-        raise KuzuQueryTimeoutError(error_msg)
+        raise GraphQueryTimeoutError(error_msg)
 
       # Ensure result is a dictionary (non-streaming mode)
       if not isinstance(result, dict):
-        raise KuzuAPIError("Expected dictionary result from query, got async generator")
+        raise GraphAPIError(
+          "Expected dictionary result from query, got async generator"
+        )
 
       data = result.get("data", [])
       execution_time = result.get("execution_time_ms", 0)
@@ -300,16 +306,16 @@ class KuzuMCPClient:
 
       return data
 
-    except KuzuQueryTimeoutError:
+    except GraphQueryTimeoutError:
       # Re-raise timeout errors
       raise
-    except KuzuQueryComplexityError:
+    except GraphQueryComplexityError:
       # Re-raise complexity errors
       raise
     except TimeoutException as e:
       error_msg = f"HTTP timeout executing query after {self.timeout}s: {e}"
       logger.error(error_msg)
-      raise KuzuQueryTimeoutError(error_msg)
+      raise GraphQueryTimeoutError(error_msg)
     except HTTPError as e:
       # Log full error for debugging
       logger.error(f"HTTP error executing query: {e}")
@@ -349,14 +355,14 @@ class KuzuMCPClient:
         # If we can't parse the response, use generic message
         user_msg = self._sanitize_error_message(e, "query execution")
 
-      raise KuzuAPIError(user_msg)
+      raise GraphAPIError(user_msg)
 
     except Exception as e:
       # Log full error for debugging
       logger.error(f"Unexpected error executing query: {e}")
       # Return sanitized error to user
       user_msg = self._sanitize_error_message(e, "query execution")
-      raise KuzuAPIError(user_msg)
+      raise GraphAPIError(user_msg)
 
   async def get_schema(self) -> List[Dict[str, Any]]:
     """
@@ -459,7 +465,7 @@ class KuzuMCPClient:
 
     except Exception as e:
       logger.error(f"Failed to get schema: {e}")
-      raise KuzuAPIError(f"Schema retrieval failed: {e}")
+      raise GraphAPIError(f"Schema retrieval failed: {e}")
 
   def _get_common_properties(self, node_name: str) -> List[str]:
     """Get commonly used properties for node types."""
@@ -630,10 +636,10 @@ class KuzuMCPClient:
         Human-readable description of the graph
     """
     # Import here to avoid circular import
-    from .tools import KuzuMCPTools
+    from .tools import GraphMCPTools
 
     # Delegate to MCP tools
-    mcp_tools = KuzuMCPTools(self)
+    mcp_tools = GraphMCPTools(self)
     return await mcp_tools.structure_tool._describe_graph_structure()
 
   async def get_graph_info(self) -> Dict[str, Any]:
@@ -718,7 +724,7 @@ class KuzuMCPClient:
 
     except Exception as e:
       logger.error(f"Failed to get graph info: {e}")
-      raise KuzuAPIError(f"Graph info retrieval failed: {e}")
+      raise GraphAPIError(f"Graph info retrieval failed: {e}")
 
   def _sanitize_error_message(
     self, error: Exception, context: str = "operation"
@@ -800,7 +806,7 @@ class KuzuMCPClient:
       r"\bline \d+",  # Line numbers
       r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",  # IP addresses
       r"\bport \d+",  # Port numbers
-      r"[\w_]+\.(db|kuzu|sqlite)",  # Database file names
+      r"[\w_]+\.(db|lbug|kuzu|sqlite)",  # Database file names (lbug, legacy kuzu, sqlite)
     ]
 
     # Find matching user-friendly message
@@ -858,7 +864,7 @@ class KuzuMCPClient:
       "GROUP BY",
       "DISTINCT",
       # Common patterns that indicate aggregation
-      "COUNT{",  # Kuzu COUNT subquery syntax
+      "COUNT{",  # Graph database COUNT subquery syntax
     ]
 
     for func in aggregation_functions:

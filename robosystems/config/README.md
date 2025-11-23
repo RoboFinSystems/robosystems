@@ -71,8 +71,8 @@ JWT_SECRET_KEY       # JWT signing key
 
 # Graph API Configuration
 GRAPH_API_URL        # Graph API endpoint
-KUZU_DATABASE_PATH   # Database file path
-KUZU_MAX_DATABASES_PER_NODE  # Capacity limit
+LBUG_DATABASE_PATH   # Database file path
+LBUG_MAX_DATABASES_PER_NODE  # Capacity limit
 
 # AWS Settings
 AWS_REGION           # AWS region
@@ -105,15 +105,15 @@ SUBSCRIPTION_PLANS = {
         "max_graphs": 5,
         "api_rate_multiplier": 2.0,
     },
-    "enterprise": {
-        "display_name": "Enterprise",
+    "large": {
+        "display_name": "Large",
         "credits_per_month": 1_000_000,
         "base_price_cents": 19999,  # $199.99
         "max_graphs": 25,
         "api_rate_multiplier": 5.0,
     },
-    "premium": {
-        "display_name": "Premium",
+    "xlarge": {
+        "display_name": "XLarge",
         "credits_per_month": 3_000_000,
         "base_price_cents": 49999,  # $499.99
         "max_graphs": 100,
@@ -131,7 +131,7 @@ from robosystems.config.billing import BillingConfig
 pricing = BillingConfig.get_all_pricing_info()
 
 # Get specific plan
-plan = BillingConfig.get_subscription_plan("enterprise")
+plan = BillingConfig.get_subscription_plan("large")
 print(f"{plan['display_name']}: ${plan['base_price_cents']/100}/month")
 
 # Check plan features
@@ -183,7 +183,7 @@ GRAPH_WRITE: 500/min  # 30k/hour possible
 from robosystems.config.rate_limits import get_rate_limit_for_tier
 
 # Get limits for tier and operation
-limit, period = get_rate_limit_for_tier("enterprise", EndpointCategory.GRAPH_QUERY)
+limit, period = get_rate_limit_for_tier("large", EndpointCategory.GRAPH_QUERY)
 # Returns: (300, RateLimitPeriod.MINUTE)
 
 # Apply in middleware
@@ -235,7 +235,7 @@ storage_cost = CreditConfig.get_storage_cost(gb_hours=24)
 # 24 * 0.1 = 2.4 credits
 
 # Apply tier discount
-enterprise_cost = cost * 0.8  # 20% discount
+large_tier_cost = cost * 0.8  # 20% discount
 ```
 
 ### 5. Configuration Validation (`validation.py`)
@@ -256,7 +256,7 @@ Validates all configuration at startup.
 - DATABASE_URL must be set
 - JWT_SECRET_KEY must be secure
 - AWS credentials configured
-- Kuzu endpoints defined
+- LadybugDB endpoints defined
 
 # Development Warnings
 - Missing optional services

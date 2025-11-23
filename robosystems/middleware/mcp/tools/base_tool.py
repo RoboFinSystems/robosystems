@@ -8,10 +8,10 @@ from typing import Any, Dict, TYPE_CHECKING
 from abc import ABC, abstractmethod
 
 if TYPE_CHECKING:
-  from ..client import KuzuMCPClient
+  from ..client import GraphMCPClient
 
 from robosystems.logger import logger
-from robosystems.middleware.mcp.query_validator import KuzuQueryValidator
+from robosystems.middleware.mcp.query_validator import GraphQueryValidator
 
 
 class BaseTool(ABC):
@@ -21,9 +21,9 @@ class BaseTool(ABC):
   Provides common functionality like client access, validation, and logging.
   """
 
-  def __init__(self, client: "KuzuMCPClient"):
+  def __init__(self, client: "GraphMCPClient"):
     self.client = client
-    self.validator = KuzuQueryValidator()
+    self.validator = GraphQueryValidator()
 
   @abstractmethod
   def get_tool_definition(self) -> Dict[str, Any]:

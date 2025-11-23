@@ -3,7 +3,7 @@
 Graph Database Query Tool
 
 Generic command-line tool to execute queries against graph databases through the Graph API.
-Works with any backend (Kuzu, Neo4j, etc.) that implements the Graph API.
+Works with any backend (LadybugDB, Neo4j, etc.) that implements the Graph API.
 
 Usage:
     # Health check
@@ -288,7 +288,7 @@ Examples:
   parser.add_argument(
     "--url",
     default="http://localhost:8001",
-    help="Graph API URL (default: http://localhost:8001 for Kuzu, use http://localhost:8001 for Neo4j)",
+    help="Graph API URL (default: http://localhost:8001 for LadybugDB, use http://localhost:8001 for Neo4j)",
   )
 
   parser.add_argument("--graph-id", help="Graph database identifier (e.g., 'sec')")

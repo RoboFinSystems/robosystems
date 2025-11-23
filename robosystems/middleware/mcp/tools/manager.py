@@ -1,20 +1,20 @@
 """
-Kuzu MCP Tools - MCP tools implementation using Graph API.
+Graph MCP Tools - MCP tools implementation using Graph API.
 
-This module contains the KuzuMCPTools class which provides all the MCP tool
-functionality for interacting with Kuzu graph databases.
+This module contains the GraphMCPTools class which provides all the MCP tool
+functionality for interacting with graph databases.
 """
 
 import json
 from typing import Any, Dict, List, Optional
 
 from robosystems.logger import logger
-from robosystems.middleware.mcp.query_validator import KuzuQueryValidator
+from robosystems.middleware.mcp.query_validator import GraphQueryValidator
 from ..exceptions import (
-  KuzuAPIError,
-  KuzuQueryTimeoutError,
-  KuzuQueryComplexityError,
-  KuzuValidationError,
+  GraphAPIError,
+  GraphQueryTimeoutError,
+  GraphQueryComplexityError,
+  GraphValidationError,
 )
 from . import (
   ExampleQueriesTool,
@@ -32,41 +32,41 @@ from . import (
 )
 
 
-class KuzuMCPTools:
+class GraphMCPTools:
   """
   MCP tools implementation using Graph API.
 
   Provides the same interface as graph database MCP tools but uses Graph API backend.
   """
 
-  def __init__(self, kuzu_client):
+  def __init__(self, graph_client):
     # Import here to avoid circular import
-    from ..client import KuzuMCPClient
+    from ..client import GraphMCPClient
 
-    self.client: KuzuMCPClient = kuzu_client
+    self.client: GraphMCPClient = graph_client
 
     # Initialize query validator
-    self.validator = KuzuQueryValidator()
+    self.validator = GraphQueryValidator()
 
     # Initialize individual tools
-    self.example_queries_tool = ExampleQueriesTool(kuzu_client)
-    self.cypher_tool = CypherTool(kuzu_client)
-    self.schema_tool = SchemaTool(kuzu_client)
-    self.properties_tool = PropertiesTool(kuzu_client)
-    self.structure_tool = StructureTool(kuzu_client)
-    self.elements_tool = ElementsTool(kuzu_client)
-    self.facts_tool = FactsTool(kuzu_client)
-    self.create_workspace_tool = CreateWorkspaceTool(kuzu_client)
-    self.delete_workspace_tool = DeleteWorkspaceTool(kuzu_client)
-    self.list_workspaces_tool = ListWorkspacesTool(kuzu_client)
-    self.switch_workspace_tool = SwitchWorkspaceTool(kuzu_client)
-    self.build_fact_grid_tool = BuildFactGridTool(kuzu_client)
+    self.example_queries_tool = ExampleQueriesTool(graph_client)
+    self.cypher_tool = CypherTool(graph_client)
+    self.schema_tool = SchemaTool(graph_client)
+    self.properties_tool = PropertiesTool(graph_client)
+    self.structure_tool = StructureTool(graph_client)
+    self.elements_tool = ElementsTool(graph_client)
+    self.facts_tool = FactsTool(graph_client)
+    self.create_workspace_tool = CreateWorkspaceTool(graph_client)
+    self.delete_workspace_tool = DeleteWorkspaceTool(graph_client)
+    self.list_workspaces_tool = ListWorkspacesTool(graph_client)
+    self.switch_workspace_tool = SwitchWorkspaceTool(graph_client)
+    self.build_fact_grid_tool = BuildFactGridTool(graph_client)
 
     # Cache statistics (inherited from schema tool)
     self._cache_hits = 0
     self._cache_misses = 0
 
-    logger.info("Initialized Kuzu MCP tools with query validator enabled")
+    logger.info("Initialized Graph MCP tools with query validator enabled")
 
   def _should_include_element_discovery(self) -> bool:
     """
@@ -230,7 +230,7 @@ class KuzuMCPTools:
       else:
         raise ValueError(f"Unknown tool: {name}")
 
-    except KuzuQueryTimeoutError as e:
+    except GraphQueryTimeoutError as e:
       # Enhanced timeout error handling
       error_context = self._build_error_context(name, arguments, e)
       error_msg = str(e)
@@ -253,7 +253,7 @@ class KuzuMCPTools:
         raise  # Re-raise for raw mode
       return f"Timeout: {error_msg}"
 
-    except KuzuQueryComplexityError as e:
+    except GraphQueryComplexityError as e:
       # Enhanced complexity error handling
       error_context = self._build_error_context(name, arguments, e)
       error_msg = str(e)
@@ -271,7 +271,7 @@ class KuzuMCPTools:
         raise  # Re-raise for raw mode
       return f"Complexity Error: {error_msg}"
 
-    except KuzuAPIError as e:
+    except GraphAPIError as e:
       # Enhanced error handling with more context
       error_msg = str(e)
       error_context = self._build_error_context(name, arguments, e)
@@ -301,7 +301,7 @@ class KuzuMCPTools:
 
       logger.error(f"Argument validation error in tool '{name}': {error_msg}")
       if return_raw:
-        raise KuzuValidationError(error_msg, validation_errors=[error_msg])
+        raise GraphValidationError(error_msg, validation_errors=[error_msg])
       return f"Validation Error: {error_msg}"
 
     except Exception as e:
@@ -315,7 +315,7 @@ class KuzuMCPTools:
       )
 
       if return_raw:
-        raise KuzuAPIError(f"Tool execution failed: {error_msg}")
+        raise GraphAPIError(f"Tool execution failed: {error_msg}")
       return f"Error: {error_msg}"
 
   async def execute_cypher_tool(

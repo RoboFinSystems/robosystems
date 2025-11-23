@@ -73,11 +73,11 @@ class GraphLimitsResponse(BaseModel):
       "examples": [
         {
           "summary": "Standard tier user graph limits",
-          "description": "Operational limits for a kuzu-standard tier user graph with full details",
+          "description": "Operational limits for a ladybug-standard tier user graph with full details",
           "value": {
             "graph_id": "kg1a2b3c4d5",
-            "subscription_tier": "kuzu-standard",
-            "graph_tier": "kuzu-standard",
+            "subscription_tier": "ladybug-standard",
+            "graph_tier": "ladybug-standard",
             "is_shared_repository": False,
             "storage": {
               "current_usage_gb": 2.45,
@@ -121,8 +121,8 @@ class GraphLimitsResponse(BaseModel):
           "description": "Operational limits for SEC shared repository (read-only, no credits)",
           "value": {
             "graph_id": "sec",
-            "subscription_tier": "kuzu-standard",
-            "graph_tier": "kuzu-shared",
+            "subscription_tier": "ladybug-standard",
+            "graph_tier": "ladybug-shared",
             "is_shared_repository": True,
             "storage": {
               "current_usage_gb": 125.3,
@@ -157,11 +157,11 @@ class GraphLimitsResponse(BaseModel):
         },
         {
           "summary": "Enterprise tier limits",
-          "description": "Operational limits for kuzu-large tier with enhanced capabilities",
+          "description": "Operational limits for ladybug-large tier with enhanced capabilities",
           "value": {
             "graph_id": "kg9f8e7d6c5",
-            "subscription_tier": "kuzu-large",
-            "graph_tier": "kuzu-large",
+            "subscription_tier": "ladybug-large",
+            "graph_tier": "ladybug-large",
             "is_shared_repository": False,
             "storage": {
               "current_usage_gb": 450.8,

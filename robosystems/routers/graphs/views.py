@@ -33,13 +33,13 @@ def get_graph_tier(graph_id: str, session: Session) -> GraphTier:
   graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
   if graph and graph.graph_tier:
     tier_map = {
-      "kuzu-standard": GraphTier.KUZU_STANDARD,
-      "kuzu-large": GraphTier.KUZU_LARGE,
-      "kuzu-xlarge": GraphTier.KUZU_XLARGE,
-      "kuzu-shared": GraphTier.KUZU_SHARED,
+      "ladybug-standard": GraphTier.LADYBUG_STANDARD,
+      "ladybug-large": GraphTier.LADYBUG_LARGE,
+      "ladybug-xlarge": GraphTier.LADYBUG_XLARGE,
+      "ladybug-shared": GraphTier.LADYBUG_SHARED,
     }
-    return tier_map.get(graph.graph_tier.lower(), GraphTier.KUZU_STANDARD)
-  return GraphTier.KUZU_STANDARD
+    return tier_map.get(graph.graph_tier.lower(), GraphTier.LADYBUG_STANDARD)
+  return GraphTier.LADYBUG_STANDARD
 
 
 @router.post("", operation_id="create_view")

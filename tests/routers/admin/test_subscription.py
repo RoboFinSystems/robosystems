@@ -93,7 +93,7 @@ def test_graph(db_session: Session, test_org):
     graph_type="entity",
     org_id=test_org.id,
     session=db_session,
-    graph_tier=GraphTier.KUZU_STANDARD,
+    graph_tier=GraphTier.LADYBUG_STANDARD,
   )
   return graph
 
@@ -112,7 +112,7 @@ def test_subscription(db_session: Session, test_org, test_graph):
     org_id=test_org.id,
     resource_type="graph",
     resource_id=test_graph.graph_id,
-    plan_name="kuzu-standard",
+    plan_name="ladybug-standard",
     base_price_cents=4999,
     session=db_session,
   )
@@ -232,14 +232,14 @@ class TestListSubscriptions:
         graph_type="entity",
         org_id=test_org.id,
         session=db_session,
-        graph_tier=GraphTier.KUZU_STANDARD,
+        graph_tier=GraphTier.LADYBUG_STANDARD,
       )
 
       BillingSubscription.create_subscription(
         org_id=test_org.id,
         resource_type="graph",
         resource_id=graph.graph_id,
-        plan_name="kuzu-standard",
+        plan_name="ladybug-standard",
         base_price_cents=2999,
         session=db_session,
       )
@@ -312,7 +312,7 @@ class TestCreateSubscription:
       "resource_type": "graph",
       "resource_id": unique_graph_id,
       "org_id": test_org.id,
-      "plan_name": "kuzu-standard",
+      "plan_name": "ladybug-standard",
       "billing_interval": "monthly",
     }
 
@@ -330,7 +330,7 @@ class TestCreateSubscription:
     assert data["id"].startswith("bsub_")
     assert data["resource_type"] == "graph"
     assert data["resource_id"] == unique_graph_id
-    assert data["plan_name"] == "kuzu-standard"
+    assert data["plan_name"] == "ladybug-standard"
     assert data["status"] == SubscriptionStatus.ACTIVE.value
 
   def test_create_subscription_org_not_found(self, client, test_graph, mock_admin_auth):
@@ -339,7 +339,7 @@ class TestCreateSubscription:
       "resource_type": "graph",
       "resource_id": test_graph.graph_id,
       "org_id": "org_nonexistent",
-      "plan_name": "kuzu-standard",
+      "plan_name": "ladybug-standard",
     }
 
     response = client.post(
@@ -357,7 +357,7 @@ class TestCreateSubscription:
       "resource_type": "graph",
       "resource_id": "kg_nonexistent",
       "org_id": test_org.id,
-      "plan_name": "kuzu-standard",
+      "plan_name": "ladybug-standard",
     }
 
     response = client.post(
@@ -377,7 +377,7 @@ class TestCreateSubscription:
       "resource_type": "graph",
       "resource_id": test_graph.graph_id,
       "org_id": test_org.id,
-      "plan_name": "kuzu-standard",
+      "plan_name": "ladybug-standard",
     }
 
     response = client.post(
@@ -429,14 +429,14 @@ class TestCreateSubscription:
       graph_type="entity",
       org_id=test_org.id,
       session=db_session,
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
     )
 
     payload = {
       "resource_type": "graph",
       "resource_id": unique_graph_id,
       "org_id": test_org.id,
-      "plan_name": "kuzu-standard",
+      "plan_name": "ladybug-standard",
     }
 
     response = client.post(
@@ -463,7 +463,7 @@ class TestCreateSubscription:
       "resource_type": "graph",
       "resource_id": test_graph.graph_id,
       "org_id": test_org.id,
-      "plan_name": "kuzu-standard",
+      "plan_name": "ladybug-standard",
     }
 
     response = client.post("/admin/v1/subscriptions", json=payload)
@@ -529,7 +529,7 @@ class TestUpdateSubscription:
     self, client, db_session, test_subscription, mock_admin_auth
   ):
     """Test updating subscription plan name."""
-    payload = {"plan_name": "kuzu-large"}
+    payload = {"plan_name": "ladybug-large"}
 
     response = client.patch(
       f"/admin/v1/subscriptions/{test_subscription.id}",
@@ -539,7 +539,7 @@ class TestUpdateSubscription:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["plan_name"] == "kuzu-large"
+    assert data["plan_name"] == "ladybug-large"
 
   def test_update_subscription_base_price(
     self, client, db_session, test_subscription, mock_admin_auth
@@ -574,7 +574,7 @@ class TestUpdateSubscription:
 
   def test_update_subscription_not_found(self, client, mock_admin_auth):
     """Test updating non-existent subscription."""
-    payload = {"plan_name": "kuzu-large"}
+    payload = {"plan_name": "ladybug-large"}
 
     response = client.patch(
       "/admin/v1/subscriptions/bsub_nonexistent",
@@ -588,7 +588,7 @@ class TestUpdateSubscription:
     self, client, db_session, test_subscription, mock_admin_auth
   ):
     """Test that updating subscription creates audit log."""
-    payload = {"plan_name": "kuzu-large"}
+    payload = {"plan_name": "ladybug-large"}
 
     response = client.patch(
       f"/admin/v1/subscriptions/{test_subscription.id}",
@@ -611,7 +611,7 @@ class TestUpdateSubscription:
 
   def test_update_subscription_unauthorized(self, client, test_subscription):
     """Test updating subscription without authentication."""
-    payload = {"plan_name": "kuzu-large"}
+    payload = {"plan_name": "ladybug-large"}
 
     response = client.patch(
       f"/admin/v1/subscriptions/{test_subscription.id}", json=payload

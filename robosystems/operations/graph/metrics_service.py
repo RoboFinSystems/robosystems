@@ -235,7 +235,7 @@ class GraphMetricsService:
   async def _get_node_counts_by_label(self, repository) -> Dict[str, int]:
     """Get node counts grouped by label."""
     try:
-      # Get all unique node labels using Kuzu-compatible query
+      # Get all unique node labels using LadybugDB-compatible query
       labels_query = "MATCH (n) RETURN DISTINCT LABEL(n) AS label"
       # Use async method for repository
       labels_result = await repository.execute_query(labels_query)
@@ -272,7 +272,7 @@ class GraphMetricsService:
     """Get relationship counts grouped by type."""
     try:
       # First get all relationship types
-      # Get all unique relationship types using Kuzu-compatible query
+      # Get all unique relationship types using LadybugDB-compatible query
       types_query = "MATCH ()-[r]->() RETURN DISTINCT LABEL(r) AS relationshipType"
       types_result = await repository.execute_query(types_query)
 
@@ -310,7 +310,7 @@ class GraphMetricsService:
     try:
       # Try to get database size information with fallback strategies
       size_queries = [
-        # Try to get database size information (Kuzu doesn't have JMX, skip this)
+        # Try to get database size information (LadybugDB doesn't have JMX, skip this)
         # "CALL dbms.queryJmx('...') YIELD attributes RETURN attributes",
         # Simple fallback with estimation
         "MATCH (n) RETURN count(n) as nodeCount, count(n) * 100 as estimatedBytes",

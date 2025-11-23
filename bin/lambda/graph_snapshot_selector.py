@@ -2,7 +2,7 @@
 Lambda function to update replica launch template with latest snapshot.
 
 This function:
-1. Finds the latest snapshot from shared master writer instances (WriterTier=kuzu-shared)
+1. Finds the latest snapshot from shared master writer instances (WriterTier=ladybug-shared)
 2. Updates the replica launch template with the new snapshot ID
 3. Triggers instance refresh for the ASG if instances exist
 """
@@ -30,11 +30,11 @@ def lambda_handler(event, context):
     print(f"Finding latest snapshot for {ENVIRONMENT} replicas, ASG: {ASG_NAME}")
 
     # Find latest snapshot from shared master writer instances
-    # These snapshots will have WriterTier=kuzu-shared tag
+    # These snapshots will have WriterTier=ladybug-shared tag
     filters = [
       {"Name": "status", "Values": ["completed"]},
       {"Name": "tag:Environment", "Values": [ENVIRONMENT]},
-      {"Name": "tag:WriterTier", "Values": ["kuzu-shared"]},
+      {"Name": "tag:WriterTier", "Values": ["ladybug-shared"]},
       {"Name": "tag:SnapshotType", "Values": ["scheduled"]},
     ]
 

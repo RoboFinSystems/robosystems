@@ -37,7 +37,7 @@ class TestMain:
       # Mock env import inside main
       with patch("robosystems.config.env") as mock_env:
         mock_env.CLUSTER_TIER = None  # No tier configured
-        mock_env.get_kuzu_tier_config.side_effect = Exception("No tier config")
+        mock_env.get_lbug_tier_config.side_effect = Exception("No tier config")
 
         with patch.object(sys, "argv", test_args):
           from robosystems.graph_api.main import main
@@ -162,7 +162,7 @@ class TestMain:
       # Mock tier configuration
       with patch("robosystems.config.env") as mock_env:
         mock_env.CLUSTER_TIER = "standard"
-        mock_env.get_kuzu_tier_config.return_value = {
+        mock_env.get_lbug_tier_config.return_value = {
           "databases_per_instance": 10,
           "memory_per_database_mb": 2048,
         }
@@ -335,7 +335,7 @@ class TestMain:
       # Mock tier configuration to raise exception
       with patch("robosystems.config.env") as mock_env:
         mock_env.CLUSTER_TIER = "standard"
-        mock_env.get_kuzu_tier_config.side_effect = Exception("Config error")
+        mock_env.get_lbug_tier_config.side_effect = Exception("Config error")
 
         with patch.object(sys, "argv", test_args):
           from robosystems.graph_api.main import main

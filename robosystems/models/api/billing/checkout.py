@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 class CreateCheckoutRequest(BaseModel):
   """Request to create a checkout session for payment collection."""
 
-  plan_name: str = Field(..., description="Billing plan name (e.g., 'kuzu-standard')")
+  plan_name: str = Field(
+    ..., description="Billing plan name (e.g., 'ladybug-standard')"
+  )
   resource_type: str = Field(..., description="Resource type ('graph' or 'repository')")
   resource_config: Dict[str, Any] = Field(
     ...,

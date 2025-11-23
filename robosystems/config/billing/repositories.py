@@ -37,8 +37,8 @@ class RepositoryBillingConfig:
       "data_source_url": "https://www.sec.gov/cgi-bin/browse-edgar",
       "sync_frequency": "daily",
       "status": "available",
-      "graph_tier": "kuzu-shared",
-      "graph_instance_id": "kuzu-shared-prod",
+      "graph_tier": "ladybug-shared",
+      "graph_instance_id": "ladybug-shared-prod",
     },
     SharedRepository.INDUSTRY: {
       "name": "Industry Benchmarks Repository",
@@ -47,8 +47,8 @@ class RepositoryBillingConfig:
       "data_source_url": "https://api.bls.gov/publicAPI/v2/",
       "sync_frequency": "monthly",
       "status": "coming_soon",
-      "graph_tier": "kuzu-shared",
-      "graph_instance_id": "kuzu-shared-prod",
+      "graph_tier": "ladybug-shared",
+      "graph_instance_id": "ladybug-shared-prod",
     },
     SharedRepository.ECONOMIC: {
       "name": "Economic Indicators Repository",
@@ -57,8 +57,8 @@ class RepositoryBillingConfig:
       "data_source_url": "https://api.stlouisfed.org/fred/",
       "sync_frequency": "daily",
       "status": "coming_soon",
-      "graph_tier": "kuzu-shared",
-      "graph_instance_id": "kuzu-shared-prod",
+      "graph_tier": "ladybug-shared",
+      "graph_instance_id": "ladybug-shared-prod",
     },
   }
 

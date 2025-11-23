@@ -14,7 +14,7 @@ Stage 2: Processing (by year)
   - Uses RoboLedger schema for standardized output
 
 Stage 3: Ingestion (by year)
-  - Ingest processed parquet files into Kuzu
+  - Ingest processed parquet files into LadybugDB
   - Year-by-year ingestion for controlled batch processing
   - Resumable if interrupted
 

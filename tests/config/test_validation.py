@@ -28,18 +28,18 @@ class MockEnvConfig:
     self.PLAID_CLIENT_ID = None
     self.PLAID_CLIENT_SECRET = None
     self.ANTHROPIC_API_KEY = None
-    self.KUZU_DATABASE_PATH = "/tmp/kuzu"
+    self.LBUG_DATABASE_PATH = "/tmp/lbug-dbs"
     self.GRAPH_API_URL = "http://localhost:8001"
     self.GRAPH_API_KEY = None
     self.WORKER_AUTOSCALE = 10
     self.CELERY_TASK_TIME_LIMIT = 3600
     self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
     self.RATE_LIMIT_API_KEY = 10000
-    self.KUZU_MAX_DATABASES_PER_NODE = 100
+    self.LBUG_MAX_DATABASES_PER_NODE = 100
     self.VALKEY_URL = "redis://localhost:6379"
     self.LOG_FILE_PATH = "stdout"
     self.DEBUG = False
-    self.KUZU_ACCESS_PATTERN = "multi-tenant"
+    self.LBUG_ACCESS_PATTERN = "multi-tenant"
     self.RATE_LIMIT_ENABLED = True
     self.SECURITY_AUDIT_ENABLED = True
 
@@ -258,13 +258,13 @@ class TestEnvValidator:
     mock_path.dirname.return_value = "/missing/parent"
 
     env_config = MockEnvConfig()
-    env_config.KUZU_DATABASE_PATH = "/missing/parent/kuzu"
+    env_config.LBUG_DATABASE_PATH = "/missing/parent/lbug"
     warnings = []
 
     EnvValidator._validate_paths(env_config, warnings)
 
     assert len(warnings) == 1
-    assert "KUZU_DATABASE_PATH" in warnings[0]
+    assert "LBUG_DATABASE_PATH" in warnings[0]
     assert "parent directory is missing" in warnings[0]
 
   @patch("os.getenv")
@@ -305,7 +305,7 @@ class TestEnvValidator:
     env_config.INTUIT_CLIENT_ID = "intuit-id"
     env_config.PLAID_CLIENT_ID = "plaid-id"
     env_config.ANTHROPIC_API_KEY = "claude-key"
-    env_config.GRAPH_API_KEY = "kuzu-key"
+    env_config.GRAPH_API_KEY = "lbug-key"
 
     summary = EnvValidator.get_config_summary(env_config)
 
@@ -316,9 +316,9 @@ class TestEnvValidator:
     assert summary["features"]["sec"] is True
     assert summary["database"]["type"] == "postgresql"
     assert summary["database"]["configured"] is True
-    assert summary["kuzu"]["access_pattern"] == "multi-tenant"
-    assert summary["kuzu"]["max_databases"] == 100
-    assert summary["kuzu"]["api_key_configured"] is True
+    assert summary["ladybug"]["access_pattern"] == "multi-tenant"
+    assert summary["ladybug"]["max_databases"] == 100
+    assert summary["ladybug"]["api_key_configured"] is True
     assert summary["security"]["rate_limiting"] is True
     assert summary["security"]["audit_logging"] is True
     assert summary["workers"]["autoscale"] == 10

@@ -58,7 +58,7 @@ class Graph(Model):
     ),
   )
 
-  # Primary identifier - matches the Kuzu database name
+  # Primary identifier - matches the LadybugDB database name
   graph_id = Column(
     String, primary_key=True
   )  # e.g., "kg1a2b3c4d5", "sec", "generic_123"
@@ -89,8 +89,8 @@ class Graph(Model):
 
   # Credit system integration
   graph_tier = Column(
-    String, nullable=False, default=GraphTier.KUZU_STANDARD.value
-  )  # kuzu-standard, kuzu-large, kuzu-xlarge, etc. (infrastructure tier)
+    String, nullable=False, default=GraphTier.LADYBUG_STANDARD.value
+  )  # ladybug-standard, ladybug-large, ladybug-xlarge, etc. (infrastructure tier)
 
   # Subgraph support (Enterprise/Premium only)
   parent_graph_id = Column(
@@ -194,8 +194,8 @@ class Graph(Model):
   def can_have_subgraphs(self) -> bool:
     """Check if this graph tier supports subgraphs."""
     return str(self.graph_tier) in [
-      GraphTier.KUZU_LARGE.value,
-      GraphTier.KUZU_XLARGE.value,
+      GraphTier.LADYBUG_LARGE.value,
+      GraphTier.LADYBUG_XLARGE.value,
       GraphTier.NEO4J_ENTERPRISE_XLARGE.value,
     ]
 
@@ -216,7 +216,7 @@ class Graph(Model):
     schema_extensions: Optional[List[str]] = None,
     graph_instance_id: str = "default",
     graph_cluster_region: Optional[str] = None,
-    graph_tier: GraphTier = GraphTier.KUZU_STANDARD,
+    graph_tier: GraphTier = GraphTier.LADYBUG_STANDARD,
     graph_metadata: Optional[Dict[str, Any]] = None,
     parent_graph_id: Optional[str] = None,
     subgraph_index: Optional[int] = None,
@@ -405,8 +405,8 @@ class Graph(Model):
     data_source_type: Optional[str] = None,
     data_source_url: Optional[str] = None,
     sync_frequency: Optional[str] = None,
-    graph_tier: GraphTier = GraphTier.KUZU_SHARED,
-    graph_instance_id: str = "kuzu-shared-prod",
+    graph_tier: GraphTier = GraphTier.LADYBUG_SHARED,
+    graph_instance_id: str = "ladybug-shared-prod",
   ) -> "Graph":
     """
     Find or create a repository graph entry.

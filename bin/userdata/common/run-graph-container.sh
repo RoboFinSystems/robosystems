@@ -1,11 +1,11 @@
 #!/bin/bash
 # Universal Graph Database Container Runner
-# Supports both Kuzu and Neo4j with shared infrastructure patterns
+# Supports both LadybugDB and Neo4j with shared infrastructure patterns
 
 set -e
 
 # Validate required environment variables
-: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (kuzu|neo4j)"}
+: ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
 : ${NODE_TYPE:?"NODE_TYPE must be set"}
 : ${CONTAINER_PORT:?"CONTAINER_PORT must be set"}
 : ${ECR_IMAGE:?"ECR_IMAGE must be set"}
@@ -27,7 +27,7 @@ STAGING_MOUNT_TARGET="${STAGING_MOUNT_TARGET:-}"
 DOCKER_PROFILE="${DOCKER_PROFILE:-${DATABASE_TYPE}-writer}"
 
 # Determine container name - backend-agnostic
-# Container name represents the service (graph-api), not the implementation (kuzu/neo4j)
+# Container name represents the service (graph-api), not the implementation (ladybug/neo4j)
 # Backend type is determined by DOCKER_PROFILE and environment variables
 determine_container_name() {
     if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
@@ -84,14 +84,14 @@ fi
 
 # Build database-specific environment variables
 case "${DATABASE_TYPE}" in
-    kuzu)
-        EXTRA_ENV_VARS="-e KUZU_NODE_TYPE=${NODE_TYPE} \
+    ladybug)
+        EXTRA_ENV_VARS="-e LBUG_NODE_TYPE=${NODE_TYPE} \
             -e REPOSITORY_TYPE=${REPOSITORY_TYPE:-shared} \
             -e SHARED_REPOSITORIES=${SHARED_REPOSITORIES:-} \
-            -e KUZU_DATABASE_PATH=${DATA_MOUNT_TARGET}/kuzu-dbs \
-            -e KUZU_PORT=${CONTAINER_PORT} \
-            -e KUZU_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
-            -e KUZU_ACCESS_PATTERN=api_writer"
+            -e LBUG_DATABASE_PATH=${DATA_MOUNT_TARGET}/lbug-dbs \
+            -e LBUG_PORT=${CONTAINER_PORT} \
+            -e LBUG_ROLE=$(if [ "${NODE_TYPE}" = "shared_replica" ]; then echo "replica"; else echo "master"; fi) \
+            -e LBUG_ACCESS_PATTERN=api_writer"
         HEALTH_CMD="timeout 10 curl -f http://localhost:${CONTAINER_PORT}/health || exit 1"
         ;;
     neo4j)

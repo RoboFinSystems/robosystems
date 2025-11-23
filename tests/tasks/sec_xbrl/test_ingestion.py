@@ -32,14 +32,14 @@ class TestIngestionLogic:
 
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
   @patch("robosystems.adapters.s3.S3Client")
-  def test_ingestion_flow_logic(self, mock_s3_class, mock_kuzu_factory):
+  def test_ingestion_flow_logic(self, mock_s3_class, mock_lbug_factory):
     """Test the core ingestion flow logic."""
     # Setup mocks
     mock_s3_client = MagicMock()
     mock_s3_class.return_value = mock_s3_client
 
-    mock_kuzu_client = MagicMock()
-    mock_kuzu_factory.create_client.return_value = mock_kuzu_client
+    mock_lbug_client = MagicMock()
+    mock_lbug_factory.create_client.return_value = mock_lbug_client
 
     # Mock S3 operations
     mock_s3_client.list_objects.return_value = [

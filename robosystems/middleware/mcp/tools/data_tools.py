@@ -20,8 +20,8 @@ MAX_STAGING_QUERY_LIMIT = 10000
 class BuildFactGridTool:
   """Build multidimensional fact grid from graph data."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
@@ -223,8 +223,8 @@ class BuildFactGridTool:
 class IngestFileTool:
   """Upload file and stage in DuckDB for immediate querying."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
@@ -300,8 +300,8 @@ print(f"Operation ID: {{result['operation_id']}}")
 class MapElementsTool:
   """Map Chart of Accounts to XBRL taxonomy elements."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
@@ -351,7 +351,7 @@ class MapElementsTool:
         from robosystems.models.iam.graph import GraphTier
 
         # Get tier from client if available
-        tier = getattr(self.client, "tier", GraphTier.KUZU_STANDARD)
+        tier = getattr(self.client, "tier", GraphTier.LADYBUG_STANDARD)
 
         mapping_response = await get_mapping_structure(
           graph_id=graph_id, structure_id=structure_id, tier=tier
@@ -412,8 +412,8 @@ mapping = client.create_mapping_structure(
 class QueryStagingTool:
   """Query DuckDB staging tables before graph materialization."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
@@ -494,15 +494,15 @@ class QueryStagingTool:
 
 
 class MaterializeGraphTool:
-  """Trigger materialization from DuckDB staging to Kuzu graph."""
+  """Trigger materialization from DuckDB staging to LadybugDB graph."""
 
-  def __init__(self, kuzu_client):
-    self.client = kuzu_client
+  def __init__(self, graph_client):
+    self.client = graph_client
 
   def get_tool_definition(self) -> Dict[str, Any]:
     return {
       "name": "materialize-graph",
-      "description": "Trigger materialization of DuckDB staging tables to Kuzu graph database. Converts tabular data to graph nodes and relationships.",
+      "description": "Trigger materialization of DuckDB staging tables to LadybugDB graph database. Converts tabular data to graph nodes and relationships.",
       "inputSchema": {
         "type": "object",
         "properties": {

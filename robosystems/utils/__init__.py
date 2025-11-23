@@ -20,7 +20,7 @@ from .html_parser import extract_structured_content, save_structured_content
 from .docs_template import (
   generate_swagger_docs,
   generate_robosystems_docs,
-  generate_kuzu_docs,
+  generate_lbug_docs,
 )
 
 # ULID utilities for time-ordered unique IDs
@@ -69,7 +69,7 @@ __all__ = [
   # Documentation
   "generate_swagger_docs",
   "generate_robosystems_docs",
-  "generate_kuzu_docs",
+  "generate_lbug_docs",
   # ULID utilities
   "generate_ulid",
   "generate_prefixed_ulid",

@@ -1,5 +1,5 @@
 """
-Enhanced Schema Manager for Kuzu
+Enhanced Schema Manager for LadybugDB
 
 Manages configurable schema definitions with inheritance and compilation.
 Supports base schema + extensions architecture.

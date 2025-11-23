@@ -1,5 +1,5 @@
 """
-Tests for Kuzu Schema Validator.
+Tests for LadybugDB Schema Validator.
 
 Comprehensive test coverage for schema validation functionality.
 """
@@ -7,7 +7,7 @@ Comprehensive test coverage for schema validation functionality.
 import pytest
 from unittest.mock import Mock, patch
 
-from robosystems.schemas.validator import KuzuSchemaValidator
+from robosystems.schemas.validator import LadybugSchemaValidator
 
 
 @pytest.fixture
@@ -79,10 +79,10 @@ def validator(mock_schema_loader):
   with patch(
     "robosystems.schemas.validator.get_schema_loader", return_value=mock_schema_loader
   ):
-    return KuzuSchemaValidator()
+    return LadybugSchemaValidator()
 
 
-class TestKuzuSchemaValidatorInit:
+class TestLadybugSchemaValidatorInit:
   """Test validator initialization."""
 
   @patch("robosystems.schemas.validator.get_schema_loader")
@@ -93,7 +93,7 @@ class TestKuzuSchemaValidatorInit:
     mock_loader.list_relationship_types.return_value = ["HAS_ELEMENT"]
     mock_get_loader.return_value = mock_loader
 
-    validator = KuzuSchemaValidator()
+    validator = LadybugSchemaValidator()
 
     mock_get_loader.assert_called_once()
     assert validator.schema_loader == mock_loader
@@ -107,11 +107,11 @@ class TestKuzuSchemaValidatorInit:
     mock_loader.list_relationship_types.return_value = ["HAS_ELEMENT"]
     mock_get_loader.return_value = mock_loader
 
-    KuzuSchemaValidator()
+    LadybugSchemaValidator()
 
     # Verify debug logs were called
     assert mock_logger.debug.call_count >= 3
-    mock_logger.debug.assert_any_call("Initialized KuzuSchemaValidator")
+    mock_logger.debug.assert_any_call("Initialized LadybugSchemaValidator")
     mock_logger.debug.assert_any_call("Loaded schemas for 2 node types")
     mock_logger.debug.assert_any_call("Loaded schemas for 1 relationship types")
 
@@ -428,7 +428,7 @@ class TestErrorHandling:
       mock_get_loader.side_effect = Exception("Schema loader failed")
 
       with pytest.raises(Exception, match="Schema loader failed"):
-        KuzuSchemaValidator()
+        LadybugSchemaValidator()
 
   def test_node_validation_with_loader_exception(self, validator, mock_schema_loader):
     """Test node validation when loader raises exception."""

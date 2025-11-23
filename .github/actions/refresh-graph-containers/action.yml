@@ -1,5 +1,5 @@
 name: Refresh Graph Container
-description: Refreshes a single graph database container in-place without replacing the instance (supports Kuzu and Neo4j)
+description: Refreshes a single graph database container in-place without replacing the instance (supports LadybugDB and Neo4j)
 
 inputs:
   environment:
@@ -12,7 +12,7 @@ inputs:
     description: 'Node type (writer, shared-writer)'
     required: true
   backend:
-    description: 'Graph backend (kuzu, neo4j)'
+    description: 'Graph backend (ladybug, neo4j)'
     required: true
   aws-region:
     description: 'AWS region'
@@ -40,10 +40,10 @@ runs:
     - name: Validate Inputs
       shell: bash
       run: |
-        VALID_BACKENDS="kuzu|neo4j"
+        VALID_BACKENDS="ladybug|neo4j"
         if [[ ! "${{ inputs.backend }}" =~ ^($VALID_BACKENDS)$ ]]; then
           echo "❌ Invalid backend: ${{ inputs.backend }}"
-          echo "Must be one of: kuzu, neo4j"
+          echo "Must be one of: ladybug, neo4j"
           exit 1
         fi
 

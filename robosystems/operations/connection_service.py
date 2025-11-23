@@ -41,7 +41,7 @@ def _safe_datetime_conversion(dt_value):
       dt_value: A datetime value in any of the following formats:
           - None
           - datetime.datetime object
-          - Object with .datetime attribute (e.g., Kuzu datetime)
+          - Object with .datetime attribute (e.g., LadybugDB datetime)
           - Object with .isoformat method (datetime-like)
           - ISO 8601 string (e.g., "2024-01-01T12:00:00Z")
           - Unix timestamp as int or float (seconds since epoch)

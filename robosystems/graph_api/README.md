@@ -4,7 +4,7 @@ High-performance HTTP API server for graph database cluster management with plug
 
 **Supported Backends:**
 
-- **Kuzu** (Default): High-performance embedded graph database based on columnar storage
+- **LadybugDB** (Default): High-performance embedded graph database based on columnar storage
 - **Neo4j Community**: Client-server architecture with advanced features
 - **Neo4j Enterprise**: TODO - Multi-database support and clustering not yet implemented
 
@@ -40,10 +40,10 @@ High-performance HTTP API server for graph database cluster management with plug
 │          (FastAPI on Port 8001/8002 depending on backend)   │
 ├─────────────────────────────────────────────────────────────┤
 │                Backend Abstraction Layer                    │
-│         (Pluggable: Kuzu, Neo4j Community/Enterprise)       │
+│         (Pluggable: LadybugDB, Neo4j Community/Enterprise)       │
 ├─────────────────────────────────────────────────────────────┤
 │                   Graph Database Engine                     │
-│              (Kuzu Embedded or Neo4j Bolt)                  │
+│              (LadybugDB Embedded or Neo4j Bolt)                  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -57,7 +57,7 @@ graph_api/
 │
 ├── backends/                   # Backend implementations
 │   ├── base.py                # Abstract backend interface
-│   ├── kuzu.py                # Kuzu backend implementation
+│   ├── lbug.py                # LadybugDB backend implementation
 │   ├── neo4j.py               # Neo4j backend implementation
 │   └── __init__.py            # Backend factory
 │
@@ -105,9 +105,9 @@ graph_api/
     └── cluster.py            # Cluster configuration
 ```
 
-### Node Types (Kuzu Backend)
+### Node Types (LadybugDB Backend)
 
-When using the Kuzu backend, the system deploys different node types:
+When using the LadybugDB backend, the system deploys different node types:
 
 - **Writer Nodes** (`writer`): Entity database read/write operations on EC2
 - **Shared Master** (`shared_master`): Shared repository ingestion and writes on EC2
@@ -125,24 +125,24 @@ When using Neo4j backend:
 
 The Graph API deployment architecture varies by backend:
 
-#### Kuzu Backend Infrastructure
+#### LadybugDB Backend Infrastructure
 
-For Kuzu deployments, the system uses a sophisticated multi-stack CloudFormation architecture:
+For LadybugDB deployments, the system uses a sophisticated multi-stack CloudFormation architecture:
 
 ```
-1. Infrastructure Stack (kuzu-infra.yaml)
+1. Infrastructure Stack (ladybug-infra.yaml)
    ├─ DynamoDB Tables (Instance, Graph, Volume Registry)
    ├─ Secrets Manager (API Keys with rotation)
    ├─ SNS Topics (Alerts and notifications)
    └─ Lambda Functions (Instance monitoring)
 
-2. Volume Management Stack (kuzu-volumes.yaml)
+2. Volume Management Stack (ladybug-volumes.yaml)
    ├─ Volume Manager Lambda (EBS lifecycle)
    ├─ Volume Monitor Lambda (Auto-expansion)
    ├─ Snapshot Management (Backup/restore)
    └─ SNS Topics (Volume alerts)
 
-3. Writer Stacks (kuzu-writers.yaml) - Deployed in parallel
+3. Writer Stacks (ladybug-writers.yaml) - Deployed in parallel
    ├─ Multi-Tenant Writers (configurable instance types and capacity)
    ├─ Dedicated Writers (single database per instance)
    ├─ High-Performance Writers (larger instances for demanding workloads)
@@ -190,7 +190,7 @@ Infrastructure is configurable based on workload requirements. Example configura
 
 #### Instance Registry
 
-Tracks all Kuzu instances across the infrastructure:
+Tracks all LadybugDB instances across the infrastructure:
 
 ```python
 {
@@ -237,16 +237,16 @@ Manages EBS volume persistence:
 ### GitHub Actions Deployment Workflow
 
 ```yaml
-deploy-kuzu.yml (Orchestrator)
-├── deploy-kuzu-infra.yml
+deploy-ladybug.yml (Orchestrator)
+├── deploy-ladybug-infra.yml
 │   └── Creates DynamoDB, Secrets, SNS
-├── deploy-kuzu-volumes.yml
+├── deploy-ladybug-volumes.yml
 │   └── Deploys Lambda functions for volume management
 ├── prepare-writer-matrix
-│   └── Parses .github/configs/kuzu.yml for tier specs
-├── deploy-kuzu-writers.yml (Matrix strategy, parallel)
+│   └── Parses .github/configs/graph.yml for tier specs
+├── deploy-ladybug-writers.yml (Matrix strategy, parallel)
 │   └── Deploys each tier based on configuration
-└── deploy-kuzu-shared-replicas.yml
+└── deploy-ladybug-shared-replicas.yml
 └── Creates read replica infrastructure
 ```
 
@@ -264,8 +264,8 @@ aws lambda invoke --function-name volume-manager ...
 # 3. Pull and start Docker container
 docker run -d \
   -p 8001:8001 \
-  -v /data/kuzu-dbs:/data/kuzu-dbs \
-  -e KUZU_NODE_TYPE=writer \
+  -v /data/lbug-dbs:/data/lbug-dbs \
+  -e LBUG_NODE_TYPE=writer \
   -e WRITER_TIER=standard \
   -e GRAPH_API_KEY=${GRAPH_API_KEY} \
   ${ECR_URI}:${ECR_IMAGE_TAG} \
@@ -326,7 +326,7 @@ Content-Type: application/json
   }
 }
 
-Note: S3 bulk copy is Kuzu-specific. Neo4j uses alternative data loading methods.
+Note: S3 bulk copy is LadybugDB-specific. Neo4j uses alternative data loading methods.
 ```
 
 This returns a task ID that can be monitored via Server-Sent Events:
@@ -427,7 +427,7 @@ Response: {
   "execution_time_ms": 2340.8
 }
 
-Note: This performs direct DuckDB → Kuzu ingestion via database extensions.
+Note: This performs direct DuckDB → LadybugDB ingestion via database extensions.
 Use rebuild=true to regenerate the graph database from scratch (safe operation).
 ```
 
@@ -558,13 +558,13 @@ client = await get_graph_client(
 
 ```bash
 # Backend Configuration
-GRAPH_BACKEND_TYPE=kuzu                 # kuzu|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=ladybug                 # ladybug|neo4j_community|neo4j_enterprise
 
-# Node Configuration (Kuzu Backend)
-KUZU_NODE_TYPE=writer                    # writer|shared_master
-WRITER_TIER=standard                     # standard|enterprise|premium|shared
-KUZU_DATABASE_PATH=/data/kuzu-dbs       # Storage location
-KUZU_PORT=8001                           # API port (8001 for Kuzu, 8002 for Neo4j)
+# Node Configuration (LadybugDB Backend)
+LBUG_NODE_TYPE=writer                    # writer|shared_master
+WRITER_TIER=standard                     # standard|large|xlarge|shared
+LBUG_DATABASE_PATH=/data/lbug-dbs       # Storage location
+LBUG_PORT=8001                           # API port (8001 for LadybugDB, 8002 for Neo4j)
 
 # Neo4j Configuration (Neo4j Backend)
 NEO4J_URI=bolt://neo4j-db:7687          # Neo4j Bolt connection
@@ -574,13 +574,13 @@ NEO4J_ENTERPRISE=false                   # Enable multi-database support
 GRAPH_API_PORT=8002                      # API port for Neo4j backend
 
 # Performance Settings
-KUZU_MAX_DATABASES_PER_NODE=10          # Configuration-based limit (Kuzu)
-KUZU_MAX_MEMORY_MB=14336                # Total memory allocation (Kuzu)
-KUZU_MEMORY_PER_DB_MB=2048              # Per-database memory (Kuzu)
-KUZU_CHUNK_SIZE=1000                    # Streaming chunk size
-KUZU_QUERY_TIMEOUT=30                   # Query timeout seconds
-KUZU_MAX_QUERY_LENGTH=10000             # Max query characters
-KUZU_CONNECTION_POOL_SIZE=10            # Connections per database
+LBUG_MAX_DATABASES_PER_NODE=10          # Configuration-based limit (LadybugDB)
+LBUG_MAX_MEMORY_MB=14336                # Total memory allocation (LadybugDB)
+LBUG_MEMORY_PER_DB_MB=2048              # Per-database memory (LadybugDB)
+LBUG_CHUNK_SIZE=1000                    # Streaming chunk size
+LBUG_QUERY_TIMEOUT=30                   # Query timeout seconds
+LBUG_MAX_QUERY_LENGTH=10000             # Max query characters
+LBUG_CONNECTION_POOL_SIZE=10            # Connections per database
 NEO4J_MAX_CONNECTION_POOL_SIZE=50       # Neo4j connection pool size
 
 # Authentication
@@ -592,10 +592,10 @@ DATABASE_URL=postgresql://...           # PostgreSQL for metadata
 AWS_S3_BUCKET=robosystems-data         # S3 for ingestion
 
 # Feature Flags
-KUZU_CIRCUIT_BREAKERS_ENABLED=true     # Enable circuit breakers
-KUZU_REDIS_CACHE_ENABLED=true          # Enable Redis caching
-KUZU_RETRY_LOGIC_ENABLED=true          # Enable automatic retries
-KUZU_HEALTH_CHECKS_ENABLED=true        # Enable health checking
+LBUG_CIRCUIT_BREAKERS_ENABLED=true     # Enable circuit breakers
+LBUG_REDIS_CACHE_ENABLED=true          # Enable Redis caching
+LBUG_RETRY_LOGIC_ENABLED=true          # Enable automatic retries
+LBUG_HEALTH_CHECKS_ENABLED=true        # Enable health checking
 ```
 
 ### Schema Types
@@ -639,7 +639,7 @@ X-Graph-API-Key: graph_api_64_character_random_string
 
 ### CloudWatch Metrics
 
-**Namespace**: `RoboSystemsKuzu/{Environment}`
+**Namespace**: `RoboSystemsLadybugDB/{Environment}`
 
 **Key Metrics**:
 
@@ -656,23 +656,23 @@ X-Graph-API-Key: graph_api_64_character_random_string
 
 ```bash
 # System health
-curl http://kuzu-writer:8001/status
+curl http://ladybug-writer:8001/status
 
 # Database health
-curl http://kuzu-writer:8001/status/databases
+curl http://ladybug-writer:8001/status/databases
 
 # Detailed metrics
-curl http://kuzu-writer:8001/metrics
+curl http://ladybug-writer:8001/metrics
 ```
 
 ### Logging
 
 **CloudWatch Log Groups**:
 
-- `/robosystems/{env}/kuzu-writer-standard`
-- `/robosystems/{env}/kuzu-writer-enterprise`
-- `/robosystems/{env}/kuzu-writer-premium`
-- `/robosystems/{env}/kuzu-shared-master`
+- `/robosystems/{env}/ladybug-writer-standard`
+- `/robosystems/{env}/ladybug-writer-large`
+- `/robosystems/{env}/ladybug-writer-xlarge`
+- `/robosystems/{env}/ladybug-shared-master`
 
 **Log Format**:
 
@@ -700,12 +700,12 @@ just start robosystems
 
 # Run API server locally
 uv run python -m robosystems.graph_api \
-  --base-path ./data/kuzu-dbs \
+  --base-path ./data/lbug-dbs \
   --node-type writer \
   --port 8001
 
 # Use direct file access (bypass API)
-export KUZU_ACCESS_PATTERN=direct_file
+export LBUG_ACCESS_PATTERN=direct_file
 ```
 
 ### Docker Development
@@ -713,8 +713,8 @@ export KUZU_ACCESS_PATTERN=direct_file
 ```bash
 docker run -d \
   -p 8001:8001 \
-  -v kuzu_data:/data/kuzu-dbs \
-  -e KUZU_NODE_TYPE=writer \
+  -v lbug_data:/data/lbug-dbs \
+  -e LBUG_NODE_TYPE=writer \
   -e WRITER_TIER=standard \
   robosystems-api:latest \
   python -m robosystems.graph_api
@@ -748,7 +748,7 @@ uv run pytest tests/graph_api/test_ingestion.py -v
 ### Integration Tests
 
 ```bash
-# Requires running Kuzu instance
+# Requires running LadybugDB instance
 uv run pytest tests/graph_api/ -m integration
 
 # Test with real S3
@@ -792,7 +792,7 @@ curl -X POST http://localhost:8001/databases/test_db/query \
 **Solution**:
 
 - Reduce concurrent requests
-- Increase `KUZU_CONNECTION_POOL_SIZE`
+- Increase `LBUG_CONNECTION_POOL_SIZE`
 - Scale out instances
 
 #### 2. Memory Pressure
@@ -825,24 +825,24 @@ curl -X POST http://localhost:8001/databases/test_db/query \
 ### Debugging Commands
 
 ```bash
-# Check instance status (replace 'standard' with your actual tier)
+# Check instance status (replace 'standard' with your actual tier: standard|large|xlarge)
 aws dynamodb scan \
   --table-name robosystems-graph-prod-instance-registry \
   --filter-expression "cluster_tier = :tier" \
   --expression-attribute-values '{":tier":{"S":"standard"}}'
 
 # View recent logs (replace with actual log group name for your tier)
-aws logs tail /robosystems/prod/kuzu-writer-standard \
+aws logs tail /robosystems/prod/ladybug-writer-standard \
   --follow --filter-pattern ERROR
 
 # Check volume usage
 aws ec2 describe-volumes \
-  --filters "Name=tag:Component,Values=KuzuWriter" \
+  --filters "Name=tag:Component,Values=LadybugDBWriter" \
   --query 'Volumes[*].[VolumeId,Size,State]'
 
-# Force instance refresh (replace 'standard' with your actual tier)
+# Force instance refresh (replace 'standard' with your actual tier: standard|large|xlarge)
 aws autoscaling start-instance-refresh \
-  --auto-scaling-group-name kuzu-writers-standard-prod
+  --auto-scaling-group-name ladybug-writers-standard-prod
 ```
 
 ### Performance Tuning
@@ -863,16 +863,16 @@ aws autoscaling start-instance-refresh \
 
 #### Memory Optimization
 
-- Multi-tenant configurations share memory across databases (e.g., 2GB per database with 10 databases per instance)
-- Dedicated configurations provide isolated memory per database (e.g., 14GB or 28GB)
+- Multi-tenant configurations (standard tier) share memory across databases (e.g., 2GB per database with 10 databases per instance)
+- Dedicated configurations (large/xlarge tiers) provide isolated memory per database (14GB for large, 28GB for xlarge)
 - Shared repositories use memory pooling
 - Monitor memory usage metrics in CloudWatch for your configuration
 
 ## Known Limitations
 
-### Kuzu Backend
+### LadybugDB Backend
 
-1. **Sequential Ingestion**: Files processed one at a time per database (Kuzu constraint)
+1. **Sequential Ingestion**: Files processed one at a time per database (LadybugDB constraint)
 2. **Connection Limit**: Maximum 3 concurrent connections per database
 3. **Single Writer**: Only one write operation per database at a time
 4. **No Cross-Database Queries**: Each query scoped to single database
@@ -896,7 +896,7 @@ aws autoscaling start-instance-refresh \
 
 ## Support
 
-- **Internal Documentation**: See `/docs/kuzu-architecture.md`
-- **Runbooks**: Available in `/runbooks/kuzu-operations/`
+- **Internal Documentation**: See `/docs/ladybug-architecture.md`
+- **Runbooks**: Available in `/runbooks/ladybug-operations/`
 - **Monitoring Dashboard**: Grafana at `https://grafana.robosystems.ai`
 - **Alerts**: Via PagerDuty integration with SNS topics

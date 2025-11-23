@@ -1,7 +1,7 @@
 """
 Graph API Client Configuration.
 
-Centralized configuration for Graph API clients (works with all backends: Kuzu, Neo4j).
+Centralized configuration for Graph API clients with multi-backend support.
 """
 
 import os
@@ -34,7 +34,7 @@ class GraphClientConfig:
   verify_ssl: bool = True
 
   @classmethod
-  def from_env(cls, prefix: str = "KUZU_CLIENT_") -> "GraphClientConfig":
+  def from_env(cls, prefix: str = "GRAPH_CLIENT_") -> "GraphClientConfig":
     """
     Create configuration from environment variables.
 

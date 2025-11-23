@@ -145,7 +145,7 @@ def classify_exception(exception: Exception) -> str:
   # Database related errors
   if any(
     keyword in exception_str
-    for keyword in ["database", "connection", "sql", "postgres", "kuzu"]
+    for keyword in ["database", "connection", "sql", "postgres", "ladybug"]
   ):
     return ErrorType.DATABASE_ERROR
 

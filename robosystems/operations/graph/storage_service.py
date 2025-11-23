@@ -4,7 +4,7 @@ Storage calculator service for tracking S3 and EBS usage.
 Calculates storage breakdown by type:
 - Files: S3 user-uploaded files
 - Tables: S3 CSV/Parquet imports
-- Graphs: EBS Kuzu database files
+- Graphs: EBS LadybugDB database files
 - Subgraphs: EBS subgraph data (tracked separately for analytics)
 """
 
@@ -94,10 +94,10 @@ class StorageCalculator:
 
   def _calculate_graph_database_storage(self, graph_id: str) -> int:
     """
-    Calculate storage for main Kuzu graph database (EBS).
+    Calculate storage for main LadybugDB graph database (EBS).
 
     Queries the Graph API metrics endpoint to get accurate database size
-    from the Kuzu instance, which works correctly in both development and production.
+    from the LadybugDB instance, which works correctly in both development and production.
 
     Returns:
         Total bytes of graph database storage
@@ -168,7 +168,7 @@ class StorageCalculator:
     """
     Calculate storage for subgraphs (part of main database but tracked separately).
 
-    Subgraphs are stored within the main Kuzu database but can be isolated
+    Subgraphs are stored within the main LadybugDB database but can be isolated
     for analytics purposes.
 
     Returns:

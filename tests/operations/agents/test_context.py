@@ -29,7 +29,7 @@ class TestRAGConfig:
       enable_entity_linking=True,
       enable_pattern_matching=True,
       embedding_provider=EmbeddingProvider.OPENAI,
-      vector_store_type="kuzu",
+      vector_store_type="ladybug",
       similarity_threshold=0.7,
       max_results=10,
       chunk_size=512,
@@ -175,10 +175,10 @@ class TestContextEnricher:
     return MockVectorStore()
 
   @pytest.fixture
-  def mock_kuzu_client(self):
-    """Create mock Kuzu client."""
+  def mock_lbug_client(self):
+    """Create mock LadybugDB client."""
     with patch(
-      "robosystems.middleware.mcp.create_kuzu_mcp_client", new_callable=AsyncMock
+      "robosystems.middleware.mcp.create_graph_mcp_client", new_callable=AsyncMock
     ) as mock:
       client = AsyncMock()
       client.execute_query = AsyncMock(
@@ -191,7 +191,7 @@ class TestContextEnricher:
       yield client
 
   @pytest.fixture
-  def enricher(self, mock_embedding_provider, mock_vector_store, mock_kuzu_client):
+  def enricher(self, mock_embedding_provider, mock_vector_store, mock_lbug_client):
     """Create context enricher instance."""
     config = RAGConfig(
       enable_semantic_search=True,
@@ -304,14 +304,14 @@ class TestContextEnricher:
     assert all(isinstance(r, SearchResult) for r in results)
 
   @pytest.mark.asyncio
-  async def test_load_graph_documents(self, enricher, mock_kuzu_client):
+  async def test_load_graph_documents(self, enricher, mock_lbug_client):
     """Test loading documents from graph database."""
     await enricher.load_graph_documents(
       node_types=["Document", "Report"],
       limit=100,
     )
 
-    mock_kuzu_client.execute_query.assert_called()
+    mock_lbug_client.execute_query.assert_called()
     # Documents should be added to vector store
     assert len(enricher.vector_store.documents) > 0
 

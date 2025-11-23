@@ -2,7 +2,7 @@
 Service offering API endpoint.
 
 Provides comprehensive information about all subscription offerings:
-- Per-graph infrastructure subscriptions (kuzu-standard, kuzu-large, kuzu-xlarge)
+- Per-graph infrastructure subscriptions (ladybug-standard, ladybug-large, ladybug-xlarge)
 - Shared repository subscriptions (SEC, industry, economic data)
 - Operation costs and credit information
 - Features and capabilities for each infrastructure tier
@@ -124,7 +124,7 @@ applications to display subscription options.
 - Credits are allocated per-graph, not shared across organization
 
 Includes:
-- Graph infrastructure tiers (kuzu-standard, kuzu-large, kuzu-xlarge) - per-graph pricing
+- Graph infrastructure tiers (ladybug-standard, ladybug-large, ladybug-xlarge) - per-graph pricing
 - Shared repository subscriptions (SEC, industry, economic data) - org-level
 - Operation costs and credit information
 - Features and capabilities for each tier
@@ -143,8 +143,8 @@ No authentication required - this is public service information.""",
             "graph_subscriptions": {
               "tiers": [
                 {
-                  "name": "kuzu-standard",
-                  "display_name": "Kuzu Standard",
+                  "name": "ladybug-standard",
+                  "display_name": "LadybugDB Standard",
                   "monthly_price": 49.99,
                   "monthly_credits": 10000,
                   "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
@@ -196,7 +196,7 @@ async def get_service_offerings(
     tier_configs = GraphTierConfig.get_available_tiers(include_disabled=False)
 
     # Filter to only customer-facing tiers (exclude internal/shared infrastructure)
-    customer_tiers = ["kuzu-standard", "kuzu-large", "kuzu-xlarge"]
+    customer_tiers = ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
     tier_configs = [tier for tier in tier_configs if tier.get("tier") in customer_tiers]
 
     # Build graph subscription tiers from billing plans
@@ -253,7 +253,7 @@ async def get_service_offerings(
         "api_rate_multiplier": tier_config.get("api_rate_multiplier", 1.0)
         if tier_config
         else 1.0,
-        "backend": tier_config.get("backend", "kuzu") if tier_config else "kuzu",
+        "backend": tier_config.get("backend", "ladybug") if tier_config else "ladybug",
         "instance_type": tier_config.get("instance", {}).get("type")
         if tier_config
         else None,

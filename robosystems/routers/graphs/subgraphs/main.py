@@ -200,7 +200,7 @@ async def list_subgraphs(
 - Valid authentication
 - Parent graph must exist and be accessible to the user
 - User must have 'admin' permission on the parent graph
-- Parent graph tier must support subgraphs (Kuzu Large/XLarge or Neo4j Enterprise XLarge)
+- Parent graph tier must support subgraphs (LadybugDB Large/XLarge or Neo4j Enterprise XLarge)
 - Must be within subgraph quota limits
 - Subgraph name must be unique within the parent graph
 

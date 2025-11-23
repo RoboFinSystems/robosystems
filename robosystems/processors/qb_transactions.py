@@ -6,8 +6,8 @@ relationships have been removed from the graph schema. Platform metadata (users,
 connections) is now stored exclusively in PostgreSQL.
 
 When connections are re-implemented, they will be managed in PostgreSQL tables,
-not in the Kuzu graph database. This file needs refactoring to:
-1. Query connections from PostgreSQL instead of Kuzu
+not in the LadybugDB graph database. This file needs refactoring to:
+1. Query connections from PostgreSQL instead of LadybugDB
 2. Remove all Connection node queries from Cypher
 3. Use connection_id references instead of graph relationships
 """
@@ -212,7 +212,7 @@ class QBTransactionsProcessor:
     self._initialized = True
 
   def sync(self):
-    """Sync QuickBooks transactions using Kuzu operations."""
+    """Sync QuickBooks transactions using LadybugDB operations."""
     logger.info(f"Starting QB transactions sync for entity: {self.entity_id}")
 
     # Initialize if not already done
@@ -235,7 +235,7 @@ class QBTransactionsProcessor:
     if not self._initialized:
       await self._initialize_async()
 
-    # Note: Kuzu operations are synchronous, so we just call the sync method
+    # Note: LadybugDB operations are synchronous, so we just call the sync method
     self.make_entity()
     self.make_taxonomy()
     self.make_coa_structure()
@@ -778,7 +778,7 @@ class QBTransactionsProcessor:
       tx_li_num += 1
 
   def refresh_sync(self):
-    """Refresh sync data using Kuzu operations."""
+    """Refresh sync data using LadybugDB operations."""
     logger.info(f"Refreshing QB sync data for entity: {self.entity_id}")
 
     taxonomy_uri = qb_entity_uri(self.realm_id)

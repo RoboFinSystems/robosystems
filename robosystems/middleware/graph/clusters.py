@@ -2,13 +2,13 @@
 Cluster Configuration for Writer/Reader Architecture
 
 DEPRECATION WARNING: This module is being phased out in favor of the dynamic
-allocation manager (KuzuAllocationManager) which properly tracks instance
+allocation manager (LadybugAllocationManager) which properly tracks instance
 allocations in DynamoDB. The hardcoded configurations here do not work
 correctly in production environments with multiple EC2 instances.
 
 For entity graphs, use:
-  from robosystems.graph_api.client import get_kuzu_client
-  client = await get_kuzu_client(graph_id)
+  from robosystems.graph_api.client import get_graph_client
+  client = await get_graph_client(graph_id)
 
 This module defines cluster configurations for single-writer, multiple-reader architecture.
 
@@ -87,7 +87,7 @@ class ClusterConfig:
   reader_nodes: List[NodeConfig] = field(default_factory=list)  # Reader nodes
   alb_endpoint: Optional[str] = None  # ALB endpoint for readers
   region: str = "us-east-1"  # AWS region
-  tier: GraphTier = GraphTier.KUZU_STANDARD
+  tier: GraphTier = GraphTier.LADYBUG_STANDARD
 
   @property
   def max_databases(self) -> int:
@@ -139,7 +139,7 @@ def load_cluster_configs_from_environment() -> Dict[str, ClusterConfig]:
   writer_url = env.GRAPH_API_URL
 
   # Log the API URL for debugging
-  logger.info(f"Configuring Kuzu cluster with API URL: {writer_url}")
+  logger.info(f"Configuring graph cluster with API URL: {writer_url}")
 
   configs["entity-shared-us-east-1"] = ClusterConfig(
     cluster_id="entity-shared-us-east-1",
@@ -149,12 +149,12 @@ def load_cluster_configs_from_environment() -> Dict[str, ClusterConfig]:
       node_type=NodeType.WRITER,
       api_base_url=writer_url,
       region="us-east-1",
-      tier=GraphTier.KUZU_STANDARD,
+      tier=GraphTier.LADYBUG_STANDARD,
       max_databases=200,
       repository_type=RepositoryType.ENTITY,
     ),
     region="us-east-1",
-    tier=GraphTier.KUZU_STANDARD,
+    tier=GraphTier.LADYBUG_STANDARD,
   )
 
   # Shared repositories now use the same infrastructure as entity graphs
@@ -167,7 +167,7 @@ def load_cluster_configs_from_environment() -> Dict[str, ClusterConfig]:
 
 def load_cluster_configs() -> Dict[str, ClusterConfig]:
   """
-  Load Kuzu cluster configurations from environment variables.
+  Load graph cluster configurations from environment variables.
 
   Future implementation will:
   1. Load from AWS Secrets Manager
@@ -187,10 +187,10 @@ def get_cluster_for_entity_graphs(
   tier: GraphTier, region: str = "us-east-1"
 ) -> ClusterConfig:
   """
-  Get the best available Kuzu cluster for entity graph creation.
+  Get the best available LadybugDB cluster for entity graph creation.
 
   Args:
-      tier: Customer tier (kuzu-shared, kuzu-standard, kuzu-large, kuzu-xlarge)
+      tier: Customer tier (ladybug-shared, ladybug-standard, ladybug-large, ladybug-xlarge)
       region: Preferred AWS region
 
   Returns:
@@ -221,17 +221,17 @@ def get_cluster_for_entity_graphs(
     ]
 
   if not candidates:
-    raise ValueError(f"No Kuzu entity clusters available for tier {tier}")
+    raise ValueError(f"No LadybugDB entity clusters available for tier {tier}")
 
   # Select cluster with most available capacity
   available_clusters = [c for c in candidates if c.is_available]
   if not available_clusters:
-    raise ValueError(f"No capacity available in tier {tier} Kuzu entity clusters")
+    raise ValueError(f"No capacity available in tier {tier} LadybugDB entity clusters")
 
   best_cluster = min(available_clusters, key=lambda c: c.utilization_percent)
 
   logger.info(
-    f"Selected Kuzu cluster {best_cluster.cluster_id} for tier {tier} "
+    f"Selected LadybugDB cluster {best_cluster.cluster_id} for tier {tier} "
     f"(capacity: {best_cluster.capacity_remaining}/{best_cluster.max_databases})"
   )
 
@@ -242,7 +242,7 @@ def get_cluster_for_shared_repository(
   repository_name: str, operation_type: str = "read", region: str = "us-east-1"
 ) -> ClusterConfig:
   """
-  Get the Kuzu cluster configuration for a shared repository.
+  Get the LadybugDB cluster configuration for a shared repository.
 
   Since shared repositories now use the same infrastructure as entity graphs,
   this delegates to get_cluster_for_entity_graphs.
@@ -263,12 +263,12 @@ def get_cluster_for_shared_repository(
   logger.info(
     f"Routing shared repository '{repository_name}' to standard tier entity clusters"
   )
-  return get_cluster_for_entity_graphs(GraphTier.KUZU_STANDARD, region)
+  return get_cluster_for_entity_graphs(GraphTier.LADYBUG_STANDARD, region)
 
 
 def get_cluster_by_id(cluster_id: str) -> ClusterConfig:
   """
-  Get Kuzu cluster configuration by cluster ID.
+  Get LadybugDB cluster configuration by cluster ID.
 
   Args:
       cluster_id: Unique cluster identifier
@@ -282,6 +282,6 @@ def get_cluster_by_id(cluster_id: str) -> ClusterConfig:
   clusters = load_cluster_configs()
 
   if cluster_id not in clusters:
-    raise ValueError(f"Kuzu cluster '{cluster_id}' not found")
+    raise ValueError(f"LadybugDB cluster '{cluster_id}' not found")
 
   return clusters[cluster_id]

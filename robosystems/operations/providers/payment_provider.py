@@ -263,7 +263,7 @@ class StripePaymentProvider(PaymentProvider):
     5. Use distributed locks to prevent race conditions
 
     Args:
-        plan_name: Internal plan name (e.g., "kuzu-standard", "sec-starter")
+        plan_name: Internal plan name (e.g., "ladybug-standard", "sec-starter")
         resource_type: "graph" or "repository"
 
     Returns:

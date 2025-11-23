@@ -65,7 +65,7 @@ class XBRLSchemaConfigGenerator:
   1. Analyzing all nodes and relationships in the compiled schema
   2. Generating file patterns for parquet file recognition
   3. Creating column mappings from schema properties
-  4. Providing table information for Kuzu ingestion
+  4. Providing table information for LadybugDB ingestion
   5. Handling relationship structure and foreign key detection
 
   Replaces hardcoded ingestion logic with schema-driven automation.

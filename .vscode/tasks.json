@@ -241,7 +241,7 @@
         "apps",
         "pg",
         "valkey",
-        "kuzu",
+        "graph-api",
         "neo4j",
         "graph-dbs",
         "localstack",
@@ -261,7 +261,7 @@
       "options": [
         "robosystems-api",
         "robosystems-worker",
-        "robosystems-graph-api-kuzu",
+        "robosystems-graph-api",
         "robosystems-graph-api-neo4j",
         "robosystems-pg-iam",
         "robosystems-valkey",

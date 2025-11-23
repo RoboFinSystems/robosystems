@@ -1,4 +1,4 @@
-"""Comprehensive tests for KuzuClusterService and FastAPI endpoints."""
+"""Comprehensive tests for LadybugClusterService and FastAPI endpoints."""
 
 import pytest
 import tempfile
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from robosystems.graph_api.core.cluster_manager import (
-  KuzuClusterService,
+  LadybugClusterService,
   validate_cypher_query,
 )
 from robosystems.graph_api.core.utils import (
@@ -153,8 +153,8 @@ class TestSecurityValidation:
     assert "too long" in str(exc_info.value.detail)
 
 
-class TestKuzuClusterService:
-  """Test KuzuClusterService class."""
+class TestLadybugClusterService:
+  """Test LadybugClusterService class."""
 
   def setup_method(self):
     """Set up test fixtures."""
@@ -165,10 +165,10 @@ class TestKuzuClusterService:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_initialization_entity_writer(self, mock_db_manager):
     """Test initialization of entity writer node."""
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       max_databases=100,
       read_only=False,
@@ -184,10 +184,10 @@ class TestKuzuClusterService:
     assert isinstance(service.start_time, float)
     mock_db_manager.assert_called_once_with(self.base_path, 100, read_only=False)
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_initialization_shared_writer(self, mock_db_manager):
     """Test initialization of shared repository writer."""
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       max_databases=50,
       read_only=False,
@@ -199,13 +199,13 @@ class TestKuzuClusterService:
     assert service.node_type == NodeType.WRITER
     assert service.repository_type == RepositoryType.SHARED
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_initialization_validation_errors(self, mock_db_manager):
     """Test initialization validation for invalid configurations."""
 
     # Writer nodes cannot be read-only
     with pytest.raises(ConfigurationError, match="Writer nodes cannot be read-only"):
-      KuzuClusterService(
+      LadybugClusterService(
         base_path=self.base_path,
         read_only=True,
         node_type=NodeType.WRITER,
@@ -216,7 +216,7 @@ class TestKuzuClusterService:
     with pytest.raises(
       ValueError, match="Shared writer nodes must use shared repository type"
     ):
-      KuzuClusterService(
+      LadybugClusterService(
         base_path=self.base_path,
         read_only=False,
         node_type=NodeType.SHARED_MASTER,
@@ -225,7 +225,7 @@ class TestKuzuClusterService:
 
     # Writers can now handle both entity and shared repositories
     # No exception should be raised for writer with shared repository
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       read_only=False,
       node_type=NodeType.WRITER,
@@ -233,7 +233,7 @@ class TestKuzuClusterService:
     )
     assert service.repository_type == RepositoryType.SHARED
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_execute_query_success(self, mock_db_manager):
     """Test successful query execution."""
     # Mock database manager instance
@@ -241,7 +241,7 @@ class TestKuzuClusterService:
     mock_db_instance.list_databases.return_value = ["test_db"]
     mock_db_manager.return_value = mock_db_instance
 
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       node_type=NodeType.WRITER,
       repository_type=RepositoryType.ENTITY,
@@ -255,7 +255,7 @@ class TestKuzuClusterService:
     mock_schema.keys.return_value = [
       "col0",
       "col1",
-    ]  # Kuzu returns generic column names
+    ]  # LadybugDB returns generic column names
     mock_result.get_schema.return_value = mock_schema
     mock_result.has_next.side_effect = [True, True, False]
     mock_result.get_next.side_effect = [
@@ -287,12 +287,12 @@ class TestKuzuClusterService:
     ]
     assert response.execution_time_ms > 0
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_execute_query_database_not_found(self, mock_db_manager):
     """Test query execution with non-existent database."""
     from fastapi import HTTPException
 
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       node_type=NodeType.WRITER,
       repository_type=RepositoryType.ENTITY,
@@ -312,7 +312,7 @@ class TestKuzuClusterService:
     assert exc_info.value.status_code == 404
     assert "not found" in str(exc_info.value.detail)
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   @patch("robosystems.graph_api.core.cluster_manager.ThreadPoolExecutor")
   def test_execute_query_timeout(self, mock_executor_class, mock_db_manager):
     """Test query execution timeout using ThreadPoolExecutor."""
@@ -329,7 +329,7 @@ class TestKuzuClusterService:
       mock_db_manager.return_value = mock_db_instance
 
       # Create service
-      service = KuzuClusterService(
+      service = LadybugClusterService(
         base_path=self.base_path,
         node_type=NodeType.WRITER,
         repository_type=RepositoryType.ENTITY,
@@ -367,7 +367,7 @@ class TestKuzuClusterService:
       # Verify timeout was used correctly
       mock_future.result.assert_called_once_with(timeout=1.0)
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_execute_query_large_result_set(self, mock_db_manager):
     """Test query execution with large result set (DoS protection)."""
     # Mock database manager instance before creating service
@@ -375,7 +375,7 @@ class TestKuzuClusterService:
     mock_db_instance.list_databases.return_value = ["test_db"]
     mock_db_manager.return_value = mock_db_instance
 
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       node_type=NodeType.WRITER,
       repository_type=RepositoryType.ENTITY,
@@ -411,10 +411,10 @@ class TestKuzuClusterService:
     mock_result.close.assert_called_once()
 
   @patch("robosystems.graph_api.core.cluster_manager.psutil")
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_get_cluster_health(self, mock_db_manager, mock_psutil):
     """Test cluster health check."""
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       max_databases=100,
       node_type=NodeType.WRITER,
@@ -439,10 +439,10 @@ class TestKuzuClusterService:
     assert health.read_only is False
     assert health.uptime_seconds > 0
 
-  @patch("robosystems.graph_api.core.cluster_manager.KuzuDatabaseManager")
+  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
   def test_get_cluster_info(self, mock_db_manager):
     """Test cluster information retrieval."""
-    service = KuzuClusterService(
+    service = LadybugClusterService(
       base_path=self.base_path,
       max_databases=50,
       node_type=NodeType.SHARED_MASTER,
@@ -455,9 +455,9 @@ class TestKuzuClusterService:
 
     info = service.get_cluster_info()
 
-    assert "kuzu-shared_master" in info.node_id
+    assert "lbug-shared_master" in info.node_id
     assert info.node_type == "shared_master"
-    # Skip version check - it's just a reflection of the kuzu library version
+    # Skip version check - it's just a reflection of the lbug library version
     assert hasattr(info, "cluster_version")  # Just ensure the field exists
     assert info.base_path == self.base_path
     assert info.max_databases == 50
@@ -527,7 +527,7 @@ class TestFastAPIEndpoints:
 
     # Mock cluster info response
     mock_info = ClusterInfoResponse(
-      node_id="kuzu-entity_writer-12345",
+      node_id="lbug-entity_writer-12345",
       node_type="entity_writer",
       cluster_version="0.6.0",
       base_path="/tmp/test",
@@ -546,7 +546,7 @@ class TestFastAPIEndpoints:
 
     assert response.status_code == 200
     data = response.json()
-    assert data["node_id"] == "kuzu-entity_writer-12345"
+    assert data["node_id"] == "lbug-entity_writer-12345"
     assert data["databases"] == ["db1", "db2"]
 
   def test_execute_query_endpoint(self):
@@ -587,7 +587,7 @@ class TestFastAPIEndpoints:
     # Mock cluster service
     mock_db_info = DatabaseInfo(
       graph_id="test_db",
-      database_path="/tmp/test/test_db.kuzu",
+      database_path="/tmp/test/test_db.lbug",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024000,
       read_only=False,
@@ -628,7 +628,7 @@ class TestFastAPIEndpoints:
     mock_response = DatabaseCreateResponse(
       status="success",
       graph_id="test_entity",
-      database_path="/tmp/test/test_entity.kuzu",
+      database_path="/tmp/test/test_entity.lbug",
       schema_applied=True,
       execution_time_ms=500.0,
     )
@@ -715,7 +715,7 @@ class TestFastAPIEndpoints:
     # Mock cluster service
     mock_db_info = DatabaseInfo(
       graph_id="test_db",
-      database_path="/tmp/test/test_db.kuzu",
+      database_path="/tmp/test/test_db.lbug",
       created_at="2023-01-01T00:00:00",
       size_bytes=1024000,
       read_only=False,

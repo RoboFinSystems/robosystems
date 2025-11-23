@@ -244,14 +244,14 @@ class TestBaseAgent:
   @pytest.mark.asyncio
   async def test_agent_with_mcp_tools(self, test_agent, mock_user):
     """Test agent with MCP tools initialization."""
-    # Since create_kuzu_mcp_client is async, we need to handle it properly
+    # Since create_graph_mcp_client is async, we need to handle it properly
     mock_client = Mock()
     mock_tools_instance = Mock()
 
     with patch(
-      "robosystems.middleware.mcp.create_kuzu_mcp_client", new_callable=AsyncMock
+      "robosystems.middleware.mcp.create_graph_mcp_client", new_callable=AsyncMock
     ) as mock_create_client:
-      with patch("robosystems.middleware.mcp.KuzuMCPTools") as mock_tools:
+      with patch("robosystems.middleware.mcp.GraphMCPTools") as mock_tools:
         mock_create_client.return_value = mock_client
         mock_tools.return_value = mock_tools_instance
 
@@ -261,18 +261,18 @@ class TestBaseAgent:
 
         mock_create_client.assert_called_once_with(graph_id="test_graph")
         mock_tools.assert_called_once()
-        assert agent.kuzu_client == mock_client
+        assert agent.graph_client == mock_client
         assert agent.mcp_tools == mock_tools_instance
 
   @pytest.mark.asyncio
   async def test_agent_cleanup(self, test_agent):
     """Test agent cleanup/close method."""
-    test_agent.kuzu_client = AsyncMock()
-    test_agent.kuzu_client.close = AsyncMock()
+    test_agent.graph_client = AsyncMock()
+    test_agent.graph_client.close = AsyncMock()
 
     await test_agent.close()
 
-    test_agent.kuzu_client.close.assert_called_once()
+    test_agent.graph_client.close.assert_called_once()
 
   def test_agent_track_tokens(self, test_agent):
     """Test token tracking functionality."""

@@ -99,7 +99,7 @@ This unified endpoint automatically detects the resource type and returns the ap
                 "id": "bsub_abc123",
                 "resource_type": "graph",
                 "resource_id": "kg1a2b3c",
-                "plan_name": "kuzu-standard",
+                "plan_name": "ladybug-standard",
                 "billing_interval": "monthly",
                 "status": "active",
                 "base_price_cents": 4999,

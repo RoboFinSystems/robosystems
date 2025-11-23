@@ -44,7 +44,7 @@ class TestGraphTypeRegistry:
       graph_name="SEC Public Filings",
       repository_type="sec",
       session=db_session,
-      graph_tier=GraphTier.KUZU_SHARED,
+      graph_tier=GraphTier.LADYBUG_SHARED,
     )
 
     identity = GraphTypeRegistry.identify_graph(repo.graph_id, session=db_session)
@@ -52,7 +52,7 @@ class TestGraphTypeRegistry:
     assert identity.graph_id == repo.graph_id
     assert identity.category == GraphCategory.SHARED
     assert identity.graph_type == "sec"
-    assert identity.graph_tier == GraphTier.KUZU_SHARED
+    assert identity.graph_tier == GraphTier.LADYBUG_SHARED
     assert identity.access_pattern == AccessPattern.READ_ONLY
 
   def test_identify_graph_with_database_lookup_user_graph(self, db_session, test_org):
@@ -64,7 +64,7 @@ class TestGraphTypeRegistry:
       org_id=test_org.id,
       session=db_session,
       schema_extensions=["roboledger"],
-      graph_tier=GraphTier.KUZU_STANDARD,
+      graph_tier=GraphTier.LADYBUG_STANDARD,
     )
 
     identity = GraphTypeRegistry.identify_graph(user_graph.graph_id, session=db_session)
@@ -72,7 +72,7 @@ class TestGraphTypeRegistry:
     assert identity.graph_id == user_graph.graph_id
     assert identity.category == GraphCategory.USER
     assert identity.graph_type == "entity"
-    assert identity.graph_tier == GraphTier.KUZU_STANDARD
+    assert identity.graph_tier == GraphTier.LADYBUG_STANDARD
 
   def test_identify_graph_named_parameter_usage(self):
     """
@@ -83,10 +83,10 @@ class TestGraphTypeRegistry:
     is expected), causing AttributeError: 'GraphTier' object has no attribute 'query'.
     """
     identity = GraphTypeRegistry.identify_graph(
-      "kg123abc", graph_tier=GraphTier.KUZU_STANDARD
+      "kg123abc", graph_tier=GraphTier.LADYBUG_STANDARD
     )
 
-    assert identity.graph_tier == GraphTier.KUZU_STANDARD
+    assert identity.graph_tier == GraphTier.LADYBUG_STANDARD
     assert identity.graph_id == "kg123abc"
 
   def test_identify_graph_fallback_to_pattern_matching(self):
@@ -104,7 +104,7 @@ class TestGraphTypeRegistry:
       graph_name="Test",
       repository_type="test",
       session=db_session,
-      graph_tier=GraphTier.KUZU_SHARED,
+      graph_tier=GraphTier.LADYBUG_SHARED,
     )
 
     identity = GraphTypeRegistry.identify_graph(
@@ -112,7 +112,7 @@ class TestGraphTypeRegistry:
       session=db_session,
     )
 
-    assert identity.graph_tier == GraphTier.KUZU_SHARED
+    assert identity.graph_tier == GraphTier.LADYBUG_SHARED
 
   def test_identify_graph_without_session_uses_patterns(self):
     """Test that without session, identify_graph uses pattern matching."""

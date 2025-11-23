@@ -2,14 +2,14 @@ name: Refresh Graph ASG
 description: |
   Performs a controlled instance refresh for graph database writer EC2 instances using Auto Scaling Groups.
   Handles volume attachment and database allocation carefully to ensure data persistence.
-  Supports both Kuzu and Neo4j backends.
+  Supports both LadybugDB and Neo4j backends.
 
 inputs:
   environment:
     description: "Environment (staging, prod)"
     required: true
   tier:
-    description: "Graph tier to refresh (kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared, neo4j-community-large, neo4j-enterprise-xlarge)"
+    description: "Graph tier to refresh (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge)"
     required: true
   aws-region:
     description: "AWS region"
@@ -69,10 +69,10 @@ runs:
     - name: Validate Inputs
       shell: bash
       run: |
-        VALID_TIERS="kuzu-standard|kuzu-large|kuzu-xlarge|kuzu-shared|neo4j-community-large|neo4j-enterprise-xlarge"
+        VALID_TIERS="ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared|neo4j-community-large|neo4j-enterprise-xlarge"
         if [[ ! "${{ inputs.tier }}" =~ ^($VALID_TIERS)$ ]]; then
           echo "❌ Invalid tier: ${{ inputs.tier }}"
-          echo "Must be one of: kuzu-standard, kuzu-large, kuzu-xlarge, kuzu-shared, neo4j-community-large, neo4j-enterprise-xlarge"
+          echo "Must be one of: ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge"
           exit 1
         fi
 
@@ -93,7 +93,7 @@ runs:
         echo "Dry Run: ${{ inputs.dry-run }}"
         echo ""
 
-        # Convert tier to stack suffix (kuzu-standard → KuzuStandard)
+        # Convert tier to stack suffix (ladybug-standard → LadybugStandard)
         TIER="${{ inputs.tier }}"
         STACK_SUFFIX=$(echo "$TIER" | awk -F'-' '{
           for(i=1; i<=NF; i++) {
@@ -111,11 +111,11 @@ runs:
         echo "Stack Name: ${STACK_NAME}"
 
         # Determine tag filtering based on tier
-        if [[ "$TIER" == kuzu-* ]]; then
-          # Kuzu uses KuzuRole tag
-          TAG_NAME="KuzuRole"
+        if [[ "$TIER" == ladybug-* ]]; then
+          # LadybugDB uses LadybugRole tag
+          TAG_NAME="LadybugRole"
           TAG_VALUE="writer"
-          echo "Using Kuzu tags: ${TAG_NAME}=${TAG_VALUE}"
+          echo "Using LadybugDB tags: ${TAG_NAME}=${TAG_VALUE}"
         elif [[ "$TIER" == neo4j-* ]]; then
           # Neo4j uses GraphRole + GraphBackend tags
           TAG_NAME="GraphRole"

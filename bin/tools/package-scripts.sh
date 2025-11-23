@@ -100,7 +100,7 @@ for script in "${REPO_ROOT}"/bin/userdata/*.sh; do
     aws s3 cp "$script" "s3://${BUCKET_NAME}/userdata/${script_name}" --region "$REGION"
 done
 
-# Upload common userdata scripts (shared between Kuzu and Neo4j)
+# Upload common userdata scripts (shared between LadybugDB and Neo4j)
 echo "📤 Uploading common userdata scripts to S3..."
 for script in "${REPO_ROOT}"/bin/userdata/common/*.sh; do
     if [ -f "$script" ]; then
@@ -182,8 +182,8 @@ for lambda_name in postgres-secrets postgres-rotation valkey-rotation graph-api-
 done
 echo "  Lambda packages uploaded: $LAMBDA_COUNT functions"
 echo "  Lambda manifest uploaded"
-echo "  UserData scripts uploaded: 4 scripts (bastion, gha-runner, kuzu-writer, neo4j-writer)"
-echo "  Shared userdata scripts uploaded: 5 scripts (graph-lifecycle, graph-health-check, register, run-container, setup-cloudwatch)"
+echo "  UserData scripts uploaded: 4 scripts (bastion, gha-runner, ladybug-writer, neo4j-writer)"
+echo "  Shared userdata scripts uploaded: 5 scripts (graph-lifecycle, graph-health-check, register-graph-instance, run-graph-container, setup-cloudwatch-graph)"
 echo ""
 echo "📋 CloudFormation Parameters:"
 echo "  LambdaCodeBucket configured"

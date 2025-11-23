@@ -125,11 +125,11 @@ jobs:
           if [ "$NODE_TYPES" == "all" ] || [ "$NODE_TYPES" == "writer" ] || [ "$NODE_TYPES" == "shared" ]; then
             echo "📦 Collecting writer instances..."
 
-            # Get all Kuzu writers (using KuzuRole tag)
-            KUZU_WRITERS=$(aws ec2 describe-instances \
+            # Get all graph writers (LadybugDB backend - using LadybugRole tag)
+            LBUG_WRITERS=$(aws ec2 describe-instances \
               --filters \
                 "Name=tag:Environment,Values=${{ inputs.environment }}" \
-                "Name=tag:KuzuRole,Values=writer" \
+                "Name=tag:LadybugRole,Values=writer" \
                 "Name=instance-state-name,Values=running" \
               --query "Reservations[].Instances[].InstanceId" \
               --output text \
@@ -146,8 +146,8 @@ jobs:
               --output text \
               --region "${{ github.event_name == 'workflow_dispatch' && (vars.AWS_REGION || 'us-east-1') || inputs.aws_region }}" 2>/dev/null || echo "")
 
-            # Process Kuzu writers
-            for INSTANCE in $KUZU_WRITERS; do
+            # Process graph writers (LadybugDB backend)
+            for INSTANCE in $LBUG_WRITERS; do
               TIER=$(aws ec2 describe-tags \
                 --filters \
                   "Name=resource-id,Values=$INSTANCE" \
@@ -168,13 +168,13 @@ jobs:
               # Determine node type based on tier
               if [ "$TIER" == "shared" ]; then
                 NODE_TYPE="shared-writer"
-                echo "  Found Kuzu shared writer: $INSTANCE"
+                echo "  Found graph shared writer (LadybugDB): $INSTANCE"
               else
                 NODE_TYPE="writer"
-                echo "  Found Kuzu writer: $INSTANCE (tier: ${TIER:-standard})"
+                echo "  Found graph writer (LadybugDB): $INSTANCE (tier: ${TIER:-standard})"
               fi
 
-              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\",\"backend\":\"kuzu\"}"
+              INSTANCE_OBJ="{\"instance_id\":\"$INSTANCE\",\"node_type\":\"$NODE_TYPE\",\"backend\":\"ladybug\"}"
               if [ "$INSTANCES_JSON" == "[]" ]; then
                 INSTANCES_JSON="[$INSTANCE_OBJ]"
               else

@@ -1,7 +1,7 @@
 """
-Kuzu Schema Builder
+LadybugDB Schema Builder
 
-Dynamically generates and manages Kuzu schemas based on configuration.
+Dynamically generates and manages LadybugDB schemas based on configuration.
 Uses the enhanced SchemaManager for better inheritance and compatibility.
 """
 
@@ -13,9 +13,9 @@ from .manager import SchemaManager, SchemaConfiguration
 from robosystems.logger import logger
 
 
-class KuzuSchemaBuilder:
+class LadybugSchemaBuilder:
   """
-  Builds Kuzu schemas by combining base schemas and extensions.
+  Builds LadybugDB schemas by combining base schemas and extensions.
 
   This builder loads schema definitions from configuration and generates
   the complete Cypher DDL script for creating the database schema.
@@ -34,19 +34,21 @@ class KuzuSchemaBuilder:
     self.schema_manager = SchemaManager()
     self.schema = None
 
-  def load_schemas(self) -> "KuzuSchemaBuilder":
+  def load_schemas(self) -> "LadybugSchemaBuilder":
     """
     Load base schema and all configured extensions using SchemaManager.
 
     Returns:
         Self for method chaining
     """
-    logger.info(f"Loading Kuzu schemas from configuration: {self.config}")
+    logger.info(f"Loading LadybugDB schemas from configuration: {self.config}")
 
     # Create schema configuration
     schema_config = SchemaConfiguration(
       name=self.config.get("name", "Generated Schema"),
-      description=self.config.get("description", "Dynamically generated Kuzu schema"),
+      description=self.config.get(
+        "description", "Dynamically generated LadybugDB schema"
+      ),
       version=self.config.get("version", "1.0.0"),
       base_schema=self.config.get("base_schema", "base"),
       extensions=self.config.get("extensions", []),
@@ -73,7 +75,7 @@ class KuzuSchemaBuilder:
           self.schema = Schema(
             name=self.config.get("name", "Generated Schema"),
             description=self.config.get(
-              "description", "Dynamically generated Kuzu schema"
+              "description", "Dynamically generated LadybugDB schema"
             ),
             version=self.config.get("version", "1.0.0"),
           )
@@ -105,7 +107,7 @@ class KuzuSchemaBuilder:
           self.schema = Schema(
             name=self.config.get("name", "Generated Schema"),
             description=self.config.get(
-              "description", "Dynamically generated Kuzu schema"
+              "description", "Dynamically generated LadybugDB schema"
             ),
             version=self.config.get("version", "1.0.0"),
           )
@@ -139,13 +141,13 @@ class KuzuSchemaBuilder:
 
   def apply_to_connection(self, connection):
     """
-    Apply the schema to a Kuzu database connection.
+    Apply the schema to a LadybugDB database connection.
 
     Args:
-        connection: Kuzu database connection
+        connection: LadybugDB database connection
     """
     cypher_script = self.generate_cypher()
-    logger.info("Applying Kuzu schema to database")
+    logger.info("Applying LadybugDB schema to database")
     logger.debug(f"Schema DDL:\n{cypher_script}")
 
     # Split and clean statements - handle multi-line comments properly
@@ -185,7 +187,7 @@ class KuzuSchemaBuilder:
           logger.error(f"Error: {e}")
           raise
 
-    logger.info("Successfully applied Kuzu schema")
+    logger.info("Successfully applied LadybugDB schema")
 
   def get_schema(self) -> Schema:
     """
@@ -212,26 +214,26 @@ def create_schema_from_config(config: Dict[str, Any]) -> Schema:
   Returns:
       Complete schema object
   """
-  builder = KuzuSchemaBuilder(config)
+  builder = LadybugSchemaBuilder(config)
   builder.load_schemas()
   return builder.get_schema()
 
 
 def apply_schema_to_database(database_path: str, config: Dict[str, Any]):
   """
-  Convenience function to apply schema to a Kuzu database.
+  Convenience function to apply schema to a LadybugDB database.
 
   Args:
-      database_path: Path to Kuzu database
+      database_path: Path to LadybugDB database
       config: Schema configuration dictionary
   """
-  import kuzu
+  import real_ladybug as lbug
 
-  db = kuzu.Database(database_path)
-  conn = kuzu.Connection(db)
+  db = lbug.Database(database_path)
+  conn = lbug.Connection(db)
 
   try:
-    builder = KuzuSchemaBuilder(config)
+    builder = LadybugSchemaBuilder(config)
     builder.load_schemas()
     builder.apply_to_connection(conn)
   finally:

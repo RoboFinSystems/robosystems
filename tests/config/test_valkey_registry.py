@@ -24,7 +24,7 @@ class TestValkeyDatabase:
     assert ValkeyDatabase.PIPELINE_TRACKING == 5
     assert ValkeyDatabase.CREDITS_CACHE == 6
     assert ValkeyDatabase.RATE_LIMITING == 7
-    assert ValkeyDatabase.KUZU_CACHE == 8
+    assert ValkeyDatabase.LBUG_CACHE == 8
     assert ValkeyDatabase.BILLING_CACHE == 9
 
   def test_get_next_available(self):
@@ -68,7 +68,7 @@ class TestValkeyDatabase:
     databases = list(ValkeyDatabase)
     assert len(databases) == 10  # Currently 10 databases allocated (0-9)
     assert ValkeyDatabase.CELERY_BROKER in databases
-    assert ValkeyDatabase.KUZU_CACHE in databases
+    assert ValkeyDatabase.LBUG_CACHE in databases
     assert ValkeyDatabase.BILLING_CACHE in databases
 
 
@@ -192,7 +192,7 @@ class TestValkeyURLBuilder:
   def test_build_url_with_valkey_prefix(self):
     """Test using valkey:// prefix."""
     url = ValkeyURLBuilder.build_url(
-      "localhost:6379", ValkeyDatabase.KUZU_CACHE, use_valkey_prefix=True
+      "localhost:6379", ValkeyDatabase.LBUG_CACHE, use_valkey_prefix=True
     )
     assert url == "valkey://localhost:6379/8"
 
@@ -256,8 +256,8 @@ class TestDatabasePurpose:
     purpose = get_database_purpose(ValkeyDatabase.AUTH_CACHE)
     assert "Authentication" in purpose
 
-    purpose = get_database_purpose(ValkeyDatabase.KUZU_CACHE)
-    assert "Kuzu client factory" in purpose
+    purpose = get_database_purpose(ValkeyDatabase.LBUG_CACHE)
+    assert "LadybugDB client factory" in purpose
 
   def test_get_database_purpose_all_defined(self):
     """Test that all databases have purposes defined."""
@@ -275,7 +275,7 @@ class TestDatabasePurpose:
     assert "VALKEY/REDIS DATABASE REGISTRY" in captured.out
     assert "CELERY_BROKER" in captured.out
     assert "AUTH_CACHE" in captured.out
-    assert "KUZU_CACHE" in captured.out
+    assert "LBUG_CACHE" in captured.out
     assert "USAGE EXAMPLE" in captured.out
     assert "ValkeyURLBuilder.build_url" in captured.out
 

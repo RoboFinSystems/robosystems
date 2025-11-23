@@ -19,7 +19,7 @@ The MCP middleware:
 ```
 mcp/
 ├── __init__.py              # Module exports and public API
-├── client.py                # KuzuMCPClient implementation
+├── client.py                # GraphMCPClient implementation
 ├── factory.py               # Client factory and pooling
 ├── pool.py                  # Connection pool management
 ├── query_validator.py       # Query validation and complexity checks
@@ -40,7 +40,7 @@ mcp/
 
 ## Key Components
 
-### 1. KuzuMCPClient (`client.py`)
+### 1. GraphMCPClient (`client.py`)
 
 Main MCP client for interacting with graph databases through the RoboSystems API.
 
@@ -53,10 +53,10 @@ Main MCP client for interacting with graph databases through the RoboSystems API
 
 **Usage:**
 ```python
-from robosystems.middleware.mcp import create_kuzu_mcp_client
+from robosystems.middleware.mcp import create_graph_mcp_client
 
 # Create client with automatic endpoint discovery
-client = await create_kuzu_mcp_client(graph_id="sec")
+client = await create_graph_mcp_client(graph_id="sec")
 
 # Execute Cypher query
 result = await client.execute_query(
@@ -88,10 +88,10 @@ max_lifetime: 3600 seconds (1 hour)
 
 **Usage:**
 ```python
-from robosystems.middleware.mcp import acquire_kuzu_mcp_client
+from robosystems.middleware.mcp import acquire_graph_mcp_client
 
 # Acquire client from pool (recommended)
-async with acquire_kuzu_mcp_client(graph_id="kg1a2b3c") as client:
+async with acquire_graph_mcp_client(graph_id="kg1a2b3c") as client:
     result = await client.execute_query("MATCH (n) RETURN count(n)")
     # Client automatically returned to pool
 ```
@@ -257,7 +257,7 @@ result = await tool.execute({
 ```
 
 ##### Materialize Graph Tool
-Trigger materialization from DuckDB staging to Kuzu graph database.
+Trigger materialization from DuckDB staging to LadybugDB graph database.
 
 ```python
 from robosystems.middleware.mcp.tools import MaterializeGraphTool
@@ -292,30 +292,30 @@ MCP_MAX_COMPLEXITY_SCORE=100      # Complexity threshold
 Comprehensive exception hierarchy for MCP operations.
 
 **Exception Classes:**
-- `KuzuAPIError` - Base exception for all MCP errors
-- `KuzuQueryTimeoutError` - Query exceeded timeout
-- `KuzuQueryComplexityError` - Query too complex
-- `KuzuValidationError` - Invalid query or parameters
-- `KuzuAuthenticationError` - Authentication failed
-- `KuzuAuthorizationError` - Insufficient permissions
-- `KuzuConnectionError` - Connection to Graph API failed
-- `KuzuResourceNotFoundError` - Resource not found
-- `KuzuRateLimitError` - Rate limit exceeded
-- `KuzuSchemaError` - Schema validation failed
+- `GraphAPIError` - Base exception for all MCP errors
+- `GraphQueryTimeoutError` - Query exceeded timeout
+- `GraphQueryComplexityError` - Query too complex
+- `GraphValidationError` - Invalid query or parameters
+- `GraphAuthenticationError` - Authentication failed
+- `GraphAuthorizationError` - Insufficient permissions
+- `GraphConnectionError` - Connection to Graph API failed
+- `GraphResourceNotFoundError` - Resource not found
+- `GraphRateLimitError` - Rate limit exceeded
+- `LadybugDBSchemaError` - Schema validation failed
 
 **Usage:**
 ```python
 from robosystems.middleware.mcp import (
-    KuzuQueryTimeoutError,
-    KuzuValidationError
+    GraphQueryTimeoutError,
+    GraphValidationError
 )
 
 try:
     result = await client.execute_query(query)
-except KuzuQueryTimeoutError:
+except GraphQueryTimeoutError:
     # Handle timeout
     logger.warning("Query timed out")
-except KuzuValidationError as e:
+except GraphValidationError as e:
     # Handle validation error
     logger.error(f"Invalid query: {e}")
 ```
@@ -351,7 +351,7 @@ MCP_ENABLE_VALIDATION=true             # Enable query validation
 
 ```python
 from fastapi import APIRouter, Depends
-from robosystems.middleware.mcp import acquire_kuzu_mcp_client
+from robosystems.middleware.mcp import acquire_graph_mcp_client
 
 router = APIRouter()
 
@@ -360,7 +360,7 @@ async def execute_mcp_query(
     graph_id: str,
     query: str
 ):
-    async with acquire_kuzu_mcp_client(graph_id) as client:
+    async with acquire_graph_mcp_client(graph_id) as client:
         result = await client.execute_query(query)
         return {"results": result}
 ```
@@ -368,10 +368,10 @@ async def execute_mcp_query(
 ### With Agent System
 
 ```python
-from robosystems.middleware.mcp import KuzuMCPTools
+from robosystems.middleware.mcp import GraphMCPTools
 
 # Initialize tools for agent
-tools = KuzuMCPTools(graph_id="sec")
+tools = GraphMCPTools(graph_id="sec")
 
 # Agent uses tools for natural language queries
 response = await agent.execute({
@@ -384,11 +384,11 @@ response = await agent.execute({
 
 ```python
 from celery import shared_task
-from robosystems.middleware.mcp import create_kuzu_mcp_client
+from robosystems.middleware.mcp import create_graph_mcp_client
 
 @shared_task
 async def analyze_financials(graph_id: str, company: str):
-    client = await create_kuzu_mcp_client(graph_id)
+    client = await create_graph_mcp_client(graph_id)
     try:
         result = await client.execute_query(
             f"MATCH (c:Company {{ticker: '{company}'}}) RETURN c"
@@ -409,7 +409,7 @@ async def analyze_financials(graph_id: str, company: str):
 
 ### Best Practices
 
-1. **Use Connection Pool**: Always use `acquire_kuzu_mcp_client` for pooled connections
+1. **Use Connection Pool**: Always use `acquire_graph_mcp_client` for pooled connections
 2. **Set Appropriate Timeouts**: Match timeouts to query complexity
 3. **Validate Queries**: Enable query validation to prevent expensive operations
 4. **Cache Schema**: Enable schema caching for repeated introspection

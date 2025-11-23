@@ -44,7 +44,9 @@ async def materialize_table(
 
   start_time = time.time()
 
-  logger.info(f"Materializing table {table_name} from DuckDB to Kuzu graph {graph_id}")
+  logger.info(
+    f"Materializing table {table_name} from DuckDB to LadybugDB graph {graph_id}"
+  )
 
   if cluster_service.read_only:
     raise HTTPException(
@@ -55,13 +57,13 @@ async def materialize_table(
   try:
     duck_path = f"{env.DUCKDB_STAGING_PATH}/{graph_id}.duckdb"
     duckdb_extension_path = (
-      PathLib.home() / ".kuzu" / "extension" / "duckdb" / "libduckdb.kuzu_extension"
+      PathLib.home() / ".ladybug" / "extension" / "duckdb" / "libduckdb.lbug_extension"
     )
 
-    # CRITICAL: Checkpoint DuckDB to flush WAL to main database BEFORE Kuzu attaches
-    # Kuzu's DuckDB extension creates a new session that won't see uncommitted WAL data
+    # CRITICAL: Checkpoint DuckDB to flush WAL to main database BEFORE LadybugDB attaches
+    # LadybugDB's DuckDB extension creates a new session that won't see uncommitted WAL data
     logger.info(
-      f"Checkpointing DuckDB database before Kuzu materialization: {duck_path}"
+      f"Checkpointing DuckDB database before LadybugDB materialization: {duck_path}"
     )
     from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
 
@@ -116,22 +118,39 @@ async def materialize_table(
         except Exception:
           pass
 
-        # Create physical copy of table without file_id column
+        # Check if file_id column exists in the table
+        columns_result = duck_conn.execute(
+          f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+        ).fetchall()
+        column_names = [col[0] for col in columns_result]
+        has_file_id = "file_id" in column_names
+
+        # Create physical copy of table without file_id column (if it exists)
         if request.file_ids:
           file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
-          duck_conn.execute(
-            f"CREATE TABLE {temp_table_name} AS "
-            f"SELECT * EXCLUDE (file_id) FROM {table_name} "
-            f"WHERE file_id IN ({file_ids_str})"
-          )
+          if has_file_id:
+            duck_conn.execute(
+              f"CREATE TABLE {temp_table_name} AS "
+              f"SELECT * EXCLUDE (file_id) FROM {table_name} "
+              f"WHERE file_id IN ({file_ids_str})"
+            )
+          else:
+            duck_conn.execute(
+              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}"
+            )
           logger.info(
             f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
           )
         else:
-          duck_conn.execute(
-            f"CREATE TABLE {temp_table_name} AS "
-            f"SELECT * EXCLUDE (file_id) FROM {table_name}"
-          )
+          if has_file_id:
+            duck_conn.execute(
+              f"CREATE TABLE {temp_table_name} AS "
+              f"SELECT * EXCLUDE (file_id) FROM {table_name}"
+            )
+          else:
+            duck_conn.execute(
+              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}"
+            )
           logger.info(
             f"Created temp DuckDB table {temp_table_name} for full materialization"
           )
@@ -270,12 +289,12 @@ async def fork_from_parent_duckdb(
   cluster_service=Depends(get_cluster_service),
 ) -> ForkFromParentResponse:
   """
-  Fork data from parent graph's DuckDB directly into subgraph's Kuzu.
+  Fork data from parent graph's DuckDB directly into subgraph's LadybugDB.
 
   This endpoint:
   1. Attaches parent graph's DuckDB staging database
-  2. Copies specified tables (or all tables) from parent DuckDB to subgraph Kuzu
-  3. Runs on the same EC2 instance where both DuckDB and Kuzu databases live
+  2. Copies specified tables (or all tables) from parent DuckDB to subgraph LadybugDB
+  3. Runs on the same EC2 instance where both DuckDB and LadybugDB databases live
 
   Args:
       graph_id: Graph database identifier from router prefix (must equal subgraph_id)
@@ -297,7 +316,7 @@ async def fork_from_parent_duckdb(
       detail=f"graph_id ({graph_id}) must match subgraph_id ({subgraph_id})",
     )
 
-  logger.info(f"Forking data from {parent_graph_id} DuckDB to {subgraph_id} Kuzu")
+  logger.info(f"Forking data from {parent_graph_id} DuckDB to {subgraph_id} LadybugDB")
 
   if cluster_service.read_only:
     raise HTTPException(
@@ -308,7 +327,7 @@ async def fork_from_parent_duckdb(
   try:
     parent_duck_path = f"{env.DUCKDB_STAGING_PATH}/{parent_graph_id}.duckdb"
     duckdb_extension_path = (
-      PathLib.home() / ".kuzu" / "extension" / "duckdb" / "libduckdb.kuzu_extension"
+      PathLib.home() / ".ladybug" / "extension" / "duckdb" / "libduckdb.lbug_extension"
     )
 
     # Checkpoint parent DuckDB to flush WAL and create views
@@ -367,7 +386,7 @@ async def fork_from_parent_duckdb(
         detail="No tables to copy",
       )
 
-    # Create temp physical tables in parent DuckDB for each table (excluding file_id)
+    # Create temp physical tables in parent DuckDB for each table (excluding file_id if exists)
     temp_tables = []
     try:
       with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
@@ -378,13 +397,25 @@ async def fork_from_parent_duckdb(
           # Drop if exists from previous failed run
           duck_conn.execute(f"DROP TABLE IF EXISTS {temp_table}")
 
-          # Create physical temp table without file_id
-          duck_conn.execute(
-            f"CREATE TABLE {temp_table} AS SELECT * EXCLUDE (file_id) FROM {table_name}"
-          )
+          # Check if file_id column exists in the table
+          columns_result = duck_conn.execute(
+            f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+          ).fetchall()
+          column_names = [col[0] for col in columns_result]
+          has_file_id = "file_id" in column_names
+
+          # Create physical temp table without file_id (if it exists)
+          if has_file_id:
+            duck_conn.execute(
+              f"CREATE TABLE {temp_table} AS SELECT * EXCLUDE (file_id) FROM {table_name}"
+            )
+          else:
+            duck_conn.execute(
+              f"CREATE TABLE {temp_table} AS SELECT * FROM {table_name}"
+            )
         logger.info(f"Created {len(temp_tables)} temp tables in parent DuckDB for fork")
 
-      # Connect to subgraph Kuzu and attach parent DuckDB
+      # Connect to subgraph LadybugDB and attach parent DuckDB
       total_rows = 0
       tables_copied = []
 

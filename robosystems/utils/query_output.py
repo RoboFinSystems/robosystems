@@ -2,7 +2,7 @@
 Shared output utilities for query scripts.
 
 Provides standardized output formatting for table, JSON, and CSV outputs
-across all database query tools (graph_query, kuzu_query, duckdb_query).
+across all database query tools (graph_query, lbug_query, duckdb_query).
 """
 
 import csv

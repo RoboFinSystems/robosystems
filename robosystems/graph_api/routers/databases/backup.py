@@ -2,7 +2,7 @@
 Database backup and restore endpoints for Graph API.
 
 This module provides endpoints for creating backups and restoring
-Kuzu databases.
+LadybugDB databases.
 """
 
 from datetime import datetime, timezone
@@ -14,7 +14,7 @@ from robosystems.graph_api.models.database import BackupRequest, BackupResponse
 from robosystems.graph_api.core.cluster_manager import get_cluster_service
 from robosystems.graph_api.core.task_manager import backup_task_manager
 from robosystems.logger import logger
-from robosystems.operations.kuzu.backup_manager import (
+from robosystems.operations.lbug.backup_manager import (
   create_backup_manager,
   BackupJob,
   BackupType,
@@ -94,9 +94,9 @@ async def create_backup(
   """
   Create a backup of a database.
 
-  Initiates a background task to create a complete backup of the Kuzu database.
+  Initiates a background task to create a complete backup of the LadybugDB database.
   The backup will be:
-  - Full dump of the .kuzu database file
+  - Full dump of the .lbug database file
   - Compressed for optimal storage
   - Optionally encrypted for security
 
