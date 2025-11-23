@@ -104,6 +104,26 @@ class GraphInfo(BaseModel):
     description="Repository type if isRepository=true",
     examples=[None, "sec", "industry", "economic"],
   )
+  schemaExtensions: list[str] = Field(
+    default_factory=list,
+    description="List of schema extensions installed on this graph",
+    examples=[[], ["roboledger"], ["roboledger", "roboinvestor"]],
+  )
+  isSubgraph: bool = Field(
+    default=False,
+    description="Whether this is a subgraph (vs a main graph)",
+    examples=[False, True],
+  )
+  parentGraphId: Optional[str] = Field(
+    default=None,
+    description="Parent graph ID if this is a subgraph",
+    examples=[None, "kg1a2b3c4d5"],
+  )
+  graphType: str = Field(
+    default="entity",
+    description="Type of graph: generic, entity, or repository",
+    examples=["entity", "generic", "repository"],
+  )
 
   class Config:
     json_schema_extra = {
@@ -114,13 +134,38 @@ class GraphInfo(BaseModel):
           "role": "admin",
           "isSelected": True,
           "createdAt": "2024-01-15T10:00:00Z",
+          "isRepository": False,
+          "repositoryType": None,
+          "schemaExtensions": ["roboledger"],
+          "isSubgraph": False,
+          "parentGraphId": None,
+          "graphType": "entity",
         },
         {
-          "graphId": "kg9z8y7x6w5",
-          "graphName": "TechCorp Enterprises",
+          "graphId": "kg9z8y7x6w5_dev",
+          "graphName": "TechCorp Enterprises - Dev",
           "role": "member",
           "isSelected": False,
           "createdAt": "2024-02-20T14:30:00Z",
+          "isRepository": False,
+          "repositoryType": None,
+          "schemaExtensions": ["roboledger", "roboinvestor"],
+          "isSubgraph": True,
+          "parentGraphId": "kg9z8y7x6w5",
+          "graphType": "entity",
+        },
+        {
+          "graphId": "sec",
+          "graphName": "SEC EDGAR Filings",
+          "role": "read",
+          "isSelected": False,
+          "createdAt": "2024-01-01T00:00:00Z",
+          "isRepository": True,
+          "repositoryType": "sec",
+          "schemaExtensions": [],
+          "isSubgraph": False,
+          "parentGraphId": None,
+          "graphType": "repository",
         },
       ]
     }

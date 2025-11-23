@@ -317,6 +317,11 @@ class SubgraphService:
 
       now = datetime.now(timezone.utc)
 
+      # Ensure subgraph_type is stored in metadata
+      subgraph_metadata = (metadata or {}).copy()
+      if "subgraph_type" not in subgraph_metadata:
+        subgraph_metadata["subgraph_type"] = subgraph_type
+
       subgraph = Graph(
         graph_id=subgraph_id,
         org_id=parent_graph.org_id,
@@ -331,7 +336,7 @@ class SubgraphService:
         subgraph_index=next_index,
         subgraph_name=name,
         is_subgraph=True,
-        subgraph_metadata=metadata or {},
+        subgraph_metadata=subgraph_metadata,
         is_repository=False,
         repository_type=None,
         data_source_type=None,
