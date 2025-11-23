@@ -3,6 +3,7 @@ Main subgraph routes (list and create operations).
 """
 
 import json
+import os
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,6 +40,28 @@ from robosystems.config import env
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
+
+
+async def get_database_size_mb(graph_id: str) -> float | None:
+  """Get the size of a database in MB from Graph API metrics."""
+  try:
+    from robosystems.graph_api.client.factory import GraphClientFactory
+
+    # Create client using factory for endpoint discovery
+    graph_client = await GraphClientFactory.create_client(
+      graph_id=graph_id, operation_type="read"
+    )
+
+    # Get database metrics from Graph API
+    metrics = await graph_client.get_database_metrics(graph_id=graph_id)
+
+    if metrics and "size_mb" in metrics:
+      return metrics["size_mb"]
+
+    return None
+  except Exception as e:
+    logger.debug(f"Could not get size for database {graph_id}: {e}")
+    return None
 
 
 @router.get(
@@ -101,26 +124,43 @@ async def list_subgraphs(
     )
 
     subgraph_summaries = []
+    total_size_mb = 0.0
     for subgraph in subgraphs:
-      # Get usage stats from GraphUser
-      user_graph = (
-        db.query(GraphUser)
-        .filter(
-          GraphUser.user_id == current_user.id, GraphUser.graph_id == subgraph.graph_id
-        )
-        .first()
-      )
+      # Extract subgraph name from graph_id (format: {parent_id}_{subgraph_name})
+      subgraph_name = subgraph.subgraph_name
+      if not subgraph_name and "_" in subgraph.graph_id:
+        # Fallback: extract from graph_id if subgraph_name is not set
+        subgraph_name = subgraph.graph_id.split("_", 1)[1]
+
+      # Get database size from Graph API
+      size_mb = await get_database_size_mb(subgraph.graph_id)
+      if size_mb:
+        total_size_mb += size_mb
+
+      # Determine status from graph_stale field
+      status = "stale" if subgraph.graph_stale else "active"
+
+      # Extract subgraph_type from metadata, default to "static"
+      subgraph_type_str = "static"
+      if subgraph.subgraph_metadata and isinstance(subgraph.subgraph_metadata, dict):
+        subgraph_type_str = subgraph.subgraph_metadata.get("subgraph_type", "static")
+
+      # Convert string to SubgraphType enum
+      try:
+        subgraph_type = SubgraphType(subgraph_type_str)
+      except ValueError:
+        subgraph_type = SubgraphType.STATIC
 
       subgraph_summaries.append(
         SubgraphSummary(
           graph_id=subgraph.graph_id,
-          subgraph_name=subgraph.subgraph_name or subgraph.graph_name,
+          subgraph_name=subgraph_name or subgraph.graph_name,
           display_name=subgraph.graph_name,
-          subgraph_type=SubgraphType.STATIC,
-          status="active",
+          subgraph_type=subgraph_type,
+          status=status,
           created_at=subgraph.created_at,
-          size_mb=None,
-          last_accessed=user_graph.last_accessed if user_graph else None,
+          size_mb=size_mb,
+          last_accessed=None,  # GraphUser doesn't have last_accessed field
         )
       )
 
@@ -153,7 +193,7 @@ async def list_subgraphs(
       subgraphs=subgraph_summaries,
       subgraph_count=len(subgraph_summaries),
       max_subgraphs=max_subgraphs,
-      total_size_mb=None,  # Not calculated yet
+      total_size_mb=round(total_size_mb, 2) if total_size_mb > 0 else None,
     )
 
   except HTTPException:

@@ -104,6 +104,26 @@ class GraphInfo(BaseModel):
     description="Repository type if isRepository=true",
     examples=[None, "sec", "industry", "economic"],
   )
+  schemaExtensions: list[str] = Field(
+    default_factory=list,
+    description="List of schema extensions installed on this graph",
+    examples=[[], ["roboledger"], ["roboledger", "roboinvestor"]],
+  )
+  isSubgraph: bool = Field(
+    default=False,
+    description="Whether this is a subgraph (vs a main graph)",
+    examples=[False, True],
+  )
+  parentGraphId: Optional[str] = Field(
+    default=None,
+    description="Parent graph ID if this is a subgraph",
+    examples=[None, "kg1a2b3c4d5"],
+  )
+  graphType: str = Field(
+    default="entity",
+    description="Type of graph: generic, entity, or repository",
+    examples=["entity", "generic", "repository"],
+  )
 
   class Config:
     json_schema_extra = {
