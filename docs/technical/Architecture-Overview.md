@@ -38,7 +38,7 @@ RoboSystems is built on a modern, scalable architecture designed for enterprise 
                            ↓
 ┌─────────────────────────────────────────────────────────┐
 │               Graph Database Backends                   │
-│                  (Kuzu Primary Backend)                 │
+│               (LadyBug Primary Backend)                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -85,7 +85,7 @@ Asynchronous task processing with priority queues:
 RoboSystems supports multiple graph database backends:
 
 **Active Backends:**
-- **Kuzu**: Primary backend - high-performance embedded graph database with columnar storage
+- **LadyBug**: Primary backend - high-performance embedded graph database with columnar storage
   - Optimized for analytical workloads
   - Native DuckDB integration for bulk ingestion
 
@@ -93,7 +93,7 @@ RoboSystems supports multiple graph database backends:
 - **Neo4j Community**: Client-server architecture with advanced query features
 - **Neo4j Enterprise**: Clustering and advanced security features
 
-The system is currently **Kuzu-first** with Neo4j available as opt-in tiers.
+The system is currently **LadyBug-first** with Neo4j available as opt-in tiers.
 
 ### Graph API
 
@@ -116,7 +116,7 @@ FastAPI microservice providing unified interface for all backends:
 
 The backend factory provides pluggable graph database backends with a unified interface:
 
-- **Backend Abstraction**: Common interface for Kuzu and Neo4j implementations
+- **Backend Abstraction**: Common interface for LadyBug and Neo4j implementations
 - **Factory Pattern**: Dynamic backend selection based on configuration (`GRAPH_BACKEND_TYPE`)
 - **Backend-Specific Optimizations**: Each backend implements optimal patterns for their architecture
 - **Connection Management**: Backend-appropriate connection pooling and lifecycle management
@@ -131,7 +131,7 @@ The backend factory provides pluggable graph database backends with a unified in
 
 The client factory layer provides intelligent routing between application code and graph database infrastructure:
 
-- **Backend-Agnostic**: Works seamlessly with both Kuzu and Neo4j backends
+- **Backend-Agnostic**: Works seamlessly with both LadyBug and Neo4j backends
 - **Automatic Discovery**: Finds database instances via DynamoDB registry
 - **Redis Caching**: Caches instance locations to reduce lookups
 - **Circuit Breakers**: Prevents cascading failures with automatic recovery
@@ -148,7 +148,7 @@ High-performance data ingestion via intermediate staging:
 
 - **Staging Tables**: DuckDB materialized tables for data preparation
 - **File-Based Workflow**: Users upload Parquet → DuckDB validates → Graph ingests
-- **Direct Integration**: Native DuckDB → Kuzu via extensions
+- **Direct Integration**: Native DuckDB → LadyBug via extensions
 - **Schema-Driven**: Tables auto-created from graph schema DDL
 - **S3 Integration**: Direct S3 file access via httpfs extension
 
@@ -161,36 +161,37 @@ High-performance data ingestion via intermediate staging:
 - **DynamoDB Registry**: Track database allocation across instances
 - **API-First**: All access through REST APIs, no direct connections
 
-**Production Tier System (Kuzu):**
+**Production Tier System (LadyBug):**
 
-- **kuzu-standard**: Multi-tenant, cost-optimized entry
+- **ladybug-standard**: Multi-tenant, cost-optimized entry
   - Instance: r7g.large (16GB RAM, 2 vCPUs)
   - Density: 10 databases per instance
   - Memory: 2GB per database (oversubscribed for cost efficiency)
   - Subgraphs: Not supported (single database only)
   - Storage: 500GB per database
 
-- **kuzu-large**: Dedicated instance with subgraph support
+- **ladybug-large**: Dedicated instance with subgraph support
   - Instance: r7g.large (16GB RAM, 2 vCPUs)
   - Density: 1 customer per instance (11 total databases with subgraphs)
   - Subgraphs: Up to 10 subgraphs (1 parent + 10 children)
   - Storage: 2TB total across all databases
 
-- **kuzu-xlarge**: Maximum performance and scale
+- **ladybug-xlarge**: Maximum performance and scale
   - Instance: r7g.xlarge (32GB RAM, 4 vCPUs)
   - Density: 1 customer per instance (26 total databases with subgraphs)
   - Subgraphs: Up to 25 subgraphs (1 parent + 25 children)
   - Storage: 5TB total across all databases
 
-- **kuzu-shared**: Public data repositories
+- **ladybug-shared**: Public data repositories
   - Instance: r7g.large
   - Purpose: SEC filings, industry data, economic indicators
   - Read-only for all users
 
 **Staging Environment:**
-- kuzu-standard: r7g.medium (8GB RAM)
-- kuzu-large: r7g.medium (8GB RAM)
-- kuzu-shared: r7g.medium (8GB RAM)
+- ladybug-standard: r7g.medium (8GB RAM)
+- ladybug-large: r7g.medium (8GB RAM)
+- ladybug-xlarge: r7g.large (16GB RAM)
+- ladybug-shared: r7g.medium (8GB RAM)
 
 **Optional Neo4j Tiers (Disabled by Default):**
 - neo4j-community-large: r7g.large (production) / r7g.medium (staging)
@@ -274,7 +275,7 @@ Data transformation pipeline and business logic:
 
 **Purpose**: Financial knowledge graphs with relationships
 
-- **Kuzu**: Primary embedded graph database backend
+- **LadyBug**: Primary embedded graph database backend
 - **Neo4j**: Optional managed graph database (disabled by default)
 - **Multi-tenant**: Separate database per entity (`kg12345abc`)
 - **Shared repositories**: SEC, industry, economic data in dedicated clusters
@@ -321,7 +322,7 @@ Data transformation pipeline and business logic:
 - DB 5: Pipeline tracking
 - DB 6: Credits cache
 - DB 7: Rate limiting
-- DB 8: Kuzu client caching
+- DB 8: LadyBug client caching
 
 ### AWS S3
 
@@ -404,8 +405,8 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 - **`graph-infra.yaml`**: Base infrastructure for graph database clusters (security groups, roles, registries)
 - **`graph-volumes.yaml`**: EBS volume management and snapshot automation for graph databases
-- **`kuzu-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Kuzu backend)
-- **`neo4j-writers.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Neo4j backend)
+- **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (LadyBugDB backend)
+- **`graph-neo4j.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Neo4j backend)
 
 #### Observability
 

@@ -157,7 +157,7 @@ uv run examples/custom_graph_demo/01_setup_credentials.py --force  # Force new
 
 **What happens automatically:**
 - Reads `schema.json` from the demo directory
-- Creates new Kuzu graph database with custom schema
+- Creates new LadyBug graph database with custom schema
 - Registers graph with user account
 - Stores graph_id in `credentials/config.json`
 
@@ -213,7 +213,7 @@ uv run examples/custom_graph_demo/03_generate_data.py --regenerate  # Force rege
 1. **Upload**: Files uploaded to S3 (LocalStack in development)
 2. **Stage**: Data loaded into DuckDB staging tables
 3. **Validate**: Automatic data quality checks
-4. **Ingest**: DuckDB → Kuzu graph database via extension
+4. **Ingest**: DuckDB → LadyBug graph database via extension
 5. **Verify**: Counts verified, relationships checked
 
 **Manual execution (if needed):**
@@ -698,7 +698,7 @@ This represents: *Alice works as a Senior Engineer at TechCorp, dedicating 40 ho
 
 1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
 2. Connect to your custom graph database:
-   - **Database Path**: `./data/kuzu-dbs/<graph_id>.kuzu` (get graph_id from `credentials/config.json`)
+   - **Database Path**: `./data/lbug-dbs/<graph_id>.lbug` (get graph_id from `credentials/config.json`)
 3. **Enable "Fetch all edges between vertices"** in settings
 4. Run visualization queries to explore your data
 

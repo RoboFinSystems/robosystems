@@ -101,7 +101,7 @@ uv run examples/accounting_demo/01_setup_credentials.py --force  # Force new
 ### Step 2: Create Graph Database (`02_create_graph.py`)
 
 **What happens automatically:**
-- Creates new Kuzu graph database
+- Creates new LadyBug graph database
 - Registers graph with user account
 - Stores graph_id in `credentials/config.json` for subsequent operations
 
@@ -149,7 +149,7 @@ uv run examples/accounting_demo/03_generate_data.py --months 12  # More data
 1. **Upload**: Files uploaded to S3 (LocalStack in development)
 2. **Stage**: Data loaded into DuckDB staging tables
 3. **Validate**: Automatic data quality checks
-4. **Ingest**: DuckDB → Kuzu graph database via extension
+4. **Ingest**: DuckDB → LadyBug graph database via extension
 5. **Verify**: Counts verified, relationships checked
 
 **Manual execution (if needed):**
@@ -612,7 +612,7 @@ just graph-query <graph_id> "MATCH (t:Transaction) WHERE t.description CONTAINS 
 
 1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
 2. Connect to your accounting graph database:
-   - **Database Path**: `./data/kuzu-dbs/<graph_id>.kuzu` (get graph_id from `credentials/config.json`)
+   - **Database Path**: `./data/lbug-dbs/<graph_id>.lbug` (get graph_id from `credentials/config.json`)
 3. **Enable "Fetch all edges between vertices"** in settings for richer visualizations
 4. Run visualization queries to explore your accounting data
 
