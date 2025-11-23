@@ -219,7 +219,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-password-generator"
       Description: "Neo4j Password Generator Lambda - inline code (no S3)"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt PasswordGeneratorRole.Arn
       Timeout: 60

@@ -263,7 +263,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-key-generator"
       Description: "API Key Generator Lambda - inline code (no S3)"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt ApiKeyGeneratorRole.Arn
       Timeout: 60
@@ -396,7 +396,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-secret-rotation"
       Description: "Graph API Rotation Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt SecretRotationRole.Arn
       Timeout: 60
@@ -576,7 +576,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-instance-monitor"
       Description: "Instance Monitor Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Timeout: 300
       MemorySize: 512

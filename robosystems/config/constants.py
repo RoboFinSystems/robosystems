@@ -199,6 +199,10 @@ ARELLE_DOWNLOAD_TIMEOUT = 10  # seconds
 # XBRL Fixed Limits
 XBRL_EXTERNALIZATION_THRESHOLD = 1024  # characters
 
+# XBRL graph large nodes that require aggressive memory cleanup after LadybugDB ingestion
+# These tables contain millions of rows and consume significant memory
+XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,FactDimension,Report"
+
 # SEC API Rate Limiting
 SEC_RATE_LIMIT = 10  # requests per second (SEC.gov requirement)
 

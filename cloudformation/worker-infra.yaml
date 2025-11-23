@@ -496,7 +496,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-worker-monitor"
       Description: Monitor worker queues and manage ECS task protection
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Code:
         S3Bucket: !Ref LambdaCodeBucket

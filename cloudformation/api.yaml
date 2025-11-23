@@ -176,15 +176,6 @@ Parameters:
     AllowedPattern: ^sg-[0-9a-f]+$
     ConstraintDescription: Must be a valid security group ID
 
-  # LadybugDB Configuration
-  AllowSharedMasterReads:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: Allow fallback read operations from shared master when replicas unavailable
-
   # Tagging Configuration
   ServiceTag:
     Type: String
@@ -606,9 +597,6 @@ Resources:
             # AWS & Container Configuration
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            # LadybugDB Routing Configuration
-            - Name: ALLOW_SHARED_MASTER_READS
-              Value: !Ref AllowSharedMasterReads
             # Cache & Message Queue Configuration
             - Name: VALKEY_URL
               Value: !Ref ValkeyUrl

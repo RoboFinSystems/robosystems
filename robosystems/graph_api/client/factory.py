@@ -434,7 +434,7 @@ class GraphClientFactory:
         Tuple of (target, api_url, api_key)
     """
 
-    if env.ALLOW_SHARED_MASTER_READS:
+    if env.SHARED_MASTER_READS_ENABLED:
       logger.info(f"Routing {graph_id} READ to shared master")
       return (
         RouteTarget.SHARED_MASTER,

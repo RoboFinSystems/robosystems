@@ -74,6 +74,7 @@ from .constants import (
   ARELLE_MIN_SCHEMA_COUNT,
   ARELLE_DOWNLOAD_TIMEOUT,
   XBRL_EXTERNALIZATION_THRESHOLD,
+  XBRL_GRAPH_LARGE_NODES,
   # Resiliency and circuit breaker
   GRAPH_INSTANCE_CACHE_TTL,
   GRAPH_CIRCUIT_BREAKER_THRESHOLD,
@@ -265,7 +266,6 @@ class EnvConfig:
     "CSP_TRUSTED_TYPES_ENABLED",
     bool(get_secret_value("CSP_TRUSTED_TYPES_ENABLED", "true").lower() == "true"),
   )
-  MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
   ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
     "ORG_MEMBER_INVITATIONS_ENABLED",
     bool(get_secret_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true"),
@@ -305,7 +305,10 @@ class EnvConfig:
   GRAPH_REDIS_CACHE_ENABLED = get_bool_env("GRAPH_REDIS_CACHE_ENABLED", True)
   GRAPH_RETRY_LOGIC_ENABLED = get_bool_env("GRAPH_RETRY_LOGIC_ENABLED", True)
   GRAPH_HEALTH_CHECKS_ENABLED = get_bool_env("GRAPH_HEALTH_CHECKS_ENABLED", True)
-  ALLOW_SHARED_MASTER_READS = get_bool_env("ALLOW_SHARED_MASTER_READS", True)
+  SHARED_MASTER_READS_ENABLED = get_bool_env(
+    "SHARED_MASTER_READS_ENABLED",
+    bool(get_secret_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true"),
+  )
 
   # Graph backup encryption and compression are always enabled for security and efficiency
 
@@ -352,19 +355,6 @@ class EnvConfig:
     if get_str_env("ENVIRONMENT", "dev") in ["prod", "staging"]
     else False,
   )
-
-  # ==========================================================================
-  # DATABASE CONFIGURATION - POSTGRESQL
-  # ==========================================================================
-
-  DATABASE_URL = get_secret_value(
-    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
-  )
-  DATABASE_POOL_SIZE = get_int_env("DATABASE_POOL_SIZE", DEFAULT_POOL_SIZE)
-  DATABASE_MAX_OVERFLOW = get_int_env("DATABASE_MAX_OVERFLOW", DEFAULT_MAX_OVERFLOW)
-  DATABASE_POOL_TIMEOUT = get_int_env("DATABASE_POOL_TIMEOUT", DEFAULT_POOL_TIMEOUT)
-  DATABASE_POOL_RECYCLE = get_int_env("DATABASE_POOL_RECYCLE", DEFAULT_POOL_RECYCLE)
-  DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
   # ==========================================================================
   # DATABASE CONFIGURATION - GRAPH DATABASES (MULTI-BACKEND: LADYBUGDB AND NEO4J)
@@ -516,6 +506,19 @@ class EnvConfig:
   INSTANCE_ID = get_str_env("INSTANCE_ID", "")
   CLUSTER_TIER = get_str_env("CLUSTER_TIER", "")
   # ==========================================================================
+  # DATABASE CONFIGURATION - POSTGRESQL
+  # ==========================================================================
+
+  DATABASE_URL = get_secret_value(
+    "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/robosystems"
+  )
+  DATABASE_POOL_SIZE = get_int_env("DATABASE_POOL_SIZE", DEFAULT_POOL_SIZE)
+  DATABASE_MAX_OVERFLOW = get_int_env("DATABASE_MAX_OVERFLOW", DEFAULT_MAX_OVERFLOW)
+  DATABASE_POOL_TIMEOUT = get_int_env("DATABASE_POOL_TIMEOUT", DEFAULT_POOL_TIMEOUT)
+  DATABASE_POOL_RECYCLE = get_int_env("DATABASE_POOL_RECYCLE", DEFAULT_POOL_RECYCLE)
+  DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
+
+  # ==========================================================================
   # CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
   # ==========================================================================
 
@@ -584,6 +587,71 @@ class EnvConfig:
 
   # Distributed lock TTLs
   INGESTION_LOCK_TTL = get_int_env("INGESTION_LOCK_TTL", 3600)  # 1 hour
+
+  # ==========================================================================
+  # PERFORMANCE AND SCALING
+  # ==========================================================================
+
+  # Query queue configuration
+  QUERY_QUEUE_MAX_SIZE = get_int_env("QUERY_QUEUE_MAX_SIZE", DEFAULT_QUEUE_SIZE)
+  QUERY_QUEUE_MAX_CONCURRENT = get_int_env(
+    "QUERY_QUEUE_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT
+  )
+  QUERY_QUEUE_MAX_PER_USER = get_int_env(
+    "QUERY_QUEUE_MAX_PER_USER", QUERY_QUEUE_MAX_PER_USER
+  )
+  QUERY_QUEUE_TIMEOUT = get_int_env("QUERY_QUEUE_TIMEOUT", QUERY_QUEUE_TIMEOUT)
+  QUERY_DEFAULT_PRIORITY = get_int_env("QUERY_DEFAULT_PRIORITY", QUERY_DEFAULT_PRIORITY)
+  QUERY_PRIORITY_BOOST_PREMIUM = get_int_env(
+    "QUERY_PRIORITY_BOOST_PREMIUM", QUERY_PRIORITY_BOOST_PREMIUM
+  )
+
+  # Admission control
+  ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  )
+  ADMISSION_CPU_THRESHOLD = get_float_env(
+    "ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
+  )
+  ADMISSION_QUEUE_THRESHOLD = get_float_env(
+    "ADMISSION_QUEUE_THRESHOLD", ADMISSION_QUEUE_THRESHOLD_DEFAULT
+  )
+  ADMISSION_CHECK_INTERVAL = get_float_env(
+    "ADMISSION_CHECK_INTERVAL", ADMISSION_CHECK_INTERVAL
+  )
+
+  # LadybugDB-specific admission control (can override general settings)
+  LBUG_ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD
+  )
+  LBUG_ADMISSION_CPU_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD
+  )
+  LBUG_MAX_CONNECTIONS_PER_DB = get_int_env("LBUG_MAX_CONNECTIONS_PER_DB", 10)
+  LBUG_CONNECTION_TTL_MINUTES = get_float_env(
+    "LBUG_CONNECTION_TTL_MINUTES", 30.0
+  )  # 30 minutes default
+  LBUG_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
+    "LBUG_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
+  )  # 5 minutes default
+
+  # Load shedding
+  LOAD_SHED_START_PRESSURE = get_float_env(
+    "LOAD_SHED_START_PRESSURE", LOAD_SHED_START_PRESSURE_DEFAULT
+  )
+  LOAD_SHED_STOP_PRESSURE = get_float_env(
+    "LOAD_SHED_STOP_PRESSURE", LOAD_SHED_STOP_PRESSURE_DEFAULT
+  )
+
+  # SSE (Server-Sent Events)
+  MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
+  SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
+  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
+  # SSE Rate limiting
+  RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
+  RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
+    "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
+  )
 
   # ==========================================================================
   # AWS CONFIGURATION
@@ -724,21 +792,14 @@ class EnvConfig:
     "XBRL_EXTERNALIZATION_THRESHOLD", XBRL_EXTERNALIZATION_THRESHOLD
   )
 
-  # XBRL graph large nodes that require aggressive memory cleanup after LadybugDB ingestion
+  # XBRL graph large nodes (imported from constants.py - not configurable via env)
   # These tables contain millions of rows and consume significant memory
-  XBRL_GRAPH_LARGE_NODES = get_str_env(
-    "XBRL_GRAPH_LARGE_NODES",
-    "Fact,Element,Label,Association,Structure,FactDimension,Report",
-  )
+  XBRL_GRAPH_LARGE_NODES = XBRL_GRAPH_LARGE_NODES
 
   # MCP (Model Context Protocol)
+  MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
   MCP_MAX_RESULT_ROWS = get_int_env("MCP_MAX_RESULT_ROWS", DEFAULT_QUERY_LIMIT)
   MCP_MAX_RESULT_SIZE_MB = get_float_env("MCP_MAX_RESULT_SIZE_MB", 5.0)
-
-  # Agent memory configuration
-  AGENT_MEMORY_BACKEND = get_str_env(
-    "AGENT_MEMORY_BACKEND", "memory"
-  )  # Options: memory, subgraph, hybrid
 
   # ==========================================================================
   # BILLING AND SUBSCRIPTIONS
@@ -747,71 +808,6 @@ class EnvConfig:
   # Credit allocation schedule
   CREDIT_ALLOCATION_DAY = get_int_env("CREDIT_ALLOCATION_DAY", CREDIT_ALLOCATION_DAY)
   CREDIT_ALLOCATION_HOUR = get_int_env("CREDIT_ALLOCATION_HOUR", CREDIT_ALLOCATION_HOUR)
-
-  # ==========================================================================
-  # PERFORMANCE AND SCALING
-  # ==========================================================================
-
-  # Query queue configuration
-  QUERY_QUEUE_MAX_SIZE = get_int_env("QUERY_QUEUE_MAX_SIZE", DEFAULT_QUEUE_SIZE)
-  QUERY_QUEUE_MAX_CONCURRENT = get_int_env(
-    "QUERY_QUEUE_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT
-  )
-  QUERY_QUEUE_MAX_PER_USER = get_int_env(
-    "QUERY_QUEUE_MAX_PER_USER", QUERY_QUEUE_MAX_PER_USER
-  )
-  QUERY_QUEUE_TIMEOUT = get_int_env("QUERY_QUEUE_TIMEOUT", QUERY_QUEUE_TIMEOUT)
-  QUERY_DEFAULT_PRIORITY = get_int_env("QUERY_DEFAULT_PRIORITY", QUERY_DEFAULT_PRIORITY)
-  QUERY_PRIORITY_BOOST_PREMIUM = get_int_env(
-    "QUERY_PRIORITY_BOOST_PREMIUM", QUERY_PRIORITY_BOOST_PREMIUM
-  )
-
-  # Admission control
-  ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
-  )
-  ADMISSION_CPU_THRESHOLD = get_float_env(
-    "ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
-  )
-  ADMISSION_QUEUE_THRESHOLD = get_float_env(
-    "ADMISSION_QUEUE_THRESHOLD", ADMISSION_QUEUE_THRESHOLD_DEFAULT
-  )
-  ADMISSION_CHECK_INTERVAL = get_float_env(
-    "ADMISSION_CHECK_INTERVAL", ADMISSION_CHECK_INTERVAL
-  )
-
-  # LadybugDB-specific admission control (can override general settings)
-  LBUG_ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "LBUG_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD
-  )
-  LBUG_ADMISSION_CPU_THRESHOLD = get_float_env(
-    "LBUG_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD
-  )
-  LBUG_MAX_CONNECTIONS_PER_DB = get_int_env("LBUG_MAX_CONNECTIONS_PER_DB", 10)
-  LBUG_CONNECTION_TTL_MINUTES = get_float_env(
-    "LBUG_CONNECTION_TTL_MINUTES", 30.0
-  )  # 30 minutes default
-  LBUG_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
-    "LBUG_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
-  )  # 5 minutes default
-
-  # Load shedding
-  LOAD_SHED_START_PRESSURE = get_float_env(
-    "LOAD_SHED_START_PRESSURE", LOAD_SHED_START_PRESSURE_DEFAULT
-  )
-  LOAD_SHED_STOP_PRESSURE = get_float_env(
-    "LOAD_SHED_STOP_PRESSURE", LOAD_SHED_STOP_PRESSURE_DEFAULT
-  )
-
-  # SSE (Server-Sent Events)
-  MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
-  SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
-  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
-  # SSE Rate limiting
-  RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
-  RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
-    "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
-  )
 
   # ==========================================================================
   # OBSERVABILITY

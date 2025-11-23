@@ -220,7 +220,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-manager"
       Description: "Volume manager Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Timeout: 300
       MemorySize: 256
@@ -429,7 +429,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-monitor"
       Description: "Volume monitor Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Role: !GetAtt VolumeMonitorLambdaRole.Arn
       Timeout: 300
@@ -498,7 +498,7 @@ Resources:
     Condition: HasSnapshotCreatorCode
     Properties:
       FunctionName: !Sub "${AWS::StackName}-snapshot-creator"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt SnapshotLambdaRole.Arn
       Timeout: 300
@@ -565,7 +565,7 @@ Resources:
     Condition: HasSnapshotSelectorCode
     Properties:
       FunctionName: !Sub "${AWS::StackName}-snapshot-selector"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.lambda_handler
       Role: !GetAtt SnapshotSelectorLambdaRole.Arn
       Timeout: 300
@@ -991,7 +991,7 @@ Resources:
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-detachment"
       Description: "Volume detachment Lambda - auto-updates via S3 key hash"
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: index.handler
       Timeout: 300
       Role: !GetAtt VolumeDetachmentRole.Arn
