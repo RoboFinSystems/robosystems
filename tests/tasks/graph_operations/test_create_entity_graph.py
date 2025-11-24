@@ -362,3 +362,291 @@ class TestCreateEntityWithNewGraphSSETask:
     result_data = result.get()
     assert result_data["graph_id"] == "kgminimal"
     assert result_data["status"] == "created"
+
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.get_db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.GraphSubscriptionService"
+  )
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.EntityGraphServiceSync"
+  )
+  def test_create_entity_with_billing_subscription(
+    self,
+    mock_service_class,
+    mock_db_session,
+    mock_subscription_service_class,
+    mock_get_db,
+  ):
+    """Test entity creation with billing subscription."""
+    mock_service = MagicMock()
+    mock_service.create_entity_with_new_graph.return_value = {
+      "graph_id": "kgbilling123",
+      "entity_id": "entity-billing",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription = MagicMock()
+    mock_subscription.id = "sub_123"
+    mock_subscription_service = MagicMock()
+    mock_subscription_service.create_graph_subscription.return_value = mock_subscription
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    entity_data = {
+      "name": "Billing Test Corp",
+      "type": "company",
+      "graph_tier": "ladybug-large",
+    }
+
+    result = create_entity_with_new_graph_task.apply(args=[entity_data, "user-billing"])  # type: ignore[attr-defined]
+
+    assert result.successful()
+    mock_subscription_service.create_graph_subscription.assert_called_once_with(
+      user_id="user-billing",
+      graph_id="kgbilling123",
+      plan_name="ladybug-large",
+    )
+    mock_session.close.assert_called_once()
+
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.get_db_session")
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.EntityGraphServiceSync"
+  )
+  def test_create_entity_skip_billing(
+    self, mock_service_class, mock_db_session, mock_get_db
+  ):
+    """Test entity creation with skip_billing flag."""
+    mock_service = MagicMock()
+    mock_service.create_entity_with_new_graph.return_value = {
+      "graph_id": "kgskipbilling",
+      "entity_id": "entity-skipbilling",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    entity_data = {
+      "name": "Skip Billing Corp",
+      "type": "company",
+      "skip_billing": True,
+    }
+
+    result = create_entity_with_new_graph_task.apply(  # type: ignore[attr-defined]
+      args=[entity_data, "user-skipbilling"]
+    )
+
+    assert result.successful()
+    mock_get_db.assert_not_called()
+
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.get_db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.GraphSubscriptionService"
+  )
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.EntityGraphServiceSync"
+  )
+  def test_create_entity_billing_error_continues(
+    self,
+    mock_service_class,
+    mock_db_session,
+    mock_subscription_service_class,
+    mock_get_db,
+  ):
+    """Test entity creation continues even if billing subscription fails."""
+    mock_service = MagicMock()
+    mock_service.create_entity_with_new_graph.return_value = {
+      "graph_id": "kgbillingerr",
+      "entity_id": "entity-billingerr",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription_service = MagicMock()
+    mock_subscription_service.create_graph_subscription.side_effect = RuntimeError(
+      "Payment service unavailable"
+    )
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    entity_data = {
+      "name": "Billing Error Corp",
+      "type": "company",
+      "graph_tier": "ladybug-standard",
+    }
+
+    result = create_entity_with_new_graph_task.apply(  # type: ignore[attr-defined]
+      args=[entity_data, "user-billingerr"]
+    )
+
+    assert result.successful()
+    result_data = result.get()
+    assert result_data["graph_id"] == "kgbillingerr"
+    mock_session.close.assert_called_once()
+
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.get_db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.GraphSubscriptionService"
+  )
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.EntityGraphServiceSync"
+  )
+  def test_create_entity_default_tier(
+    self,
+    mock_service_class,
+    mock_db_session,
+    mock_subscription_service_class,
+    mock_get_db,
+  ):
+    """Test entity creation uses default tier when not specified."""
+    mock_service = MagicMock()
+    mock_service.create_entity_with_new_graph.return_value = {
+      "graph_id": "kgdefaulttier",
+      "entity_id": "entity-defaulttier",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription = MagicMock()
+    mock_subscription.id = "sub_default"
+    mock_subscription_service = MagicMock()
+    mock_subscription_service.create_graph_subscription.return_value = mock_subscription
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    entity_data = {
+      "name": "Default Tier Corp",
+      "type": "company",
+    }
+
+    result = create_entity_with_new_graph_task.apply(  # type: ignore[attr-defined]
+      args=[entity_data, "user-defaulttier"]
+    )
+
+    assert result.successful()
+    mock_subscription_service.create_graph_subscription.assert_called_once_with(
+      user_id="user-defaulttier",
+      graph_id="kgdefaulttier",
+      plan_name="ladybug-standard",
+    )
+
+
+class TestCreateEntityWithNewGraphSSEBillingPaths:
+  """Test SSE task billing paths."""
+
+  @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.get_db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.GraphSubscriptionService"
+  )
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.EntityGraphServiceSync"
+  )
+  def test_create_entity_sse_with_billing(
+    self,
+    mock_service_class,
+    mock_db_session,
+    mock_subscription_service_class,
+    mock_get_db,
+    mock_tracker_class,
+  ):
+    """Test SSE entity creation with billing subscription."""
+    mock_service = MagicMock()
+    mock_service.create_entity_with_new_graph.return_value = {
+      "graph_id": "kgssebilling",
+      "entity_id": "entity-ssebilling",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_tracker = MagicMock()
+    mock_tracker_class.return_value = mock_tracker
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription = MagicMock()
+    mock_subscription.id = "sub_sse_123"
+    mock_subscription_service = MagicMock()
+    mock_subscription_service.create_graph_subscription.return_value = mock_subscription
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    entity_data = {
+      "name": "SSE Billing Corp",
+      "type": "company",
+      "graph_tier": "ladybug-xlarge",
+    }
+
+    result = create_entity_with_new_graph_sse_task.apply(  # type: ignore[attr-defined]
+      args=[entity_data, "user-ssebilling", "op-ssebilling"]
+    )
+
+    assert result.successful()
+    mock_tracker.emit_progress.assert_any_call("Creating billing subscription...", 95)
+    mock_subscription_service.create_graph_subscription.assert_called_once_with(
+      user_id="user-ssebilling",
+      graph_id="kgssebilling",
+      plan_name="ladybug-xlarge",
+    )
+
+  @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.get_db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.GraphSubscriptionService"
+  )
+  @patch("robosystems.tasks.graph_operations.create_entity_graph.db_session")
+  @patch(
+    "robosystems.tasks.graph_operations.create_entity_graph.EntityGraphServiceSync"
+  )
+  def test_create_entity_sse_billing_error(
+    self,
+    mock_service_class,
+    mock_db_session,
+    mock_subscription_service_class,
+    mock_get_db,
+    mock_tracker_class,
+  ):
+    """Test SSE entity creation continues when billing fails."""
+    mock_service = MagicMock()
+    mock_service.create_entity_with_new_graph.return_value = {
+      "graph_id": "kgssebillingerr",
+      "entity_id": "entity-ssebillingerr",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_tracker = MagicMock()
+    mock_tracker_class.return_value = mock_tracker
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription_service = MagicMock()
+    mock_subscription_service.create_graph_subscription.side_effect = RuntimeError(
+      "Stripe API timeout"
+    )
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    entity_data = {
+      "name": "SSE Billing Error Corp",
+      "type": "company",
+    }
+
+    result = create_entity_with_new_graph_sse_task.apply(  # type: ignore[attr-defined]
+      args=[entity_data, "user-ssebillingerr", "op-ssebillingerr"]
+    )
+
+    assert result.successful()
+    result_data = result.get()
+    assert result_data["graph_id"] == "kgssebillingerr"
+    mock_tracker.emit_completion.assert_called_once()

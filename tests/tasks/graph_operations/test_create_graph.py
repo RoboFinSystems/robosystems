@@ -215,3 +215,268 @@ class TestCreateGraphTask:
     assert call_args["tier"] == "ladybug-standard"  # Default tier
     assert call_args["initial_data"] is None
     assert call_args["custom_schema"] is None
+
+  @patch("robosystems.tasks.graph_operations.create_graph.get_db_session")
+  @patch("robosystems.tasks.graph_operations.create_graph.GraphSubscriptionService")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_create_graph_with_billing_subscription(
+    self, mock_service_class, mock_subscription_service_class, mock_get_db
+  ):
+    """Test graph creation creates billing subscription."""
+    mock_service = MagicMock()
+    mock_service.create_graph.return_value = {
+      "graph_id": "kg123456",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription_service = MagicMock()
+    mock_subscription = MagicMock()
+    mock_subscription.id = "sub-123"
+    mock_subscription_service.create_graph_subscription.return_value = mock_subscription
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    task_data = {
+      "user_id": "user-123",
+      "tier": "ladybug-large",
+    }
+
+    result = create_graph_task.apply(args=[task_data]).get()  # type: ignore[attr-defined]
+
+    assert result["graph_id"] == "kg123456"
+    mock_subscription_service.create_graph_subscription.assert_called_once_with(
+      user_id="user-123",
+      graph_id="kg123456",
+      plan_name="ladybug-large",
+    )
+    mock_session.close.assert_called_once()
+
+  @patch("robosystems.tasks.graph_operations.create_graph.get_db_session")
+  @patch("robosystems.tasks.graph_operations.create_graph.GraphSubscriptionService")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_create_graph_skip_billing(
+    self, mock_service_class, mock_subscription_service_class, mock_get_db
+  ):
+    """Test graph creation with skip_billing flag."""
+    mock_service = MagicMock()
+    mock_service.create_graph.return_value = {
+      "graph_id": "kg123456",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    task_data = {
+      "user_id": "user-123",
+      "skip_billing": True,
+    }
+
+    result = create_graph_task.apply(args=[task_data]).get()  # type: ignore[attr-defined]
+
+    assert result["graph_id"] == "kg123456"
+    mock_subscription_service_class.assert_not_called()
+    mock_get_db.assert_not_called()
+
+  @patch("robosystems.tasks.graph_operations.create_graph.get_db_session")
+  @patch("robosystems.tasks.graph_operations.create_graph.GraphSubscriptionService")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_create_graph_billing_error_continues(
+    self, mock_service_class, mock_subscription_service_class, mock_get_db
+  ):
+    """Test graph creation continues despite billing subscription error."""
+    mock_service = MagicMock()
+    mock_service.create_graph.return_value = {
+      "graph_id": "kg123456",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription_service = MagicMock()
+    mock_subscription_service.create_graph_subscription.side_effect = Exception(
+      "Billing API error"
+    )
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    task_data = {
+      "user_id": "user-123",
+      "tier": "ladybug-standard",
+    }
+
+    result = create_graph_task.apply(args=[task_data]).get()  # type: ignore[attr-defined]
+
+    assert result["graph_id"] == "kg123456"
+    assert result["status"] == "created"
+    mock_session.close.assert_called_once()
+
+  @patch("robosystems.tasks.graph_operations.create_graph.celery_app")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_create_graph_task_cancellation(self, mock_service_class, mock_celery_app):
+    """Test graph creation handles task cancellation."""
+    mock_service = MagicMock()
+    mock_service_class.return_value = mock_service
+
+    mock_result = MagicMock()
+    mock_result.state = "REVOKED"
+    mock_celery_app.AsyncResult.return_value = mock_result
+
+    def cancellation_check(*args, **kwargs):
+      callback = kwargs.get("cancellation_callback")
+      if callback:
+        callback()
+      return {"graph_id": "kg123456", "status": "created"}
+
+    mock_service.create_graph.side_effect = cancellation_check
+
+    task_data = {"user_id": "user-123"}
+
+    with pytest.raises(Exception, match="Task was cancelled"):
+      create_graph_task.apply(args=[task_data]).get()  # type: ignore[attr-defined]
+
+
+class TestCreateGraphSSETask:
+  """Test cases for create_graph_sse_task."""
+
+  @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
+  @patch("robosystems.tasks.graph_operations.create_graph.get_db_session")
+  @patch("robosystems.tasks.graph_operations.create_graph.GraphSubscriptionService")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_sse_graph_creation_success(
+    self,
+    mock_service_class,
+    mock_subscription_service_class,
+    mock_get_db,
+    mock_tracker_class,
+  ):
+    """Test successful SSE graph creation with progress tracking."""
+    from robosystems.tasks.graph_operations.create_graph import create_graph_sse_task
+
+    mock_service = MagicMock()
+    mock_service.create_graph.return_value = {
+      "graph_id": "kg123456",
+      "status": "created",
+    }
+    mock_service_class.return_value = mock_service
+
+    mock_session = MagicMock()
+    mock_get_db.return_value = iter([mock_session])
+
+    mock_subscription_service = MagicMock()
+    mock_subscription = MagicMock()
+    mock_subscription.id = "sub-123"
+    mock_subscription_service.create_graph_subscription.return_value = mock_subscription
+    mock_subscription_service_class.return_value = mock_subscription_service
+
+    mock_tracker = MagicMock()
+    mock_tracker_class.return_value = mock_tracker
+
+    task_data = {
+      "user_id": "user-123",
+      "tier": "ladybug-standard",
+      "metadata": {"graph_name": "Test Graph"},
+    }
+
+    result = create_graph_sse_task.apply(  # type: ignore[attr-defined]
+      args=[task_data, "op-123"]
+    ).get()
+
+    assert result["graph_id"] == "kg123456"
+    mock_tracker.emit_progress.assert_any_call("Starting graph creation...", 0)
+    mock_tracker.emit_progress.assert_any_call("Validating graph configuration...", 10)
+    mock_tracker.emit_progress.assert_any_call("Creating billing subscription...", 95)
+    mock_tracker.emit_completion.assert_called_once()
+
+  @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_sse_graph_creation_with_progress_callback(
+    self, mock_service_class, mock_tracker_class
+  ):
+    """Test SSE graph creation invokes progress callback."""
+    from robosystems.tasks.graph_operations.create_graph import create_graph_sse_task
+
+    mock_service = MagicMock()
+
+    def create_with_progress(*args, **kwargs):
+      progress_cb = kwargs.get("progress_callback")
+      if progress_cb:
+        progress_cb("Creating database...", 30)
+        progress_cb("Installing schema...", 60)
+      return {"graph_id": "kg123456", "status": "created"}
+
+    mock_service.create_graph.side_effect = create_with_progress
+    mock_service_class.return_value = mock_service
+
+    mock_tracker = MagicMock()
+    mock_tracker_class.return_value = mock_tracker
+
+    task_data = {
+      "user_id": "user-123",
+      "skip_billing": True,
+    }
+
+    create_graph_sse_task.apply(args=[task_data, "op-123"]).get()  # type: ignore[attr-defined]
+
+    mock_tracker.emit_progress.assert_any_call("Creating database...", 30)
+    mock_tracker.emit_progress.assert_any_call("Installing schema...", 60)
+
+  @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_sse_graph_creation_error(self, mock_service_class, mock_tracker_class):
+    """Test SSE graph creation handles errors with progress tracking."""
+    from robosystems.tasks.graph_operations.create_graph import create_graph_sse_task
+
+    mock_service = MagicMock()
+    error = ValueError("Invalid configuration")
+    mock_service.create_graph.side_effect = error
+    mock_service_class.return_value = mock_service
+
+    mock_tracker = MagicMock()
+    mock_tracker_class.return_value = mock_tracker
+
+    task_data = {
+      "user_id": "user-123",
+      "metadata": {"graph_name": "Test Graph"},
+    }
+
+    with pytest.raises(ValueError, match="Invalid configuration"):
+      create_graph_sse_task.apply(args=[task_data, "op-123"]).get()  # type: ignore[attr-defined]
+
+    mock_tracker.emit_error.assert_called_once()
+    call_args = mock_tracker.emit_error.call_args
+    assert call_args[0][0] == error
+    assert call_args[1]["additional_context"]["user_id"] == "user-123"
+    assert call_args[1]["additional_context"]["graph_name"] == "Test Graph"
+
+  @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
+  @patch("robosystems.tasks.graph_operations.create_graph.GenericGraphServiceSync")
+  def test_sse_graph_creation_cancellation(
+    self, mock_service_class, mock_tracker_class
+  ):
+    """Test SSE graph creation handles cancellation."""
+    from robosystems.tasks.graph_operations.create_graph import create_graph_sse_task
+
+    mock_service = MagicMock()
+    mock_service_class.return_value = mock_service
+
+    mock_tracker = MagicMock()
+    mock_tracker.check_cancellation.side_effect = Exception("Task cancelled")
+    mock_tracker_class.return_value = mock_tracker
+
+    def check_cancel(*args, **kwargs):
+      callback = kwargs.get("cancellation_callback")
+      if callback:
+        callback()
+      return {"graph_id": "kg123456", "status": "created"}
+
+    mock_service.create_graph.side_effect = check_cancel
+
+    task_data = {"user_id": "user-123"}
+
+    with pytest.raises(Exception, match="Task cancelled"):
+      create_graph_sse_task.apply(args=[task_data, "op-123"]).get()  # type: ignore[attr-defined]
+
+    mock_tracker.emit_error.assert_called_once()

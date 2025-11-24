@@ -4,7 +4,8 @@ Test Suite for SEC XBRL Orchestration Tasks
 Tests the phase-based pipeline orchestration logic.
 """
 
-from unittest.mock import MagicMock, patch
+import pytest
+from unittest.mock import MagicMock, patch, Mock
 from datetime import datetime
 
 
@@ -662,3 +663,467 @@ class TestPipelineConfiguration:
 
     assert download_batch < process_batch
     assert process_batch < ingest_batch
+
+
+@pytest.fixture(autouse=True)
+def mock_celery_async_result():
+  """Mock Celery AsyncResult to avoid Redis connection during tests."""
+  with patch(
+    "robosystems.tasks.sec_xbrl.orchestration.celery_app.AsyncResult"
+  ) as mock_result_class:
+    mock_result = Mock()
+    mock_result.state = "PENDING"
+    mock_result_class.return_value = mock_result
+    yield mock_result_class
+
+
+class TestDownloadCompanyFilingsTask:
+  """Test cases for download_company_filings Celery task."""
+
+  @patch("robosystems.operations.pipelines.sec_xbrl_filings.SECXBRLPipeline")
+  def test_successful_download(self, mock_pipeline_class):
+    """Test successful filing download for a company."""
+    from robosystems.tasks.sec_xbrl.orchestration import download_company_filings
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.raw_bucket = "test-bucket"
+    mock_pipeline.s3_client = MagicMock()
+
+    mock_pipeline._discover_entity_filings_by_year.return_value = [
+      {"accessionNumber": "0001234567-89-012345"},
+      {"accessionNumber": "0001234567-89-012346"},
+    ]
+
+    mock_pipeline._collect_raw_filing.return_value = {
+      "status": "success",
+      "key": "raw/year=2024/0001045810/000123456789012345.zip",
+    }
+
+    mock_pipeline_class.return_value = mock_pipeline
+
+    result = download_company_filings.apply(
+      args=[],
+      kwargs={
+        "cik": "0001045810",
+        "years": [2024],
+        "pipeline_id": "test-pipeline-123",
+        "skip_if_exists": False,
+      },
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["cik"] == "0001045810"
+    assert result["total_downloaded"] == 2
+    assert 2024 in result["years"]
+
+  @patch("robosystems.operations.pipelines.sec_xbrl_filings.SECXBRLPipeline")
+  def test_download_with_cache(self, mock_pipeline_class):
+    """Test download respects S3 cache."""
+    from robosystems.tasks.sec_xbrl.orchestration import download_company_filings
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.raw_bucket = "test-bucket"
+    mock_pipeline.s3_client = MagicMock()
+
+    mock_pipeline._discover_entity_filings_by_year.return_value = [
+      {"accessionNumber": "0001234567-89-012345"},
+    ]
+
+    mock_pipeline.s3_client.head_object.return_value = {"ContentLength": 1000}
+
+    mock_pipeline_class.return_value = mock_pipeline
+
+    result = download_company_filings.apply(
+      args=[],
+      kwargs={
+        "cik": "0001045810",
+        "years": [2024],
+        "skip_if_exists": True,
+      },
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["total_cached"] == 1
+    assert result["total_downloaded"] == 0
+
+
+class TestHandlePhaseCompletionTask:
+  """Test cases for handle_phase_completion Celery task."""
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.cleanup_phase_connections")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.publish_phase_metrics")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_successful_phase_completion(
+    self, mock_orchestrator_class, mock_publish, mock_cleanup
+  ):
+    """Test successful phase completion handling."""
+    from robosystems.tasks.sec_xbrl.orchestration import handle_phase_completion
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator._load_state.return_value = {"phases": {"download": {}}}
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    mock_cleanup_task = MagicMock()
+    mock_cleanup_task.id = "cleanup-123"
+    mock_cleanup.apply_async.return_value = mock_cleanup_task
+
+    results = [
+      {
+        "status": "success",
+        "cik": "0001045810",
+        "total_downloaded": 10,
+        "total_cached": 5,
+      },
+      {
+        "status": "success",
+        "cik": "0000789019",
+        "total_downloaded": 8,
+        "total_cached": 3,
+      },
+    ]
+
+    result = handle_phase_completion.apply(
+      args=[],
+      kwargs={
+        "results": results,
+        "phase": "download",
+        "start_time": "2024-01-01T10:00:00",
+        "total_companies": 2,
+      },
+    ).get()
+
+    assert result["status"] == "completed"
+    assert result["phase"] == "download"
+    assert result["metrics"]["companies_processed"] == 2
+    assert result["metrics"]["companies_failed"] == 0
+    mock_publish.assert_called_once()
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.smart_retry_failed_companies")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.cleanup_phase_connections")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.publish_phase_metrics")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_phase_completion_with_failures(
+    self, mock_orchestrator_class, mock_publish, mock_cleanup, mock_retry
+  ):
+    """Test phase completion with some failures."""
+    from robosystems.tasks.sec_xbrl.orchestration import handle_phase_completion
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator._load_state.return_value = {"phases": {"download": {}}}
+    mock_orchestrator._classify_error.return_value = "rate_limit"
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    mock_cleanup_task = MagicMock()
+    mock_cleanup_task.id = "cleanup-123"
+    mock_cleanup.apply_async.return_value = mock_cleanup_task
+
+    results = [
+      {
+        "status": "success",
+        "cik": "0001045810",
+        "total_downloaded": 10,
+        "total_cached": 0,
+      },
+      {"status": "failed", "cik": "0000789019", "error": "Rate limit exceeded"},
+    ]
+
+    result = handle_phase_completion.apply(
+      args=[],
+      kwargs={
+        "results": results,
+        "phase": "download",
+        "start_time": "2024-01-01T10:00:00",
+        "total_companies": 2,
+      },
+    ).get()
+
+    assert result["status"] == "completed"
+    assert result["metrics"]["companies_processed"] == 1
+    assert result["metrics"]["companies_failed"] == 1
+    assert "rate_limit" in result["metrics"]["error_breakdown"]
+    mock_retry.apply_async.assert_called_once()
+
+
+class TestCleanupPhaseConnectionsTask:
+  """Test cases for cleanup_phase_connections Celery task."""
+
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
+  def test_successful_cleanup(self, mock_factory):
+    """Test successful connection cleanup."""
+    from robosystems.tasks.sec_xbrl.orchestration import cleanup_phase_connections
+
+    mock_factory._connection_pools = {"pool1": {}, "pool2": {}}
+    mock_factory._pool_stats = {"stats": {}}
+
+    result = cleanup_phase_connections.apply(
+      args=[],
+      kwargs={"phase": "download"},
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["phase"] == "download"
+    assert len(mock_factory._connection_pools) == 0
+
+  @patch("robosystems.config.valkey_registry.create_redis_client")
+  @patch("robosystems.graph_api.client.factory.GraphClientFactory")
+  def test_ingest_phase_cleanup(self, mock_factory, mock_redis_client):
+    """Test cleanup after ingest phase includes Redis."""
+    from robosystems.tasks.sec_xbrl.orchestration import cleanup_phase_connections
+
+    mock_factory._connection_pools = {}
+
+    mock_redis = MagicMock()
+    mock_redis.connection_pool = MagicMock()
+    mock_redis_client.return_value = mock_redis
+
+    result = cleanup_phase_connections.apply(
+      args=[],
+      kwargs={"phase": "ingest"},
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["phase"] == "ingest"
+    mock_redis.connection_pool.disconnect.assert_called_once()
+
+
+class TestSmartRetryFailedCompaniesTask:
+  """Test cases for smart_retry_failed_companies Celery task."""
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.download_company_filings")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_retry_rate_limited_companies(self, mock_orchestrator_class, mock_download):
+    """Test retry of rate-limited companies."""
+    from robosystems.tasks.sec_xbrl.orchestration import smart_retry_failed_companies
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.get_failed_companies.return_value = [
+      {"cik": "0001045810", "error_type": "rate_limit", "retry_count": 0},
+      {"cik": "0000789019", "error_type": "rate_limit", "retry_count": 1},
+    ]
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    result = smart_retry_failed_companies.apply(
+      args=[],
+      kwargs={"phase": "download", "max_attempts": 3},
+    ).get()
+
+    assert result["status"] == "retry_started"
+    assert result["retried"] == 2
+    assert result["skipped"] == 0
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_skip_max_attempts_reached(self, mock_orchestrator_class):
+    """Test skipping companies that reached max attempts."""
+    from robosystems.tasks.sec_xbrl.orchestration import smart_retry_failed_companies
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.get_failed_companies.return_value = [
+      {"cik": "0001045810", "error_type": "timeout", "retry_count": 3},
+    ]
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    result = smart_retry_failed_companies.apply(
+      args=[],
+      kwargs={"phase": "download", "max_attempts": 3},
+    ).get()
+
+    assert result["skipped"] == 1
+    assert result["retried"] == 0
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_skip_data_errors(self, mock_orchestrator_class):
+    """Test skipping companies with data errors."""
+    from robosystems.tasks.sec_xbrl.orchestration import smart_retry_failed_companies
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator.get_failed_companies.return_value = [
+      {"cik": "0001045810", "error_type": "data_error", "retry_count": 0},
+      {"cik": "0000789019", "error_type": "not_found", "retry_count": 0},
+    ]
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    result = smart_retry_failed_companies.apply(
+      args=[],
+      kwargs={"phase": "download"},
+    ).get()
+
+    assert result["skipped"] == 2
+    assert result["retried"] == 0
+
+
+class TestPlanPhasedProcessingTask:
+  """Test cases for plan_phased_processing Celery task."""
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  @patch("robosystems.adapters.sec.SECClient")
+  def test_plan_with_max_companies(
+    self, mock_sec_client_class, mock_orchestrator_class
+  ):
+    """Test planning with max companies limit."""
+    from robosystems.tasks.sec_xbrl.orchestration import plan_phased_processing
+    import pandas as pd
+
+    mock_sec_client = MagicMock()
+    mock_sec_client.get_companies_df.return_value = pd.DataFrame(
+      {
+        "cik_str": [1045810, 789019, 1018724, 320193, 1234567],
+      }
+    )
+    mock_sec_client_class.return_value = mock_sec_client
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    result = plan_phased_processing.apply(
+      args=[],
+      kwargs={
+        "start_year": 2023,
+        "end_year": 2024,
+        "max_companies": 3,
+      },
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["companies"] == 3
+    assert result["years"] == [2023, 2024]
+    mock_orchestrator._save_state.assert_called_once()
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  @patch("robosystems.adapters.sec.SECClient")
+  def test_plan_with_cik_filter(self, mock_sec_client_class, mock_orchestrator_class):
+    """Test planning with specific CIK filter."""
+    from robosystems.tasks.sec_xbrl.orchestration import plan_phased_processing
+    import pandas as pd
+
+    mock_sec_client = MagicMock()
+    mock_sec_client.get_companies_df.return_value = pd.DataFrame(
+      {
+        "cik_str": [1045810, 789019],
+      }
+    )
+    mock_sec_client_class.return_value = mock_sec_client
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    result = plan_phased_processing.apply(
+      args=[],
+      kwargs={
+        "start_year": 2024,
+        "end_year": 2024,
+        "cik_filter": "0001045810",
+      },
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["companies"] == 1
+
+
+class TestStartPhaseTask:
+  """Test cases for start_phase Celery task."""
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.orchestrate_download_phase")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_start_download_phase(self, mock_orchestrator_class, mock_orchestrate):
+    """Test starting download phase."""
+    from robosystems.tasks.sec_xbrl.orchestration import start_phase
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator._load_state.return_value = {
+      "companies": ["0001045810", "0000789019"],
+      "years": [2024],
+      "config": {"companies_per_batch": 50},
+    }
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    mock_task = MagicMock()
+    mock_task.id = "download-task-123"
+    mock_orchestrate.apply_async.return_value = mock_task
+
+    result = start_phase.apply(
+      args=[],
+      kwargs={"phase": "download"},
+    ).get()
+
+    assert result["status"] == "started"
+    assert result["phase"] == "download"
+    assert result["companies"] == 2
+    mock_orchestrate.apply_async.assert_called_once()
+
+  @patch("robosystems.tasks.sec_xbrl.ingestion.ingest_sec_data")
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_start_ingest_phase(self, mock_orchestrator_class, mock_ingest):
+    """Test starting ingest phase."""
+    from robosystems.tasks.sec_xbrl.orchestration import start_phase
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator._load_state.return_value = {
+      "companies": ["0001045810"],
+      "years": [2023, 2024],
+      "config": {},
+    }
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    mock_task = MagicMock()
+    mock_task.id = "ingest-task-123"
+    mock_ingest.apply_async.return_value = mock_task
+
+    result = start_phase.apply(
+      args=[],
+      kwargs={"phase": "ingest", "backend": "neo4j"},
+    ).get()
+
+    assert result["status"] == "started"
+    assert result["phase"] == "ingest"
+    assert result["backend"] == "neo4j"
+    assert result["years"] == [2023, 2024]
+    assert mock_ingest.apply_async.call_count == 2
+
+
+class TestGetPhaseStatusTask:
+  """Test cases for get_phase_status Celery task."""
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_get_status_with_checkpoints(self, mock_orchestrator_class):
+    """Test getting status with checkpoint info."""
+    from robosystems.tasks.sec_xbrl.orchestration import get_phase_status
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator._load_state.return_value = {
+      "companies": ["0001045810"],
+      "config": {"max_companies": 1},
+      "stats": {"total_companies": 1},
+      "phases": {
+        "download": {"status": "completed"},
+        "process": {"status": "in_progress"},
+      },
+      "last_updated": "2024-01-01T12:00:00",
+    }
+
+    mock_orchestrator.get_checkpoint.side_effect = lambda phase: (
+      {"completed_items": ["0001045810"], "timestamp": "2024-01-01T11:00:00"}
+      if phase == "download"
+      else None
+    )
+
+    mock_orchestrator.get_failed_companies.return_value = []
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    result = get_phase_status.apply(args=[], kwargs={}).get()
+
+    assert result["status"] == "success"
+    assert "download" in result["phases"]
+    assert result["phases"]["download"]["checkpoint"]["completed_count"] == 1
+
+  @patch("robosystems.tasks.sec_xbrl.orchestration.SECOrchestrator")
+  def test_get_status_no_plan(self, mock_orchestrator_class):
+    """Test getting status when no plan exists."""
+    from robosystems.tasks.sec_xbrl.orchestration import get_phase_status
+
+    mock_orchestrator = MagicMock()
+    mock_orchestrator._load_state.return_value = {"companies": []}
+    mock_orchestrator_class.return_value = mock_orchestrator
+
+    result = get_phase_status.apply(args=[], kwargs={}).get()
+
+    assert result["status"] == "no_plan"
