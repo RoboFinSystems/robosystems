@@ -147,8 +147,9 @@ class TestConsolidationHelpers:
     assert len(files) == 2  # Only parquet files
     assert all(f["Key"].endswith(".parquet") for f in files)
 
+  @patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files")
   @patch("robosystems.tasks.sec_xbrl.consolidation.S3Client")
-  def test_list_s3_files_all_years(self, mock_s3_class):
+  def test_list_s3_files_all_years(self, mock_s3_class, mock_list_s3):
     """Test listing files across all years."""
     mock_s3_client = MagicMock()
     mock_s3_class.return_value = mock_s3_client
@@ -169,42 +170,17 @@ class TestConsolidationHelpers:
           ]
         }
       ],
-      # Files for 2023
-      [
-        {
-          "Contents": [
-            {
-              "Key": "processed/year=2023/nodes/Entity/file1.parquet",
-              "Size": 1000,
-              "LastModified": datetime.now(),
-            }
-          ]
-        }
-      ],
-      # Files for 2024
-      [
-        {
-          "Contents": [
-            {
-              "Key": "processed/year=2024/nodes/Entity/file2.parquet",
-              "Size": 2000,
-              "LastModified": datetime.now(),
-            }
-          ]
-        }
-      ],
     ]
 
-    with patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files") as mock_list:
-      mock_list.side_effect = [
-        [{"Key": "file1.parquet", "Size": 1000}],
-        [{"Key": "file2.parquet", "Size": 2000}],
-      ]
+    mock_list_s3.side_effect = [
+      [{"Key": "file1.parquet", "Size": 1000}],
+      [{"Key": "file2.parquet", "Size": 2000}],
+    ]
 
-      files = list_s3_files_all_years(mock_s3_client, "test-bucket", "nodes", "Entity")
+    files = list_s3_files_all_years(mock_s3_client, "test-bucket", "nodes", "Entity")
 
-      assert len(files) == 2
-      assert sum(f["Size"] for f in files) == 3000
+    assert len(files) == 2
+    assert sum(f["Size"] for f in files) == 3000
 
 
 # Note: The Celery task itself is tested via integration tests.
@@ -214,43 +190,332 @@ class TestConsolidationHelpers:
 class TestConsolidationExecution:
   """Test actual consolidation execution."""
 
-  def test_consolidate_parquet_files(self):
-    """Test the consolidate_parquet_files task exists and is callable."""
-    # Verify it's a Celery task with the expected attributes
+  def test_consolidate_parquet_files_is_task(self):
+    """Test that consolidate_parquet_files is a Celery task."""
     assert hasattr(consolidate_parquet_files, "delay")
     assert hasattr(consolidate_parquet_files, "apply_async")
 
-    # Mock the task execution
-    mock_result = {"status": "success", "files_processed": 0}
-
-    # Create a mock function and assign it
-    def mock_run(**kwargs):
-      return mock_result
-
-    consolidate_parquet_files.run = mock_run  # type: ignore
-
-    result = mock_run(
-      table_type="nodes",
-      table_name="Entity",
-      year=2024,
-      bucket="test-bucket",
-      batch_mode=False,
-      dry_run=True,
-    )
-
-    # Verify result structure
-    assert isinstance(result, dict)
-    assert result["status"] == "success"
-
-  def test_orchestrate_consolidation_phase(self):
-    """Test the orchestrate_consolidation_phase task exists."""
-    # Verify it's a Celery task
+  def test_orchestrate_consolidation_phase_is_task(self):
+    """Test that orchestrate_consolidation_phase is a Celery task."""
     assert hasattr(orchestrate_consolidation_phase, "delay")
     assert hasattr(orchestrate_consolidation_phase, "apply_async")
 
   def test_get_consolidation_status(self):
     """Test getting consolidation status function exists."""
-    # The function exists and returns a dict
     result = get_consolidation_status("pipeline-123")
     assert isinstance(result, dict)
     assert "pipeline_id" in result
+
+
+class TestConsolidateParquetFilesTask:
+  """Integration tests for consolidate_parquet_files Celery task."""
+
+  @patch("robosystems.tasks.sec_xbrl.consolidation.stream_consolidate_batch")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.create_file_batches")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.S3Client")
+  def test_successful_consolidation(
+    self, mock_s3_class, mock_list_files, mock_create_batches, mock_stream_consolidate
+  ):
+    """Test successful parquet file consolidation."""
+    mock_s3 = MagicMock()
+    mock_s3_class.return_value = mock_s3
+
+    source_files = [
+      {
+        "Key": f"file{i}.parquet",
+        "Size": 100 * 1024 * 1024,
+        "LastModified": datetime.now(),
+      }
+      for i in range(10)
+    ]
+
+    def list_files_side_effect(s3_client, bucket, prefix):
+      if "consolidated" in prefix:
+        return []
+      return source_files
+
+    mock_list_files.side_effect = list_files_side_effect
+
+    batches = [[source_files[0], source_files[1]], [source_files[2]]]
+    mock_create_batches.return_value = batches
+
+    mock_stream_consolidate.side_effect = [1000, 500]
+
+    result = consolidate_parquet_files.apply(
+      kwargs={
+        "table_type": "nodes",
+        "table_name": "Entity",
+        "year": 2024,
+        "bucket": "test-bucket",
+        "pipeline_id": "test-pipeline",
+      }
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["table"] == "Entity"
+    assert result["year"] == 2024
+    assert result["source_files"] == 10
+    assert result["consolidated_files"] == 2
+    assert result["total_rows"] == 1500
+    assert "duration_seconds" in result
+    assert "consolidation_ratio" in result
+
+  @patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.S3Client")
+  def test_skipped_too_few_files(self, mock_s3_class, mock_list_files):
+    """Test consolidation skipped when too few files."""
+    mock_s3 = MagicMock()
+    mock_s3_class.return_value = mock_s3
+
+    mock_list_files.return_value = []
+
+    result = consolidate_parquet_files.apply(
+      kwargs={
+        "table_type": "nodes",
+        "table_name": "Entity",
+        "year": 2024,
+        "bucket": "test-bucket",
+      }
+    ).get()
+
+    assert result["status"] == "skipped"
+    assert result["table"] == "Entity"
+    assert result["year"] == 2024
+    assert "Only 0 files" in result["reason"]
+
+  @patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.S3Client")
+  def test_already_consolidated(self, mock_s3_class, mock_list_files):
+    """Test consolidation skipped when already consolidated."""
+    mock_s3 = MagicMock()
+    mock_s3_class.return_value = mock_s3
+
+    source_files = [
+      {"Key": f"file{i}.parquet", "Size": 1024, "LastModified": datetime.now()}
+      for i in range(100)
+    ]
+    consolidated_files = [
+      {
+        "Key": "consolidated.parquet",
+        "Size": 100 * 1024,
+        "LastModified": datetime.now(),
+      }
+    ]
+
+    mock_list_files.side_effect = [source_files, consolidated_files]
+
+    result = consolidate_parquet_files.apply(
+      kwargs={
+        "table_type": "nodes",
+        "table_name": "Entity",
+        "year": 2024,
+        "bucket": "test-bucket",
+      }
+    ).get()
+
+    assert result["status"] == "already_consolidated"
+    assert result["table"] == "Entity"
+    assert result["year"] == 2024
+    assert result["source_files"] == 100
+    assert result["consolidated_files"] == 1
+
+  @patch("robosystems.tasks.sec_xbrl.consolidation.stream_consolidate_batch")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.create_file_batches")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.S3Client")
+  def test_partial_batch_failure(
+    self, mock_s3_class, mock_list_files, mock_create_batches, mock_stream_consolidate
+  ):
+    """Test consolidation continues when one batch fails."""
+    mock_s3 = MagicMock()
+    mock_s3_class.return_value = mock_s3
+
+    source_files = [
+      {"Key": f"file{i}.parquet", "Size": 1024, "LastModified": datetime.now()}
+      for i in range(6)
+    ]
+    mock_list_files.side_effect = [source_files, []]
+
+    batches = [[source_files[0]], [source_files[1]], [source_files[2]]]
+    mock_create_batches.return_value = batches
+
+    mock_stream_consolidate.side_effect = [1000, Exception("S3 error"), 500]
+
+    result = consolidate_parquet_files.apply(
+      kwargs={
+        "table_type": "nodes",
+        "table_name": "Entity",
+        "year": 2024,
+        "bucket": "test-bucket",
+      }
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["consolidated_files"] == 2
+    assert result["total_rows"] == 1500
+
+  @patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.S3Client")
+  def test_s3_listing_failure_after_retries(self, mock_s3_class, mock_list_files):
+    """Test consolidation returns failed status after exhausting retries."""
+    from celery.exceptions import Retry
+    import pytest
+
+    mock_s3 = MagicMock()
+    mock_s3_class.return_value = mock_s3
+
+    mock_list_files.side_effect = Exception("S3 connection failed")
+
+    with pytest.raises(Retry):
+      consolidate_parquet_files.apply(
+        kwargs={
+          "table_type": "nodes",
+          "table_name": "Entity",
+          "year": 2024,
+          "bucket": "test-bucket",
+        }
+      ).get()
+
+  @patch("robosystems.tasks.sec_xbrl.consolidation.stream_consolidate_batch")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.create_file_batches")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.list_s3_files")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.S3Client")
+  def test_zero_rows_consolidated(
+    self, mock_s3_class, mock_list_files, mock_create_batches, mock_stream_consolidate
+  ):
+    """Test successful completion with zero rows consolidated."""
+    mock_s3 = MagicMock()
+    mock_s3_class.return_value = mock_s3
+
+    source_files = [
+      {"Key": "file.parquet", "Size": 1024, "LastModified": datetime.now()}
+    ]
+    mock_list_files.side_effect = [source_files, []]
+
+    batches = [[source_files[0]]]
+    mock_create_batches.return_value = batches
+
+    mock_stream_consolidate.return_value = 0
+
+    result = consolidate_parquet_files.apply(
+      kwargs={
+        "table_type": "nodes",
+        "table_name": "Entity",
+        "year": 2024,
+        "bucket": "test-bucket",
+      }
+    ).get()
+
+    assert result["status"] == "success"
+    assert result["total_rows"] == 0
+    assert result["consolidated_files"] == 1
+
+
+class TestOrchestrateConsolidationPhaseTask:
+  """Integration tests for orchestrate_consolidation_phase Celery task."""
+
+  @patch("celery.group")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.get_schema_types")
+  def test_successful_orchestration(self, mock_get_schema, mock_group):
+    """Test successful consolidation orchestration."""
+    mock_get_schema.return_value = (
+      ["Entity", "Report"],
+      ["REPORT_HAS_FACT", "ENTITY_FILED_REPORT"],
+    )
+
+    mock_job = MagicMock()
+    mock_job.id = "job-12345"
+    mock_group_instance = MagicMock()
+    mock_group_instance.apply_async.return_value = mock_job
+    mock_group.return_value = mock_group_instance
+
+    result = orchestrate_consolidation_phase.apply(
+      kwargs={
+        "years": [2023, 2024],
+        "bucket": "test-bucket",
+        "pipeline_id": "test-pipeline",
+      }
+    ).get()
+
+    assert result["status"] == "started"
+    assert result["phase"] == "consolidation"
+    assert result["job_id"] == "job-12345"
+    assert result["pipeline_id"] == "test-pipeline"
+    assert result["years"] == [2023, 2024]
+    assert result["total_tasks"] == 8
+    assert result["tasks_per_year"] == 4
+    assert result["bucket"] == "test-bucket"
+
+  @patch("celery.group")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.get_schema_types")
+  def test_orchestration_with_default_bucket(self, mock_get_schema, mock_group):
+    """Test orchestration uses default bucket when not provided."""
+    mock_get_schema.return_value = (["Entity"], ["REPORT_HAS_FACT"])
+
+    mock_job = MagicMock()
+    mock_job.id = "job-12345"
+    mock_group_instance = MagicMock()
+    mock_group_instance.apply_async.return_value = mock_job
+    mock_group.return_value = mock_group_instance
+
+    result = orchestrate_consolidation_phase.apply(
+      kwargs={
+        "years": [2024],
+      }
+    ).get()
+
+    assert result["status"] == "started"
+    assert "bucket" in result
+    assert result["total_tasks"] == 2
+
+  @patch("celery.group")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.get_schema_types")
+  def test_orchestration_single_year(self, mock_get_schema, mock_group):
+    """Test orchestration for single year."""
+    mock_get_schema.return_value = (["Entity", "Report", "Fact"], ["REPORT_HAS_FACT"])
+
+    mock_job = MagicMock()
+    mock_job.id = "job-12345"
+    mock_group_instance = MagicMock()
+    mock_group_instance.apply_async.return_value = mock_job
+    mock_group.return_value = mock_group_instance
+
+    result = orchestrate_consolidation_phase.apply(
+      kwargs={
+        "years": [2024],
+        "bucket": "test-bucket",
+      }
+    ).get()
+
+    assert result["status"] == "started"
+    assert result["years"] == [2024]
+    assert result["total_tasks"] == 4
+    assert result["tasks_per_year"] == 4
+
+  @patch("celery.group")
+  @patch("robosystems.tasks.sec_xbrl.consolidation.get_schema_types")
+  def test_orchestration_creates_correct_task_count(self, mock_get_schema, mock_group):
+    """Test orchestration creates correct number of tasks."""
+    node_types = ["Entity", "Report", "Fact"]
+    rel_types = ["REPORT_HAS_FACT", "ENTITY_FILED_REPORT"]
+    mock_get_schema.return_value = (node_types, rel_types)
+
+    mock_job = MagicMock()
+    mock_job.id = "job-12345"
+    mock_group_instance = MagicMock()
+    mock_group_instance.apply_async.return_value = mock_job
+    mock_group.return_value = mock_group_instance
+
+    years = [2022, 2023, 2024]
+    result = orchestrate_consolidation_phase.apply(
+      kwargs={
+        "years": years,
+        "bucket": "test-bucket",
+      }
+    ).get()
+
+    expected_tasks = len(years) * (len(node_types) + len(rel_types))
+
+    assert result["total_tasks"] == expected_tasks
+    assert result["tasks_per_year"] == len(node_types) + len(rel_types)
