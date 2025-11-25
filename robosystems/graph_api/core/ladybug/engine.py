@@ -1,7 +1,7 @@
 """
-Graph database engine implementation.
+LadybugDB database engine implementation
 
-This module provides graph database integration for the application.
+This module provides LadybugDB database integration for the application.
 """
 
 import re
@@ -9,7 +9,7 @@ import time
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import real_ladybug as lbug
-from .base import GraphEngineInterface, GraphOperation
+from robosystems.middleware.graph.base import GraphEngineInterface, GraphOperation
 from robosystems.logger import logger, log_db_query, log_app_error
 from robosystems.config import env
 
@@ -28,14 +28,14 @@ class QueryError(Exception):
 
 class Engine(GraphEngineInterface):
   """
-  Graph database engine implementation.
+  LadybugDB database engine implementation.
 
   Provides a graph database implementation of the GraphEngineInterface.
   """
 
   def __init__(self, database_path: str, read_only: bool = False):
     """
-    Initialize graph database engine.
+    Initialize LadybugDB database engine.
 
     Args:
         database_path: Path to the graph database file
@@ -63,9 +63,9 @@ class Engine(GraphEngineInterface):
     return self._db
 
   def _connect(self) -> None:
-    """Establish connection to graph database."""
+    """Establish connection to LadybugDB database."""
     try:
-      logger.debug(f"Connecting to graph database: {self.database_path}")
+      logger.debug(f"Connecting to LadybugDB database: {self.database_path}")
 
       # Determine checkpoint threshold based on database
       # SEC has huge tables (Fact, Association) that need more frequent checkpoints
@@ -84,10 +84,10 @@ class Engine(GraphEngineInterface):
         checkpoint_threshold=checkpoint_threshold,
       )
       self._conn = lbug.Connection(self._db)
-      logger.info(f"Successfully connected to graph database: {self.database_path}")
+      logger.info(f"Successfully connected to LadybugDB database: {self.database_path}")
     except Exception as e:
-      logger.error(f"Failed to connect to graph database {self.database_path}: {e}")
-      raise ConnectionError(f"Failed to connect to graph database: {e}")
+      logger.error(f"Failed to connect to LadybugDB database {self.database_path}: {e}")
+      raise ConnectionError(f"Failed to connect to LadybugDB database: {e}")
 
   def set_query_timeout(self, timeout_ms: int) -> None:
     """

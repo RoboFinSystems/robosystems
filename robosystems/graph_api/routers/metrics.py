@@ -9,7 +9,7 @@ query performance, and ingestion queue status.
 from typing import Dict, Any
 from fastapi import APIRouter, Depends
 
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.admission_control import get_admission_controller
 
 router = APIRouter(tags=["Cluster Metrics"])
@@ -17,7 +17,7 @@ router = APIRouter(tags=["Cluster Metrics"])
 
 @router.get("/metrics")
 async def get_metrics(
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> Dict[str, Any]:
   """
   Get comprehensive metrics for the cluster node.
@@ -34,7 +34,7 @@ async def get_metrics(
   or custom dashboards to track the health and performance of the
   LadybugDB cluster.
   """
-  metrics_collector = cluster_service.metrics_collector
+  metrics_collector = ladybug_service.metrics_collector
 
   # Collect all metrics
   system_metrics = metrics_collector.collect_system_metrics()
@@ -54,8 +54,8 @@ async def get_metrics(
     "ingestion": ingestion_metrics,
     "admission_control": admission_metrics,
     "cluster": {
-      "node_id": cluster_service.node_id,
-      "node_type": cluster_service.node_type.value,
-      "uptime_seconds": cluster_service.get_uptime(),
+      "node_id": ladybug_service.node_id,
+      "node_type": ladybug_service.node_type.value,
+      "uptime_seconds": ladybug_service.get_uptime(),
     },
   }

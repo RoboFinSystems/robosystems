@@ -69,7 +69,7 @@ graph_api/
 │   └── exceptions.py          # Custom exceptions
 │
 ├── core/                      # Core services
-│   ├── cluster_manager.py    # Cluster orchestration
+│   ├── ladybug_service.py    # LadybugDB service orchestration
 │   ├── database_manager.py   # Database lifecycle management
 │   ├── duckdb_manager.py     # DuckDB staging database management
 │   ├── duckdb_pool.py        # DuckDB connection pooling

@@ -3,7 +3,7 @@ Basic security tests to validate security improvements.
 """
 
 import pytest
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
 class TestPathTraversal:

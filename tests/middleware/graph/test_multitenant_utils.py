@@ -6,7 +6,7 @@ import os
 import pytest
 from unittest.mock import patch
 
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
 class TestMultiTenantUtils:
@@ -26,7 +26,7 @@ class TestMultiTenantUtils:
   def test_get_max_databases_custom(self):
     """Test custom max databases value."""
     with patch(
-      "robosystems.middleware.graph.multitenant_utils.env.LBUG_MAX_DATABASES_PER_NODE",
+      "robosystems.middleware.graph.utils.database.env.LBUG_MAX_DATABASES_PER_NODE",
       500,
     ):
       assert MultiTenantUtils.get_max_databases_per_node() == 500
@@ -36,7 +36,7 @@ class TestMultiTenantUtils:
     # Since env.py handles the environment variable parsing and validation,
     # we don't need to test invalid values here - just that the config value is used
     with patch(
-      "robosystems.middleware.graph.multitenant_utils.env.LBUG_MAX_DATABASES_PER_NODE",
+      "robosystems.middleware.graph.utils.database.env.LBUG_MAX_DATABASES_PER_NODE",
       100,
     ):
       assert MultiTenantUtils.get_max_databases_per_node() == 100

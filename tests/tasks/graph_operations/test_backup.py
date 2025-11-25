@@ -88,7 +88,7 @@ class TestRestoreGraphBackupTask:
   @patch("robosystems.tasks.graph_operations.backup.GraphClientFactory")
   @patch("robosystems.tasks.graph_operations.backup.S3BackupAdapter")
   @patch("robosystems.tasks.graph_operations.backup.GraphBackup")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   @patch("robosystems.tasks.graph_operations.backup.asyncio")
   @patch("robosystems.tasks.graph_operations.backup.session")
   def test_successful_restore(
@@ -314,7 +314,7 @@ class TestCreateGraphBackupTask:
 
   @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
   @patch("robosystems.operations.lbug.backup_manager.create_backup_manager")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   @patch("robosystems.tasks.graph_operations.backup.GraphBackup")
   @patch("robosystems.tasks.graph_operations.backup.S3BackupAdapter")
   @patch("robosystems.tasks.graph_operations.backup.session")
@@ -381,7 +381,7 @@ class TestCreateGraphBackupTask:
 
   @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
   @patch("robosystems.operations.lbug.backup_manager.create_backup_manager")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   @patch("robosystems.tasks.graph_operations.backup.GraphBackup")
   @patch("robosystems.tasks.graph_operations.backup.S3BackupAdapter")
   @patch("robosystems.tasks.graph_operations.backup.session")
@@ -443,7 +443,7 @@ class TestCreateGraphBackupTask:
     assert result["s3_key"] == "graph-backups/databases/kg123456/full/backup.csv.zip"
 
   @patch("robosystems.middleware.sse.task_progress.TaskSSEProgressTracker")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   def test_backup_error_handling(
     self,
     mock_utils,

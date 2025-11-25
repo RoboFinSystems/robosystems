@@ -186,7 +186,7 @@ class DeleteWorkspaceTool:
       }
 
     # Parse workspace_id to extract parent_graph_id
-    from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
+    from robosystems.middleware.graph.utils import parse_subgraph_id
 
     subgraph_info = parse_subgraph_id(workspace_id)
     if not subgraph_info:

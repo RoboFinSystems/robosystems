@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 from ...middleware.graph.router import get_universal_repository
-from ...middleware.graph.multitenant_utils import MultiTenantUtils
+from ...middleware.graph.utils import MultiTenantUtils
 from ...models.iam import GraphUser
 from ...middleware.otel.metrics import get_endpoint_metrics
 from ...database import session

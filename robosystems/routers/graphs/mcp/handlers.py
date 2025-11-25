@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.logger import logger
 
 # Import timeout utilities

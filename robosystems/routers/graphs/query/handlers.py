@@ -6,7 +6,7 @@ This module provides helper utilities for query execution.
 
 from typing import Any
 
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
 def get_query_operation_type(graph_id: str) -> str:

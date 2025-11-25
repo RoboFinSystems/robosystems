@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from ...config import env
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...middleware.graph.types import GraphTypeRegistry
-from ...middleware.graph.subgraph_utils import (
+from ...middleware.graph.utils import (
   construct_subgraph_id,
   parse_subgraph_id,
   validate_subgraph_name,

@@ -51,7 +51,7 @@ def get_graph_access(
   db: Session = Depends(get_db_session),
 ) -> GraphUser:
   """Get user's access to a graph with proper authorization validation."""
-  from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+  from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.models.iam.user_repository import UserRepository
 
   # Determine graph type and validate access accordingly
@@ -277,7 +277,7 @@ async def get_credit_transactions(
     UserRepositoryCreditTransaction,
     UserRepositoryCredits,
   )
-  from ...middleware.graph.multitenant_utils import MultiTenantUtils
+  from ...middleware.graph.utils import MultiTenantUtils
 
   try:
     # Determine if this is a repository or user graph

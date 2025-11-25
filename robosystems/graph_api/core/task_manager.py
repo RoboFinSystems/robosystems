@@ -10,19 +10,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from enum import Enum
 
-from robosystems.config.valkey_registry import ValkeyDatabase
 import redis.asyncio as redis_async
 
-
-class TaskStatus(str, Enum):
-  """Task execution status."""
-
-  PENDING = "pending"
-  RUNNING = "running"
-  COMPLETED = "completed"
-  FAILED = "failed"
+from robosystems.config.valkey_registry import ValkeyDatabase
+from robosystems.graph_api.models.tasks import TaskStatus
 
 
 class GenericTaskManager:

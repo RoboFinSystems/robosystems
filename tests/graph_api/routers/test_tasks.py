@@ -19,10 +19,10 @@ class TestTasksRouter:
     app = create_app()
 
     # Override the cluster service dependency
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
     mock_service = MagicMock()
-    app.dependency_overrides[get_cluster_service] = lambda: mock_service
+    app.dependency_overrides[get_ladybug_service] = lambda: mock_service
 
     return TestClient(app)
 

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from robosystems.graph_api.routers.databases.tables import materialize
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.database import get_db_session
 
 
@@ -24,7 +24,7 @@ def app_client(monkeypatch):
 
 def test_materialize_rejects_read_only(monkeypatch, app_client):
   cluster_service = SimpleNamespace(read_only=True)
-  app_client.dependency_overrides[get_cluster_service] = lambda: cluster_service
+  app_client.dependency_overrides[get_ladybug_service] = lambda: cluster_service
 
   client = TestClient(app_client)
 

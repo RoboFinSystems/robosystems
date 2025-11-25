@@ -1,30 +1,30 @@
 """
-Cluster information endpoints for LadybugDB nodes.
+Information endpoints for LadybugDB nodes.
 
 This module provides endpoints for retrieving detailed information
-about the cluster node and its capabilities.
+about the node and its capabilities.
 """
 
 from fastapi import APIRouter, Depends
 
 from robosystems.graph_api.models.cluster import ClusterInfoResponse
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-router = APIRouter(tags=["Cluster Info"])
+router = APIRouter(tags=["Info"])
 
 
 @router.get("/info", response_model=ClusterInfoResponse)
-async def get_cluster_info(
-  cluster_service=Depends(get_cluster_service),
+async def get_info(
+  ladybug_service=Depends(get_ladybug_service),
 ) -> ClusterInfoResponse:
   """
-  Get detailed cluster information.
+  Get detailed node information.
 
-  Returns comprehensive information about the cluster node including:
+  Returns comprehensive information about the node including:
   - Node identification and type
   - Software version
   - Database capacity and current usage
   - List of databases on this node
   - Uptime and operational status
   """
-  return cluster_service.get_cluster_info()
+  return ladybug_service.get_cluster_info()

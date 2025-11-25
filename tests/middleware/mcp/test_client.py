@@ -570,7 +570,7 @@ class TestGraphMCPFactory:
         "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
       ) as mock_factory,
       patch(
-        "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository",
+        "robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository",
         return_value=True,
       ),
     ):
@@ -603,7 +603,7 @@ class TestGraphMCPFactory:
         "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
       ) as mock_factory,
       patch(
-        "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository",
+        "robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository",
         return_value=True,
       ),
     ):

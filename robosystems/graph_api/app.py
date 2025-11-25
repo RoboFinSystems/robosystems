@@ -56,7 +56,7 @@ def create_app() -> FastAPI:
     logger.info("Graph API starting up")
 
     # Initialize DuckDB connection pool for staging tables
-    from robosystems.graph_api.core.duckdb_pool import initialize_duckdb_pool
+    from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
 
     duckdb_base_path = Path(env.DUCKDB_STAGING_PATH)
     duckdb_pool = initialize_duckdb_pool(

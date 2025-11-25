@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Path, Body
 from fastapi import status as http_status
 
-from robosystems.graph_api.core.duckdb_manager import (
+from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
   TableCreateRequest,
   TableCreateResponse,

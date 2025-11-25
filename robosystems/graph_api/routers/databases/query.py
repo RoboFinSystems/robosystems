@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from sqlalchemy.orm import Session
 
 from robosystems.graph_api.models.database import QueryRequest
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.admission_control import (
   get_admission_controller,
   AdmissionDecision,
@@ -35,13 +35,13 @@ def track_connection(admission_controller, database_name):
     admission_controller.release_connection(database_name)
 
 
-def _get_cluster_service_for_request():
+def _get_service_for_request():
   backend_type = env.GRAPH_BACKEND_TYPE
   if backend_type in ["neo4j_community", "neo4j_enterprise"]:
-    from robosystems.graph_api.core.backend_cluster_manager import BackendClusterService
+    from robosystems.graph_api.core.neo4j import Neo4jService
 
-    return BackendClusterService()
-  return get_cluster_service()
+    return Neo4jService()
+  return get_ladybug_service()
 
 
 @router.post("/{graph_id}/query")
@@ -50,7 +50,7 @@ async def execute_query(
   graph_id: str = Path(..., description="Graph database identifier"),
   streaming: bool = False,
   database: str = None,
-  cluster_service=Depends(_get_cluster_service_for_request),
+  service=Depends(_get_service_for_request),
   db: Session = Depends(get_db_session),
 ):
   """
@@ -116,9 +116,9 @@ async def execute_query(
     backend_type = env.GRAPH_BACKEND_TYPE
 
     if backend_type in ["neo4j_community", "neo4j_enterprise"]:
-      # Use async backend cluster service
+      # Use async backend service
       if not streaming:
-        return await cluster_service.execute_query(query_request)
+        return await service.execute_query(query_request)
       else:
         # Streaming not yet implemented for Neo4j backend
         raise HTTPException(
@@ -126,15 +126,13 @@ async def execute_query(
           detail="Streaming not yet implemented for Neo4j backend",
         )
     else:
-      # Use existing LadybugDB cluster service (sync)
+      # Use existing LadybugDB service (sync)
       if not streaming:
-        return cluster_service.execute_query(query_request)
+        return service.execute_query(query_request)
 
       # Streaming response for large result sets
       def generate_stream():
-        for chunk in cluster_service.execute_query_streaming(
-          query_request, chunk_size=1000
-        ):
+        for chunk in service.execute_query_streaming(query_request, chunk_size=1000):
           yield json.dumps(chunk) + "\n"
 
       return StreamingResponse(

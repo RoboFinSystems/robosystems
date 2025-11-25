@@ -8,15 +8,15 @@ quickly for infrastructure health monitoring.
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.logger import logger
 
-router = APIRouter(tags=["Cluster Health"])
+router = APIRouter(tags=["Health"])
 
 
 @router.get("/health")
 async def health_check(
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> JSONResponse:
   """
   Simple health check endpoint for load balancers and monitoring.
@@ -31,9 +31,9 @@ async def health_check(
   - Kubernetes liveness probes
   """
   try:
-    # Basic check that cluster service is accessible
-    uptime = cluster_service.get_uptime()
-    databases = len(cluster_service.db_manager.list_databases())
+    # Basic check that service is accessible
+    uptime = ladybug_service.get_uptime()
+    databases = len(ladybug_service.db_manager.list_databases())
 
     # Include memory usage if psutil is available
     memory_info = {}

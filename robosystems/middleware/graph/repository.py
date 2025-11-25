@@ -18,7 +18,7 @@ import asyncio
 from typing import List, Dict, Any, Optional, Union
 
 from .base import GraphOperation
-from .engine import Repository
+from robosystems.graph_api.core.ladybug import Repository
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 

@@ -9,7 +9,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi import status as http_status
 
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/databases", tags=["Metrics"])
 @router.get("/{graph_id}/metrics")
 async def get_database_metrics(
   graph_id: str = Path(..., description="Graph database identifier"),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> Dict[str, Any]:
   """
   Get metrics for a specific database.
@@ -37,7 +37,7 @@ async def get_database_metrics(
     validated_graph_id = validate_database_name(graph_id)
 
     # Check if database exists
-    databases = cluster_service.db_manager.list_databases()
+    databases = ladybug_service.db_manager.list_databases()
     if validated_graph_id not in databases:
       raise HTTPException(
         status_code=http_status.HTTP_404_NOT_FOUND,
@@ -45,7 +45,7 @@ async def get_database_metrics(
       )
 
     # Get database metrics
-    db_path = cluster_service.db_manager.get_database_path(validated_graph_id)
+    db_path = ladybug_service.db_manager.get_database_path(validated_graph_id)
 
     # Get size information
     import os
@@ -65,7 +65,7 @@ async def get_database_metrics(
     relationship_count = 0
 
     try:
-      with cluster_service.db_manager.get_connection(
+      with ladybug_service.db_manager.get_connection(
         validated_graph_id, read_only=True
       ) as conn:
         # Count nodes
@@ -96,8 +96,8 @@ async def get_database_metrics(
       "node_count": node_count,
       "relationship_count": relationship_count,
       "last_modified": last_modified,
-      "instance_id": cluster_service.node_id,
-      "node_type": cluster_service.node_type.value,
+      "instance_id": ladybug_service.node_id,
+      "node_type": ladybug_service.node_type.value,
     }
 
   except HTTPException:

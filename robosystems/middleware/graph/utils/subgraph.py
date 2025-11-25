@@ -10,7 +10,7 @@ import re
 from typing import Optional, NamedTuple, Tuple
 from enum import Enum
 
-from .types import SUBGRAPH_NAME_PATTERN as SUBGRAPH_NAME_PATTERN_STR
+from ..types import SUBGRAPH_NAME_PATTERN as SUBGRAPH_NAME_PATTERN_STR
 
 
 class SubgraphType(Enum):

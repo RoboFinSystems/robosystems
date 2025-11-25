@@ -39,7 +39,7 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_with_discovery_shared_repo(
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
@@ -82,7 +82,7 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_with_discovery_user_graph(
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
@@ -126,7 +126,7 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_url_discovery_fallback_base_url(
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
@@ -160,7 +160,7 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_url_discovery_env_fallback(
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
@@ -195,7 +195,7 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_url_discovery_final_fallback(
     self, mock_utils, mock_factory, mock_client_class, mock_env
   ):
@@ -275,7 +275,7 @@ class TestCreateGraphMCPClient:
   @patch("robosystems.middleware.mcp.factory.env")
   @patch("robosystems.middleware.mcp.factory.GraphMCPClient")
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   async def test_create_client_logs_discovery(
     self, mock_utils, mock_factory, mock_client_class, mock_env, mock_logger
   ):

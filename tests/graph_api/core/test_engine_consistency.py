@@ -9,7 +9,7 @@ import pytest
 import tempfile
 import os
 
-from robosystems.middleware.graph import (
+from robosystems.graph_api.core.ladybug import (
   Engine,
   Repository,
 )

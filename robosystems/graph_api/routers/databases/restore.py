@@ -18,7 +18,7 @@ from fastapi import (
 from fastapi import status as http_status
 
 from robosystems.graph_api.models.database import RestoreResponse
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.task_manager import restore_task_manager
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
@@ -81,7 +81,7 @@ async def perform_restore(
     if connection_pool and force_overwrite:
       from pathlib import Path
       import shutil
-      from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+      from robosystems.middleware.graph.utils import MultiTenantUtils
 
       logger.info(f"[Task {task_id}] Deleting existing database for {graph_id}")
 
@@ -145,7 +145,7 @@ async def restore_database(
   force_overwrite: bool = Form(False, description="Force overwrite existing database"),
   encrypted: bool = Form(True, description="Whether the backup is encrypted"),
   compressed: bool = Form(True, description="Whether the backup is compressed"),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> RestoreResponse:
   """
   Restore a database from S3 backup.
@@ -163,14 +163,14 @@ async def restore_database(
   # Validate graph_id to prevent path injection
   graph_id = validate_database_name(graph_id)
 
-  if cluster_service.read_only:
+  if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Restore operations not allowed on read-only nodes",
     )
 
   # Check if database exists
-  database_exists = graph_id in cluster_service.db_manager.list_databases()
+  database_exists = graph_id in ladybug_service.db_manager.list_databases()
 
   if database_exists and not force_overwrite:
     raise HTTPException(
@@ -203,7 +203,7 @@ async def restore_database(
     force_overwrite=force_overwrite,
     encrypted=encrypted,
     compressed=compressed,
-    connection_pool=cluster_service.db_manager.connection_pool,
+    connection_pool=ladybug_service.db_manager.connection_pool,
   )
 
   logger.info(f"Restore initiated for database {graph_id} with task ID: {task_id}")
@@ -221,7 +221,7 @@ async def restore_database(
 @router.post("/{graph_id}/backup-download")
 async def download_backup(
   graph_id: str = Path(..., description="Graph database identifier"),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> Response:
   """
   Download the current database as a backup.
@@ -233,14 +233,14 @@ async def download_backup(
   # Validate graph_id to prevent path injection
   graph_id = validate_database_name(graph_id)
 
-  if cluster_service.read_only:
+  if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Backup operations not allowed on read-only nodes",
     )
 
   # Validate database exists
-  if graph_id not in cluster_service.db_manager.list_databases():
+  if graph_id not in ladybug_service.db_manager.list_databases():
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,
       detail=f"Database {graph_id} not found",
@@ -248,7 +248,7 @@ async def download_backup(
 
   try:
     # Get database path
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+    from robosystems.middleware.graph.utils import MultiTenantUtils
     import os
     import tempfile
     import shutil

@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, Set, Union
 from pathlib import Path
 
 from ...logger import logger
-from ...middleware.graph.engine import Engine
+from robosystems.graph_api.core.ladybug import Engine
 from ...processors.xbrl.schema_config_generator import (
   XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,

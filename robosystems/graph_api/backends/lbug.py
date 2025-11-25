@@ -4,7 +4,7 @@ import shutil
 import time
 
 from robosystems.logger import logger
-from robosystems.graph_api.core.connection_pool import get_connection_pool
+from robosystems.graph_api.core.ladybug import get_connection_pool
 from .base import GraphBackend, DatabaseInfo, ClusterTopology, S3IngestionError
 
 

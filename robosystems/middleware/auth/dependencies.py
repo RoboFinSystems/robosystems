@@ -324,7 +324,7 @@ async def get_current_user_with_graph(
         if has_access is None:
           # Cache miss - check database and cache result
           from ...models.iam import GraphUser
-          from ..graph.multitenant_utils import MultiTenantUtils
+          from ..graph.utils import MultiTenantUtils
 
           # Check if this is a shared repository or user graph
           if MultiTenantUtils.is_shared_repository(graph_id):

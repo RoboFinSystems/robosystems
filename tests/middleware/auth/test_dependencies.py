@@ -838,10 +838,10 @@ class TestGetCurrentUserWithGraph:
 
     # Mock shared repository detection and access validation
     with patch(
-      "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository"
+      "robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository"
     ) as mock_is_shared:
       with patch(
-        "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.validate_repository_access"
+        "robosystems.middleware.graph.utils.MultiTenantUtils.validate_repository_access"
       ) as mock_validate_repo:
         mock_is_shared.return_value = True
         mock_validate_repo.return_value = True

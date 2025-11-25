@@ -20,7 +20,7 @@ The `core/` directory contains the foundational services that power the Graph AP
 core/
 ├── README.md                       # This file
 ├── __init__.py                    # Core service exports
-├── cluster_manager.py             # Graph database cluster orchestration (35KB)
+├── ladybug_service.py             # LadybugDB service orchestration (35KB)
 ├── database_manager.py            # Database lifecycle and schema management (35KB)
 ├── connection_pool.py             # Graph database connection pooling (26KB)
 ├── duckdb_manager.py              # DuckDB staging table management (20KB)
@@ -35,11 +35,11 @@ core/
 
 ## Core Services
 
-### 1. Cluster Management
+### 1. LadybugDB Service
 
-**Files**: `cluster_manager.py`, `backend_cluster_manager.py`
+**Files**: `ladybug_service.py`, `backend_cluster_manager.py`
 
-Orchestrates graph database clusters across multiple instances with intelligent routing:
+Orchestrates LadybugDB database services across multiple instances with intelligent routing:
 
 **Key Features**:
 - **Multi-Instance Management** - Tracks and routes to multiple graph database instances
@@ -49,15 +49,15 @@ Orchestrates graph database clusters across multiple instances with intelligent 
 - **Auto-Scaling Support** - Integrates with EC2 auto-scaling groups
 
 **Primary Classes**:
-- `LadybugDBClusterService` - Main cluster orchestration service
+- `LadybugService` - Main LadybugDB service orchestration
 - `BackendClusterManager` - Backend-agnostic cluster management
 
 **Usage**:
 ```python
-from robosystems.graph_api.core import get_cluster_service
+from robosystems.graph_api.core import get_ladybug_service
 
-cluster_service = get_cluster_service()
-instance_url = cluster_service.get_database_instance(graph_id)
+ladybug_service = get_ladybug_service()
+instance_url = ladybug_service.get_database_instance(graph_id)
 ```
 
 ### 2. Database Management
@@ -219,12 +219,12 @@ Core services are initialized at application startup:
 
 ```python
 from robosystems.graph_api.core import (
-    init_cluster_service,
+    init_ladybug_service,
     initialize_connection_pool
 )
 
-# Initialize cluster service with DynamoDB registry
-cluster_service = init_cluster_service(
+# Initialize LadybugDB service with DynamoDB registry
+ladybug_service = init_ladybug_service(
     registry_table="graph-instances",
     health_check_interval=30
 )
@@ -239,7 +239,7 @@ connection_pool = initialize_connection_pool(
 ### Request Flow
 
 1. **API Request** → Routers
-2. **Cluster Routing** → `ClusterManager` finds appropriate instance
+2. **Service Routing** → `LadybugService` finds appropriate instance
 3. **Connection Acquisition** → `ConnectionPool` provides connection
 4. **Admission Check** → `AdmissionController` verifies resources
 5. **Query Execution** → `DatabaseManager` executes query
@@ -293,7 +293,7 @@ MEMORY_CRITICAL_THRESHOLD=90
 
 ## Best Practices
 
-### Cluster Management
+### LadybugDB Service
 - Monitor instance health continuously
 - Use DynamoDB registry for service discovery
 - Implement graceful failover for instance failures

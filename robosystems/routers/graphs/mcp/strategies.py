@@ -14,7 +14,7 @@ from robosystems.middleware.graph.execution_strategies import (
   BaseClientDetector,
   BaseStrategySelector,
 )
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
 class MCPExecutionStrategy(Enum):

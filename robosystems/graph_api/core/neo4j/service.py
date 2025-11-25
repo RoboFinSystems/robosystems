@@ -13,13 +13,13 @@ from robosystems.graph_api.models.cluster import (
 from robosystems.logger import logger
 
 
-class BackendClusterService:
+class Neo4jService:
   def __init__(self):
     self.backend = get_backend()
     self.start_time = time.time()
     self.last_activity: Optional[datetime] = None
     logger.info(
-      f"Backend Cluster Service initialized with backend type: {type(self.backend).__name__}"
+      f"Neo4jService initialized with backend type: {type(self.backend).__name__}"
     )
 
   def get_uptime(self) -> float:

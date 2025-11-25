@@ -174,7 +174,7 @@ class TestIngestFromS3:
 class TestIngestFromLocalFiles:
   """Test cases for local file ingestion."""
 
-  @patch("robosystems.middleware.graph.engine.Engine")
+  @patch("robosystems.graph_api.core.ladybug.engine.Engine")
   @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
   @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
   @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")
@@ -221,7 +221,7 @@ class TestIngestFromLocalFiles:
     mock_categorize.assert_called_once_with(test_files, mock_adapter)
     assert mock_ingest_node.call_count == 2
 
-  @patch("robosystems.middleware.graph.engine.Engine")
+  @patch("robosystems.graph_api.core.ladybug.engine.Engine")
   @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
   @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_empty_list(
@@ -238,7 +238,7 @@ class TestIngestFromLocalFiles:
 
     assert result is False
 
-  @patch("robosystems.middleware.graph.engine.Engine")
+  @patch("robosystems.graph_api.core.ladybug.engine.Engine")
   @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
   @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_exception(
@@ -495,7 +495,7 @@ class TestS3IngestionEdgeCases:
 class TestIngestionErrorHandling:
   """Test error handling in ingestion operations."""
 
-  @patch("robosystems.middleware.graph.engine.Engine")
+  @patch("robosystems.graph_api.core.ladybug.engine.Engine")
   @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
   @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
   def test_ingest_from_local_files_schema_error(
@@ -518,7 +518,7 @@ class TestIngestionErrorHandling:
 
       assert result is False
 
-  @patch("robosystems.middleware.graph.engine.Engine")
+  @patch("robosystems.graph_api.core.ladybug.engine.Engine")
   @patch("robosystems.operations.lbug.schema_setup.ensure_schema")
   @patch("robosystems.operations.lbug.path_utils.get_lbug_database_path")
   @patch("robosystems.operations.lbug.ingest._get_cached_schema_adapter")

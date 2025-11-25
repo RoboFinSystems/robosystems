@@ -17,12 +17,10 @@ Key features:
 """
 
 from typing import Dict, Any, Union
-import asyncio
 
 from robosystems.config import env
-from .engine import Repository
+from robosystems.graph_api.core.ladybug import Repository
 from .types import GraphTier
-from .clusters import ClusterConfig, load_cluster_configs
 from robosystems.logger import logger
 from robosystems.graph_api.client import GraphClient
 from robosystems.graph_api.client.factory import GraphClientFactory
@@ -69,8 +67,6 @@ class GraphRouter:
 
     if access_pattern == "direct_file":
       # Force direct file access regardless of cluster configuration
-      from .engine import Repository
-
       db_path = env.LBUG_DATABASE_PATH
       database_path = f"{db_path}/{graph_id}"
       logger.debug(f"Creating direct file Repository for {graph_id}: {database_path}")
@@ -97,66 +93,40 @@ class GraphRouter:
       return client
 
   async def get_health_status(self) -> Dict[str, Any]:
-    """Get health status of all clusters."""
-    health_status = {"status": "healthy", "clusters": {}, "errors": []}
+    """Get health status of the graph backend."""
+    health_status = {"status": "healthy", "backend": {}, "errors": []}
 
     try:
-      # Check clusters
-      clusters = load_cluster_configs()
-      for cluster_name, cluster_config in clusters.items():
-        try:
-          # Test connectivity to cluster
-          test_repo = self._create_test_repository(cluster_config)
+      # Check the configured graph API endpoint
+      graph_api_url = env.GRAPH_API_URL
+      api_key = env.GRAPH_API_KEY
 
-          # Handle both sync and async repositories
-          if hasattr(test_repo, "execute_query"):
-            if asyncio.iscoroutinefunction(test_repo.execute_query):
-              test_result = await test_repo.execute_query(
-                "MATCH (n) RETURN count(n) as node_count LIMIT 1"
-              )
-            else:
-              test_result = test_repo.execute_query(
-                "MATCH (n) RETURN count(n) as node_count LIMIT 1"
-              )
-          else:
-            # Fallback for repositories without execute_query
-            test_result = [{"node_count": 0}]
+      client = GraphClient(base_url=graph_api_url, api_key=api_key)
 
-          health_status["clusters"][cluster_name] = {
-            "status": "healthy",
-            "type": "graph",
-            "endpoint": cluster_config.alb_endpoint or "local",
-            "test_result": test_result,
-          }
-        except Exception as e:
-          health_status["clusters"][cluster_name] = {
-            "status": "unhealthy",
-            "error": str(e),
-          }
-          health_status["errors"].append(f"Cluster {cluster_name}: {e}")
+      # Try to get health from the graph API
+      try:
+        health_response = await client.health()
+        health_status["backend"] = {
+          "status": "healthy",
+          "endpoint": graph_api_url,
+          "response": health_response,
+        }
+      except Exception as e:
+        health_status["backend"] = {
+          "status": "unhealthy",
+          "endpoint": graph_api_url,
+          "error": str(e),
+        }
+        health_status["errors"].append(f"Graph API health check failed: {e}")
 
     except Exception as e:
-      health_status["clusters"]["cluster_error"] = str(e)
-      health_status["errors"].append(f"Cluster loading error: {e}")
+      health_status["backend"] = {"status": "error", "error": str(e)}
+      health_status["errors"].append(f"Health check error: {e}")
 
     if health_status["errors"]:
       health_status["status"] = "degraded"
 
     return health_status
-
-  def _create_test_repository(self, cluster_config: ClusterConfig):
-    """Create a test repository for health checking."""
-    if cluster_config.alb_endpoint:
-      # Use unified API key for test repository from centralized config
-      from robosystems.config import env
-
-      api_key = env.GRAPH_API_KEY
-
-      client = GraphClient(base_url=cluster_config.alb_endpoint, api_key=api_key)
-      client.graph_id = "test"
-      return client
-    else:
-      return Repository("test")
 
 
 # Global router instance

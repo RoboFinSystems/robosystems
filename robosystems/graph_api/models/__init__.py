@@ -1,5 +1,8 @@
 """
 Graph API Pydantic models for request/response validation.
+
+These models are used by the internal Graph API service (LadybugDB management).
+For user-facing API models, see robosystems/models/api/graphs/.
 """
 
 from .cluster import (
@@ -17,11 +20,26 @@ from .database import (
   DatabaseListResponse,
   DatabaseCreateRequest,
   DatabaseCreateResponse,
+  NodeDatabasesHealthResponse,
+  RestoreResponse,
 )
-from .ingestion import (
-  CopyIngestRequest,
-  IngestResponse,
-  TaskStatusResponse,
+from .tables import (
+  TableInfo,
+  TableCreateRequest,
+  TableCreateResponse,
+  TableQueryRequest,
+  TableQueryResponse,
+  TableMaterializationRequest,
+  TableMaterializationResponse,
+)
+from .tasks import (
+  TaskStatus,
+  TaskType,
+  BackgroundIngestRequest,
+)
+from .fork import (
+  ForkFromParentRequest,
+  ForkFromParentResponse,
 )
 
 __all__ = [
@@ -39,8 +57,21 @@ __all__ = [
   "DatabaseListResponse",
   "DatabaseCreateRequest",
   "DatabaseCreateResponse",
-  # Ingestion models
-  "CopyIngestRequest",
-  "IngestResponse",
-  "TaskStatusResponse",
+  "NodeDatabasesHealthResponse",
+  "RestoreResponse",
+  # Table models
+  "TableInfo",
+  "TableCreateRequest",
+  "TableCreateResponse",
+  "TableQueryRequest",
+  "TableQueryResponse",
+  "TableMaterializationRequest",
+  "TableMaterializationResponse",
+  # Task models
+  "TaskStatus",
+  "TaskType",
+  "BackgroundIngestRequest",
+  # Fork models
+  "ForkFromParentRequest",
+  "ForkFromParentResponse",
 ]

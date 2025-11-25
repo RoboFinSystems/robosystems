@@ -101,7 +101,7 @@ class TestValidateAPIKeyWithGraph:
   @patch("robosystems.middleware.auth.utils.api_key_cache")
   @patch("robosystems.middleware.auth.utils.UserAPIKey")
   @patch("robosystems.middleware.auth.utils.GraphUser")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   @patch("robosystems.middleware.auth.utils.SecurityAuditLogger")
   def test_validate_api_key_with_graph_standard_db(
     self, mock_audit, mock_utils, mock_user_graph, mock_api_key_class, mock_cache
@@ -144,7 +144,7 @@ class TestValidateAPIKeyWithGraph:
 
   @patch("robosystems.middleware.auth.utils.api_key_cache")
   @patch("robosystems.middleware.auth.utils.UserAPIKey")
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   @patch("robosystems.middleware.auth.utils.SecurityAuditLogger")
   def test_validate_api_key_with_graph_shared_repository(
     self, mock_audit, mock_utils, mock_api_key_class, mock_cache
@@ -197,7 +197,7 @@ class TestValidateAPIKeyWithGraph:
 class TestValidateRepositoryAccess:
   """Test repository access validation."""
 
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   def test_validate_repository_access_valid_user(self, mock_utils):
     """Test repository access with valid active user."""
     mock_user = Mock(spec=User)
@@ -213,7 +213,7 @@ class TestValidateRepositoryAccess:
       "sec", "user123", "read"
     )
 
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   def test_validate_repository_access_inactive_user(self, mock_utils):
     """Test repository access with inactive user."""
     mock_user = Mock(spec=User)
@@ -225,7 +225,7 @@ class TestValidateRepositoryAccess:
     assert result is False
     mock_utils.validate_repository_access.assert_not_called()
 
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   def test_validate_repository_access_no_user(self, mock_utils):
     """Test repository access with no user."""
     result = validate_repository_access(None, "sec", "read")
@@ -233,7 +233,7 @@ class TestValidateRepositoryAccess:
     assert result is False
     mock_utils.validate_repository_access.assert_not_called()
 
-  @patch("robosystems.middleware.graph.multitenant_utils.MultiTenantUtils")
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils")
   def test_validate_repository_access_different_operations(self, mock_utils):
     """Test repository access with different operation types."""
     mock_user = Mock(spec=User)

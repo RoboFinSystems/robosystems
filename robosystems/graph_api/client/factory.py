@@ -30,7 +30,7 @@ from robosystems.logger import logger
 from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
 from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import GraphTypeRegistry
-from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
+from robosystems.middleware.graph.utils import parse_subgraph_id
 
 
 class GraphClientError(Exception):

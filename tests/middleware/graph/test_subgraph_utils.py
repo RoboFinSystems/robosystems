@@ -1,7 +1,7 @@
 """Tests for subgraph utility functions."""
 
 import pytest
-from robosystems.middleware.graph.subgraph_utils import (
+from robosystems.middleware.graph.utils import (
   parse_subgraph_id,
   validate_subgraph_name,
   validate_parent_graph_id,

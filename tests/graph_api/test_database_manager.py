@@ -7,11 +7,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 
-from robosystems.graph_api.core.database_manager import (
+from robosystems.graph_api.core.ladybug.manager import (
   LadybugDatabaseManager,
+  validate_database_path,
+)
+from robosystems.graph_api.models.database import (
   DatabaseCreateRequest,
   DatabaseInfo,
-  validate_database_path,
 )
 
 
@@ -95,7 +97,7 @@ class TestLadybugDatabaseManager:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_initialization(self, mock_init_pool):
     """Test manager initialization."""
     mock_pool = MagicMock()
@@ -119,7 +121,7 @@ class TestLadybugDatabaseManager:
       connection_ttl_minutes=30,
     )
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   @patch("real_ladybug.Database")
   @patch("real_ladybug.Connection")
   def test_create_database_success_entity_schema(
@@ -173,7 +175,7 @@ class TestLadybugDatabaseManager:
     # Verify database was created successfully (connection pool manages connections)
     # New implementation uses connection pool, no direct database/connection storage
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   @patch("real_ladybug.Database")
   @patch("real_ladybug.Connection")
   def test_create_database_read_only(
@@ -209,7 +211,7 @@ class TestLadybugDatabaseManager:
     # Verify read-only database creation completed successfully
     # New implementation uses connection pool, no direct connection storage
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_create_database_capacity_exceeded(self, mock_init_pool):
     """Test database creation when capacity is exceeded."""
     from fastapi import HTTPException
@@ -233,7 +235,7 @@ class TestLadybugDatabaseManager:
     assert exc_info.value.status_code == 507  # Insufficient Storage
     assert "Maximum database capacity reached" in str(exc_info.value.detail)
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_create_database_already_exists(self, mock_init_pool):
     """Test database creation when database already exists."""
     from fastapi import HTTPException
@@ -259,7 +261,7 @@ class TestLadybugDatabaseManager:
     assert exc_info.value.status_code == 409  # Conflict
     assert "already exists" in str(exc_info.value.detail)
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   @patch("real_ladybug.Database")
   def test_create_database_lbug_error_cleanup(self, mock_db_class, mock_init_pool):
     """Test database creation error handling and cleanup."""
@@ -289,7 +291,7 @@ class TestLadybugDatabaseManager:
     db_path = self.base_path / "test_fail.lbug"
     assert not db_path.exists()
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_delete_database_success(self, mock_init_pool):
     """Test successful database deletion."""
     mock_init_pool.return_value = MagicMock()
@@ -316,7 +318,7 @@ class TestLadybugDatabaseManager:
     # Verify directory was deleted
     assert not db_path.exists()
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_delete_database_not_found(self, mock_init_pool):
     """Test database deletion when database doesn't exist."""
     from fastapi import HTTPException
@@ -330,7 +332,7 @@ class TestLadybugDatabaseManager:
     assert exc_info.value.status_code == 404
     assert "not found" in str(exc_info.value.detail)
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_list_databases(self, mock_init_pool):
     """Test database listing."""
     mock_init_pool.return_value = MagicMock()
@@ -347,7 +349,7 @@ class TestLadybugDatabaseManager:
     # Should return only .lbug files, sorted
     assert databases == ["db1", "db2", "db3"]
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_list_databases_empty(self, mock_init_pool):
     """Test database listing when no databases exist."""
     mock_init_pool.return_value = MagicMock()
@@ -357,7 +359,7 @@ class TestLadybugDatabaseManager:
 
     assert databases == []
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_get_database_info_success(self, mock_init_pool):
     """Test successful database info retrieval."""
     mock_init_pool.return_value = MagicMock()
@@ -383,7 +385,7 @@ class TestLadybugDatabaseManager:
     assert info.last_accessed is not None
     assert isinstance(datetime.fromisoformat(info.created_at), datetime)
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_get_database_info_not_found(self, mock_init_pool):
     """Test database info retrieval for non-existent database."""
     from fastapi import HTTPException
@@ -397,7 +399,7 @@ class TestLadybugDatabaseManager:
     assert exc_info.value.status_code == 404
     assert "not found" in str(exc_info.value.detail)
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_get_all_databases_info(self, mock_init_pool):
     """Test retrieval of all databases info."""
     mock_init_pool.return_value = MagicMock()
@@ -437,7 +439,7 @@ class TestLadybugDatabaseManager:
     assert response.node_capacity["capacity_remaining"] == 98
     assert response.node_capacity["utilization_percent"] == 2.0
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_health_check_all(self, mock_init_pool):
     """Test health check for all databases."""
     mock_init_pool.return_value = MagicMock()
@@ -473,7 +475,7 @@ class TestLadybugDatabaseManager:
     assert health_response.unhealthy_databases == 1
     assert len(health_response.databases) == 2
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_check_database_health_success(self, mock_init_pool):
     """Test successful database health check (file existence only)."""
     mock_init_pool.return_value = MagicMock()
@@ -487,7 +489,7 @@ class TestLadybugDatabaseManager:
 
     assert is_healthy is True
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_check_database_health_failure(self, mock_init_pool):
     """Test database health check failure (file does not exist)."""
     mock_init_pool.return_value = MagicMock()
@@ -498,7 +500,7 @@ class TestLadybugDatabaseManager:
 
     assert is_healthy is False
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_check_database_health_not_found(self, mock_init_pool):
     """Test database health check for non-existent database."""
     mock_init_pool.return_value = MagicMock()
@@ -508,7 +510,7 @@ class TestLadybugDatabaseManager:
 
     assert is_healthy is False
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_apply_entity_schema(self, mock_init_pool):
     """Test entity schema application using dynamic schema loader."""
     mock_init_pool.return_value = MagicMock()
@@ -539,7 +541,7 @@ class TestLadybugDatabaseManager:
     assert "CREATE NODE TABLE IF NOT EXISTS Entity" in all_calls_str
     assert "CREATE NODE TABLE IF NOT EXISTS Element" in all_calls_str
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_apply_shared_schema(self, mock_init_pool):
     """Test shared schema application using dynamic schema loader."""
     mock_init_pool.return_value = MagicMock()
@@ -560,7 +562,7 @@ class TestLadybugDatabaseManager:
     all_calls_str = " ".join(call_args)
     assert "CREATE NODE TABLE IF NOT EXISTS" in all_calls_str
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_apply_schema_unknown_type(self, mock_init_pool):
     """Test schema application with unknown schema type."""
     mock_init_pool.return_value = MagicMock()
@@ -572,7 +574,7 @@ class TestLadybugDatabaseManager:
 
     assert result is False
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_apply_fallback_entity_schema(self, mock_init_pool):
     """Test fallback entity schema application."""
     mock_init_pool.return_value = MagicMock()
@@ -595,7 +597,7 @@ class TestLadybugDatabaseManager:
     assert "CREATE NODE TABLE IF NOT EXISTS User" in all_calls_str
     assert "CREATE REL TABLE IF NOT EXISTS HAS_USER" in all_calls_str
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_apply_fallback_entity_schema_with_error(self, mock_init_pool):
     """Test fallback entity schema application with database error."""
     mock_init_pool.return_value = MagicMock()
@@ -608,7 +610,7 @@ class TestLadybugDatabaseManager:
 
     assert result is False
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_map_schema_type_to_lbug(self, mock_init_pool):
     """Test schema type mapping to LadybugDB types."""
     mock_init_pool.return_value = MagicMock()
@@ -630,7 +632,7 @@ class TestLadybugDatabaseManager:
     assert manager._map_schema_type_to_lbug("UNKNOWN_TYPE") == "STRING"
     assert manager._map_schema_type_to_lbug("") == "STRING"
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   @patch("robosystems.schemas.loader.get_schema_loader")
   def test_apply_entity_schema_with_schema_loader_failure(
     self, mock_get_schema_loader, mock_init_pool
@@ -650,7 +652,7 @@ class TestLadybugDatabaseManager:
     # Verify fallback was used (should have exactly 3 calls for minimal schema)
     assert mock_conn.execute.call_count == 3
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_apply_shared_schema_with_different_repositories(self, mock_init_pool):
     """Test shared schema application with different repository types."""
     mock_init_pool.return_value = MagicMock()
@@ -669,7 +671,7 @@ class TestLadybugDatabaseManager:
     result_other = manager._apply_shared_schema(mock_conn, "industry")
     assert result_other is True
 
-  @patch("robosystems.graph_api.core.database_manager.initialize_connection_pool")
+  @patch("robosystems.graph_api.core.ladybug.manager.initialize_connection_pool")
   def test_close_all_connections(self, mock_init_pool):
     """Test closing all connections."""
     mock_pool = MagicMock()
@@ -692,11 +694,9 @@ class TestLadybugDatabaseManager:
       schema_type="entity",
       repository_name=None,
       custom_schema_ddl=None,
-      read_only=False,
     )
     assert valid_request.graph_id == "test_entity"
     assert valid_request.schema_type == "entity"
-    assert valid_request.read_only is False
 
     # Invalid database name
     with pytest.raises(ValidationError):
@@ -722,15 +722,6 @@ class TestLadybugDatabaseManager:
         graph_id="x" * 65,
         schema_type="entity",
         repository_name=None,
-        custom_schema_ddl=None,
-      )
-
-    # Invalid repository name for shared schema
-    with pytest.raises(ValidationError):
-      DatabaseCreateRequest(
-        graph_id="test_db",
-        schema_type="shared",
-        repository_name="invalid@repo",
         custom_schema_ddl=None,
       )
 

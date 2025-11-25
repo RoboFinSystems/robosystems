@@ -169,7 +169,7 @@ class TestSubgraphAuthorization:
     user_graph: Graph,
   ):
     """Authorization middleware should check parent permissions for subgraphs"""
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+    from robosystems.middleware.graph.utils import MultiTenantUtils
 
     subgraph_id = f"{user_graph.graph_id}_dev"
 

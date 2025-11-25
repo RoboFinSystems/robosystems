@@ -189,7 +189,7 @@ def validate_api_key_with_graph(
 
   # Check if the user has access to the specified graph
   # Special handling for SEC database
-  from ..graph.multitenant_utils import MultiTenantUtils
+  from ..graph.utils import MultiTenantUtils
 
   has_access = False  # Initialize variable
   if MultiTenantUtils.is_shared_repository(graph_id):
@@ -272,7 +272,7 @@ def validate_repository_access(
   if not user or not bool(user.is_active):
     return False
 
-  from ..graph.multitenant_utils import MultiTenantUtils
+  from ..graph.utils import MultiTenantUtils
 
   # Use the generic repository access validation
   return MultiTenantUtils.validate_repository_access(

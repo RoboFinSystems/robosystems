@@ -1,4 +1,4 @@
-"""Comprehensive tests for LadybugClusterService and FastAPI endpoints."""
+"""Comprehensive tests for LadybugService and FastAPI endpoints."""
 
 import pytest
 import tempfile
@@ -6,8 +6,8 @@ import shutil
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
-from robosystems.graph_api.core.cluster_manager import (
-  LadybugClusterService,
+from robosystems.graph_api.core.ladybug import (
+  LadybugService,
   validate_cypher_query,
 )
 from robosystems.graph_api.core.utils import (
@@ -16,7 +16,7 @@ from robosystems.graph_api.core.utils import (
 )
 from robosystems.graph_api.app import create_app
 from robosystems.graph_api.models.database import QueryRequest, DatabaseCreateRequest
-from robosystems.middleware.graph.clusters import NodeType, RepositoryType
+from robosystems.middleware.graph.types import NodeType, RepositoryType
 from robosystems.exceptions import ConfigurationError
 
 
@@ -153,8 +153,8 @@ class TestSecurityValidation:
     assert "too long" in str(exc_info.value.detail)
 
 
-class TestLadybugClusterService:
-  """Test LadybugClusterService class."""
+class TestLadybugService:
+  """Test LadybugService class."""
 
   def setup_method(self):
     """Set up test fixtures."""
@@ -165,10 +165,10 @@ class TestLadybugClusterService:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_initialization_entity_writer(self, mock_db_manager):
     """Test initialization of entity writer node."""
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       max_databases=100,
       read_only=False,
@@ -184,10 +184,10 @@ class TestLadybugClusterService:
     assert isinstance(service.start_time, float)
     mock_db_manager.assert_called_once_with(self.base_path, 100, read_only=False)
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_initialization_shared_writer(self, mock_db_manager):
     """Test initialization of shared repository writer."""
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       max_databases=50,
       read_only=False,
@@ -199,13 +199,13 @@ class TestLadybugClusterService:
     assert service.node_type == NodeType.WRITER
     assert service.repository_type == RepositoryType.SHARED
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_initialization_validation_errors(self, mock_db_manager):
     """Test initialization validation for invalid configurations."""
 
     # Writer nodes cannot be read-only
     with pytest.raises(ConfigurationError, match="Writer nodes cannot be read-only"):
-      LadybugClusterService(
+      LadybugService(
         base_path=self.base_path,
         read_only=True,
         node_type=NodeType.WRITER,
@@ -216,7 +216,7 @@ class TestLadybugClusterService:
     with pytest.raises(
       ValueError, match="Shared writer nodes must use shared repository type"
     ):
-      LadybugClusterService(
+      LadybugService(
         base_path=self.base_path,
         read_only=False,
         node_type=NodeType.SHARED_MASTER,
@@ -225,7 +225,7 @@ class TestLadybugClusterService:
 
     # Writers can now handle both entity and shared repositories
     # No exception should be raised for writer with shared repository
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       read_only=False,
       node_type=NodeType.WRITER,
@@ -233,7 +233,7 @@ class TestLadybugClusterService:
     )
     assert service.repository_type == RepositoryType.SHARED
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_execute_query_success(self, mock_db_manager):
     """Test successful query execution."""
     # Mock database manager instance
@@ -241,7 +241,7 @@ class TestLadybugClusterService:
     mock_db_instance.list_databases.return_value = ["test_db"]
     mock_db_manager.return_value = mock_db_instance
 
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       node_type=NodeType.WRITER,
       repository_type=RepositoryType.ENTITY,
@@ -287,12 +287,12 @@ class TestLadybugClusterService:
     ]
     assert response.execution_time_ms > 0
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_execute_query_database_not_found(self, mock_db_manager):
     """Test query execution with non-existent database."""
     from fastapi import HTTPException
 
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       node_type=NodeType.WRITER,
       repository_type=RepositoryType.ENTITY,
@@ -312,8 +312,8 @@ class TestLadybugClusterService:
     assert exc_info.value.status_code == 404
     assert "not found" in str(exc_info.value.detail)
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
-  @patch("robosystems.graph_api.core.cluster_manager.ThreadPoolExecutor")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.ThreadPoolExecutor")
   def test_execute_query_timeout(self, mock_executor_class, mock_db_manager):
     """Test query execution timeout using ThreadPoolExecutor."""
     from concurrent.futures import TimeoutError as FuturesTimeoutError
@@ -329,7 +329,7 @@ class TestLadybugClusterService:
       mock_db_manager.return_value = mock_db_instance
 
       # Create service
-      service = LadybugClusterService(
+      service = LadybugService(
         base_path=self.base_path,
         node_type=NodeType.WRITER,
         repository_type=RepositoryType.ENTITY,
@@ -367,7 +367,7 @@ class TestLadybugClusterService:
       # Verify timeout was used correctly
       mock_future.result.assert_called_once_with(timeout=1.0)
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_execute_query_large_result_set(self, mock_db_manager):
     """Test query execution with large result set (DoS protection)."""
     # Mock database manager instance before creating service
@@ -375,7 +375,7 @@ class TestLadybugClusterService:
     mock_db_instance.list_databases.return_value = ["test_db"]
     mock_db_manager.return_value = mock_db_instance
 
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       node_type=NodeType.WRITER,
       repository_type=RepositoryType.ENTITY,
@@ -410,11 +410,11 @@ class TestLadybugClusterService:
     # Should close result to free resources
     mock_result.close.assert_called_once()
 
-  @patch("robosystems.graph_api.core.cluster_manager.psutil")
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.psutil")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_get_cluster_health(self, mock_db_manager, mock_psutil):
     """Test cluster health check."""
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       max_databases=100,
       node_type=NodeType.WRITER,
@@ -439,10 +439,10 @@ class TestLadybugClusterService:
     assert health.read_only is False
     assert health.uptime_seconds > 0
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_get_cluster_info(self, mock_db_manager):
     """Test cluster information retrieval."""
-    service = LadybugClusterService(
+    service = LadybugService(
       base_path=self.base_path,
       max_databases=50,
       node_type=NodeType.SHARED_MASTER,
@@ -475,8 +475,8 @@ class TestFastAPIEndpoints:
     self.base_path = str(self.temp_dir)
 
     # Initialize a mock cluster service for all tests
-    from robosystems.middleware.graph.clusters import NodeType
-    from robosystems.graph_api.core import cluster_manager
+    from robosystems.middleware.graph.types import NodeType
+    from robosystems.graph_api.core.ladybug import service as ladybug_service
 
     mock_service = MagicMock()
     mock_service.node_type = NodeType.WRITER
@@ -485,7 +485,7 @@ class TestFastAPIEndpoints:
     mock_service.db_manager = MagicMock()
 
     # Patch the global cluster service
-    cluster_manager._cluster_service = mock_service
+    ladybug_service._ladybug_service = mock_service
     self.mock_service = mock_service
 
   def teardown_method(self):
@@ -493,9 +493,9 @@ class TestFastAPIEndpoints:
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     # Reset the global cluster service
-    from robosystems.graph_api.core import cluster_manager
+    from robosystems.graph_api.core.ladybug import service as ladybug_service
 
-    cluster_manager._cluster_service = None
+    ladybug_service._ladybug_service = None
 
   def test_health_endpoint(self):
     """Test health check endpoint."""
@@ -741,9 +741,7 @@ class TestFastAPIEndpoints:
     self.mock_service.read_only = True
 
     # Patch connection pool at module level before creating app
-    with patch(
-      "robosystems.graph_api.core.connection_pool._connection_pool", MagicMock()
-    ):
+    with patch("robosystems.graph_api.core.ladybug.pool._connection_pool", MagicMock()):
       app = create_app()
       client = TestClient(app)
 

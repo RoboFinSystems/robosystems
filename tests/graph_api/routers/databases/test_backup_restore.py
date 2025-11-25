@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from robosystems.graph_api.routers.databases import backup as backup_module
 from robosystems.graph_api.routers.databases import restore as restore_module
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 
 
 class FakeDBManager:
@@ -48,7 +48,7 @@ def backup_client(monkeypatch):
   monkeypatch.setattr(backup_module, "perform_backup", perform_backup_mock)
 
   def _factory(cluster_service):
-    app.dependency_overrides[get_cluster_service] = lambda: cluster_service
+    app.dependency_overrides[get_ladybug_service] = lambda: cluster_service
     client = TestClient(app)
     client.task_manager = task_manager  # attach for assertions
     client.perform_backup_mock = perform_backup_mock  # attach for assertions
@@ -76,7 +76,7 @@ def restore_client(monkeypatch):
   monkeypatch.setattr(restore_module, "perform_restore", perform_restore_mock)
 
   def _factory(cluster_service):
-    app.dependency_overrides[get_cluster_service] = lambda: cluster_service
+    app.dependency_overrides[get_ladybug_service] = lambda: cluster_service
     client = TestClient(app)
     client.task_manager = task_manager
     client.perform_restore_mock = perform_restore_mock
@@ -192,12 +192,12 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
   db_file.write_bytes(b"neo4j-data")
 
   monkeypatch.setattr(
-    "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.get_database_path_for_graph",
+    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
     lambda graph_id: str(db_file),
   )
 
   response = await restore_module.download_backup(
-    graph_id="graph1", cluster_service=cluster
+    graph_id="graph1", ladybug_service=cluster
   )
 
   assert response.headers["X-Database"] == "graph1"
@@ -219,12 +219,12 @@ async def test_download_backup_returns_zip_for_file_db(monkeypatch, tmp_path):
 async def test_download_backup_missing_path_returns_404(monkeypatch):
   cluster = FakeClusterService(read_only=False, databases=["graph1"])
   monkeypatch.setattr(
-    "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.get_database_path_for_graph",
+    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
     lambda graph_id: "/nonexistent/path/graph1.lbug",
   )
 
   with pytest.raises(HTTPException) as exc:
-    await restore_module.download_backup(graph_id="graph1", cluster_service=cluster)
+    await restore_module.download_backup(graph_id="graph1", ladybug_service=cluster)
 
   assert exc.value.status_code == 404
   assert "not found" in exc.value.detail.lower()
@@ -235,7 +235,7 @@ async def test_download_backup_rejects_read_only():
   cluster = FakeClusterService(read_only=True, databases=["graph1"])
 
   with pytest.raises(HTTPException) as exc:
-    await restore_module.download_backup(graph_id="graph1", cluster_service=cluster)
+    await restore_module.download_backup(graph_id="graph1", ladybug_service=cluster)
 
   assert exc.value.status_code == 403
 
@@ -245,7 +245,7 @@ async def test_download_backup_missing_database_returns_404():
   cluster = FakeClusterService(read_only=False, databases=[])
 
   with pytest.raises(HTTPException) as exc:
-    await restore_module.download_backup(graph_id="graph1", cluster_service=cluster)
+    await restore_module.download_backup(graph_id="graph1", ladybug_service=cluster)
 
   assert exc.value.status_code == 404
 
@@ -262,12 +262,12 @@ async def test_download_backup_directory_database(monkeypatch, tmp_path):
   (nested_dir / "metrics.log").write_text("metrics")
 
   monkeypatch.setattr(
-    "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.get_database_path_for_graph",
+    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph",
     lambda graph_id: str(db_dir),
   )
 
   response = await restore_module.download_backup(
-    graph_id="graph1", cluster_service=cluster
+    graph_id="graph1", ladybug_service=cluster
   )
 
   backup_bytes = response.body

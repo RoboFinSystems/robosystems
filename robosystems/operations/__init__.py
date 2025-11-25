@@ -24,7 +24,7 @@ from ..middleware.graph.allocation_manager import (
   DatabaseStatus,
   InstanceStatus,
 )
-from ..middleware.graph.multitenant_utils import MultiTenantUtils, AccessPattern
+from ..middleware.graph.utils import MultiTenantUtils, AccessPattern
 from .lbug.backup_manager import (
   BackupManager,
   BackupJob,

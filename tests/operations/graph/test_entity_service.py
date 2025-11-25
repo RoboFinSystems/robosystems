@@ -28,7 +28,7 @@ class TestEntityGraphService:
 
   def test_is_multitenant_mode_always_true(self):
     """Test multitenant mode is always True for LadybugDB databases."""
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+    from robosystems.middleware.graph.utils import MultiTenantUtils
 
     # MultiTenantUtils.is_multitenant_mode() always returns True
     result = MultiTenantUtils.is_multitenant_mode()
