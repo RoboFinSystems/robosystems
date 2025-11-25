@@ -15,28 +15,61 @@ The graph middleware:
 
 **Supported Backends:**
 
-- **LadybugDB**: Embedded graph database with EC2-based clusters
-- **Neo4j Community**: Client-server architecture for ladybug-large tier
-- **Neo4j Enterprise**: Multi-database support for ladybug-xlarge tier
+- **LadybugDB**: Embedded graph database (primary backend for all main subscription tiers)
+  - Multi-tenant shared instances (ladybug-standard)
+  - Dedicated instances (ladybug-large, ladybug-xlarge)
+  - Subgraph support on dedicated tiers
+  - Core services: `/robosystems/graph_api/core/ladybug/`
+
+- **Neo4j** (optional, available on request):
+  - External graph database for enterprise requirements
+  - Core services: `/robosystems/graph_api/core/neo4j/`
+
+- **DuckDB Staging**: Data transformation layer for all backends
+  - Parquet file reading from S3
+  - Data validation and transformation
+  - Core services: `/robosystems/graph_api/core/duckdb/`
 
 ## Architecture
 
+The middleware layer sits above the core services, providing routing, orchestration, and multi-tenant management:
+
 ```
-graph/
-├── __init__.py              # Module exports
-├── router.py                # Main routing logic
-├── clusters.py              # Cluster configuration and management
-├── engine.py                # Direct LadybugDB database access
-├── repository.py            # Repository pattern implementation
-├── dependencies.py          # FastAPI dependency injection
-├── types.py                 # Type definitions and enums
-├── base.py                  # Base classes and interfaces
-├── query_queue.py           # Query queue with admission control
-├── admission_control.py     # System resource monitoring
-├── schema_installer.py      # Schema installation utilities
-├── allocation_manager.py    # DynamoDB-based database allocation
-└── multitenant_utils.py     # Multi-tenant utilities and validation
+middleware/graph/                         # Middleware layer (this module)
+├── __init__.py                          # Module exports
+├── router.py                            # Main routing logic
+├── clusters.py                          # Cluster configuration and management
+├── repository.py                        # Repository pattern implementation
+├── dependencies.py                      # FastAPI dependency injection
+├── types.py                             # Type definitions and enums
+├── base.py                              # Base classes and interfaces
+├── query_queue.py                       # Query queue with admission control
+├── admission_control.py                 # System resource monitoring
+├── schema_installer.py                  # Schema installation utilities
+├── allocation_manager.py                # DynamoDB-based database allocation
+├── multitenant_utils.py                 # Multi-tenant utilities and validation
+└── utils/                               # Utility modules
+    ├── validation.py                    # Input validation
+    ├── database.py                      # Database resolution
+    ├── identity.py                      # Graph identity management
+    └── subgraph.py                      # Subgraph utilities
+
+graph_api/core/                          # Core services layer (database access)
+├── ladybug/                             # LadybugDB embedded database
+│   ├── engine.py                       # Low-level driver
+│   ├── pool.py                         # Connection pooling
+│   ├── manager.py                      # Database lifecycle
+│   └── service.py                      # Service orchestration
+├── neo4j/                               # Neo4j backend (optional)
+│   └── service.py                      # Neo4j service layer
+└── duckdb/                              # DuckDB staging layer
+    ├── pool.py                          # Connection pooling
+    └── manager.py                       # Table management
 ```
+
+**Layer Separation**:
+- **Middleware** (this module): Routing, multi-tenancy, orchestration
+- **Core Services**: Database access, connection management, query execution
 
 ## Key Components
 
@@ -101,27 +134,43 @@ class ClusterConfig:
     tier: InstanceTier
 ```
 
-### 3. Graph Engine (`engine.py`)
+### 3. Core Services Integration
 
-Direct graph database access with connection management (LadybugDB-specific).
+The middleware integrates with the core services layer for database access.
 
-**Features:**
+**LadybugDB Service** (`graph_api/core/ladybug/`):
+- Connection pooling via `LadybugConnectionPool`
+- Database lifecycle via `LadybugDatabaseManager`
+- Query execution via `LadybugService`
+- Direct engine access via `Engine` (for low-level operations)
 
-- **Connection Pooling**: Reuses connections for performance
-- **Query Execution**: Executes Cypher queries with proper error handling
-- **Transaction Support**: Full ACID transaction support
-- **Schema Management**: Creates and updates graph schemas
+**Neo4j Service** (`graph_api/core/neo4j/`):
+- Backend abstraction integration
+- Query execution and health monitoring
+
+**DuckDB Staging** (`graph_api/core/duckdb/`):
+- Staging table management via `DuckDBTableManager`
+- Connection pooling via `DuckDBConnectionPool`
 
 **Usage:**
 
 ```python
-# LadybugDB-specific direct access (development/legacy)
-engine = GraphEngine(database_path="/data/lbug-dbs/kg1a2b3c")
-result = engine.execute_query("MATCH (c:Entity) RETURN c")
-engine.close()
+# Via middleware routing (recommended)
+router = GraphRouter()
+repo = router.get_repository("kg1a2b3c")
+result = await repo.execute_query("MATCH (c:Entity) RETURN c")
 
-# Note: For production use the backend abstraction layer instead
+# Direct core service access (when needed)
+from robosystems.graph_api.core.ladybug import get_ladybug_service
+
+service = get_ladybug_service()
+response = await service.execute_query(QueryRequest(
+    database="kg1a2b3c",
+    cypher="MATCH (c:Entity) RETURN c"
+))
 ```
+
+See the [Core Services README](/robosystems/graph_api/core/README.md) for detailed documentation.
 
 ### 4. Repository Pattern (`repository.py`)
 
@@ -144,7 +193,7 @@ class Repository(Protocol):
     async def health_check(self) -> Dict[str, Any]
 ```
 
-### 5. Query Queue (`query_queue.py`)
+### 5. Query Queue with Admission Control (`query_queue.py`)
 
 Advanced query queue with admission control and long polling.
 
@@ -342,15 +391,25 @@ Key environment variables:
 
 ```bash
 # Backend Configuration
-GRAPH_BACKEND_TYPE=ladybug             # ladybug|neo4j_community|neo4j_enterprise
+GRAPH_BACKEND_TYPE=ladybug             # ladybug (primary) | neo4j (optional)
 
-# Routing Configuration (LadybugDB)
-LBUG_ACCESS_PATTERN=api_writer      # Access pattern (api_writer/api_reader/direct_file)
-GRAPH_API_URL=                       # Localhost endpoint for routing (dynamic lookup in prod)
+# LadybugDB Configuration (core/ladybug/)
+LBUG_DATABASE_DIR=/data/lbug-dbs       # Database directory
+LBUG_MAX_DATABASES_PER_NODE=100        # Instance capacity
+LBUG_MAX_CONNECTIONS_PER_DB=10         # Connection pool size
+LBUG_ACCESS_PATTERN=api_writer         # Access pattern for routing
+GRAPH_API_URL=                         # Graph API endpoint (dynamic in prod)
 
-# Routing Configuration (Neo4j)
-NEO4J_URI=bolt://neo4j-db:7687      # Neo4j Bolt connection
-NEO4J_ENTERPRISE=false               # Enable multi-database support
+# Neo4j Configuration (core/neo4j/ - optional)
+NEO4J_URI=bolt://neo4j-db:7687         # Neo4j Bolt connection
+NEO4J_USER=neo4j                       # Neo4j username
+NEO4J_PASSWORD=password                # Neo4j password
+
+# DuckDB Staging Configuration (core/duckdb/)
+DUCKDB_STAGING_DIR=/data/duckdb-staging  # Staging database directory
+DUCKDB_MAX_CONNECTIONS_PER_DB=3          # DuckDB connection pool size
+DUCKDB_MAX_THREADS=4                     # DuckDB processing threads
+DUCKDB_MEMORY_LIMIT=2GB                  # DuckDB memory limit
 
 # Queue Configuration
 QUERY_QUEUE_MAX_SIZE=1000           # Maximum queries in queue
@@ -363,15 +422,10 @@ ADMISSION_CPU_THRESHOLD=90          # CPU threshold (%)
 LOAD_SHEDDING_ENABLED=true         # Enable load shedding
 
 # Performance
-CONNECTION_POOL_SIZE=10             # Database connection pool size
-QUERY_TIMEOUT=30                    # Query timeout (seconds)
-NEO4J_MAX_CONNECTION_POOL_SIZE=50   # Neo4j connection pool size
-
-# Database Allocation (LadybugDB)
-LBUG_MAX_DATABASES_PER_NODE=50     # Max databases per LadybugDB instance
+QUERY_TIMEOUT=300                   # Query timeout (seconds)
 
 # Multi-tenant Configuration
-LBUG_ACCESS_PATTERN=api_auto       # Access pattern for graph operations
+MULTITENANT_MODE=true              # Enable multi-tenant database support
 ```
 
 ## Usage Patterns
@@ -379,11 +433,22 @@ LBUG_ACCESS_PATTERN=api_auto       # Access pattern for graph operations
 ### Basic Query Execution
 
 ```python
+# Via middleware router (recommended for multi-tenant routing)
 from robosystems.middleware.graph import GraphRouter
 
 router = GraphRouter()
 repo = router.get_repository("kg1a2b3c")
 result = await repo.execute_query("MATCH (c:Entity) RETURN c")
+
+# Via core service (direct access when routing not needed)
+from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.models.database import QueryRequest
+
+service = get_ladybug_service()
+response = await service.execute_query(QueryRequest(
+    database="kg1a2b3c",
+    cypher="MATCH (c:Entity) RETURN c"
+))
 ```
 
 ### With Query Queue
@@ -417,9 +482,10 @@ success = await repo.execute_transaction([
 
 The middleware integrates with the credit system to track usage:
 
-- Query operations consume credits based on complexity
-- Storage operations consume credits based on size
-- AI operations (MCP) consume higher credit amounts
+- **AI Operations**: Anthropic/OpenAI API calls consume credits (token-based billing)
+- **Database Operations**: All graph queries, imports, backups are FREE (included in subscription)
+- **Storage**: Optional billing mechanism (10 credits/GB/day)
+- Credit tracking happens at the middleware layer before queries reach core services
 
 ### 2. Authentication
 
@@ -480,3 +546,30 @@ Common issues and solutions:
    - Add appropriate indexes
    - Limit result sets
    - Use query profiling
+
+## Related Documentation
+
+### Core Services Layer
+
+- **[Core Services Overview](/robosystems/graph_api/core/README.md)** - Complete overview of the core services architecture
+- **[LadybugDB Service](/robosystems/graph_api/core/ladybug/README.md)** - Embedded database services (Engine, Pool, Manager, Service)
+- **[Neo4j Service](/robosystems/graph_api/core/neo4j/README.md)** - Optional Neo4j backend integration
+- **[DuckDB Staging](/robosystems/graph_api/core/duckdb/README.md)** - Data staging and transformation layer
+
+### Middleware Components
+
+- **[Subgraph Utilities](/robosystems/middleware/graph/utils/subgraph.py)** - Subgraph ID parsing and validation
+- **[Multi-tenant Utilities](/robosystems/middleware/graph/utils/)** - Database resolution and access patterns
+- **[Allocation Manager](/robosystems/middleware/graph/allocation_manager.py)** - DynamoDB-based database allocation
+
+### Configuration
+
+- **[Billing Plans](/robosystems/config/billing.py)** - Subscription tiers and features
+- **[Rate Limiting](/robosystems/config/rate_limits.py)** - Burst-focused rate limiting
+- **[Graph Tier Configuration](/.github/configs/graph.yml)** - Infrastructure tier specifications
+
+### API Documentation
+
+- **[Graph API README](/robosystems/graph_api/README.md)** - Complete Graph API overview
+- **[API Routers](/robosystems/graph_api/routers/)** - FastAPI endpoint implementations
+- **[API Models](/robosystems/graph_api/models/)** - Request/response schemas
