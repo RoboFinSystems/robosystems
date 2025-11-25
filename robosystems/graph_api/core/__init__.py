@@ -16,7 +16,6 @@ from .ladybug import (
 from .utils import validate_database_name, validate_query_parameters
 from .metrics_collector import LadybugMetricsCollector
 
-# Backward compatibility alias
 init_cluster_service = init_ladybug_service
 
 __all__ = [

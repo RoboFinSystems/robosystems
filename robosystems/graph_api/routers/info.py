@@ -1,5 +1,5 @@
 """
-Information endpoints for LadybugDB nodes.
+Information endpoints for graph database nodes.
 
 This module provides endpoints for retrieving detailed information
 about the node and its capabilities.
@@ -9,13 +9,26 @@ from fastapi import APIRouter, Depends
 
 from robosystems.graph_api.models.cluster import ClusterInfoResponse
 from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.config import env
 
 router = APIRouter(tags=["Info"])
 
 
+def _get_service_for_info(
+  ladybug_service=Depends(get_ladybug_service),
+):
+  """Get the appropriate service based on backend configuration."""
+  backend_type = env.GRAPH_BACKEND_TYPE
+  if backend_type in ["neo4j_community", "neo4j_enterprise"]:
+    from robosystems.graph_api.core.neo4j import Neo4jService
+
+    return Neo4jService()
+  return ladybug_service
+
+
 @router.get("/info", response_model=ClusterInfoResponse)
 async def get_info(
-  ladybug_service=Depends(get_ladybug_service),
+  service=Depends(_get_service_for_info),
 ) -> ClusterInfoResponse:
   """
   Get detailed node information.
@@ -27,4 +40,9 @@ async def get_info(
   - List of databases on this node
   - Uptime and operational status
   """
-  return ladybug_service.get_cluster_info()
+  import inspect
+
+  result = service.get_cluster_info()
+  if inspect.iscoroutine(result):
+    return await result
+  return result

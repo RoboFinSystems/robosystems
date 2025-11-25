@@ -587,32 +587,6 @@ TASK_TTL_SECONDS=3600
 - **Implement retries** - Retry transient failures with exponential backoff
 - **Return user-friendly errors** - Sanitize error messages before returning to client
 
-## Migration Guide
-
-### Upgrading from Old Structure
-
-If you're migrating from the old flat structure, update your imports:
-
-**Old imports (deprecated)**:
-```python
-from robosystems.graph_api.core.ladybug_service import LadybugService
-from robosystems.graph_api.core.connection_pool import LadybugConnectionPool
-from robosystems.graph_api.core.database_manager import LadybugDatabaseManager
-from robosystems.graph_api.core.backend_cluster_manager import BackendClusterService
-```
-
-**New imports (current)**:
-```python
-from robosystems.graph_api.core.ladybug import (
-    LadybugService,
-    LadybugConnectionPool,
-    LadybugDatabaseManager
-)
-from robosystems.graph_api.core.neo4j import Neo4jService  # formerly BackendClusterService
-```
-
-**Backward compatibility**: The old imports still work via aliases in `core/__init__.py`, but should be updated to use the new structure.
-
 ## Related Documentation
 
 - **[Graph API README](/robosystems/graph_api/README.md)** - Complete Graph API overview

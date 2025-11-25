@@ -8,15 +8,28 @@ quickly for infrastructure health monitoring.
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.config import env
 from robosystems.logger import logger
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 
 router = APIRouter(tags=["Health"])
 
 
+def _get_service_for_health(
+  ladybug_service=Depends(get_ladybug_service),
+):
+  """Get the appropriate service based on backend configuration."""
+  backend_type = env.GRAPH_BACKEND_TYPE
+  if backend_type in ["neo4j_community", "neo4j_enterprise"]:
+    from robosystems.graph_api.core.neo4j import Neo4jService
+
+    return Neo4jService()
+  return ladybug_service
+
+
 @router.get("/health")
 async def health_check(
-  ladybug_service=Depends(get_ladybug_service),
+  service=Depends(_get_service_for_health),
 ) -> JSONResponse:
   """
   Simple health check endpoint for load balancers and monitoring.
@@ -32,8 +45,21 @@ async def health_check(
   """
   try:
     # Basic check that service is accessible
-    uptime = ladybug_service.get_uptime()
-    databases = len(ladybug_service.db_manager.list_databases())
+    uptime = service.get_uptime()
+
+    # Get database count (different for LadybugDB vs Neo4j)
+    database_count = 0
+    if hasattr(service, "db_manager"):
+      # LadybugDB service
+      database_count = len(service.db_manager.list_databases())
+    elif hasattr(service, "backend"):
+      # Neo4j service - get databases from backend
+      try:
+        databases = await service.backend.list_databases()
+        database_count = len(databases)
+      except Exception:
+        # If listing databases fails, just continue with 0
+        pass
 
     # Include memory usage if psutil is available
     memory_info = {}
@@ -55,7 +81,7 @@ async def health_check(
       content={
         "status": "healthy",
         "uptime_seconds": uptime,
-        "database_count": databases,
+        "database_count": database_count,
         **memory_info,
       },
     )
