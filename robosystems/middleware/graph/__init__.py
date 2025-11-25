@@ -4,6 +4,8 @@ Graph middleware for graph database operations.
 Simplified architecture for graph databases-only graph database access.
 """
 
+from typing import TYPE_CHECKING
+
 # Graph middleware components
 from .router import (
   get_graph_repository,
@@ -12,7 +14,8 @@ from .router import (
   GraphRouter,
 )
 
-from robosystems.graph_api.core.ladybug import Repository, Engine
+if TYPE_CHECKING:
+  from robosystems.graph_api.core.ladybug import Repository, Engine
 
 # Repository wrapper
 from .repository import (
@@ -64,3 +67,16 @@ __all__ = [
   "GraphEngineInterface",
   "GraphOperation",
 ]
+
+
+def __getattr__(name):
+  """Lazy import to avoid circular dependencies."""
+  if name == "Repository":
+    from robosystems.graph_api.core.ladybug import Repository
+
+    return Repository
+  elif name == "Engine":
+    from robosystems.graph_api.core.ladybug import Engine
+
+    return Engine
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

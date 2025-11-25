@@ -16,14 +16,16 @@ Key features:
 - Maintains backward compatibility with existing code
 """
 
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, TYPE_CHECKING
 
 from robosystems.config import env
-from robosystems.graph_api.core.ladybug import Repository
 from .types import GraphTier
 from robosystems.logger import logger
 from robosystems.graph_api.client import GraphClient
 from robosystems.graph_api.client.factory import GraphClientFactory
+
+if TYPE_CHECKING:
+  from robosystems.graph_api.core.ladybug import Repository
 
 
 class GraphRouter:
@@ -50,7 +52,7 @@ class GraphRouter:
     graph_id: str,
     operation_type: str = "write",
     tier: GraphTier = GraphTier.LADYBUG_STANDARD,
-  ) -> Union[Repository, Any]:
+  ) -> Union["Repository", Any]:
     """
     Get a repository for the specified graph.
 
@@ -67,6 +69,8 @@ class GraphRouter:
 
     if access_pattern == "direct_file":
       # Force direct file access regardless of cluster configuration
+      from robosystems.graph_api.core.ladybug import Repository
+
       db_path = env.LBUG_DATABASE_PATH
       database_path = f"{db_path}/{graph_id}"
       logger.debug(f"Creating direct file Repository for {graph_id}: {database_path}")
@@ -145,7 +149,7 @@ async def get_graph_repository(
   graph_id: str,
   operation_type: str = "write",
   tier: GraphTier = GraphTier.LADYBUG_STANDARD,
-) -> Union[Repository, Any]:
+) -> Union["Repository", Any]:
   """
   Get a graph repository for the specified database.
 
