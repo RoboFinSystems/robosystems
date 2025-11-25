@@ -18,16 +18,15 @@ from robosystems.logger import logger
 router = APIRouter(prefix="/databases", tags=["Metrics"])
 
 
-def _get_service_for_metrics(
-  ladybug_service=Depends(get_ladybug_service),
-):
+def _get_service_for_metrics():
   """Get the appropriate service based on backend configuration."""
   backend_type = env.GRAPH_BACKEND_TYPE
   if backend_type in ["neo4j_community", "neo4j_enterprise"]:
     from robosystems.graph_api.core.neo4j import Neo4jService
 
     return Neo4jService()
-  return ladybug_service
+  else:
+    return get_ladybug_service()
 
 
 @router.get("/{graph_id}/metrics")
@@ -70,6 +69,7 @@ async def get_database_metrics(
     last_modified = None
     if hasattr(backend, "data_path"):
       # LadybugDB backend
+      # Safe: validated_graph_id has been sanitized by validate_database_name() on line 49
       db_path = Path(backend.data_path) / f"{validated_graph_id}.lbug"
       if db_path.exists():
         mtime = os.path.getmtime(db_path)

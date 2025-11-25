@@ -16,11 +16,11 @@ class TestHealthRouter:
     """Create a test client."""
     app = create_app()
 
-    # Override the cluster service dependency
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    # Override the service dependency
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
     mock_service = MagicMock()
-    app.dependency_overrides[get_ladybug_service] = lambda: mock_service
+    app.dependency_overrides[_get_service_for_health] = lambda: mock_service
 
     return TestClient(app)
 
@@ -35,9 +35,9 @@ class TestHealthRouter:
   def test_health_check_success(self, client, mock_cluster_service):
     """Test successful health check."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
-    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_health]()
     mock_service.get_uptime.return_value = 3600
     mock_service.db_manager.list_databases.return_value = ["db1", "db2", "db3"]
 
@@ -52,9 +52,9 @@ class TestHealthRouter:
   def test_health_check_with_memory_info(self, client, mock_cluster_service):
     """Test health check with memory information."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
-    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_health]()
     mock_service.get_uptime.return_value = 3600
     mock_service.db_manager.list_databases.return_value = ["db1", "db2", "db3"]
 
@@ -81,9 +81,9 @@ class TestHealthRouter:
   def test_health_check_without_psutil(self, client, mock_cluster_service):
     """Test health check when psutil is not available."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
-    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_health]()
     mock_service.get_uptime.return_value = 3600
     mock_service.db_manager.list_databases.return_value = ["db1", "db2", "db3"]
 
@@ -102,9 +102,9 @@ class TestHealthRouter:
   def test_health_check_service_error(self, client):
     """Test health check when cluster service has an error."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
-    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_health]()
     mock_service.get_uptime.side_effect = Exception("Service unavailable")
 
     response = client.get("/health")
@@ -118,9 +118,9 @@ class TestHealthRouter:
   def test_health_check_database_error(self, client):
     """Test health check when database manager has an error."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
-    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_health]()
     mock_service.get_uptime.return_value = 1000
     mock_service.db_manager.list_databases.side_effect = Exception("Database error")
 
@@ -135,9 +135,9 @@ class TestHealthRouter:
   def test_health_check_zero_databases(self, client, mock_cluster_service):
     """Test health check with zero databases."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
-    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_health]()
     mock_service.get_uptime.return_value = 3600
     mock_service.db_manager.list_databases.return_value = []
 
@@ -151,9 +151,9 @@ class TestHealthRouter:
   def test_health_check_response_format(self, client, mock_cluster_service):
     """Test that health check response has expected format."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.ladybug import get_ladybug_service
+    from robosystems.graph_api.routers.health import _get_service_for_health
 
-    mock_service = client.app.dependency_overrides[get_ladybug_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_health]()
     mock_service.get_uptime.return_value = 3600
     mock_service.db_manager.list_databases.return_value = ["db1", "db2", "db3"]
 
