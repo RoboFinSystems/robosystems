@@ -9,8 +9,8 @@ from robosystems.graph_api.routers.databases.schema import (
   escape_identifier,
 )
 from robosystems.graph_api.app import create_app
-from robosystems.graph_api.core import init_cluster_service
-from robosystems.middleware.graph.clusters import NodeType, RepositoryType
+from robosystems.graph_api.core import init_ladybug_service
+from robosystems.middleware.graph.types import NodeType, RepositoryType
 
 
 class TestDDLValidation:
@@ -124,15 +124,15 @@ class TestIdentifierEscaping:
 @pytest.fixture
 def test_client():
   """Create a test client with mocked cluster service."""
-  from robosystems.graph_api.core import cluster_manager
+  from robosystems.graph_api.core.ladybug import service as ladybug_service
 
   # Reset cluster service before test
-  original_service = cluster_manager._cluster_service
-  cluster_manager._cluster_service = None
+  original_service = ladybug_service._ladybug_service
+  ladybug_service._ladybug_service = None
 
   try:
     # Initialize cluster service
-    init_cluster_service(
+    init_ladybug_service(
       base_path="/tmp/test_lbug",
       max_databases=10,
       read_only=False,
@@ -144,7 +144,7 @@ def test_client():
     yield TestClient(app)
   finally:
     # Reset cluster service after test
-    cluster_manager._cluster_service = original_service
+    ladybug_service._ladybug_service = original_service
 
 
 class TestSchemaEndpointSecurity:
@@ -153,7 +153,7 @@ class TestSchemaEndpointSecurity:
   def test_path_traversal_in_database_name(self, test_client):
     """Test path traversal attempts in database names."""
     with patch(
-      "robosystems.graph_api.core.cluster_manager.get_cluster_service"
+      "robosystems.graph_api.core.ladybug.service.get_ladybug_service"
     ) as mock_get_service:
       mock_service = Mock()
       mock_service.read_only = False
@@ -187,10 +187,10 @@ class TestSchemaEndpointSecurity:
 
   def test_sql_injection_in_schema_endpoint(self, test_client):
     """Test SQL injection prevention in schema endpoints."""
-    from robosystems.graph_api.core import cluster_manager
+    from robosystems.graph_api.core.ladybug import service as ladybug_service
 
     # Access the actual cluster service that was initialized in the fixture
-    cluster_service = cluster_manager._cluster_service
+    cluster_service = ladybug_service._ladybug_service
 
     # Mock the database manager methods
     with patch.object(

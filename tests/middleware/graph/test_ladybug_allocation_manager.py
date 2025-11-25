@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
-from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
+from robosystems.middleware.graph.utils import parse_subgraph_id
 
 
 class TestLadybugAllocationManager:

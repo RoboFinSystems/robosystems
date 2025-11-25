@@ -562,9 +562,3 @@ def get_operation_logger() -> OperationLogger:
     _operation_logger = OperationLogger()
 
   return _operation_logger
-
-
-# Legacy MCP compatibility function
-def get_mcp_logger() -> OperationLogger:
-  """Legacy compatibility function for MCP logging."""
-  return get_operation_logger()

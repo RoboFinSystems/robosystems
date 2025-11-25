@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
-from robosystems.middleware.graph.clusters import NodeType, RepositoryType
+from robosystems.middleware.graph.types import NodeType, RepositoryType
 
 
 class TestMain:

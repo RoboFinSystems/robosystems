@@ -366,7 +366,7 @@ async def get_graph_infrastructure(request: Request, graph_id: str):
         detail=f"Graph {graph_id} not found",
       )
 
-    from ...middleware.graph.multitenant_utils import MultiTenantUtils
+    from ...middleware.graph.utils import MultiTenantUtils
 
     identity = MultiTenantUtils.get_graph_identity(graph_id)
 

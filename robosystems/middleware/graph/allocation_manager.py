@@ -29,8 +29,8 @@ from robosystems.middleware.graph.types import (
   GraphTier,
   is_subgraph_id,
 )
-from .multitenant_utils import MultiTenantUtils
-from .subgraph_utils import parse_subgraph_id
+from .utils import MultiTenantUtils
+from .utils import parse_subgraph_id
 from robosystems.config import env
 from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 

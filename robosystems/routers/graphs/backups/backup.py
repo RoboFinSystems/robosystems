@@ -29,7 +29,7 @@ from robosystems.middleware.otel.metrics import (
   get_endpoint_metrics,
   endpoint_metrics_decorator,
 )
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.config import env

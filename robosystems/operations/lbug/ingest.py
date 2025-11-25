@@ -160,7 +160,7 @@ def ingest_from_local_files(
       bool: True if ingestion successful, False otherwise
   """
   try:
-    from ...middleware.graph.engine import Engine
+    from robosystems.graph_api.core.ladybug import Engine
     from .schema_setup import ensure_schema
 
     logger.info(f"Starting LadybugDB ingestion: {len(file_paths)} files -> {db_name}")

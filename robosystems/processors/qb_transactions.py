@@ -20,7 +20,7 @@ from typing import Dict, Any, Optional
 from arelle import XbrlConst
 from robosystems.logger import logger
 from robosystems.adapters.qb import QBClient
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.utils import generate_deterministic_uuid7
 from robosystems.config import URIConstants
 from robosystems.operations.connection_service import ConnectionService, SYSTEM_USER_ID

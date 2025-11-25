@@ -11,7 +11,7 @@ import uvicorn
 
 from robosystems.graph_api.app import create_app
 from robosystems.graph_api.core import init_cluster_service
-from robosystems.middleware.graph.clusters import NodeType, RepositoryType
+from robosystems.middleware.graph.types import NodeType, RepositoryType
 from robosystems.logger import logger
 
 

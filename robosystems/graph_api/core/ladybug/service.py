@@ -1,7 +1,7 @@
 """
-LadybugDB cluster management service.
+LadybugDB service.
 
-This module provides the core cluster service that manages multiple LadybugDB databases
+This module provides the core LadybugDB service that manages multiple databases
 on a single node, handling database operations, health monitoring, and metrics.
 """
 
@@ -17,8 +17,8 @@ import psutil
 from fastapi import HTTPException, status
 
 from robosystems.config import env
-from .database_manager import LadybugDatabaseManager
-from .metrics_collector import LadybugMetricsCollector
+from .manager import LadybugDatabaseManager
+from robosystems.graph_api.core.metrics_collector import LadybugMetricsCollector
 from robosystems.graph_api.models.database import QueryRequest, QueryResponse
 from robosystems.graph_api.models.cluster import (
   ClusterHealthResponse,
@@ -28,7 +28,7 @@ from robosystems.graph_api.core.utils import (
   validate_database_name,
   validate_query_parameters,
 )
-from robosystems.middleware.graph.clusters import NodeType, RepositoryType
+from robosystems.middleware.graph.types import NodeType, RepositoryType
 from robosystems.models.api.graphs.query import translate_neo4j_to_lbug
 from robosystems.logger import logger
 from robosystems.exceptions import (
@@ -189,8 +189,8 @@ def validate_cypher_query(cypher: str) -> None:
     )
 
 
-class LadybugClusterService:
-  """LadybugDB cluster service with multi-database support."""
+class LadybugService:
+  """LadybugDB service with multi-database support."""
 
   def __init__(
     self,
@@ -842,7 +842,7 @@ class LadybugClusterService:
       import shutil
       import zipfile
       from pathlib import Path
-      from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+      from robosystems.middleware.graph.utils import MultiTenantUtils
 
       db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
 
@@ -906,7 +906,7 @@ class LadybugClusterService:
       import zipfile
       from pathlib import Path
       from datetime import datetime, timezone
-      from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+      from robosystems.middleware.graph.utils import MultiTenantUtils
 
       db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
       db_dir = os.path.dirname(db_path)
@@ -989,38 +989,40 @@ class LadybugClusterService:
 
 
 # Global service instance with thread-safe initialization
-_cluster_service: Optional[LadybugClusterService] = None
-_cluster_service_lock = threading.Lock()
+_ladybug_service: Optional[LadybugService] = None
+_ladybug_service_lock = threading.Lock()
 
 
-def get_cluster_service() -> LadybugClusterService:
-  """Get the global cluster service instance."""
-  if _cluster_service is None:
-    raise RuntimeError("Cluster service not initialized")
-  return _cluster_service
+def get_ladybug_service() -> LadybugService:
+  """Get the global LadybugDB service instance."""
+  if _ladybug_service is None:
+    raise RuntimeError("LadybugDB service not initialized")
+  return _ladybug_service
 
 
-def init_cluster_service(
+def init_ladybug_service(
   base_path: str,
   max_databases: int = 200,
   read_only: bool = False,
   node_type: NodeType = NodeType.WRITER,
   repository_type: RepositoryType = RepositoryType.ENTITY,
-) -> LadybugClusterService:
-  """Initialize the global cluster service instance with thread safety."""
-  global _cluster_service
+) -> LadybugService:
+  """Initialize the global LadybugDB service instance with thread safety."""
+  global _ladybug_service
 
-  with _cluster_service_lock:
-    if _cluster_service is not None:
-      logger.warning("Cluster service already initialized, returning existing instance")
-      return _cluster_service
+  with _ladybug_service_lock:
+    if _ladybug_service is not None:
+      logger.warning(
+        "LadybugDB service already initialized, returning existing instance"
+      )
+      return _ladybug_service
 
-    _cluster_service = LadybugClusterService(
+    _ladybug_service = LadybugService(
       base_path=base_path,
       max_databases=max_databases,
       read_only=read_only,
       node_type=node_type,
       repository_type=repository_type,
     )
-    logger.info("Cluster service initialized successfully")
-    return _cluster_service
+    logger.info("LadybugDB service initialized successfully")
+    return _ladybug_service

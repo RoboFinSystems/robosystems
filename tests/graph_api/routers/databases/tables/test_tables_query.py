@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from robosystems.graph_api.routers.databases.tables import query
-from robosystems.graph_api.core.duckdb_manager import TableQueryResponse
+from robosystems.graph_api.core.duckdb.manager import TableQueryResponse
 
 
 @pytest.fixture

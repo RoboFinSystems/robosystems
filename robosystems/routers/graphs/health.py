@@ -36,7 +36,7 @@ timeout_coordinator = TimeoutCoordinator()
 async def _get_graph_client(graph_id: str) -> GraphClient:
   """Get Graph client for the specified graph using factory for endpoint discovery."""
   from robosystems.graph_api.client.factory import GraphClientFactory
-  from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+  from robosystems.middleware.graph.utils import MultiTenantUtils
 
   # Determine operation type based on graph
   # Shared repositories are read-only from the application perspective

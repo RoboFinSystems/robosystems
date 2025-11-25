@@ -628,7 +628,7 @@ def create_graph_backup(
     )
 
     # Import at function level to avoid circular imports
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+    from robosystems.middleware.graph.utils import MultiTenantUtils
 
     # Validate graph_id
     progress_tracker.emit_progress("Validating graph database...", 10)

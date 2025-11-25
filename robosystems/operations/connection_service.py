@@ -16,7 +16,7 @@ from ..database import session
 from ..logger import logger
 from ..config import URIConstants
 from ..middleware.graph import get_graph_repository
-from ..middleware.graph.multitenant_utils import MultiTenantUtils
+from ..middleware.graph.utils import MultiTenantUtils
 
 SYSTEM_USER_ID = "__system__"
 

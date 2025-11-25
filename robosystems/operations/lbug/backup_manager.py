@@ -26,7 +26,7 @@ from enum import Enum
 
 from ...adapters.s3 import S3BackupAdapter, BackupMetadata
 from ...middleware.graph import get_universal_repository
-from ...middleware.graph.multitenant_utils import MultiTenantUtils
+from ...middleware.graph.utils import MultiTenantUtils
 from ...logger import logger
 
 

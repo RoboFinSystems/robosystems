@@ -13,11 +13,11 @@ For user-facing operations, use the file upload + DuckDB staging workflow instea
 """
 
 import json
+import os
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
-from enum import Enum
+from typing import Dict, Any, Optional
 
 from fastapi import (
   APIRouter,
@@ -27,67 +27,24 @@ from fastapi import (
   Path as PathParam,
   status as http_status,
 )
-from pydantic import BaseModel, Field
+import redis.asyncio as redis_async
 
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
-from robosystems.graph_api.core.connection_pool import get_connection_pool
+from robosystems.graph_api.core.ladybug import get_ladybug_service, get_connection_pool
+from robosystems.graph_api.models.tasks import TaskStatus, BackgroundIngestRequest
 from robosystems.logger import logger
 from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.config import env
-import redis.asyncio as redis_async
 
 
 # Tables that require aggressive memory cleanup after ingestion
 # This is configurable via environment variable to support different use cases
 # Default list is empty - specific implementations (like SEC) should define their own
-import os
-
 _large_tables_env = os.getenv("LBUG_LARGE_TABLES_REQUIRING_CLEANUP", "")
 LARGE_TABLES_REQUIRING_CLEANUP = (
   [t.strip() for t in _large_tables_env.split(",") if t.strip()]
   if _large_tables_env
   else []
 )
-
-
-class TaskStatus(str, Enum):
-  """Task execution status."""
-
-  PENDING = "pending"
-  RUNNING = "running"
-  COMPLETED = "completed"
-  FAILED = "failed"
-
-
-class BackgroundIngestRequest(BaseModel):
-  """Request for background ingestion with SSE monitoring."""
-
-  s3_pattern: str = Field(
-    ...,
-    description="S3 glob pattern for bulk loading (e.g., s3://bucket/path/*.parquet)",
-  )
-  table_name: str = Field(..., description="Target table name")
-  s3_credentials: Optional[dict] = Field(
-    None, description="S3 credentials for LocalStack/MinIO"
-  )
-  ignore_errors: bool = Field(
-    True, description="Use IGNORE_ERRORS for duplicate handling"
-  )
-
-  class Config:
-    json_schema_extra = {
-      "example": {
-        "s3_pattern": "s3://robosystems-sec-processed/consolidated/nodes/Fact/batch_*.parquet",
-        "table_name": "Fact",
-        "ignore_errors": True,
-        "s3_credentials": {
-          "aws_access_key_id": "test",
-          "aws_secret_access_key": "test",
-          "endpoint_url": "http://localhost:4566",
-          "region": "us-east-1",
-        },
-      }
-    }
 
 
 router = APIRouter(prefix="/databases", tags=["Copy"])
@@ -341,7 +298,7 @@ async def start_background_copy(
   request: BackgroundIngestRequest,
   background_tasks: BackgroundTasks,
   graph_id: str = PathParam(..., description="Graph database identifier"),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
   connection_pool=Depends(get_connection_pool),
 ) -> Dict[str, Any]:
   """
@@ -355,7 +312,7 @@ async def start_background_copy(
   Returns:
       Dict with task_id and SSE monitoring URL
   """
-  if cluster_service.read_only:
+  if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Cannot ingest data: node is in read-only mode",

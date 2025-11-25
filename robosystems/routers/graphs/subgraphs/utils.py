@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from robosystems.models.iam.graph import Graph
 from robosystems.models.iam.user import User
 from robosystems.models.iam.graph_user import GraphUser
-from robosystems.middleware.graph.subgraph_utils import (
+from robosystems.middleware.graph.utils import (
   construct_subgraph_id,
   validate_subgraph_name,
   parse_subgraph_id,

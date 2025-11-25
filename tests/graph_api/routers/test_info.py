@@ -17,11 +17,11 @@ class TestInfoRouter:
     """Create a test client."""
     app = create_app()
 
-    # Override the cluster service dependency
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    # Override the service dependency
+    from robosystems.graph_api.routers.info import _get_service_for_info
 
     mock_service = MagicMock()
-    app.dependency_overrides[get_cluster_service] = lambda: mock_service
+    app.dependency_overrides[_get_service_for_info] = lambda: mock_service
 
     return TestClient(app)
 
@@ -43,9 +43,9 @@ class TestInfoRouter:
   def test_get_cluster_info_success(self, client, mock_cluster_info):
     """Test successful cluster info retrieval."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.routers.info import _get_service_for_info
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_info]()
     mock_service.get_cluster_info.return_value = mock_cluster_info
 
     response = client.get("/info")
@@ -75,9 +75,9 @@ class TestInfoRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.routers.info import _get_service_for_info
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_info]()
     mock_service.get_cluster_info.return_value = mock_info
 
     response = client.get("/info")
@@ -102,9 +102,9 @@ class TestInfoRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.routers.info import _get_service_for_info
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_info]()
     mock_service.get_cluster_info.return_value = mock_info
 
     response = client.get("/info")
@@ -129,9 +129,9 @@ class TestInfoRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.routers.info import _get_service_for_info
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_info]()
     mock_service.get_cluster_info.return_value = mock_info
 
     response = client.get("/info")
@@ -157,9 +157,9 @@ class TestInfoRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.routers.info import _get_service_for_info
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_info]()
     mock_service.get_cluster_info.return_value = mock_info
 
     response = client.get("/info")
@@ -184,9 +184,9 @@ class TestInfoRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.routers.info import _get_service_for_info
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[_get_service_for_info]()
     mock_service.get_cluster_info.return_value = mock_info
 
     response = client.get("/info")

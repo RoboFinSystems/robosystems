@@ -1,35 +1,19 @@
 from fastapi import APIRouter, HTTPException, Depends, Body, Path
 from fastapi import status as http_status
-from pydantic import BaseModel, Field
 
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.models.tables import (
+  TableMaterializationRequest,
+  TableMaterializationResponse,
+)
+from robosystems.graph_api.models.fork import (
+  ForkFromParentRequest,
+  ForkFromParentResponse,
+)
 from robosystems.logger import logger
 from robosystems.config import env
 
 router = APIRouter(prefix="/databases/{graph_id}/tables")
-
-
-class TableMaterializationRequest(BaseModel):
-  ignore_errors: bool = Field(
-    default=True, description="Continue materialization on row errors"
-  )
-  file_ids: list[str] | None = Field(
-    default=None,
-    description="Optional list of file IDs to materialize. If None, materializes all files (full materialization).",
-  )
-
-  class Config:
-    extra = "forbid"
-
-
-class TableMaterializationResponse(BaseModel):
-  status: str = Field(..., description="Materialization status")
-  graph_id: str = Field(..., description="Graph database identifier")
-  table_name: str = Field(..., description="Table name")
-  rows_ingested: int = Field(..., description="Number of rows materialized")
-  execution_time_ms: float = Field(
-    ..., description="Materialization time in milliseconds"
-  )
 
 
 @router.post("/{table_name}/materialize", response_model=TableMaterializationResponse)
@@ -37,7 +21,7 @@ async def materialize_table(
   graph_id: str = Path(..., description="Graph database identifier"),
   table_name: str = Path(..., description="Table name to materialize from DuckDB"),
   request: TableMaterializationRequest = Body(...),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> TableMaterializationResponse:
   import time
   from pathlib import Path as PathLib
@@ -48,7 +32,7 @@ async def materialize_table(
     f"Materializing table {table_name} from DuckDB to LadybugDB graph {graph_id}"
   )
 
-  if cluster_service.read_only:
+  if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Materialization not allowed on read-only nodes",
@@ -65,7 +49,7 @@ async def materialize_table(
     logger.info(
       f"Checkpointing DuckDB database before LadybugDB materialization: {duck_path}"
     )
-    from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
+    from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
     temp_table_name = f"{table_name}_temp_materialization"
@@ -162,7 +146,7 @@ async def materialize_table(
     temp_table_created = True
 
     try:
-      with cluster_service.db_manager.connection_pool.get_connection(graph_id) as conn:
+      with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
         try:
           conn.execute(f"LOAD EXTENSION '{duckdb_extension_path}'")
           logger.info(f"Loaded DuckDB extension from {duckdb_extension_path}")
@@ -254,28 +238,6 @@ async def materialize_table(
     )
 
 
-class ForkFromParentRequest(BaseModel):
-  tables: list[str] = Field(
-    default_factory=list,
-    description="List of table names to copy from parent, or empty for all tables",
-  )
-  ignore_errors: bool = Field(
-    default=True, description="Continue materialization on row errors"
-  )
-
-  class Config:
-    extra = "forbid"
-
-
-class ForkFromParentResponse(BaseModel):
-  status: str = Field(..., description="Fork operation status")
-  parent_graph_id: str = Field(..., description="Parent graph identifier")
-  subgraph_id: str = Field(..., description="Subgraph identifier")
-  tables_copied: list[str] = Field(..., description="Tables successfully copied")
-  total_rows: int = Field(..., description="Total rows copied")
-  execution_time_ms: float = Field(..., description="Total fork time in milliseconds")
-
-
 @router.post(
   "/{subgraph_id}/fork-from/{parent_graph_id}", response_model=ForkFromParentResponse
 )
@@ -286,7 +248,7 @@ async def fork_from_parent_duckdb(
   parent_graph_id: str = Path(..., description="Parent graph database identifier"),
   subgraph_id: str = Path(..., description="Subgraph database identifier"),
   request: ForkFromParentRequest = Body(...),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> ForkFromParentResponse:
   """
   Fork data from parent graph's DuckDB directly into subgraph's LadybugDB.
@@ -318,7 +280,7 @@ async def fork_from_parent_duckdb(
 
   logger.info(f"Forking data from {parent_graph_id} DuckDB to {subgraph_id} LadybugDB")
 
-  if cluster_service.read_only:
+  if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Fork not allowed on read-only nodes",
@@ -332,7 +294,7 @@ async def fork_from_parent_duckdb(
 
     # Checkpoint parent DuckDB to flush WAL and create views
     logger.info(f"Checkpointing parent DuckDB before fork: {parent_duck_path}")
-    from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
+    from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
     duckdb_pool = get_duckdb_pool()
 
@@ -419,7 +381,7 @@ async def fork_from_parent_duckdb(
       total_rows = 0
       tables_copied = []
 
-      with cluster_service.db_manager.connection_pool.get_connection(
+      with ladybug_service.db_manager.connection_pool.get_connection(
         subgraph_id
       ) as conn:
         try:

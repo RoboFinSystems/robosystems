@@ -15,7 +15,7 @@ from robosystems.graph_api.models.database import (
   SchemaInstallResponse,
   QueryRequest,
 )
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
@@ -102,7 +102,7 @@ def escape_identifier(identifier: str) -> str:
 async def install_schema(
   request: SchemaInstallRequest,
   graph_id: str = Path(..., description="Graph database identifier"),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> SchemaInstallResponse:
   """
   Install custom schema on an existing database.
@@ -111,14 +111,14 @@ async def install_schema(
   This is useful for adding new node/relationship types or properties
   after database creation.
   """
-  if cluster_service.read_only:
+  if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Schema installation not allowed on read-only nodes",
     )
 
   # Validate database exists
-  if graph_id not in cluster_service.db_manager.list_databases():
+  if graph_id not in ladybug_service.db_manager.list_databases():
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,
       detail=f"Database {graph_id} not found",
@@ -139,7 +139,7 @@ async def install_schema(
 
   try:
     # Use connection with proper resource management and transaction
-    with cluster_service.db_manager.get_connection(graph_id, read_only=False) as conn:
+    with ladybug_service.db_manager.get_connection(graph_id, read_only=False) as conn:
       # Split DDL into statements
       statements = [stmt.strip() for stmt in request.ddl.split(";") if stmt.strip()]
       executed_count = 0
@@ -219,7 +219,7 @@ async def install_schema(
 @router.get("/{graph_id}/schema")
 async def get_schema(
   graph_id: str = Path(..., description="Graph database identifier"),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> Dict[str, Any]:
   """
   Get database schema information.
@@ -231,7 +231,7 @@ async def get_schema(
   validated_graph_id = validate_database_name(graph_id)
 
   # Check if database exists
-  if validated_graph_id not in cluster_service.db_manager.list_databases():
+  if validated_graph_id not in ladybug_service.db_manager.list_databases():
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,
       detail=f"Database '{validated_graph_id}' not found",
@@ -252,7 +252,7 @@ async def get_schema(
       cypher="CALL SHOW_TABLES() RETURN id, name, type, comment",
     )
 
-    result = cluster_service.execute_query(query_request)
+    result = ladybug_service.execute_query(query_request)
 
     # Process the results
     for row in result.data:
@@ -287,7 +287,7 @@ async def get_schema(
           database=validated_graph_id,
           cypher=f"CALL TABLE_INFO('{safe_table_name}') RETURN *",
         )
-        info_result = cluster_service.execute_query(info_request)
+        info_result = ladybug_service.execute_query(info_request)
 
         properties = []
         for prop_row in info_result.data:

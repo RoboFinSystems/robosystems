@@ -5,7 +5,7 @@ from ...processors.qb_transactions import QBTransactionsProcessor
 from robosystems.logger import logger
 from robosystems.operations.connection_service import ConnectionService, SYSTEM_USER_ID
 from ...middleware.graph import get_graph_repository
-from ...middleware.graph.multitenant_utils import MultiTenantUtils
+from ...middleware.graph.utils import MultiTenantUtils
 from robosystems.operations.graph.credit_service import CreditService
 from robosystems.database import get_db_session
 

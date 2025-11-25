@@ -31,7 +31,7 @@ class OperationType(Enum):
   BACKUP_OPERATION = "backup_operation"
   ENTITY_OPERATION = "entity_operation"
   CONNECTION_OPERATION = "connection_operation"
-  TOOL_EXECUTION = "tool_execution"  # Legacy MCP compatibility
+  TOOL_EXECUTION = "tool_execution"
   HANDLER_LIFECYCLE = "handler_lifecycle"
   QUEUE_OPERATION = "queue_operation"
   CIRCUIT_BREAKER = "circuit_breaker"
@@ -481,36 +481,6 @@ def record_operation_metric(
     graph_id=graph_id,
     user_id=user_id,
     operation_name=operation_name,
-    error_details=error_details,
-    metadata=metadata,
-  )
-
-
-# Legacy MCP compatibility functions
-def get_mcp_metrics_collector() -> OperationMetricsCollector:
-  """Legacy compatibility function for MCP metrics."""
-  return get_operation_metrics_collector()
-
-
-def record_mcp_metric(
-  operation_type: OperationType,
-  status: OperationStatus,
-  duration_ms: float,
-  graph_id: str,
-  tool_name: Optional[str] = None,
-  user_id: Optional[str] = None,
-  error_details: Optional[str] = None,
-  metadata: Optional[Dict[str, Any]] = None,
-):
-  """Legacy compatibility function for MCP metrics."""
-  record_operation_metric(
-    operation_type=operation_type,
-    status=status,
-    duration_ms=duration_ms,
-    endpoint="/v1/graphs/{graph_id}/mcp/call-tool",
-    graph_id=graph_id,
-    user_id=user_id,
-    operation_name=tool_name,
     error_details=error_details,
     metadata=metadata,
   )

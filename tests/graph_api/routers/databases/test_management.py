@@ -11,7 +11,7 @@ from robosystems.graph_api.models.database import (
   DatabaseListResponse,
   DatabaseInfo,
 )
-from robosystems.middleware.graph.clusters import NodeType
+from robosystems.middleware.graph.types import NodeType
 
 
 class TestDatabaseManagementRouter:
@@ -23,10 +23,10 @@ class TestDatabaseManagementRouter:
     app = create_app()
 
     # Override the cluster service dependency
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
     mock_service = MagicMock()
-    app.dependency_overrides[get_cluster_service] = lambda: mock_service
+    app.dependency_overrides[get_ladybug_service] = lambda: mock_service
 
     return TestClient(app)
 
@@ -60,9 +60,9 @@ class TestDatabaseManagementRouter:
   def test_list_databases_success(self, client, mock_database_list_response):
     """Test successful database listing."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.db_manager.get_all_databases_info.return_value = (
       mock_database_list_response
     )
@@ -90,9 +90,9 @@ class TestDatabaseManagementRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.db_manager.get_all_databases_info.return_value = empty_response
     response = client.get("/databases")
 
@@ -117,9 +117,9 @@ class TestDatabaseManagementRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     mock_service.node_type = NodeType.WRITER
     mock_service.db_manager.create_database.return_value = expected_response
@@ -149,9 +149,9 @@ class TestDatabaseManagementRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     mock_service.node_type = NodeType.SHARED_MASTER
     mock_service.db_manager.create_database.return_value = expected_response
@@ -166,9 +166,9 @@ class TestDatabaseManagementRouter:
   def test_create_database_shared_without_repository_name(self, client):
     """Test creating shared database without repository name fails."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     response = client.post(
       "/databases",
@@ -182,9 +182,9 @@ class TestDatabaseManagementRouter:
   def test_create_database_on_readonly_node(self, client):
     """Test that database creation fails on read-only nodes."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = True
     response = client.post(
       "/databases",
@@ -198,9 +198,9 @@ class TestDatabaseManagementRouter:
   def test_get_database_info_success(self, client, mock_database_info):
     """Test retrieving database information."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.db_manager.get_database_info.return_value = mock_database_info
     response = client.get("/databases/kg1a2b3c4d5")
 
@@ -217,9 +217,9 @@ class TestDatabaseManagementRouter:
     from fastapi import HTTPException
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.db_manager.get_database_info.side_effect = HTTPException(
       status_code=404, detail="Database not found"
     )
@@ -232,9 +232,9 @@ class TestDatabaseManagementRouter:
   def test_delete_database_success(self, client):
     """Test successful database deletion."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     mock_service.node_type = NodeType.WRITER
     mock_service.db_manager.delete_database.return_value = None
@@ -249,9 +249,9 @@ class TestDatabaseManagementRouter:
   def test_delete_database_on_readonly_node(self, client):
     """Test that database deletion fails on read-only nodes."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = True
     response = client.delete("/databases/kg1a2b3c4d5")
 
@@ -262,9 +262,9 @@ class TestDatabaseManagementRouter:
   def test_delete_shared_database_warning(self, client):
     """Test that deleting shared database logs warning."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     mock_service.node_type = NodeType.SHARED_MASTER
     mock_service.db_manager.delete_database.return_value = None
@@ -288,9 +288,9 @@ class TestDatabaseManagementRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.read_only = False
     mock_service.db_manager.create_database.return_value = expected_response
     response = client.post(
@@ -330,9 +330,9 @@ class TestDatabaseManagementRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.db_manager.get_all_databases_info.return_value = list_response
     response = client.get("/databases")
 
@@ -355,9 +355,9 @@ class TestDatabaseManagementRouter:
     )
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.db_manager.get_database_info.return_value = unhealthy_db_info
     response = client.get("/databases/unhealthy_db")
 

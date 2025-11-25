@@ -7,7 +7,7 @@ from fastapi import status as http_status
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
-from robosystems.graph_api.core.duckdb_manager import (
+from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
   TableQueryRequest,
   TableQueryResponse,

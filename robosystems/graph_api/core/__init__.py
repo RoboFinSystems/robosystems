@@ -1,20 +1,27 @@
 """
 Core business logic for the Graph API server.
+
+Note: Engine and Repository are available from robosystems.graph_api.core.ladybug
+but are not imported here to avoid circular imports with middleware.graph.
 """
 
-from .cluster_manager import (
-  LadybugClusterService,
-  get_cluster_service,
-  init_cluster_service,
+from .ladybug import (
+  LadybugService,
+  get_ladybug_service,
+  init_ladybug_service,
+  LadybugDatabaseManager,
+  LadybugConnectionPool,
+  initialize_connection_pool,
 )
 from .utils import validate_database_name, validate_query_parameters
-from .database_manager import LadybugDatabaseManager
 from .metrics_collector import LadybugMetricsCollector
-from .connection_pool import LadybugConnectionPool, initialize_connection_pool
+
+init_cluster_service = init_ladybug_service
 
 __all__ = [
-  "LadybugClusterService",
-  "get_cluster_service",
+  "LadybugService",
+  "get_ladybug_service",
+  "init_ladybug_service",
   "init_cluster_service",
   "validate_database_name",
   "validate_query_parameters",

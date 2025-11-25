@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
 
-from robosystems.graph_api.core.duckdb_pool import (
+from robosystems.graph_api.core.duckdb.pool import (
   DuckDBConnectionPool,
   DuckDBConnectionInfo,
   initialize_duckdb_pool,
@@ -438,7 +438,7 @@ class TestConnectionPoolGlobals:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
     # Reset global state
-    import robosystems.graph_api.core.duckdb_pool as pool_module
+    import robosystems.graph_api.core.duckdb.pool as pool_module
 
     pool_module._duckdb_pool = None
 

@@ -4,7 +4,7 @@ Unit tests for security improvements (no database required).
 
 import pytest
 from unittest.mock import Mock, patch
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
 class TestPathTraversalUnit:
@@ -61,7 +61,7 @@ class TestCypherParameterValidationUnit:
   def test_deep_nested_parameters_rejected(self):
     """Test that deeply nested parameters are rejected."""
     # Mock the Engine class to avoid database connection
-    with patch("robosystems.middleware.graph.engine.Engine") as MockEngine:
+    with patch("robosystems.graph_api.core.ladybug.engine.Engine") as MockEngine:
       mock_engine = Mock()
 
       # Create a mock validation method that checks nesting depth
@@ -94,7 +94,7 @@ class TestCypherParameterValidationUnit:
   def test_large_arrays_rejected(self):
     """Test that overly large arrays are rejected."""
     # Mock the Engine class to avoid database connection
-    with patch("robosystems.middleware.graph.engine.Engine") as MockEngine:
+    with patch("robosystems.graph_api.core.ladybug.engine.Engine") as MockEngine:
       mock_engine = Mock()
 
       # Create a mock validation method that checks array size
@@ -118,7 +118,7 @@ class TestCypherParameterValidationUnit:
   def test_invalid_parameter_names_rejected(self):
     """Test that invalid parameter names are rejected."""
     # Mock the Engine class to avoid database connection
-    with patch("robosystems.middleware.graph.engine.Engine") as MockEngine:
+    with patch("robosystems.graph_api.core.ladybug.engine.Engine") as MockEngine:
       mock_engine = Mock()
 
       # Create a mock validation method that checks parameter names

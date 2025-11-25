@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta, timezone
 
-from robosystems.graph_api.core.connection_pool import (
+from robosystems.graph_api.core.ladybug.pool import (
   LadybugConnectionPool,
   ConnectionInfo,
   initialize_connection_pool,
@@ -643,7 +643,7 @@ class TestConnectionPoolGlobals:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
     # Reset global state
-    import robosystems.graph_api.core.connection_pool as pool_module
+    import robosystems.graph_api.core.ladybug.pool as pool_module
 
     pool_module._connection_pool = None
 

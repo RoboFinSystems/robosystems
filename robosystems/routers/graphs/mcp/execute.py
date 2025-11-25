@@ -39,7 +39,7 @@ from robosystems.security.cypher_analyzer import (
   is_bulk_operation,
   is_admin_operation,
 )
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.config.query_queue import QueryQueueConfig
 from robosystems.middleware.otel.metrics import (

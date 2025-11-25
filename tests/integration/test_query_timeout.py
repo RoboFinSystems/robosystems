@@ -6,9 +6,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from unittest.mock import MagicMock, patch
 
-from robosystems.graph_api.core.cluster_manager import LadybugClusterService
+from robosystems.graph_api.core.ladybug import LadybugService
 from robosystems.graph_api.models.database import QueryRequest
-from robosystems.middleware.graph.clusters import NodeType, RepositoryType
+from robosystems.middleware.graph.types import NodeType, RepositoryType
 from fastapi import HTTPException
 
 
@@ -70,7 +70,7 @@ class TestQueryTimeout:
       mock_db_instance.get_connection.return_value.__enter__.return_value = mock_conn
 
       # Create service
-      service = LadybugClusterService(
+      service = LadybugService(
         base_path=self.temp_dir,
         node_type=NodeType.WRITER,
         repository_type=RepositoryType.ENTITY,

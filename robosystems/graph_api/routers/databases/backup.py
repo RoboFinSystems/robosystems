@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path
 from fastapi import status as http_status
 
 from robosystems.graph_api.models.database import BackupRequest, BackupResponse
-from robosystems.graph_api.core.cluster_manager import get_cluster_service
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.task_manager import backup_task_manager
 from robosystems.logger import logger
 from robosystems.operations.lbug.backup_manager import (
@@ -89,7 +89,7 @@ async def create_backup(
   request: BackupRequest,
   background_tasks: BackgroundTasks,
   graph_id: str = Path(..., description="Graph database identifier"),
-  cluster_service=Depends(get_cluster_service),
+  ladybug_service=Depends(get_ladybug_service),
 ) -> BackupResponse:
   """
   Create a backup of a database.
@@ -103,14 +103,14 @@ async def create_backup(
   The backup operation runs asynchronously and can be monitored using
   the returned task_id.
   """
-  if cluster_service.read_only:
+  if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Backup operations not allowed on read-only nodes",
     )
 
   # Validate database exists
-  if graph_id not in cluster_service.db_manager.list_databases():
+  if graph_id not in ladybug_service.db_manager.list_databases():
     raise HTTPException(
       status_code=http_status.HTTP_404_NOT_FOUND,
       detail=f"Database {graph_id} not found",

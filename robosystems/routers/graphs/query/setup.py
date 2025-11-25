@@ -9,7 +9,7 @@ import asyncio
 from typing import Dict, Any, Optional
 
 from robosystems.middleware.graph.router import GraphRouter
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.logger import logger
 

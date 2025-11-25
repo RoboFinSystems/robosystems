@@ -76,11 +76,35 @@ class SharedRepositoryType(str, Enum):
 
 
 class AccessPattern(str, Enum):
-  """Graph database access patterns."""
+  """Graph database access patterns (authorization level)."""
 
   READ_WRITE = "read_write"  # Full read/write access (user graphs)
   READ_ONLY = "read_only"  # Read-only access (shared repositories)
   RESTRICTED = "restricted"  # Restricted access (system graphs)
+
+
+class ConnectionPattern(str, Enum):
+  """Database connection patterns (how to connect to the database)."""
+
+  DIRECT_FILE = "direct_file"  # Direct file access (local development only)
+  API_WRITER = "api_writer"  # API access to writer node
+  API_READER = "api_reader"  # API access to reader node (via ALB)
+  API_AUTO = "api_auto"  # API access with automatic routing
+
+
+class NodeType(str, Enum):
+  """Node types in the cluster architecture."""
+
+  WRITER = "writer"  # Writer for all graphs (entity and shared repositories)
+  SHARED_MASTER = "shared_master"  # Shared repository master writer
+  SHARED_REPLICA = "shared_replica"  # Shared repository read-only replica
+
+
+class RepositoryType(str, Enum):
+  """Types of repositories (infrastructure-level classification)."""
+
+  ENTITY = "entity"  # User/entity-specific graphs
+  SHARED = "shared"  # Shared repositories (SEC, industry, etc.)
 
 
 class GraphIdentity(BaseModel):

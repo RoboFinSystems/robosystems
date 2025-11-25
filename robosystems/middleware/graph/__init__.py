@@ -4,6 +4,8 @@ Graph middleware for graph database operations.
 Simplified architecture for graph databases-only graph database access.
 """
 
+from typing import TYPE_CHECKING
+
 # Graph middleware components
 from .router import (
   get_graph_repository,
@@ -12,7 +14,8 @@ from .router import (
   GraphRouter,
 )
 
-from .engine import Repository, Engine
+if TYPE_CHECKING:
+  from robosystems.graph_api.core.ladybug import Repository, Engine
 
 # Repository wrapper
 from .repository import (
@@ -24,14 +27,15 @@ from .repository import (
   get_repository_type,
 )
 
-# Cluster management
-from .clusters import (
-  ClusterConfig,
+# Type definitions (canonical source)
+from .types import (
+  NodeType,
   RepositoryType,
-  get_cluster_for_entity_graphs,
-  get_cluster_for_shared_repository,
+  ConnectionPattern,
+  AccessPattern,
+  GraphCategory,
 )
-
+from robosystems.config.graph_tier import GraphTier
 
 # Base abstractions
 from .base import GraphEngineInterface, GraphOperation
@@ -52,12 +56,27 @@ __all__ = [
   "is_api_repository",
   "is_direct_repository",
   "get_repository_type",
-  # Cluster management
-  "ClusterConfig",
+  # Type definitions
+  "NodeType",
   "RepositoryType",
-  "get_cluster_for_entity_graphs",
-  "get_cluster_for_shared_repository",
+  "ConnectionPattern",
+  "AccessPattern",
+  "GraphCategory",
+  "GraphTier",
   # Base abstractions
   "GraphEngineInterface",
   "GraphOperation",
 ]
+
+
+def __getattr__(name):
+  """Lazy import to avoid circular dependencies."""
+  if name == "Repository":
+    from robosystems.graph_api.core.ladybug import Repository
+
+    return Repository
+  elif name == "Engine":
+    from robosystems.graph_api.core.ladybug import Engine
+
+    return Engine
+  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

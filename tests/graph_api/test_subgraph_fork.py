@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from robosystems.security.cypher_analyzer import is_write_operation
-from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
+from robosystems.middleware.graph.utils import parse_subgraph_id
 
 
 def test_parse_subgraph_id():

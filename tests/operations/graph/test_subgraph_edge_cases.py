@@ -9,7 +9,7 @@ from robosystems.middleware.graph.types import (
   parse_graph_id,
   construct_subgraph_id,
 )
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
 class TestSubgraphEdgeCases:

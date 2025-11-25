@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException
 
-from robosystems.graph_api.core.duckdb_manager import (
+from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
   TableCreateRequest,
   TableCreateResponse,
@@ -72,7 +72,7 @@ class TestDuckDBTableManager:
   def teardown_method(self):
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_create_table_success(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -101,7 +101,7 @@ class TestDuckDBTableManager:
     assert any("CREATE OR REPLACE TABLE" in call for call in execute_calls)
     assert any("read_parquet" in call for call in execute_calls)
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_create_table_validates_table_name(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
@@ -116,7 +116,7 @@ class TestDuckDBTableManager:
       self.manager.create_table(request)
     assert exc_info.value.status_code == 400
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_create_table_uses_quoted_table_name(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -138,7 +138,7 @@ class TestDuckDBTableManager:
     execute_calls = [call[0][0] for call in mock_conn.execute.call_args_list]
     assert any('"my_table"' in call for call in execute_calls)
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_create_table_handles_connection_failure(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -157,7 +157,7 @@ class TestDuckDBTableManager:
     assert exc_info.value.status_code == 500
     assert "Failed to create table" in exc_info.value.detail
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_table_success(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -181,7 +181,7 @@ class TestDuckDBTableManager:
     assert response.row_count == 2
     assert response.execution_time_ms > 0
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_table_empty_results(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -201,7 +201,7 @@ class TestDuckDBTableManager:
     assert response.rows == []
     assert response.row_count == 0
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_table_handles_sql_errors(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -216,7 +216,7 @@ class TestDuckDBTableManager:
     assert exc_info.value.status_code == 400
     assert "Query failed" in exc_info.value.detail
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_table_streaming_success(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -250,7 +250,7 @@ class TestDuckDBTableManager:
     assert chunks[1]["row_count"] == 1
     assert chunks[1]["total_rows_sent"] == 3
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_table_streaming_empty_results(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -270,7 +270,7 @@ class TestDuckDBTableManager:
 
     assert len(chunks) == 0
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_query_table_streaming_handles_errors(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -287,7 +287,7 @@ class TestDuckDBTableManager:
     assert chunks[0]["error"] == "Query error"
     assert chunks[0]["is_last_chunk"] is True
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_list_tables_success(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -308,7 +308,7 @@ class TestDuckDBTableManager:
     assert tables[1].table_name == "orders"
     assert tables[1].row_count == 50
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_list_tables_empty_database(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -321,7 +321,7 @@ class TestDuckDBTableManager:
 
     assert len(tables) == 0
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_list_tables_handles_connection_failure(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -334,7 +334,7 @@ class TestDuckDBTableManager:
     assert exc_info.value.status_code == 500
     assert "Failed to list tables" in exc_info.value.detail
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_delete_table_success(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()
@@ -350,7 +350,7 @@ class TestDuckDBTableManager:
     assert any("DROP TABLE IF EXISTS" in call for call in execute_calls)
     assert any("DROP VIEW IF EXISTS" in call for call in execute_calls)
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_delete_table_validates_table_name(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_get_pool.return_value = mock_pool
@@ -359,7 +359,7 @@ class TestDuckDBTableManager:
       self.manager.delete_table("test_graph", "invalid;DROP TABLE")
     assert exc_info.value.status_code == 400
 
-  @patch("robosystems.graph_api.core.duckdb_manager.get_duckdb_pool")
+  @patch("robosystems.graph_api.core.duckdb.manager.get_duckdb_pool")
   def test_delete_table_handles_failure(self, mock_get_pool):
     mock_pool = MagicMock()
     mock_conn = MagicMock()

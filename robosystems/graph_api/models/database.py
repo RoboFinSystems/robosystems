@@ -153,24 +153,12 @@ class DatabaseListResponse(BaseModel):
   node_capacity: Dict[str, Any] = Field(..., description="Node capacity information")
 
 
-class DatabaseHealthResponse(BaseModel):
-  """Health status for all databases."""
+class NodeDatabasesHealthResponse(BaseModel):
+  """Health status for all databases on a cluster node."""
 
   healthy_databases: int = Field(..., description="Number of healthy databases")
   unhealthy_databases: int = Field(..., description="Number of unhealthy databases")
   databases: List[DatabaseInfo] = Field(..., description="Database health details")
-
-
-class RestoreRequest(BaseModel):
-  """Request model for database restore."""
-
-  backup_data: bytes = Field(..., description="Backup data to restore from")
-  create_system_backup: bool = Field(
-    default=True, description="Create system backup before restore"
-  )
-  force_overwrite: bool = Field(
-    default=False, description="Force overwrite existing database"
-  )
 
 
 class RestoreResponse(BaseModel):

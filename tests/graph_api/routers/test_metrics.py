@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from datetime import datetime
 
 from robosystems.graph_api.app import create_app
-from robosystems.middleware.graph.clusters import NodeType
+from robosystems.middleware.graph.types import NodeType
 
 
 class TestMetricsRouter:
@@ -19,10 +19,10 @@ class TestMetricsRouter:
     app = create_app()
 
     # Override the cluster service dependency
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
     mock_service = MagicMock()
-    app.dependency_overrides[get_cluster_service] = lambda: mock_service
+    app.dependency_overrides[get_ladybug_service] = lambda: mock_service
 
     return TestClient(app)
 
@@ -120,9 +120,9 @@ class TestMetricsRouter:
   ):
     """Test getting complete metrics snapshot."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.node_id = "test-node-01"
     mock_service.node_type = NodeType.WRITER
     mock_service.get_uptime.return_value = 3600
@@ -215,9 +215,9 @@ class TestMetricsRouter:
     }
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.node_id = "empty-node"
     mock_service.node_type = NodeType.WRITER
     mock_service.get_uptime.return_value = 0
@@ -248,9 +248,9 @@ class TestMetricsRouter:
   async def test_get_metrics_shared_node(self, client):
     """Test metrics for shared repository node."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.node_id = "shared-master-01"
     mock_service.node_type = NodeType.SHARED_MASTER
     mock_service.get_uptime.return_value = 7200
@@ -342,9 +342,9 @@ class TestMetricsRouter:
     }
 
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.node_id = "overloaded-node"
     mock_service.node_type = NodeType.WRITER
     mock_service.get_uptime.return_value = 86400
@@ -379,9 +379,9 @@ class TestMetricsRouter:
   async def test_get_metrics_error_handling(self, client):
     """Test metrics when some collectors fail."""
     # Configure the mock service that was already injected
-    from robosystems.graph_api.core.cluster_manager import get_cluster_service
+    from robosystems.graph_api.core.ladybug import get_ladybug_service
 
-    mock_service = client.app.dependency_overrides[get_cluster_service]()
+    mock_service = client.app.dependency_overrides[get_ladybug_service]()
     mock_service.node_id = "error-node"
     mock_service.node_type = NodeType.WRITER
     mock_service.get_uptime.return_value = 100

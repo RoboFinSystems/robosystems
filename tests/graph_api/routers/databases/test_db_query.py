@@ -22,11 +22,11 @@ class TestDatabaseQueryRouter:
 
     # Override the cluster service dependency factory function
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
     mock_service = MagicMock()
-    app.dependency_overrides[_get_cluster_service_for_request] = lambda: mock_service
+    app.dependency_overrides[_get_service_for_request] = lambda: mock_service
 
     return TestClient(app)
 
@@ -57,10 +57,10 @@ class TestDatabaseQueryRouter:
     """Test successful query execution."""
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query.return_value = mock_query_response
 
     with patch(
@@ -103,10 +103,10 @@ class TestDatabaseQueryRouter:
 
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query.return_value = expected_response
 
     with patch(
@@ -165,10 +165,10 @@ class TestDatabaseQueryRouter:
 
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query_streaming.return_value = streaming_chunks
 
     with patch(
@@ -213,10 +213,10 @@ class TestDatabaseQueryRouter:
 
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query.return_value = empty_response
 
     with patch(
@@ -262,10 +262,10 @@ class TestDatabaseQueryRouter:
 
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query.return_value = complex_response
 
     with patch(
@@ -291,10 +291,10 @@ class TestDatabaseQueryRouter:
     """Test query execution on shared database (e.g., SEC)."""
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query.return_value = mock_query_response
 
     with patch(
@@ -318,10 +318,10 @@ class TestDatabaseQueryRouter:
     """Test that connections are released even when query fails."""
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query.side_effect = Exception("Query execution failed")
 
     with patch(
@@ -360,10 +360,10 @@ class TestDatabaseQueryRouter:
 
     # Configure the mock service that was already injected
     from robosystems.graph_api.routers.databases.query import (
-      _get_cluster_service_for_request,
+      _get_service_for_request,
     )
 
-    mock_service = client.app.dependency_overrides[_get_cluster_service_for_request]()
+    mock_service = client.app.dependency_overrides[_get_service_for_request]()
     mock_service.execute_query.return_value = large_response
 
     with patch(

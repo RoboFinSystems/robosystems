@@ -278,9 +278,7 @@ async def export_graph_schema(
       # Get runtime statistics from the graph
       try:
         from .utils import get_schema_info
-        from robosystems.middleware.graph.dependencies import (
-          get_universal_repository,
-        )
+        from robosystems.middleware.graph.router import get_universal_repository
 
         # Use existing session parameter for repository auth
         repository = await get_universal_repository(graph_id, "read")

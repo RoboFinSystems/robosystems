@@ -1,4 +1,4 @@
-"""Tests for BackendClusterService coordinating backend operations."""
+"""Tests for Neo4jService coordinating backend operations."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -6,13 +6,13 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from robosystems.graph_api.core.backend_cluster_manager import BackendClusterService
+from robosystems.graph_api.core.neo4j import Neo4jService
 from robosystems.graph_api.models.database import QueryRequest
 
 
 @pytest.fixture
 def service_with_backend(monkeypatch):
-  """Create a BackendClusterService with a mocked backend."""
+  """Create a Neo4jService with a mocked backend."""
   backend = AsyncMock()
   backend.execute_query = AsyncMock(return_value=[{"result": 1}])
   backend.health_check = AsyncMock(return_value=True)
@@ -20,11 +20,11 @@ def service_with_backend(monkeypatch):
   backend.get_cluster_topology = AsyncMock(return_value={"mode": "single"})
 
   monkeypatch.setattr(
-    "robosystems.graph_api.core.backend_cluster_manager.get_backend",
+    "robosystems.graph_api.core.neo4j.service.get_backend",
     lambda: backend,
   )
 
-  service = BackendClusterService()
+  service = Neo4jService()
   return service, backend
 
 
@@ -82,11 +82,11 @@ async def test_get_cluster_health_classifies_status(
   backend.health_check.return_value = health_return
 
   monkeypatch.setattr(
-    "robosystems.graph_api.core.backend_cluster_manager.psutil.cpu_percent",
+    "robosystems.graph_api.core.neo4j.service.psutil.cpu_percent",
     lambda interval=0.1: cpu_percent,
   )
   monkeypatch.setattr(
-    "robosystems.graph_api.core.backend_cluster_manager.psutil.virtual_memory",
+    "robosystems.graph_api.core.neo4j.service.psutil.virtual_memory",
     lambda: SimpleNamespace(percent=mem_percent),
   )
 

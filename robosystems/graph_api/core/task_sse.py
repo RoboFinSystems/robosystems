@@ -10,19 +10,9 @@ import json
 import time
 from datetime import datetime, timezone
 from typing import AsyncGenerator, Dict, Any
-from enum import Enum
 
 from robosystems.logger import logger
-
-
-class TaskType(Enum):
-  """Types of background tasks that support SSE monitoring."""
-
-  INGESTION = "ingestion"
-  BACKUP = "backup"
-  RESTORE = "restore"
-  EXPORT = "export"
-  MIGRATION = "migration"
+from robosystems.graph_api.models.tasks import TaskType
 
 
 async def generate_task_sse_events(

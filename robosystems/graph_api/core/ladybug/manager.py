@@ -17,15 +17,21 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+import re
 
 import real_ladybug as lbug
 from fastapi import HTTPException, status
-from pydantic import BaseModel, Field
-import re
 
 from robosystems.config import env
 from robosystems.logger import logger
-from .connection_pool import initialize_connection_pool
+from robosystems.graph_api.models.database import (
+  DatabaseInfo,
+  DatabaseCreateRequest,
+  DatabaseCreateResponse,
+  DatabaseListResponse,
+  NodeDatabasesHealthResponse,
+)
+from .pool import initialize_connection_pool
 
 
 def validate_database_path(base_path: Path, db_name: str) -> Path:
@@ -60,79 +66,6 @@ def validate_database_path(base_path: Path, db_name: str) -> Path:
     )
 
   return db_path
-
-
-class DatabaseInfo(BaseModel):
-  """Information about a database on this node."""
-
-  graph_id: str = Field(..., description="Graph database identifier")
-  database_path: str = Field(..., description="Full path to database files")
-  created_at: str = Field(..., description="Database creation timestamp")
-  size_bytes: int = Field(..., description="Database size in bytes")
-  read_only: bool = Field(..., description="Whether database is read-only")
-  is_healthy: bool = Field(..., description="Database health status")
-  last_accessed: Optional[str] = Field(None, description="Last access timestamp")
-
-
-class DatabaseCreateRequest(BaseModel):
-  """Request to create a new database."""
-
-  graph_id: str = Field(
-    ...,
-    description="Graph database identifier",
-    pattern=r"^[a-zA-Z0-9_-]+$",
-    max_length=64,
-  )
-  schema_type: str = Field(
-    default="entity",
-    description="Schema type (entity, shared, custom)",
-    pattern=r"^(entity|shared|custom)$",
-  )
-  repository_name: Optional[str] = Field(
-    None,
-    description="Repository name for shared databases",
-    pattern=r"^[a-zA-Z0-9_-]*$",
-    max_length=32,
-  )
-  custom_schema_ddl: Optional[str] = Field(
-    None,
-    description="Custom schema DDL commands (required when schema_type='custom')",
-  )
-  is_subgraph: bool = Field(
-    default=False,
-    description="Whether this is a subgraph (bypasses max_databases check for Enterprise/Premium)",
-  )
-  read_only: bool = Field(default=False, description="Create as read-only database")
-
-  class Config:
-    extra = "forbid"
-
-
-class DatabaseCreateResponse(BaseModel):
-  """Response from database creation."""
-
-  status: str = Field(..., description="Creation status")
-  graph_id: str = Field(..., description="Graph database identifier")
-  database_path: str = Field(..., description="Path to created database")
-  schema_applied: bool = Field(..., description="Whether schema was applied")
-  execution_time_ms: float = Field(..., description="Creation time in milliseconds")
-
-
-class DatabaseListResponse(BaseModel):
-  """Response listing all databases."""
-
-  databases: List[DatabaseInfo] = Field(..., description="List of databases")
-  total_databases: int = Field(..., description="Total number of databases")
-  total_size_bytes: int = Field(..., description="Total size of all databases")
-  node_capacity: Dict[str, Any] = Field(..., description="Node capacity information")
-
-
-class DatabaseHealthResponse(BaseModel):
-  """Health status for all databases."""
-
-  healthy_databases: int = Field(..., description="Number of healthy databases")
-  unhealthy_databases: int = Field(..., description="Number of unhealthy databases")
-  databases: List[DatabaseInfo] = Field(..., description="Database health details")
 
 
 class LadybugDatabaseManager:
@@ -344,7 +277,7 @@ class LadybugDatabaseManager:
         shutil.rmtree(db_path)
 
       # Clean up DuckDB staging database alongside LadybugDB database
-      from robosystems.graph_api.core.duckdb_pool import get_duckdb_pool
+      from robosystems.graph_api.core.duckdb import get_duckdb_pool
 
       try:
         duckdb_pool = get_duckdb_pool()
@@ -500,7 +433,7 @@ class LadybugDatabaseManager:
       node_capacity=node_capacity,
     )
 
-  def health_check_all(self) -> DatabaseHealthResponse:
+  def health_check_all(self) -> NodeDatabasesHealthResponse:
     """
     Perform health checks on all databases.
 
@@ -519,7 +452,7 @@ class LadybugDatabaseManager:
       except Exception as e:
         logger.error(f"Health check failed for database {db_name}: {e}")
 
-    return DatabaseHealthResponse(
+    return NodeDatabasesHealthResponse(
       healthy_databases=healthy_count,
       unhealthy_databases=len(databases) - healthy_count,
       databases=databases,

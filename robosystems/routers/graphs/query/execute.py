@@ -43,7 +43,7 @@ from robosystems.security.cypher_analyzer import (
   is_admin_operation,
   is_schema_ddl,
 )
-from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
@@ -261,7 +261,7 @@ async def execute_cypher_query(
     access_type = "write" if is_write else "read"
 
     # Check if this is a subgraph (allows writes) or main graph (read-only)
-    from robosystems.middleware.graph.subgraph_utils import parse_subgraph_id
+    from robosystems.middleware.graph.utils import parse_subgraph_id
 
     is_subgraph = parse_subgraph_id(graph_id) is not None
 

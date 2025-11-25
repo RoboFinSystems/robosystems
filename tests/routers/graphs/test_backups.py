@@ -100,11 +100,9 @@ class TestBackupEndpoints:
   @patch("robosystems.tasks.graph_operations.backup.create_graph_backup")
   @patch("os.path.exists")
   @patch(
-    "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.get_database_path_for_graph"
+    "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph"
   )
-  @patch(
-    "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository"
-  )
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
   @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_create_backup_endpoint(
     self,
@@ -194,9 +192,7 @@ class TestBackupEndpoints:
       if session in app.dependency_overrides:
         del app.dependency_overrides[session]
 
-  @patch(
-    "robosystems.middleware.graph.multitenant_utils.MultiTenantUtils.is_shared_repository"
-  )
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
   @patch("robosystems.models.iam.GraphUser.get_by_user_id")
   def test_list_backups_endpoint(
     self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user

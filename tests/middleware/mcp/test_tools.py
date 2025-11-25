@@ -201,7 +201,7 @@ class TestDeleteWorkspaceTool:
     tool = DeleteWorkspaceTool(mock_graph_client)
 
     # Mock subgraph_info
-    from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
+    from robosystems.middleware.graph.utils import SubgraphInfo
 
     mock_subgraph_info = SubgraphInfo(
       graph_id="kg1234567890abcdef_dev",
@@ -241,7 +241,7 @@ class TestDeleteWorkspaceTool:
         "robosystems.middleware.mcp.tools.workspace.SubgraphService"
       ) as mock_service_class,
       patch(
-        "robosystems.middleware.graph.subgraph_utils.parse_subgraph_id",
+        "robosystems.middleware.graph.utils.parse_subgraph_id",
         return_value=mock_subgraph_info,
       ),
       patch("robosystems.database.get_db_session") as mock_get_db,
@@ -271,7 +271,7 @@ class TestDeleteWorkspaceTool:
     tool = DeleteWorkspaceTool(mock_graph_client)
 
     # Mock subgraph_info
-    from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
+    from robosystems.middleware.graph.utils import SubgraphInfo
 
     mock_subgraph_info = SubgraphInfo(
       graph_id="kg1234567890abcdef_dev",
@@ -311,7 +311,7 @@ class TestDeleteWorkspaceTool:
         "robosystems.middleware.mcp.tools.workspace.SubgraphService"
       ) as mock_service_class,
       patch(
-        "robosystems.middleware.graph.subgraph_utils.parse_subgraph_id",
+        "robosystems.middleware.graph.utils.parse_subgraph_id",
         return_value=mock_subgraph_info,
       ),
       patch("robosystems.database.get_db_session") as mock_get_db,
@@ -359,7 +359,7 @@ class TestDeleteWorkspaceTool:
     tool = DeleteWorkspaceTool(mock_graph_client)
 
     # Mock parse_subgraph_id to return valid info
-    from robosystems.middleware.graph.subgraph_utils import SubgraphInfo
+    from robosystems.middleware.graph.utils import SubgraphInfo
 
     mock_subgraph_info = SubgraphInfo(
       graph_id="kg1234567890abcdef_missing",
@@ -378,7 +378,7 @@ class TestDeleteWorkspaceTool:
         "robosystems.middleware.mcp.tools.workspace.SubgraphService"
       ) as mock_service_class,
       patch(
-        "robosystems.middleware.graph.subgraph_utils.parse_subgraph_id",
+        "robosystems.middleware.graph.utils.parse_subgraph_id",
         return_value=mock_subgraph_info,
       ),
       patch(

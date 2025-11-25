@@ -30,7 +30,7 @@ async def create_graph_mcp_client(
   # If URL not provided, use GraphClientFactory to discover the proper endpoint
   if not api_base_url:
     from robosystems.graph_api.client.factory import GraphClientFactory
-    from robosystems.middleware.graph.multitenant_utils import MultiTenantUtils
+    from robosystems.middleware.graph.utils import MultiTenantUtils
 
     # Determine operation type based on graph
     # Shared repositories are read-only from the application perspective
