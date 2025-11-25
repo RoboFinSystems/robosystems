@@ -15,14 +15,12 @@ Key features:
 
 import inspect
 import asyncio
-from typing import List, Dict, Any, Optional, Union, TYPE_CHECKING
+from typing import List, Dict, Any, Optional, Union
 
 from .base import GraphOperation
+from robosystems.graph_api.core.ladybug import Repository
 from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
-
-if TYPE_CHECKING:
-  from robosystems.graph_api.core.ladybug import Repository
 
 
 class UniversalRepository:
@@ -34,7 +32,7 @@ class UniversalRepository:
   method calls accordingly.
   """
 
-  def __init__(self, repository: Union["Repository", GraphClient]):
+  def __init__(self, repository: Union[Repository, GraphClient]):
     """
     Initialize the universal repository wrapper.
 
@@ -320,7 +318,7 @@ class UniversalRepository:
     return await self._call_method("get_schema")
 
   # Direct access to underlying repository for advanced use cases
-  def get_underlying_repository(self) -> Union["Repository", GraphClient]:
+  def get_underlying_repository(self) -> Union[Repository, GraphClient]:
     """Get the underlying repository instance."""
     return self._repository
 
@@ -384,7 +382,7 @@ async def create_universal_repository_with_auth(
 
 # Utility functions for repository detection
 def is_api_repository(
-  repository: Union["Repository", GraphClient, UniversalRepository],
+  repository: Union[Repository, GraphClient, UniversalRepository],
 ) -> bool:
   """Check if a repository is an API repository."""
   if isinstance(repository, UniversalRepository):
@@ -393,22 +391,18 @@ def is_api_repository(
 
 
 def is_direct_repository(
-  repository: Union["Repository", GraphClient, UniversalRepository],
+  repository: Union[Repository, GraphClient, UniversalRepository],
 ) -> bool:
   """Check if a repository is a direct file repository."""
-  from robosystems.graph_api.core.ladybug import Repository
-
   if isinstance(repository, UniversalRepository):
     return not repository.is_async
   return isinstance(repository, Repository)
 
 
 def get_repository_type(
-  repository: Union["Repository", GraphClient, UniversalRepository],
+  repository: Union[Repository, GraphClient, UniversalRepository],
 ) -> str:
   """Get the type of a repository."""
-  from robosystems.graph_api.core.ladybug import Repository
-
   if isinstance(repository, UniversalRepository):
     return repository.repository_type
   elif isinstance(repository, GraphClient):

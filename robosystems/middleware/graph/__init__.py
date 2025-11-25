@@ -4,8 +4,6 @@ Graph middleware for graph database operations.
 Simplified architecture for graph databases-only graph database access.
 """
 
-from typing import TYPE_CHECKING
-
 # Graph middleware components
 from .router import (
   get_graph_repository,
@@ -13,9 +11,6 @@ from .router import (
   get_graph_router,
   GraphRouter,
 )
-
-if TYPE_CHECKING:
-  from robosystems.graph_api.core.ladybug import Repository, Engine
 
 # Repository wrapper
 from .repository import (

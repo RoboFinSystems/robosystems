@@ -4,8 +4,6 @@ Repository factory dependencies.
 FastAPI dependency functions for creating graph repositories.
 """
 
-from typing import TYPE_CHECKING
-
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -17,9 +15,7 @@ from robosystems.models.iam import User
 from robosystems.models.iam.graph_user import GraphUser
 from robosystems.models.iam.user_repository import UserRepository
 from robosystems.security import SecurityAuditLogger
-
-if TYPE_CHECKING:
-  from robosystems.graph_api.core.ladybug import Repository
+from robosystems.graph_api.core.ladybug import Repository
 
 from ..router import get_graph_repository
 
@@ -28,7 +24,7 @@ async def get_graph_repository_dependency(
   graph_id: str,
   current_user: User = Depends(get_current_user),
   operation_type: str = Query("read", description="Operation type: read or write"),
-) -> "Repository":
+) -> Repository:
   """
   Get a repository for any graph type with proper routing.
 
@@ -76,7 +72,7 @@ async def get_user_graph_repository(
   current_user: User = Depends(get_current_user),
   operation_type: str = Query("write", description="Operation type: read or write"),
   db: Session = Depends(get_db_session),
-) -> "Repository":
+) -> Repository:
   """
   Get a repository specifically for user-created graphs.
 
@@ -129,7 +125,7 @@ async def get_shared_repository(
   repository_name: str,
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
-) -> "Repository":
+) -> Repository:
   """
   Get a repository for a shared data repository.
 
@@ -170,7 +166,7 @@ async def get_shared_repository(
 
 async def get_main_repository(
   current_user: User = Depends(get_current_user),
-) -> "Repository":
+) -> Repository:
   """
   Get a repository for the main/default database.
 
@@ -194,7 +190,7 @@ async def get_main_repository(
     )
 
 
-async def get_sec_repository() -> "Repository":
+async def get_sec_repository() -> Repository:
   """
   Get a repository for the shared SEC database.
 

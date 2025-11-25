@@ -9,7 +9,7 @@ import time
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import real_ladybug as lbug
-from robosystems.middleware.graph.base import GraphEngineInterface, GraphOperation
+from robosystems.graph_api.interfaces import GraphEngineInterface, GraphOperation
 from robosystems.logger import logger, log_db_query, log_app_error
 from robosystems.config import env
 
