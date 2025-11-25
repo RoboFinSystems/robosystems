@@ -35,6 +35,9 @@ from robosystems.config.graph_tier import GraphTier
 # Base abstractions
 from .base import GraphEngineInterface, GraphOperation
 
+# Graph database implementations (no circular dependency now)
+from robosystems.graph_api.core.ladybug import Repository, Engine
+
 __all__ = [
   # Primary interface (recommended)
   "get_graph_repository",
@@ -62,16 +65,3 @@ __all__ = [
   "GraphEngineInterface",
   "GraphOperation",
 ]
-
-
-def __getattr__(name):
-  """Lazy import to avoid circular dependencies."""
-  if name == "Repository":
-    from robosystems.graph_api.core.ladybug import Repository
-
-    return Repository
-  elif name == "Engine":
-    from robosystems.graph_api.core.ladybug import Engine
-
-    return Engine
-  raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
