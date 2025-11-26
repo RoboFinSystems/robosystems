@@ -21,16 +21,16 @@ INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.2
 case "${DATABASE_TYPE}" in
     ladybug)
         if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="lbug-shared-writer"
+            CONTAINER_NAME="graph-api-shared"
         else
-            CONTAINER_NAME="lbug-writer"
+            CONTAINER_NAME="graph-api"
         fi
         ;;
     neo4j)
         if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="neo4j-shared-writer"
+            CONTAINER_NAME="graph-api-shared"
         else
-            CONTAINER_NAME="neo4j-writer"
+            CONTAINER_NAME="graph-api"
         fi
         ;;
     *)
