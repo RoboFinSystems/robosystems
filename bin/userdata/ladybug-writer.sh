@@ -368,7 +368,14 @@ export LOGS_MOUNT_SOURCE="/mnt/ladybug-data/logs"
 export LOGS_MOUNT_TARGET="/app/logs"
 export STAGING_MOUNT_SOURCE="/mnt/ladybug-data/staging"
 export STAGING_MOUNT_TARGET="/app/data/staging"
-export DOCKER_PROFILE="ladybug-writer"
+
+# Set DOCKER_PROFILE based on node type
+if [ "${LBUG_NODE_TYPE}" = "shared_master" ] || [ "${LBUG_NODE_TYPE}" = "shared_replica" ]; then
+  export DOCKER_PROFILE="ladybug-shared-writer"
+else
+  export DOCKER_PROFILE="ladybug-writer"
+fi
+
 export REPOSITORY_TYPE="${REPOSITORY_TYPE:-shared}"
 export SHARED_REPOSITORIES="${SHARED_REPOSITORIES:-}"
 

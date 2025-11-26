@@ -23,9 +23,9 @@ INSTANCE_REGISTRY_TABLE="${INSTANCE_REGISTRY_TABLE:-robosystems-graph-${ENVIRONM
 case "${DATABASE_TYPE}" in
     ladybug)
         if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="lbug-shared-writer"
+            CONTAINER_NAME="graph-api-shared"
         else
-            CONTAINER_NAME="lbug-writer"
+            CONTAINER_NAME="graph-api"
         fi
         GRAPH_API_PORT="8001"
         DRAIN_ENDPOINT="http://localhost:${GRAPH_API_PORT}/admin/drain"
@@ -33,9 +33,9 @@ case "${DATABASE_TYPE}" in
         ;;
     neo4j)
         if [ "${NODE_TYPE}" = "shared_master" ] || [ "${NODE_TYPE}" = "shared_replica" ]; then
-            CONTAINER_NAME="neo4j-shared-writer"
+            CONTAINER_NAME="graph-api-shared"
         else
-            CONTAINER_NAME="neo4j-writer"
+            CONTAINER_NAME="graph-api"
         fi
         GRAPH_API_PORT="8001"
         NEO4J_HTTP_PORT="7474"

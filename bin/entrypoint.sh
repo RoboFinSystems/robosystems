@@ -136,7 +136,7 @@ case $DOCKER_PROFILE in
       -s /tmp/celerybeat-schedule \
       --pidfile=/tmp/celerybeat.pid
     ;;
-  "lbug-writer")
+  "ladybug-writer")
     echo "Starting LadybugDB Writer API..."
     # max-databases will be loaded from tier configuration based on CLUSTER_TIER
     exec uv run python -m robosystems.graph_api \
@@ -145,7 +145,7 @@ case $DOCKER_PROFILE in
       --port ${LBUG_PORT:-8001} \
       --base-path ${LBUG_DATABASE_PATH:-/app/data/lbug-dbs}
     ;;
-  "lbug-shared-writer")
+  "ladybug-shared-writer")
     # Determine if this is a master or replica based on LBUG_ROLE
     if [[ "${LBUG_ROLE:-master}" == "replica" ]]; then
       echo "Starting LadybugDB Shared Replica API..."
