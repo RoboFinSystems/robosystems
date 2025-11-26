@@ -42,7 +42,7 @@ services:
       dockerfile: Dockerfile
     command: /app/bin/entrypoint.sh
     environment:
-      - DOCKER_PROFILE=lbug-writer
+      - DOCKER_PROFILE=ladybug-writer
       - ENVIRONMENT=dev
       - GRAPH_BACKEND_TYPE=ladybug
       - LBUG_PORT=8001
