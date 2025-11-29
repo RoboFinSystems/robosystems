@@ -23,7 +23,6 @@ from typing import Iterable
 from robosystems_client.extensions import (
   RoboSystemsExtensions,
   RoboSystemsExtensionConfig,
-  FileUploadOptions,
   MaterializationOptions,
 )
 
@@ -96,7 +95,6 @@ def upload_tables(
         graph_id,
         table_name,
         str(file_path),
-        FileUploadOptions(fix_localstack_url=True),
       )
       if result.success:
         print(
@@ -217,6 +215,7 @@ def main() -> None:
   config = RoboSystemsExtensionConfig(
     base_url=args.base_url,
     headers={"X-API-Key": api_key},
+    s3_endpoint_url="http://localhost:4566",  # LocalStack S3 endpoint
   )
   extensions = RoboSystemsExtensions(config)
 

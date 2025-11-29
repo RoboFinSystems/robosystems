@@ -1,465 +1,401 @@
-# CLAUDE.md
+# CLAUDE.md - RoboSystems Development Guide
 
-## Quick Start
+## Critical Rules
 
-**CRITICAL**: All Python scripts and packages must be run through `uv run` to use the proper virtual environment context.
-
-**NEVER run bare `python`, `pip`, `pytest`, or any Python tools directly** - they must be scoped to the uv virtual environment:
+**All Python commands MUST use `uv run`:**
 
 ```bash
-# CORRECT
-uv run python script.py
-uv run pytest
-just cf-lint template
-uv run ruff check
-
-# WRONG - DO NOT USE
-python script.py
-pytest
-cfn-lint template.yaml
-ruff check
+uv run python script.py    # NOT: python script.py
+uv run pytest              # NOT: pytest
+uv run ruff check          # NOT: ruff check
 ```
 
-### Essential Commands
+**Always use Docker profile `robosystems`** - never individual service profiles:
 
 ```bash
-# Quick start - full Docker setup
-just start
-
-# Development workflow
-just venv && just install          # Setup environment
-just compose-up robosystems        # Start services (use 'robosystems' not 'api' or 'worker')
-
-# Code changes workflow
-just restart                       # QUICK: Restart containers (picks up Python code changes)
-just rebuild                       # FULL: Rebuild images AND restart containers
-
-# Testing
-just test                          # Run tests
-just test-all                      # Run all tests with linting
-just test routers                  # Run tests at /tests/routers
-just lint && just format          # Code quality
-
-# For long-running tests that may exceed default timeout:
-# Use the timeout parameter with Bash tool: timeout=300000 (5 minutes) or timeout=600000 (10 minutes)
+just start                 # Uses robosystems profile by default
+just start robosystems     # Explicit form (same result)
+                           # NOT: just start api
 ```
 
-**When to use `just restart` vs `just rebuild`:**
-
-- **`just restart`** - Fast container restart (5-10 seconds)
-
-  - Use for: Python code changes in `/robosystems` directory
-  - Does NOT rebuild Docker images, just restarts existing containers
-  - Code changes are picked up because `/robosystems` is mounted as a volume
-  - ⚠️ **Does NOT work for:** Changes to dependencies, Dockerfile, or environment variables
-
-- **`just rebuild`** - Full rebuild + restart (1-3 minutes)
-  - Use for: Package changes (`pyproject.toml`, `uv.lock`), Dockerfile changes, environment variable changes
-  - Rebuilds Docker images from scratch, then recreates containers
-  - Required when you modify: dependencies, Docker configuration, build-time settings
-  - Always safe to use, but slower than `just restart`
-
-**Quick decision:**
-
-- Changed Python files? → `just restart`
-- Changed `pyproject.toml` or added packages? → `just rebuild`
-- Not sure? → `just rebuild` (always works, just slower)
-
-## Development Environment
-
-### Docker Infrastructure
-
-**IMPORTANT**: Always use the `robosystems` Docker profile for development, not individual `api` or `worker` profiles. The full stack is required for proper functionality due to interdependencies between services.
-
-```bash
-just start robosystems    # Starts full stack
-just restart robosystems  # Restarts full stack
-```
-
-### Environment Files
-
-The repository uses a dual `.env` pattern for Docker/localhost URL management:
-
-- **`.env`**: Container hostnames for Docker services (required by `compose.yaml`)
-
-  - Example: `DATABASE_URL=postgresql://postgres:postgres@pg:5432/robosystems`
-  - Used by containers running inside Docker network
-
-- **`.env.local`**: Localhost URL overrides for justfile commands (default for most commands)
-  - Example: `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/robosystems`
-  - Used by justfile commands running on host machine
-
-**Setup**: Both files are created automatically by `just start` or `just venv` from their `.example` templates.
-
-**Key Point**: Docker containers use container hostnames (pg, valkey, graph-api), while justfile commands need localhost URLs since they run on the host machine.
-
-### Core Services
-
-- **FastAPI API** (`api` container) - Port 8000
-- **Celery Worker** (`worker` container) - Async task processing
-- **PostgreSQL** (`pg` container) - Port 5432
-- **Valkey/Redis** (`valkey` container) - Port 6379
-- **Graph API** (`graph-api` container) - Port 8001
-
-### Environment Variables
-
-Key environment variables are centrally managed in `/robosystems/config/env.py`. Always use the centralized configuration:
+**Never use `os.getenv()` directly** - use centralized config:
 
 ```python
 from robosystems.config import env
-
-# Type-safe access with defaults
-database_url = env.DATABASE_URL
-debug_mode = env.DEBUG
+database_url = env.DATABASE_URL  # NOT: os.getenv("DATABASE_URL")
 ```
 
-See `.env.example` for the complete list of available configuration options.
-
-## Architecture Overview
-
-### Application Structure
-
-```
-robosystems/
-├── routers/           # API endpoints organized by domain
-├── middleware/        # Cross-cutting concerns
-├── models/           # Data models (API and IAM)
-├── operations/       # Business logic and workflows
-├── tasks/            # Celery async tasks
-├── processors/       # Data transformation pipeline
-├── adapters/         # External service integrations
-├── config/           # Centralized configuration
-├── security/         # Security implementations
-├── graph_api/         # Graph database API service
-└── scripts/          # Utility and admin scripts
-```
-
-### Key Components
-
-1. **FastAPI Backend** (`main.py`, `routers/`)
-
-   - RESTful API with automatic OpenAPI documentation
-   - Multi-tenant with graph-scoped endpoints: `/v1/graphs/{graph_id}/*`
-   - Authentication via JWT and API keys
-
-2. **Graph Database System**
-
-   - **Primary Backend**: LadybugDB embedded graph database (all main tiers)
-   - **Multi-Tenant**: Separate database per entity
-   - **Tiered Infrastructure**: Multi-tenant shared instances to dedicated instances with increasing resources
-   - **Shared Repositories**: SEC, industry, economic data
-   - **Cluster-Based**: Writer clusters (EC2), reader clusters (ECS Fargate)
-
-3. **Configuration System** (`config/`)
-
-   - **Billing Plans**: Subscription tiers with credit allocations
-   - **Rate Limiting**: Burst protection with 1-minute windows
-   - **Credit System**: AI operation billing (database ops included)
-   - **Environment Validation**: Startup configuration checks
-
-4. **Middleware Layers**
-   - **Graph Routing**: Intelligent cluster selection
-   - **Rate Limiting**: Tier-based burst protection
-   - **Credits**: AI operation billing and tracking
-   - **Security**: Audit logging and authentication
-   - **Observability**: OpenTelemetry integration
-
-## Configuration Management
-
-### Centralized Configuration
-
-All configuration is managed in `/robosystems/config/`:
+**Never create migrations manually** - always autogenerate:
 
 ```bash
-config/
-├── env.py               # Environment variables with validation
-├── billing.py           # Subscription plans and pricing
-├── rate_limits.py       # Burst-focused rate limiting
-├── credits.py           # AI operation credit costs
-├── validation.py        # Startup validation
-└── valkey_registry.py   # Redis database allocation
+just migrate-create "description"  # NOT: manual alembic revision
 ```
 
-### Subscription Tiers
+## Quick Reference
 
-Multiple subscription tiers are available, ranging from multi-tenant shared infrastructure to dedicated instances with enhanced resources. Each tier includes monthly AI credit allocations and varying levels of storage, subgraph support, and performance capabilities.
-
-### Credit System (Simplified - AI Operations Only)
-
-- **AI Operations**: Only Anthropic/OpenAI API calls consume credits (token-based billing)
-- **Included Operations**: All database operations (queries, imports, backups, etc.)
-- **Monthly Allocations**: Based on subscription tier
-- **Storage**: Separate optional billing mechanism (10 credits/GB/day)
-
-### Rate Limiting
-
-Burst-focused protection with 1-minute windows. Rate limits scale with subscription tier, with higher tiers receiving increased `api_rate_multiplier` values (e.g., 1.0x for standard, 2.5x for large, 5.0x for xlarge). These multipliers apply only to API request rates, not to credit costs.
-
-## Database Systems
-
-### PostgreSQL (Primary Database)
+### Daily Development
 
 ```bash
-# Database migrations (always use autogenerate)
-just migrate-create "description"
-just migrate-up
-just migrate-down
-
-# Database management
-just demo-user                     # Create/reuse demo user (shared across all demo scripts)
-```
-
-### Graph Database Infrastructure
-
-**Backend:**
-
-- **Primary**: LadybugDB embedded graph database (all main subscription tiers)
-- **Optional**: Neo4j (disabled by default, available on request)
-
-**Infrastructure Tiers:**
-
-**Production:**
-
-- **Multi-tenant**: r7g.large instances, multiple databases per instance, shared resources
-- **Dedicated Small**: r7g.large instances, single database with subgraph support
-- **Dedicated Large**: r7g.xlarge instances, single database with enhanced subgraph support
-- **Shared Repositories**: r7g.large instances for public data (SEC, etc.)
-
-**Staging:**
-
-- **Multi-tenant**: r7g.medium instances, reduced resources for testing
-- **Shared Repositories**: r7g.medium instances for public data testing
-
-```bash
-# Graph operations (works with both LadybugDB and Neo4j backends)
-just graph-query graph_id "MATCH (e:Entity) RETURN e"  # Execute Cypher query via API
-just graph-health                                       # Health check
-just graph-info graph_id                                # Database info
-
-# LadybugDB direct database access (bypasses API)
-just lbug-query graph_id "MATCH (e:Entity) RETURN e"  # Direct embedded database query
-
-# SEC shared database
-just sec-load NVDA 2025            # Load company data (year optional)
-just sec-health                    # SEC database health
-```
-
-### Subgraph Management
-
-Subgraphs allow users on dedicated tiers (ladybug-large and ladybug-xlarge) to create isolated databases on their parent graph's instance. They share the parent's resources and credit pool while maintaining separate data.
-
-#### Key Concepts
-
-- **Parent Graph**: The main graph that owns subgraphs
-- **Subgraph ID Format**: `{parent_graph_id}_{subgraph_name}`
-  - Example: `kg1234567890abcdef_dev`
-- **Naming Rules**: Alphanumeric only, 1-20 characters (no hyphens, underscores, or special chars)
-  - Valid: `dev`, `staging`, `prod1`, `test123`
-  - Invalid: `dev-test`, `my_subgraph`, `test.env`
-
-#### Tier Limits
-
-- **ladybug-standard**: 0 subgraphs (not supported)
-- **ladybug-large**: 10 subgraphs maximum
-- **ladybug-xlarge**: 25 subgraphs maximum
-
-#### Features
-
-- **Shared Credit Pool**: Subgraphs consume credits from parent's allocation
-- **Shared Permissions**: Users with parent access automatically have subgraph access
-- **Isolated Data**: Each subgraph has its own database, independent from parent
-- **Schema Inheritance**: Subgraphs inherit parent's schema extensions
-- **Same Instance**: All subgraphs run on parent's dedicated instance
-
-#### Usage Notes
-
-- Subgraphs are NOT tracked in DynamoDB - location resolution uses parent
-- Deletion requires `force=true` if subgraph contains data
-- Optional backup creation on deletion with `create_backup=true`
-- Subgraphs count against parent's max_subgraphs tier limit
-- All standard graph endpoints work with subgraph IDs
-
-### Valkey/Redis Configuration
-
-**IMPORTANT**: Always use the centralized Valkey registry:
-
-```python
-from robosystems.config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
-
-# Use enum for database allocation
-redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH_CACHE)
-```
-
-Database allocation:
-
-- 0: Celery broker
-- 1: Celery results
-- 2: Authentication cache
-- 3: Server-sent events
-- 4: Distributed locks
-- 5: Pipeline tracking
-- 6: Credits cache
-- 7: Rate limiting
-- 8: LadybugDB client caching
-
-## Infrastructure & Deployment
-
-### GitHub Actions
-
-**Self-hosted runner**: Deployments, tests, infrastructure
-**GitHub-hosted**: Docker builds only
-
-### AWS Infrastructure
-
-- **API/Workers**: ECS Fargate ARM64 (1-2 tasks, 99% Spot)
-- **PostgreSQL**: RDS (db.t4g.micro, 20-100GB auto-scaling)
-- **LadybugDB**: EC2 ARM64 (r7g.medium/large/xlarge, auto-updated AMI)
-- **Valkey**: ElastiCache (cache.t4g.micro)
-
-### Configuration Management
-
-**Central Config**: `.github/configs/graph.yml` defines all tier specifications
-
-- Instance configuration (hardware specs, memory, performance settings)
-- Scaling configuration (min/max replicas, auto-scaling)
-- Deployment configuration (feature flags, enablement)
-
-### Deployment Flow
-
-- `staging` branch → staging environment
-- `main` branch → production environment
-- All deployments through GitHub Actions workflows
-
-## Testing & Code Quality
-
-### Testing Framework
-
-```bash
-# Test commands
-just test                          # Unit tests
-just test-all                      # Full test suite with linting
-just test-cov                      # Coverage report
-
-# Test markers
-@pytest.mark.unit                  # Unit tests
-@pytest.mark.integration           # Integration tests
-@pytest.mark.lbug_integration      # LadybugDB-specific integration
-@pytest.mark.celery                # Celery task tests
+just start                 # Start full Docker stack
+just restart               # Quick restart (Python code changes only)
+just rebuild               # Full rebuild (dependency/Dockerfile changes)
+just test                  # Run tests (excludes slow/integration)
+just logs api              # View API logs
+just logs worker           # View worker logs
 ```
 
 ### Code Quality
 
 ```bash
-# Code quality tools
-just lint                          # Ruff linting
-just format                        # Ruff formatting
-just typecheck                     # Pyright type checking
-just cf-lint template              # CloudFormation linting & validation
+just lint fix              # Fix linting issues
+just format                # Format code
+just typecheck             # Type checking
+just test-all              # Full test suite with all checks
 ```
 
-**Standards:**
+### Database Operations
 
-- Python 3.13, uv package management
-- Ruff formatting (88-char, double quotes)
-- Type hints with basedpyright
-- **NO COMMENTS** unless explicitly requested
-- **Emoji Policy**:
-  - Interactive scripts (user-facing CLIs): Emojis allowed for better UX (e.g., demo scripts in `examples/`)
-  - Background/logging scripts: No emojis in log output (e.g., `arelle_cache_manager.py`)
-  - Rationale: Interactive scripts benefit from visual feedback; logs should be machine-parseable
+```bash
+just migrate-create "msg"  # Create migration (autogenerate)
+just migrate-up            # Apply migrations
+just migrate-down          # Rollback one migration
+just migrate-current       # Show current revision
+```
 
-## Common Patterns
+### Graph Database
 
-### Working with README Files
+```bash
+just graph-health                              # Health check
+just graph-query GRAPH_ID "CYPHER_QUERY"       # Execute query
+just graph-info GRAPH_ID                       # Database info
+just lbug-query GRAPH_ID "CYPHER_QUERY"        # Direct LadybugDB query (bypass API)
+```
 
-**IMPORTANT**: Before working in any major directory, always read the README.md file:
+### SEC Data (Local Development)
 
-- `/robosystems/middleware/graph/README.md` - Graph database middleware
-- `/robosystems/operations/README.md` - Business logic operations
-- `/robosystems/config/README.md` - Configuration patterns
-- `/robosystems/tasks/README.md` - Celery task patterns
+```bash
+just sec-load NVDA 2025    # Load company filings
+just sec-health            # SEC database health
+just sec-reset             # Reset SEC database
+```
 
-### API Development
+### Demo Scripts
+
+```bash
+just demo-user             # Create/reuse demo user credentials
+just demo-accounting       # Run accounting demo
+just demo-custom-graph     # Run custom graph demo
+just demo-sec NVDA 2025    # Run SEC demo
+```
+
+## Architecture Overview
+
+```
+robosystems/
+├── routers/           # API endpoints (thin layer, calls operations)
+├── operations/        # Business logic orchestration
+│   ├── graph/         # Graph services (credit, entity, subscription)
+│   └── lbug/          # LadybugDB operations (backup, ingest)
+├── middleware/        # Cross-cutting concerns
+│   ├── auth/          # Authentication (JWT, API keys, SSO)
+│   ├── billing/       # Credit consumption tracking
+│   ├── graph/         # Graph routing and multi-tenancy
+│   └── rate_limits/   # Burst protection
+├── tasks/             # Celery background tasks
+│   ├── billing/       # Credit allocation, storage billing
+│   ├── data_sync/     # SEC, QuickBooks, Plaid sync
+│   └── graph_operations/  # Backups, ingestion
+├── processors/        # Data transformation (XBRL, transactions)
+├── adapters/          # External service integrations
+├── models/
+│   ├── api/           # Pydantic request/response models
+│   └── iam/           # SQLAlchemy database models
+├── config/            # Centralized configuration
+├── schemas/           # Graph schema definitions
+└── graph_api/         # Graph API microservice
+```
+
+### Key Architectural Patterns
+
+1. **Operations orchestrate, processors transform**: Operations coordinate business logic; processors handle data transformation
+2. **Multi-tenant by design**: All graph operations are scoped to `graph_id`
+3. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
+4. **Pluggable graph backend**: LadybugDB (default) or Neo4j via `GRAPH_BACKEND_TYPE`
+
+## Environment Configuration
+
+### Dual .env Pattern
+
+- **`.env`**: Container hostnames for Docker services (e.g., `postgres:5432`)
+  - Used by: Docker Compose, containers communicating with each other
+- **`.env.local`**: Localhost URLs for host commands (e.g., `localhost:5432`)
+  - Used by: Justfile recipes, local scripts, migrations run on host
+
+Both are auto-created from `.example` templates by `just start` or `just init`.
+
+**When to edit which:**
+- Adding secrets/credentials → Update both files
+- Changing service ports → Update both files
+- Local overrides only → Update `.env.local` only
+
+### Key Environment Variables
+
+```bash
+# Core
+ENVIRONMENT=dev|staging|prod
+DATABASE_URL=postgresql://...
+CELERY_BROKER_URL=redis://...
+
+# Graph API
+GRAPH_API_URL=http://localhost:8001
+GRAPH_BACKEND_TYPE=ladybug|neo4j_community
+LBUG_DATABASE_PATH=/data/lbug-dbs
+
+# Feature Flags
+ENABLE_RATE_LIMITING=true
+ENABLE_CREDITS=true
+```
+
+## Configuration System (`/robosystems/config/`)
+
+All configuration is centralized and config-as-code:
+
+| Module               | Purpose                                        |
+| -------------------- | ---------------------------------------------- |
+| `env.py`             | Environment variables with validation          |
+| `billing.py`         | Subscription plans and pricing                 |
+| `rate_limits.py`     | Burst-focused rate limiting (1-minute windows) |
+| `credits.py`         | AI operation credit costs                      |
+| `agents.py`          | Claude model configuration (Bedrock)           |
+| `validation.py`      | Startup configuration checks                   |
+| `valkey_registry.py` | Redis database allocation                      |
+
+### Subscription Tiers
+
+| Tier     | Credits/Month | Max Graphs | API Rate Multiplier |
+| -------- | ------------- | ---------- | ------------------- |
+| standard | 100K          | 5          | 2.0x                |
+| large    | 1M            | 25         | 5.0x                |
+| xlarge   | 3M            | 100        | 10.0x               |
+
+### Credit System
+
+- **AI Operations**: Token-based billing (Anthropic/OpenAI)
+- **Database Operations**: 100% included (queries, backups, imports - no credits)
+- **Storage**: Separate optional billing (not credits)
+
+### Valkey/Redis Database Allocation
 
 ```python
-# API endpoint pattern
-from robosystems.middleware.auth import require_auth
-from robosystems.models.api import SomeModel
+from robosystems.config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 
-@router.get("/endpoint")
-@require_auth
-async def endpoint(request: Request) -> SomeModel:
-    # Implementation
+# Always use the registry, never hardcode database numbers
+redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH_CACHE)
+```
+
+Database numbers: 0=Celery broker, 1=Celery results, 2=Auth cache, 3=SSE, 4=Locks, 5=Pipeline, 6=Credits, 7=Rate limiting, 8=LadybugDB cache
+
+## Testing
+
+### Test Commands
+
+```bash
+just test                  # Unit tests (fast, no external deps)
+just test routers          # Run tests at /tests/routers
+just test-integration      # Integration tests
+just test-cov              # Coverage report
+just test-all              # Full suite with linting/formatting
+```
+
+### Test Markers
+
+```python
+@pytest.mark.unit          # Fast, isolated
+@pytest.mark.integration   # May use databases
+@pytest.mark.celery        # Celery task tests
+@pytest.mark.slow          # Long-running
+@pytest.mark.security      # Security-focused
+```
+
+### Celery Task Testing Pattern
+
+The key insight is that `sessionmaker()()` creates a call chain:
+
+```python
+@patch("path.to.task.cleanup_function")
+@patch("path.to.task.sessionmaker")
+@patch("path.to.task.engine")
+def test_task(self, mock_engine, mock_sessionmaker, mock_func):
+    mock_session = MagicMock()
+    # Mock the full chain: sessionmaker()().__enter__()
+    mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
+    mock_sessionmaker.return_value.return_value.__exit__.return_value = False
+
+    result = your_task()  # type: ignore[call-arg]
+    mock_session.commit.assert_called_once()
+```
+
+### Long-Running Tests
+
+For tests exceeding the default pytest timeout, use the `@pytest.mark.timeout` decorator:
+
+```python
+@pytest.mark.timeout(300)  # 5 minutes
+@pytest.mark.slow
+def test_long_running_operation():
     pass
 ```
 
-### Configuration Access
+Or configure in `pytest.ini` for specific test paths.
+
+## Graph API
+
+### Backends
+
+- **LadybugDB** (default): Embedded columnar graph database
+- **Neo4j Community**: Client-server with Bolt protocol
+
+### Key Endpoints
+
+```http
+POST /databases                           # Create database
+POST /databases/{graph_id}/query          # Execute Cypher
+POST /databases/{graph_id}/tables         # Create staging table
+POST /databases/{graph_id}/tables/query   # Query staging (SQL)
+POST /databases/{graph_id}/tables/{name}/ingest  # Ingest to graph
+GET  /status                              # Health check
+```
+
+### LadybugDB Limitations
+
+- Sequential ingestion (one file at a time per database)
+- Maximum 3 concurrent connections per database
+- Single writer per database at a time
+
+### Subgraphs (Dedicated Tiers Only)
+
+- **Tiers**: ladybug-large (10 max), ladybug-xlarge (25 max)
+- **Naming**: Alphanumeric only, 1-20 chars (no hyphens/underscores)
+- **ID Format**: `{parent_graph_id}_{subgraph_name}` (e.g., `kg123_dev`)
+- **Features**: Shared credit pool, shared permissions, isolated data
+
+## Common Patterns
+
+### API Endpoint Pattern
 
 ```python
-# ALWAYS use centralized config
-from robosystems.config import env
+from robosystems.middleware.auth import get_current_user
+from robosystems.models.api import ResponseModel
 
-# NEVER use os.getenv() directly
-database_url = env.DATABASE_URL  # ✓ Correct
-database_url = os.getenv("DATABASE_URL")  # ✗ Wrong
+@router.get("/endpoint")
+async def endpoint(
+    request: Request,
+    user: User = Depends(get_current_user)
+) -> ResponseModel:
+    pass
+```
+
+### Service Layer Pattern
+
+```python
+from robosystems.operations.graph import CreditService, EntityGraphService
+
+# Business logic in operations, not routers
+credit_service = CreditService(user_id, graph_id)
+if await credit_service.has_sufficient_credits("operation"):
+    result = await entity_service.execute(...)
+    await credit_service.consume_credits("operation")
 ```
 
 ### Database Migrations
 
-1. **Update SQLAlchemy models** in `/robosystems/models/iam/`
-2. **Generate migration**: `just migrate-create "description"`
-3. **Review and run**: `just migrate-up`
+1. Update SQLAlchemy models in `/robosystems/models/iam/`
+2. Generate migration: `just migrate-create "description"`
+3. Review and run: `just migrate-up`
 
-**NEVER manually create migrations** - always use autogenerate.
+## Code Standards
+
+- **Python 3.13** with uv package management
+- **Ruff** formatting (88-char lines, double quotes)
+- **basedpyright** for type checking
+- **Self-documenting code**: Prefer clear names over comments; add comments only for non-obvious logic
+- **Emojis**: Only in interactive scripts (`/examples/`), never in production code or logs
 
 ## Troubleshooting
 
-### Common Issues
-
-1. **Environment Variables**
-
-   - Verify names match between CloudFormation and app code
-   - Check .env file exists and is properly formatted
-   - Use env.py validation functions
-
-2. **Docker Issues**
-
-   - Always use `robosystems` profile, not individual services
-   - Run `just restart` after code changes
-   - Use `just rebuild` for package/environment changes
-
-3. **Database Connection**
-
-   - Ensure PostgreSQL container is running
-   - Check DATABASE_URL format
-   - Verify migration status with `just migrate-current`
-
-4. **Graph Database**
-
-   - Check Graph API health with `just graph-health`
-   - Get database info with `just graph-info graph_id`
-   - Check CloudFormation stack status in AWS Console
-
-5. **Celery Tasks**
-   - Monitor worker logs with `just logs robosystems-worker`
-   - Check Valkey queue status
-   - Use DLQ management commands: `just dlq-stats`
-
-### Development Debugging
+### Docker Issues
 
 ```bash
-# Logs and monitoring
-just logs robosystems-api                      # API logs
-just logs-grep robosystems-worker ERROR        # Search worker logs
+just restart               # Code changes not picked up
+just rebuild               # Dependency changes not working
+just logs api              # Check API logs
+just logs-grep worker ERROR  # Search worker logs
 ```
 
-### Secret Management
+### Database Issues
 
-AWS Secrets Manager Base: `robosystems/{staging|prod}`
-Components: `robosystems/{staging|prod}/{postgres|s3|ladybug}`
+```bash
+docker ps | grep postgres  # Check PostgreSQL running
+just migrate-current       # Verify migration status
+just migrate-up            # Apply pending migrations
+```
 
-Never commit secrets to code. Use environment variables or AWS Secrets Manager.
+### Graph Database Issues
 
----
+```bash
+just graph-health          # Check Graph API
+just graph-info GRAPH_ID   # Database info
+```
 
-**Support**: For questions about this setup, refer to individual README files in component directories, or check the GitHub Actions workflows for deployment examples.
+### Cache/Queue Issues
+
+```bash
+just valkey-list-queue QUEUE  # List queue contents
+just valkey-clear-queue QUEUE # Clear queue
+```
+
+## CI/CD
+
+- **Self-hosted runner**: Deployments, tests, infrastructure
+- **GitHub-hosted**: Docker builds only
+- **Branches**: `staging` → staging, `main` → production
+- **Infrastructure Config**: `.github/configs/graph.yml`
+
+## AWS Infrastructure
+
+| Component   | Service           | Instance                |
+| ----------- | ----------------- | ----------------------- |
+| API/Workers | ECS Fargate ARM64 | 1-2 tasks, 99% Spot     |
+| PostgreSQL  | RDS               | db.t4g.micro            |
+| LadybugDB   | EC2 ARM64         | r7g.medium/large/xlarge |
+| Cache       | ElastiCache       | cache.t4g.micro         |
+
+## Key READMEs
+
+Before working in a directory, read its README:
+
+- `/robosystems/config/README.md` - Configuration patterns
+- `/robosystems/graph_api/README.md` - Graph API details
+- `/robosystems/middleware/auth/README.md` - Authentication system
+- `/robosystems/middleware/graph/README.md` - Graph routing
+- `/robosystems/operations/README.md` - Business logic patterns
+- `/robosystems/tasks/README.md` - Celery task patterns
+- `/robosystems/models/api/README.md` - API models
+- `/robosystems/models/iam/README.md` - Database models
+- `/tests/README.md` - Testing guide
+- `/examples/README.md` - Demo scripts
+
+## Admin CLI
+
+```bash
+just admin dev stats                    # System stats
+just admin dev customers list           # List customers
+just admin dev subscriptions list       # List subscriptions
+just admin dev credits grant USER AMT   # Grant bonus credits
+```
+
+## Secret Management
+
+- **AWS Secrets Manager Base**: `robosystems/{staging|prod}`
+- **Components**: `robosystems/{staging|prod}/{postgres|s3|ladybug}`
+- Never commit secrets to code

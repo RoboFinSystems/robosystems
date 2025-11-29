@@ -348,6 +348,7 @@ services:
       - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
       - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
       - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:4566
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3000:3000
@@ -379,6 +380,7 @@ services:
       - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
       - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
       - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:4566
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3001:3000
@@ -410,6 +412,7 @@ services:
       - NEXT_PUBLIC_ROBOSYSTEMS_APP_URL=http://localhost:3000
       - NEXT_PUBLIC_ROBOLEDGER_APP_URL=http://localhost:3001
       - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=http://localhost:3002
+      - NEXT_PUBLIC_S3_ENDPOINT_URL=http://localhost:4566
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3002:3000
