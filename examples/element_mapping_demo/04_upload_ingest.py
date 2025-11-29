@@ -18,7 +18,6 @@ from pathlib import Path
 from robosystems_client.extensions import (
   RoboSystemsExtensions,
   RoboSystemsExtensionConfig,
-  FileUploadOptions,
   MaterializationOptions,
 )
 
@@ -83,7 +82,7 @@ def upload_directory(
 
     try:
       result = extensions.files.upload(
-        graph_id, table_name, str(file_path), FileUploadOptions(fix_localstack_url=True)
+        graph_id, table_name, str(file_path)
       )
 
       if result.success:
@@ -186,6 +185,7 @@ def main():
     config = RoboSystemsExtensionConfig(
       base_url=args.base_url,
       headers={"X-API-Key": api_key},
+      s3_endpoint_url="http://localhost:4566",  # LocalStack S3 endpoint
     )
     extensions = RoboSystemsExtensions(config)
 
