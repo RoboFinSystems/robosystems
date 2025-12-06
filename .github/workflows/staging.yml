@@ -74,7 +74,7 @@ jobs:
 
       - name: Install PyYAML
         shell: bash
-        run: pip install pyyaml
+        run: pip install --user pyyaml
 
       - name: Load Stack Configuration
         id: load
