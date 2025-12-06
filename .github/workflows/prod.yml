@@ -65,7 +65,7 @@ jobs:
           token: ${{ secrets.ACTIONS_TOKEN }}
 
       - name: Install PyYAML
-        run: pip install pyyaml
+        run: pip install --user pyyaml
 
       - name: Load Stack Configuration
         id: load

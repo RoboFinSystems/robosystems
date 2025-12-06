@@ -60,35 +60,31 @@ package_lambda() {
 
 # Package all Lambda functions
 
-package_lambda "postgres-secrets" "postgres_secrets_update.py" "boto3==1.34.14"
+package_lambda "postgres-secrets" "postgres_secrets_update.py" ""
 
-package_lambda "postgres-rotation" "postgres_rotation.py" "boto3==1.34.14
-psycopg2-binary==2.9.9"
+package_lambda "postgres-rotation" "postgres_rotation.py" "psycopg2-binary==2.9.10"
 
-package_lambda "valkey-rotation" "valkey_rotation.py" "boto3==1.34.14
-redis==5.0.1"
+package_lambda "valkey-rotation" "valkey_rotation.py" "redis==5.0.1"
 
-package_lambda "graph-api-rotation" "graph_api_rotation.py" "boto3==1.34.14"
+package_lambda "graph-api-rotation" "graph_api_rotation.py" ""
 
 # Package snapshot Lambda functions (temporary - will be migrated to volume manager)
-package_lambda "graph-snapshot-creator" "graph_snapshot_creator.py" "boto3==1.34.14"
+package_lambda "graph-snapshot-creator" "graph_snapshot_creator.py" ""
 
-package_lambda "graph-snapshot-selector" "graph_snapshot_selector.py" "boto3==1.34.14"
+package_lambda "graph-snapshot-selector" "graph_snapshot_selector.py" ""
 
 # Package volume management Lambda functions
-package_lambda "graph-volume-manager" "graph_volume_manager.py" "boto3==1.34.14"
+package_lambda "graph-volume-manager" "graph_volume_manager.py" ""
 
-package_lambda "graph-volume-monitor" "graph_volume_monitor.py" "boto3==1.34.14
-urllib3==2.0.7"
+package_lambda "graph-volume-monitor" "graph_volume_monitor.py" "urllib3==2.6.0"
 
-package_lambda "graph-volume-detachment" "graph_volume_detachment.py" "boto3==1.34.14"
+package_lambda "graph-volume-detachment" "graph_volume_detachment.py" ""
 
 # Package instance monitor Lambda function
-package_lambda "graph-instance-monitor" "graph_instance_monitor.py" "boto3==1.34.14"
+package_lambda "graph-instance-monitor" "graph_instance_monitor.py" ""
 
 # Package worker monitor Lambda function (queue metrics and task protection)
-package_lambda "worker-monitor" "worker_monitor.py" "boto3==1.34.14
-redis==5.0.1"
+package_lambda "worker-monitor" "worker_monitor.py" "redis==5.0.1"
 
 # Upload UserData scripts
 echo "📤 Uploading UserData scripts to S3..."
