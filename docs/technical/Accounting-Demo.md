@@ -101,7 +101,7 @@ uv run examples/accounting_demo/01_setup_credentials.py --force  # Force new
 ### Step 2: Create Graph Database (`02_create_graph.py`)
 
 **What happens automatically:**
-- Creates new LadyBug graph database
+- Creates new Ladybug graph database
 - Registers graph with user account
 - Stores graph_id in `credentials/config.json` for subsequent operations
 
@@ -149,7 +149,7 @@ uv run examples/accounting_demo/03_generate_data.py --months 12  # More data
 1. **Upload**: Files uploaded to S3 (LocalStack in development)
 2. **Stage**: Data loaded into DuckDB staging tables
 3. **Validate**: Automatic data quality checks
-4. **Ingest**: DuckDB → LadyBug graph database via extension
+4. **Ingest**: DuckDB → Ladybug graph database via extension
 5. **Verify**: Counts verified, relationships checked
 
 **Manual execution (if needed):**

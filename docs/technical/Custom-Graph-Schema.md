@@ -157,7 +157,7 @@ uv run examples/custom_graph_demo/01_setup_credentials.py --force  # Force new
 
 **What happens automatically:**
 - Reads `schema.json` from the demo directory
-- Creates new LadyBug graph database with custom schema
+- Creates new Ladybug graph database with custom schema
 - Registers graph with user account
 - Stores graph_id in `credentials/config.json`
 
@@ -213,7 +213,7 @@ uv run examples/custom_graph_demo/03_generate_data.py --regenerate  # Force rege
 1. **Upload**: Files uploaded to S3 (LocalStack in development)
 2. **Stage**: Data loaded into DuckDB staging tables
 3. **Validate**: Automatic data quality checks
-4. **Ingest**: DuckDB → LadyBug graph database via extension
+4. **Ingest**: DuckDB → Ladybug graph database via extension
 5. **Verify**: Counts verified, relationships checked
 
 **Manual execution (if needed):**

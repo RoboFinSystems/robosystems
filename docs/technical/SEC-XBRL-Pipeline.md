@@ -9,7 +9,7 @@ This guide shows you how to load SEC financial data locally and query it using t
 The SEC local pipeline allows you to:
 
 - Load company financial filings (10-K, 10-Q) by ticker symbol
-- Store XBRL data in a local LadyBug graph database
+- Store XBRL data in a local Ladybug graph database
 - Query financial data using Cypher or the MCP client
 - Inspect staged data in DuckDB before ingestion
 - Query SEC filings using natural language through any MCP-compatible AI tool
@@ -47,7 +47,7 @@ just demo-sec TSLA 2023 true
 4. **Generate** - Creates Parquet files optimized for graph ingestion
 5. **Stage** - Uploads to S3 and creates DuckDB staging tables
 6. **Validate** - Automatic data quality checks and deduplication
-7. **Ingest** - Direct DuckDB → LadyBug via database extension
+7. **Ingest** - Direct DuckDB → Ladybug via database extension
 8. **Access Grant** - Grants SEC repository access to your user
 9. **Config Update** - Updates credentials with SEC graph info
 10. **Example Queries** - Runs preset queries showing your data (unless skipped)
@@ -232,7 +232,7 @@ For exploratory analysis, you can launch an interactive REPL for running multipl
 # Launch interactive mode for graph queries
 just graph-query-i sec
 
-# Or for direct LadyBug database access
+# Or for direct Ladybug database access
 just lbug-query-i sec
 ```
 
@@ -358,10 +358,10 @@ print(schema)
 
 ### Option 5: G.V() Graph IDE For Interactive Exploration
 
-[G.V()](https://gdotv.com/) is a powerful graph visualization tool and our recommended partner for visualizing LadyBug databases:
+[G.V()](https://gdotv.com/) is a powerful graph visualization tool and our recommended partner for visualizing Ladybug databases:
 
-**Why G.V() for LadyBug?**
-- Native LadyBug database support
+**Why G.V() for Ladybug?**
+- Native Ladybug database support
 - Interactive graph exploration
 - Real-time Cypher query visualization
 - Perfect for understanding complex financial relationships
@@ -374,7 +374,7 @@ print(schema)
 
 1. Visit [https://gdotv.com/](https://gdotv.com/) or download the desktop application
 2. Open the application
-3. Connect to your local LadyBug database:
+3. Connect to your local Ladybug database:
    - **Database Path**: `./data/lbug-dbs/sec.lbug` (from RoboSystems root directory)
 4. **Enable "Fetch all edges between vertices"** in settings for richer visualizations
 5. Run Cypher queries and visualize results interactively
@@ -621,7 +621,7 @@ just sec-load NVDA 2025
 
 - **Documentation**: See `/robosystems/tasks/sec_xbrl/README.md` for technical details
 - **Health Check**: `just sec-health v` for diagnostic information
-- **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for LadyBug
+- **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Ladybug
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)
 - **MCP Protocol**: [Model Context Protocol](https://modelcontextprotocol.io/)
 - **RoboSystems API**: http://localhost:8000/docs (when running locally)
