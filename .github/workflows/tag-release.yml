@@ -73,31 +73,31 @@ jobs:
 
           if [ -z "$LAST_TAG" ]; then
             echo "No previous release found, analyzing all commits"
-            COMMIT_RANGE="$(git rev-list --max-parents=0 HEAD)..HEAD"
             LAST_TAG="initial"
+            # For initial release, use different commands that don't require a range
+            FILES_CHANGED=$(git ls-files | wc -l)
+            COMMITS_COUNT=$(git rev-list --count HEAD)
+            # Get stats by diffing empty tree against HEAD
+            EMPTY_TREE=$(git hash-object -t tree /dev/null)
+            ADDITIONS=$(git diff --shortstat "$EMPTY_TREE" HEAD | grep -oE '[0-9]+ insertions?' | grep -oE '[0-9]+' || echo "0")
+            DELETIONS=$(git diff --shortstat "$EMPTY_TREE" HEAD | grep -oE '[0-9]+ deletions?' | grep -oE '[0-9]+' || echo "0")
+            COMMIT_MESSAGES=$(git log --oneline --no-color HEAD | head -30)
+            DETAILED_CHANGES=$(git diff --name-status --no-color "$EMPTY_TREE" HEAD | head -50)
+            PR_REFS=$(git log --oneline --no-color HEAD | grep -oE '#[0-9]+' | sort -u | head -10 || echo "")
           else
-            COMMIT_RANGE="$LAST_TAG..HEAD"
             echo "Analyzing changes since last release: $LAST_TAG"
+            # Use explicit two-commit diff syntax instead of range syntax
+            FILES_CHANGED=$(git diff --name-only "$LAST_TAG" HEAD | wc -l)
+            COMMITS_COUNT=$(git rev-list --count "$LAST_TAG"..HEAD)
+            ADDITIONS=$(git diff --shortstat "$LAST_TAG" HEAD | grep -oE '[0-9]+ insertions?' | grep -oE '[0-9]+' || echo "0")
+            DELETIONS=$(git diff --shortstat "$LAST_TAG" HEAD | grep -oE '[0-9]+ deletions?' | grep -oE '[0-9]+' || echo "0")
+            COMMIT_MESSAGES=$(git log --oneline --no-color "$LAST_TAG"..HEAD | head -30)
+            DETAILED_CHANGES=$(git diff --name-status --no-color "$LAST_TAG" HEAD | head -50)
+            PR_REFS=$(git log --oneline --no-color "$LAST_TAG"..HEAD | grep -oE '#[0-9]+' | sort -u | head -10 || echo "")
           fi
-
-          # Get change statistics
-          FILES_CHANGED=$(git diff --name-only $COMMIT_RANGE | wc -l)
-          COMMITS_COUNT=$(git rev-list --count $COMMIT_RANGE)
-          ADDITIONS=$(git diff --shortstat $COMMIT_RANGE | grep -oE '[0-9]+ insertions?' | grep -oE '[0-9]+' || echo "0")
-          DELETIONS=$(git diff --shortstat $COMMIT_RANGE | grep -oE '[0-9]+ deletions?' | grep -oE '[0-9]+' || echo "0")
-
-          # Get commit messages (limit to prevent memory issues)
-          COMMIT_MESSAGES=$(git log --oneline --no-color $COMMIT_RANGE | head -30)
-
-          # Get file changes (limit to prevent memory issues)
-          DETAILED_CHANGES=$(git diff --name-status --no-color $COMMIT_RANGE | head -50)
-
-          # Get PR references from commit messages
-          PR_REFS=$(git log --oneline --no-color $COMMIT_RANGE | grep -oE '#[0-9]+' | sort -u | head -10 || echo "")
 
           # Save outputs
           echo "last_tag=$LAST_TAG" >> $GITHUB_OUTPUT
-          echo "commit_range=$COMMIT_RANGE" >> $GITHUB_OUTPUT
           echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
           echo "commits_count=$COMMITS_COUNT" >> $GITHUB_OUTPUT
           echo "additions=$ADDITIONS" >> $GITHUB_OUTPUT
