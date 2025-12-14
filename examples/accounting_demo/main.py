@@ -11,6 +11,7 @@ This script runs the complete accounting demo workflow:
 
 Usage:
     uv run main.py                        # Reuse existing user & graph, regenerate data automatically
+    uv run main.py --company "My Company" # Use custom company name
     uv run main.py --new-user             # Create new user + graph, regenerate data
     uv run main.py --new-graph            # Create new graph for existing user, regenerate data
     uv run main.py --skip-queries         # Skip verification queries after ingestion
@@ -87,6 +88,12 @@ def main():
     action="store_true",
     help="Skip running verification queries at the end",
   )
+  parser.add_argument(
+    "--company",
+    type=str,
+    default="Acme Consulting LLC",
+    help="Company name for the demo entity (default: Acme Consulting LLC)",
+  )
 
   args = parser.parse_args()
 
@@ -123,6 +130,7 @@ def main():
   print("📊 Accounting Demo - Complete Workflow")
   print("=" * 70)
   print(f"Base URL: {args.base_url}")
+  print(f"Company: {args.company}")
   print(f"Create new user: {args.new_user}")
   print(f"Create new graph: {args.new_graph}")
   print("Regenerate data: True (always)")
@@ -134,7 +142,7 @@ def main():
   run_script("02_create_graph.py", step2_args)
 
   # Regenerate data every run to align parquet identifiers with the current graph.
-  step3_args = ["--regenerate"]
+  step3_args = ["--regenerate", "--company", args.company]
   run_script("03_generate_data.py", step3_args)
 
   step4_args = ["--base-url", args.base_url]

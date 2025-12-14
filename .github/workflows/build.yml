@@ -116,6 +116,13 @@ jobs:
             VERSION_TAG=${GITHUB_REF#refs/tags/}
             IS_RELEASE="true"
             echo "📦 Building release version: $VERSION_TAG"
+          # Check if this is a release branch (release/*)
+          elif [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            # Extract version from branch name (e.g., release/1.0.0 -> v1.0.0)
+            BRANCH_VERSION=${GITHUB_REF#refs/heads/release/}
+            VERSION_TAG="v${BRANCH_VERSION}-hotfix.${GITHUB_SHA:0:8}"
+            IS_RELEASE="true"
+            echo "🔥 Building hotfix version: $VERSION_TAG (from release/$BRANCH_VERSION)"
           else
             # For non-release builds, use commit SHA
             VERSION_TAG="git-${GITHUB_SHA:0:8}"

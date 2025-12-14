@@ -62,8 +62,9 @@ DEMO_NAME = "accounting_demo"
 class AccountingDataGenerator:
   """Generate realistic accounting data."""
 
-  def __init__(self, num_months=6):
+  def __init__(self, num_months=6, company_name="Acme Consulting LLC"):
     self.num_months = num_months
+    self.company_name = company_name
     self.data_dir = DATA_DIR
     self.nodes_dir = NODES_DIR
     self.relationships_dir = RELATIONSHIPS_DIR
@@ -132,8 +133,8 @@ class AccountingDataGenerator:
       "cik": [None],
       "ticker": [None],
       "exchange": [None],
-      "name": ["Acme Consulting LLC"],
-      "legal_name": ["Acme Consulting Limited Liability Company"],
+      "name": [self.company_name],
+      "legal_name": [self.company_name],
       "industry": ["Professional Services"],
       "entity_type": ["LLC"],
       "sic": ["8742"],
@@ -769,11 +770,17 @@ def main():
     action="store_true",
     help="Force regenerate existing data files",
   )
+  parser.add_argument(
+    "--company",
+    type=str,
+    default="Acme Consulting LLC",
+    help="Company name for the demo entity (default: Acme Consulting LLC)",
+  )
 
   args = parser.parse_args()
 
   try:
-    generator = AccountingDataGenerator(num_months=args.months)
+    generator = AccountingDataGenerator(num_months=args.months, company_name=args.company)
     generator.generate_all(regenerate=args.regenerate)
   except Exception as e:
     print(f"\n❌ Error: {e}")
