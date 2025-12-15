@@ -47,6 +47,13 @@
       "problemMatcher": []
     },
     {
+      "label": "RoboSystems Clone Apps",
+      "type": "shell",
+      "command": "just",
+      "args": ["clone-apps"],
+      "problemMatcher": []
+    },
+    {
       "label": "Docker Logs",
       "type": "shell",
       "command": "just",
@@ -286,11 +293,7 @@
       "type": "pickString",
       "description": "Choose service to tunnel:",
       "default": "postgres",
-      "options": [
-        "all",
-        "postgres",
-        "valkey"
-      ]
+      "options": ["all", "postgres", "valkey"]
     },
     {
       "id": "versionType",

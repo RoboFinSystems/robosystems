@@ -133,9 +133,10 @@ jobs:
       environment: ${{ vars.ENVIRONMENT_PROD || 'prod' }}
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       ecr_repository: ${{ vars.ECR_REPOSITORY || 'robosystems' }}
-      # Docker Hub publishing: only when explicitly enabled AND deploying from a version tag
+      # Docker Hub publishing: only when explicitly enabled AND deploying from a version tag or release branch
       # Set DOCKERHUB_PUBLISHING_ENABLED to 'true' in GitHub variables when ready to publish
-      publish_to_dockerhub: ${{ vars.DOCKERHUB_PUBLISHING_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/v') }}
+      # Supports: refs/tags/v*.*.* (releases) and refs/heads/release/* (hotfixes)
+      publish_to_dockerhub: ${{ vars.DOCKERHUB_PUBLISHING_ENABLED == 'true' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')) }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

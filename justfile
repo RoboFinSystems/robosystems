@@ -64,6 +64,12 @@ logs-follow container="worker":
 logs-grep container="worker" pattern="ERROR" lines="100":
     docker logs robosystems-{{container}} --tail {{lines}} | grep -E "{{pattern}}"
 
+# Clone frontend app repositories
+clone-apps:
+    @test -d ../robosystems-app || git clone https://github.com/RoboFinSystems/robosystems-app.git
+    @test -d ../roboledger-app || git clone https://github.com/RoboFinSystems/roboledger-app.git
+    @test -d ../roboinvestor-app || git clone https://github.com/RoboFinSystems/roboinvestor-app.git
+
 
 ## Development Environment ##
 
