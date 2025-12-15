@@ -429,7 +429,7 @@ services:
         reservations:
           memory: 256m
           cpus: "0.25"
-    profiles: ["roboinvestor-app"]
+    profiles: ["roboinvestor-app", "apps", "all"]
 
 volumes:
   prometheus_data:
