@@ -338,7 +338,9 @@ services:
   # RoboSystems App Frontend
   robosystems-app:
     container_name: robosystems-app
-    image: robofinsystems/robosystems-app:latest
+    build:
+      context: ../robosystems-app
+      dockerfile: Dockerfile
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev
@@ -350,6 +352,10 @@ services:
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3000:3000
+    volumes:
+      - ../robosystems-app/src:/app/src:ro # Mount source code for hot reload
+      - ../robosystems-app/public:/app/public:ro # Mount public assets
+      - ../robosystems-app/package.json:/app/package.json:ro # Mount package.json
     restart: always
     deploy:
       resources:
@@ -364,7 +370,9 @@ services:
   # RoboLedger App Frontend
   roboledger-app:
     container_name: roboledger-app
-    image: robofinsystems/roboledger-app:latest
+    build:
+      context: ../roboledger-app
+      dockerfile: Dockerfile
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev
@@ -376,6 +384,10 @@ services:
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - 3001:3000
+    volumes:
+      - ../roboledger-app/src:/app/src:ro # Mount source code for hot reload
+      - ../roboledger-app/public:/app/public:ro # Mount public assets
+      - ../roboledger-app/package.json:/app/package.json:ro # Mount package.json
     restart: always
     deploy:
       resources:
