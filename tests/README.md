@@ -65,12 +65,10 @@ The test suite is organized by component, mirroring the application structure:
   - `pipeline/` - Data processing pipelines
   - `providers/` - External provider integrations
 
-### Data Processing
-- **`processors/`** - Data transformation and processing
-  - XBRL processing (SEC filings, taxonomies)
-  - QuickBooks transaction processing
-  - Trial balance generation
-  - Schedule processing (balance sheet, income statement)
+### Adapters
+- **`adapters/`** - External service integrations
+  - SEC adapter (XBRL processing, filings, taxonomies)
+  - QuickBooks adapter (transaction processing)
 
 ### API Layer
 - **`routers/`** - HTTP endpoint tests
@@ -155,8 +153,8 @@ uv run pytest tests/operations/
 uv run pytest tests/middleware/auth/
 uv run pytest tests/middleware/credits/
 
-# Data processors
-uv run pytest tests/processors/
+# Adapters
+uv run pytest tests/adapters/
 
 # API endpoints
 uv run pytest tests/routers/

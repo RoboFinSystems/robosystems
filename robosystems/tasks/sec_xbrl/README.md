@@ -183,7 +183,7 @@ If processing fails for specific companies:
 
 ## XBRL Processing Architecture
 
-The XBRLGraphProcessor has been modularized into specialized components in `robosystems/processors/xbrl/`:
+The XBRLGraphProcessor has been modularized into specialized components in `robosystems/adapters/sec/processors/`:
 
 ### Core Components
 

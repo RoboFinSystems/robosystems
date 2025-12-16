@@ -383,12 +383,12 @@ Balance Sheet (US-GAAP, 5 lines):
    - Pivot table generation
    - Aspect filtering
 
-2. **XBRL Processing** (`/robosystems/processors/xbrl_graph.py`)
+2. **XBRL Processing** (`/robosystems/adapters/sec/processors/`)
    - SEC filing ingestion
    - Taxonomy management
    - Presentation linkbases
 
-3. **QuickBooks Integration** (`/robosystems/processors/qb_transactions.py`)
+3. **QuickBooks Integration** (`/robosystems/adapters/quickbooks/`)
    - Transaction import
    - Chart of accounts sync
    - Structure/Association pattern (same as element mapping!)

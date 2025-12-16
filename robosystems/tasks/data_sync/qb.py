@@ -1,7 +1,7 @@
 import asyncio
 from decimal import Decimal
 from ...celery import celery_app, QUEUE_DEFAULT
-from ...processors.qb_transactions import QBTransactionsProcessor
+from robosystems.adapters.quickbooks import QBTransactionsProcessor
 from robosystems.logger import logger
 from robosystems.operations.connection_service import ConnectionService, SYSTEM_USER_ID
 from ...middleware.graph import get_graph_repository

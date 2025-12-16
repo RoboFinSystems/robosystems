@@ -10,7 +10,7 @@ from celery import shared_task
 from typing import Dict, Any
 
 from robosystems.logger import logger
-from robosystems.processors.xbrl.duckdb_graph_ingestion import XBRLDuckDBGraphProcessor
+from robosystems.adapters.sec.processors import XBRLDuckDBGraphProcessor
 
 
 @shared_task(

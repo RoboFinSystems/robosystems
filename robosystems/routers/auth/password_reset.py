@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
-from ...adapters import sns_service
+from robosystems.operations.aws import ses_service as sns_service
 from ...config import env
 from ...database import get_async_db_session
 from ...logger import logger

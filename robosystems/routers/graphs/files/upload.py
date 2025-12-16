@@ -63,7 +63,7 @@ from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
-from robosystems.adapters.s3 import S3Client
+from robosystems.operations.aws.s3 import S3Client
 from robosystems.config import env
 from robosystems.config.constants import (
   MAX_FILE_SIZE_MB,

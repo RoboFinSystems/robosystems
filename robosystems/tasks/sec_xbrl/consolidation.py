@@ -22,7 +22,7 @@ from celery import Task
 from robosystems.celery import celery_app
 from robosystems.config import env
 from robosystems.logger import logger
-from robosystems.adapters.s3 import S3Client
+from robosystems.operations.aws.s3 import S3Client
 
 
 # Consolidation configuration

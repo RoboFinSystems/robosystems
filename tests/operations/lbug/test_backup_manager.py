@@ -17,7 +17,7 @@ from robosystems.operations.lbug.backup_manager import (
   RestoreJob,
 )
 from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.adapters.s3 import S3BackupAdapter
+from robosystems.operations.aws.s3 import S3BackupAdapter
 
 
 class TestBackupManager:

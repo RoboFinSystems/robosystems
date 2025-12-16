@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-from ...adapters.s3 import S3BackupAdapter, BackupMetadata
+from robosystems.operations.aws.s3 import S3BackupAdapter, BackupMetadata
 from ...middleware.graph import get_universal_repository
 from ...middleware.graph.utils import MultiTenantUtils
 from ...logger import logger

@@ -604,7 +604,7 @@ def cleanup_phase_connections(phase: str) -> Dict:
 
     # Clear any cached S3 clients
     try:
-      from robosystems.adapters.s3 import S3AdapterMixin
+      from robosystems.operations.aws.s3 import S3AdapterMixin
 
       # If S3 adapter has any class-level caches, clear them
       if hasattr(S3AdapterMixin, "_s3_client"):

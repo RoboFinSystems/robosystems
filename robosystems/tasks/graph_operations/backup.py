@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 
 from celery import Task
 from ...celery import celery_app, QUEUE_DEFAULT
-from ...adapters.s3 import S3BackupAdapter
+from robosystems.operations.aws.s3 import S3BackupAdapter
 from ...models.iam import GraphBackup, BackupStatus
 from ...database import session
 from ...logger import logger

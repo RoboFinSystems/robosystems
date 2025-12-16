@@ -214,7 +214,7 @@ pip install robosystems-client
 **Core Services:**
 
 - **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration
-- **[Processors](/robosystems/processors/README.md)** - Data transformation pipeline
+- **[Adapters](/robosystems/adapters/README.md)** - External service integrations (SEC, QuickBooks)
 - **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions
 - **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
 - **[API Models](/robosystems/models/api/README.md)** - API request/response models

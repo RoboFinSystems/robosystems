@@ -32,7 +32,7 @@ class TestIngestionLogic:
     # since we always use ignore_errors=True for SEC data
 
   @patch("robosystems.graph_api.client.factory.GraphClientFactory")
-  @patch("robosystems.adapters.s3.S3Client")
+  @patch("robosystems.operations.aws.s3.S3Client")
   def test_ingestion_flow_logic(self, mock_s3_class, mock_lbug_factory):
     """Test the core ingestion flow logic."""
     # Setup mocks

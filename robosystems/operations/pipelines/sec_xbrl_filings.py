@@ -36,10 +36,11 @@ import redis
 import requests
 from retrying import retry
 
-from ...adapters.sec import SECClient, SEC_HEADERS
+from robosystems.adapters.sec import SECClient
+from robosystems.adapters.sec.client.edgar import SEC_HEADERS
+from robosystems.adapters.sec.processors import XBRLGraphProcessor
 from ...config import env
 from ...logger import logger
-from ...processors.xbrl_graph import XBRLGraphProcessor
 
 
 class SECXBRLPipeline:

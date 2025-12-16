@@ -105,8 +105,7 @@ robosystems/
 │   ├── billing/       # Credit allocation, storage billing
 │   ├── data_sync/     # SEC, QuickBooks, Plaid sync
 │   └── graph_operations/  # Backups, ingestion
-├── processors/        # Data transformation (XBRL, transactions)
-├── adapters/          # External service integrations
+├── adapters/          # External service integrations (SEC, QuickBooks)
 ├── models/
 │   ├── api/           # Pydantic request/response models
 │   └── iam/           # SQLAlchemy database models
@@ -117,7 +116,7 @@ robosystems/
 
 ### Key Architectural Patterns
 
-1. **Operations orchestrate, processors transform**: Operations coordinate business logic; processors handle data transformation
+1. **Operations orchestrate, adapters integrate**: Operations coordinate business logic; adapters handle external service integration and data transformation
 2. **Multi-tenant by design**: All graph operations are scoped to `graph_id`
 3. **Credit-based AI billing**: Only AI operations (Anthropic/OpenAI) consume credits; database operations are free
 4. **Pluggable graph backend**: LadybugDB (default) or Neo4j via `GRAPH_BACKEND_TYPE`

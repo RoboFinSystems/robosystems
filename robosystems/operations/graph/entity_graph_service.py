@@ -610,7 +610,7 @@ class EntityGraphService:
       logger.info(f"Converted entity data to Parquet ({len(parquet_bytes)} bytes)")
 
       # Step 3: Upload to S3
-      from ...adapters.s3 import S3Client
+      from robosystems.operations.aws.s3 import S3Client
       from ...models.iam import GraphFile, GraphTable
 
       s3_client = S3Client()

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ...logger import logger
 from robosystems.graph_api.core.ladybug import Engine
-from ...processors.xbrl.schema_config_generator import (
+from robosystems.adapters.sec.processors.schema_config_generator import (
   XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
 )

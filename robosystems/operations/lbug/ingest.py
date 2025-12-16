@@ -14,7 +14,7 @@ from typing import Optional, List, Tuple, Dict
 
 from ...logger import logger
 from ...security import SecurityAuditLogger
-from ...processors.xbrl.schema_config_generator import (
+from robosystems.adapters.sec.processors.schema_config_generator import (
   XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
   IngestTableInfo,

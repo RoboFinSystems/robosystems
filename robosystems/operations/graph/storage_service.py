@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from ...models.iam import GraphUser, GraphFile, GraphTable
-from ...adapters.s3 import S3Client
+from robosystems.operations.aws.s3 import S3Client
 
 logger = logging.getLogger(__name__)
 

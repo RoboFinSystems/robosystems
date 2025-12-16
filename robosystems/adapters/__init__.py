@@ -1,9 +1,9 @@
-"""Adapters for external services and schemas."""
+"""Adapters for external data source pipelines."""
 
-from .ses import SESEmailService, ses_service
+# Pipeline source adapters will be organized here:
+# - sec/
+# - quickbooks/
+# - plaid/
+# - etc.
 
-# Keep the old names for backward compatibility during migration
-sns_service = ses_service
-SNSEmailService = SESEmailService
-
-__all__ = ["SESEmailService", "ses_service", "sns_service", "SNSEmailService"]
+# AWS infrastructure services: import from robosystems.operations.aws

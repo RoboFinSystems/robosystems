@@ -1,6 +1,6 @@
 # Operations Directory
 
-This directory contains business workflow orchestration and high-level operations that coordinate multiple components to accomplish complex business tasks. Operations represent the business logic layer that ties together adapters, processors, and database operations.
+This directory contains business workflow orchestration and high-level operations that coordinate multiple components to accomplish complex business tasks. Operations represent the business logic layer that ties together adapters and database operations.
 
 ## 📂 Directory Structure
 
@@ -30,7 +30,7 @@ operations/
 
 Operations orchestrate complex business workflows by:
 
-- **Coordinating Components** - Bringing together adapters, processors, and databases
+- **Coordinating Components** - Bringing together adapters and databases
 - **Implementing Business Logic** - High-level business rules and workflows
 - **Managing State** - Handling complex stateful operations
 - **Enforcing Policies** - Credit limits, access controls, and business policies
@@ -78,11 +78,10 @@ Operations act as the service layer that:
 - Provides transaction boundaries
 - Handles error scenarios
 
-### 2. **Orchestration vs Processing**
+### 2. **Orchestration vs Integration**
 
 - **Operations** (this directory): Orchestrate workflows and business logic
-- **Processors** (`/processors/`): Transform and process data
-- **Adapters** (`/adapters/`): Connect to external services
+- **Adapters** (`/adapters/`): Connect to external services and transform data
 
 ### 3. **Multi-Tenant Architecture**
 
@@ -209,8 +208,7 @@ Operations often trigger background tasks:
 ## 📚 Related Components
 
 - **Routers** (`/routers/`) - HTTP endpoints that call operations
-- **Processors** (`/processors/`) - Data transformation components
-- **Adapters** (`/adapters/`) - External service connections
+- **Adapters** (`/adapters/`) - External service connections and data transformation
 - **Models** (`/models/`) - Data structure definitions
 - **Tasks** (`/tasks/`) - Background processing jobs
 
@@ -219,7 +217,7 @@ Operations often trigger background tasks:
 When creating new operations:
 
 1. **Focus on Business Logic** - Implement business rules and workflows
-2. **Coordinate Don't Process** - Use processors for data transformation
+2. **Coordinate Don't Transform** - Use adapters for data transformation
 3. **Handle Errors Gracefully** - Comprehensive error handling and rollback
 4. **Log Extensively** - Detailed operation logs for debugging
 5. **Consider Credits** - Integrate with credit system where appropriate
