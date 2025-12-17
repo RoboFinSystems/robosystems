@@ -598,9 +598,11 @@ just sec-load NVDA 2025
 If loading fails:
 
 ```bash
-# Check logs
-just logs worker
-just logs graph-api
+# Check Dagster logs (pipeline orchestration)
+just logs dagster-webserver
+
+# Check API logs
+just logs api
 
 # Reset and try again
 just sec-reset
@@ -619,7 +621,8 @@ just sec-load NVDA 2025
 
 ## Resources
 
-- **Documentation**: See `/robosystems/tasks/sec_xbrl/README.md` for technical details
+- **Dagster Pipeline**: See `/robosystems/dagster/assets/sec.py` for pipeline implementation
+- **SEC Adapters**: See `/robosystems/adapters/sec/` for SEC client and processors
 - **Health Check**: `just sec-health v` for diagnostic information
 - **G.V()**: [https://gdotv.com/](https://gdotv.com/) - Recommended graph visualization tool for Ladybug
 - **Cypher Docs**: [Cypher Manual](https://neo4j.com/docs/cypher-manual/current/introduction/)

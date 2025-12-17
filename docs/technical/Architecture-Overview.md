@@ -25,10 +25,17 @@ RoboSystems is built on a modern, scalable architecture designed for enterprise 
 │                  FastAPI REST API                       │
 │            (Authentication, Rate Limiting)              │
 └─────────────────────────────────────────────────────────┘
+          ↓                                    ↓
+┌──────────────────────────┐    ┌──────────────────────────┐
+│   Operations Layer       │    │    Dagster Pipelines     │
+│  (Business Logic, SSE)   │    │   (Data Orchestration)   │
+└──────────────────────────┘    └──────────────────────────┘
+          ↓                                    ↓
+          └────────────────┬───────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────┐
-│                Operations & Middleware                  │
-│           (Graph Router, Credits, Query Queue)          │
+│                   Adapters Layer                        │
+│          (SEC, QuickBooks, Plaid Integrations)          │
 └─────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────┐
@@ -67,16 +74,40 @@ Model Context Protocol server for AI integration via the FastAPI Backend:
 - **Financial Analysis**: Specialized tools for financial data exploration
 - **Tool Registry**: Discover available graph operations
 
-### Celery Workers
+### Dagster Pipelines
 
-**Location**: `/robosystems/tasks/`, `/robosystems/celery.py`
+**Location**: `/robosystems/dagster/`
 
-Asynchronous task processing with priority queues:
+Data pipeline orchestration using Dagster's Software-Defined Assets:
 
-- **SEC Data Pipeline**: Background processing of XBRL filings
-- **QuickBooks Sync**: Periodic accounting data synchronization
-- **Bulk Operations**: Large-scale data imports and transformations
-- **Priority Queues**: High-priority tasks processed first
+**Architecture:**
+```
+dagster/
+├── assets/           # Software-Defined Assets
+│   ├── sec.py        # SEC XBRL pipeline (5 assets)
+│   └── plaid.py      # Plaid banking pipeline
+├── jobs/             # Job definitions
+│   ├── sec.py        # SEC jobs and schedules
+│   ├── billing.py    # Credit allocation jobs
+│   └── infrastructure.py  # Health check jobs
+├── partitions/       # Partition definitions
+│   └── sec.py        # Year-based partitions (2019-2025)
+└── definitions.py    # Dagster definitions registry
+```
+
+**SEC Pipeline Assets:**
+1. `sec_companies_list` → Fetch company list from SEC EDGAR
+2. `sec_raw_filings` → Download XBRL ZIPs (year-partitioned)
+3. `sec_processed_filings` → Process to Parquet via adapters
+4. `sec_duckdb_staging` → Create DuckDB staging tables
+5. `sec_graph_materialized` → Materialize to LadybugDB
+
+**Key Features:**
+- **Asset Dependencies**: Declarative data lineage with automatic orchestration
+- **Year Partitioning**: Process historical data by year (2019-2025)
+- **Observability**: Built-in UI at `localhost:3003` for monitoring
+- **Scheduling**: Cron-based schedules (e.g., daily SEC rebuild at 2 AM)
+- **Local Development**: `just sec-load NVDA 2025` triggers pipeline via Docker CLI
 
 ## Graph Database System
 
@@ -213,22 +244,48 @@ Business workflow orchestration and service layer:
 
 **See**: [Operations Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md) in codebase
 
-### Processors
+### Adapters
 
-**Location**: `/robosystems/processors/`
+**Location**: `/robosystems/adapters/`
 
-Data transformation pipeline and business logic:
+External service integrations following a consistent client/processor pattern:
 
-**XBRL Graph Processor** (`/processors/xbrl_graph.py`):
-- Transforms SEC XBRL filings into graph schema-derived DataFrames using Arelle
-- Creates structured nodes for Entity, Report, Fact, Element, Period, Unit, Taxonomy, Structure
-- Processes DTS (Discoverable Taxonomy Set) including presentation/calculation networks
-- Schema-driven DataFrame generation with configurable graph schemas
-- Outputs Parquet files organized by node type and relationship type
-- Handles text block externalization to S3 for large fact values (>10KB threshold)
-- Deterministic UUIDv7 identifiers for deduplication across filings
+**Architecture:**
+```
+adapters/
+├── sec/                    # SEC EDGAR adapter
+│   ├── client/
+│   │   └── edgar.py        # SECClient - API client
+│   ├── processors/
+│   │   ├── graph.py        # XBRLGraphProcessor
+│   │   └── duckdb_graph_ingestion.py  # XBRLDuckDBGraphProcessor
+│   └── arelle/             # Arelle XBRL integration
+├── quickbooks/             # QuickBooks adapter
+│   ├── client/
+│   │   └── api.py          # QBClient - OAuth client
+│   └── processors/
+│       └── transactions.py # Transaction processing
+└── plaid/                  # Plaid banking adapter
+    ├── client/
+    │   └── api.py          # PlaidClient
+    └── processors/
+        └── transactions.py # PlaidTransactionsProcessor
+```
 
-**See**: [Processors Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/processors/README.md) in codebase
+**Adapter Pattern:**
+Each adapter consists of:
+1. **Client** - API connection, authentication, rate limiting
+2. **Processors** - Data transformation to graph-ready format
+3. **Models** (optional) - Service-specific data models
+
+**SEC Adapter Details:**
+- **SECClient**: SEC EDGAR API with rate limiting and retry logic
+- **XBRLGraphProcessor**: Transforms XBRL to DataFrames using Arelle
+- **XBRLDuckDBGraphProcessor**: Orchestrates S3 → DuckDB → LadybugDB flow
+- Creates nodes: Entity, Report, Fact, Element, Period, Unit, Taxonomy
+- Outputs year-partitioned Parquet files to S3
+
+**See**: [Adapters Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md) in codebase
 
 ### Middleware Components
 
@@ -314,8 +371,6 @@ Data transformation pipeline and business logic:
 **Purpose**: Message broker and caching
 
 **Database Allocation**:
-- DB 0: Celery broker
-- DB 1: Celery results
 - DB 2: Authentication cache
 - DB 3: Server-sent events
 - DB 4: Distributed locks
@@ -338,8 +393,8 @@ Data transformation pipeline and business logic:
 ### AWS Services
 
 **Compute**:
-- **ECS Fargate**: API and worker containers (ARM64/Graviton)
-- **EC2**: Graph database writer instances (ARM64/Graviton auto-scaling groups)
+- **ECS Fargate**: API and Dagster webserver/daemon (ARM64/Graviton)
+- **EC2**: Graph database writers and Dagster run workers (ARM64/Graviton auto-scaling groups)
 - **Lambda**: Management functions (monitoring, rotation, volume management)
 
 **Database & Cache**:
@@ -398,8 +453,8 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 - **`api.yaml`**: ECS Fargate API service with auto-scaling, load balancing, and health checks
 - **`waf.yaml`**: AWS Web Application Firewall for protecting the API from web exploits
-- **`worker.yaml`**: ECS Fargate Celery workers with priority queues and spot capacity
-- **`worker-infra.yaml`**: Worker infrastructure (Celery beat scheduler + Lambda worker monitor)
+- **`dagster.yaml`**: Dagster webserver and daemon for pipeline orchestration
+- **`dagster-run-worker.yaml`**: EC2 auto-scaling group for Dagster run workers
 
 #### Graph Database Infrastructure
 
@@ -447,10 +502,10 @@ just bootstrap     # Deploy GitHub Actions runner infrastructure
 
 **Purpose**: Financial filing data source
 
-- XBRL filing downloads
-- Metadata extraction
-- Bulk processing with parallel workers
-- Rate-limited API access
+- XBRL filing downloads via Dagster pipeline
+- Year-partitioned processing (2019-2025)
+- Arelle-based XBRL parsing and transformation
+- Rate-limited API access with backoff
 
 ### QuickBooks API
 
@@ -460,6 +515,15 @@ just bootstrap     # Deploy GitHub Actions runner infrastructure
 - Real-time account sync
 - Transaction processing
 - Trial balance generation
+
+### Plaid API
+
+**Purpose**: Banking and financial institution connections
+
+- OAuth-based Link integration
+- Transaction synchronization via Dagster
+- Account balance tracking
+- Multi-institution support
 
 ### Anthropic Claude
 
@@ -483,7 +547,8 @@ just bootstrap     # Deploy GitHub Actions runner infrastructure
 - **Horizontal Scaling**: Auto-scaling groups for writers
 - **Vertical Scaling**: Tiered instance types (large → xlarge)
 - **Caching**: Valkey for hot data
-- **Async Processing**: Celery for background jobs
+- **Pipeline Orchestration**: Dagster for data pipelines and batch operations
+- **Real-time Operations**: FastAPI background tasks for SSE-enabled interactions
 
 ### Reliability
 
@@ -508,11 +573,21 @@ just bootstrap     # Deploy GitHub Actions runner infrastructure
 
 ## Related Documentation
 
+**Wiki Guides:**
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
 - **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
-- **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases with schema.json template
-- **Component READMEs**: Detailed technical docs in the codebase
-- **API Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs) (local) or [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs) (production)
+- **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
+
+**Codebase Documentation:**
+- **[Dagster Pipelines](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/dagster/README.md)** - Pipeline orchestration and assets
+- **[Adapters](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md)** - External service integrations
+- **[Graph API](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md)** - Graph database abstraction layer
+- **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration
+
+**API Documentation:**
+- Local: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Production: [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs)
+- Dagster UI: [http://localhost:3003](http://localhost:3003) (local development)
 
 ## Support
 
