@@ -1,0 +1,64 @@
+# Dagster configuration for RoboSystems
+# This file configures Dagster's storage backends and execution settings.
+
+# Run storage - stores run metadata
+run_storage:
+  module: dagster_postgres.run_storage
+  class: PostgresRunStorage
+  config:
+    postgres_db:
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      port:
+        env: DAGSTER_POSTGRES_PORT
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+
+# Event log storage - stores structured event logs for runs
+event_log_storage:
+  module: dagster_postgres.event_log
+  class: PostgresEventLogStorage
+  config:
+    postgres_db:
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      port:
+        env: DAGSTER_POSTGRES_PORT
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+
+# Schedule storage - stores schedule and sensor state
+schedule_storage:
+  module: dagster_postgres.schedule_storage
+  class: PostgresScheduleStorage
+  config:
+    postgres_db:
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      port:
+        env: DAGSTER_POSTGRES_PORT
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+
+# Run launcher - how runs are executed
+# Using default in-process launcher for simplicity in dev
+# In production, could use ECS, K8s, or Celery
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher
+
+# Telemetry - disable for privacy
+telemetry:
+  enabled: false

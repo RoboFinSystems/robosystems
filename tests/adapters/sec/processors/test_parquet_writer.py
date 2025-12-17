@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from robosystems.adapters.sec.processors.parquet_writer import ParquetWriter
+from robosystems.adapters.sec.processors.parquet import ParquetWriter
 
 
 @pytest.fixture(autouse=True)

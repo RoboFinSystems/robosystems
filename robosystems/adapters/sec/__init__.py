@@ -1,7 +1,7 @@
 """SEC EDGAR adapter for XBRL financial data extraction."""
 
 from robosystems.adapters.sec.client import SECClient, SEC_BASE_URL, enable_test_mode
-from robosystems.adapters.sec.arelle import ArelleClient
+from robosystems.adapters.sec.client.arelle import ArelleClient
 from robosystems.adapters.sec.processors import (
   XBRLGraphProcessor,
   XBRL_GRAPH_PROCESSOR_VERSION,

@@ -526,42 +526,37 @@ async def trigger_resource_provisioning(subscription: BillingSubscription, db: S
 
   try:
     if resource_type == "graph":
-      from ...tasks.graph_operations.provision_graph import provision_graph_task
-
-      graph_config = {
-        **resource_config,
-        "tier": subscription.plan_name,
-      }
-
-      result = provision_graph_task.delay(  # type: ignore[attr-defined]
-        user_id=user_id,
-        subscription_id=str(subscription.id),
-        graph_config=graph_config,
-      )
-
+      # Store graph configuration in metadata for the Dagster sensor to pick up
       if not subscription.subscription_metadata:
         subscription.subscription_metadata = {}
-      subscription.subscription_metadata["operation_id"] = result.id  # type: ignore[index]
+      subscription.subscription_metadata.update(resource_config)  # type: ignore[union-attr]
+
+      # Set status to "provisioning" - the pending_subscription_sensor will pick this up
+      # and trigger provision_graph_job within 60 seconds
       subscription.status = "provisioning"
       db.commit()
 
-    elif resource_type == "repository":
-      from ...tasks.billing.provision_repository import provision_repository_access_task
-
-      repository_name = resource_config.get("repository_name")
-
-      result = provision_repository_access_task.delay(  # type: ignore[attr-defined]
-        user_id=user_id,
-        subscription_id=str(subscription.id),
-        repository_name=repository_name,
+      logger.info(
+        f"Subscription {subscription.id} set to provisioning - Dagster sensor will handle"
       )
 
+    elif resource_type == "repository":
+      repository_name = resource_config.get("repository_name")
+
+      # Store repository info in metadata for the Dagster sensor to pick up
       if not subscription.subscription_metadata:
         subscription.subscription_metadata = {}
-      subscription.subscription_metadata["operation_id"] = result.id  # type: ignore[index]
-      subscription.resource_id = repository_name
-      subscription.status = "active"
+      subscription.subscription_metadata["repository_name"] = repository_name  # type: ignore[index]
+
+      # Set status to "provisioning" - the pending_repository_sensor will pick this up
+      # and trigger provision_repository_job within 60 seconds
+      subscription.status = "provisioning"
       db.commit()
+
+      logger.info(
+        f"Subscription {subscription.id} set to provisioning for {repository_name} - "
+        "Dagster sensor will handle"
+      )
 
     else:
       logger.error(f"Unknown resource type: {resource_type}")

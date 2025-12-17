@@ -1,127 +1,61 @@
 # Celery Tasks Organization
 
-This directory contains all Celery tasks organized by functional domain for better maintainability and clear separation of concerns.
+This directory contains Celery tasks for real-time, user-triggered operations that require SSE (Server-Sent Events) feedback.
 
-## Directory Structure
+## Migration to Dagster
 
-### Core Modules
+Most tasks have been migrated to Dagster for better orchestration and observability:
 
-#### `billing/`
+| Category | Old Location | New Location |
+|----------|--------------|--------------|
+| Billing | `tasks/billing/` | `dagster/jobs/billing.py` |
+| Infrastructure | `tasks/infrastructure/` | `dagster/jobs/infrastructure.py` |
+| Data Sync (SEC) | `tasks/sec_xbrl/` | `dagster/assets/sec.py` |
+| Data Sync (Plaid) | `tasks/data_sync/plaid.py` | `dagster/assets/plaid.py` |
+| Provisioning | Various | `dagster/jobs/provisioning.py` |
 
-Financial operations related to credits, usage tracking, and billing:
+## Remaining Celery Tasks
 
-- `credit_allocation.py` - Monthly graph credit allocation and health checks
-- `shared_credit_allocation.py` - Shared repository (SEC) credit allocation
-- `credit_reservation_cleanup.py` - Cleanup expired credit reservations (runs every 15 min)
-- `storage_billing.py` - Daily storage billing and monthly summaries
-- `usage_collector.py` - Hourly storage usage data collection
+The following tasks remain in Celery for real-time SSE feedback:
 
-#### `data_sync/`
+### `graph_operations/`
 
-External data source synchronization:
+User-triggered graph database operations with SSE progress:
 
-- `sec_filings.py` - SEC filing synchronization and processing
-- `qb.py` - QuickBooks data synchronization
-- `plaid.py` - Plaid financial data synchronization
+- `backup.py` - Graph backup creation
+- `create_graph.py` - Graph database creation
+- `create_subgraph.py` - Subgraph creation
+- `create_entity_graph.py` - Entity graph creation
 
-#### `graph_operations/`
+### `table_operations/`
 
-LadybugDB graph database operations:
+User-triggered table operations with SSE progress:
 
-- `backup.py` - Graph backup creation and management
-- `ingestion.py` - LadybugDB database ingestion and data loading
+- `duckdb_staging.py` - DuckDB staging table creation
+- `graph_materialization.py` - Graph materialization from staging
 
-#### `infrastructure/`
+### `agents/`
 
-Infrastructure maintenance and monitoring:
+Real-time AI operations:
 
-- `auth_cleanup.py` - Expired API key and authentication cleanup (hourly)
-- Note: All infrastructure monitoring has been migrated to Lambda functions:
-  - Instance monitoring: `bin/lambda/lbug_instance_monitor.py`
-  - Worker monitoring: `bin/lambda/worker_monitor.py` (queue metrics, task protection)
+- `analyze.py` - AI-powered analysis with streaming responses
 
-#### `processing/`
+## Why Celery for These Tasks?
 
-Data processing and transformation:
+These tasks require:
+1. **Real-time SSE feedback** - Progress updates streamed to UI
+2. **User-triggered execution** - Not scheduled, but on-demand
+3. **Immediate response** - User waiting for result
 
-- `entity.py` - Entity data processing tasks
-- `agent.py` - Agent-related processing tasks
-- `graph.py` - Graph processing and analytics operations
-
-### Configuration Files
-
-#### `schedule.py`
-
-Centralized Celery Beat schedule configuration defining all periodic tasks, their schedules, and priorities.
-
-## Task Organization Principles
-
-### Queue Strategy
-
-All tasks currently use a single queue (`WORKER_QUEUE` from environment) but the structure supports future multi-queue deployments:
-
-- Standard queue for general tasks
-- Priority queues for time-sensitive operations
-- Dedicated queues for heavy processing
-
-### Task Priorities
-
-Tasks are assigned priorities (1-10, where 10 is highest):
-
-- **9-10**: Critical infrastructure (queue monitoring for autoscaling)
-- **8**: Billing and credit operations
-- **7**: Credit reservation cleanup
-- **6**: Regular monitoring and data collection
-- **5**: Health checks
-- **4**: Maintenance and cleanup tasks
-
-## Scheduled Tasks
-
-### Regular Intervals
-
-- Credit reservation cleanup (15 minutes) [Note: Moving to Lambda]
-- API key cleanup (hourly)
-- Storage usage collection (hourly)
-
-### Daily Tasks
-
-- Storage billing (2 AM)
-- Stale graph entry cleanup (1 AM)
-
-### Weekly Tasks
-
-- Credit allocation health checks (Mondays)
-
-### Monthly Tasks
-
-- Shared credit allocation (configured day/hour)
-- Graph credit allocation (30 min after shared)
-- Monthly storage summary (2nd of month)
-
-## Adding New Tasks
-
-1. **Choose the appropriate domain directory** based on task functionality
-2. **Add task to the module** with proper decorators and error handling
-3. **Update `__init__.py`** in the domain directory to export the task
-4. **Add to schedule.py** if it's a periodic task
-5. **Set appropriate priority** based on task importance
-6. **Document the task** purpose and parameters
+Dagster is better for:
+- Scheduled/batch operations
+- Data pipelines with dependencies
+- Operations that don't need real-time UI feedback
 
 ## Task Best Practices
 
 1. **Error Handling**: Use proper try/except blocks and log errors
-2. **Idempotency**: Tasks should be safe to retry
-3. **Timeouts**: Set appropriate task timeouts
-4. **Monitoring**: Emit metrics for task performance
+2. **SSE Updates**: Send progress updates via SSE for long-running tasks
+3. **Idempotency**: Tasks should be safe to retry
+4. **Timeouts**: Set appropriate task timeouts
 5. **Documentation**: Clear docstrings explaining task purpose
-6. **Testing**: Write unit tests for task logic
-
-## Future Enhancements
-
-The current structure supports future enhancements:
-
-- Multi-queue deployment for task isolation
-- Worker pool specialization
-- Dynamic priority adjustment
-- Task dependency management
-- Advanced retry strategies

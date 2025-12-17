@@ -553,15 +553,8 @@ main() {
                 exit 1
             fi
             ;;
-        sec-plan)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator plan $parameters"
-            ;;
-        sec-phase)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase $parameters"
-            ;;
-        sec-status)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator status"
-            ;;
+        # SEC orchestration commands removed - pipeline migrated to Dagster
+        # For production: Use Dagster UI at dagster.robosystems.app
 
         ## Valkey/Queue Management ##
         valkey-clear-queue)

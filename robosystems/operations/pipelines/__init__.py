@@ -1,17 +1,15 @@
 """
-Pipeline Operations
+Pipeline Operations - Migrated to Dagster
 
-This module contains production-ready data processing pipelines that orchestrate
-complex multi-step operations with full visibility and tracking.
+Data pipelines have been migrated to Dagster for improved orchestration,
+observability, and scalability.
 
-Key features:
-- First-class pipeline tracking with Redis-based state management
-- Distributed execution across workers
-- Automatic LadybugDB ingestion upon completion
-- Production-ready error handling and retry logic
-- Full transparency of pipeline progress
+See:
+- robosystems/dagster/assets/sec.py - SEC XBRL pipeline
+- robosystems/dagster/jobs/sec.py - SEC jobs and schedules
+
+For local development:
+  just sec-load NVDA 2025    # Load company via Dagster pipeline
 """
 
-from .sec_xbrl_filings import SECXBRLPipeline
-
-__all__ = ["SECXBRLPipeline"]
+__all__: list[str] = []

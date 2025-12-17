@@ -79,8 +79,8 @@ class TestXBRLGraphProcessorInitialization:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_initialization_with_schema_config(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -120,8 +120,8 @@ class TestXBRLGraphProcessorInitialization:
         schema_config=None,
       )
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_initialization_with_sec_data(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -160,8 +160,8 @@ class TestXBRLGraphProcessorInitialization:
     assert processor.sec_filer == sec_filer
     assert processor.sec_report == sec_report
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_initialization_with_feature_flags(
     self, mock_schema_ingestion_processor, mock_schema_processor, monkeypatch
   ):
@@ -204,8 +204,8 @@ class TestSafeConcatenation:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_safe_concat_empty_dataframes(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -241,8 +241,8 @@ class TestSafeConcatenation:
     assert len(result) == 2
     assert list(result.columns) == ["col1", "col2"]
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_safe_concat_dtype_compatibility(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -296,8 +296,8 @@ class TestEntityCreation:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_make_entity_without_sec_data(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -362,8 +362,8 @@ class TestEntityCreation:
     assert entity_data["cik"] == processor.entityId.zfill(10)
     assert len(processor.entities_df) == 1
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_make_entity_with_sec_data(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -435,8 +435,8 @@ class TestEntityCreation:
     assert entity_data["state_of_incorporation"] == "CA"
     assert entity_data["fiscal_year_end"] == "0930"
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_make_entity_without_entity_id(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -484,8 +484,8 @@ class TestReportCreation:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_make_report_basic(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -550,8 +550,8 @@ class TestReportCreation:
     assert processor.report_data["failed"] is False
     assert len(processor.reports_df) == 1
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_make_report_with_sec_data(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -600,8 +600,8 @@ class TestReportCreation:
     assert processor.report_data["period_end_date"] == "2023-09-30"
     assert processor.report_data["is_inline_xbrl"] is True
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_make_report_with_invalid_dates(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -665,9 +665,9 @@ class TestS3Externalization:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.S3Client")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_should_externalize_value(
     self, mock_schema_ingestion_processor, mock_schema_processor, mock_s3_client
   ):
@@ -697,9 +697,9 @@ class TestS3Externalization:
     # Test None value
     assert processor.textblock_externalizer.should_externalize(None) is False
 
-  @patch("robosystems.adapters.sec.processors.graph.S3Client")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_generate_s3_key_with_metadata(
     self, mock_schema_ingestion_processor, mock_schema_processor, mock_s3_client
   ):
@@ -725,9 +725,9 @@ class TestS3Externalization:
     )
     assert s3_key == "2023/0000320193/0000320193-23-000077/fact_fact1234.html"
 
-  @patch("robosystems.adapters.sec.processors.graph.S3Client")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_generate_s3_key_without_metadata(
     self, mock_schema_ingestion_processor, mock_schema_processor, mock_s3_client
   ):
@@ -772,8 +772,8 @@ class TestParquetOutput:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_output_parquet_files_creates_directories(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -807,8 +807,8 @@ class TestParquetOutput:
     assert nodes_dir.exists()
     assert relationships_dir.exists()
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_save_df_to_parquet_with_deduplication(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -866,8 +866,8 @@ class TestDataFrameHelpers:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_convert_schema_name_to_dataframe_attr(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -951,9 +951,9 @@ class TestProcessMethod:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.ArelleClient")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.ArelleClient")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_process_with_missing_local_file(
     self, mock_schema_ingestion_processor, mock_schema_processor, mock_arelle_client
   ):
@@ -982,9 +982,9 @@ class TestProcessMethod:
     # Check that report was marked as failed
     assert processor.report_data["failed"] is True
 
-  @patch("robosystems.adapters.sec.processors.graph.ArelleClient")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.ArelleClient")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   @patch("os.path.exists")
   def test_process_with_nonexistent_file(
     self,
@@ -1018,9 +1018,9 @@ class TestProcessMethod:
     # Check that report was marked as failed
     assert processor.report_data["failed"] is True
 
-  @patch("robosystems.adapters.sec.processors.graph.ArelleClient")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.ArelleClient")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   @patch("os.path.exists")
   def test_process_async(
     self,
@@ -1097,8 +1097,8 @@ class TestSchemaCompleteness:
     """Clean up test fixtures."""
     shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_ensure_schema_completeness_adds_missing_columns(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):
@@ -1153,8 +1153,8 @@ class TestSchemaCompleteness:
     assert complete_df["cik"].iloc[0] == ""  # String default
     assert pd.isna(complete_df["created_at"].iloc[0])  # Timestamp can be None
 
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
+  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
   def test_ensure_schema_completeness_for_relationships(
     self, mock_schema_ingestion_processor, mock_schema_processor
   ):

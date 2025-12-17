@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 from arelle import ModelXbrl
 
-from robosystems.adapters.sec.arelle import ArelleClient
+from robosystems.adapters.sec.client.arelle import ArelleClient
 from robosystems.config import env
 
 
@@ -25,9 +25,9 @@ class TestArelleClient:
     """Create Arelle client instance."""
     return ArelleClient()
 
-  @patch("robosystems.adapters.sec.arelle.client.Cntlr.Cntlr")
-  @patch("robosystems.adapters.sec.arelle.client.ArelleClient._setup_cache_directory")
-  @patch("robosystems.adapters.sec.arelle.client.ArelleClient._initialize_controller")
+  @patch("robosystems.adapters.sec.client.arelle.Cntlr.Cntlr")
+  @patch("robosystems.adapters.sec.client.arelle.ArelleClient._setup_cache_directory")
+  @patch("robosystems.adapters.sec.client.arelle.ArelleClient._initialize_controller")
   def test_initialization(
     self, mock_init_controller, mock_setup_cache, mock_cntlr_class
   ):
@@ -49,12 +49,12 @@ class TestArelleClient:
       assert client.cntlr is not None
 
   @patch(
-    "robosystems.adapters.sec.arelle.client.ArelleClient._register_sec_transformations"
+    "robosystems.adapters.sec.client.arelle.ArelleClient._register_sec_transformations"
   )
-  @patch("robosystems.adapters.sec.arelle.client.ArelleClient._configure_webcache")
-  @patch("robosystems.adapters.sec.arelle.client.ArelleClient._load_plugins")
-  @patch("robosystems.adapters.sec.arelle.client.Cntlr.Cntlr")
-  @patch("robosystems.adapters.sec.arelle.client.ArelleClient._setup_cache_directory")
+  @patch("robosystems.adapters.sec.client.arelle.ArelleClient._configure_webcache")
+  @patch("robosystems.adapters.sec.client.arelle.ArelleClient._load_plugins")
+  @patch("robosystems.adapters.sec.client.arelle.Cntlr.Cntlr")
+  @patch("robosystems.adapters.sec.client.arelle.ArelleClient._setup_cache_directory")
   def test_initialization_complete_flow(
     self,
     mock_setup_cache,
@@ -78,10 +78,10 @@ class TestArelleClient:
     mock_register_transforms.assert_called_once()
 
   @patch(
-    "robosystems.adapters.sec.arelle.client.ArelleClient._populate_cache_from_bundle"
+    "robosystems.adapters.sec.client.arelle.ArelleClient._populate_cache_from_bundle"
   )
-  @patch("robosystems.adapters.sec.arelle.client.env")
-  @patch("robosystems.adapters.sec.arelle.client.Path.mkdir")
+  @patch("robosystems.adapters.sec.client.arelle.env")
+  @patch("robosystems.adapters.sec.client.arelle.Path.mkdir")
   def test_setup_cache_directory_with_env_var(
     self, mock_mkdir, mock_env, mock_populate, temp_dir
   ):
@@ -90,7 +90,7 @@ class TestArelleClient:
     mock_env.ARELLE_CACHE_DIR = str(temp_dir)
     mock_populate.return_value = None  # Skip cache population
 
-    with patch("robosystems.adapters.sec.arelle.client.env", mock_env):
+    with patch("robosystems.adapters.sec.client.arelle.env", mock_env):
       client = ArelleClient.__new__(ArelleClient)  # Create without calling __init__
       client.cache_dir = None
       client._setup_cache_directory()
@@ -99,8 +99,8 @@ class TestArelleClient:
       assert client.cache_dir == temp_dir
       mock_mkdir.assert_called_once()  # Directory creation is called
 
-  @patch("robosystems.adapters.sec.arelle.client.env")
-  @patch("robosystems.adapters.sec.arelle.client.os.access")
+  @patch("robosystems.adapters.sec.client.arelle.env")
+  @patch("robosystems.adapters.sec.client.arelle.os.access")
   def test_setup_cache_directory_mounted_volume(self, mock_access, mock_env, temp_dir):
     """Test cache directory setup using mounted volume."""
     # Setup mocks - no env var, but mounted volume exists and is writable
@@ -110,13 +110,13 @@ class TestArelleClient:
     mounted_cache = temp_dir / "arelle" / "cache"
     mounted_cache.mkdir(parents=True)
 
-    with patch("robosystems.adapters.sec.arelle.client.Path") as mock_path_class:
+    with patch("robosystems.adapters.sec.client.arelle.Path") as mock_path_class:
       mock_path_class.return_value.parent.parent = temp_dir
       mock_path_class.return_value.parent = temp_dir / "arelle"
       mock_path_class.return_value = mounted_cache
 
       with patch(
-        "robosystems.adapters.sec.arelle.client.__file__", str(temp_dir / "arelle.py")
+        "robosystems.adapters.sec.client.arelle.__file__", str(temp_dir / "arelle.py")
       ):
         client = ArelleClient.__new__(ArelleClient)
         client.cache_dir = None
@@ -125,9 +125,9 @@ class TestArelleClient:
         # Verify mounted volume is used
         assert str(client.cache_dir).endswith("arelle/cache")
 
-  @patch("robosystems.adapters.sec.arelle.client.env")
-  @patch("robosystems.adapters.sec.arelle.client.os.access")
-  @patch("robosystems.adapters.sec.arelle.client.Path.mkdir")
+  @patch("robosystems.adapters.sec.client.arelle.env")
+  @patch("robosystems.adapters.sec.client.arelle.os.access")
+  @patch("robosystems.adapters.sec.client.arelle.Path.mkdir")
   def test_setup_cache_directory_fallback_to_tmp(
     self, mock_mkdir, mock_access, mock_env, temp_dir
   ):
@@ -136,7 +136,7 @@ class TestArelleClient:
     mock_env.ARELLE_CACHE_DIR = None
     mock_access.return_value = False  # Not writable
 
-    with patch("robosystems.adapters.sec.arelle.client.Path") as mock_path_class:
+    with patch("robosystems.adapters.sec.client.arelle.Path") as mock_path_class:
       # Create a proper mock path that returns the expected string
       mock_tmp_path = MagicMock()
       mock_tmp_path.__str__ = lambda x: f"/tmp/arelle/cache/{os.getpid()}"
@@ -154,8 +154,8 @@ class TestArelleClient:
       assert str(client.cache_dir).startswith("/tmp/arelle/cache")
       mock_tmp_path.mkdir.assert_called()
 
-  @patch("robosystems.adapters.sec.arelle.client.shutil.copy2")
-  @patch("robosystems.adapters.sec.arelle.client.Path.glob")
+  @patch("robosystems.adapters.sec.client.arelle.shutil.copy2")
+  @patch("robosystems.adapters.sec.client.arelle.Path.glob")
   def test_populate_cache_from_bundle(self, mock_glob, mock_copy2, temp_dir):
     """Test cache population from bundle."""
     # Setup mock source files
@@ -183,7 +183,7 @@ class TestArelleClient:
     # Verify - should copy .xsd and .xml files but not .txt
     assert mock_copy2.call_count == 2  # Only .xsd and .xml files
 
-  @patch("robosystems.adapters.sec.arelle.client.Path.glob")
+  @patch("robosystems.adapters.sec.client.arelle.Path.glob")
   def test_check_cache_health_success(self, mock_glob, temp_dir):
     """Test cache health check with sufficient schemas."""
     # Setup mocks
@@ -227,7 +227,7 @@ class TestArelleClient:
       assert result is True
       mock_cache_dir.glob.assert_called_once_with("**/*.xsd")
 
-  @patch("robosystems.adapters.sec.arelle.client.Path.glob")
+  @patch("robosystems.adapters.sec.client.arelle.Path.glob")
   def test_check_cache_health_missing_essential_file(self, mock_glob, temp_dir):
     """Test cache health check with missing essential file."""
     # Setup mocks - essential file missing
@@ -280,7 +280,7 @@ class TestArelleClient:
     edgar_path.mkdir(parents=True, exist_ok=True)
 
     with patch(
-      "robosystems.adapters.sec.arelle.client.__file__", str(temp_dir / "arelle.py")
+      "robosystems.adapters.sec.client.arelle.__file__", str(temp_dir / "arelle.py")
     ):
       # Create a simple mock for PluginManager that does nothing
       mock_plugin_manager = MagicMock()
@@ -299,7 +299,7 @@ class TestArelleClient:
           # If we get an exception, verify it's handled gracefully
           assert False, f"_load_plugins raised unexpected exception: {e}"
 
-  @patch("robosystems.adapters.sec.arelle.client.env")
+  @patch("robosystems.adapters.sec.client.arelle.env")
   def test_configure_webcache(self, mock_env, temp_dir):
     """Test webcache configuration."""
     # Setup mocks
@@ -324,7 +324,7 @@ class TestArelleClient:
     assert mock_webcache.timeout == 60
     assert mock_webcache.httpsRedirect is True
 
-  @patch("robosystems.adapters.sec.arelle.client.WebCache")
+  @patch("robosystems.adapters.sec.client.arelle.WebCache")
   def test_controller_method(self, mock_webcache, client):
     """Test XBRL document loading via controller method."""
     # Setup mocks
@@ -425,8 +425,8 @@ class TestArelleClient:
     # Verify
     assert client.cntlr is None
 
-  @patch("robosystems.adapters.sec.arelle.client.Cntlr.Cntlr")
-  @patch("robosystems.adapters.sec.arelle.client.ArelleClient._setup_cache_directory")
+  @patch("robosystems.adapters.sec.client.arelle.Cntlr.Cntlr")
+  @patch("robosystems.adapters.sec.client.arelle.ArelleClient._setup_cache_directory")
   def test_initialization_error_handling(self, mock_setup_cache, mock_cntlr_class):
     """Test initialization error handling."""
     # Setup mock to raise exception
@@ -452,7 +452,7 @@ class TestArelleClient:
 
   def test_cache_directory_environment_setup(self, temp_dir):
     """Test environment variable setup for cache directory."""
-    with patch("robosystems.adapters.sec.arelle.client.env") as mock_env:
+    with patch("robosystems.adapters.sec.client.arelle.env") as mock_env:
       mock_env.ARELLE_CACHE_DIR = None
       mock_env.DEFAULT_ARELLE_CACHE_VOLUME = None
 
@@ -467,7 +467,7 @@ class TestArelleClient:
       assert client.cache_dir is not None
       assert "cache" in str(client.cache_dir)
 
-  @patch("robosystems.adapters.sec.arelle.client.WebCache")
+  @patch("robosystems.adapters.sec.client.arelle.WebCache")
   def test_webcache_offline_mode(self, mock_webcache_class, client):
     """Test webcache offline mode configuration."""
     # Setup mock controller and webcache
@@ -478,7 +478,7 @@ class TestArelleClient:
 
     client.cntlr = mock_cntlr
 
-    with patch("robosystems.adapters.sec.arelle.client.env") as mock_env:
+    with patch("robosystems.adapters.sec.client.arelle.env") as mock_env:
       mock_env.ARELLE_WORK_OFFLINE = "true"
       mock_env.ARELLE_DOWNLOAD_TIMEOUT = 300
       mock_env.ARELLE_TIMEOUT = 60

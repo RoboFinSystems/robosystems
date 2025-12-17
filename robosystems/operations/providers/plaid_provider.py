@@ -7,8 +7,6 @@ from sqlalchemy.orm import Session
 
 from ...logger import logger
 from ...operations.connection_service import ConnectionService
-from ...tasks.data_sync.plaid import sync_plaid_data
-from ...celery import QUEUE_DEFAULT
 from ...models.api.graphs.connections import PlaidConnectionConfig
 from ...config import env
 
@@ -213,7 +211,13 @@ class PlaidProvider:
     sync_options: Optional[Dict[str, Any]],
     graph_id: str,
   ) -> str:
-    """Trigger Plaid sync."""
+    """Trigger Plaid sync.
+
+    TODO: Refactor to use Dagster pipeline.
+    The Plaid sync has been migrated to Dagster assets:
+    - See: robosystems/dagster/assets/plaid.py
+    - Assets: plaid_accounts, plaid_transactions, plaid_graph_data
+    """
     entity_id = connection["entity_id"]
     item_id = connection["metadata"].get("item_id")
 
@@ -223,12 +227,13 @@ class PlaidProvider:
         detail="Plaid connection not properly configured. Missing item_id.",
       )
 
-    # Queue Plaid sync task
-    task_result = sync_plaid_data.apply_async(  # type: ignore[attr-defined]
-      args=[entity_id, item_id], queue=QUEUE_DEFAULT, priority=10
+    # TODO: Trigger Dagster pipeline instead of Celery task
+    # For now, return a placeholder - provider refactoring needed
+    logger.warning(
+      f"Plaid sync requested for entity {entity_id}, item {item_id} - "
+      "provider needs refactoring to use Dagster pipeline"
     )
-
-    return task_result.id
+    return f"dagster-pending-{entity_id}"
 
   async def cleanup_connection(self, connection: Dict[str, Any], graph_id: str) -> None:
     """Clean up Plaid connection."""

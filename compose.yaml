@@ -431,6 +431,76 @@ services:
           cpus: "0.25"
     profiles: ["roboinvestor-app", "apps", "all"]
 
+  # Dagster Webserver - Orchestration UI
+  dagster-webserver:
+    container_name: robosystems-dagster-webserver
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["uv", "run"]
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3003", "-m", "robosystems.dagster"]
+    environment:
+      - DAGSTER_HOME=/app/dagster_home
+      - DAGSTER_POSTGRES_HOST=pg-iam
+      - DAGSTER_POSTGRES_PORT=5432
+      - DAGSTER_POSTGRES_USER=postgres
+      - DAGSTER_POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - DAGSTER_POSTGRES_DB=dagster
+    env_file:
+      - .env
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./robosystems:/app/robosystems
+      - ./dagster_home:/app/dagster_home
+    depends_on:
+      pg-iam:
+        condition: service_healthy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "0.5"
+        reservations:
+          memory: 512m
+          cpus: "0.25"
+    profiles: ["dagster", "robosystems", "all"]
+
+  # Dagster Daemon - Schedules and Sensors
+  dagster-daemon:
+    container_name: robosystems-dagster-daemon
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["uv", "run"]
+    command: ["dagster-daemon", "run", "-m", "robosystems.dagster"]
+    environment:
+      - DAGSTER_HOME=/app/dagster_home
+      - DAGSTER_POSTGRES_HOST=pg-iam
+      - DAGSTER_POSTGRES_PORT=5432
+      - DAGSTER_POSTGRES_USER=postgres
+      - DAGSTER_POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - DAGSTER_POSTGRES_DB=dagster
+    env_file:
+      - .env
+    volumes:
+      - ./robosystems:/app/robosystems
+      - ./dagster_home:/app/dagster_home
+    depends_on:
+      pg-iam:
+        condition: service_healthy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "0.5"
+        reservations:
+          memory: 512m
+          cpus: "0.25"
+    profiles: ["dagster", "robosystems", "all"]
+
 volumes:
   prometheus_data:
   grafana_data:

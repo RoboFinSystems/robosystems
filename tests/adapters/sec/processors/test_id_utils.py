@@ -1,4 +1,4 @@
-from robosystems.adapters.sec.processors.id_utils import (
+from robosystems.adapters.sec.processors.ids import (
   create_element_id,
   create_label_id,
   create_taxonomy_id,

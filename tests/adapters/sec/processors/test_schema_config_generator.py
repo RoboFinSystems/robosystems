@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from robosystems.adapters.sec.processors.schema_config_generator import (
+from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
   create_custom_ingestion_processor,
@@ -60,7 +60,7 @@ def schema_config():
 
 
 class TestXBRLSchemaConfigGeneratorInitialization:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_initialization(self, mock_manager_class, mock_schema_manager, schema_config):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -74,7 +74,7 @@ class TestXBRLSchemaConfigGeneratorInitialization:
     )
     assert generator.ingest_config is not None
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_schema_configuration_creation(
     self, mock_manager_class, mock_schema_manager, schema_config
   ):
@@ -87,7 +87,7 @@ class TestXBRLSchemaConfigGeneratorInitialization:
     assert generator.config.base_schema == "base"
     assert generator.config.extensions == ["test_ext"]
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_default_configuration(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -99,7 +99,7 @@ class TestXBRLSchemaConfigGeneratorInitialization:
 
 
 class TestPascalToSnake:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_simple_pascal_case(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -108,7 +108,7 @@ class TestPascalToSnake:
     assert generator._pascal_to_snake("Entity") == "entity"
     assert generator._pascal_to_snake("EntityReport") == "entity_report"
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_multiple_capitals(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -117,7 +117,7 @@ class TestPascalToSnake:
     assert generator._pascal_to_snake("HTTPSConnection") == "https_connection"
     assert generator._pascal_to_snake("XMLParser") == "xml_parser"
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_with_numbers(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -127,7 +127,7 @@ class TestPascalToSnake:
 
 
 class TestGenerateFilePatterns:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_generate_node_patterns(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -139,7 +139,7 @@ class TestGenerateFilePatterns:
     assert "node_entity" in patterns
     assert "entity_" in patterns
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_generate_relationship_patterns(
     self, mock_manager_class, mock_schema_manager
   ):
@@ -157,7 +157,7 @@ class TestGenerateFilePatterns:
 
 
 class TestCreateNodeTableInfo:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_create_node_table_info(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -183,7 +183,7 @@ class TestCreateNodeTableInfo:
 
 
 class TestCreateRelationshipTableInfo:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_create_relationship_table_info(
     self, mock_manager_class, mock_schema_manager
   ):
@@ -208,7 +208,7 @@ class TestCreateRelationshipTableInfo:
     assert table_info.columns == ["from", "to", "weight"]
     assert table_info.properties == ["weight"]
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_create_relationship_no_properties(
     self, mock_manager_class, mock_schema_manager
   ):
@@ -229,7 +229,7 @@ class TestCreateRelationshipTableInfo:
 
 
 class TestIngestConfigGeneration:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_generate_ingest_config(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -240,7 +240,7 @@ class TestIngestConfigGeneration:
     assert "ENTITY_HAS_REPORT" in generator.ingest_config.relationship_tables
     assert len(generator.ingest_config.file_pattern_mapping) > 0
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_table_name_mapping(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -252,7 +252,7 @@ class TestIngestConfigGeneration:
 
 
 class TestIsRelationshipFile:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_is_relationship_file_true(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -264,7 +264,7 @@ class TestIsRelationshipFile:
 
     assert result is True
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_is_relationship_file_false(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -274,7 +274,7 @@ class TestIsRelationshipFile:
 
     assert result is False
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_is_relationship_file_unknown(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -286,7 +286,7 @@ class TestIsRelationshipFile:
 
 
 class TestGetTableNameFromFile:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_table_name_from_path_node(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -296,7 +296,7 @@ class TestGetTableNameFromFile:
 
     assert result == "Entity"
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_table_name_from_path_relationship(
     self, mock_manager_class, mock_schema_manager
   ):
@@ -310,7 +310,7 @@ class TestGetTableNameFromFile:
 
     assert result == "ENTITY_HAS_REPORT"
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_table_name_from_windows_path(
     self, mock_manager_class, mock_schema_manager
   ):
@@ -322,7 +322,7 @@ class TestGetTableNameFromFile:
 
     assert result == "Entity"
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_table_name_unknown_path(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -332,7 +332,7 @@ class TestGetTableNameFromFile:
 
     assert result is None
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_table_name_no_path(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -344,7 +344,7 @@ class TestGetTableNameFromFile:
 
 
 class TestGetTableInfo:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_node_table_info(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -356,7 +356,7 @@ class TestGetTableInfo:
     assert result.name == "Entity"
     assert result.is_relationship is False
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_relationship_table_info(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -368,7 +368,7 @@ class TestGetTableInfo:
     assert result.name == "ENTITY_HAS_REPORT"
     assert result.is_relationship is True
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_unknown_table_info(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -380,7 +380,7 @@ class TestGetTableInfo:
 
 
 class TestGetRelationshipInfo:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_relationship_info(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -391,7 +391,7 @@ class TestGetRelationshipInfo:
     assert result is not None
     assert result == ("ENTITY_HAS_REPORT", "Entity", "Report")
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_relationship_info_not_found(
     self, mock_manager_class, mock_schema_manager
   ):
@@ -405,7 +405,7 @@ class TestGetRelationshipInfo:
 
 
 class TestGetAllTables:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_all_node_tables(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -417,7 +417,7 @@ class TestGetAllTables:
     assert "Report" in result
     assert len(result) == 2
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_all_relationship_tables(self, mock_manager_class, mock_schema_manager):
     mock_manager_class.return_value = mock_schema_manager
 
@@ -430,7 +430,7 @@ class TestGetAllTables:
 
 
 class TestGetSchemaStatistics:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_get_schema_statistics(
     self, mock_manager_class, mock_schema_manager, schema_config
   ):
@@ -450,7 +450,7 @@ class TestGetSchemaStatistics:
 
 
 class TestFactoryFunctions:
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_create_roboledger_ingestion_processor(
     self, mock_manager_class, mock_schema_manager
   ):
@@ -462,7 +462,7 @@ class TestFactoryFunctions:
     assert generator.config.base_schema == "base"
     assert "roboledger" in generator.config.extensions
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_create_custom_ingestion_processor(
     self, mock_manager_class, mock_schema_manager
   ):

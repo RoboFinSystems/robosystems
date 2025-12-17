@@ -240,11 +240,14 @@ class TestCheckoutCompletedHandler:
     }
 
   @pytest.mark.asyncio
-  @patch("robosystems.tasks.graph_operations.provision_graph.provision_graph_task")
   async def test_checkout_completed_triggers_graph_provisioning(
-    self, mock_task, mock_db, session_data
+    self, mock_db, session_data
   ):
-    """Test that checkout completion triggers graph provisioning."""
+    """Test that checkout completion sets subscription to provisioning status.
+
+    Note: Graph provisioning is now handled by Dagster sensors that monitor
+    subscriptions in 'provisioning' status, not by direct Celery task calls.
+    """
     from robosystems.routers.admin.webhooks import handle_checkout_completed
     from robosystems.models.iam import OrgUser
 
@@ -283,21 +286,17 @@ class TestCheckoutCompletedHandler:
 
     await handle_checkout_completed(session_data, mock_db)
 
-    mock_task.delay.assert_called_once()
-    call_args = mock_task.delay.call_args
-    assert call_args[1]["user_id"] == "user_123"
-    assert call_args[1]["subscription_id"] == "bsub_123"
+    # Dagster sensor will pick up subscriptions in "provisioning" status
     assert mock_customer.has_payment_method is True
     assert mock_subscription.status == "provisioning"
 
   @pytest.mark.asyncio
-  @patch(
-    "robosystems.tasks.billing.provision_repository.provision_repository_access_task"
-  )
-  async def test_checkout_completed_triggers_repository_provisioning(
-    self, mock_task, mock_db
-  ):
-    """Test that checkout completion triggers repository provisioning."""
+  async def test_checkout_completed_triggers_repository_provisioning(self, mock_db):
+    """Test that checkout completion sets repository subscription to provisioning.
+
+    Note: Repository provisioning is now handled by Dagster sensors that monitor
+    subscriptions in 'provisioning' status, not by direct Celery task calls.
+    """
     from robosystems.routers.admin.webhooks import handle_checkout_completed
     from robosystems.models.iam import OrgUser
 
@@ -350,11 +349,9 @@ class TestCheckoutCompletedHandler:
 
     await handle_checkout_completed(session_data, mock_db)
 
-    mock_task.delay.assert_called_once()
-    call_args = mock_task.delay.call_args
-    assert call_args[1]["user_id"] == "user_123"
-    assert call_args[1]["repository_name"] == "sec"
-    assert mock_subscription.status == "active"
+    # Dagster sensor will pick up subscriptions in "provisioning" status
+    assert mock_customer.has_payment_method is True
+    assert mock_subscription.status == "provisioning"
 
   @pytest.mark.asyncio
   async def test_checkout_completed_subscription_not_found(self, mock_db, session_data):
@@ -385,11 +382,12 @@ class TestPaymentSucceededHandler:
     }
 
   @pytest.mark.asyncio
-  @patch("robosystems.tasks.graph_operations.provision_graph.provision_graph_task")
-  async def test_payment_succeeded_activates_subscription(
-    self, mock_task, mock_db, invoice_data
-  ):
-    """Test that payment success activates subscription."""
+  async def test_payment_succeeded_activates_subscription(self, mock_db, invoice_data):
+    """Test that payment success sets subscription to provisioning status.
+
+    Note: Graph provisioning is now handled by Dagster sensors that monitor
+    subscriptions in 'provisioning' status, not by direct Celery task calls.
+    """
     from robosystems.routers.admin.webhooks import handle_payment_succeeded
     from robosystems.models.iam import OrgUser
 
@@ -429,8 +427,9 @@ class TestPaymentSucceededHandler:
 
     await handle_payment_succeeded(invoice_data, mock_db)
 
-    mock_task.delay.assert_called_once()
+    # Dagster sensor will pick up subscriptions in "provisioning" status
     assert mock_customer.has_payment_method is True
+    assert mock_subscription.status == "provisioning"
     mock_db.commit.assert_called()
 
   @pytest.mark.asyncio

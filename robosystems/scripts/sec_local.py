@@ -3,31 +3,36 @@
 """
 SEC Local Pipeline - Testing and Development Tool
 
-A unified local pipeline for SEC data management focused on:
-- Single company loading by ticker symbol
-- Database reset with proper schema creation
-- Health checks and data validation
-- Local testing and development
+Triggers Dagster jobs via Docker CLI for SEC data processing.
+The actual processing runs inside the Dagster container.
 
-This replaces the old sec_pipeline.py, reset_sec_pipeline.py, and sec_health_check.py
+Usage:
+  # Load NVIDIA data for 2024
+  just sec-load NVDA 2024
+
+  # Reset SEC database
+  just sec-reset
+
+  # Materialize existing processed files
+  just sec-materialize
 """
 
 import argparse
-import sys
+import json
 import subprocess
-
-# No typing imports needed
+import sys
+import tempfile
 from datetime import datetime
+from pathlib import Path
 
 from robosystems.logger import logger
 
 
 class SECLocalPipeline:
-  """Local SEC pipeline for testing and development."""
+  """Local SEC pipeline - triggers Dagster jobs via Docker CLI."""
 
   def __init__(self, backend: str = "ladybug"):
-    """
-    Initialize the local pipeline.
+    """Initialize the local pipeline.
 
     Args:
         backend: Database backend to use ("ladybug" or "neo4j")
@@ -39,9 +44,258 @@ class SECLocalPipeline:
     self.sec_database = "sec"
     logger.info(f"Initialized SEC pipeline with backend: {backend}")
 
-  def reset_database(self, clear_s3: bool = True) -> bool:
+  def _create_config_file(self, ticker: str, year: int) -> str:
+    """Create a YAML config file for the Dagster job.
+
+    Args:
+        ticker: Company ticker symbol
+        year: Year to process
+
+    Returns:
+        Path to the config file inside the container
     """
-    Reset SEC database with proper schema creation.
+    config = {
+      "ops": {
+        "sec_companies_list": {
+          "config": {
+            "ticker_filter": [ticker.upper()],
+          }
+        },
+        "sec_raw_filings": {
+          "config": {
+            "skip_existing": True,
+            "form_types": ["10-K", "10-Q"],
+            "tickers": [ticker.upper()],
+          }
+        },
+        "sec_processed_filings": {
+          "config": {
+            "refresh": False,
+            "tickers": [ticker.upper()],
+          }
+        },
+        "sec_duckdb_staging": {
+          "config": {
+            "rebuild": True,
+            "year_filter": [year],
+          }
+        },
+        "sec_graph_materialized": {
+          "config": {
+            "graph_id": "sec",
+            "ignore_errors": True,
+            "rebuild": True,
+          }
+        },
+      }
+    }
+
+    # Write config to temp file
+    import yaml
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+      yaml.dump(config, f, default_flow_style=False)
+      config_path = f.name
+
+    # Set readable permissions before copying
+    import os
+
+    os.chmod(config_path, 0o644)
+
+    # Copy to container
+    container_path = f"/tmp/sec_config_{ticker}_{year}.yaml"
+    subprocess.run(
+      ["docker", "cp", config_path, f"robosystems-dagster-webserver:{container_path}"],
+      check=True,
+      capture_output=True,
+    )
+
+    # Clean up local temp file
+    Path(config_path).unlink()
+
+    return container_path
+
+  def load_company(self, ticker: str, year: int = None) -> bool:
+    """Load a single company's data using Dagster job.
+
+    Args:
+        ticker: Company ticker symbol (e.g., "NVDA", "AAPL")
+        year: Year to load data for (None for current year)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if year is None:
+      year = datetime.now().year
+
+    logger.info(f"Loading {ticker} data for {year} via Dagster...")
+
+    try:
+      # Create config file in container
+      config_path = self._create_config_file(ticker, year)
+
+      # Build the dagster command
+      cmd = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "dagster-webserver",
+        "dagster",
+        "job",
+        "execute",
+        "-m",
+        "robosystems.dagster",
+        "--job",
+        "sec_single_company",
+        "-c",
+        config_path,
+        "--tags",
+        json.dumps({"dagster/partition": str(year)}),
+      ]
+
+      logger.info(f"Executing Dagster job for {ticker} ({year})...")
+
+      # Run the command
+      result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=600,  # 10 minute timeout
+      )
+
+      # Check for success
+      if result.returncode == 0:
+        logger.info(f"Successfully loaded {ticker} data for {year}")
+        return True
+      else:
+        # Check if the output contains RUN_SUCCESS
+        if "RUN_SUCCESS" in result.stdout:
+          logger.info(f"Successfully loaded {ticker} data for {year}")
+          return True
+        else:
+          logger.error(f"Job failed with exit code {result.returncode}")
+          if result.stderr:
+            logger.error(f"Error output: {result.stderr[-500:]}")
+          return False
+
+    except subprocess.TimeoutExpired:
+      logger.error("Job timed out after 10 minutes")
+      return False
+    except FileNotFoundError:
+      logger.error(
+        "Docker not found. Is Docker running? "
+        "Make sure the Dagster containers are up with: just start"
+      )
+      return False
+    except Exception as e:
+      logger.error(f"Failed to load company: {e}")
+      return False
+
+  def materialize_only(self, year: int = None, rebuild: bool = True) -> bool:
+    """Materialize existing processed files to graph.
+
+    Args:
+        year: Optional year filter
+        rebuild: Whether to rebuild the graph database first
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if year:
+      logger.info(f"Materializing SEC graph for year {year}...")
+    else:
+      logger.info("Materializing SEC graph for ALL years...")
+
+    try:
+      # Build config for materialize-only job
+      config = {
+        "ops": {
+          "sec_duckdb_staging": {
+            "config": {
+              "rebuild": rebuild,
+              "year_filter": [year] if year else [],
+            }
+          },
+          "sec_graph_materialized": {
+            "config": {
+              "graph_id": "sec",
+              "ignore_errors": True,
+              "rebuild": rebuild,
+            }
+          },
+        }
+      }
+
+      # Write config to temp file
+      import yaml
+
+      with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        yaml.dump(config, f, default_flow_style=False)
+        config_path = f.name
+
+      # Set readable permissions before copying
+      import os
+
+      os.chmod(config_path, 0o644)
+
+      # Copy to container
+      container_path = "/tmp/sec_materialize_config.yaml"
+      subprocess.run(
+        [
+          "docker",
+          "cp",
+          config_path,
+          f"robosystems-dagster-webserver:{container_path}",
+        ],
+        check=True,
+        capture_output=True,
+      )
+
+      Path(config_path).unlink()
+
+      # Execute the job
+      cmd = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "dagster-webserver",
+        "dagster",
+        "job",
+        "execute",
+        "-m",
+        "robosystems.dagster",
+        "--job",
+        "sec_materialize_only",
+        "-c",
+        container_path,
+      ]
+
+      result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=600,
+      )
+
+      if result.returncode == 0 or "RUN_SUCCESS" in result.stdout:
+        logger.info("Materialization complete")
+        return True
+      else:
+        logger.error(
+          f"Materialization failed: {result.stderr[-500:] if result.stderr else 'Unknown error'}"
+        )
+        return False
+
+    except Exception as e:
+      logger.error(f"Materialization failed: {e}")
+      return False
+
+  def reset_database(self, clear_s3: bool = True) -> bool:
+    """Reset SEC database with proper schema creation.
+
+    Note: This still runs locally since it needs direct DB access.
 
     Args:
         clear_s3: Whether to also clear S3 buckets
@@ -49,27 +303,68 @@ class SECLocalPipeline:
     Returns:
         True if successful, False otherwise
     """
-    logger.info(f"🔄 Starting SEC database reset ({self.backend})...")
+    logger.info(f"Resetting SEC database ({self.backend})...")
 
-    # Use the maintenance task to reset the database through the Graph API
-    from robosystems.tasks.sec_xbrl.maintenance import reset_sec_database
-
-    # Call as a Celery task (even locally, we use the same pattern as production)
-    task = reset_sec_database.apply_async(
-      kwargs={"confirm": True, "backend": self.backend}
-    )
-
-    logger.info("⏳ Waiting for database reset to complete...")
     try:
-      result = task.get(timeout=300)  # 5 minute timeout for database reset
+      # Use docker compose exec to run reset inside container
+      cmd = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "api",
+        "python",
+        "-c",
+        """
+import asyncio
+from robosystems.graph_api.client.factory import get_graph_client
+from robosystems.database import SessionFactory
+from robosystems.models.iam import GraphSchema
 
-      if result.get("status") == "success":
-        logger.info("✅ Database reset successfully")
-        logger.info(f"  Node types: {result.get('node_types', 0)}")
-        logger.info(f"  Relationship types: {result.get('relationship_types', 0)}")
-      else:
-        logger.error(f"Database reset failed: {result.get('error', 'Unknown error')}")
+async def reset():
+    db = SessionFactory()
+    try:
+        client = await get_graph_client(graph_id='sec', operation_type='write')
+
+        # Delete existing database
+        try:
+            await client.delete_database('sec')
+            print('Deleted existing database')
+        except Exception as e:
+            print(f'Database may not exist: {e}')
+
+        # Get schema for recreation
+        schema = GraphSchema.get_active_schema('sec', db)
+        if not schema:
+            print('No schema found for graph sec')
+            return False
+
+        # Recreate with schema
+        create_db_kwargs = {
+            'graph_id': 'sec',
+            'schema_type': schema.schema_type,
+            'custom_schema_ddl': schema.schema_ddl,
+        }
+
+        if schema.schema_type == 'shared':
+            create_db_kwargs['repository_name'] = 'sec'
+
+        await client.create_database(**create_db_kwargs)
+        print(f'Recreated SEC database with schema: {schema.schema_type}')
+        return True
+    finally:
+        db.close()
+
+asyncio.run(reset())
+""",
+      ]
+
+      result = subprocess.run(cmd, capture_output=True, text=True)
+      if result.returncode != 0:
+        logger.error(f"Reset failed: {result.stderr}")
         return False
+
+      logger.info(result.stdout)
 
     except Exception as e:
       logger.error(f"Failed to reset database: {e}")
@@ -80,7 +375,7 @@ class SECLocalPipeline:
       logger.info("Clearing S3 buckets...")
       self._clear_s3_buckets()
 
-    logger.info("✅ SEC database reset complete")
+    logger.info("SEC database reset complete")
     return True
 
   def _clear_s3_buckets(self):
@@ -112,537 +407,29 @@ class SECLocalPipeline:
       except Exception as e:
         logger.warning(f"  Error clearing {bucket}: {e}")
 
-  def _clear_consolidated_files(self):
-    """Clear consolidated files from S3 to force reconsolidation."""
-    from robosystems.config import env
-
-    bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
-    prefix = "consolidated/"
-
-    try:
-      # Use LocalStack endpoint for development
-      endpoint_url = (
-        "--endpoint-url http://localhost:4566" if env.is_development() else ""
-      )
-
-      cmd = [
-        "aws",
-        "s3",
-        "rm",
-        f"s3://{bucket}/{prefix}",
-        "--recursive",
-      ]
-
-      if endpoint_url:
-        cmd.extend(endpoint_url.split())
-
-      result = subprocess.run(cmd, capture_output=True, text=True)
-      if result.returncode == 0:
-        logger.info(f"✅ Cleared consolidated files from s3://{bucket}/{prefix}")
-      elif "NoSuchBucket" in result.stderr or "(KeyError)" in result.stderr:
-        logger.debug(f"No consolidated files to clear in {bucket}")
-      else:
-        logger.warning(f"Failed to clear consolidated files: {result.stderr}")
-    except Exception as e:
-      logger.warning(f"Error clearing consolidated files: {e}")
-
-  def _ensure_database_exists(self) -> bool:
-    """
-    Check if SEC repository metadata exists and create it if it doesn't.
-
-    This checks for Graph metadata in PostgreSQL, which is required for
-    the unified graph/repository infrastructure.
-
-    Returns:
-        True if repository exists or was created successfully, False otherwise
-    """
-    from robosystems.models.iam.graph import Graph
-    from robosystems.database import get_db_session
-
-    db_gen = get_db_session()
-    db = next(db_gen)
-    try:
-      existing_graph = Graph.get_by_id(self.sec_database, db)
-      if existing_graph and existing_graph.is_repository:
-        logger.debug(
-          f"SEC repository metadata already exists: {existing_graph.graph_id}"
-        )
-        return True
-
-      logger.info("SEC repository not found in database")
-      logger.info("🔄 Initializing SEC repository for first use...")
-      logger.info(
-        "This is a one-time setup that creates the database schema and metadata."
-      )
-
-      success = self.reset_database(clear_s3=False)
-      if success:
-        logger.info("✅ SEC repository initialized successfully")
-        return True
-      else:
-        logger.error("❌ Failed to initialize SEC repository")
-        return False
-    finally:
-      try:
-        next(db_gen)
-      except StopIteration:
-        pass
-
-  def load_company(
-    self, ticker: str, year: int = None, force_reconsolidate: bool = False
-  ) -> bool:
-    """
-    Load a single company's data using traditional COPY pipeline (fallback/prod emulation).
-
-    Pipeline phases:
-    1. Download - Fetch XBRL files from SEC
-    2. Process - Convert XBRL to parquet format
-    3. Consolidate - Combine small parquet files into larger ones
-    4. Ingest - Load consolidated files into graph database (LadybugDB or Neo4j)
-
-    Note: Consolidation processes ALL available files across all years
-    for optimal graph database ingestion performance.
-
-    Args:
-        ticker: Company ticker symbol (e.g., "NVDA", "AAPL")
-        year: Year to load data for (None for all available years)
-        force_reconsolidate: If True, clear existing consolidated files to force reconsolidation
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not self._ensure_database_exists():
-      logger.error("Failed to ensure SEC database exists, cannot proceed")
-      return False
-
-    if year is None:
-      logger.info(
-        f"📊 Loading {ticker} data for ALL YEARS using orchestrated pipeline..."
-      )
-      # Default to a reasonable range of years
-      start_year = (
-        2019  # SEC started requiring XBRL in 2009, but quality improves from 2019
-      )
-      end_year = datetime.now().year
-    else:
-      logger.info(f"📊 Loading {ticker} data for {year} using orchestrated pipeline...")
-      start_year = year
-      end_year = year
-
-    try:
-      # Use the orchestration tasks just like production
-      from robosystems.tasks.sec_xbrl.orchestration import (
-        plan_phased_processing,
-        start_phase,
-      )
-      from robosystems.adapters.sec import SECClient
-
-      # Get CIK from ticker for filtering
-      sec_client = SECClient()
-      companies_df = sec_client.get_companies_df()
-      company = companies_df[companies_df["ticker"] == ticker.upper()]
-      if company.empty:
-        logger.error(f"Company not found: {ticker}")
-        return False
-
-      cik = str(company.iloc[0]["cik_str"])
-      company_name = company.iloc[0]["title"]
-      logger.info(f"Found: {company_name} (CIK: {cik})")
-
-      # Step 1: Create a plan for just this company and specified year(s)
-      logger.info(
-        f"Creating processing plan for years {start_year}-{end_year} ({self.backend})..."
-      )
-      plan_task = plan_phased_processing.apply_async(
-        kwargs={
-          "start_year": start_year,
-          "end_year": end_year,
-          "cik_filter": cik,  # Filter to specific CIK
-          "backend": self.backend,  # Pass backend selection
-        }
-      )
-
-      plan_result = plan_task.get(timeout=60)
-      if plan_result.get("status") != "success":
-        logger.error(f"Failed to create plan: {plan_result.get('error')}")
-        return False
-
-      year_display = (
-        f"{start_year}-{end_year}" if start_year != end_year else str(start_year)
-      )
-      logger.info(f"✅ Plan created for {company_name} ({year_display})")
-
-      # Calculate timeouts based on number of years being processed
-      num_years = end_year - start_year + 1
-      base_timeout = 120
-      per_year_timeout = 60
-      phase_timeout = base_timeout + (num_years * per_year_timeout)
-
-      logger.info(f"Using timeout of {phase_timeout}s for {num_years} years of data")
-
-      # Step 2: Run download phase
-      logger.info("Starting download phase...")
-      download_task = start_phase.apply_async(
-        kwargs={"phase": "download", "backend": self.backend}
-      )
-
-      download_result = download_task.get(timeout=phase_timeout)
-      if download_result.get("status") != "started":
-        logger.error(f"Failed to start download: {download_result.get('error')}")
-        return False
-
-      # Wait for downloads to complete
-      import time
-      from robosystems.config import env
-
-      # In dev environment, use minimal delays for faster iteration
-      # But scale up wait time for multiple years
-      wait_time = (0.5 if env.is_development() else 5) * min(num_years, 3)
-      time.sleep(wait_time)  # Give it a moment to process
-
-      # Step 3: Run process phase
-      logger.info("Starting processing phase...")
-      process_task = start_phase.apply_async(
-        kwargs={"phase": "process", "backend": self.backend}
-      )
-
-      process_result = process_task.get(timeout=phase_timeout)
-      if process_result.get("status") != "started":
-        logger.error(f"Failed to start processing: {process_result.get('error')}")
-        return False
-
-      # Wait for processing
-      time.sleep(wait_time)
-
-      # Step 3: Clear consolidated files if force_reconsolidate is True
-      if force_reconsolidate:
-        logger.info(
-          "🧹 Clearing existing consolidated files to force reconsolidation..."
-        )
-        self._clear_consolidated_files()
-
-        # Also reset the LadybugDB database to avoid duplicates
-        logger.info("🔄 Resetting SEC database to avoid duplicates...")
-        if not self.reset_database(clear_s3=False):
-          logger.error("Failed to reset database, continuing anyway...")
-
-      # Step 3: Run consolidation phase (consolidates all files across years)
-      logger.info("Starting consolidation phase...")
-      consolidate_task = start_phase.apply_async(
-        kwargs={"phase": "consolidate", "backend": self.backend}
-      )
-
-      consolidate_result = consolidate_task.get(timeout=phase_timeout)
-      if consolidate_result.get("status") != "started":
-        logger.error(
-          f"Failed to start consolidation: {consolidate_result.get('error')}"
-        )
-        return False
-
-      # Wait for consolidation tasks to complete
-      # The consolidation phase returns a job_id for the group of tasks
-      consolidation_job_id = consolidate_result.get("job_id")
-
-      # Define wait time for after ingestion starts (scale with years)
-      ingestion_wait = (5 if env.is_development() else 30) * min(num_years, 3)
-
-      if consolidation_job_id:
-        from celery.result import GroupResult
-
-        logger.info("Waiting for all consolidation tasks to complete...")
-        # Scale wait time with number of years
-        max_wait = (60 if env.is_development() else 300) * max(1, num_years // 2)
-        check_interval = 2 if env.is_development() else 5
-        waited = 0
-
-        while waited < max_wait:
-          # Check if all tasks in the group are complete
-          group_result = GroupResult.restore(consolidation_job_id)
-          if group_result and group_result.ready():
-            logger.info("✅ All consolidation tasks completed")
-            break
-
-          time.sleep(check_interval)
-          waited += check_interval
-
-          # Log progress every 10 seconds
-          if waited % 10 == 0:
-            if group_result:
-              completed = sum(1 for r in group_result.results if r.ready())
-              total = len(group_result.results)
-              logger.info(
-                f"Consolidation progress: {completed}/{total} tasks complete ({waited}s)"
-              )
-            else:
-              logger.debug(f"Still waiting for consolidation... ({waited}s)")
-
-        if waited >= max_wait:
-          logger.warning(
-            f"Consolidation may not be complete after {max_wait}s, proceeding anyway"
-          )
-      else:
-        # Fallback to fixed wait if no job ID (scale with years)
-        consolidation_wait = (10 if env.is_development() else 30) * min(num_years, 3)
-        logger.info(
-          f"No job ID found, waiting {consolidation_wait}s for consolidation to complete..."
-        )
-        time.sleep(consolidation_wait)
-
-      # Step 4: Run ingestion phase (reads from consolidated files)
-      logger.info(f"Starting ingestion phase ({self.backend})...")
-      ingest_task = start_phase.apply_async(
-        kwargs={"phase": "ingest", "backend": self.backend}
-      )
-
-      # Use longer timeout for ingestion with multiple years
-      ingest_timeout = min(phase_timeout * 2, 1800)  # Max 30 minutes
-      ingest_result = ingest_task.get(timeout=ingest_timeout)
-      if ingest_result.get("status") != "started":
-        logger.error(f"Failed to start ingestion: {ingest_result.get('error')}")
-        return False
-
-      # Wait for ingestion to complete
-      time.sleep(ingestion_wait)
-
-      year_display = (
-        f"years {start_year}-{end_year}"
-        if start_year != end_year
-        else f"year {start_year}"
-      )
-      logger.info(f"✅ Successfully loaded {ticker} data for {year_display}")
-      return True
-
-    except Exception as e:
-      logger.error(f"Failed to load company: {e}")
-      import traceback
-
-      traceback.print_exc()
-      return False
-
-  def load_company_via_api(self, ticker: str, year: int = None) -> bool:
-    """
-    Load a single company's data using DuckDB-based ingestion (default method).
-
-    This method:
-    1. Downloads and processes the company data
-    2. Skips consolidation step (S3 is source of truth)
-    3. Uses DuckDB-based ingestion directly with processed files
-
-    Args:
-        ticker: Company ticker symbol (e.g., "NVDA", "AAPL")
-        year: Year to load data for (None for all available years)
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not self._ensure_database_exists():
-      logger.error("Failed to ensure SEC database exists, cannot proceed")
-      return False
-
-    if year is None:
-      logger.info(
-        f"📊 Loading {ticker} data for ALL YEARS using DuckDB-based ingestion ({self.backend})..."
-      )
-      start_year = 2019
-      end_year = datetime.now().year
-    else:
-      logger.info(
-        f"📊 Loading {ticker} data for {year} using DuckDB-based ingestion ({self.backend})..."
-      )
-      start_year = year
-      end_year = year
-
-    try:
-      from robosystems.tasks.sec_xbrl.orchestration import (
-        plan_phased_processing,
-        start_phase,
-      )
-      from robosystems.adapters.sec import SECClient
-
-      # Get CIK from ticker
-      sec_client = SECClient()
-      companies_df = sec_client.get_companies_df()
-      company = companies_df[companies_df["ticker"] == ticker.upper()]
-      if company.empty:
-        logger.error(f"Company not found: {ticker}")
-        return False
-
-      cik = str(company.iloc[0]["cik_str"])
-      company_name = company.iloc[0]["title"]
-      logger.info(f"Found: {company_name} (CIK: {cik})")
-
-      # Step 1: Create processing plan
-      logger.info(
-        f"Creating processing plan for years {start_year}-{end_year} ({self.backend})..."
-      )
-      plan_task = plan_phased_processing.apply_async(
-        kwargs={
-          "start_year": start_year,
-          "end_year": end_year,
-          "cik_filter": cik,
-          "backend": self.backend,
-        }
-      )
-
-      plan_result = plan_task.get(timeout=60)
-      if plan_result.get("status") != "success":
-        logger.error(f"Failed to create plan: {plan_result.get('error')}")
-        return False
-
-      year_display = (
-        f"{start_year}-{end_year}" if start_year != end_year else str(start_year)
-      )
-      logger.info(f"✅ Plan created for {company_name} ({year_display})")
-
-      # Calculate timeouts
-      num_years = end_year - start_year + 1
-      base_timeout = 120
-      per_year_timeout = 60
-      phase_timeout = base_timeout + (num_years * per_year_timeout)
-
-      logger.info(f"Using timeout of {phase_timeout}s for {num_years} years of data")
-
-      # Step 2: Run download phase
-      logger.info("Starting download phase...")
-      download_task = start_phase.apply_async(
-        kwargs={"phase": "download", "backend": self.backend}
-      )
-
-      download_result = download_task.get(timeout=phase_timeout)
-      if download_result.get("status") != "started":
-        logger.error(f"Failed to start download: {download_result.get('error')}")
-        return False
-
-      # Wait for downloads
-      import time
-      from robosystems.config import env
-
-      wait_time = (0.5 if env.is_development() else 5) * min(num_years, 3)
-      time.sleep(wait_time)
-
-      # Step 3: Run process phase
-      logger.info("Starting processing phase...")
-      process_task = start_phase.apply_async(
-        kwargs={"phase": "process", "backend": self.backend}
-      )
-
-      process_result = process_task.get(timeout=phase_timeout)
-      if process_result.get("status") != "started":
-        logger.error(f"Failed to start processing: {process_result.get('error')}")
-        return False
-
-      # Wait for processing
-      time.sleep(wait_time)
-
-      # Step 4: Use DuckDB-based ingestion (skips consolidation)
-      logger.info(
-        "🚀 Using DuckDB-based ingestion (skipping consolidation, working with processed files)..."
-      )
-
-      # Call the DuckDB ingestion method (always rebuild since DuckDB discovers ALL files)
-      return self.ingest_via_api(year=year, rebuild=True)
-
-    except Exception as e:
-      logger.error(f"Failed to load company via DuckDB ingestion: {e}")
-      import traceback
-
-      traceback.print_exc()
-      return False
-
-  def ingest_via_api(self, year: int = None, rebuild: bool = True) -> bool:
-    """
-    Test DuckDB-based ingestion with processed files (skips consolidation).
-
-    This uses the XBRLDuckDBGraphProcessor that works directly with
-    processed files instead of consolidated files to test performance with
-    many small files vs fewer large files.
-
-    IMPORTANT: Always rebuilds the graph by default (rebuild=True) because
-    DuckDB staging tables discover and load ALL processed files from S3,
-    not just new ones.
-
-    Args:
-        year: Optional year filter for processing
-        rebuild: Whether to rebuild graph database from scratch (default: True).
-                 Should remain True to avoid duplicate key errors.
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if year:
-      logger.info(
-        f"📊 Testing DuckDB-based ingestion for year {year} ({self.backend})..."
-      )
-    else:
-      logger.info(
-        f"📊 Testing DuckDB-based ingestion for ALL YEARS ({self.backend})..."
-      )
-
-    try:
-      from robosystems.tasks.sec_xbrl.duckdb_ingestion import ingest_via_duckdb
-
-      logger.info("Starting DuckDB-based ingestion task...")
-      task = ingest_via_duckdb.apply_async(
-        kwargs={
-          "rebuild": rebuild,
-          "year": year,
-        }
-      )
-
-      logger.info("⏳ Waiting for ingestion to complete...")
-      result = task.get(timeout=1800)
-
-      if result.get("status") == "success":
-        logger.info("✅ DuckDB-based ingestion completed successfully")
-        logger.info(f"  Tables processed: {result.get('tables_processed', 0)}")
-        logger.info(f"  Total files: {result.get('total_files', 0)}")
-        logger.info(f"  Duration: {result.get('duration_seconds', 0):.2f}s")
-
-        ingestion = result.get("ingestion_results", {})
-        logger.info(f"  Rows ingested: {ingestion.get('total_rows_ingested', 0)}")
-        logger.info(f"  Ingestion time: {ingestion.get('total_time_ms', 0):.2f}ms")
-
-        return True
-      else:
-        logger.error(f"Ingestion failed: {result.get('error', 'Unknown error')}")
-        return False
-
-    except Exception as e:
-      logger.error(f"Failed to run DuckDB-based ingestion: {e}")
-      import traceback
-
-      traceback.print_exc()
-      return False
-
 
 def main():
   """Main entry point for local SEC pipeline."""
 
   parser = argparse.ArgumentParser(
-    description="SEC Local Pipeline - Testing and Development Tool",
+    description="SEC Local Pipeline - Triggers Dagster jobs via Docker CLI",
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""
 Examples:
-  # Reset LadybugDB database and start fresh (default)
+  # Reset LadybugDB database and start fresh
   %(prog)s reset
 
-  # Reset Neo4j database
-  %(prog)s reset --backend neo4j
-
-  # Load NVIDIA data for 2024 using DuckDB-based ingestion (default, many small files)
+  # Load NVIDIA data for 2024 using Dagster pipeline
   %(prog)s load --ticker NVDA --year 2024
 
-  # Load NVIDIA data for 2024 using traditional COPY pipeline (fallback, with consolidation)
-  %(prog)s load --ticker NVDA --year 2024 --use-copy-pipeline
+  # Load Apple data for current year
+  %(prog)s load --ticker AAPL
 
-  # Load Apple data for 2023 into Neo4j using DuckDB approach
-  %(prog)s load --ticker AAPL --year 2023 --backend neo4j
+  # Materialize existing processed files (skip download/processing)
+  %(prog)s materialize --year 2025
 
-  # Test DuckDB-based ingestion for all processed files for 2025
-  %(prog)s ingest-api --year 2025
-
-  # Test DuckDB-based ingestion with rebuild
-  %(prog)s ingest-api --year 2025 --rebuild
+  # Full rebuild from existing processed files
+  %(prog)s materialize --rebuild
 """,
   )
 
@@ -669,17 +456,7 @@ Examples:
     "--year",
     type=int,
     default=None,
-    help=f"Year to load (default: all years from 2019 to {datetime.now().year})",
-  )
-  load_parser.add_argument(
-    "--use-copy-pipeline",
-    action="store_true",
-    help="Use traditional COPY pipeline (consolidation + COPY ingestion, emulates production)",
-  )
-  load_parser.add_argument(
-    "--force-reconsolidate",
-    action="store_true",
-    help="Force reconsolidation by clearing existing consolidated files (only with --use-copy-pipeline)",
+    help=f"Year to load (default: {datetime.now().year})",
   )
   load_parser.add_argument(
     "--backend",
@@ -688,23 +465,24 @@ Examples:
     help="Database backend to use (default: ladybug)",
   )
 
-  # Ingest API command
-  ingest_api_parser = subparsers.add_parser(
-    "ingest-api",
-    help="Test DuckDB-based ingestion with processed files (skips consolidation)",
+  # Materialize command
+  materialize_parser = subparsers.add_parser(
+    "materialize",
+    help="Materialize existing processed files to graph",
   )
-  ingest_api_parser.add_argument(
+  materialize_parser.add_argument(
     "--year",
     type=int,
     default=None,
     help="Year to process (default: all years)",
   )
-  ingest_api_parser.add_argument(
+  materialize_parser.add_argument(
     "--rebuild",
     action="store_true",
-    help="Rebuild graph database from scratch before ingestion",
+    default=True,
+    help="Rebuild graph database from scratch (default: True)",
   )
-  ingest_api_parser.add_argument(
+  materialize_parser.add_argument(
     "--backend",
     default="ladybug",
     choices=["ladybug", "neo4j"],
@@ -726,23 +504,14 @@ Examples:
     sys.exit(0 if success else 1)
 
   elif args.command == "load":
-    if args.use_copy_pipeline:
-      # Use traditional COPY pipeline (with consolidation) - fallback/prod emulation
-      success = pipeline.load_company(
-        ticker=args.ticker,
-        year=args.year,
-        force_reconsolidate=args.force_reconsolidate,
-      )
-    else:
-      # Use DuckDB-based ingestion (default: skips consolidation, many small files)
-      success = pipeline.load_company_via_api(
-        ticker=args.ticker,
-        year=args.year,
-      )
+    success = pipeline.load_company(
+      ticker=args.ticker,
+      year=args.year,
+    )
     sys.exit(0 if success else 1)
 
-  elif args.command == "ingest-api":
-    success = pipeline.ingest_via_api(
+  elif args.command == "materialize":
+    success = pipeline.materialize_only(
       year=args.year,
       rebuild=args.rebuild,
     )

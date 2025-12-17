@@ -1507,72 +1507,9 @@ def sec_health(client):
     )
 
 
-@sec.command("plan")
-@click.option("--start-year", required=True, type=int, help="Start year")
-@click.option("--end-year", required=True, type=int, help="End year")
-@click.option("--max-companies", default=50, help="Maximum number of companies")
-@click.pass_obj
-def sec_plan(client, start_year, end_year, max_companies):
-  """Create SEC orchestrator execution plan."""
-  if client.environment == "dev":
-    console.print("[blue]Creating SEC orchestrator plan...[/blue]")
-    command = f"uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {start_year} --end-year {end_year} --max-companies {max_companies}"
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    console.print(result.stdout)
-    if result.returncode != 0:
-      console.print(f"[red]Error:[/red] {result.stderr}")
-      raise click.ClickException("Plan creation failed")
-  else:
-    executor = SSMExecutor(client.environment)
-    command = f"/usr/local/bin/run-bastion-operation.sh sec-plan --start-year {start_year} --end-year {end_year} --max-companies {max_companies}"
-    stdout, _, _ = executor.execute(command)
-
-
-@sec.command("phase")
-@click.option(
-  "--phase",
-  required=True,
-  type=click.Choice(["download", "process", "consolidate", "ingest"]),
-  help="Phase to execute",
-)
-@click.option("--resume", is_flag=True, help="Resume from previous state")
-@click.pass_obj
-def sec_phase(client, phase, resume):
-  """Execute SEC orchestrator phase."""
-  if client.environment == "dev":
-    console.print(f"[blue]Executing SEC phase: {phase}...[/blue]")
-    resume_arg = " --resume" if resume else ""
-    command = f"uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {phase}{resume_arg}"
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    console.print(result.stdout)
-    if result.returncode != 0:
-      console.print(f"[red]Error:[/red] {result.stderr}")
-      raise click.ClickException("Phase execution failed")
-  else:
-    executor = SSMExecutor(client.environment)
-    resume_arg = " --resume" if resume else ""
-    command = (
-      f"/usr/local/bin/run-bastion-operation.sh sec-phase --phase {phase}{resume_arg}"
-    )
-    stdout, _, _ = executor.execute(command)
-
-
-@sec.command("status")
-@click.pass_obj
-def sec_status(client):
-  """Check SEC orchestrator status."""
-  if client.environment == "dev":
-    command = "uv run python -m robosystems.scripts.sec_orchestrator status"
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    console.print(result.stdout)
-    if result.returncode != 0:
-      console.print(f"[red]Error:[/red] {result.stderr}")
-      raise click.ClickException("Status check failed")
-  else:
-    executor = SSMExecutor(client.environment)
-    stdout, _, _ = executor.execute(
-      "/usr/local/bin/run-bastion-operation.sh sec-status"
-    )
+# SEC orchestration commands removed - pipeline migrated to Dagster
+# For production: Use Dagster UI at dagster.robosystems.app
+# For local dev: just sec-load TICKER YEAR
 
 
 if __name__ == "__main__":

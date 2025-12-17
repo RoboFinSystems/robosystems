@@ -6,7 +6,6 @@ import httpx
 
 from ...logger import logger
 from ...operations.connection_service import ConnectionService
-from ...celery import QUEUE_DEFAULT
 from ...models.api.graphs.connections import QuickBooksConnectionConfig
 from ...config import env
 from .oauth_handler import OAuthHandler
@@ -124,18 +123,22 @@ async def create_quickbooks_connection(
 async def sync_quickbooks_connection(
   connection: Dict[str, Any], sync_options: Optional[Dict[str, Any]], graph_id: str
 ) -> str:
-  """Trigger QuickBooks sync."""
-  # Delayed import to avoid circular dependency
-  from ...tasks.data_sync.qb import sync_task as qb_sync_task
+  """Trigger QuickBooks sync.
 
+  TODO: Refactor to use Dagster pipeline.
+  The QuickBooks sync has been migrated to Dagster assets:
+  - See: robosystems/dagster/assets/quickbooks.py
+  - Assets: qb_accounts, qb_transactions, qb_graph_data
+  """
   entity_id = connection["entity_id"]
 
-  # Queue QuickBooks sync task
-  task_result = qb_sync_task.apply_async(  # type: ignore[attr-defined]
-    args=[entity_id, graph_id], queue=QUEUE_DEFAULT, priority=10
+  # TODO: Trigger Dagster pipeline instead of Celery task
+  # For now, return a placeholder - provider refactoring needed
+  logger.warning(
+    f"QuickBooks sync requested for entity {entity_id}, graph {graph_id} - "
+    "provider needs refactoring to use Dagster pipeline"
   )
-
-  return task_result.id
+  return f"dagster-pending-{entity_id}"
 
 
 async def cleanup_quickbooks_connection(

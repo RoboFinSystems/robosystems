@@ -8,7 +8,7 @@ for XBRL processing.
 import pytest
 from unittest.mock import patch
 
-from robosystems.adapters.sec.processors.schema_config_generator import (
+from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
   create_custom_ingestion_processor,
@@ -19,9 +19,7 @@ from robosystems.schemas.models import Node, Relationship, Property, Schema
 @pytest.fixture
 def mock_schema_manager():
   """Create a mock schema manager with test schema data."""
-  with patch(
-    "robosystems.adapters.sec.processors.schema_config_generator.SchemaManager"
-  ) as MockManager:
+  with patch("robosystems.adapters.sec.processors.schema.SchemaManager") as MockManager:
     manager_instance = MockManager.return_value
 
     # Create mock compiled schema with nodes and relationships
@@ -379,7 +377,7 @@ class TestXBRLSchemaConfigGenerator:
     assert len(stats["node_tables"]) == 3
     assert len(stats["relationship_tables"]) == 3
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.logger")
+  @patch("robosystems.adapters.sec.processors.schema.logger")
   def test_print_configuration_summary(self, mock_logger, processor_with_mock_schema):
     """Test configuration summary printing."""
     processor = processor_with_mock_schema
@@ -401,7 +399,7 @@ class TestXBRLSchemaConfigGenerator:
 class TestFactoryFunctions:
   """Test factory functions for creating processors."""
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_create_roboledger_ingestion_processor(self, mock_manager):
     """Test RoboLedger processor creation."""
     compiled_schema = Schema(
@@ -418,7 +416,7 @@ class TestFactoryFunctions:
     assert processor.config.base_schema == "base"
     assert processor.config.extensions == ["roboledger"]
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_create_custom_ingestion_processor(self, mock_manager):
     """Test custom processor creation."""
     compiled_schema = Schema(
@@ -439,7 +437,7 @@ class TestFactoryFunctions:
 class TestEdgeCases:
   """Test edge cases and error handling."""
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_empty_schema(self, mock_manager, basic_schema_config):
     """Test processor with empty schema."""
     compiled_schema = Schema(
@@ -455,7 +453,7 @@ class TestEdgeCases:
     assert len(processor.ingest_config.relationship_tables) == 0
     assert len(processor.ingest_config.file_pattern_mapping) == 0
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_relationship_with_many_properties(self, mock_manager, basic_schema_config):
     """Test relationship with many properties."""
     compiled_schema = Schema(
@@ -481,7 +479,7 @@ class TestEdgeCases:
     assert len(rel_info.properties) == 10
     assert len(rel_info.columns) == 12  # from, to, + 10 properties
 
-  @patch("robosystems.adapters.sec.processors.schema_config_generator.SchemaManager")
+  @patch("robosystems.adapters.sec.processors.schema.SchemaManager")
   def test_special_characters_in_names(self, mock_manager, basic_schema_config):
     """Test handling of special characters in table names."""
     compiled_schema = Schema(

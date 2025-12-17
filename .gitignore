@@ -91,6 +91,10 @@ celerybeat-schedule.db
 celerybeat-schedule
 celerybeat.pid
 
+# Dagster local state (keep dagster.yaml config)
+dagster_home/*
+!dagster_home/dagster.yaml
+
 # SageMath parsed files
 *.sage.py
 

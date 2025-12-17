@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from robosystems.adapters.sec.processors.textblock_externalizer import (
+from robosystems.adapters.sec.processors.textblock import (
   TextBlockExternalizer,
 )
 
@@ -175,7 +175,7 @@ class TestGenerateS3Key:
     )
 
     with patch(
-      "robosystems.adapters.sec.processors.textblock_externalizer.datetime"
+      "robosystems.adapters.sec.processors.textblock.datetime"
     ) as mock_datetime:
       mock_datetime.now.return_value.strftime.return_value = "2024"
 
@@ -227,7 +227,7 @@ class TestGenerateS3KeyWithHash:
     content_hash = "abcdef1234567890" * 4
 
     with patch(
-      "robosystems.adapters.sec.processors.textblock_externalizer.datetime"
+      "robosystems.adapters.sec.processors.textblock.datetime"
     ) as mock_datetime:
       mock_datetime.now.return_value.strftime.return_value = "2024"
 
@@ -393,7 +393,7 @@ class TestQueueValueForS3:
 
   def test_queue_value_exception(self, mock_s3_client, entity_data, report_data):
     with patch(
-      "robosystems.adapters.sec.processors.textblock_externalizer.hashlib.sha256"
+      "robosystems.adapters.sec.processors.textblock.hashlib.sha256"
     ) as mock_sha256:
       mock_sha256.side_effect = Exception("Hash error")
 
@@ -551,7 +551,7 @@ class TestExternalizeValueToS3:
     )
 
     with patch(
-      "robosystems.adapters.sec.processors.textblock_externalizer.datetime"
+      "robosystems.adapters.sec.processors.textblock.datetime"
     ) as mock_datetime:
       mock_datetime.now.return_value.strftime.return_value = "2024"
 

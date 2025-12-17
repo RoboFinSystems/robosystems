@@ -78,11 +78,12 @@ The test suite is organized by component, mirroring the application structure:
 
 ### Background Tasks
 - **`tasks/`** - Celery async task tests
-  - `billing/` - Storage billing, usage collection, credit allocation
-  - `data_sync/` - Plaid and QuickBooks synchronization
   - `graph_operations/` - Backup and graph database operations
-  - `infrastructure/` - Authentication cleanup, system maintenance
-  - `sec_xbrl/` - SEC filing ingestion and processing
+  - `table_operations/` - DuckDB staging and materialization
+  - `agents/` - AI analysis operations
+- **`dagster/`** - Dagster pipeline tests
+  - `assets/` - Asset tests (SEC, Plaid, etc.)
+  - `jobs/` - Job tests (billing, infrastructure)
 
 ### Infrastructure
 - **`graph_api/`** - Graph API cluster services (multi-backend support)

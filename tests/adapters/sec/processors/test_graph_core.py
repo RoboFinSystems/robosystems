@@ -50,13 +50,13 @@ def processor(temp_dir, mock_schema_config):
   """Create initialized processor for testing."""
   with (
     patch(
-      "robosystems.adapters.sec.processors.graph.XBRLSchemaAdapter"
+      "robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter"
     ) as mock_schema_adapter_class,
     patch(
-      "robosystems.adapters.sec.processors.graph.XBRLSchemaConfigGenerator"
+      "robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator"
     ) as mock_config_gen_class,
     patch(
-      "robosystems.adapters.sec.processors.graph.DataFrameManager"
+      "robosystems.adapters.sec.processors.xbrl_graph.DataFrameManager"
     ) as mock_df_manager_class,
   ):
     mock_schema_instance = MagicMock()

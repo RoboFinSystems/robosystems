@@ -328,39 +328,6 @@ sec-reset backend="ladybug" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
 
 
-## SEC Production Pipeline - Large-scale orchestrated processing ##
-
-# Uses proven consolidation + COPY approach for large-scale data processing.
-# Pipeline phases: download → process → consolidate → ingest (COPY-based)
-# Examples:
-#   just sec-plan 2020 2025 100                                 # Plan processing for 100 companies
-#   just sec-phase [download|process|consolidate|ingest]        # Start a specific phase
-
-# SEC Production - Plan processing with optional company limit for testing
-sec-plan start_year="2020" end_year="2025" max_companies="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {{start_year}} --end-year {{end_year}} --max-companies {{max_companies}}
-
-# SEC Production - Start a specific phase: download, process, consolidate, ingest
-sec-phase phase env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}}
-
-# SEC Production - Resume a phase from last checkpoint
-sec-phase-resume phase env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --resume
-
-# SEC Production - Retry failed companies in a phase
-sec-phase-retry phase env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --retry-failed
-
-# SEC Production - Get status of all phases
-sec-status env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator status
-
-# SEC Production - Reset database (requires confirmation)
-sec-reset-remote confirm="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
-
-
 ## Valkey/Redis ##
 
 # Clear Valkey/Redis queues

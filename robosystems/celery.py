@@ -29,32 +29,19 @@ celery_app = Celery(
   broker=celery_config["broker_url"],
   result_backend=celery_config["result_backend"],
   include=[
-    # Data synchronization
-    "robosystems.tasks.data_sync.qb",
-    "robosystems.tasks.data_sync.plaid",
-    # SEC XBRL processing
-    "robosystems.tasks.sec_xbrl.orchestration",
-    "robosystems.tasks.sec_xbrl.ingestion",
-    "robosystems.tasks.sec_xbrl.consolidation",
-    "robosystems.tasks.sec_xbrl.maintenance",
-    "robosystems.tasks.sec_xbrl.duckdb_ingestion",
-    # Graph operations
+    # SEC XBRL processing migrated to Dagster (see robosystems/dagster/assets/sec.py)
+    # Graph operations (SSE/user-triggered - kept in Celery)
     "robosystems.tasks.graph_operations.backup",
     "robosystems.tasks.graph_operations.create_entity_graph",
     "robosystems.tasks.graph_operations.create_graph",
     "robosystems.tasks.graph_operations.create_subgraph",
-    # Table operations
+    # Table operations (user-triggered - kept in Celery)
     "robosystems.tasks.table_operations.duckdb_staging",
     "robosystems.tasks.table_operations.graph_materialization",
-    # Agent operations
+    # Agent operations (real-time AI - kept in Celery)
     "robosystems.tasks.agents.analyze",
-    # Billing and credits
-    "robosystems.tasks.billing.credit_allocation",
-    "robosystems.tasks.billing.shared_credit_allocation",
-    "robosystems.tasks.billing.storage_billing",
-    "robosystems.tasks.billing.usage_collector",
-    # Infrastructure
-    "robosystems.tasks.infrastructure.auth_cleanup",
+    # Note: Billing, infrastructure, data_sync, and provisioning
+    # tasks have been migrated to Dagster (see robosystems/dagster/)
   ],
 )
 
@@ -171,11 +158,9 @@ celery_app.conf.task_queues = [
 ]
 
 
-# Configure Celery Beat Schedule
-# Import and set the schedule directly so it's available for beat
-from robosystems.tasks.schedule import BEAT_SCHEDULE  # noqa: E402
-
-celery_app.conf.beat_schedule = BEAT_SCHEDULE
+# Note: Scheduled tasks have been migrated to Dagster.
+# See robosystems/dagster/jobs/ for schedule definitions.
+# Celery Beat is no longer used for scheduled tasks.
 
 
 # Worker startup validation
