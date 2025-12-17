@@ -223,14 +223,6 @@ api env=_local_env:
 graph-api backend="ladybug" type="writer" port="8001" env=_local_env:
     UV_ENV_FILE={{env}} GRAPH_BACKEND_TYPE={{backend}} LBUG_NODE_TYPE={{type}} uv run python -m robosystems.graph_api --port {{port}}
 
-# Start worker
-worker num_workers="1" queue="robosystems" env=_local_env:
-    UV_ENV_FILE={{env}} uv run celery -A robosystems worker -B -n rsworkerbeat --concurrency={{num_workers}} -Q {{queue}} -l info -Ofair --prefetch-multiplier=0
-
-# Start beat worker (Celery scheduler)
-beat env=_local_env:
-    UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
-
 stripe-webhook url="http://localhost:8000" env=_local_env:
     UV_ENV_FILE={{env}} uv run stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe
 

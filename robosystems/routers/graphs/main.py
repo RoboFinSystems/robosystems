@@ -6,7 +6,7 @@ optionally including initial entities like companies.
 """
 
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from robosystems.logger import logger
 from robosystems.models.iam import User, OrgUser, OrgLimits, GraphUser
@@ -369,6 +369,7 @@ eventSource.onmessage = (event) => {
 )
 async def create_graph(
   request: CreateGraphRequest,
+  background_tasks: BackgroundTasks,
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),  # noqa: ARG001
 ):
@@ -498,30 +499,56 @@ async def create_graph(
         graph_id=None,  # Will be set when graph is created
       )
 
-      # Queue the actual Celery task with operation_id for progress tracking
+      # Queue Dagster job with SSE monitoring via FastAPI background task
       operation_id = response["operation_id"]
 
+      from robosystems.middleware.sse import (
+        run_and_monitor_dagster_job,
+        build_graph_job_config,
+      )
+
       if request.initial_entity:
-        from robosystems.tasks.graph_operations.create_entity_graph import (
-          create_entity_with_new_graph_sse_task,
+        # Entity graph creation via Dagster
+        job_name = "create_entity_graph_job"
+        run_config = build_graph_job_config(
+          job_name,
+          user_id=str(current_user.id),
+          entity_name=operation_data["entity_data"]["name"],
+          entity_identifier=operation_data["entity_data"].get("identifier"),
+          entity_identifier_type=operation_data["entity_data"].get("identifier_type"),
+          tier=request.instance_tier,
+          graph_name=request.metadata.graph_name,
+          description=request.metadata.description,
+          schema_extensions=request.metadata.schema_extensions,
+          tags=request.tags or [],
+          create_entity=request.create_entity,
+          skip_billing=False,
         )
-
-        # Launch task with operation ID for SSE progress tracking
-        task = create_entity_with_new_graph_sse_task.delay(  # type: ignore[attr-defined]
-          operation_data["entity_data"], current_user.id, operation_id
-        )
-
       else:
-        from robosystems.tasks.graph_operations.create_graph import (
-          create_graph_sse_task,
+        # Generic graph creation via Dagster
+        job_name = "create_graph_job"
+        run_config = build_graph_job_config(
+          job_name,
+          user_id=str(current_user.id),
+          tier=request.instance_tier,
+          graph_name=request.metadata.graph_name,
+          description=request.metadata.description,
+          schema_extensions=request.metadata.schema_extensions,
+          tags=request.tags or [],
+          skip_billing=False,
         )
 
-        # Launch task with operation ID for SSE progress tracking
-        task = create_graph_sse_task.delay(  # type: ignore[attr-defined]
-          operation_data["task_data"], operation_id
-        )
+      # Run Dagster job with SSE monitoring in background
+      background_tasks.add_task(
+        run_and_monitor_dagster_job,
+        job_name=job_name,
+        operation_id=operation_id,
+        run_config=run_config,
+      )
 
-      logger.info(f"✓ Created SSE operation {operation_id} and queued task {task.id}")
+      logger.info(
+        f"✓ Created SSE operation {operation_id} and queued Dagster job {job_name}"
+      )
       logger.info("=== END GRAPH CREATION REQUEST (SSE) ===")
 
       return response

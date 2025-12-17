@@ -7,7 +7,15 @@ similar to MCP tool execution.
 
 import asyncio
 from typing import Optional, Union
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import (
+  APIRouter,
+  BackgroundTasks,
+  Depends,
+  HTTPException,
+  Path,
+  Query,
+  Request,
+)
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
@@ -49,7 +57,11 @@ from .strategies import (
   AgentClientDetector,
   ResponseMode,
 )
-from .handlers import handle_sync_execution, handle_sse_streaming, handle_celery_queue
+from .handlers import (
+  handle_sync_execution,
+  handle_sse_streaming,
+  handle_background_queue,
+)
 
 
 router = APIRouter()
@@ -206,6 +218,7 @@ See request/response examples in the "Examples" dropdown below.""",
 async def auto_agent(
   request: AgentRequest,
   full_request: Request,
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -296,11 +309,12 @@ async def auto_agent(
       )
 
     elif strategy == AgentExecutionStrategy.CELERY_QUEUE_STREAM:
-      return await handle_celery_queue(
+      return await handle_background_queue(
         graph_id=graph_id,
         request_data=request_data,
         current_user=current_user,
         db=db,
+        background_tasks=background_tasks,
       )
 
   except Exception as e:
@@ -396,6 +410,7 @@ async def specific_agent(
   agent_type: str,
   request: AgentRequest,
   full_request: Request,
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -478,11 +493,12 @@ async def specific_agent(
       )
 
     elif strategy == AgentExecutionStrategy.CELERY_QUEUE_STREAM:
-      return await handle_celery_queue(
+      return await handle_background_queue(
         graph_id=graph_id,
         request_data=request_data,
         current_user=current_user,
         db=db,
+        background_tasks=background_tasks,
         agent_type=agent_type,
       )
 

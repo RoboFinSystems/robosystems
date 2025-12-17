@@ -47,6 +47,13 @@ from .operation_manager import (
   create_operation_response,
 )
 
+from .dagster_monitor import (
+  DagsterRunMonitor,
+  run_and_monitor_dagster_job,
+  submit_dagster_job_sync,
+  build_graph_job_config,
+)
+
 __all__ = [
   # Event Storage
   "SSEEventStorage",
@@ -65,4 +72,9 @@ __all__ = [
   "OperationManager",
   "get_operation_manager",
   "create_operation_response",
+  # Dagster Integration
+  "DagsterRunMonitor",
+  "run_and_monitor_dagster_job",
+  "submit_dagster_job_sync",
+  "build_graph_job_config",
 ]

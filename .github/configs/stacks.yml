@@ -40,7 +40,7 @@ production:
       bucket_name: BucketName
       bucket_arn: BucketArn
   
-  # API & Worker Services
+  # API Service
   api:
     stack_name: RoboSystemsAPIProd
     outputs:
@@ -48,31 +48,6 @@ production:
       alb_dns: ApiAlbDnsName
       service_arn: ApiServiceArn
 
-  worker_infra:
-    stack_name: RoboSystemsWorkerInfraProd
-
-  workers:
-    default:
-      stack_name: RoboSystemsWorkerDefaultProd
-      outputs:
-        service_arn: WorkerServiceArn
-    critical:
-      stack_name: RoboSystemsWorkerCriticalProd
-      outputs:
-        service_arn: WorkerServiceArn
-    shared:
-      stack_name: RoboSystemsWorkerSharedProd
-      outputs:
-        service_arn: WorkerServiceArn
-    extraction:
-      stack_name: RoboSystemsWorkerExtractionProd
-      outputs:
-        service_arn: WorkerServiceArn
-    ingestion:
-      stack_name: RoboSystemsWorkerIngestionProd
-      outputs:
-        service_arn: WorkerServiceArn
-  
   # Graph Infrastructure (Multi-Backend: LadybugDB and Neo4j)
   graph:
     infra:
@@ -204,7 +179,7 @@ staging:
       bucket_name: BucketName
       bucket_arn: BucketArn
   
-  # API & Worker Services
+  # API Service
   api:
     stack_name: RoboSystemsAPIStaging
     outputs:
@@ -212,31 +187,6 @@ staging:
       alb_dns: ApiAlbDnsName
       service_arn: ApiServiceArn
 
-  worker_infra:
-    stack_name: RoboSystemsWorkerInfraStaging
-
-  workers:
-    default:
-      stack_name: RoboSystemsWorkerDefaultStaging
-      outputs:
-        service_arn: WorkerServiceArn
-    critical:
-      stack_name: RoboSystemsWorkerCriticalStaging
-      outputs:
-        service_arn: WorkerServiceArn
-    shared:
-      stack_name: RoboSystemsWorkerSharedStaging
-      outputs:
-        service_arn: WorkerServiceArn
-    extraction:
-      stack_name: RoboSystemsWorkerExtractionStaging
-      outputs:
-        service_arn: WorkerServiceArn
-    ingestion:
-      stack_name: RoboSystemsWorkerIngestionStaging
-      outputs:
-        service_arn: WorkerServiceArn
-  
   # Graph Infrastructure (Multi-Backend: LadybugDB and Neo4j)
   graph:
     infra:
@@ -339,9 +289,6 @@ staging:
 
 # Common patterns for dynamic stack name generation
 patterns:
-  # Pattern for worker stacks: RoboSystemsWorker{Name}{Environment}
-  worker: "RoboSystemsWorker{name}{environment}"
-
   # Pattern for graph database writer stacks: RoboSystemsGraph{Backend}{Tier}{Environment}
   # Both LadybugDB and Neo4j use unified Graph prefix
   graph_writer: "RoboSystemsGraph{backend}{tier}{environment}"

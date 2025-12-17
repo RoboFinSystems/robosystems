@@ -4,7 +4,7 @@ Main subgraph routes (list and create operations).
 
 import asyncio
 import json
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -276,6 +276,7 @@ When `fork_parent=true`, the operation:
 )
 async def create_subgraph(
   request: CreateSubgraphRequest,
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Parent graph ID (e.g., 'kg1a2b3c4d5')",
@@ -332,10 +333,11 @@ async def create_subgraph(
 
     # 6. Check if we need SSE for forking
     if request.fork_parent:
-      # Use SSE for fork operations (like graph creation)
+      # Use SSE for fork operations via Dagster
       from robosystems.middleware.sse.operation_manager import create_operation_response
-      from robosystems.tasks.graph_operations.create_subgraph import (
-        create_subgraph_with_fork_sse_task,
+      from robosystems.middleware.sse import (
+        run_and_monitor_dagster_job,
+        build_graph_job_config,
       )
 
       # Create SSE operation
@@ -345,30 +347,34 @@ async def create_subgraph(
         graph_id=graph_id,
       )
 
-      # Prepare task data
-      task_data = {
-        "parent_graph_id": graph_id,
-        "user_id": str(current_user.id),
-        "name": request.name,
-        "description": request.display_name,
-        "subgraph_type": request.subgraph_type.value
+      operation_id = operation_response["operation_id"]
+
+      # Build Dagster job config for subgraph creation with fork
+      fork_options = request.metadata.get("fork_options") if request.metadata else {}
+      run_config = build_graph_job_config(
+        "create_subgraph_job",
+        user_id=str(current_user.id),
+        parent_graph_id=graph_id,
+        name=request.name,
+        description=request.display_name,
+        subgraph_type=request.subgraph_type.value
         if request.subgraph_type
         else "static",
-        "metadata": request.metadata,
-        "fork_parent": True,
-        "fork_options": request.metadata.get("fork_options")
-        if request.metadata
-        else {},
-      }
+        fork_parent=True,
+        fork_tables=fork_options.get("tables", []),
+        fork_exclude_patterns=fork_options.get("exclude_patterns", []),
+      )
 
-      # Queue the task with operation ID for SSE progress tracking
-      task = create_subgraph_with_fork_sse_task.delay(  # type: ignore[reportFunctionMemberAccess]
-        task_data, operation_response["operation_id"]
+      # Run Dagster job with SSE monitoring in background
+      background_tasks.add_task(
+        run_and_monitor_dagster_job,
+        job_name="create_subgraph_job",
+        operation_id=operation_id,
+        run_config=run_config,
       )
 
       logger.info(
-        f"Created SSE operation {operation_response['operation_id']} and queued task {task.id} "
-        f"for subgraph creation with fork"
+        f"Created SSE operation {operation_id} and queued Dagster subgraph job with fork"
       )
 
       # Record success metrics

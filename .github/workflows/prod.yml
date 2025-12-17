@@ -44,13 +44,11 @@ jobs:
       postgres_iam_stack: ${{ steps.load.outputs.postgres_iam_stack }}
       valkey_stack: ${{ steps.load.outputs.valkey_stack }}
       api_stack: ${{ steps.load.outputs.api_stack }}
-      beat_stack: ${{ steps.load.outputs.beat_stack }}
       graph_infra_stack: ${{ steps.load.outputs.graph_infra_stack }}
       graph_volumes_stack: ${{ steps.load.outputs.graph_volumes_stack }}
       prometheus_stack: ${{ steps.load.outputs.prometheus_stack }}
       grafana_stack: ${{ steps.load.outputs.grafana_stack }}
       bastion_stack: ${{ steps.load.outputs.bastion_stack }}
-      worker_monitor_stack: ${{ steps.load.outputs.worker_monitor_stack }}
       waf_stack: ${{ steps.load.outputs.waf_stack }}
       cloudtrail_stack: ${{ steps.load.outputs.cloudtrail_stack }}
       domain_name_root: ${{ steps.config.outputs.domain_name_root }}
@@ -81,13 +79,11 @@ jobs:
           echo "postgres_iam_stack=$(./bin/tools/stack-config.sh $ENV postgres_iam)" >> $GITHUB_OUTPUT
           echo "valkey_stack=$(./bin/tools/stack-config.sh $ENV valkey)" >> $GITHUB_OUTPUT
           echo "api_stack=$(./bin/tools/stack-config.sh $ENV api)" >> $GITHUB_OUTPUT
-          echo "beat_stack=$(./bin/tools/stack-config.sh $ENV beat)" >> $GITHUB_OUTPUT
           echo "graph_infra_stack=$(./bin/tools/stack-config.sh $ENV graph.infra)" >> $GITHUB_OUTPUT
           echo "graph_volumes_stack=$(./bin/tools/stack-config.sh $ENV graph.volumes)" >> $GITHUB_OUTPUT
           echo "prometheus_stack=$(./bin/tools/stack-config.sh $ENV monitoring.prometheus)" >> $GITHUB_OUTPUT
           echo "grafana_stack=$(./bin/tools/stack-config.sh $ENV monitoring.grafana)" >> $GITHUB_OUTPUT
           echo "bastion_stack=$(./bin/tools/stack-config.sh $ENV bastion)" >> $GITHUB_OUTPUT
-          echo "worker_monitor_stack=$(./bin/tools/stack-config.sh $ENV monitoring.worker_monitor)" >> $GITHUB_OUTPUT
           echo "waf_stack=$(./bin/tools/stack-config.sh $ENV waf)" >> $GITHUB_OUTPUT
           echo "cloudtrail_stack=$(./bin/tools/stack-config.sh $ENV cloudtrail)" >> $GITHUB_OUTPUT
 

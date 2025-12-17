@@ -572,20 +572,25 @@ class MaterializeGraphTool:
           if not file:
             return {"error": "file_not_found", "message": f"File '{file_id}' not found"}
 
-          # Queue materialization task
-          from robosystems.tasks.table_operations.graph_materialization import (
-            materialize_file_to_graph,
+          # Queue materialization via Dagster
+          from robosystems.middleware.sse import (
+            submit_dagster_job_sync,
+            build_graph_job_config,
           )
 
-          task = materialize_file_to_graph.delay(  # type: ignore[attr-defined]
-            file_id=file_id, graph_id=graph_id, table_name=table_name
+          run_config = build_graph_job_config(
+            "materialize_file_job",
+            file_id=file_id,
+            graph_id=graph_id,
+            table_name=table_name,
           )
+          run_id = submit_dagster_job_sync("materialize_file_job", run_config)
 
-          logger.info(f"Queued materialization task {task.id} for file {file_id}")
+          logger.info(f"Queued Dagster materialization job {run_id} for file {file_id}")
 
           return {
             "success": True,
-            "task_id": task.id,
+            "run_id": run_id,
             "file_id": file_id,
             "table_name": table_name,
             "message": f"Queued materialization for file {file_id}",
@@ -605,25 +610,30 @@ class MaterializeGraphTool:
             "message": f"No staged files found for table '{table_name}'",
           }
 
-        # Queue materialization for each file
-        from robosystems.tasks.table_operations.graph_materialization import (
-          materialize_file_to_graph,
+        # Queue materialization for each file via Dagster
+        from robosystems.middleware.sse import (
+          submit_dagster_job_sync,
+          build_graph_job_config,
         )
 
-        task_ids = []
+        run_ids = []
         for file in staged_files:
-          task = materialize_file_to_graph.delay(  # type: ignore[attr-defined]
-            file_id=file.id, graph_id=graph_id, table_name=table_name
+          run_config = build_graph_job_config(
+            "materialize_file_job",
+            file_id=file.id,
+            graph_id=graph_id,
+            table_name=table_name,
           )
-          task_ids.append(task.id)
+          run_id = submit_dagster_job_sync("materialize_file_job", run_config)
+          run_ids.append(run_id)
 
         logger.info(
-          f"Queued {len(task_ids)} materialization tasks for table '{table_name}'"
+          f"Queued {len(run_ids)} Dagster materialization jobs for table '{table_name}'"
         )
 
         return {
           "success": True,
-          "task_ids": task_ids,
+          "run_ids": run_ids,
           "file_count": len(staged_files),
           "table_name": table_name,
           "message": f"Queued materialization for {len(staged_files)} files",

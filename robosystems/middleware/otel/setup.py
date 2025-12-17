@@ -6,7 +6,7 @@ It is designed to be a drop-in replacement for the previous AWS X-Ray implementa
 
 Features:
 - Environment-conditional tracing (dev/staging/prod)
-- Automatic instrumentation for FastAPI, requests, psycopg2, and celery
+- Automatic instrumentation for FastAPI, requests, and psycopg2
 - OTLP exporter for sending telemetry data to a collector
 - Graceful degradation if the collector is not available
 - Resource attributes for better observability
@@ -31,7 +31,6 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
-from opentelemetry.instrumentation.celery import CeleryInstrumentor
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -185,7 +184,6 @@ def setup_telemetry(app: FastAPI) -> None:
     # Instrument other libraries
     RequestsInstrumentor().instrument()
     Psycopg2Instrumentor().instrument()
-    CeleryInstrumentor().instrument()
 
     _instrumentation_enabled = True
     logger.info(f"OpenTelemetry tracing enabled for service: {service_name}")

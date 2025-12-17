@@ -153,8 +153,6 @@ class EnvValidator:
   def _validate_numeric_ranges(env_config, errors: List[str]) -> None:
     """Validate numeric configuration values are within reasonable ranges."""
     validations = [
-      ("WORKER_AUTOSCALE", 1, 100, "Worker autoscale"),
-      ("CELERY_TASK_TIME_LIMIT", 60, 7200, "Task time limit"),
       ("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 1440, "JWT access token expiry"),
       ("RATE_LIMIT_API_KEY", 100, 1000000, "API key rate limit"),
       ("LBUG_MAX_DATABASES_PER_NODE", 1, 1000, "Max databases per node"),
@@ -173,13 +171,9 @@ class EnvValidator:
     """Validate URL format for various endpoints."""
     url_vars = [
       "DATABASE_URL",
-      "VALKEY_URL",  # CELERY_BROKER_URL is now auto-constructed
+      "VALKEY_URL",
       "GRAPH_API_URL",
     ]
-
-    # Also validate CELERY_BROKER_URL if it's explicitly set
-    if getattr(env_config, "CELERY_BROKER_URL", None):
-      url_vars.append("CELERY_BROKER_URL")
 
     for var_name in url_vars:
       value = getattr(env_config, var_name, None)
@@ -286,9 +280,6 @@ class EnvValidator:
       "security": {
         "rate_limiting": env_config.RATE_LIMIT_ENABLED,
         "audit_logging": env_config.SECURITY_AUDIT_ENABLED,
-      },
-      "workers": {
-        "autoscale": env_config.WORKER_AUTOSCALE,
       },
       "agents": {
         "config_valid": agent_validation["valid"],

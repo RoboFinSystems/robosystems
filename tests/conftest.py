@@ -23,25 +23,6 @@ VALID_TEST_GRAPH_ID_2 = "kg11111111111111111"  # 17 hex chars
 VALID_TEST_GRAPH_ID_3 = "kg22222222222222222"  # 17 hex chars
 
 
-@pytest.fixture(scope="session", autouse=True)
-def configure_celery_for_tests():
-  """Configure Celery to run tasks synchronously during testing.
-
-  This prevents tests from queuing tasks to the actual running Celery worker,
-  which can cause OOM errors and test failures.
-  """
-  from robosystems.celery import celery_app
-
-  # Enable eager mode: tasks execute synchronously in the test process
-  celery_app.conf.task_always_eager = True
-  # Always use eager pool (don't queue tasks)
-  celery_app.conf.task_eager_propagates = True
-  # Disable result backend persistence during tests
-  celery_app.conf.result_expires = 0
-
-  return celery_app
-
-
 @pytest.fixture(scope="session")
 def test_db():
   """Create a test database."""

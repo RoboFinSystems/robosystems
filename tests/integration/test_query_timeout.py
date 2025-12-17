@@ -46,7 +46,7 @@ class TestQueryTimeout:
       # Verify the future is cancelled or still running
       assert future.cancelled() or future.running()
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_query_timeout_with_slow_query(self, mock_db_manager):
     """Test actual query timeout with simulated slow query."""
     from robosystems.config import env

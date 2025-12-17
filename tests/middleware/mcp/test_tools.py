@@ -672,8 +672,10 @@ class TestMaterializeGraphTool:
     with (
       patch("robosystems.database.get_db_session") as mock_db,
       patch(
-        "robosystems.tasks.table_operations.graph_materialization.materialize_file_to_graph"
-      ) as mock_task,
+        "robosystems.middleware.sse.submit_dagster_job_sync",
+        return_value="run-123",
+      ) as mock_submit,
+      patch("robosystems.middleware.sse.build_graph_job_config") as mock_build,
     ):
       mock_session = MagicMock()
       mock_db.return_value = iter([mock_session])
@@ -690,18 +692,16 @@ class TestMaterializeGraphTool:
 
       with patch("robosystems.models.iam.GraphFile") as mock_file_class:
         mock_file_class.get_by_id.return_value = mock_file
-
-        mock_celery_task = MagicMock()
-        mock_celery_task.id = "task123"
-        mock_task.delay.return_value = mock_celery_task
+        mock_build.return_value = {"ops": {}}
 
         result = await tool.execute(
           {"table_name": "financial_data", "file_id": "file123"}
         )
 
     assert result["success"] is True
-    assert result["task_id"] == "task123"
+    assert result["run_id"] == "run-123"
     assert result["file_id"] == "file123"
+    mock_submit.assert_called_once()
 
   @pytest.mark.asyncio
   @pytest.mark.unit
@@ -712,8 +712,10 @@ class TestMaterializeGraphTool:
     with (
       patch("robosystems.database.get_db_session") as mock_db,
       patch(
-        "robosystems.tasks.table_operations.graph_materialization.materialize_file_to_graph"
-      ) as mock_task,
+        "robosystems.middleware.sse.submit_dagster_job_sync",
+        return_value="run-123",
+      ) as mock_submit,
+      patch("robosystems.middleware.sse.build_graph_job_config") as mock_build,
     ):
       mock_session = MagicMock()
       mock_db.return_value = iter([mock_session])
@@ -733,16 +735,14 @@ class TestMaterializeGraphTool:
 
       with patch("robosystems.models.iam.GraphFile") as mock_file_class:
         mock_file_class.get_all_for_table.return_value = [mock_file1, mock_file2]
-
-        mock_celery_task = MagicMock()
-        mock_celery_task.id = "task123"
-        mock_task.delay.return_value = mock_celery_task
+        mock_build.return_value = {"ops": {}}
 
         result = await tool.execute({"table_name": "financial_data"})
 
     assert result["success"] is True
     assert result["file_count"] == 2
-    assert len(result["task_ids"]) == 2
+    assert mock_submit.call_count == 2
+    assert len(result["run_ids"]) == 2
 
   @pytest.mark.asyncio
   @pytest.mark.unit

@@ -37,13 +37,13 @@ class TestProductionSSLHandling:
       assert "test_token" in url_without_ssl
 
   def test_build_authenticated_url_includes_ssl_params_by_default(self):
-    """Test that SSL params are included by default for Celery compatibility."""
+    """Test that SSL params are included by default."""
     with patch.dict(
       os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
     ):
-      # With SSL params (for Celery)
+      # With SSL params
       url_with_ssl = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.CELERY_BROKER, include_ssl_params=True
+        ValkeyDatabase.AUTH_CACHE, include_ssl_params=True
       )
       assert "ssl_cert_reqs=CERT_NONE" in url_with_ssl
       assert url_with_ssl.startswith("rediss://")
@@ -115,24 +115,24 @@ class TestProductionSSLHandling:
       assert "ssl_check_hostname" not in params
       assert "ssl_ca_certs" not in params
 
-  def test_celery_urls_include_ssl_params(self):
-    """Test that Celery broker/result URLs include SSL params in production."""
+  def test_reserved_urls_include_ssl_params(self):
+    """Test that reserved database URLs include SSL params in production."""
     with patch.dict(
       os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
     ):
-      # Celery broker URL should include SSL params
-      broker_url = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.CELERY_BROKER,
-        include_ssl_params=True,  # Celery needs this
+      # Reserved 0 URL should include SSL params
+      reserved0_url = ValkeyURLBuilder.build_authenticated_url(
+        ValkeyDatabase.RESERVED_0,
+        include_ssl_params=True,
       )
-      assert "ssl_cert_reqs=CERT_NONE" in broker_url
+      assert "ssl_cert_reqs=CERT_NONE" in reserved0_url
 
-      # Celery results URL should include SSL params
-      results_url = ValkeyURLBuilder.build_authenticated_url(
-        ValkeyDatabase.CELERY_RESULTS,
-        include_ssl_params=True,  # Celery needs this
+      # Reserved 1 URL should include SSL params
+      reserved1_url = ValkeyURLBuilder.build_authenticated_url(
+        ValkeyDatabase.RESERVED_1,
+        include_ssl_params=True,
       )
-      assert "ssl_cert_reqs=CERT_NONE" in results_url
+      assert "ssl_cert_reqs=CERT_NONE" in reserved1_url
 
   def test_production_staging_difference(self):
     """Test that both prod and staging handle SSL params correctly."""
@@ -147,11 +147,11 @@ class TestProductionSSLHandling:
           url = mock_sync.call_args[0][0]
           assert "ssl_cert_reqs=CERT_NONE" not in url
 
-        # But Celery URLs should include them
-        celery_url = ValkeyURLBuilder.build_authenticated_url(
-          ValkeyDatabase.CELERY_BROKER, include_ssl_params=True
+        # URLs with include_ssl_params=True should include them
+        auth_url = ValkeyURLBuilder.build_authenticated_url(
+          ValkeyDatabase.AUTH_CACHE, include_ssl_params=True
         )
-        assert "ssl_cert_reqs=CERT_NONE" in celery_url
+        assert "ssl_cert_reqs=CERT_NONE" in auth_url
 
   def test_url_encoding_special_characters_in_auth_token(self):
     """Test that special characters in auth tokens are properly encoded."""

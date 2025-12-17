@@ -28,15 +28,15 @@ class ValkeyDatabase(IntEnum):
   isolation and prevent key collisions.
 
   Current allocation:
-  - 0-1: Celery task queue system
+  - 0-1: Reserved (formerly Celery, now available for reuse)
   - 2-9: Application services (auth, SSE, locks, pipelines, credits, rate limiting, lbug, billing)
   """
 
   # =========================================================================
-  # CELERY DATABASES (0-1)
+  # RESERVED DATABASES (0-1) - Available for future use
   # =========================================================================
-  CELERY_BROKER = 0  # Celery task queue (messages)
-  CELERY_RESULTS = 1  # Celery task results storage
+  RESERVED_0 = 0  # Formerly Celery broker - available for reuse
+  RESERVED_1 = 1  # Formerly Celery results - available for reuse
 
   # =========================================================================
   # APPLICATION DATABASES (2-9)
@@ -230,7 +230,7 @@ class ValkeyURLBuilder:
   @staticmethod
   def build_url(
     base_url: Optional[str] = None,
-    database: ValkeyDatabase = ValkeyDatabase.CELERY_BROKER,
+    database: ValkeyDatabase = ValkeyDatabase.AUTH_CACHE,
     use_valkey_prefix: bool = False,
     auth_token: Optional[str] = None,
     use_tls: Optional[bool] = None,
@@ -327,7 +327,7 @@ class ValkeyURLBuilder:
     # Add database number
     url = f"{base_url}/{database.value}"
 
-    # Add SSL parameters for rediss:// URLs (required by Celery/Kombu)
+    # Add SSL parameters for rediss:// URLs
     if use_tls and include_ssl_params:
       url += "?ssl_cert_reqs=CERT_NONE"
 
@@ -335,7 +335,7 @@ class ValkeyURLBuilder:
 
   @staticmethod
   def build_authenticated_url(
-    database: ValkeyDatabase = ValkeyDatabase.CELERY_BROKER,
+    database: ValkeyDatabase = ValkeyDatabase.AUTH_CACHE,
     base_url: Optional[str] = None,
     include_ssl_params: bool = True,
   ) -> str:
@@ -414,8 +414,8 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
       Description of the database's purpose
   """
   descriptions = {
-    ValkeyDatabase.CELERY_BROKER: "Celery task queue for async job processing",
-    ValkeyDatabase.CELERY_RESULTS: "Storage for Celery task results and status",
+    ValkeyDatabase.RESERVED_0: "Reserved (formerly Celery broker) - available for reuse",
+    ValkeyDatabase.RESERVED_1: "Reserved (formerly Celery results) - available for reuse",
     ValkeyDatabase.AUTH_CACHE: "Authentication tokens, sessions, and API key cache",
     ValkeyDatabase.SSE_EVENTS: "Server-Sent Events for real-time updates",
     ValkeyDatabase.DISTRIBUTED_LOCKS: "Distributed locks for multi-instance coordination",

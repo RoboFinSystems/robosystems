@@ -48,7 +48,15 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path as PathLib
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
+from fastapi import (
+  APIRouter,
+  BackgroundTasks,
+  Depends,
+  HTTPException,
+  Path,
+  Body,
+  status,
+)
 from sqlalchemy.orm import Session
 
 from robosystems.models.iam import User, GraphTable, GraphFile, Graph
@@ -446,6 +454,7 @@ immediate DuckDB staging and optional graph ingestion.
   "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_updated"
 )
 async def update_file(
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -692,37 +701,60 @@ async def update_file(
       )
 
       if new_file_count > 0:
-        from robosystems.tasks.table_operations.duckdb_staging import (
-          stage_file_in_duckdb,
+        from robosystems.middleware.sse import (
+          run_and_monitor_dagster_job,
+          build_graph_job_config,
         )
+        from robosystems.middleware.sse.event_storage import get_event_storage
 
         operation_id = str(uuid.uuid4())
 
         try:
-          task = stage_file_in_duckdb.apply_async(  # type: ignore[attr-defined]
-            args=[file_id, graph_id, table.id, operation_id, request.ingest_to_graph],
-            task_id=operation_id,
+          # Register operation with SSE
+          event_storage = get_event_storage()
+          await event_storage.create_operation(
+            operation_type="duckdb_staging",
+            user_id=str(current_user.id),
+            graph_id=graph_id,
+            operation_id=operation_id,
           )
 
-          graph_file.celery_task_id = task.id
+          # Build Dagster job config
+          run_config = build_graph_job_config(
+            "stage_file_job",
+            file_id=file_id,
+            graph_id=graph_id,
+            table_id=str(table.id),
+            ingest_to_graph=request.ingest_to_graph,
+          )
+
+          # Run Dagster job with SSE monitoring in background
+          background_tasks.add_task(
+            run_and_monitor_dagster_job,
+            job_name="stage_file_job",
+            operation_id=operation_id,
+            run_config=run_config,
+          )
+
+          graph_file.celery_task_id = operation_id  # Reuse field for operation_id
 
           db.commit()
           db.refresh(graph_file)
 
           if request.ingest_to_graph:
             logger.info(
-              f"v2 Incremental Ingestion: Async DuckDB staging task {task.id} started for file {file_id} "
+              f"v2 Incremental Ingestion: Dagster staging job started for file {file_id} "
               f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
             )
           else:
             logger.info(
-              f"v2 Incremental Ingestion: Async DuckDB staging task {task.id} started for file {file_id}. "
+              f"v2 Incremental Ingestion: Dagster staging job started for file {file_id}. "
               f"Monitor at /v1/operations/{operation_id}/stream"
             )
 
         except Exception as e:
           logger.warning(
-            f"Failed to start async DuckDB staging task for file {file_id}: {e}. "
+            f"Failed to start Dagster staging job for file {file_id}: {e}. "
             f"File will be staged on next upload or query attempt."
           )
 

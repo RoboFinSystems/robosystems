@@ -325,23 +325,52 @@ def collect_graph_usage(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict[str, Any]:
   """Collect storage usage snapshots for all active graphs."""
-  from robosystems.operations.graph.storage_service import StorageService
+  from robosystems.models.iam import Graph
+  from robosystems.operations.graph.storage_service import StorageCalculator
 
   collected = 0
   errors = 0
 
   with db.get_session() as session:
-    # Get all active graphs
-    active_graphs = session.query(GraphCredits.graph_id).all()
+    # Get all active graphs with user_id and tier info
+    # Join with Graph table since graph_tier is a property that reads from Graph
+    active_graphs = (
+      session.query(
+        GraphCredits.graph_id,
+        GraphCredits.user_id,
+        Graph.graph_tier,
+      )
+      .join(Graph, GraphCredits.graph_id == Graph.graph_id)
+      .all()
+    )
 
-    for (graph_id,) in active_graphs:
+    storage_calculator = StorageCalculator(session)
+
+    for graph_id, user_id, graph_tier in active_graphs:
       try:
-        storage_service = StorageService(graph_id, session)
-        storage_service.record_storage_snapshot()
+        # Calculate storage using StorageCalculator
+        storage_data = storage_calculator.calculate_graph_storage(graph_id, user_id)
+
+        # Record storage usage snapshot
+        GraphUsage.record_storage_usage(
+          user_id=user_id,
+          graph_id=graph_id,
+          graph_tier=graph_tier,
+          storage_bytes=storage_data.get("total_bytes", 0),
+          session=session,
+          files_storage_gb=float(storage_data.get("files_gb", 0)),
+          tables_storage_gb=float(storage_data.get("tables_gb", 0)),
+          graphs_storage_gb=float(storage_data.get("graphs_gb", 0)),
+          subgraphs_storage_gb=float(storage_data.get("subgraphs_gb", 0)),
+          auto_commit=False,  # Commit at end
+        )
         collected += 1
       except Exception as e:
         errors += 1
         context.log.warning(f"Failed to collect usage for {graph_id}: {e}")
+
+    # Commit all at once
+    session.commit()
 
   context.log.info(f"Collected usage for {collected} graphs, {errors} errors")
 

@@ -3,7 +3,7 @@ Tests for connection feature flags.
 """
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -673,6 +673,15 @@ class TestGraphOperationFeatureFlags:
             patch("os.path.exists", return_value=True),
             patch("os.walk", return_value=[("/tmp/test/path", [], ["file1.lbug"])]),
             patch("os.path.getsize", return_value=1024),
+            patch(
+              "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.submit_job",
+              return_value="test-run-123",
+            ),
+            patch(
+              "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
+              new_callable=AsyncMock,
+              return_value={"status": "completed", "run_id": "test-run-123"},
+            ),
           ):
             # Mock request data
             request_data = {

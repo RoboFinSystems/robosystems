@@ -50,7 +50,6 @@ from .constants import (
   DEFAULT_HTTP_TIMEOUT,
   DEFAULT_QUERY_TIMEOUT,
   MAX_QUERY_LENGTH,
-  DEFAULT_RETRY_DELAY,
   DEFAULT_QUERY_LIMIT,
   DEFAULT_QUEUE_SIZE,
   DEFAULT_MAX_CONCURRENT,
@@ -60,9 +59,6 @@ from .constants import (
   CACHE_TTL_SHORT,
   CACHE_TTL_LONG,
   # Task constants
-  TASK_TIME_LIMIT,
-  TASK_SOFT_TIME_LIMIT,
-  # Admission control
   ADMISSION_MEMORY_THRESHOLD_DEFAULT,
   ADMISSION_CPU_THRESHOLD_DEFAULT,
   ADMISSION_QUEUE_THRESHOLD_DEFAULT,
@@ -374,6 +370,10 @@ class EnvConfig:
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
   GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
 
+  # Dagster Configuration (for job orchestration)
+  DAGSTER_HOST = get_str_env("DAGSTER_HOST", "dagster-webserver")
+  DAGSTER_PORT = get_int_env("DAGSTER_PORT", 3003)
+
   # Shared repository backend selection (dev/local only)
   # In AWS environments, backend is determined by graph.yml tier configuration
   # Values: "ladybug" or "neo4j"
@@ -535,47 +535,9 @@ class EnvConfig:
     "VALKEY_AUTH_SECRET_NAME", f"robosystems/{ENVIRONMENT}/valkey/auth"
   )
 
-  # Celery URLs with explicit database numbers (see valkey_registry.py for allocation)
-  # These will be dynamically constructed with auth in prod/staging via get_celery_config()
-  CELERY_BROKER_URL = get_str_env("CELERY_BROKER_URL", "redis://localhost:6379/0")
-  CELERY_RESULT_BACKEND = get_str_env(
-    "CELERY_RESULT_BACKEND", "redis://localhost:6379/1"
-  )
+  # Note: Celery has been removed. Task orchestration now uses Dagster.
+  # See robosystems/dagster/ for job definitions and schedules.
 
-  # Celery task configuration
-  CELERY_TASK_TIME_LIMIT = get_int_env("CELERY_TASK_TIME_LIMIT", TASK_TIME_LIMIT)
-  CELERY_TASK_SOFT_TIME_LIMIT = get_int_env(
-    "CELERY_TASK_SOFT_TIME_LIMIT", TASK_SOFT_TIME_LIMIT
-  )
-  CELERY_WORKER_PREFETCH_MULTIPLIER = get_int_env(
-    "CELERY_WORKER_PREFETCH_MULTIPLIER",
-    0,  # 0 disables prefetching for proper queue-based scaling
-  )
-  CELERY_TASK_RETRY_DELAY = get_int_env("CELERY_TASK_RETRY_DELAY", DEFAULT_RETRY_DELAY)
-  CELERY_TASK_MAX_RETRIES = get_int_env("CELERY_TASK_MAX_RETRIES", 3)
-  CELERY_RESULT_EXPIRES = get_int_env("CELERY_RESULT_EXPIRES", CACHE_TTL_LONG)
-  # Soft shutdown timeout - time to wait during warm shutdown before forcing cold shutdown
-  # This allows tasks to finish gracefully and re-queue ETA tasks
-  CELERY_WORKER_SOFT_SHUTDOWN_TIMEOUT = get_int_env(
-    "CELERY_WORKER_SOFT_SHUTDOWN_TIMEOUT",
-    60,  # 60 seconds default
-  )
-
-  # Worker configuration
-  WORKER_AUTOSCALE = get_int_env("WORKER_AUTOSCALE", 1)
-
-  # Queue names
-  QUEUE_DEFAULT = get_str_env("QUEUE_DEFAULT", "default")
-  QUEUE_CRITICAL = get_str_env("QUEUE_CRITICAL", "critical")
-  QUEUE_SHARED_EXTRACTION = get_str_env("QUEUE_SHARED_EXTRACTION", "shared-extraction")
-  QUEUE_SHARED_PROCESSING = get_str_env("QUEUE_SHARED_PROCESSING", "shared-processing")
-  QUEUE_SHARED_INGESTION = get_str_env("QUEUE_SHARED_INGESTION", "shared-ingestion")
-  QUEUE_DATA_SYNC = get_str_env("QUEUE_DATA_SYNC", "default")  # Future: "data-sync"
-  QUEUE_ANALYTICS = get_str_env("QUEUE_ANALYTICS", "default")  # Future: "analytics"
-
-  # Worker configuration (used by entrypoint.sh and CloudFormation, not in application code)
-  # Specifies which queue(s) a worker process listens to (e.g., "default", "critical", "shared-processing")
-  WORKER_QUEUE = get_str_env("WORKER_QUEUE", QUEUE_DEFAULT)
   # Cache TTLs
   CREDIT_BALANCE_CACHE_TTL = get_int_env("CREDIT_BALANCE_CACHE_TTL", CACHE_TTL_SHORT)
   CREDIT_SUMMARY_CACHE_TTL = get_int_env("CREDIT_SUMMARY_CACHE_TTL", 600)  # 10 minutes
@@ -905,7 +867,6 @@ class EnvConfig:
     if cls.is_production():
       required_vars = [
         ("DATABASE_URL", cls.DATABASE_URL, None),
-        ("CELERY_BROKER_URL", cls.CELERY_BROKER_URL, None),
         ("JWT_SECRET_KEY", cls.JWT_SECRET_KEY, ""),
         # Note: AWS credentials come from IAM roles, not environment variables
       ]
@@ -1136,58 +1097,6 @@ class EnvConfig:
     else:
       # Development only
       return ["*"]
-
-  @classmethod
-  def get_celery_config(cls) -> dict:
-    """Get Celery configuration as a dict."""
-    # Build authenticated URLs for prod/staging if not explicitly set
-    broker_url = cls.CELERY_BROKER_URL
-    result_backend = cls.CELERY_RESULT_BACKEND
-
-    # Check if we need to build authenticated URLs
-    # Try to get auth token from any source (env var, Secrets Manager, etc.)
-    try:
-      from .valkey_registry import ValkeyDatabase, ValkeyURLBuilder
-
-      # Check if we can get an auth token from any source
-      auth_token = ValkeyURLBuilder.get_auth_token()
-
-      # Build authenticated URLs if we have a token or are in prod/staging
-      if auth_token or cls.ENVIRONMENT in ["prod", "staging"]:
-        # Only build if not explicitly set via environment
-        if not os.getenv("CELERY_BROKER_URL"):
-          try:
-            broker_url = ValkeyURLBuilder.build_authenticated_url(
-              database=ValkeyDatabase.CELERY_BROKER
-            )
-          except Exception:
-            # Keep default if unable to build
-            pass
-
-        if not os.getenv("CELERY_RESULT_BACKEND"):
-          try:
-            result_backend = ValkeyURLBuilder.build_authenticated_url(
-              database=ValkeyDatabase.CELERY_RESULTS
-            )
-          except Exception:
-            # Keep default if unable to build
-            pass
-    except (ImportError, Exception):
-      # If we can't import or get auth token, keep defaults
-      pass
-
-    return {
-      "broker_url": broker_url,
-      "result_backend": result_backend,
-      "task_time_limit": cls.CELERY_TASK_TIME_LIMIT,
-      "task_soft_time_limit": cls.CELERY_TASK_SOFT_TIME_LIMIT,
-      "worker_prefetch_multiplier": cls.CELERY_WORKER_PREFETCH_MULTIPLIER,
-      "task_serializer": "json",
-      "result_serializer": "json",
-      "accept_content": ["json"],
-      "timezone": "UTC",
-      "enable_utc": True,
-    }
 
   @classmethod
   def get_valkey_url(

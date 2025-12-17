@@ -8,7 +8,7 @@ including authentication, request validation, and response formatting.
 import pytest
 from tests.conftest import VALID_TEST_GRAPH_ID
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from main import app
 
@@ -97,7 +97,15 @@ class TestBackupEndpoints:
       )
 
   @patch("robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id")
-  @patch("robosystems.tasks.graph_operations.backup.create_graph_backup")
+  @patch(
+    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
+    new_callable=AsyncMock,
+    return_value={"status": "completed", "run_id": "test-run-123"},
+  )
+  @patch(
+    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.submit_job",
+    return_value="test-run-123",
+  )
   @patch("os.path.exists")
   @patch(
     "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph"
@@ -110,7 +118,8 @@ class TestBackupEndpoints:
     mock_is_shared,
     mock_get_database_path,
     mock_path_exists,
-    mock_task,
+    mock_dagster_submit,
+    mock_dagster_monitor,
     mock_get_graph_credits,
     client,
     mock_auth_user,
@@ -153,11 +162,6 @@ class TestBackupEndpoints:
 
       # Set mock user ID
       mock_auth_user.id = "test-user-123"
-
-      # Mock task response
-      mock_task_result = MagicMock()
-      mock_task_result.id = "task-123"
-      mock_task.apply_async.return_value = mock_task_result
 
       graph_id = VALID_TEST_GRAPH_ID  # Use valid test graph ID
       response = client.post(

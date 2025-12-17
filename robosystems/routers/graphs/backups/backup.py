@@ -351,15 +351,18 @@ async def create_backup(
         detail="Database service temporarily unavailable",
       )
 
-    # Queue Celery task for backup creation with SSE progress tracking
+    # Queue Dagster job for backup creation with SSE progress tracking
     import uuid
-    from robosystems.tasks.graph_operations.backup import create_graph_backup
+    from robosystems.middleware.sse import (
+      run_and_monitor_dagster_job,
+      build_graph_job_config,
+    )
     from robosystems.middleware.sse.event_storage import get_event_storage
 
     operation_id = str(uuid.uuid4())
 
     logger.info(
-      f"Queueing backup task for graph {graph_id} with operation_id {operation_id}"
+      f"Queueing Dagster backup job for graph {graph_id} with operation_id {operation_id}"
     )
 
     # Register operation with SSE before queuing task
@@ -371,16 +374,24 @@ async def create_backup(
       operation_id=operation_id,
     )
 
-    # Queue Celery task with SSE progress tracking
-    create_graph_backup.delay(  # type: ignore[attr-defined]
+    # Build Dagster job config
+    run_config = build_graph_job_config(
+      "backup_graph_job",
       graph_id=graph_id,
-      backup_type="full",
       user_id=str(current_user.id),
+      backup_type="full",
+      backup_format=request.backup_format,
       retention_days=request.retention_days,
       compression=True,
       encryption=request.encryption,
-      backup_format=request.backup_format,
+    )
+
+    # Run Dagster job with SSE monitoring in background
+    background_tasks.add_task(
+      run_and_monitor_dagster_job,
+      job_name="backup_graph_job",
       operation_id=operation_id,
+      run_config=run_config,
     )
 
     # Record business event

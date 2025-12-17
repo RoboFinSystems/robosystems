@@ -44,6 +44,15 @@ from robosystems.dagster.jobs.provisioning import (
   provision_graph_job,
   provision_repository_job,
 )
+from robosystems.dagster.jobs.graph import (
+  create_graph_job,
+  create_entity_graph_job,
+  create_subgraph_job,
+  backup_graph_job,
+  restore_graph_job,
+  stage_file_job,
+  materialize_file_job,
+)
 from robosystems.dagster.jobs.sec import (
   sec_single_company_job,
   sec_full_rebuild_job,
@@ -111,6 +120,14 @@ all_jobs = [
   # Provisioning jobs (triggered by sensors)
   provision_graph_job,
   provision_repository_job,
+  # Graph operations jobs (user-triggered via API)
+  create_graph_job,
+  create_entity_graph_job,
+  create_subgraph_job,
+  backup_graph_job,
+  restore_graph_job,
+  stage_file_job,
+  materialize_file_job,
   # SEC pipeline jobs
   sec_single_company_job,
   sec_full_rebuild_job,

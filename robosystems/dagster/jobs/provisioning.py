@@ -89,12 +89,12 @@ def get_subscription_details(
 
 
 @op
-def create_graph_database(
+def provision_graph_database(
   context: OpExecutionContext,
   db: DatabaseResource,
   subscription_details: dict[str, Any],
 ) -> dict[str, Any]:
-  """Create the graph database based on type."""
+  """Create the graph database as part of subscription provisioning."""
   from robosystems.operations.graph.entity_graph_service import EntityGraphService
   from robosystems.operations.graph.generic_graph_service import GenericGraphService
 
@@ -230,7 +230,7 @@ def handle_provisioning_failure(
 def provision_graph_job():
   """Provision a graph database after payment confirmation."""
   details = get_subscription_details()
-  graph = create_graph_database(details)
+  graph = provision_graph_database(details)
   activate_graph_subscription(graph)
 
 

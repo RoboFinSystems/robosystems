@@ -376,9 +376,25 @@ class TestAgentEndpoints:
 
   def test_agent_force_extended_analysis(self, client, mock_orchestrator):
     """Test forcing extended analysis mode."""
-    with patch("robosystems.tasks.agents.analyze.analyze_agent_task") as mock_task:
-      # Mock the celery task
-      mock_task.delay = Mock(return_value=Mock(id="test-task-id"))
+    with (
+      patch(
+        "robosystems.routers.graphs.agent.handlers._run_agent_analysis_background"
+      ) as mock_background_task,
+      patch(
+        "robosystems.routers.graphs.agent.handlers.create_operation_response",
+        new_callable=AsyncMock,
+        return_value={
+          "operation_id": "test-op-123",
+          "status": "pending",
+          "_links": {
+            "stream": "/v1/operations/test-op-123/stream",
+            "status": "/v1/operations/test-op-123/status",
+          },
+        },
+      ),
+    ):
+      # Mock the background task (replaces old Celery task)
+      mock_background_task.return_value = None
 
       request_data = {
         "message": "Simple query",

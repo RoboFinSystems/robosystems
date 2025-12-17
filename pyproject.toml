@@ -49,9 +49,7 @@ dependencies = [
     "psycopg2-binary>=2.9.0,<3.0",
     "sqlalchemy>=2.0.0,<3.0",
 
-    # Task Queue & Caching
-    "amqp>=5.3.0,<6.0",
-    "celery>=5.5.0,<6.0",
+    # Caching
     "redis>=6.2.0,<7.0",
 
     # Data Orchestration (Dagster)
@@ -85,7 +83,6 @@ dependencies = [
     "opentelemetry-api>=1.35.0,<2.0",
     "opentelemetry-exporter-otlp>=1.35.0,<2.0",
     "opentelemetry-instrumentation-aiohttp-client>=0.55b0,<1.0",
-    "opentelemetry-instrumentation-celery>=0.55b0,<1.0",
     "opentelemetry-instrumentation-fastapi>=0.55b0,<1.0",
     "opentelemetry-instrumentation-psycopg2>=0.55b0,<1.0",
     "opentelemetry-instrumentation-requests>=0.55b0,<1.0",
