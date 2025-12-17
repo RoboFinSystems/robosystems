@@ -1,7 +1,7 @@
 """
 Agent execution handlers for different strategies.
 
-Provides handler functions for sync, SSE, and Celery execution paths.
+Provides handler functions for sync, SSE, and background queue execution paths.
 """
 
 from typing import Dict, Any
@@ -141,7 +141,7 @@ async def handle_background_queue(
   agent_type: str = None,
 ) -> JSONResponse:
   """
-  Handle async background execution (replaces Celery).
+  Handle async background execution.
 
   Uses FastAPI background tasks to run agent analysis asynchronously
   while providing SSE progress updates.
@@ -214,8 +214,6 @@ async def _run_agent_analysis_background(
 ) -> Dict[str, Any]:
   """
   Run agent analysis in background with SSE progress updates.
-
-  This replaces the Celery task implementation.
   """
   import time
   from robosystems.database import get_db_session
@@ -341,7 +339,3 @@ async def _run_agent_analysis_background(
     )
 
     raise
-
-
-# Backwards compatibility alias
-handle_celery_queue = handle_background_queue

@@ -28,7 +28,7 @@ async def stream_agent_execution(
   """
   Stream agent execution with SSE progress updates.
 
-  This function runs the agent on the API (not Celery) but provides
+  This function runs the agent on the API and provides
   real-time progress updates via SSE for operations expected to take 5-30s.
 
   Args:

@@ -132,7 +132,7 @@ async def sync_quickbooks_connection(
   """
   entity_id = connection["entity_id"]
 
-  # TODO: Trigger Dagster pipeline instead of Celery task
+  # TODO: Trigger Dagster pipeline
   # For now, return a placeholder - provider refactoring needed
   logger.warning(
     f"QuickBooks sync requested for entity {entity_id}, graph {graph_id} - "

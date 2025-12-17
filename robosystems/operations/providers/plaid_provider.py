@@ -227,7 +227,7 @@ class PlaidProvider:
         detail="Plaid connection not properly configured. Missing item_id.",
       )
 
-    # TODO: Trigger Dagster pipeline instead of Celery task
+    # TODO: Trigger Dagster pipeline
     # For now, return a placeholder - provider refactoring needed
     logger.warning(
       f"Plaid sync requested for entity {entity_id}, item {item_id} - "

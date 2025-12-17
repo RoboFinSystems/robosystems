@@ -41,7 +41,7 @@ just restart               # Quick restart (Python code changes only)
 just rebuild               # Full rebuild (dependency/Dockerfile changes)
 just test                  # Run tests (excludes slow/integration)
 just logs api              # View API logs
-just logs worker           # View worker logs
+just logs dagster-daemon   # View Dagster daemon logs
 ```
 
 ### Code Quality
@@ -101,10 +101,11 @@ robosystems/
 │   ├── billing/       # Credit consumption tracking
 │   ├── graph/         # Graph routing and multi-tenancy
 │   └── rate_limits/   # Burst protection
-├── tasks/             # Celery background tasks
-│   ├── billing/       # Credit allocation, storage billing
-│   ├── data_sync/     # SEC, QuickBooks, Plaid sync
-│   └── graph_operations/  # Backups, ingestion
+├── dagster/           # Dagster orchestration
+│   ├── jobs/          # Job definitions (billing, infrastructure, SEC)
+│   ├── sensors/       # Event-driven triggers
+│   ├── assets/        # Data pipeline assets
+│   └── resources/     # Dagster resources (DB, S3, Graph)
 ├── adapters/          # External service integrations (SEC, QuickBooks)
 ├── models/
 │   ├── api/           # Pydantic request/response models
@@ -143,7 +144,7 @@ Both are auto-created from `.example` templates by `just start` or `just init`.
 # Core
 ENVIRONMENT=dev|staging|prod
 DATABASE_URL=postgresql://...
-CELERY_BROKER_URL=redis://...
+VALKEY_URL=redis://...
 
 # Graph API
 GRAPH_API_URL=http://localhost:8001
@@ -192,7 +193,7 @@ from robosystems.config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 redis_url = ValkeyURLBuilder.build_url(env.VALKEY_URL, ValkeyDatabase.AUTH_CACHE)
 ```
 
-Database numbers: 0=Celery broker, 1=Celery results, 2=Auth cache, 3=SSE, 4=Locks, 5=Pipeline, 6=Credits, 7=Rate limiting, 8=LadybugDB cache
+Database numbers: 0=Reserved, 1=Reserved, 2=Auth cache, 3=SSE, 4=Locks, 5=Pipeline, 6=Credits, 7=Rate limiting, 8=LadybugDB cache
 
 ## Testing
 
@@ -211,27 +212,8 @@ just test-all              # Full suite with linting/formatting
 ```python
 @pytest.mark.unit          # Fast, isolated
 @pytest.mark.integration   # May use databases
-@pytest.mark.celery        # Celery task tests
 @pytest.mark.slow          # Long-running
 @pytest.mark.security      # Security-focused
-```
-
-### Celery Task Testing Pattern
-
-The key insight is that `sessionmaker()()` creates a call chain:
-
-```python
-@patch("path.to.task.cleanup_function")
-@patch("path.to.task.sessionmaker")
-@patch("path.to.task.engine")
-def test_task(self, mock_engine, mock_sessionmaker, mock_func):
-    mock_session = MagicMock()
-    # Mock the full chain: sessionmaker()().__enter__()
-    mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
-    mock_sessionmaker.return_value.return_value.__exit__.return_value = False
-
-    result = your_task()  # type: ignore[call-arg]
-    mock_session.commit.assert_called_once()
 ```
 
 ### Long-Running Tests

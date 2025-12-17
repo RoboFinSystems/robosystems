@@ -506,8 +506,8 @@ Quick Examples:
     ./bin/tools/tunnels.sh prod graph-query --graph-id kg123 --query 'MATCH (e) RETURN e LIMIT 5'
 
   Queue Management:
-    ./bin/tools/tunnels.sh prod valkey-list-queue celery
-    ./bin/tools/tunnels.sh prod valkey-clear-queue celery
+    ./bin/tools/tunnels.sh prod valkey-list-queue default
+    ./bin/tools/tunnels.sh prod valkey-clear-queue default
     ./bin/tools/tunnels.sh prod dlq-stats
 
 Show All Commands:

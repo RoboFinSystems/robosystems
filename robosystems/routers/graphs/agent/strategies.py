@@ -21,7 +21,7 @@ class AgentExecutionStrategy(Enum):
 
   SYNC_IMMEDIATE = "sync_immediate"
   SSE_STREAMING = "sse_streaming"
-  CELERY_QUEUE_STREAM = "celery_queue_stream"
+  BACKGROUND_QUEUE = "background_queue"
 
 
 ResponseMode = BaseResponseMode
@@ -108,12 +108,12 @@ class AgentStrategySelector:
 
     if mode_override == ResponseMode.ASYNC or client_info.get("prefers_async"):
       metadata["selection_reason"] = "Async mode preferred or forced"
-      return AgentExecutionStrategy.CELERY_QUEUE_STREAM, metadata
+      return AgentExecutionStrategy.BACKGROUND_QUEUE, metadata
 
-    # Extended analysis always goes to Celery
+    # Extended analysis always goes to background queue
     if force_extended:
       metadata["selection_reason"] = "Extended analysis forced"
-      return AgentExecutionStrategy.CELERY_QUEUE_STREAM, metadata
+      return AgentExecutionStrategy.BACKGROUND_QUEUE, metadata
 
     # Testing tools get sync for fast operations
     if client_info["is_testing_tool"]:
@@ -147,32 +147,32 @@ class AgentStrategySelector:
         return AgentExecutionStrategy.SYNC_IMMEDIATE, metadata
 
     else:
-      # Long operations: Celery worker with SSE monitoring
+      # Long operations: background queue with SSE monitoring
       metadata["selection_reason"] = (
-        f"Long operation ({estimated_time}s), queuing to worker"
+        f"Long operation ({estimated_time}s), queuing to background"
       )
-      return AgentExecutionStrategy.CELERY_QUEUE_STREAM, metadata
+      return AgentExecutionStrategy.BACKGROUND_QUEUE, metadata
 
   @classmethod
-  def should_use_celery(
+  def should_use_background(
     cls,
     execution_profile: Optional[ExecutionProfile],
     mode: AgentMode,
   ) -> bool:
     """
-    Quick check if agent should use Celery based on execution profile.
+    Quick check if agent should use background queue based on execution profile.
 
     Args:
         execution_profile: Agent's execution time profile
         mode: Agent execution mode
 
     Returns:
-        True if should use Celery, False for API execution
+        True if should use background queue, False for API execution
     """
     if not execution_profile:
       return False
 
-    # Extended mode always goes to Celery
+    # Extended mode always goes to background queue
     if mode == AgentMode.EXTENDED:
       return True
 

@@ -383,7 +383,7 @@ AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
 
 # Database configuration (populated at runtime)
 # DATABASE_URL will be set by infrastructure scripts when needed
-# CELERY_BROKER_URL will be set by infrastructure scripts when needed
+# VALKEY_URL will be set by infrastructure scripts when needed
 ENV_EOF
 
 chmod 600 /etc/robosystems/.env
@@ -621,11 +621,8 @@ bastion sec-load --ticker NVDA --year 2024
 # Check SEC database health
 bastion sec-health --verbose
 
-# Force credit allocation (DANGEROUS)
+# List DLQ stats
 bastion dlq-stats
-
-# Add bonus credits to repository
-bastion valkey-list-queue celery
 
 # Run custom script
 bastion run python -m robosystems.scripts.custom_script --help

@@ -7,7 +7,7 @@ analysis with:
 - Intelligent strategy selection based on execution profiles
 - Multiple response formats (JSON, SSE) with transparent handling
 - Progress monitoring for long-running operations
-- Celery worker integration for extended analysis
+- Background queue integration for extended analysis
 """
 
 from fastapi import APIRouter

@@ -242,7 +242,7 @@ class GraphClientFactory:
 
     try:
       # Create a new Redis client for each event loop to avoid "Event loop is closed" errors
-      # This is necessary because Celery tasks create new event loops
+      # This is necessary because background tasks may create new event loops
       # Use async factory method to handle SSL params correctly
       from robosystems.config.valkey_registry import create_async_redis_client
 
@@ -266,7 +266,7 @@ class GraphClientFactory:
         return client
       except AttributeError as ae:
         # Handle '_AsyncRESP2Parser' object has no attribute '_connected' error
-        # This happens when the event loop context changes (e.g., in Celery tasks)
+        # This happens when the event loop context changes (e.g., in background tasks)
         logger.debug(f"Redis connection state issue, skipping cache: {ae}")
         return None
 
@@ -767,7 +767,7 @@ class GraphClientFactory:
         "create_client_sync() cannot be called from an async context. "
         "Use 'await get_graph_client(graph_id)' or "
         "'await GraphClientFactory.create_client(graph_id)' instead. "
-        "If you're in a Celery task, wrap with asyncio.run()."
+        "For sync contexts, wrap with asyncio.run()."
       )
     except RuntimeError as e:
       if "no running event loop" in str(e).lower():

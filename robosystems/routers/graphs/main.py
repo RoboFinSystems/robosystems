@@ -492,7 +492,7 @@ async def create_graph(
           },
         }
 
-      # Create SSE operation instead of Celery task
+      # Create SSE operation for async tracking
       response = await create_operation_response(
         operation_type=operation_type,
         user_id=current_user.id,

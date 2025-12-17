@@ -53,8 +53,8 @@ schedule_storage:
         env: DAGSTER_POSTGRES_DB
 
 # Run launcher - how runs are executed
-# Using default in-process launcher for simplicity in dev
-# In production, could use ECS, K8s, or Celery
+# Using default in-process launcher for local development
+# Production uses EcsRunLauncher (see dagster_prod.yaml)
 run_launcher:
   module: dagster.core.launcher
   class: DefaultRunLauncher

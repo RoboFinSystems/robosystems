@@ -408,7 +408,7 @@ immediate DuckDB staging and optional graph ingestion.
 **What Happens (status='uploaded'):**
 1. File validated in S3
 2. Row count calculated
-3. DuckDB staging triggered immediately (Celery task)
+3. DuckDB staging triggered immediately (background task)
 4. If ingest_to_graph=true, graph ingestion queued
 5. File queryable in DuckDB within seconds
 
@@ -431,7 +431,7 @@ immediate DuckDB staging and optional graph ingestion.
             "file_id": "f123",
             "status": "uploaded",
             "message": "File uploaded and queued for DuckDB staging",
-            "duckdb_task_id": "celery_task_123",
+            "duckdb_task_id": "op_abc123",
           }
         }
       },
@@ -736,7 +736,9 @@ async def update_file(
             run_config=run_config,
           )
 
-          graph_file.celery_task_id = operation_id  # Reuse field for operation_id
+          graph_file.celery_task_id = (
+            operation_id  # Legacy field name, stores operation_id
+          )
 
           db.commit()
           db.refresh(graph_file)

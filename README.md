@@ -41,7 +41,7 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 - Graph database (LadybugDB by default, Neo4j optional)
 - PostgreSQL with automatic migrations
 - Dagster for data pipeline orchestration
-- Valkey for caching and Celery broker
+- Valkey for caching and SSE messaging
 - All development services
 
 ### Local Development
@@ -115,8 +115,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - FastAPI REST API with versioned endpoints (`/v1/`)
 - MCP Server for AI-powered financial analytics
-- Dagster for data pipeline orchestration (SEC, Plaid, billing)
-- Celery for real-time SSE operations (graph creation, backups)
+- Dagster for data pipeline orchestration and background jobs
 
 **Graph Database System:**
 

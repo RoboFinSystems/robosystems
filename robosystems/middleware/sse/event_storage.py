@@ -135,7 +135,7 @@ class SSEEventStorage:
     """
     self._redis_client = redis_client
     self._async_redis = None
-    self._sync_redis = None  # For sync methods (Celery workers)
+    self._sync_redis = None  # For sync methods (background tasks)
     self.default_ttl = default_ttl
 
     # Redis key prefixes
@@ -164,7 +164,7 @@ class SSEEventStorage:
     return client
 
   def _get_sync_redis(self) -> Redis:
-    """Get synchronous Redis client for Celery workers."""
+    """Get synchronous Redis client for background tasks."""
     if self._sync_redis is None:
       from robosystems.config.valkey_registry import ValkeyDatabase
       from robosystems.config.valkey_registry import create_redis_client
@@ -304,7 +304,7 @@ class SSEEventStorage:
     ttl: Optional[int] = None,
   ) -> SSEEvent:
     """
-    Synchronous version of store_event for use in Celery workers.
+    Synchronous version of store_event for use in background tasks.
 
     Args:
         operation_id: Operation identifier
