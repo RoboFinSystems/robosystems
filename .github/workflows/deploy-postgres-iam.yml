@@ -98,6 +98,9 @@ on:
       postgres_secret_arn:
         description: "ARN of the PostgreSQL secret in Secrets Manager"
         value: ${{ jobs.action.outputs.postgres_secret_arn }}
+      database_sg_id:
+        description: "RDS Security Group ID for database access"
+        value: ${{ jobs.action.outputs.database_sg_id }}
 
     secrets:
       ACTIONS_TOKEN:
@@ -113,6 +116,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       postgres_secret_arn: ${{ steps.stack-outputs.outputs.postgres_secret_arn }}
+      database_sg_id: ${{ steps.stack-outputs.outputs.database_sg_id }}
 
     steps:
       - name: Checkout
@@ -162,12 +166,12 @@ jobs:
             # Fetch S3 keys from manifest (which includes hashes in filenames)
             MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
             
-            SECRETS_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."postgres-secrets".s3_key // empty')
+            INIT_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."postgres-init".s3_key // empty')
             ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."postgres-rotation".s3_key // empty')
-            
-            if [ -n "$SECRETS_KEY" ]; then
-              POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=PostgresSecretsCodeKey,ParameterValue=$SECRETS_KEY"
-              echo "Adding Postgres Secrets Lambda code key: $SECRETS_KEY"
+
+            if [ -n "$INIT_KEY" ]; then
+              POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=PostgresInitCodeKey,ParameterValue=$INIT_KEY"
+              echo "Adding Postgres Init Lambda code key: $INIT_KEY"
             fi
             
             if [ -n "$ROTATION_KEY" ]; then
@@ -224,10 +228,10 @@ jobs:
           timeout: "1800"
           interval: "10"
 
-      - name: Invoke Postgres Secrets Update Lambda
+      - name: Invoke Postgres Init Lambda
         run: |
-          LAMBDA_NAME="${{ inputs.stack_name }}-secrets-update-lambda"
-          echo "Invoking secrets update lambda: $LAMBDA_NAME"
+          LAMBDA_NAME="${{ inputs.stack_name }}-init-lambda"
+          echo "Invoking postgres init lambda: $LAMBDA_NAME"
 
           # Invoke the lambda function
           RESPONSE=$(aws lambda invoke \
@@ -240,7 +244,9 @@ jobs:
           STATUS_CODE=$(echo $RESPONSE | jq -r '.StatusCode')
           if [ "$STATUS_CODE" = "200" ]; then
             echo "Lambda invoked successfully"
-            echo "Secrets update completed"
+            echo "PostgreSQL initialization completed (secrets + databases)"
+            # Show Lambda response for visibility
+            cat /tmp/lambda-response.json || true
           else
             echo "Error invoking lambda: $RESPONSE"
             exit 1
@@ -270,6 +276,19 @@ jobs:
               --output text)
             echo "CloudFormation output retrieved"
             echo "postgres_secret_arn=$POSTGRES_SECRET_ARN" >> $GITHUB_OUTPUT
+          fi
+
+          # Get the RDS Security Group ID from CloudFormation outputs
+          DATABASE_SG_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='RDSSecurityGroupId'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$DATABASE_SG_ID" ] && [ "$DATABASE_SG_ID" != "None" ]; then
+            echo "database_sg_id=$DATABASE_SG_ID" >> $GITHUB_OUTPUT
+            echo "RDS Security Group ID: $DATABASE_SG_ID"
+          else
+            echo "Warning: Could not retrieve RDS Security Group ID"
           fi
 
       - name: Update Deployment Status

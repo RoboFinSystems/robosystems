@@ -60,7 +60,9 @@ package_lambda() {
 
 # Package all Lambda functions
 
-package_lambda "postgres-secrets" "postgres_secrets_update.py" ""
+# postgres-init: Updates secrets AND creates additional databases (dagster, etc.)
+# psycopg2-binary needed for database creation
+package_lambda "postgres-init" "postgres_init.py" "psycopg2-binary==2.9.10"
 
 package_lambda "postgres-rotation" "postgres_rotation.py" "psycopg2-binary==2.9.10"
 
@@ -68,20 +70,12 @@ package_lambda "valkey-rotation" "valkey_rotation.py" "redis==5.0.1"
 
 package_lambda "graph-api-rotation" "graph_api_rotation.py" ""
 
-# Package snapshot Lambda functions (temporary - will be migrated to volume manager)
-package_lambda "graph-snapshot-creator" "graph_snapshot_creator.py" ""
-
-package_lambda "graph-snapshot-selector" "graph_snapshot_selector.py" ""
-
 # Package volume management Lambda functions
 package_lambda "graph-volume-manager" "graph_volume_manager.py" ""
 
 package_lambda "graph-volume-monitor" "graph_volume_monitor.py" "urllib3==2.6.0"
 
 package_lambda "graph-volume-detachment" "graph_volume_detachment.py" ""
-
-# Package instance monitor Lambda function
-package_lambda "graph-instance-monitor" "graph_instance_monitor.py" ""
 
 # Package worker monitor Lambda function (queue metrics and task protection)
 package_lambda "worker-monitor" "worker_monitor.py" "redis==5.0.1"
@@ -145,7 +139,7 @@ echo "  \"Lambdas\": {" >> "$MANIFEST"
 
 # Create manifest with S3 keys and hashes
 FIRST=true
-for lambda_name in postgres-secrets postgres-rotation valkey-rotation graph-api-rotation graph-snapshot-creator graph-snapshot-selector graph-volume-manager graph-volume-monitor graph-volume-detachment graph-instance-monitor worker-monitor; do
+for lambda_name in postgres-init postgres-rotation valkey-rotation graph-api-rotation graph-volume-manager graph-volume-monitor graph-volume-detachment worker-monitor; do
     if [ "$FIRST" = false ]; then
         echo "," >> "$MANIFEST"
     fi
@@ -171,7 +165,7 @@ echo "✅ Lambda functions, scripts, and CloudFormation templates packaged and u
 echo ""
 echo "📍 S3 Artifacts:"
 LAMBDA_COUNT=0
-for lambda_name in postgres-secrets postgres-rotation valkey-rotation graph-api-rotation graph-snapshot-creator graph-snapshot-selector graph-volume-manager graph-volume-monitor graph-volume-detachment graph-instance-monitor worker-monitor; do
+for lambda_name in postgres-init postgres-rotation valkey-rotation graph-api-rotation graph-volume-manager graph-volume-monitor graph-volume-detachment worker-monitor; do
     if [ -f "../${lambda_name}.s3key" ]; then
         LAMBDA_COUNT=$((LAMBDA_COUNT + 1))
     fi

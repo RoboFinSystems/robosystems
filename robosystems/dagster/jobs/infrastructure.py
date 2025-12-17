@@ -1,11 +1,13 @@
 """Dagster infrastructure jobs.
 
-These jobs are migrated from Celery tasks for system maintenance:
+These jobs are migrated from Celery tasks and Lambda functions for system maintenance:
 - Auth cleanup (expired API keys, tokens)
 - Health checks (credit allocation, graph credits)
+- Graph instance monitoring (from bin/lambda/graph_instance_monitor.py)
 """
 
 from datetime import datetime, timezone
+from typing import Any
 
 from dagster import (
   DefaultScheduleStatus,
@@ -194,5 +196,246 @@ hourly_auth_cleanup_schedule = ScheduleDefinition(
 weekly_health_check_schedule = ScheduleDefinition(
   job=weekly_health_check_job,
   cron_schedule="0 3 * * 1",  # Mondays at 3 AM UTC
+  default_status=DefaultScheduleStatus.RUNNING,
+)
+
+
+# ============================================================================
+# Instance Monitoring Jobs
+# Replaces: bin/lambda/graph_instance_monitor.py
+# ============================================================================
+
+
+@op
+def check_instance_health(context: OpExecutionContext) -> dict[str, Any]:
+  """Check health of Graph EC2 instances and update registry.
+
+  This operation:
+  1. Queries all instances from DynamoDB registry
+  2. Checks actual EC2 instance states
+  3. Updates instance health status in registry
+  4. Removes instances that have been terminated
+  """
+  from robosystems.operations.graph.infrastructure import InstanceMonitor
+
+  monitor = InstanceMonitor()
+  result = monitor.check_instance_health()
+
+  context.log.info(
+    f"Instance health check: {result.healthy} healthy, "
+    f"{result.unhealthy} unhealthy, {result.removed} removed"
+  )
+
+  return {
+    "timestamp": result.timestamp,
+    "total_instances": result.total_instances,
+    "healthy": result.healthy,
+    "unhealthy": result.unhealthy,
+    "terminated": result.terminated,
+    "removed": result.removed,
+    "errors": result.errors,
+  }
+
+
+@job
+def instance_health_check_job():
+  """Hourly health check for Graph EC2 instances."""
+  check_instance_health()
+
+
+@op
+def collect_instance_metrics(context: OpExecutionContext) -> dict[str, Any]:
+  """Collect and publish cluster metrics to CloudWatch.
+
+  This operation:
+  1. Queries instance and graph registries
+  2. Calculates capacity, utilization, and health metrics
+  3. Publishes metrics to CloudWatch for monitoring and auto-scaling
+  """
+  from robosystems.operations.graph.infrastructure import InstanceMonitor
+
+  monitor = InstanceMonitor()
+  result = monitor.collect_metrics()
+
+  context.log.info(f"Published {result.metrics_published} metrics to CloudWatch")
+
+  return {
+    "timestamp": result.timestamp,
+    "metrics_published": result.metrics_published,
+    "errors": result.errors,
+  }
+
+
+@job
+def instance_metrics_collection_job():
+  """Collect cluster metrics every 5 minutes for auto-scaling."""
+  collect_instance_metrics()
+
+
+@op
+def cleanup_stale_registry_entries(context: OpExecutionContext) -> dict[str, Any]:
+  """Clean up stale entries from instance registry.
+
+  Removes:
+  - Entries marked as deleted older than 7 days
+  - Entries with missing instance_id references
+  """
+  from robosystems.operations.graph.infrastructure import InstanceMonitor
+
+  monitor = InstanceMonitor()
+  result = monitor.cleanup_stale_graphs()
+
+  context.log.info(f"Instance registry cleanup: {result.removed_count} entries removed")
+
+  return {
+    "timestamp": result.timestamp,
+    "removed_count": result.removed_count,
+    "errors": result.errors,
+  }
+
+
+@job
+def instance_registry_cleanup_job():
+  """Daily cleanup of stale instance registry entries."""
+  cleanup_stale_registry_entries()
+
+
+@op
+def cleanup_stale_volume_entries(context: OpExecutionContext) -> dict[str, Any]:
+  """Clean up stale entries from volume registry.
+
+  Removes or updates:
+  - Volumes stuck in 'attaching' state to non-existent instances
+  - Volumes with missing instance references
+  - Old unattached volumes (older than 30 days)
+  """
+  from robosystems.operations.graph.infrastructure import InstanceMonitor
+
+  monitor = InstanceMonitor()
+  result = monitor.cleanup_stale_volumes()
+
+  context.log.info(
+    f"Volume registry cleanup: {result.updated_count} updated, "
+    f"{result.removed_count} removed"
+  )
+
+  return {
+    "timestamp": result.timestamp,
+    "updated_count": result.updated_count,
+    "removed_count": result.removed_count,
+    "errors": result.errors,
+  }
+
+
+@job
+def volume_registry_cleanup_job():
+  """Daily cleanup of stale volume registry entries."""
+  cleanup_stale_volume_entries()
+
+
+@op
+def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]:
+  """Run all instance maintenance tasks in sequence.
+
+  This combines:
+  - Instance health check
+  - Metrics collection
+  - Instance registry cleanup
+  - Volume registry cleanup
+  """
+  from robosystems.operations.graph.infrastructure import InstanceMonitor
+
+  monitor = InstanceMonitor()
+
+  results = {
+    "health_check": {},
+    "metrics": {},
+    "instance_cleanup": {},
+    "volume_cleanup": {},
+  }
+
+  # Health check
+  health_result = monitor.check_instance_health()
+  results["health_check"] = {
+    "healthy": health_result.healthy,
+    "unhealthy": health_result.unhealthy,
+    "removed": health_result.removed,
+  }
+  context.log.info(f"Health check: {health_result.healthy} healthy instances")
+
+  # Metrics collection
+  metrics_result = monitor.collect_metrics()
+  results["metrics"] = {
+    "metrics_published": metrics_result.metrics_published,
+  }
+  context.log.info(f"Metrics: {metrics_result.metrics_published} published")
+
+  # Instance registry cleanup
+  instance_cleanup_result = monitor.cleanup_stale_graphs()
+  results["instance_cleanup"] = {
+    "removed_count": instance_cleanup_result.removed_count,
+  }
+  context.log.info(f"Instance cleanup: {instance_cleanup_result.removed_count} removed")
+
+  # Volume cleanup
+  volume_cleanup_result = monitor.cleanup_stale_volumes()
+  results["volume_cleanup"] = {
+    "updated_count": volume_cleanup_result.updated_count,
+    "removed_count": volume_cleanup_result.removed_count,
+  }
+  context.log.info(
+    f"Volume cleanup: {volume_cleanup_result.updated_count} updated, "
+    f"{volume_cleanup_result.removed_count} removed"
+  )
+
+  return {
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "results": results,
+  }
+
+
+@job
+def full_instance_maintenance_job():
+  """Run all instance maintenance tasks (weekly)."""
+  run_full_instance_maintenance()
+
+
+# ============================================================================
+# Instance Infrastructure Schedules
+# ============================================================================
+
+# Instance health check - every hour (matches Lambda: rate(1 hour))
+instance_health_check_schedule = ScheduleDefinition(
+  job=instance_health_check_job,
+  cron_schedule="0 * * * *",  # Every hour at :00
+  default_status=DefaultScheduleStatus.RUNNING,
+)
+
+# Metrics collection - every 5 minutes (matches Lambda: rate(5 minutes))
+# Critical for autoscaling
+instance_metrics_collection_schedule = ScheduleDefinition(
+  job=instance_metrics_collection_job,
+  cron_schedule="*/5 * * * *",  # Every 5 minutes
+  default_status=DefaultScheduleStatus.RUNNING,
+)
+
+# Instance registry cleanup - daily at 3 AM UTC (matches Lambda: cron(0 3 * * ? *))
+instance_registry_cleanup_schedule = ScheduleDefinition(
+  job=instance_registry_cleanup_job,
+  cron_schedule="0 3 * * *",  # 3 AM UTC daily
+  default_status=DefaultScheduleStatus.RUNNING,
+)
+
+# Volume registry cleanup - daily at 4 AM UTC (matches Lambda: cron(0 4 * * ? *))
+volume_registry_cleanup_schedule = ScheduleDefinition(
+  job=volume_registry_cleanup_job,
+  cron_schedule="0 4 * * *",  # 4 AM UTC daily
+  default_status=DefaultScheduleStatus.RUNNING,
+)
+
+# Full maintenance - weekly on Sundays at 2 AM UTC
+full_instance_maintenance_schedule = ScheduleDefinition(
+  job=full_instance_maintenance_job,
+  cron_schedule="0 2 * * 0",  # Sundays at 2 AM UTC
   default_status=DefaultScheduleStatus.RUNNING,
 )

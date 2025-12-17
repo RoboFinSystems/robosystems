@@ -456,7 +456,7 @@ Resources:
       CacheParameterGroupFamily: valkey8
       Description: Parameter group for RoboSystems Valkey ElastiCache
       Properties:
-        # Memory management for Celery workloads
+        # Memory management for application caches
         maxmemory-policy: allkeys-lru
         # Connection settings
         timeout: 300

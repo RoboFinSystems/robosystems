@@ -89,9 +89,9 @@ Parameters:
   LambdaCodeBucket:
     Type: String
     Description: S3 bucket containing Lambda deployment packages
-  PostgresSecretsCodeKey:
+  PostgresInitCodeKey:
     Type: String
-    Description: S3 key for Postgres Secrets Lambda deployment package
+    Description: S3 key for Postgres Init Lambda deployment package (secrets + database creation)
   PostgresRotationCodeKey:
     Type: String
     Description: S3 key for Postgres Rotation Lambda deployment package
@@ -716,32 +716,69 @@ Resources:
             - - !Sub ${DBInstanceName}-${Environment}
       State: ENABLED
       Targets:
-        - Arn: !GetAtt PostgresSecretsUpdateLambda.Arn
-          Id: PostgresSecretsUpdateLambdaTarget
+        - Arn: !GetAtt PostgresInitLambda.Arn
+          Id: PostgresInitLambdaTarget
 
   # Lambda permission for CloudWatch Events
-  LambdaPermissionForCloudWatchEvents:
+  PostgresInitLambdaPermission:
     Type: AWS::Lambda::Permission
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      FunctionName: !GetAtt PostgresSecretsUpdateLambda.Arn
+      FunctionName: !GetAtt PostgresInitLambda.Arn
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt RDSStateChangeRule.Arn
 
-  # Lambda function for updating Secrets Manager
-  PostgresSecretsUpdateLambda:
+  # Security group for Lambda functions that need RDS access
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupName: !Sub ${AWS::StackName}-lambda-sg
+      GroupDescription: Security group for Lambda functions accessing RDS
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-lambda-sg
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Allow Lambda to access RDS
+  LambdaToRDSIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Description: Allow Lambda functions to access PostgreSQL
+
+  # Lambda function for PostgreSQL initialization (secrets + database creation)
+  PostgresInitLambda:
     Type: AWS::Lambda::Function
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
-      FunctionName: !Sub ${AWS::StackName}-secrets-update-lambda
-      Description: "Updates PostgreSQL secrets - auto-updates via S3 key hash"
+      FunctionName: !Sub ${AWS::StackName}-init-lambda
+      Description: "Initializes PostgreSQL: updates secrets and creates additional databases (e.g., dagster)"
       Handler: index.lambda_handler
-      Role: !GetAtt PostgresSecretsUpdateLambdaRole.Arn
+      Role: !GetAtt PostgresInitLambdaRole.Arn
       Runtime: python3.13
       Timeout: 300
+      # VPC configuration for RDS access (database creation)
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds:
+          - !Ref SubnetId1
+          - !Ref SubnetId2
       Environment:
         Variables:
           ENVIRONMENT: !Ref Environment
@@ -750,9 +787,11 @@ Resources:
           POSTGRES_PASSWORD: !Sub "{{resolve:secretsmanager:${DBPasswordSecret}:SecretString:password}}"
           POSTGRES_DB_INSTANCE: !Sub ${DBInstanceName}-${Environment}
           POSTGRES_DB_NAME: !Ref DBName
+          # Comma-separated list of additional databases to create
+          ADDITIONAL_DATABASES: "dagster"
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-postgres-secrets-update-lambda
+          Value: !Sub ${AWS::StackName}-postgres-init-lambda
         - Key: Environment
           Value: !Ref Environment
         - Key: Service
@@ -763,8 +802,8 @@ Resources:
           Value: CloudFormation
       Code:
         S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref PostgresSecretsCodeKey
-  PostgresSecretsUpdateLambdaRole:
+        S3Key: !Ref PostgresInitCodeKey
+  PostgresInitLambdaRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
@@ -778,6 +817,8 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        # Required for VPC access (ENI creation)
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: RDSAccess
           PolicyDocument:
@@ -820,7 +861,7 @@ Resources:
                       - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-postgres-secrets-update-lambda-role
+          Value: !Sub ${AWS::StackName}-postgres-init-lambda-role
         - Key: Environment
           Value: !Ref Environment
         - Key: Service

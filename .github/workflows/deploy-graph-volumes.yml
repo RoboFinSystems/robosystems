@@ -152,8 +152,6 @@ jobs:
             VOLUME_MANAGER_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-manager".s3_key // empty')
             VOLUME_MONITOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-monitor".s3_key // empty')
             VOLUME_DETACHMENT_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-volume-detachment".s3_key // empty')
-            SNAPSHOT_CREATOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-snapshot-creator".s3_key // empty')
-            SNAPSHOT_SELECTOR_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-snapshot-selector".s3_key // empty')
 
             if [ -n "$VOLUME_MANAGER_KEY" ]; then
               STACK_PARAMS="$STACK_PARAMS \
@@ -168,16 +166,6 @@ jobs:
             if [ -n "$VOLUME_DETACHMENT_KEY" ]; then
               STACK_PARAMS="$STACK_PARAMS \
                     ParameterKey=VolumeDetachmentCodeKey,ParameterValue=$VOLUME_DETACHMENT_KEY"
-            fi
-
-            if [ -n "$SNAPSHOT_CREATOR_KEY" ]; then
-              STACK_PARAMS="$STACK_PARAMS \
-                    ParameterKey=SnapshotCreatorCodeKey,ParameterValue=$SNAPSHOT_CREATOR_KEY"
-            fi
-
-            if [ -n "$SNAPSHOT_SELECTOR_KEY" ]; then
-              STACK_PARAMS="$STACK_PARAMS \
-                    ParameterKey=SnapshotSelectorCodeKey,ParameterValue=$SNAPSHOT_SELECTOR_KEY"
             fi
           fi
 

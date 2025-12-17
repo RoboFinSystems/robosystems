@@ -120,6 +120,5 @@ DAGSTER_POSTGRES_HOST=localhost
 
 ## Related Documentation
 
-- [Execution Roadmap](/local/docs/EXECUTION_ROADMAP.md)
-- [Celery Tasks](/robosystems/tasks/README.md) - Legacy (being replaced)
-- [Dagster Documentation](https://docs.dagster.io/)
+- [Execution Roadmap](/local/docs/EXECUTION_ROADMAP.md) - Migration roadmap and progress
+- [Dagster Documentation](https://docs.dagster.io/) - Official Dagster docs

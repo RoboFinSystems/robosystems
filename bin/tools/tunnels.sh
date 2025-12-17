@@ -15,6 +15,7 @@ SSH_KEY="~/.ssh/id_rsa"
 BASTION_HOST=""
 POSTGRES_ENDPOINT=""
 VALKEY_ENDPOINT=""
+DAGSTER_ENDPOINT=""
 
 # Validate dependencies
 check_dependencies() {
@@ -98,6 +99,7 @@ print_usage() {
     echo "======================================================================${NC}"
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
     echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
+    echo "  dagster       - Dagster webserver tunnel (localhost:3000)"
     echo "  migrate       - Run database migrations via bastion"
     echo "  help          - Show bastion operation examples"
     echo "  all           - All services (default)"
@@ -190,11 +192,27 @@ discover_infrastructure() {
         VALKEY_ENDPOINT="NOT_FOUND"
     fi
 
+    # Discover Dagster internal endpoint (Service Discovery)
+    echo -e "${YELLOW}Looking for Dagster webserver endpoint...${NC}"
+
+    local dagster_stack="RoboSystemsDagster${env_capitalized}"
+    DAGSTER_ENDPOINT=$(aws cloudformation describe-stacks \
+        --stack-name "$dagster_stack" \
+        --query 'Stacks[0].Outputs[?OutputKey==`DagsterInternalEndpoint`].OutputValue' \
+        --output text 2>/dev/null || echo "")
+
+    if [[ -z "$DAGSTER_ENDPOINT" || "$DAGSTER_ENDPOINT" == "None" ]]; then
+        # Fallback to standard Service Discovery naming
+        DAGSTER_ENDPOINT="webserver.dagster.${environment}.robosystems.local"
+        echo -e "${YELLOW}Using default Dagster endpoint: $DAGSTER_ENDPOINT${NC}"
+    fi
+
     # Show discovered endpoints
     echo -e "${GREEN}✓ Infrastructure discovered:${NC}"
     echo -e "  Bastion Host: ${GREEN}$BASTION_HOST${NC}"
     echo -e "  PostgreSQL:   ${GREEN}$POSTGRES_ENDPOINT${NC}"
     echo -e "  Valkey:       ${GREEN}$VALKEY_ENDPOINT${NC}"
+    echo -e "  Dagster:      ${GREEN}$DAGSTER_ENDPOINT${NC}"
     echo ""
 }
 
@@ -325,6 +343,24 @@ setup_valkey_tunnel() {
     echo ""
 
     ssh -i $SSH_KEY -N -L 6379:$VALKEY_ENDPOINT:6379 ec2-user@$BASTION_HOST
+}
+
+setup_dagster_tunnel() {
+    if [[ -z "$DAGSTER_ENDPOINT" || "$DAGSTER_ENDPOINT" == "NOT_FOUND" ]]; then
+        echo -e "${RED}Error: Dagster endpoint not found${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}Setting up Dagster webserver tunnel...${NC}"
+    echo -e "${BLUE}Local: localhost:3000 -> Remote: $DAGSTER_ENDPOINT:3000${NC}"
+    echo ""
+    echo -e "${YELLOW}Access Dagster UI:${NC}"
+    echo "Open http://localhost:3000 in your browser"
+    echo ""
+    echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
+    echo ""
+
+    ssh -i $SSH_KEY -N -L 3000:$DAGSTER_ENDPOINT:3000 ec2-user@$BASTION_HOST
 }
 
 run_database_migration() {
@@ -587,7 +623,7 @@ main() {
                 fi
                 shift
                 ;;
-            postgres|valkey|migrate|help|all)
+            postgres|valkey|dagster|migrate|help|all)
                 if [[ -z "$service" ]]; then
                     service="$1"
                 else
@@ -659,6 +695,9 @@ main() {
             ;;
         valkey)
             setup_valkey_tunnel
+            ;;
+        dagster)
+            setup_dagster_tunnel
             ;;
         migrate)
             run_database_migration "$environment"

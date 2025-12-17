@@ -378,7 +378,7 @@ Before working in a directory, read its README:
 - `/robosystems/middleware/auth/README.md` - Authentication system
 - `/robosystems/middleware/graph/README.md` - Graph routing
 - `/robosystems/operations/README.md` - Business logic patterns
-- `/robosystems/tasks/README.md` - Celery task patterns
+- `/robosystems/dagster/README.md` - Dagster orchestration patterns
 - `/robosystems/models/api/README.md` - API models
 - `/robosystems/models/iam/README.md` - Database models
 - `/tests/README.md` - Testing guide

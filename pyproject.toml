@@ -11,7 +11,6 @@ keywords = ["robosystems", "financial", "graph", "knowledge graph", "ladybugdb"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: FastAPI",
-    "Framework :: Celery",
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
     "Intended Audience :: Information Technology",

@@ -174,6 +174,8 @@ COPY alembic/ /app/alembic/
 # Copy configuration files
 COPY .github/configs/graph.yml /app/configs/graph.yml
 COPY .github/configs/stacks.yml /app/configs/stacks.yml
+# Copy Dagster configuration (production and development)
+COPY dagster_home/ /app/dagster_home/
 
 # Make entrypoint script executable
 RUN chmod +x bin/entrypoint.sh

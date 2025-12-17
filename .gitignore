@@ -86,14 +86,10 @@ target/
 profile_default/
 ipython_config.py
 
-# celery beat schedule file
-celerybeat-schedule.db
-celerybeat-schedule
-celerybeat.pid
-
-# Dagster local state (keep dagster.yaml config)
+# Dagster local state (keep config files)
 dagster_home/*
 !dagster_home/dagster.yaml
+!dagster_home/dagster_prod.yaml
 
 # SageMath parsed files
 *.sage.py

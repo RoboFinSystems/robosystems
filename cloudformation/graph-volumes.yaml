@@ -48,14 +48,6 @@ Parameters:
   VolumeDetachmentCodeKey:
     Type: String
     Description: S3 key for Volume Detachment Lambda deployment package (includes hash)
-  SnapshotCreatorCodeKey:
-    Type: String
-    Description: S3 key for Snapshot Creator Lambda deployment package (includes hash)
-    Default: ""
-  SnapshotSelectorCodeKey:
-    Type: String
-    Description: S3 key for Snapshot Selector Lambda deployment package (includes hash)
-    Default: ""
 
   # Monitoring & Alerting
   SNSAlertEmail:
@@ -91,8 +83,6 @@ Mappings:
 Conditions:
   UseProvidedVolumeRegistry: !Not [!Equals [!Ref VolumeRegistryTable, ""]]
   HasGraphApiSecret: !Not [!Equals [!Ref GraphApiSecretArn, ""]]
-  HasSnapshotCreatorCode: !Not [!Equals [!Ref SnapshotCreatorCodeKey, ""]]
-  HasSnapshotSelectorCode: !Not [!Equals [!Ref SnapshotSelectorCodeKey, ""]]
 
 Resources:
   # ========================================
@@ -289,48 +279,6 @@ Resources:
   # SNAPSHOT MANAGEMENT LAMBDAS
   # ========================================
 
-  # Lambda role for snapshot operations
-  SnapshotLambdaRole:
-    Type: AWS::IAM::Role
-    Condition: HasSnapshotCreatorCode
-    Properties:
-      RoleName: !Sub "${AWS::StackName}-snapshot-lambda-role"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      Policies:
-        - PolicyName: SnapshotManagement
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:CreateSnapshot
-                  - ec2:DeleteSnapshot
-                  - ec2:DescribeSnapshots
-                  - ec2:DescribeVolumes
-                  - ec2:DescribeInstances
-                  - ec2:CreateTags
-                  - ec2:DescribeTags
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - cloudformation:DescribeStacks
-                Resource: "*"
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-
   # Volume Monitor Lambda Role
   VolumeMonitorLambdaRole:
     Type: AWS::IAM::Role
@@ -491,101 +439,6 @@ Resources:
           Value: !Ref Environment
         - Key: Service
           Value: !Ref ServiceTag
-
-  # Lambda function to create snapshots (migrated from shared writers)
-  SnapshotCreatorFunction:
-    Type: AWS::Lambda::Function
-    Condition: HasSnapshotCreatorCode
-    Properties:
-      FunctionName: !Sub "${AWS::StackName}-snapshot-creator"
-      Runtime: python3.13
-      Handler: index.lambda_handler
-      Role: !GetAtt SnapshotLambdaRole.Arn
-      Timeout: 300
-      MemorySize: 512
-      Environment:
-        Variables:
-          ENVIRONMENT: !Ref Environment
-          RETENTION_DAYS: "7"
-      Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref SnapshotCreatorCodeKey
-      Tags:
-        - Key: Name
-          Value: !Sub "${AWS::StackName}-snapshot-creator"
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-
-  # Lambda role for snapshot selector
-  SnapshotSelectorLambdaRole:
-    Type: AWS::IAM::Role
-    Condition: HasSnapshotSelectorCode
-    Properties:
-      RoleName: !Sub "${AWS::StackName}-snapshot-selector-role"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-      Policies:
-        - PolicyName: SnapshotSelectorPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:DescribeSnapshots
-                  - ec2:DescribeLaunchTemplates
-                  - ec2:DescribeLaunchTemplateVersions
-                  - ec2:CreateLaunchTemplateVersion
-                  - ec2:ModifyLaunchTemplate
-                  - autoscaling:DescribeAutoScalingGroups
-                  - autoscaling:UpdateAutoScalingGroup
-                  - autoscaling:StartInstanceRefresh
-                Resource: "*"
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-
-  # Lambda function to update launch templates with latest snapshot
-  SnapshotSelectorFunction:
-    Type: AWS::Lambda::Function
-    Condition: HasSnapshotSelectorCode
-    Properties:
-      FunctionName: !Sub "${AWS::StackName}-snapshot-selector"
-      Runtime: python3.13
-      Handler: index.lambda_handler
-      Role: !GetAtt SnapshotSelectorLambdaRole.Arn
-      Timeout: 300
-      MemorySize: 512
-      Environment:
-        Variables:
-          ENVIRONMENT: !Ref Environment
-          # AUTO_SCALING_GROUP_NAME will be set by EventBridge rule input
-      Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref SnapshotSelectorCodeKey
-      Tags:
-        - Key: Name
-          Value: !Sub "${AWS::StackName}-snapshot-selector"
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
 
   # ========================================
   # CLOUDWATCH ALARMS
@@ -930,37 +783,6 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt SnapshotCleanupRule.Arn
 
-  # Update Replica Launch Templates after Snapshot Creation
-  UpdateReplicaSnapshotsRule:
-    Type: AWS::Events::Rule
-    Condition: HasSnapshotSelectorCode
-    Properties:
-      Name: !Sub "${AWS::StackName}-update-replica-snapshots"
-      Description: Update replica launch templates with latest snapshots
-      ScheduleExpression: "cron(30 1 * * ? *)" # 1:30 AM UTC daily (after snapshots)
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt SnapshotSelectorFunction.Arn
-          Id: "1"
-          # Pass the ASG name as an environment variable in the event
-          InputTransformer:
-            InputPathsMap:
-              time: "$.time"
-            InputTemplate: !Sub |
-              {
-                "AUTO_SCALING_GROUP_NAME": "robosystems-ladybug-shared-replicas-${Environment}-replicas-asg",
-                "time": <time>
-              }
-
-  UpdateReplicaSnapshotsRulePermission:
-    Type: AWS::Lambda::Permission
-    Condition: HasSnapshotSelectorCode
-    Properties:
-      FunctionName: !Ref SnapshotSelectorFunction
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt UpdateReplicaSnapshotsRule.Arn
-
   # ========================================
   # Volume Detachment Resources
   # ========================================
@@ -1089,17 +911,3 @@ Outputs:
     Value: !GetAtt VolumeManagerRole.Arn
     Export:
       Name: !Sub "${AWS::StackName}-role-arn"
-
-  SnapshotCreatorFunctionArn:
-    Condition: HasSnapshotCreatorCode
-    Description: ARN of the snapshot creator Lambda function
-    Value: !GetAtt SnapshotCreatorFunction.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-snapshot-creator-arn"
-
-  SnapshotSelectorFunctionArn:
-    Condition: HasSnapshotSelectorCode
-    Description: ARN of the snapshot selector Lambda function
-    Value: !GetAtt SnapshotSelectorFunction.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-snapshot-selector-arn"

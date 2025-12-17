@@ -54,6 +54,22 @@ if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
     sleep 5
 fi
 
+# Configure Dagster based on environment
+configure_dagster() {
+    DAGSTER_HOME=${DAGSTER_HOME:-/app/dagster_home}
+
+    # For production/staging, use the production config with EcsRunLauncher
+    if [[ "${ENVIRONMENT:-}" == "prod" || "${ENVIRONMENT:-}" == "staging" ]]; then
+        if [[ -f "${DAGSTER_HOME}/dagster_prod.yaml" ]]; then
+            echo "Using production Dagster configuration (EcsRunLauncher)"
+            cp "${DAGSTER_HOME}/dagster_prod.yaml" "${DAGSTER_HOME}/dagster.yaml"
+        fi
+    else
+        echo "Using development Dagster configuration (DefaultRunLauncher)"
+        # Dev config is already the default dagster.yaml
+    fi
+}
+
 case $DOCKER_PROFILE in
   "api")
     echo "Starting API service..."
@@ -65,10 +81,7 @@ case $DOCKER_PROFILE in
     ;;
   "dagster")
     echo "Starting Dagster webserver..."
-    # Run migrations before starting Dagster
-    if [[ "${RUN_MIGRATIONS:-}" == "true" ]]; then
-      run_db_init || echo "Database initialization failed, but continuing..."
-    fi
+    configure_dagster
     exec uv run dagster-webserver \
       -h 0.0.0.0 \
       -p ${DAGSTER_PORT:-3000} \
@@ -76,6 +89,15 @@ case $DOCKER_PROFILE in
     ;;
   "dagster-daemon")
     echo "Starting Dagster daemon..."
+    configure_dagster
+
+    # Run migrations on daemon startup in staging/prod
+    # Daemon is singleton (DesiredCount: 1) so safe for migrations
+    # This mirrors the previous beat scheduler behavior
+    if [[ "${RUN_MIGRATIONS:-}" == "true" ]]; then
+      run_db_init || echo "Database initialization failed, but continuing..."
+    fi
+
     exec uv run dagster-daemon run \
       -m robosystems.dagster
     ;;

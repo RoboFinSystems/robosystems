@@ -150,6 +150,15 @@ production:
       bucket_name: CloudTrailBucketName
       enabled: CloudTrailEnabled
 
+  # Dagster Orchestration
+  dagster:
+    stack_name: RoboSystemsDagsterProd
+    outputs:
+      cluster_arn: EcsClusterArn
+      daemon_service_arn: DaemonServiceArn
+      webserver_service_arn: WebserverServiceArn
+      dagster_url: DagsterUrl
+
 staging:
   # Core Infrastructure (Uses shared VPC)
   vpc:
@@ -286,6 +295,15 @@ staging:
       trail_arn: CloudTrailArn
       bucket_name: CloudTrailBucketName
       enabled: CloudTrailEnabled
+
+  # Dagster Orchestration
+  dagster:
+    stack_name: RoboSystemsDagsterStaging
+    outputs:
+      cluster_arn: EcsClusterArn
+      daemon_service_arn: DaemonServiceArn
+      webserver_service_arn: WebserverServiceArn
+      dagster_url: DagsterUrl
 
 # Common patterns for dynamic stack name generation
 patterns:

@@ -222,8 +222,7 @@ pip install robosystems-client
 - **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
 - **[API Models](/robosystems/models/api/README.md)** - API request/response models
 - **[Configuration](/robosystems/config/README.md)** - Configuration management
-- **[Dagster](/robosystems/dagster/README.md)** - Data pipeline orchestration
-- **[Tasks](/robosystems/tasks/README.md)** - Real-time Celery operations
+- **[Dagster](/robosystems/dagster/README.md)** - Data pipeline and task orchestration
 
 **Graph Database System:**
 

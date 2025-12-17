@@ -39,6 +39,17 @@ from robosystems.dagster.jobs.infrastructure import (
   hourly_auth_cleanup_schedule,
   weekly_health_check_job,
   weekly_health_check_schedule,
+  # Instance infrastructure monitoring (from Lambda)
+  instance_health_check_job,
+  instance_health_check_schedule,
+  instance_metrics_collection_job,
+  instance_metrics_collection_schedule,
+  instance_registry_cleanup_job,
+  instance_registry_cleanup_schedule,
+  volume_registry_cleanup_job,
+  volume_registry_cleanup_schedule,
+  full_instance_maintenance_job,
+  full_instance_maintenance_schedule,
 )
 from robosystems.dagster.jobs.provisioning import (
   provision_graph_job,
@@ -117,6 +128,12 @@ all_jobs = [
   # Infrastructure jobs
   hourly_auth_cleanup_job,
   weekly_health_check_job,
+  # Instance infrastructure monitoring jobs (from Lambda)
+  instance_health_check_job,
+  instance_metrics_collection_job,
+  instance_registry_cleanup_job,
+  volume_registry_cleanup_job,
+  full_instance_maintenance_job,
   # Provisioning jobs (triggered by sensors)
   provision_graph_job,
   provision_repository_job,
@@ -147,6 +164,12 @@ all_schedules = [
   # Infrastructure schedules
   hourly_auth_cleanup_schedule,
   weekly_health_check_schedule,
+  # Instance infrastructure monitoring schedules (from Lambda - STOPPED by default)
+  instance_health_check_schedule,
+  instance_metrics_collection_schedule,
+  instance_registry_cleanup_schedule,
+  volume_registry_cleanup_schedule,
+  full_instance_maintenance_schedule,
   # SEC pipeline schedules
   sec_daily_rebuild_schedule,
   sec_weekly_refresh_schedule,

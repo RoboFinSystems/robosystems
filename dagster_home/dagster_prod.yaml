@@ -1,0 +1,87 @@
+# Dagster configuration for RoboSystems (Production)
+# Uses EcsRunLauncher for running jobs on EC2 capacity provider
+
+# Run storage - stores run metadata
+run_storage:
+  module: dagster_postgres.run_storage
+  class: PostgresRunStorage
+  config:
+    postgres_db:
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      port:
+        env: DAGSTER_POSTGRES_PORT
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+
+# Event log storage - stores structured event logs for runs
+event_log_storage:
+  module: dagster_postgres.event_log
+  class: PostgresEventLogStorage
+  config:
+    postgres_db:
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      port:
+        env: DAGSTER_POSTGRES_PORT
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+
+# Schedule storage - stores schedule and sensor state
+schedule_storage:
+  module: dagster_postgres.schedule_storage
+  class: PostgresScheduleStorage
+  config:
+    postgres_db:
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      port:
+        env: DAGSTER_POSTGRES_PORT
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+
+# Run launcher - ECS for production
+# Runs are launched on EC2 instances with large EBS volumes for DuckDB processing
+# Note: Network configuration (subnets, security groups) is inherited from the
+# ECS cluster configuration. The EcsRunLauncher will use the same network
+# settings as the daemon/webserver services.
+run_launcher:
+  module: dagster_aws.ecs
+  class: EcsRunLauncher
+  config:
+    # Task definition ARN for run workers (set via environment variable)
+    task_definition:
+      env: DAGSTER_ECS_RUN_TASK_DEFINITION
+    # Container name in the task definition
+    container_name: dagster-run
+    # Run on EC2 capacity provider for large storage
+    run_task_kwargs:
+      cluster:
+        env: DAGSTER_ECS_CLUSTER
+      launchType: EC2
+    # Resource overrides for different job types (optional)
+    run_resources:
+      cpu: "1024"
+      memory: "8192"
+
+# Telemetry - disable for privacy
+telemetry:
+  enabled: false
+
+# Run monitoring for long-running jobs
+run_monitoring:
+  enabled: true
+  poll_interval_seconds: 30
+  max_resume_run_attempts: 3
