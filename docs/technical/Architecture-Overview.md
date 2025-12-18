@@ -74,26 +74,41 @@ Model Context Protocol server for AI integration via the FastAPI Backend:
 - **Financial Analysis**: Specialized tools for financial data exploration
 - **Tool Registry**: Discover available graph operations
 
-### Dagster Pipelines
+### Dagster Orchestration
 
 **Location**: `/robosystems/dagster/`
 
-Data pipeline orchestration using Dagster's Software-Defined Assets:
+Dagster is the **sole orchestration system** for all scheduled tasks, event-driven triggers, and data pipelines. There is no separate task queue - everything runs through Dagster.
 
 **Architecture:**
 ```
 dagster/
-├── assets/           # Software-Defined Assets
+├── assets/           # Software-Defined Assets (data pipelines)
 │   ├── sec.py        # SEC XBRL pipeline (5 assets)
+│   ├── quickbooks.py # QuickBooks pipeline
 │   └── plaid.py      # Plaid banking pipeline
-├── jobs/             # Job definitions
+├── jobs/             # Job definitions (all system tasks)
 │   ├── sec.py        # SEC jobs and schedules
-│   ├── billing.py    # Credit allocation jobs
-│   └── infrastructure.py  # Health check jobs
+│   ├── billing.py    # Credit allocation, storage billing
+│   ├── infrastructure.py  # Auth cleanup, health checks
+│   ├── graph.py      # Graph operations (create, backup, restore)
+│   └── provisioning.py    # Subscription provisioning
+├── sensors/          # Event-driven triggers
+│   └── provisioning.py    # Watch for pending subscriptions
 ├── partitions/       # Partition definitions
 │   └── sec.py        # Year-based partitions (2019-2025)
 └── definitions.py    # Dagster definitions registry
 ```
+
+**What Dagster Handles:**
+
+| Category | Jobs | Description |
+|----------|------|-------------|
+| **Billing** | 4 jobs, 4 schedules | Credit allocation, storage billing, usage collection |
+| **Infrastructure** | 7 jobs, 7 schedules | Auth cleanup, health checks, instance monitoring |
+| **Graph Operations** | 7 jobs | Database creation, backup/restore, materialization |
+| **Data Pipelines** | SEC, QuickBooks, Plaid | Software-Defined Assets with dependencies |
+| **Event Triggers** | 2 sensors | Subscription provisioning, repository sync |
 
 **SEC Pipeline Assets:**
 1. `sec_companies_list` → Fetch company list from SEC EDGAR
@@ -103,11 +118,18 @@ dagster/
 5. `sec_graph_materialized` → Materialize to LadybugDB
 
 **Key Features:**
+- **Single System**: All orchestration in one place - no separate task queues
 - **Asset Dependencies**: Declarative data lineage with automatic orchestration
 - **Year Partitioning**: Process historical data by year (2019-2025)
 - **Observability**: Built-in UI at `localhost:3003` for monitoring
-- **Scheduling**: Cron-based schedules (e.g., daily SEC rebuild at 2 AM)
+- **Scheduling**: Cron-based schedules for billing, cleanup, and pipelines
+- **Sensors**: Event-driven job triggers (e.g., new subscription → provision graph)
 - **Local Development**: `just sec-load NVDA 2025` triggers pipeline via Docker CLI
+
+**Infrastructure (AWS):**
+- **Fargate**: Daemon (singleton) + Webserver (1-3 replicas) - always on, lightweight
+- **EC2 Run Workers**: r7g.large with 500GB EBS - scale 0-5 based on job queue
+- **Scale to Zero**: No EC2 costs when no jobs running
 
 ## Graph Database System
 
@@ -284,6 +306,21 @@ Each adapter consists of:
 - **XBRLDuckDBGraphProcessor**: Orchestrates S3 → DuckDB → LadybugDB flow
 - Creates nodes: Entity, Report, Fact, Element, Period, Unit, Taxonomy
 - Outputs year-partitioned Parquet files to S3
+
+**Fork-Friendly Extensibility:**
+
+The adapter directory structure is designed as a **merge boundary** for forks. Add custom data sources in the `custom_*` namespace:
+
+```
+adapters/
+├── sec/                 # ← Upstream (don't modify)
+├── quickbooks/          # ← Upstream (don't modify)
+├── plaid/               # ← Upstream (don't modify)
+└── custom_*/            # ← Your namespace (upstream never touches)
+    └── custom_erp/      #    Your custom integrations
+```
+
+This enables `git pull upstream main` without merge conflicts on your custom adapters.
 
 **See**: [Adapters Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/adapters/README.md) in codebase
 
