@@ -81,10 +81,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    entrypoint: ["uv", "run"]
-    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3003", "-m", "robosystems.dagster"]
+    command: /app/bin/entrypoint.sh
     environment:
+      - DOCKER_PROFILE=dagster
+      - ENVIRONMENT=dev
       - DAGSTER_HOME=/app/dagster_home
+      - DAGSTER_PORT=3003
       - DAGSTER_POSTGRES_HOST=pg
       - DAGSTER_POSTGRES_PORT=5432
       - DAGSTER_POSTGRES_USER=postgres
@@ -104,22 +106,24 @@ services:
     deploy:
       resources:
         limits:
+          memory: 2g
+          cpus: "2"
+        reservations:
           memory: 1g
           cpus: "0.5"
-        reservations:
-          memory: 512m
-          cpus: "0.25"
     profiles: ["dagster", "robosystems", "all"]
 
-  # Dagster Daemon - Schedules and Sensors
+  # Dagster Daemon - Schedules, Sensors, and Job Execution
   dagster-daemon:
     container_name: robosystems-dagster-daemon
     build:
       context: .
       dockerfile: Dockerfile
-    entrypoint: ["uv", "run"]
-    command: ["dagster-daemon", "run", "-m", "robosystems.dagster"]
+    command: /app/bin/entrypoint.sh
     environment:
+      - DOCKER_PROFILE=dagster-daemon
+      - ENVIRONMENT=dev
+      - RUN_MIGRATIONS=true
       - DAGSTER_HOME=/app/dagster_home
       - DAGSTER_POSTGRES_HOST=pg
       - DAGSTER_POSTGRES_PORT=5432
@@ -138,11 +142,11 @@ services:
     deploy:
       resources:
         limits:
+          memory: 3g
+          cpus: "2"
+        reservations:
           memory: 1g
           cpus: "0.5"
-        reservations:
-          memory: 512m
-          cpus: "0.25"
     profiles: ["dagster", "robosystems", "all"]
 
   # Postgres - Database for RoboSystems

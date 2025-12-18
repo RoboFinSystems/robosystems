@@ -63,6 +63,7 @@ from robosystems.dagster.jobs.graph import (
   restore_graph_job,
   stage_file_job,
   materialize_file_job,
+  materialize_graph_job,
 )
 from robosystems.dagster.jobs.sec import (
   sec_download_job,
@@ -150,6 +151,7 @@ all_jobs = [
   restore_graph_job,
   stage_file_job,
   materialize_file_job,
+  materialize_graph_job,
   # SEC pipeline jobs
   sec_download_job,
   sec_process_job,

@@ -392,7 +392,11 @@ class SSEEventStorage:
 
     if event_type == EventType.OPERATION_COMPLETED:
       metadata.status = OperationStatus.COMPLETED
-      metadata.result_data = data
+      # Merge new data with existing result_data (preserves graph_id from Dagster job)
+      if metadata.result_data:
+        metadata.result_data.update(data)
+      else:
+        metadata.result_data = data
     elif event_type == EventType.OPERATION_ERROR:
       metadata.status = OperationStatus.FAILED
       metadata.error_message = data.get("error")
@@ -407,6 +411,83 @@ class SSEEventStorage:
       self.default_ttl,
       json.dumps(metadata.to_dict()),
     )
+
+  def update_operation_result_sync(
+    self, operation_id: str, result: Dict[str, Any]
+  ) -> None:
+    """
+    Update operation metadata with result data (sync version).
+
+    This is used by Dagster jobs to store the graph_id and other result data
+    in the operation metadata before the job completes. When the monitor later
+    emits the OPERATION_COMPLETED event, it will include this result data.
+
+    Args:
+        operation_id: Operation identifier
+        result: Result data to merge into metadata (e.g., {"graph_id": "kg123"})
+    """
+    redis = self._get_sync_redis()
+    metadata_key = f"{self.metadata_prefix}{operation_id}"
+    metadata_json = redis.get(metadata_key)
+
+    if not metadata_json:
+      logger.warning(f"Operation {operation_id} not found, cannot update result")
+      return
+
+    metadata_dict = json.loads(str(metadata_json))
+    metadata = OperationMetadata(**metadata_dict)
+
+    # Update timestamp and merge result data
+    metadata.updated_at = datetime.now(timezone.utc).isoformat()
+
+    # Merge new result with existing result_data (if any)
+    if metadata.result_data:
+      metadata.result_data.update(result)
+    else:
+      metadata.result_data = result
+
+    # Update graph_id if provided
+    if "graph_id" in result:
+      metadata.graph_id = result["graph_id"]
+
+    # Store updated metadata
+    redis.setex(
+      metadata_key,
+      self.default_ttl,
+      json.dumps(metadata.to_dict()),
+    )
+
+    logger.debug(
+      f"Updated operation {operation_id} result data with keys: {list(result.keys())}"
+    )
+
+  def get_operation_result_sync(self, operation_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get operation result data (sync version).
+
+    This is used by the Dagster monitor to retrieve stored result data
+    when emitting the OPERATION_COMPLETED event.
+
+    Args:
+        operation_id: Operation ID to get result for
+
+    Returns:
+        Result data dictionary if found, None otherwise
+    """
+    redis = self._get_sync_redis()
+    metadata_key = f"{self.metadata_prefix}{operation_id}"
+    metadata_json = redis.get(metadata_key)
+
+    if not metadata_json:
+      return None
+
+    try:
+      metadata_dict = json.loads(str(metadata_json))
+      metadata = OperationMetadata(**metadata_dict)
+      return metadata.result_data
+    except Exception as e:
+      logger.warning(f"Failed to get operation result for {operation_id}: {e}")
+      return None
 
   async def _update_operation_metadata(
     self, operation_id: str, event_type: EventType, data: Dict[str, Any]
@@ -430,7 +511,12 @@ class SSEEventStorage:
       metadata.status = OperationStatus.RUNNING
     elif event_type == EventType.OPERATION_COMPLETED:
       metadata.status = OperationStatus.COMPLETED
-      metadata.result_data = data.get("result")
+      # Merge new result with existing result_data (preserves graph_id from Dagster job)
+      new_result = data.get("result") or {}
+      if metadata.result_data:
+        metadata.result_data.update(new_result)
+      else:
+        metadata.result_data = new_result
     elif event_type == EventType.OPERATION_ERROR:
       metadata.status = OperationStatus.FAILED
       metadata.error_message = data.get("error", "Unknown error")

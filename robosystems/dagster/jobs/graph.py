@@ -27,6 +27,35 @@ from robosystems.dagster.resources import DatabaseResource, GraphResource, S3Res
 
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+
+def _emit_graph_result_to_sse(
+  context: OpExecutionContext,
+  operation_id: str,
+  result: dict[str, Any],
+) -> None:
+  """
+  Update SSE operation metadata with the job result.
+
+  This stores the graph_id in the operation metadata so that when the
+  monitor emits the final OPERATION_COMPLETED event, it includes the
+  graph_id in the result.
+  """
+  try:
+    from robosystems.middleware.sse.event_storage import SSEEventStorage
+
+    storage = SSEEventStorage()
+    storage.update_operation_result_sync(operation_id, result)
+    context.log.info(
+      f"Updated SSE metadata with graph_id={result.get('graph_id')} for operation {operation_id}"
+    )
+  except Exception as e:
+    context.log.warning(f"Failed to update SSE operation metadata: {e}")
+
+
+# ============================================================================
 # Configuration Classes
 # ============================================================================
 
@@ -41,6 +70,7 @@ class CreateGraphConfig(Config):
   schema_extensions: list[str] = []
   tags: list[str] = []
   skip_billing: bool = False
+  operation_id: str | None = None  # For SSE result updates
 
 
 class CreateEntityGraphConfig(Config):
@@ -57,6 +87,7 @@ class CreateEntityGraphConfig(Config):
   tags: list[str] = []
   create_entity: bool = True
   skip_billing: bool = False
+  operation_id: str | None = None  # For SSE result updates
 
 
 class CreateSubgraphConfig(Config):
@@ -104,11 +135,22 @@ class StageFileConfig(Config):
 
 
 class MaterializeFileConfig(Config):
-  """Configuration for graph materialization."""
+  """Configuration for single file graph materialization."""
 
   file_id: str
   graph_id: str
   table_name: str
+
+
+class MaterializeGraphConfig(Config):
+  """Configuration for full graph materialization from DuckDB."""
+
+  graph_id: str
+  user_id: str
+  force: bool = False
+  rebuild: bool = False
+  ignore_errors: bool = True
+  operation_id: str | None = None  # For SSE result updates
 
 
 # ============================================================================
@@ -162,27 +204,35 @@ def create_graph_subscription(
   """Create billing subscription for the graph."""
   if config.skip_billing:
     context.log.info("Skipping billing subscription (provision flow)")
-    return {**graph_result, "subscription_created": False}
-
-  from robosystems.operations.graph.subscription_service import GraphSubscriptionService
-
-  with db.get_session() as session:
-    subscription_service = GraphSubscriptionService(session)
-    subscription = subscription_service.create_graph_subscription(
-      user_id=config.user_id,
-      graph_id=graph_result["graph_id"],
-      plan_name=config.tier,
+    result = {**graph_result, "subscription_created": False}
+  else:
+    from robosystems.operations.graph.subscription_service import (
+      GraphSubscriptionService,
     )
 
-    context.log.info(
-      f"Created subscription {subscription.id} for graph {graph_result['graph_id']}"
-    )
+    with db.get_session() as session:
+      subscription_service = GraphSubscriptionService(session)
+      subscription = subscription_service.create_graph_subscription(
+        user_id=config.user_id,
+        graph_id=graph_result["graph_id"],
+        plan_name=config.tier,
+      )
 
-    return {
-      **graph_result,
-      "subscription_id": str(subscription.id),
-      "subscription_created": True,
-    }
+      context.log.info(
+        f"Created subscription {subscription.id} for graph {graph_result['graph_id']}"
+      )
+
+      result = {
+        **graph_result,
+        "subscription_id": str(subscription.id),
+        "subscription_created": True,
+      }
+
+  # Emit graph_id to SSE storage if operation_id provided
+  if config.operation_id:
+    _emit_graph_result_to_sse(context, config.operation_id, result)
+
+  return result
 
 
 @job
@@ -224,7 +274,7 @@ def create_entity_graph_database(
       "graph_name": config.graph_name,
       "description": config.description,
       "graph_tier": config.tier,
-      "schema_extensions": config.schema_extensions,
+      "extensions": config.schema_extensions,  # EntityCreate expects 'extensions' not 'schema_extensions'
       "tags": config.tags,
       "create_entity": config.create_entity,
       "skip_billing": config.skip_billing,
@@ -250,27 +300,35 @@ def create_entity_graph_subscription(
   """Create billing subscription for the entity graph."""
   if config.skip_billing:
     context.log.info("Skipping billing subscription (provision flow)")
-    return {**entity_graph_result, "subscription_created": False}
-
-  from robosystems.operations.graph.subscription_service import GraphSubscriptionService
-
-  with db.get_session() as session:
-    subscription_service = GraphSubscriptionService(session)
-    subscription = subscription_service.create_graph_subscription(
-      user_id=config.user_id,
-      graph_id=entity_graph_result["graph_id"],
-      plan_name=config.tier,
+    result = {**entity_graph_result, "subscription_created": False}
+  else:
+    from robosystems.operations.graph.subscription_service import (
+      GraphSubscriptionService,
     )
 
-    context.log.info(
-      f"Created subscription {subscription.id} for entity graph {entity_graph_result['graph_id']}"
-    )
+    with db.get_session() as session:
+      subscription_service = GraphSubscriptionService(session)
+      subscription = subscription_service.create_graph_subscription(
+        user_id=config.user_id,
+        graph_id=entity_graph_result["graph_id"],
+        plan_name=config.tier,
+      )
 
-    return {
-      **entity_graph_result,
-      "subscription_id": str(subscription.id),
-      "subscription_created": True,
-    }
+      context.log.info(
+        f"Created subscription {subscription.id} for entity graph {entity_graph_result['graph_id']}"
+      )
+
+      result = {
+        **entity_graph_result,
+        "subscription_id": str(subscription.id),
+        "subscription_created": True,
+      }
+
+  # Emit graph_id to SSE storage if operation_id provided
+  if config.operation_id:
+    _emit_graph_result_to_sse(context, config.operation_id, result)
+
+  return result
 
 
 @job
@@ -885,3 +943,270 @@ def materialize_staged_file(
 def materialize_file_job():
   """Materialize a staged file to graph database."""
   materialize_staged_file()
+
+
+# ============================================================================
+# Full Graph Materialization Job
+# Replaces: robosystems.routers.graphs.materialize synchronous endpoint logic
+# ============================================================================
+
+
+@op(out={"materialize_result": Out(dict)})
+def materialize_graph_tables(
+  context: OpExecutionContext,
+  db: DatabaseResource,
+  graph: GraphResource,
+  config: MaterializeGraphConfig,
+) -> dict[str, Any]:
+  """
+  Materialize all DuckDB staging tables to the graph database.
+
+  This is the Dagster equivalent of the synchronous materialize_graph API endpoint.
+  It provides full observability into the materialization process.
+  """
+  import asyncio
+  import time
+
+  from robosystems.models.iam import Graph, GraphFile, GraphSchema, GraphTable
+
+  start_time = time.time()
+  graph_id = config.graph_id
+  context.log.info(
+    f"Starting graph materialization for {graph_id} "
+    f"(force={config.force}, rebuild={config.rebuild}, ignore_errors={config.ignore_errors})"
+  )
+
+  with db.get_session() as session:
+    # Verify graph exists
+    graph_record = Graph.get_by_id(graph_id, session)
+    if not graph_record:
+      raise Failure(
+        description=f"Graph {graph_id} not found",
+        metadata={"graph_id": graph_id},
+      )
+
+    # Check staleness
+    was_stale = graph_record.graph_stale or False
+    stale_reason = graph_record.graph_stale_reason
+
+    if not was_stale and not config.force and not config.rebuild:
+      # Check if there are any tables with staged data in DuckDB
+      staged_tables_count = (
+        session.query(GraphTable)
+        .join(GraphFile, GraphTable.id == GraphFile.table_id)
+        .filter(GraphTable.graph_id == graph_id)
+        .filter(GraphFile.duckdb_status == "staged")
+        .distinct()
+        .count()
+      )
+      if staged_tables_count > 0:
+        was_stale = True
+        stale_reason = "new_data_staged"
+        context.log.info(
+          f"Graph {graph_id} has {staged_tables_count} tables with staged data to materialize"
+        )
+
+    if not was_stale and not config.force and not config.rebuild:
+      context.log.info(
+        f"Graph {graph_id} is not stale and force=false, rebuild=false - skipping"
+      )
+      result = {
+        "status": "skipped",
+        "graph_id": graph_id,
+        "was_stale": False,
+        "tables_materialized": [],
+        "total_rows": 0,
+        "execution_time_ms": (time.time() - start_time) * 1000,
+        "message": "Graph is fresh - no materialization needed",
+      }
+      if config.operation_id:
+        _emit_graph_result_to_sse(context, config.operation_id, result)
+      return result
+
+    # Get async event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+      # Get graph client - use GraphClientFactory for materialize_table support
+      from robosystems.graph_api.client.factory import get_graph_client
+
+      client = loop.run_until_complete(
+        get_graph_client(graph_id=graph_id, operation_type="write")
+      )
+
+      # Handle rebuild if requested
+      if config.rebuild:
+        context.log.info("[10%] Rebuild requested - regenerating graph database")
+
+        graph_metadata = (
+          {**graph_record.graph_metadata} if graph_record.graph_metadata else {}
+        )
+        graph_metadata["status"] = "rebuilding"
+        graph_metadata["rebuild_started_at"] = time.time()
+        graph_record.graph_metadata = graph_metadata
+        session.commit()
+
+        try:
+          context.log.info(f"[20%] Deleting graph database for {graph_id}")
+          loop.run_until_complete(client.delete_database(graph_id))
+
+          schema = GraphSchema.get_active_schema(graph_id, session)
+          if not schema:
+            raise Failure(
+              description=f"No schema found for graph {graph_id}",
+              metadata={"graph_id": graph_id},
+            )
+
+          schema_type_for_rebuild = "custom" if schema.schema_ddl else "entity"
+          context.log.info(
+            f"[30%] Recreating graph database with schema type: {schema_type_for_rebuild}"
+          )
+          loop.run_until_complete(
+            client.create_database(
+              graph_id=graph_id,
+              schema_type=schema_type_for_rebuild,
+              custom_schema_ddl=schema.schema_ddl,
+            )
+          )
+          context.log.info("[40%] Graph database recreated successfully")
+
+        except Exception as e:
+          graph_metadata["status"] = "rebuild_failed"
+          graph_metadata["rebuild_failed_at"] = time.time()
+          graph_metadata["rebuild_error"] = str(e)
+          graph_record.graph_metadata = graph_metadata
+          session.commit()
+          raise Failure(
+            description=f"Failed to rebuild graph database: {str(e)}",
+            metadata={"graph_id": graph_id, "error": str(e)},
+          )
+
+      # Get tables that have staged data in DuckDB (ready for materialization)
+      # Only materialize tables with files that have duckdb_status="staged"
+      tables_with_staged_data = (
+        session.query(GraphTable)
+        .join(GraphFile, GraphTable.id == GraphFile.table_id)
+        .filter(GraphTable.graph_id == graph_id)
+        .filter(GraphFile.duckdb_status == "staged")
+        .distinct()
+        .all()
+      )
+
+      if not tables_with_staged_data:
+        context.log.info(f"No tables with staged data found for graph {graph_id}")
+        result = {
+          "status": "success",
+          "graph_id": graph_id,
+          "was_stale": was_stale,
+          "stale_reason": stale_reason,
+          "tables_materialized": [],
+          "total_rows": 0,
+          "execution_time_ms": (time.time() - start_time) * 1000,
+          "message": "No tables with staged data to materialize",
+        }
+        if config.operation_id:
+          _emit_graph_result_to_sse(context, config.operation_id, result)
+        return result
+
+      # Sort tables: nodes before relationships
+      table_names = [t.table_name for t in tables_with_staged_data]
+      node_tables = [t for t in table_names if not t.isupper()]
+      rel_tables = [t for t in table_names if t.isupper()]
+      ordered_tables = node_tables + rel_tables
+
+      context.log.info(
+        f"[50%] Materializing {len(ordered_tables)} tables: "
+        f"{len(node_tables)} nodes, {len(rel_tables)} relationships"
+      )
+
+      # Materialize each table
+      tables_materialized = []
+      total_rows = 0
+      base_progress = 50
+      progress_per_table = 40 / max(len(ordered_tables), 1)
+
+      for i, table_name in enumerate(ordered_tables):
+        progress = int(base_progress + (i * progress_per_table))
+        try:
+          context.log.info(f"[{progress}%] Materializing table {table_name}")
+
+          mat_result = loop.run_until_complete(
+            client.materialize_table(
+              graph_id=graph_id,
+              table_name=table_name,
+              ignore_errors=config.ignore_errors,
+              file_ids=None,
+            )
+          )
+
+          rows_ingested = mat_result.get("rows_ingested", 0)
+          total_rows += rows_ingested
+          tables_materialized.append(table_name)
+
+          context.log.info(f"Materialized {table_name}: {rows_ingested:,} rows")
+
+        except Exception as e:
+          context.log.error(f"Failed to materialize table {table_name}: {e}")
+          if not config.ignore_errors:
+            raise Failure(
+              description=f"Materialization failed on table {table_name}: {str(e)}",
+              metadata={
+                "graph_id": graph_id,
+                "table_name": table_name,
+                "error": str(e),
+              },
+            )
+
+      # Mark graph as fresh
+      context.log.info("[95%] Marking graph as fresh")
+      graph_record.mark_fresh(session=session)
+
+      # Update graph metadata if rebuild was performed
+      if config.rebuild:
+        graph_metadata = (
+          {**graph_record.graph_metadata} if graph_record.graph_metadata else {}
+        )
+        graph_metadata["status"] = "available"
+        graph_metadata["rebuild_completed_at"] = time.time()
+        if "rebuild_started_at" in graph_metadata:
+          rebuild_duration = (
+            graph_metadata["rebuild_completed_at"]
+            - graph_metadata["rebuild_started_at"]
+          )
+          graph_metadata["last_rebuild_duration_seconds"] = rebuild_duration
+        graph_record.graph_metadata = graph_metadata
+        session.commit()
+
+      execution_time_ms = (time.time() - start_time) * 1000
+
+      context.log.info(
+        f"[100%] Graph materialization complete: {len(tables_materialized)} tables, "
+        f"{total_rows:,} rows in {execution_time_ms:.2f}ms"
+      )
+
+      result = {
+        "status": "success",
+        "graph_id": graph_id,
+        "was_stale": was_stale,
+        "stale_reason": stale_reason,
+        "tables_materialized": tables_materialized,
+        "total_rows": total_rows,
+        "execution_time_ms": execution_time_ms,
+        "rebuild": config.rebuild,
+        "message": f"Graph materialized successfully from {len(tables_materialized)} tables",
+      }
+
+      if config.operation_id:
+        _emit_graph_result_to_sse(context, config.operation_id, result)
+
+      return result
+
+    finally:
+      loop.close()
+
+
+@job
+def materialize_graph_job():
+  """Materialize all DuckDB staging tables to graph database."""
+  materialize_graph_tables()

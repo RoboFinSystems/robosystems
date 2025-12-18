@@ -37,9 +37,9 @@ class GraphResource(ConfigurableResource):
     Returns:
         GraphClient instance
     """
-    from robosystems.middleware.graph import GraphClientFactory
+    from robosystems.middleware.graph import get_universal_repository
 
-    return await GraphClientFactory.create_client(graph_id, operation_type)
+    return await get_universal_repository(graph_id, operation_type)
 
   async def execute_query(
     self, graph_id: str, query: str, params: dict[str, Any] | None = None

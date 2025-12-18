@@ -176,14 +176,24 @@ class DagsterRunMonitor:
     operation_id: str,
     result: dict[str, Any],
   ):
-    """Emit a completion event to the SSE stream."""
+    """Emit a completion event to the SSE stream.
+
+    This merges the stored result data from Dagster job (e.g., graph_id,
+    tables_materialized) with the monitoring result (run_id, elapsed_time).
+    """
     try:
+      # Get stored result data from operation metadata (set by Dagster job)
+      stored_result = self.event_storage.get_operation_result_sync(operation_id) or {}
+
+      # Merge stored result with monitoring result
+      merged_result = {**stored_result, **result}
+
       self.event_storage.store_event_sync(
         operation_id,
         EventType.OPERATION_COMPLETED,
         {
           "message": "Operation completed successfully",
-          "result": result,
+          "result": merged_result,
         },
       )
     except Exception as e:
@@ -381,7 +391,11 @@ def build_graph_job_config(
   Build run_config for graph operation jobs.
 
   This helper creates the proper run_config structure for Dagster jobs
-  that use Config classes.
+  that use Config classes. For jobs with multiple ops that share the same
+  config class, this provides config for all of them.
+
+  In local development (ENVIRONMENT=dev), uses in_process executor to avoid
+  subprocess spawning overhead which can be very slow for many small jobs.
 
   Args:
       job_name: Name of the job (determines which op config to build)
@@ -390,25 +404,35 @@ def build_graph_job_config(
   Returns:
       run_config dictionary for Dagster
   """
-  # Map job names to their primary op names
-  job_to_op = {
-    "create_graph_job": "create_graph_database",
-    "create_entity_graph_job": "create_entity_graph_database",
-    "create_subgraph_job": "create_subgraph_database",
-    "backup_graph_job": "create_backup",
-    "restore_graph_job": "restore_backup",
-    "stage_file_job": "stage_file_in_duckdb",
-    "materialize_file_job": "materialize_staged_file",
+  # Map job names to ALL ops that need config (some jobs have multiple ops)
+  job_to_ops: dict[str, list[str]] = {
+    "create_graph_job": ["create_graph_database", "create_graph_subscription"],
+    "create_entity_graph_job": [
+      "create_entity_graph_database",
+      "create_entity_graph_subscription",
+    ],
+    "create_subgraph_job": ["create_subgraph_database", "fork_parent_to_subgraph"],
+    "backup_graph_job": ["create_backup"],
+    "restore_graph_job": ["restore_backup"],
+    "stage_file_job": ["stage_file_in_duckdb", "materialize_file_to_graph"],
+    "materialize_file_job": ["materialize_staged_file"],
+    "materialize_graph_job": ["materialize_graph_tables"],
   }
 
-  op_name = job_to_op.get(job_name)
-  if not op_name:
+  op_names = job_to_ops.get(job_name)
+  if not op_names:
     raise ValueError(f"Unknown job name: {job_name}")
 
-  return {
-    "ops": {
-      op_name: {
-        "config": kwargs,
-      }
-    }
-  }
+  # Build config for all ops that need it
+  ops_config = {}
+  for op_name in op_names:
+    ops_config[op_name] = {"config": kwargs}
+
+  run_config: dict[str, Any] = {"ops": ops_config}
+
+  # In local development, use in_process executor to avoid subprocess overhead
+  # This is much faster for many small jobs (e.g., staging 17 files)
+  if env.ENVIRONMENT == "dev":
+    run_config["execution"] = {"config": {"in_process": {}}}
+
+  return run_config

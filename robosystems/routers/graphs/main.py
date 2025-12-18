@@ -523,6 +523,7 @@ async def create_graph(
           tags=request.tags or [],
           create_entity=request.create_entity,
           skip_billing=False,
+          operation_id=operation_id,
         )
       else:
         # Generic graph creation via Dagster
@@ -536,6 +537,7 @@ async def create_graph(
           schema_extensions=request.metadata.schema_extensions,
           tags=request.tags or [],
           skip_billing=False,
+          operation_id=operation_id,
         )
 
       # Run Dagster job with SSE monitoring in background
