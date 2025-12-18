@@ -368,7 +368,7 @@ Each adapter consists of:
 
 ### Valkey (Redis)
 
-**Purpose**: Message broker and caching
+**Purpose**: Caching
 
 **Database Allocation**:
 - DB 2: Authentication cache
@@ -399,7 +399,7 @@ Each adapter consists of:
 
 **Database & Cache**:
 - **RDS PostgreSQL**: Primary database (auto-scaling storage)
-- **ElastiCache**: Valkey/Redis cache and message broker
+- **ElastiCache**: Valkey/Redis cache
 - **DynamoDB**: Service registries (on-demand pricing)
 
 **Storage**:
@@ -447,7 +447,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`cloudtrail.yaml`**: CloudTrail AWS Audit Logging for compliance purposes
 - **`s3.yaml`**: S3 buckets for data storage, backups, and CloudFormation templates
 - **`postgres.yaml`**: RDS PostgreSQL database with auto-scaling storage and automated backups
-- **`valkey.yaml`**: ElastiCache Valkey for caching and message broker
+- **`valkey.yaml`**: ElastiCache Valkey for caching 
 
 #### API & Workers
 
