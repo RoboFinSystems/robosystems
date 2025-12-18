@@ -1,4 +1,6 @@
-Description: RoboSystems Dagster Orchestration - ECS Fargate + EC2 Run Workers (Internal Only)
+Description: RoboSystems Dagster Orchestration - ECS Fargate Only (Lightweight Orchestration)
+# Revised December 18, 2025: Removed EC2 capacity provider
+# Heavy compute (DuckDB + LadybugDB) delegated to shared master via Graph API
 
 Parameters:
   # Environment
@@ -68,37 +70,17 @@ Parameters:
     MaxValue: 10
     Description: Maximum webserver tasks for auto scaling
 
-  # EC2 Run Worker Configuration
-  RunWorkerAmiId:
-    Type: AWS::EC2::Image::Id
-    Description: Amazon Linux 2023 ARM64 ECS-Optimized AMI ID for run workers
-  RunWorkerInstanceType:
+  # Run Job Configuration (Fargate)
+  RunJobCpu:
     Type: String
-    Default: r7g.large
-    Description: EC2 instance type for run workers
-    AllowedValues:
-      - r7g.medium
-      - r7g.large
-      - r7g.xlarge
-      - r7g.2xlarge
-  RunWorkerMinInstances:
-    Type: Number
-    Default: 0
-    MinValue: 0
-    MaxValue: 10
-    Description: Minimum EC2 instances for run workers (0 = scale to zero)
-  RunWorkerMaxInstances:
-    Type: Number
-    Default: 5
-    MinValue: 1
-    MaxValue: 20
-    Description: Maximum EC2 instances for run workers
-  RunWorkerEbsVolumeSize:
-    Type: Number
-    Default: 500
-    MinValue: 100
-    MaxValue: 2000
-    Description: EBS volume size in GiB for run worker data (supports up to 2TB)
+    Default: "1024"
+    Description: CPU units for Dagster run jobs (1024 = 1 vCPU)
+    AllowedValues: ["512", "1024", "2048", "4096"]
+  RunJobMemory:
+    Type: String
+    Default: "4096"
+    Description: Memory in MiB for Dagster run jobs
+    AllowedValues: ["1024", "2048", "4096", "8192", "16384"]
 
   # Cache Configuration
   ValkeyUrl:
@@ -147,7 +129,6 @@ Parameters:
     Description: Component tag for resource identification and billing
 
 Conditions:
-  HasMinRunWorkers: !Not [!Equals [!Ref RunWorkerMinInstances, 0]]
   HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
 
 Resources:
@@ -183,7 +164,7 @@ Resources:
       Description: Dagster webserver service discovery
 
   # ========================================
-  # ECS CLUSTER
+  # ECS CLUSTER (Fargate Only)
   # ========================================
   DagsterCluster:
     Type: AWS::ECS::Cluster
@@ -194,6 +175,14 @@ Resources:
       ClusterSettings:
         - Name: containerInsights
           Value: !Ref ContainerInsightsEnabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 80
+        - CapacityProvider: FARGATE
+          Weight: 20
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -246,20 +235,6 @@ Resources:
       SourceSecurityGroupId: !Ref BastionSecurityGroupId
       Description: Allow bastion host to access Dagster webserver
 
-  RunWorkerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Dagster EC2 run workers
-      VpcId: !Ref VpcId
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub sg-robosystems-dagster-${Environment}-runworker
-        - Key: Environment
-          Value: !Ref Environment
-
   # ========================================
   # LOG GROUPS
   # ========================================
@@ -278,7 +253,7 @@ Resources:
           Value: !Ref ComponentTag
 
   # ========================================
-  # IAM ROLES - Fargate Tasks
+  # IAM ROLES
   # ========================================
   DagsterTaskRole:
     Type: AWS::IAM::Role
@@ -322,14 +297,17 @@ Resources:
                   - s3:PutObject
                   - s3:DeleteObject
                   - s3:ListBucket
+                  - s3:GetBucketLocation
                 Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-raw-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-raw-${Environment}/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
-              # DynamoDB for graph registries
+              # DynamoDB for graph registries (needed for shared master discovery)
               - Effect: Allow
                 Action:
                   - dynamodb:Scan
@@ -344,6 +322,32 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*/index/*"
+              # EC2 for snapshot management (shared repository jobs)
+              - Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:DescribeSnapshots
+                  - ec2:CreateTags
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeInstances
+                Resource: "*"
+              # EC2 Launch Template management (for replica updates)
+              - Effect: Allow
+                Action:
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:ModifyLaunchTemplate
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*"
+              # Auto Scaling for replica refresh
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:StartInstanceRefresh
+                  - autoscaling:DescribeInstanceRefreshes
+                Resource: "*"
               # ECS for run launcher
               - Effect: Allow
                 Action:
@@ -355,17 +359,6 @@ Resources:
                   - ecs:RegisterTaskDefinition
                   - ecs:DeregisterTaskDefinition
                   - ecs:DescribeServices
-                  - ecs:ListContainerInstances
-                  - ecs:DescribeContainerInstances
-                Resource: "*"
-                Condition:
-                  ArnLike:
-                    "ecs:cluster": !GetAtt DagsterCluster.Arn
-              # EC2 for run workers
-              - Effect: Allow
-                Action:
-                  - ec2:DescribeInstances
-                  - ec2:DescribeNetworkInterfaces
                 Resource: "*"
               # IAM pass role for task execution
               - Effect: Allow
@@ -373,7 +366,7 @@ Resources:
                   - iam:PassRole
                 Resource:
                   - !GetAtt DagsterTaskExecutionRole.Arn
-                  - !GetAtt DagsterRunWorkerTaskRole.Arn
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/robosystems-dagster-task-role-${Environment}"
                 Condition:
                   StringEquals:
                     "iam:PassedToService": "ecs-tasks.amazonaws.com"
@@ -429,254 +422,6 @@ Resources:
           Value: !Ref Environment
 
   # ========================================
-  # IAM ROLES - EC2 Run Workers
-  # ========================================
-  DagsterRunWorkerTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub robosystems-dagster-runworker-task-role-${Environment}
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: RunWorkerPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              # All permissions from DagsterTaskRole
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                  - secretsmanager:DescribeSecret
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
-                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
-                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ebs"
-              # Extended S3 permissions for data processing
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:DeleteObject
-                  - s3:ListBucket
-                  - s3:GetBucketLocation
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}/*"
-              # DynamoDB for graph registries
-              - Effect: Allow
-                Action:
-                  - dynamodb:Scan
-                  - dynamodb:Query
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:BatchGetItem
-                  - dynamodb:BatchWriteItem
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*"
-              # CloudWatch Logs
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/dagster:*"
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-
-  RunWorkerInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub robosystems-dagster-runworker-instance-role-${Environment}
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy
-      Policies:
-        - PolicyName: RunWorkerInstancePolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecr:GetAuthorizationToken
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchGetImage
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-
-  RunWorkerInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      InstanceProfileName: !Sub robosystems-dagster-runworker-profile-${Environment}
-      Roles:
-        - !Ref RunWorkerInstanceRole
-
-  # ========================================
-  # EC2 RUN WORKER ASG & CAPACITY PROVIDER
-  # ========================================
-  RunWorkerLaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    Properties:
-      LaunchTemplateName: !Sub robosystems-dagster-runworker-${Environment}
-      LaunchTemplateData:
-        ImageId: !Ref RunWorkerAmiId
-        InstanceType: !Ref RunWorkerInstanceType
-        IamInstanceProfile:
-          Arn: !GetAtt RunWorkerInstanceProfile.Arn
-        SecurityGroupIds:
-          - !Ref RunWorkerSecurityGroup
-          - !Ref ValkeyClientSecurityGroupId
-          - !Ref DatabaseSecurityGroupId
-        BlockDeviceMappings:
-          - DeviceName: /dev/xvda
-            Ebs:
-              VolumeSize: 30
-              VolumeType: gp3
-              Encrypted: true
-              DeleteOnTermination: true
-          - DeviceName: /dev/xvdf
-            Ebs:
-              VolumeSize: !Ref RunWorkerEbsVolumeSize
-              VolumeType: gp3
-              Iops: 3000
-              Throughput: 250
-              Encrypted: true
-              DeleteOnTermination: true
-        TagSpecifications:
-          - ResourceType: instance
-            Tags:
-              - Key: Name
-                Value: !Sub robosystems-dagster-runworker-${Environment}
-              - Key: Environment
-                Value: !Ref Environment
-              - Key: Service
-                Value: !Ref ServiceTag
-              - Key: Component
-                Value: DagsterRunWorker
-        UserData:
-          Fn::Base64: !Sub |
-            #!/bin/bash
-            set -e
-
-            # Install ECS agent
-            yum install -y amazon-ecs-init
-
-            # Configure ECS agent
-            cat > /etc/ecs/ecs.config << EOF
-            ECS_CLUSTER=${DagsterCluster}
-            ECS_ENABLE_CONTAINER_METADATA=true
-            ECS_CONTAINER_INSTANCE_TAGS={"Environment":"${Environment}","Role":"DagsterRunWorker"}
-            EOF
-
-            # Mount data volume
-            mkfs -t xfs /dev/xvdf || true
-            mkdir -p /data
-            mount /dev/xvdf /data
-            echo "/dev/xvdf /data xfs defaults,nofail 0 2" >> /etc/fstab
-
-            # Set permissions
-            chmod 777 /data
-            mkdir -p /data/staging /data/tmp
-            chmod 777 /data/staging /data/tmp
-
-            # Start ECS agent
-            systemctl enable --now ecs
-
-            # Signal CloudFormation
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource RunWorkerAutoScalingGroup --region ${AWS::Region}
-
-  RunWorkerAutoScalingGroup:
-    Type: AWS::AutoScaling::AutoScalingGroup
-    DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
-    Properties:
-      AutoScalingGroupName: !Sub robosystems-dagster-runworker-${Environment}-asg
-      MinSize: !Ref RunWorkerMinInstances
-      MaxSize: !Ref RunWorkerMaxInstances
-      VPCZoneIdentifier: !Ref SubnetIds
-      LaunchTemplate:
-        LaunchTemplateId: !Ref RunWorkerLaunchTemplate
-        Version: !GetAtt RunWorkerLaunchTemplate.LatestVersionNumber
-      NewInstancesProtectedFromScaleIn: true
-      Tags:
-        - Key: Name
-          Value: !Sub robosystems-dagster-runworker-${Environment}
-          PropagateAtLaunch: true
-        - Key: Environment
-          Value: !Ref Environment
-          PropagateAtLaunch: true
-        - Key: AmazonECSManaged
-          Value: "true"
-          PropagateAtLaunch: true
-    CreationPolicy: !If
-      - HasMinRunWorkers
-      - ResourceSignal:
-          Count: !Ref RunWorkerMinInstances
-          Timeout: PT15M
-      - !Ref AWS::NoValue
-
-  RunWorkerCapacityProvider:
-    Type: AWS::ECS::CapacityProvider
-    Properties:
-      Name: !Sub robosystems-dagster-runworker-${Environment}
-      AutoScalingGroupProvider:
-        AutoScalingGroupArn: !Ref RunWorkerAutoScalingGroup
-        ManagedScaling:
-          Status: ENABLED
-          TargetCapacity: 100
-          MinimumScalingStepSize: 1
-          MaximumScalingStepSize: 2
-        ManagedTerminationProtection: ENABLED
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-
-  ClusterCapacityProviderAssociation:
-    Type: AWS::ECS::ClusterCapacityProviderAssociations
-    Properties:
-      Cluster: !Ref DagsterCluster
-      CapacityProviders:
-        - FARGATE
-        - FARGATE_SPOT
-        - !Ref RunWorkerCapacityProvider
-      DefaultCapacityProviderStrategy:
-        - CapacityProvider: FARGATE_SPOT
-          Weight: 1
-
-  # ========================================
   # TASK DEFINITIONS
   # ========================================
   DaemonTaskDefinition:
@@ -728,11 +473,13 @@ Resources:
             # Run database migrations on daemon startup (singleton pattern)
             - Name: RUN_MIGRATIONS
               Value: "true"
-            # EcsRunLauncher configuration
+            # EcsRunLauncher configuration - Fargate only
             - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
-              Value: !Ref RunWorkerTaskDefinition
+              Value: !Ref RunJobTaskDefinition
             - Name: DAGSTER_ECS_CLUSTER
               Value: !Ref DagsterCluster
+            - Name: DAGSTER_ECS_LAUNCH_TYPE
+              Value: FARGATE
 
   WebserverTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -796,29 +543,28 @@ Resources:
             Retries: 3
             StartPeriod: 60
 
-  RunWorkerTaskDefinition:
+  # Task definition for Dagster run jobs (launched by EcsRunLauncher)
+  RunJobTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub robosystems-dagster-runworker-${Environment}
+      Family: !Sub robosystems-dagster-run-${Environment}
+      Cpu: !Ref RunJobCpu
+      Memory: !Ref RunJobMemory
       NetworkMode: awsvpc
       RequiresCompatibilities:
-        - EC2
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
       ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt DagsterRunWorkerTaskRole.Arn
-      Volumes:
-        - Name: data-volume
-          Host:
-            SourcePath: /data
+      TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      # Fargate ephemeral storage (default 20GB, can increase to 200GB)
+      EphemeralStorage:
+        SizeInGiB: 100
       ContainerDefinitions:
         - Name: dagster-run
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
           Essential: true
-          Cpu: 1024
-          Memory: 8192
-          MountPoints:
-            - SourceVolume: data-volume
-              ContainerPath: /data
-              ReadOnly: false
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -844,17 +590,12 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: STAGING_PATH
-              Value: /data/staging
-            - Name: TMP_PATH
-              Value: /data/tmp
 
   # ========================================
   # ECS SERVICES
   # ========================================
   DaemonService:
     Type: AWS::ECS::Service
-    DependsOn: ClusterCapacityProviderAssociation
     Properties:
       ServiceName: !Sub robosystems-dagster-daemon-${Environment}
       Cluster: !Ref DagsterCluster
@@ -883,7 +624,6 @@ Resources:
 
   WebserverService:
     Type: AWS::ECS::Service
-    DependsOn: ClusterCapacityProviderAssociation
     Properties:
       ServiceName: !Sub robosystems-dagster-webserver-${Environment}
       Cluster: !Ref DagsterCluster
@@ -967,17 +707,11 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-SecurityGroupId
 
-  RunWorkerCapacityProviderName:
-    Description: Name of the EC2 capacity provider for run workers
-    Value: !Ref RunWorkerCapacityProvider
+  RunJobTaskDefinitionArn:
+    Description: ARN of the run job task definition (for EcsRunLauncher)
+    Value: !Ref RunJobTaskDefinition
     Export:
-      Name: !Sub ${AWS::StackName}-RunWorkerCapacityProvider
-
-  RunWorkerTaskDefinitionArn:
-    Description: ARN of the run worker task definition
-    Value: !Ref RunWorkerTaskDefinition
-    Export:
-      Name: !Sub ${AWS::StackName}-RunWorkerTaskDefinition
+      Name: !Sub ${AWS::StackName}-RunJobTaskDefinition
 
   TunnelCommand:
     Description: Command to access Dagster UI via bastion tunnel

@@ -62,6 +62,7 @@ class RouteTarget(Enum):
 
   USER_GRAPH = "user_graph"
   SHARED_MASTER = "shared_master"
+  SHARED_REPLICA = "shared_replica"  # Read replicas via ALB
 
 
 class CircuitBreaker:
@@ -430,21 +431,38 @@ class GraphClientFactory:
     """
     Determine the best target for read operations.
 
+    Priority:
+    1. Shared Replica ALB (if configured) - for horizontal read scaling
+    2. Shared Master (if SHARED_MASTER_READS_ENABLED) - fallback
+    3. Error if no read endpoint available
+
     Returns:
         Tuple of (target, api_url, api_key)
     """
+    # Try replica ALB first (if configured)
+    if env.SHARED_REPLICA_ALB_URL:
+      logger.info(f"Routing {graph_id} READ to shared replica ALB")
+      return (
+        RouteTarget.SHARED_REPLICA,
+        env.SHARED_REPLICA_ALB_URL,
+        env.GRAPH_API_KEY,
+      )
 
+    # Fallback to shared master
     if env.SHARED_MASTER_READS_ENABLED:
-      logger.info(f"Routing {graph_id} READ to shared master")
+      logger.info(
+        f"Routing {graph_id} READ to shared master (no replica ALB configured)"
+      )
       return (
         RouteTarget.SHARED_MASTER,
         await cls._get_shared_master_url(),
         env.GRAPH_API_KEY,
       )
-    else:
-      raise ServiceUnavailableError(
-        f"No read endpoint available for shared repository {graph_id}"
-      )
+
+    raise ServiceUnavailableError(
+      f"No read endpoint available for shared repository {graph_id}. "
+      "Configure SHARED_REPLICA_ALB_URL or enable SHARED_MASTER_READS_ENABLED."
+    )
 
   @classmethod
   @with_retry(max_attempts=3, base_delay=1.0)

@@ -1,0 +1,544 @@
+Description: RoboSystems Shared Repository Replicas (LadybugDB) - Read-Only Fleet with ALB
+# Replicas boot from EBS snapshots created by Dagster jobs
+# Snapshot ID is updated via Dagster's shared_repository_snapshot job
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Environment name (prod or staging)
+    ConstraintDescription: Must be prod or staging
+
+  # Infrastructure & Networking
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where instances will be deployed
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for the VPC
+    AllowedPattern: "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(1[6-9]|2[0-8]))$"
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for EC2 instances (multiple AZs for HA)
+
+  # Instance Configuration
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Amazon Linux 2023 ARM64 AMI ID
+  InstanceType:
+    Type: String
+    Default: r7g.medium
+    Description: EC2 instance type for replicas (smaller than writers)
+    AllowedValues:
+      - r7g.medium
+      - r7g.large
+      - r7g.xlarge
+
+  # Snapshot Configuration (Updated by Dagster job)
+  SnapshotId:
+    Type: String
+    Description: EBS Snapshot ID to restore data from (updated by Dagster shared_repository_snapshot job)
+    AllowedPattern: ^snap-[0-9a-f]+$
+    ConstraintDescription: Must be a valid EBS snapshot ID
+
+  # Auto-scaling Configuration
+  MinInstances:
+    Type: Number
+    Default: 2
+    MinValue: 0
+    MaxValue: 50
+    Description: Minimum number of replica instances (0 for cost-saving mode)
+  MaxInstances:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 50
+    Description: Maximum number of replica instances
+  DesiredCapacity:
+    Type: Number
+    Default: 2
+    MinValue: 0
+    MaxValue: 50
+    Description: Desired number of replica instances
+
+  # Docker Configuration
+  ECRRepositoryUrl:
+    Type: String
+    Description: Full ECR repository URL
+  ECRImageTag:
+    Type: String
+    Description: Docker image tag
+    Default: latest
+
+  # Monitoring
+  SNSAlertEmail:
+    Type: String
+    Description: Email address for alerts
+    AllowedPattern: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+
+  # Tagging
+  ServiceTag:
+    Type: String
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Default: SharedReplica
+
+Conditions:
+  HasMinInstances: !Not [!Equals [!Ref MinInstances, 0]]
+
+Resources:
+  # ========================================
+  # SNS TOPICS
+  # ========================================
+  ReplicaAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub robosystems-shared-replicas-${Environment}-alerts
+      DisplayName: !Sub RoboSystems Shared Replicas ${Environment} Alerts
+      Subscription:
+        - Endpoint: !Ref SNSAlertEmail
+          Protocol: email
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+
+  # ========================================
+  # SECURITY GROUPS
+  # ========================================
+  ReplicaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub robosystems-shared-replicas-${Environment}-sg
+      GroupDescription: Security group for shared repository replicas
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Allow Graph API access from VPC
+        - IpProtocol: tcp
+          FromPort: 8001
+          ToPort: 8001
+          CidrIp: !Ref VpcCidr
+          Description: Graph API from VPC
+        # Allow ALB health checks
+        - IpProtocol: tcp
+          FromPort: 8001
+          ToPort: 8001
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: ALB health checks
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-shared-replicas-${Environment}-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub robosystems-shared-replicas-alb-${Environment}-sg
+      GroupDescription: Security group for shared replicas ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        # Allow Graph API traffic from VPC
+        - IpProtocol: tcp
+          FromPort: 8001
+          ToPort: 8001
+          CidrIp: !Ref VpcCidr
+          Description: Graph API from VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-shared-replicas-alb-${Environment}-sg
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # IAM ROLES
+  # ========================================
+  ReplicaInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-shared-replicas-${Environment}-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: SharedReplicaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # ECR access
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: "*"
+              # S3 read-only for deployment artifacts
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*
+              # DynamoDB for instance registration (read-only replicas still register)
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-instances
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/graph-replicas:*
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  ReplicaInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub robosystems-shared-replicas-${Environment}-profile
+      Roles:
+        - !Ref ReplicaInstanceRole
+
+  # ========================================
+  # LOG GROUP
+  # ========================================
+  ReplicaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/graph-replicas
+      RetentionInDays: 14
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # LAUNCH TEMPLATE
+  # ========================================
+  ReplicaLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub robosystems-shared-replicas-${Environment}
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt ReplicaInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref ReplicaSecurityGroup
+        # Root volume
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 30
+              VolumeType: gp3
+              Encrypted: true
+              DeleteOnTermination: true
+          # Data volume from snapshot
+          - DeviceName: /dev/xvdf
+            Ebs:
+              SnapshotId: !Ref SnapshotId
+              VolumeType: gp3
+              Iops: 3000
+              Throughput: 250
+              Encrypted: true
+              DeleteOnTermination: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub robosystems-shared-replica-${Environment}
+              - Key: Environment
+                Value: !Ref Environment
+              - Key: Service
+                Value: !Ref ServiceTag
+              - Key: Component
+                Value: !Ref ComponentTag
+              - Key: NodeType
+                Value: shared_replica
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -e
+
+            # Log to CloudWatch
+            exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+            echo "Starting shared replica userdata..."
+
+            # Wait for data volume
+            echo "Waiting for data volume..."
+            while [ ! -e /dev/xvdf ]; do sleep 1; done
+
+            # Mount data volume (already has filesystem from snapshot)
+            echo "Mounting data volume..."
+            mkdir -p /data
+            mount /dev/xvdf /data
+            echo "/dev/xvdf /data xfs defaults,nofail 0 2" >> /etc/fstab
+
+            # Set permissions
+            chown -R 1000:1000 /data
+
+            # Install Docker
+            echo "Installing Docker..."
+            yum install -y docker
+            systemctl enable docker
+            systemctl start docker
+
+            # ECR Login
+            echo "Logging into ECR..."
+            aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${ECRRepositoryUrl}
+
+            # Pull image
+            echo "Pulling image..."
+            docker pull ${ECRRepositoryUrl}:${ECRImageTag}
+
+            # Start container in READ-ONLY mode
+            echo "Starting Graph API container (read-only replica)..."
+            docker run -d \
+              --name graph-api \
+              --restart always \
+              -p 8001:8001 \
+              -v /data:/data \
+              -e ENVIRONMENT=${Environment} \
+              -e DOCKER_PROFILE=graph-api \
+              -e LBUG_DATABASE_PATH=/data/lbug-dbs \
+              -e LBUG_NODE_TYPE=shared_replica \
+              -e LBUG_READ_ONLY=true \
+              -e AWS_REGION=${AWS::Region} \
+              ${ECRRepositoryUrl}:${ECRImageTag} \
+              /app/bin/entrypoint.sh
+
+            # Wait for container to be healthy
+            echo "Waiting for container health..."
+            for i in {1..30}; do
+              if curl -sf http://localhost:8001/status > /dev/null 2>&1; then
+                echo "Container is healthy!"
+                break
+              fi
+              sleep 5
+            done
+
+            # Register instance in DynamoDB (as shared_replica)
+            INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+            PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+
+            aws dynamodb put-item \
+              --region ${AWS::Region} \
+              --table-name robosystems-graph-${Environment}-instances \
+              --item '{
+                "instance_id": {"S": "'$INSTANCE_ID'"},
+                "private_ip": {"S": "'$PRIVATE_IP'"},
+                "node_type": {"S": "shared_replica"},
+                "status": {"S": "healthy"},
+                "registered_at": {"S": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"},
+                "environment": {"S": "${Environment}"}
+              }'
+
+            echo "Shared replica startup complete!"
+
+            # Signal CloudFormation
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ReplicaAutoScalingGroup --region ${AWS::Region}
+
+  # ========================================
+  # AUTO SCALING GROUP
+  # ========================================
+  ReplicaAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub robosystems-shared-replicas-${Environment}-asg
+      MinSize: !Ref MinInstances
+      MaxSize: !Ref MaxInstances
+      DesiredCapacity: !Ref DesiredCapacity
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ReplicaLaunchTemplate
+        Version: !GetAtt ReplicaLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs:
+        - !Ref ReplicaTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-shared-replica-${Environment}
+          PropagateAtLaunch: true
+        - Key: Environment
+          Value: !Ref Environment
+          PropagateAtLaunch: true
+        - Key: NodeType
+          Value: shared_replica
+          PropagateAtLaunch: true
+    CreationPolicy: !If
+      - HasMinInstances
+      - ResourceSignal:
+          Count: !Ref MinInstances
+          Timeout: PT15M
+      - !Ref AWS::NoValue
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT5M
+        WaitOnResourceSignals: true
+
+  # CPU-based Auto Scaling
+  ReplicaCPUScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref ReplicaAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 70
+        DisableScaleIn: false
+
+  # ========================================
+  # APPLICATION LOAD BALANCER
+  # ========================================
+  ReplicaALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub robosystems-shared-${Environment}
+      Type: application
+      Scheme: internal
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub robosystems-shared-replicas-${Environment}-alb
+        - Key: Environment
+          Value: !Ref Environment
+
+  ReplicaTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub robosystems-shared-${Environment}-tg
+      VpcId: !Ref VpcId
+      Port: 8001
+      Protocol: HTTP
+      TargetType: instance
+      HealthCheckEnabled: true
+      HealthCheckPath: /status
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  ReplicaListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ReplicaALB
+      Port: 8001
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ReplicaTargetGroup
+
+  # ========================================
+  # CLOUDWATCH ALARMS
+  # ========================================
+  UnhealthyHostsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-unhealthy-hosts
+      AlarmDescription: Alert when replicas are unhealthy
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt ReplicaTargetGroup.TargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt ReplicaALB.LoadBalancerFullName
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
+  HighLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub robosystems-shared-replicas-${Environment}-high-latency
+      AlarmDescription: Alert when ALB response time is high
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ReplicaALB.LoadBalancerFullName
+      AlarmActions:
+        - !Ref ReplicaAlertTopic
+      TreatMissingData: notBreaching
+
+Outputs:
+  ALBDNSName:
+    Description: DNS name of the shared replicas ALB
+    Value: !GetAtt ReplicaALB.DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-ALBDNSName
+
+  ALBEndpoint:
+    Description: Full endpoint URL for Graph API via ALB
+    Value: !Sub http://${ReplicaALB.DNSName}:8001
+    Export:
+      Name: !Sub ${AWS::StackName}-ALBEndpoint
+
+  AutoScalingGroupName:
+    Description: Name of the Auto Scaling Group (for Dagster job reference)
+    Value: !Ref ReplicaAutoScalingGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-ASGName
+
+  LaunchTemplateName:
+    Description: Name of the Launch Template (for Dagster job reference)
+    Value: !Sub robosystems-shared-replicas-${Environment}
+    Export:
+      Name: !Sub ${AWS::StackName}-LaunchTemplateName
+
+  ReplicaSecurityGroupId:
+    Description: Security group ID for replicas
+    Value: !Ref ReplicaSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-SecurityGroupId
+
+  TargetGroupArn:
+    Description: ARN of the target group
+    Value: !Ref ReplicaTargetGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-TargetGroupArn

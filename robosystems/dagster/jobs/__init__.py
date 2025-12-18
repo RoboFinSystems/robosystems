@@ -5,6 +5,7 @@ Jobs define the execution units that can be scheduled or triggered:
 - Infrastructure jobs: Auth cleanup, health checks
 - Provisioning jobs: Graph and repository provisioning
 - SEC jobs: XBRL pipeline processing (download, process, materialize)
+- Shared Repository jobs: EBS snapshots, replica management
 """
 
 from robosystems.dagster.jobs.billing import (
@@ -28,6 +29,12 @@ from robosystems.dagster.jobs.sec import (
   sec_daily_download_schedule,
   sec_weekly_download_schedule,
 )
+from robosystems.dagster.jobs.shared_repository import (
+  shared_repository_snapshot_job,
+  shared_repository_snapshot_only_job,
+  shared_repository_refresh_replicas_job,
+  weekly_shared_repository_snapshot_schedule,
+)
 
 __all__ = [
   # Billing
@@ -47,4 +54,9 @@ __all__ = [
   "sec_materialize_job",
   "sec_daily_download_schedule",
   "sec_weekly_download_schedule",
+  # Shared Repository Management
+  "shared_repository_snapshot_job",
+  "shared_repository_snapshot_only_job",
+  "shared_repository_refresh_replicas_job",
+  "weekly_shared_repository_snapshot_schedule",
 ]

@@ -306,6 +306,42 @@ class EnvConfig:
     bool(get_secret_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true"),
   )
 
+  # Shared Replica ALB URL (for read scaling)
+  # When set, reads to shared repositories will route to the replica ALB
+  # instead of the shared master. This allows horizontal scaling of reads.
+  # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
+  SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
+
+  # ==========================================================================
+  # Dagster Schedule Feature Flags
+  # All default to false - enable in AWS Secrets Manager for production.
+  # This ensures forked repos don't accidentally run production schedules.
+  # ==========================================================================
+
+  # Billing schedules: credit allocation, storage billing, usage collection
+  BILLING_SCHEDULES_ENABLED = get_bool_env(
+    "BILLING_SCHEDULES_ENABLED",
+    bool(get_secret_value("BILLING_SCHEDULES_ENABLED", "false").lower() == "true"),
+  )
+
+  # Instance infrastructure schedules: health checks, metrics, registry cleanup
+  INSTANCE_SCHEDULES_ENABLED = get_bool_env(
+    "INSTANCE_SCHEDULES_ENABLED",
+    bool(get_secret_value("INSTANCE_SCHEDULES_ENABLED", "false").lower() == "true"),
+  )
+
+  # SEC pipeline schedules: daily/weekly download
+  SEC_SCHEDULES_ENABLED = get_bool_env(
+    "SEC_SCHEDULES_ENABLED",
+    bool(get_secret_value("SEC_SCHEDULES_ENABLED", "false").lower() == "true"),
+  )
+
+  # Shared repository schedule: weekly snapshot + replica refresh
+  SHARED_REPO_SCHEDULE_ENABLED = get_bool_env(
+    "SHARED_REPO_SCHEDULE_ENABLED",
+    bool(get_secret_value("SHARED_REPO_SCHEDULE_ENABLED", "false").lower() == "true"),
+  )
+
   # Graph backup encryption and compression are always enabled for security and efficiency
 
   # Graph Operations Feature Flags

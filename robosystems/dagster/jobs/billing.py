@@ -15,11 +15,24 @@ from dagster import (
   op,
 )
 
+from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
 from robosystems.models.iam import GraphCredits, GraphCreditTransaction, GraphUsage
 from robosystems.models.iam.graph_credits import CreditTransactionType
 from robosystems.models.iam.graph_usage import UsageEventType
 from robosystems.operations.graph.credit_service import CreditService
+
+# ============================================================================
+# Environment-based Schedule Status
+# ============================================================================
+
+# Billing schedules default to STOPPED. Enable via BILLING_SCHEDULES_ENABLED=true
+# in AWS Secrets Manager or environment variables.
+BILLING_SCHEDULE_STATUS = (
+  DefaultScheduleStatus.RUNNING
+  if env.BILLING_SCHEDULES_ENABLED
+  else DefaultScheduleStatus.STOPPED
+)
 
 
 @op
@@ -455,23 +468,23 @@ def monthly_usage_report_job():
 monthly_credit_allocation_schedule = ScheduleDefinition(
   job=monthly_credit_allocation_job,
   cron_schedule="0 0 1 * *",  # 1st of month at midnight UTC
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=BILLING_SCHEDULE_STATUS,
 )
 
 daily_storage_billing_schedule = ScheduleDefinition(
   job=daily_storage_billing_job,
   cron_schedule="0 2 * * *",  # Daily at 2 AM UTC
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=BILLING_SCHEDULE_STATUS,
 )
 
 hourly_usage_collection_schedule = ScheduleDefinition(
   job=hourly_usage_collection_job,
   cron_schedule="5 * * * *",  # 5 minutes past every hour
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=BILLING_SCHEDULE_STATUS,
 )
 
 monthly_usage_report_schedule = ScheduleDefinition(
   job=monthly_usage_report_job,
   cron_schedule="0 6 2 * *",  # 2nd of month at 6 AM UTC
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=BILLING_SCHEDULE_STATUS,
 )

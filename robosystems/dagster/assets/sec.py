@@ -432,7 +432,8 @@ def sec_batch_process(
           exclude_suffixes = ("_def.xml", "_lab.xml", "_pre.xml", "_cal.xml", ".xsd")
           all_files = os.listdir(tmpdir)
           xbrl_files = [
-            f for f in all_files
+            f
+            for f in all_files
             if f.endswith((".xml", ".htm", ".html"))
             and not any(f.endswith(suffix) for suffix in exclude_suffixes)
           ]
@@ -452,6 +453,7 @@ def sec_batch_process(
 
           # Build report URL
           from robosystems.adapters.sec import SEC_BASE_URL
+
           report_url = f"{SEC_BASE_URL}/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{xbrl_files[0]}"
 
           schema_config = {
@@ -496,7 +498,9 @@ def sec_batch_process(
     if list(filings_by_cik.keys()).index(cik) % 10 == 0:
       context.log.info(f"Progress: {total_processed} filings, {total_errors} errors")
 
-  context.log.info(f"Batch processing complete for {year}: {total_processed} filings, {total_files} files")
+  context.log.info(
+    f"Batch processing complete for {year}: {total_processed} filings, {total_files} files"
+  )
 
   return MaterializeResult(
     metadata={
@@ -545,7 +549,9 @@ def sec_filings_to_process(
   context.log.info("Discovering raw filings for partition registration...")
 
   # Determine years to scan
-  years_to_scan = config.year_filter if config.year_filter else [int(y) for y in SEC_YEARS]
+  years_to_scan = (
+    config.year_filter if config.year_filter else [int(y) for y in SEC_YEARS]
+  )
 
   all_filings = []
   for year in years_to_scan:
@@ -564,7 +570,9 @@ def sec_filings_to_process(
 
           # Check if already processed (if skip_processed is enabled)
           if config.skip_processed:
-            processed_prefix = f"processed/year={year}/nodes/Entity/{cik}_{accession}.parquet"
+            processed_prefix = (
+              f"processed/year={year}/nodes/Entity/{cik}_{accession}.parquet"
+            )
             try:
               s3.client.head_object(Bucket=processed_bucket, Key=processed_prefix)
               context.log.debug(f"Skipping already processed: {partition_key}")
@@ -665,7 +673,8 @@ def sec_process_filing(
       exclude_suffixes = ("_def.xml", "_lab.xml", "_pre.xml", "_cal.xml", ".xsd")
       all_files = os.listdir(tmpdir)
       xbrl_files = [
-        f for f in all_files
+        f
+        for f in all_files
         if f.endswith((".xml", ".htm", ".html"))
         and not any(f.endswith(suffix) for suffix in exclude_suffixes)
       ]
@@ -687,6 +696,7 @@ def sec_process_filing(
 
       # Build report URL
       from robosystems.adapters.sec import SEC_BASE_URL
+
       report_url = f"{SEC_BASE_URL}/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{xbrl_files[0]}"
 
       # Schema config

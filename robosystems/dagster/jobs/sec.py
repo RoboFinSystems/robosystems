@@ -23,6 +23,7 @@ from dagster import (
   define_asset_job,
 )
 
+from robosystems.config import env
 from robosystems.dagster.assets import (
   sec_companies_list,
   sec_raw_filings,
@@ -87,13 +88,21 @@ sec_materialize_job = define_asset_job(
 # SEC Pipeline Schedules
 # ============================================================================
 
+# SEC schedules default to STOPPED. Enable via SEC_SCHEDULES_ENABLED=true
+# in AWS Secrets Manager or environment variables.
+SEC_SCHEDULE_STATUS = (
+  DefaultScheduleStatus.RUNNING
+  if env.SEC_SCHEDULES_ENABLED
+  else DefaultScheduleStatus.STOPPED
+)
+
 
 sec_daily_download_schedule = ScheduleDefinition(
   name="sec_daily_download",
   description="Daily SEC download and process at 2 AM UTC",
   job=sec_download_job,
   cron_schedule="0 2 * * *",
-  default_status=DefaultScheduleStatus.STOPPED,
+  default_status=SEC_SCHEDULE_STATUS,
   run_config=RunConfig(
     ops={
       "sec_companies_list": SECCompaniesConfig(),
@@ -114,7 +123,7 @@ sec_weekly_download_schedule = ScheduleDefinition(
   description="Weekly SEC full download and process at 3 AM UTC on Sundays",
   job=sec_download_job,
   cron_schedule="0 3 * * 0",
-  default_status=DefaultScheduleStatus.STOPPED,
+  default_status=SEC_SCHEDULE_STATUS,
   run_config=RunConfig(
     ops={
       "sec_companies_list": SECCompaniesConfig(),
