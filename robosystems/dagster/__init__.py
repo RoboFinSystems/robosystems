@@ -6,7 +6,7 @@ This module provides Dagster-based data orchestration for:
 - QuickBooks data sync
 - Plaid banking integration
 
-The Dagster setup replaces Celery for all orchestration needs, providing:
+The Dagster setup replaces background tasks for all orchestration needs, providing:
 - Better observability through the Dagster UI
 - Asset-based data lineage tracking
 - Declarative scheduling and sensors

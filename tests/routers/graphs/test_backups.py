@@ -184,7 +184,7 @@ class TestBackupEndpoints:
       assert data["status"] == "accepted"
       assert "Backup creation started" in data["message"]
 
-      # Note: This endpoint uses background tasks, not the mocked Celery task
+      # Note: This endpoint uses background tasks, not the mocked background task
       # The actual backup is executed as a background FastAPI task
 
       # Verify authorization checks were called

@@ -40,7 +40,7 @@ class EnvValidator:
       required_prod_vars = {
         "DATABASE_URL": "PostgreSQL connection string",
         "JWT_SECRET_KEY": "JWT signing key (must not be default)",
-        "VALKEY_URL": "Valkey/Redis base URL",  # Changed from CELERY_BROKER_URL
+        "VALKEY_URL": "Valkey/Redis base URL",
         "AWS_REGION": "AWS region",
         "CONNECTION_CREDENTIALS_KEY": "Encryption key for credentials",
       }

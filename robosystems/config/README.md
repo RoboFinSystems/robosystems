@@ -66,7 +66,6 @@ region = env.AWS_REGION
 # Core Settings
 ENVIRONMENT          # dev/staging/prod
 DATABASE_URL         # PostgreSQL connection
-CELERY_BROKER_URL    # Valkey/Redis connection
 JWT_SECRET_KEY       # JWT signing key
 
 # Graph API Configuration
@@ -308,6 +307,7 @@ BedrockModel.SONNET_3_5_V2  # us.anthropic.claude-3-5-sonnet-20241022-v2:0
 **Note:** All models use regional inference profiles (`us.*`) for on-demand access without marketplace subscriptions.
 
 **Pricing:** All Sonnet models use the same pricing tier:
+
 - Input: $3 per million tokens ($0.003 per 1k tokens = 3.0 credits)
 - Output: $15 per million tokens ($0.015 per 1k tokens = 15.0 credits)
 
@@ -419,6 +419,7 @@ All business configuration lives in code, not database:
 **IMPORTANT**: These are two separate systems that serve different purposes:
 
 **`api_rate_multiplier`** (Rate Limiting):
+
 - Scales API request rate limits based on subscription tier
 - Examples: 1.0x for standard, 2.5x for large, 5.0x for xlarge
 - Affects how many requests per minute you can make
@@ -426,6 +427,7 @@ All business configuration lives in code, not database:
 - Does NOT affect credit costs
 
 **Credit Costs** (Billing):
+
 - Only AI operations (Anthropic/OpenAI API calls) consume credits
 - All database operations are completely FREE (queries, imports, backups, etc.)
 - No multipliers applied to credit costs - same price for all tiers
@@ -433,6 +435,7 @@ All business configuration lives in code, not database:
 - Storage has separate optional billing (0.05 credits per GB per day)
 
 **Example:**
+
 - A xlarge tier customer gets 5.0x more API requests per minute
 - But pays the same credit cost per AI operation as a standard tier customer
 - Database queries don't consume any credits regardless of tier

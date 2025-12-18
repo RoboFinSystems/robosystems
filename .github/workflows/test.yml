@@ -34,7 +34,7 @@ jobs:
       # JWT and security secrets for authentication (test environment)
       JWT_SECRET_KEY: test-jwt-secret-key-12345678901234567890abcdef
       CONNECTION_CREDENTIALS_KEY: test-connection-credentials-key-12345678901234567890abcdef
-      # Celery/Redis Configuration (with authentication)
+      # Valkey/Redis Configuration (with authentication)
       VALKEY_URL: redis://localhost:6379
       VALKEY_AUTH_TOKEN: valkey # Must match pytest.ini
       # AI Configuration

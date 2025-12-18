@@ -535,9 +535,6 @@ class EnvConfig:
     "VALKEY_AUTH_SECRET_NAME", f"robosystems/{ENVIRONMENT}/valkey/auth"
   )
 
-  # Note: Celery has been removed. Task orchestration now uses Dagster.
-  # See robosystems/dagster/ for job definitions and schedules.
-
   # Cache TTLs
   CREDIT_BALANCE_CACHE_TTL = get_int_env("CREDIT_BALANCE_CACHE_TTL", CACHE_TTL_SHORT)
   CREDIT_SUMMARY_CACHE_TTL = get_int_env("CREDIT_SUMMARY_CACHE_TTL", 600)  # 10 minutes

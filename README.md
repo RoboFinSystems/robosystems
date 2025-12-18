@@ -127,7 +127,7 @@ RoboSystems is built on a modern, scalable architecture with:
 **Data Layer:**
 
 - PostgreSQL for IAM and graph metadata
-- Valkey for caching and message broker
+- Valkey for caching
 - AWS S3 for data lake storage and static assets
 - DynamoDB for instance/graph/volume registry
 

@@ -28,9 +28,8 @@ from robosystems.dagster.jobs.provisioning import (
 def pending_subscription_sensor(context: SensorEvaluationContext):
   """Watch for subscriptions in 'provisioning' status and trigger graph creation.
 
-  This sensor replaces the Celery task that was triggered via .delay() calls
-  when subscriptions were created. Instead, it polls for pending subscriptions
-  and triggers the provisioning job.
+  This sensor polls for pending subscriptions and triggers the provisioning job
+  when subscriptions are created.
   """
   # Skip in dev environment to avoid database connection issues
   if env.ENVIRONMENT == "dev":

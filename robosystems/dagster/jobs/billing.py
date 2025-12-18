@@ -1,13 +1,6 @@
 """Dagster billing jobs.
 
-These jobs are migrated from Celery tasks in robosystems/tasks/billing/.
-They handle credit allocation, storage billing, and usage collection.
-
-Migration Notes:
-- @celery_app.task → @op
-- task.delay() → job.execute_in_process() or sensor trigger
-- Celery Beat → ScheduleDefinition
-- session = SessionLocal() → db.get_session()
+These jobs handle credit allocation, storage billing, and usage collection.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -27,12 +20,6 @@ from robosystems.models.iam import GraphCredits, GraphCreditTransaction, GraphUs
 from robosystems.models.iam.graph_credits import CreditTransactionType
 from robosystems.models.iam.graph_usage import UsageEventType
 from robosystems.operations.graph.credit_service import CreditService
-
-
-# ============================================================================
-# Monthly Credit Allocation Job
-# Replaces: robosystems.tasks.billing.monthly_credit_reset.monthly_credit_reset
-# ============================================================================
 
 
 @op
@@ -196,12 +183,6 @@ def monthly_credit_allocation_job():
   cleanup_old_credit_transactions(result)
 
 
-# ============================================================================
-# Daily Storage Billing Job
-# Replaces: robosystems.tasks.billing.storage_billing.daily_storage_billing
-# ============================================================================
-
-
 @op
 def get_graphs_with_storage_usage(
   context: OpExecutionContext, db: DatabaseResource
@@ -314,12 +295,6 @@ def daily_storage_billing_job():
   bill_storage_credits(graphs)
 
 
-# ============================================================================
-# Hourly Usage Collection Job
-# Replaces: robosystems.tasks.billing.usage_collector.graph_usage_collector
-# ============================================================================
-
-
 @op
 def collect_graph_usage(
   context: OpExecutionContext, db: DatabaseResource
@@ -385,12 +360,6 @@ def collect_graph_usage(
 def hourly_usage_collection_job():
   """Hourly usage collection job."""
   collect_graph_usage()
-
-
-# ============================================================================
-# Monthly Usage Report Job
-# Replaces: robosystems.tasks.billing.monthly_credit_reset.generate_monthly_usage_report
-# ============================================================================
 
 
 @op
@@ -480,7 +449,7 @@ def monthly_usage_report_job():
 
 
 # ============================================================================
-# Schedules (Replace Celery Beat)
+# Schedules
 # ============================================================================
 
 monthly_credit_allocation_schedule = ScheduleDefinition(

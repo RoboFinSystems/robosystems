@@ -1,9 +1,9 @@
 """Dagster infrastructure jobs.
 
-These jobs are migrated from Celery tasks and Lambda functions for system maintenance:
+These jobs handle system maintenance:
 - Auth cleanup (expired API keys, tokens)
 - Health checks (credit allocation, graph credits)
-- Graph instance monitoring (from bin/lambda/graph_instance_monitor.py)
+- Graph instance monitoring
 """
 
 from datetime import datetime, timezone

@@ -1,6 +1,6 @@
 # Dagster Orchestration
 
-This directory contains the Dagster-based orchestration system for RoboSystems, replacing Celery for all scheduled and event-driven tasks.
+This directory contains the Dagster-based orchestration system for all scheduled and event-driven tasks.
 
 ## Directory Structure
 
@@ -13,7 +13,7 @@ dagster/
 │   ├── database.py        # PostgreSQL resource
 │   ├── storage.py         # S3 resource
 │   └── graph.py           # LadybugDB graph resource
-├── jobs/                  # Job definitions (migrated from Celery tasks)
+├── jobs/                  # Job definitions
 │   ├── billing.py         # Credit allocation, storage billing
 │   └── infrastructure.py  # Auth cleanup, health checks
 ├── sensors/               # Event-driven triggers
@@ -48,18 +48,18 @@ uv run dagster job execute -m robosystems.dagster -j daily_storage_billing_job \
 
 ### Billing Jobs
 
-| Job | Schedule | Description |
-|-----|----------|-------------|
+| Job                             | Schedule               | Description                                   |
+| ------------------------------- | ---------------------- | --------------------------------------------- |
 | `monthly_credit_allocation_job` | 1st of month, midnight | Process overages and allocate monthly credits |
-| `daily_storage_billing_job` | Daily at 2 AM | Bill storage usage credits |
-| `hourly_usage_collection_job` | Every hour at :05 | Collect storage snapshots |
-| `monthly_usage_report_job` | 2nd of month, 6 AM | Generate usage reports |
+| `daily_storage_billing_job`     | Daily at 2 AM          | Bill storage usage credits                    |
+| `hourly_usage_collection_job`   | Every hour at :05      | Collect storage snapshots                     |
+| `monthly_usage_report_job`      | 2nd of month, 6 AM     | Generate usage reports                        |
 
 ### Infrastructure Jobs
 
-| Job | Schedule | Description |
-|-----|----------|-------------|
-| `hourly_auth_cleanup_job` | Every hour | Clean up expired API keys |
+| Job                       | Schedule        | Description                 |
+| ------------------------- | --------------- | --------------------------- |
+| `hourly_auth_cleanup_job` | Every hour      | Clean up expired API keys   |
 | `weekly_health_check_job` | Mondays at 3 AM | Credit system health checks |
 
 ## Resources
@@ -84,41 +84,17 @@ Sensors watch for conditions and trigger jobs:
 
 - **`pending_subscription_sensor`**: Watches for subscriptions in "provisioning" status and triggers graph creation
 
-## Migration from Celery
+## Custom Data Sources (Fork-Friendly)
 
-This Dagster setup replaces the Celery-based task system:
+When forking RoboSystems, add custom data pipelines in the `custom_*` namespace:
 
-| Celery Component | Dagster Equivalent |
-|-----------------|-------------------|
-| `@celery_app.task` | `@op` |
-| Celery Beat schedule | `ScheduleDefinition` |
-| `task.delay()` | Sensor or job execution |
-| Redis broker | Dagster daemon |
-| Flower monitoring | Dagster UI |
+1. Create adapter: `adapters/custom_myservice/` (client + processors)
+2. Create assets: `dagster/assets/custom_myservice.py`
+3. Register in `definitions.py`
 
-### Environment Variables
-
-```bash
-# Required for all environments
-DATABASE_URL=postgresql://...
-S3_BUCKET_NAME=robosystems-data
-AWS_REGION=us-east-1
-GRAPH_API_URL=http://localhost:8001
-
-# Dagster-specific (production)
-DAGSTER_HOME=/opt/dagster
-DAGSTER_POSTGRES_DB=dagster
-DAGSTER_POSTGRES_HOST=localhost
-```
-
-## Phase Roadmap
-
-- **Phase 1** (Complete): Dagster infrastructure + billing task migration
-- **Phase 2** (Weeks 4-5): SEC pipeline assets
-- **Phase 3** (Weeks 6-9): QuickBooks pipeline assets
-- **Phase 4** (Weeks 10-12): Plaid pipeline assets
+The `custom_*` namespace ensures upstream updates never conflict with your additions. See [Adapters README](../adapters/README.md#fork-friendly-custom-adapters) for details.
 
 ## Related Documentation
 
-- [Execution Roadmap](/local/docs/EXECUTION_ROADMAP.md) - Migration roadmap and progress
 - [Dagster Documentation](https://docs.dagster.io/) - Official Dagster docs
+- [Adapters README](../adapters/README.md) - External service integrations

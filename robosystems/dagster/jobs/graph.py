@@ -1,15 +1,9 @@
 """Dagster graph operations jobs.
 
-These jobs handle user-triggered graph operations that were previously in Celery:
+These jobs handle user-triggered graph operations:
 - Graph creation (generic, entity, subgraph)
 - Backup and restore
 - DuckDB staging and graph materialization
-
-Migration Notes:
-- @celery_app.task → @op
-- task.delay() → run submitted via API + sensor
-- SSE progress → Dagster run events (monitored by FastAPI)
-- Celery worker → Dagster executor
 
 Usage:
 - Jobs are triggered via DagsterGraphQLClient from FastAPI endpoints

@@ -4,11 +4,6 @@ These jobs orchestrate the SEC XBRL pipeline:
 - sec_single_company_job: Local dev (just sec-load NVDA 2025)
 - sec_full_rebuild_job: Production (all companies, all years)
 - sec_daily_rebuild_schedule: Daily at 2 AM
-
-Migration Notes:
-- Replaces Celery tasks in robosystems/tasks/sec_xbrl/
-- Uses Dagster's partitioned assets for year-based processing
-- Rate limiting via tag-based concurrency limits
 """
 
 from dagster import (

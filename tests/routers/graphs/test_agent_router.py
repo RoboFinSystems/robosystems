@@ -393,7 +393,7 @@ class TestAgentEndpoints:
         },
       ),
     ):
-      # Mock the background task (replaces old Celery task)
+      # Mock the background task
       mock_background_task.return_value = None
 
       request_data = {

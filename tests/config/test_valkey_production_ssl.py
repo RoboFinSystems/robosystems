@@ -4,7 +4,7 @@ Test suite for Valkey/Redis production SSL parameter handling.
 
 This module specifically tests the critical production issue where SSL parameters
 in the URL query string cause "Invalid SSL Certificate Requirements Flag: CERT_NONE"
-errors with redis-py clients, while Celery requires them.
+errors with redis-py clients, while background tasks requires them.
 """
 
 import os

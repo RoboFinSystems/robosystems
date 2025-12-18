@@ -246,7 +246,7 @@ class TestCheckoutCompletedHandler:
     """Test that checkout completion sets subscription to provisioning status.
 
     Note: Graph provisioning is now handled by Dagster sensors that monitor
-    subscriptions in 'provisioning' status, not by direct Celery task calls.
+    subscriptions in 'provisioning' status, not by direct background task calls.
     """
     from robosystems.routers.admin.webhooks import handle_checkout_completed
     from robosystems.models.iam import OrgUser
@@ -295,7 +295,7 @@ class TestCheckoutCompletedHandler:
     """Test that checkout completion sets repository subscription to provisioning.
 
     Note: Repository provisioning is now handled by Dagster sensors that monitor
-    subscriptions in 'provisioning' status, not by direct Celery task calls.
+    subscriptions in 'provisioning' status, not by direct background task calls.
     """
     from robosystems.routers.admin.webhooks import handle_checkout_completed
     from robosystems.models.iam import OrgUser
@@ -386,7 +386,7 @@ class TestPaymentSucceededHandler:
     """Test that payment success sets subscription to provisioning status.
 
     Note: Graph provisioning is now handled by Dagster sensors that monitor
-    subscriptions in 'provisioning' status, not by direct Celery task calls.
+    subscriptions in 'provisioning' status, not by direct background task calls.
     """
     from robosystems.routers.admin.webhooks import handle_payment_succeeded
     from robosystems.models.iam import OrgUser

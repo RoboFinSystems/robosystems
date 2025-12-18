@@ -32,8 +32,7 @@
     "**.egg-info/**": true,
     "**/.git/**": true,
     "__mocks__/**": true,
-    ".coverage/**": true,
-    "celerybeat-schedule.db": true
+    ".coverage/**": true
   },
   "search.exclude": {
     "robosystems/arelle/EDGAR/**": true,

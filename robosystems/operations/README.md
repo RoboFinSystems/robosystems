@@ -126,8 +126,8 @@ async def create_entity_with_data(user_id: str, entity_data: dict):
     graph_service = EntityGraphService()
     graph_id = await graph_service.create_entity_graph(entity_data)
 
-    # 2. Set up billing subscription (done automatically by Celery task)
-    # The create_graph Celery task now handles subscription creation
+    # 2. Set up billing subscription (done automatically by Dagster job)
+    # The create_graph Dagster job now handles subscription creation
     # using GraphSubscriptionService with the billing namespace
 
     # 3. Initialize credit allocation

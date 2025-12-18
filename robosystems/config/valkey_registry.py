@@ -28,15 +28,15 @@ class ValkeyDatabase(IntEnum):
   isolation and prevent key collisions.
 
   Current allocation:
-  - 0-1: Reserved (formerly Celery, now available for reuse)
+  - 0-1: Reserved for future use
   - 2-9: Application services (auth, SSE, locks, pipelines, credits, rate limiting, lbug, billing)
   """
 
   # =========================================================================
   # RESERVED DATABASES (0-1) - Available for future use
   # =========================================================================
-  RESERVED_0 = 0  # Formerly Celery broker - available for reuse
-  RESERVED_1 = 1  # Formerly Celery results - available for reuse
+  RESERVED_0 = 0  # Reserved - available for future use
+  RESERVED_1 = 1  # Reserved - available for future use
 
   # =========================================================================
   # APPLICATION DATABASES (2-9)
@@ -414,8 +414,8 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
       Description of the database's purpose
   """
   descriptions = {
-    ValkeyDatabase.RESERVED_0: "Reserved (formerly Celery broker) - available for reuse",
-    ValkeyDatabase.RESERVED_1: "Reserved (formerly Celery results) - available for reuse",
+    ValkeyDatabase.RESERVED_0: "Reserved - available for future use",
+    ValkeyDatabase.RESERVED_1: "Reserved - available for future use",
     ValkeyDatabase.AUTH_CACHE: "Authentication tokens, sessions, and API key cache",
     ValkeyDatabase.SSE_EVENTS: "Server-Sent Events for real-time updates",
     ValkeyDatabase.DISTRIBUTED_LOCKS: "Distributed locks for multi-instance coordination",

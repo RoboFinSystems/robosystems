@@ -125,6 +125,38 @@ To add a new external service:
 5. Add tests in `tests/adapters/{service_name}/`
 6. Create Dagster assets in `dagster/assets/{service_name}.py`
 
+## Fork-Friendly Custom Adapters
+
+The adapter directory structure is designed as a **merge boundary** for forks. Custom adapters live in isolated namespaces that upstream never touches, enabling conflict-free updates.
+
+```
+adapters/
+├── sec/                 # ← Upstream maintains (don't modify in fork)
+├── quickbooks/          # ← Upstream maintains (don't modify in fork)
+├── plaid/               # ← Upstream maintains (don't modify in fork)
+│
+└── custom_*/            # ← Fork namespace (upstream NEVER touches)
+    ├── custom_erp/      #    Your custom ERP integration
+    ├── custom_bank/     #    Your bank API integration
+    └── custom_crm/      #    Your CRM integration
+```
+
+**To add a custom data source in your fork:**
+
+1. Create `adapters/custom_myservice/` following the same client/processors structure
+2. Add a Dagster asset file in `dagster/assets/custom_myservice.py`
+3. Import in `dagster/definitions.py`
+
+**Merge-conflict-free updates:**
+
+```bash
+git remote add upstream https://github.com/RoboFinSystems/robosystems.git
+git fetch upstream
+git merge upstream/main  # Clean merge - your custom_*/ directories untouched
+```
+
+The `custom_*` namespace convention ensures that `git pull upstream main` never conflicts with your additions.
+
 ## Related Documentation
 
 - **[Dagster Assets](/robosystems/dagster/README.md)** - Data pipeline orchestration
