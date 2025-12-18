@@ -1,9 +1,18 @@
 """Dagster SEC pipeline jobs and schedules.
 
-These jobs orchestrate the SEC XBRL pipeline:
-- sec_single_company_job: Local dev (just sec-load NVDA 2025)
-- sec_full_rebuild_job: Production (all companies, all years)
-- sec_daily_rebuild_schedule: Daily at 2 AM
+Pipeline phases (split due to different partition types):
+
+Phase 1 - Download & Process (year-partitioned):
+  sec_download_job: sec_companies_list → sec_raw_filings → sec_batch_process
+
+Phase 2 - Process Individual (dynamic partitions, per-filing - for Dagster UI):
+  sec_process_job: sec_filings_to_process → sec_process_filing
+
+Phase 3 - Materialize (unpartitioned):
+  sec_materialize_job: sec_duckdb_staging → sec_graph_materialized
+
+The CLI (sec_pipeline.py) uses Phase 1 + Phase 3 for batch workflows.
+Phase 2 is for per-filing visibility in Dagster UI.
 """
 
 from dagster import (
@@ -17,15 +26,16 @@ from dagster import (
 from robosystems.dagster.assets import (
   sec_companies_list,
   sec_raw_filings,
-  sec_processed_filings,
+  sec_batch_process,
+  sec_filings_to_process,
+  sec_process_filing,
   sec_duckdb_staging,
   sec_graph_materialized,
   sec_year_partitions,
+  sec_filing_partitions,
   SECCompaniesConfig,
   SECDownloadConfig,
-  SECProcessConfig,
-  SECDuckDBConfig,
-  SECMaterializeConfig,
+  SECBatchProcessConfig,
 )
 
 
@@ -34,69 +44,42 @@ from robosystems.dagster.assets import (
 # ============================================================================
 
 
-# Job for single company (local development)
-# Usage: just sec-load NVDA 2025
-sec_single_company_job = define_asset_job(
-  name="sec_single_company",
-  description=(
-    "Process SEC filings for a single company. "
-    "Used for local development and testing with 'just sec-load TICKER YEAR'."
-  ),
+# Phase 1: Download & Process (year-partitioned)
+sec_download_job = define_asset_job(
+  name="sec_download_and_process",
+  description="Download and process SEC XBRL filings for a specific year.",
   selection=AssetSelection.assets(
     sec_companies_list,
     sec_raw_filings,
-    sec_processed_filings,
-    sec_duckdb_staging,
-    sec_graph_materialized,
+    sec_batch_process,
   ),
-  tags={
-    "pipeline": "sec",
-    "mode": "single_company",
-  },
-  partitions_def=sec_year_partitions,  # Required for partitioned assets
-)
-
-
-# Job for full rebuild (production)
-# Processes all companies across all years
-sec_full_rebuild_job = define_asset_job(
-  name="sec_full_rebuild",
-  description=(
-    "Full SEC pipeline rebuild. "
-    "Downloads, processes, and materializes all filings for all years. "
-    "Rate-limited to 2 concurrent downloads."
-  ),
-  selection=AssetSelection.assets(
-    sec_companies_list,
-    sec_raw_filings,
-    sec_processed_filings,
-    sec_duckdb_staging,
-    sec_graph_materialized,
-  ),
-  tags={
-    "pipeline": "sec",
-    "mode": "full_rebuild",
-  },
+  tags={"pipeline": "sec", "phase": "download"},
   partitions_def=sec_year_partitions,
 )
 
 
-# Job for staging and materialization only (skip download/processing)
-# Useful when parquet files already exist in S3
-sec_materialize_only_job = define_asset_job(
-  name="sec_materialize_only",
-  description=(
-    "Materialize SEC graph from existing processed files. "
-    "Skips download and processing stages."
+# Phase 2: Process (dynamic partitions per filing)
+sec_process_job = define_asset_job(
+  name="sec_process",
+  description="Process SEC filings to parquet. One partition per filing.",
+  selection=AssetSelection.assets(
+    sec_filings_to_process,
+    sec_process_filing,
   ),
+  tags={"pipeline": "sec", "phase": "process"},
+  partitions_def=sec_filing_partitions,
+)
+
+
+# Phase 3: Materialize (unpartitioned)
+sec_materialize_job = define_asset_job(
+  name="sec_materialize",
+  description="Materialize SEC graph from processed parquet files.",
   selection=AssetSelection.assets(
     sec_duckdb_staging,
     sec_graph_materialized,
   ),
-  tags={
-    "pipeline": "sec",
-    "mode": "materialize_only",
-  },
+  tags={"pipeline": "sec", "phase": "materialize"},
 )
 
 
@@ -105,13 +88,12 @@ sec_materialize_only_job = define_asset_job(
 # ============================================================================
 
 
-# Daily rebuild at 2 AM
-sec_daily_rebuild_schedule = ScheduleDefinition(
-  name="sec_daily_rebuild",
-  description="Daily SEC pipeline rebuild at 2 AM UTC",
-  job=sec_full_rebuild_job,
-  cron_schedule="0 2 * * *",  # 2 AM UTC daily
-  default_status=DefaultScheduleStatus.STOPPED,  # Manual start in production
+sec_daily_download_schedule = ScheduleDefinition(
+  name="sec_daily_download",
+  description="Daily SEC download and process at 2 AM UTC",
+  job=sec_download_job,
+  cron_schedule="0 2 * * *",
+  default_status=DefaultScheduleStatus.STOPPED,
   run_config=RunConfig(
     ops={
       "sec_companies_list": SECCompaniesConfig(),
@@ -119,38 +101,29 @@ sec_daily_rebuild_schedule = ScheduleDefinition(
         skip_existing=True,
         form_types=["10-K", "10-Q"],
       ),
-      "sec_processed_filings": SECProcessConfig(refresh=False),
-      "sec_duckdb_staging": SECDuckDBConfig(rebuild=True),
-      "sec_graph_materialized": SECMaterializeConfig(
-        graph_id="sec",
-        ignore_errors=True,
-        rebuild=True,
+      "sec_batch_process": SECBatchProcessConfig(
+        refresh=False,
       ),
     }
   ),
 )
 
 
-# Weekly full refresh (with reprocessing)
-sec_weekly_refresh_schedule = ScheduleDefinition(
-  name="sec_weekly_refresh",
-  description="Weekly SEC pipeline refresh with reprocessing at 3 AM UTC on Sundays",
-  job=sec_full_rebuild_job,
-  cron_schedule="0 3 * * 0",  # 3 AM UTC on Sundays
+sec_weekly_download_schedule = ScheduleDefinition(
+  name="sec_weekly_download",
+  description="Weekly SEC full download and process at 3 AM UTC on Sundays",
+  job=sec_download_job,
+  cron_schedule="0 3 * * 0",
   default_status=DefaultScheduleStatus.STOPPED,
   run_config=RunConfig(
     ops={
       "sec_companies_list": SECCompaniesConfig(),
       "sec_raw_filings": SECDownloadConfig(
-        skip_existing=False,  # Re-download all
+        skip_existing=False,
         form_types=["10-K", "10-Q"],
       ),
-      "sec_processed_filings": SECProcessConfig(refresh=True),  # Re-process all
-      "sec_duckdb_staging": SECDuckDBConfig(rebuild=True),
-      "sec_graph_materialized": SECMaterializeConfig(
-        graph_id="sec",
-        ignore_errors=True,
-        rebuild=True,
+      "sec_batch_process": SECBatchProcessConfig(
+        refresh=True,
       ),
     }
   ),

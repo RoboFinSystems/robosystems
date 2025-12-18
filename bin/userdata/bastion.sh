@@ -538,16 +538,16 @@ main() {
     case "$operation" in
         ## SEC Operations ##
         sec-load)
-            run_in_docker "uv run python -m robosystems.scripts.sec_local load $parameters"
+            run_in_docker "uv run python -m robosystems.scripts.sec_pipeline run --tickers $parameters"
             ;;
         sec-health)
-            run_in_docker "uv run python -m robosystems.scripts.sec_local_health $parameters"
+            run_in_docker "uv run python -m robosystems.scripts.graph_health sec $parameters"
             ;;
         sec-reset)
             print_warning "WARNING: This will reset the SEC database!"
             read -p "Type 'CONFIRM' to proceed: " confirmation
             if [ "$confirmation" == "CONFIRM" ]; then
-                run_in_docker "uv run python -m robosystems.scripts.sec_local reset --confirm"
+                run_in_docker "uv run python -m robosystems.scripts.sec_pipeline reset"
             else
                 print_error "Operation cancelled"
                 exit 1

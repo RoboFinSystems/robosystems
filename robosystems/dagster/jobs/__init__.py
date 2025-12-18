@@ -4,7 +4,7 @@ Jobs define the execution units that can be scheduled or triggered:
 - Billing jobs: Credit allocation, storage billing, usage collection
 - Infrastructure jobs: Auth cleanup, health checks
 - Provisioning jobs: Graph and repository provisioning
-- SEC jobs: XBRL pipeline processing
+- SEC jobs: XBRL pipeline processing (download, process, materialize)
 """
 
 from robosystems.dagster.jobs.billing import (
@@ -22,11 +22,11 @@ from robosystems.dagster.jobs.provisioning import (
   provision_repository_job,
 )
 from robosystems.dagster.jobs.sec import (
-  sec_single_company_job,
-  sec_full_rebuild_job,
-  sec_materialize_only_job,
-  sec_daily_rebuild_schedule,
-  sec_weekly_refresh_schedule,
+  sec_download_job,
+  sec_process_job,
+  sec_materialize_job,
+  sec_daily_download_schedule,
+  sec_weekly_download_schedule,
 )
 
 __all__ = [
@@ -42,9 +42,9 @@ __all__ = [
   "provision_graph_job",
   "provision_repository_job",
   # SEC Pipeline
-  "sec_single_company_job",
-  "sec_full_rebuild_job",
-  "sec_materialize_only_job",
-  "sec_daily_rebuild_schedule",
-  "sec_weekly_refresh_schedule",
+  "sec_download_job",
+  "sec_process_job",
+  "sec_materialize_job",
+  "sec_daily_download_schedule",
+  "sec_weekly_download_schedule",
 ]

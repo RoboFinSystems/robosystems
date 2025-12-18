@@ -156,7 +156,7 @@ exclude = [
     ".venv",
     ".vscode",
     "examples",
-    "robosystems/arelle",
+    "robosystems/adapters/sec/arelle",
 ]
 line-length = 88
 indent-width = 2
@@ -177,7 +177,7 @@ line-ending = "auto"
 
 [tool.basedpyright]
 include = ["robosystems", "tests", "main.py"]
-exclude = ["**/__pycache__", ".venv", "examples", "robosystems/arelle"]
+exclude = ["**/__pycache__", ".venv", "examples", "robosystems/adapters/sec/arelle"]
 extraPaths = ["."]
 pythonVersion = "3.13"
 venvPath = "."

@@ -1,12 +1,13 @@
 """SEC XBRL pipeline Dagster assets.
 
-This module defines the SEC data pipeline as Dagster assets with year partitioning:
+This module defines the SEC data pipeline with two-level partitioning:
 
 1. sec_companies_list - Fetch company list from SEC EDGAR
-2. sec_raw_filings - Download XBRL ZIPs (year-partitioned)
-3. sec_processed_filings - Process XBRL to parquet (year-partitioned)
-4. sec_duckdb_staging - Create DuckDB staging tables (all years)
-5. sec_graph_materialized - Materialize to LadybugDB graph
+2. sec_raw_filings - Download XBRL ZIPs (year-partitioned, 2 concurrent max)
+3. sec_filings_to_process - Discover raw filings, register as dynamic partitions
+4. sec_process_filing - Process single filing to parquet (dynamic partitions, unlimited scale)
+5. sec_duckdb_staging - Create DuckDB staging tables (runs once)
+6. sec_graph_materialized - Materialize to LadybugDB graph (runs once)
 
 The pipeline leverages existing adapters:
 - robosystems.adapters.sec.SECClient - EDGAR API client
@@ -14,10 +15,11 @@ The pipeline leverages existing adapters:
 - robosystems.adapters.sec.XBRLDuckDBGraphProcessor - DuckDB staging/materialization
 
 Architecture Notes:
-- Year partitioning allows parallel processing of different years
+- Year partitioning for downloads (rate-limited to 2 concurrent)
+- Dynamic partitioning for processing (one partition per filing, unlimited scale)
+- Each filing tracked independently for retry/visibility
 - DuckDB staging creates virtual tables from S3 parquet files
 - Graph materialization rebuilds the entire graph from staged data
-- Rate limiting (2 concurrent) is configured at the job level via tags
 """
 
 from typing import Any
@@ -25,6 +27,7 @@ from typing import Any
 from dagster import (
   AssetExecutionContext,
   Config,
+  DynamicPartitionsDefinition,
   MaterializeResult,
   MetadataValue,
   Output,
@@ -38,6 +41,10 @@ from robosystems.dagster.resources import S3Resource
 # Year partitions for SEC data (2019-2025)
 SEC_YEARS = [str(y) for y in range(2019, 2026)]
 sec_year_partitions = StaticPartitionsDefinition(SEC_YEARS)
+
+# Dynamic partitions for individual filing processing
+# Partition key format: {year}_{cik}_{accession}
+sec_filing_partitions = DynamicPartitionsDefinition(name="sec_filings")
 
 
 # ============================================================================
@@ -62,12 +69,26 @@ class SECDownloadConfig(Config):
   ciks: list[str] = []  # Optional CIK filter
 
 
-class SECProcessConfig(Config):
-  """Configuration for SEC filings processing."""
+class SECBatchProcessConfig(Config):
+  """Configuration for batch processing all filings in a year partition."""
 
   refresh: bool = False  # Re-process existing files
   tickers: list[str] = []  # Optional ticker filter
   ciks: list[str] = []  # Optional CIK filter
+
+
+class SECFilingDiscoveryConfig(Config):
+  """Configuration for filing discovery and partition registration."""
+
+  year_filter: list[int] = []  # Optional year filter (empty = all years)
+  skip_processed: bool = True  # Skip filings that already have parquet output
+
+
+class SECSingleFilingConfig(Config):
+  """Configuration for single filing processing."""
+
+  # No config needed - partition key contains all info
+  pass
 
 
 class SECDuckDBConfig(Config):
@@ -162,9 +183,12 @@ def sec_companies_list(
   partitions_def=sec_year_partitions,
   deps=[sec_companies_list],
   metadata={
-    "pipeline": "sec_download",  # Tag for rate limiting
+    "pipeline": "sec_download",
     "stage": "extraction",
   },
+  # Limit concurrent SEC downloads to avoid rate limiting
+  # Max 2 partitions (years) download at a time
+  op_tags={"dagster/concurrency_key": "sec_download", "dagster/max_concurrent": "2"},
 )
 def sec_raw_filings(
   context: AssetExecutionContext,
@@ -176,7 +200,7 @@ def sec_raw_filings(
   Downloads 10-K and 10-Q filings for the partition year,
   storing ZIPs in S3 for subsequent processing.
 
-  Rate-limited to 2 concurrent downloads to avoid SEC throttling.
+  Concurrency limited to 2 via dagster/concurrency_key to avoid SEC rate limiting.
 
   Returns:
       MaterializeResult with download statistics
@@ -303,7 +327,7 @@ def sec_raw_filings(
 
 @asset(
   group_name="sec_pipeline",
-  description="Process XBRL filings into parquet format",
+  description="Process all XBRL filings for a year to parquet format",
   compute_kind="transform",
   partitions_def=sec_year_partitions,
   deps=[sec_raw_filings],
@@ -312,15 +336,15 @@ def sec_raw_filings(
     "stage": "processing",
   },
 )
-def sec_processed_filings(
+def sec_batch_process(
   context: AssetExecutionContext,
-  config: SECProcessConfig,
+  config: SECBatchProcessConfig,
   s3: S3Resource,
 ) -> MaterializeResult:
-  """Process downloaded XBRL filings into parquet format.
+  """Process all downloaded XBRL filings for a year into parquet format.
 
-  Processes raw XBRL ZIPs using Arelle and XBRLGraphProcessor,
-  outputting structured parquet files for each node/relationship type.
+  Batch processes all raw XBRL ZIPs for a year partition using XBRLGraphProcessor.
+  Use this for CLI workflows. For per-filing visibility, use sec_process_filing instead.
 
   Returns:
       MaterializeResult with processing statistics
@@ -328,69 +352,57 @@ def sec_processed_filings(
   from robosystems.adapters.sec import SECClient, XBRLGraphProcessor
 
   year = int(context.partition_key)
-  context.log.info(f"Processing SEC filings for year {year}")
+  context.log.info(f"Batch processing SEC filings for year {year}")
 
   raw_bucket = env.SEC_RAW_BUCKET or "robosystems-sec-raw"
   processed_bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
 
-  # List raw filings for this year (from the raw bucket, not the default S3 bucket)
+  # List raw filings for this year
   raw_prefix = f"raw/year={year}/"
   paginator = s3.client.get_paginator("list_objects_v2")
   raw_files = []
   for page in paginator.paginate(Bucket=raw_bucket, Prefix=raw_prefix):
     for obj in page.get("Contents", []):
-      raw_files.append(
-        {
-          "key": obj["Key"],
-          "size": obj["Size"],
-          "last_modified": obj["LastModified"],
-        }
-      )
+      raw_files.append({"key": obj["Key"], "size": obj["Size"]})
 
   if not raw_files:
     context.log.warning(f"No raw filings found for year {year}")
-    return MaterializeResult(
-      metadata={
-        "year": year,
-        "status": "no_data",
-        "reason": "No raw filings found",
-      }
-    )
+    return MaterializeResult(metadata={"year": year, "status": "no_data"})
 
-  # Group files by CIK
+  # Group by CIK and apply filters
   filings_by_cik: dict[str, list[dict]] = {}
   for file_info in raw_files:
     key = file_info["key"]
     parts = key.split("/")
     if len(parts) >= 3:
-      cik = parts[2]  # raw/year=YYYY/CIK/accession.zip
+      cik = parts[2]
       if cik not in filings_by_cik:
         filings_by_cik[cik] = []
       filings_by_cik[cik].append(file_info)
 
-  # Apply CIK filter if specified
+  # Apply CIK filter
   if config.ciks:
     filings_by_cik = {k: v for k, v in filings_by_cik.items() if k in config.ciks}
 
-  # Apply ticker filter if specified (need to resolve tickers to CIKs)
+  # Apply ticker filter (resolve tickers to CIKs)
   if config.tickers:
     sec_client = SECClient()
     companies = sec_client.get_companies()
-    ticker_to_cik = {}
-    for _, company in companies.items():
-      ticker_to_cik[company.get("ticker", "")] = str(
-        company.get("cik_str", company.get("cik", ""))
-      )
+    ticker_to_cik = {
+      company.get("ticker", ""): str(company.get("cik_str", company.get("cik", "")))
+      for _, company in companies.items()
+    }
     allowed_ciks = {ticker_to_cik.get(t, "") for t in config.tickers}
     filings_by_cik = {k: v for k, v in filings_by_cik.items() if k in allowed_ciks}
 
   total_processed = 0
-  total_records = 0
+  total_files = 0
   total_errors = 0
 
   import tempfile
   from io import BytesIO
   import zipfile
+  import os
 
   for cik, filings in filings_by_cik.items():
     for file_info in filings:
@@ -398,45 +410,35 @@ def sec_processed_filings(
       accession = key.split("/")[-1].replace(".zip", "")
 
       # Check if already processed
-      processed_prefix = f"processed/year={year}/nodes/Entity/{cik}_{accession}.parquet"
+      processed_check = f"processed/year={year}/nodes/Entity/{cik}_{accession}.parquet"
       if not config.refresh:
-        # Check if already processed (in processed bucket)
         try:
-          s3.client.head_object(Bucket=processed_bucket, Key=processed_prefix)
-          context.log.debug(f"Skipping already processed: {cik}/{accession}")
-          continue
+          s3.client.head_object(Bucket=processed_bucket, Key=processed_check)
+          continue  # Already processed
         except Exception:
-          pass  # File doesn't exist, proceed with processing
+          pass
 
       try:
-        # Download raw ZIP from raw bucket
+        # Download raw ZIP
         buffer = BytesIO()
         s3.client.download_fileobj(raw_bucket, key, buffer)
         buffer.seek(0)
 
-        # Extract to temp directory
         with tempfile.TemporaryDirectory() as tmpdir:
           with zipfile.ZipFile(buffer, "r") as zf:
             zf.extractall(tmpdir)
 
-          # Find the main XBRL instance file (exclude taxonomy/metadata files)
-          import os
-
-          # Patterns to exclude (taxonomy definition files)
+          # Find main XBRL instance file
           exclude_suffixes = ("_def.xml", "_lab.xml", "_pre.xml", "_cal.xml", ".xsd")
-
           all_files = os.listdir(tmpdir)
           xbrl_files = [
-            f
-            for f in all_files
+            f for f in all_files
             if f.endswith((".xml", ".htm", ".html"))
             and not any(f.endswith(suffix) for suffix in exclude_suffixes)
           ]
 
-          # Prefer .htm files for inline XBRL, then .xml
           htm_files = [f for f in xbrl_files if f.endswith((".htm", ".html"))]
           if htm_files:
-            # Pick the largest .htm file (usually the main document)
             xbrl_files = sorted(
               htm_files,
               key=lambda f: os.path.getsize(os.path.join(tmpdir, f)),
@@ -444,16 +446,14 @@ def sec_processed_filings(
             )
 
           if not xbrl_files:
-            context.log.warning(f"No XBRL instance files found in {key}")
+            context.log.warning(f"No XBRL files in {key}")
             total_errors += 1
             continue
 
-          # Get report URL for metadata
+          # Build report URL
           from robosystems.adapters.sec import SEC_BASE_URL
-
           report_url = f"{SEC_BASE_URL}/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{xbrl_files[0]}"
 
-          # Schema config for XBRL processing (with roboledger extension)
           schema_config = {
             "name": "SEC Database Schema",
             "description": "Complete financial reporting schema with XBRL taxonomy support",
@@ -461,90 +461,310 @@ def sec_processed_filings(
             "extensions": ["roboledger"],
           }
 
-          # Get company info from SEC (ticker not available in processing loop)
-          sec_filer = {"cik": cik}
-
-          # Build SEC report metadata
-          sec_report = {
-            "accessionNumber": accession,
-            "form": None,  # Will be determined from file
-            "filingDate": None,
-            "primaryDocument": xbrl_files[0],
-          }
-
-          # Process with XBRLGraphProcessor
           processor = XBRLGraphProcessor(
             report_uri=report_url,
             entityId=cik,
-            sec_filer=sec_filer,
-            sec_report=sec_report,
+            sec_filer={"cik": cik},
+            sec_report={"accessionNumber": accession, "primaryDocument": xbrl_files[0]},
             output_dir=tmpdir,
             local_file_path=os.path.join(tmpdir, xbrl_files[0]),
             schema_config=schema_config,
           )
 
-          # Run the processing - process() returns None, raises on error
-          try:
-            processor.process()
+          processor.process()
 
-            # Upload parquet files to S3 if any were created
-            # Processor outputs files directly in nodes/ and relationships/ directories
-            for entity_type in ["nodes", "relationships"]:
-              entity_dir = os.path.join(tmpdir, entity_type)
-              if os.path.exists(entity_dir):
-                for parquet_file in os.listdir(entity_dir):
-                  if parquet_file.endswith(".parquet"):
-                    local_path = os.path.join(entity_dir, parquet_file)
-                    # Extract table name from filename (e.g., Entity.parquet -> Entity)
-                    table_name = parquet_file.replace(".parquet", "")
-                    s3_key = f"processed/year={year}/{entity_type}/{table_name}/{cik}_{accession}.parquet"
+          # Upload parquet files
+          for entity_type in ["nodes", "relationships"]:
+            entity_dir = os.path.join(tmpdir, entity_type)
+            if os.path.exists(entity_dir):
+              for parquet_file in os.listdir(entity_dir):
+                if parquet_file.endswith(".parquet"):
+                  local_path = os.path.join(entity_dir, parquet_file)
+                  table_name = parquet_file.replace(".parquet", "")
+                  s3_key = f"processed/year={year}/{entity_type}/{table_name}/{cik}_{accession}.parquet"
+                  with open(local_path, "rb") as f:
+                    s3.client.upload_fileobj(f, processed_bucket, s3_key)
+                  total_files += 1
 
-                    with open(local_path, "rb") as f:
-                      s3.client.upload_fileobj(f, processed_bucket, s3_key)
-
-                    total_records += 1
-
-            total_processed += 1
-            context.log.debug(f"Processed {cik}/{accession}")
-
-          except Exception as e:
-            context.log.warning(f"Processing failed for {cik}/{accession}: {e}")
-            total_errors += 1
+          total_processed += 1
 
       except Exception as e:
         context.log.warning(f"Failed to process {key}: {e}")
         total_errors += 1
 
-    # Progress log every 10 companies
+    # Progress log
     if list(filings_by_cik.keys()).index(cik) % 10 == 0:
-      context.log.info(
-        f"Progress: {total_processed} filings processed, {total_errors} errors"
-      )
+      context.log.info(f"Progress: {total_processed} filings, {total_errors} errors")
 
-  context.log.info(
-    f"Processing complete for year {year}: "
-    f"{total_processed} filings, {total_records} files, {total_errors} errors"
-  )
+  context.log.info(f"Batch processing complete for {year}: {total_processed} filings, {total_files} files")
 
   return MaterializeResult(
     metadata={
       "year": year,
       "filings_processed": total_processed,
-      "files_created": total_records,
+      "files_created": total_files,
       "errors": total_errors,
     }
   )
 
 
+# ============================================================================
+# Dynamic Partition Assets (per-filing processing)
+# ============================================================================
+
+
 @asset(
   group_name="sec_pipeline",
-  description="Stage and materialize processed parquet files to LadybugDB graph",
+  description="Discover raw filings and register as dynamic partitions",
+  compute_kind="discovery",
+  deps=[sec_raw_filings],
+  metadata={
+    "pipeline": "sec",
+    "stage": "discovery",
+  },
+  # Runs once after downloads complete - discovers all raw ZIPs in S3
+)
+def sec_filings_to_process(
+  context: AssetExecutionContext,
+  config: SECFilingDiscoveryConfig,
+  s3: S3Resource,
+) -> Output[list[str]]:
+  """Discover raw filings in S3 and register as dynamic partitions.
+
+  Scans the raw filings bucket for downloaded ZIPs and registers each
+  as a dynamic partition for parallel processing.
+
+  Partition key format: {year}_{cik}_{accession}
+
+  Returns:
+      List of partition keys registered
+  """
+  raw_bucket = env.SEC_RAW_BUCKET or "robosystems-sec-raw"
+  processed_bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
+
+  context.log.info("Discovering raw filings for partition registration...")
+
+  # Determine years to scan
+  years_to_scan = config.year_filter if config.year_filter else [int(y) for y in SEC_YEARS]
+
+  all_filings = []
+  for year in years_to_scan:
+    raw_prefix = f"raw/year={year}/"
+    paginator = s3.client.get_paginator("list_objects_v2")
+
+    for page in paginator.paginate(Bucket=raw_bucket, Prefix=raw_prefix):
+      for obj in page.get("Contents", []):
+        key = obj["Key"]
+        # Parse: raw/year=2024/320193/0000320193-24-000081.zip
+        parts = key.split("/")
+        if len(parts) >= 4 and parts[-1].endswith(".zip"):
+          cik = parts[2]
+          accession = parts[-1].replace(".zip", "")
+          partition_key = f"{year}_{cik}_{accession}"
+
+          # Check if already processed (if skip_processed is enabled)
+          if config.skip_processed:
+            processed_prefix = f"processed/year={year}/nodes/Entity/{cik}_{accession}.parquet"
+            try:
+              s3.client.head_object(Bucket=processed_bucket, Key=processed_prefix)
+              context.log.debug(f"Skipping already processed: {partition_key}")
+              continue
+            except Exception:
+              pass  # Not processed yet
+
+          all_filings.append(partition_key)
+
+  context.log.info(f"Discovered {len(all_filings)} filings to process")
+
+  # Register dynamic partitions
+  if all_filings:
+    context.instance.add_dynamic_partitions(
+      partitions_def_name="sec_filings",
+      partition_keys=all_filings,
+    )
+    context.log.info(f"Registered {len(all_filings)} dynamic partitions")
+
+  return Output(
+    all_filings,
+    metadata={
+      "filings_discovered": len(all_filings),
+      "years_scanned": len(years_to_scan),
+      "sample_partitions": MetadataValue.json(all_filings[:10] if all_filings else []),
+    },
+  )
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Process a single SEC filing to parquet format",
+  compute_kind="transform",
+  partitions_def=sec_filing_partitions,
+  deps=[sec_filings_to_process],
+  metadata={
+    "pipeline": "sec",
+    "stage": "processing",
+  },
+  # No concurrency limit - scales with infrastructure
+  # Each filing processes independently
+)
+def sec_process_filing(
+  context: AssetExecutionContext,
+  config: SECSingleFilingConfig,
+  s3: S3Resource,
+) -> MaterializeResult:
+  """Process a single SEC filing to parquet format.
+
+  Takes partition key in format {year}_{cik}_{accession} and processes
+  the corresponding raw ZIP file to parquet output.
+
+  Returns:
+      MaterializeResult with processing statistics
+  """
+  from robosystems.adapters.sec import XBRLGraphProcessor
+
+  # Parse partition key: {year}_{cik}_{accession}
+  partition_key = context.partition_key
+  parts = partition_key.split("_", 2)  # Split into 3 parts max
+  if len(parts) != 3:
+    context.log.error(f"Invalid partition key format: {partition_key}")
+    return MaterializeResult(
+      metadata={"status": "error", "reason": f"Invalid partition key: {partition_key}"}
+    )
+
+  year, cik, accession = parts
+  context.log.info(f"Processing filing: year={year}, cik={cik}, accession={accession}")
+
+  raw_bucket = env.SEC_RAW_BUCKET or "robosystems-sec-raw"
+  processed_bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
+
+  # Download raw ZIP
+  raw_key = f"raw/year={year}/{cik}/{accession}.zip"
+
+  import tempfile
+  from io import BytesIO
+  import zipfile
+  import os
+
+  try:
+    buffer = BytesIO()
+    s3.client.download_fileobj(raw_bucket, raw_key, buffer)
+    buffer.seek(0)
+  except Exception as e:
+    context.log.error(f"Failed to download {raw_key}: {e}")
+    return MaterializeResult(
+      metadata={"status": "error", "reason": f"Download failed: {e}"}
+    )
+
+  # Extract and process
+  try:
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with zipfile.ZipFile(buffer, "r") as zf:
+        zf.extractall(tmpdir)
+
+      # Find main XBRL instance file
+      exclude_suffixes = ("_def.xml", "_lab.xml", "_pre.xml", "_cal.xml", ".xsd")
+      all_files = os.listdir(tmpdir)
+      xbrl_files = [
+        f for f in all_files
+        if f.endswith((".xml", ".htm", ".html"))
+        and not any(f.endswith(suffix) for suffix in exclude_suffixes)
+      ]
+
+      # Prefer .htm files for inline XBRL
+      htm_files = [f for f in xbrl_files if f.endswith((".htm", ".html"))]
+      if htm_files:
+        xbrl_files = sorted(
+          htm_files,
+          key=lambda f: os.path.getsize(os.path.join(tmpdir, f)),
+          reverse=True,
+        )
+
+      if not xbrl_files:
+        context.log.warning(f"No XBRL instance files found in {raw_key}")
+        return MaterializeResult(
+          metadata={"status": "error", "reason": "No XBRL files found"}
+        )
+
+      # Build report URL
+      from robosystems.adapters.sec import SEC_BASE_URL
+      report_url = f"{SEC_BASE_URL}/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{xbrl_files[0]}"
+
+      # Schema config
+      schema_config = {
+        "name": "SEC Database Schema",
+        "description": "Complete financial reporting schema with XBRL taxonomy support",
+        "base_schema": "base",
+        "extensions": ["roboledger"],
+      }
+
+      # Process with XBRLGraphProcessor
+      processor = XBRLGraphProcessor(
+        report_uri=report_url,
+        entityId=cik,
+        sec_filer={"cik": cik},
+        sec_report={"accessionNumber": accession, "primaryDocument": xbrl_files[0]},
+        output_dir=tmpdir,
+        local_file_path=os.path.join(tmpdir, xbrl_files[0]),
+        schema_config=schema_config,
+      )
+
+      processor.process()
+
+      # Upload parquet files to S3
+      files_uploaded = 0
+      for entity_type in ["nodes", "relationships"]:
+        entity_dir = os.path.join(tmpdir, entity_type)
+        if os.path.exists(entity_dir):
+          for parquet_file in os.listdir(entity_dir):
+            if parquet_file.endswith(".parquet"):
+              local_path = os.path.join(entity_dir, parquet_file)
+              table_name = parquet_file.replace(".parquet", "")
+              s3_key = f"processed/year={year}/{entity_type}/{table_name}/{cik}_{accession}.parquet"
+
+              with open(local_path, "rb") as f:
+                s3.client.upload_fileobj(f, processed_bucket, s3_key)
+              files_uploaded += 1
+
+      context.log.info(f"Processed {partition_key}: {files_uploaded} files uploaded")
+
+      return MaterializeResult(
+        metadata={
+          "partition_key": partition_key,
+          "year": year,
+          "cik": cik,
+          "accession": accession,
+          "files_uploaded": files_uploaded,
+          "status": "success",
+        }
+      )
+
+  except Exception as e:
+    context.log.error(f"Processing failed for {partition_key}: {e}")
+    return MaterializeResult(
+      metadata={
+        "partition_key": partition_key,
+        "status": "error",
+        "reason": str(e),
+      }
+    )
+
+
+# ============================================================================
+# Staging & Materialization Assets
+# ============================================================================
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Stage processed parquet files and create DuckDB tables",
   compute_kind="load",
-  deps=[sec_processed_filings],
+  deps=[sec_batch_process],
   metadata={
     "pipeline": "sec",
     "stage": "staging",
   },
+  # NOT partitioned - runs once after batch processing completes
+  # Discovers parquet files and creates DuckDB virtual tables (metadata only)
 )
 def sec_duckdb_staging(
   context: AssetExecutionContext,
@@ -610,6 +830,8 @@ def sec_duckdb_staging(
     "pipeline": "sec",
     "stage": "materialization",
   },
+  # NOT partitioned - runs once after staging complete
+  # Single-threaded graph ingestion (LadybugDB constraint)
 )
 def sec_graph_materialized(
   context: AssetExecutionContext,

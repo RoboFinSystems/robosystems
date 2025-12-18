@@ -134,9 +134,9 @@ CLAUDE.local.md
 GEMINI.md
 
 # Arelle EDGAR data - fetched as needed
-robosystems/arelle/EDGAR/
+robosystems/adapters/sec/arelle/EDGAR/
 # Arelle schema cache - downloaded during build
-robosystems/arelle/cache/
+robosystems/adapters/sec/arelle/cache/
 
 # Example credentials (local development)
 examples/credentials/config.json

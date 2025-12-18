@@ -7,18 +7,26 @@ Assets represent data artifacts that are produced and consumed:
 """
 
 from robosystems.dagster.assets.sec import (
-  # Assets
+  # Assets - download phase
   sec_companies_list,
   sec_raw_filings,
-  sec_processed_filings,
+  # Assets - batch processing (year-partitioned, for CLI workflows)
+  sec_batch_process,
+  # Assets - dynamic partition processing (for Dagster UI visibility)
+  sec_filings_to_process,
+  sec_process_filing,
+  # Assets - staging and materialization
   sec_duckdb_staging,
   sec_graph_materialized,
   # Partitions
   sec_year_partitions,
+  sec_filing_partitions,
   # Config classes
   SECCompaniesConfig,
   SECDownloadConfig,
-  SECProcessConfig,
+  SECBatchProcessConfig,
+  SECFilingDiscoveryConfig,
+  SECSingleFilingConfig,
   SECDuckDBConfig,
   SECMaterializeConfig,
 )
@@ -34,17 +42,26 @@ from robosystems.dagster.assets.plaid import (
 )
 
 __all__ = [
-  # SEC assets
+  # SEC assets - download phase
   "sec_companies_list",
   "sec_raw_filings",
-  "sec_processed_filings",
+  # SEC assets - batch processing (for CLI workflows)
+  "sec_batch_process",
+  # SEC assets - dynamic partition processing (for Dagster UI)
+  "sec_filings_to_process",
+  "sec_process_filing",
+  # SEC assets - staging and materialization
   "sec_duckdb_staging",
   "sec_graph_materialized",
+  # SEC partitions
   "sec_year_partitions",
+  "sec_filing_partitions",
   # SEC config
   "SECCompaniesConfig",
   "SECDownloadConfig",
-  "SECProcessConfig",
+  "SECBatchProcessConfig",
+  "SECFilingDiscoveryConfig",
+  "SECSingleFilingConfig",
   "SECDuckDBConfig",
   "SECMaterializeConfig",
   # QuickBooks assets

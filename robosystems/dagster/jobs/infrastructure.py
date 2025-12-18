@@ -17,8 +17,22 @@ from dagster import (
   op,
 )
 
+from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
 from robosystems.models.iam import UserAPIKey
+
+
+# ============================================================================
+# Environment-based Schedule Status
+# ============================================================================
+
+# Instance infrastructure schedules require real AWS resources (DynamoDB, EC2, CloudWatch)
+# Only enable automatically in production/staging environments
+INSTANCE_SCHEDULE_STATUS = (
+  DefaultScheduleStatus.RUNNING
+  if env.ENVIRONMENT in ("prod", "staging")
+  else DefaultScheduleStatus.STOPPED
+)
 
 
 # ============================================================================
@@ -405,37 +419,42 @@ def full_instance_maintenance_job():
 # ============================================================================
 
 # Instance health check - every hour (matches Lambda: rate(1 hour))
+# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2)
 instance_health_check_schedule = ScheduleDefinition(
   job=instance_health_check_job,
   cron_schedule="0 * * * *",  # Every hour at :00
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
 # Metrics collection - every 5 minutes (matches Lambda: rate(5 minutes))
+# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2, CloudWatch)
 # Critical for autoscaling
 instance_metrics_collection_schedule = ScheduleDefinition(
   job=instance_metrics_collection_job,
   cron_schedule="*/5 * * * *",  # Every 5 minutes
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
 # Instance registry cleanup - daily at 3 AM UTC (matches Lambda: cron(0 3 * * ? *))
+# Auto-enabled in prod/staging only (requires AWS: DynamoDB)
 instance_registry_cleanup_schedule = ScheduleDefinition(
   job=instance_registry_cleanup_job,
   cron_schedule="0 3 * * *",  # 3 AM UTC daily
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
 # Volume registry cleanup - daily at 4 AM UTC (matches Lambda: cron(0 4 * * ? *))
+# Auto-enabled in prod/staging only (requires AWS: DynamoDB)
 volume_registry_cleanup_schedule = ScheduleDefinition(
   job=volume_registry_cleanup_job,
   cron_schedule="0 4 * * *",  # 4 AM UTC daily
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=INSTANCE_SCHEDULE_STATUS,
 )
 
 # Full maintenance - weekly on Sundays at 2 AM UTC
+# Auto-enabled in prod/staging only (requires AWS: DynamoDB, EC2, CloudWatch)
 full_instance_maintenance_schedule = ScheduleDefinition(
   job=full_instance_maintenance_job,
   cron_schedule="0 2 * * 0",  # Sundays at 2 AM UTC
-  default_status=DefaultScheduleStatus.RUNNING,
+  default_status=INSTANCE_SCHEDULE_STATUS,
 )

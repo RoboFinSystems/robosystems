@@ -282,9 +282,9 @@ class ArelleCacheManager:
       else:
         self.project_root = Path.cwd()
 
-    self.cache_dir = self.project_root / "robosystems" / "arelle" / "cache"
-    self.edgar_dir = self.project_root / "robosystems" / "arelle" / "EDGAR"
-    self.bundles_dir = self.project_root / "robosystems" / "arelle" / "bundles"
+    self.cache_dir = self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "cache"
+    self.edgar_dir = self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "EDGAR"
+    self.bundles_dir = self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "bundles"
 
   def download_schema(self, url: str, cache_path: Path, retries: int = 3) -> bool:
     """Download a single schema file."""
@@ -555,7 +555,7 @@ class ArelleCacheManager:
 
     logger.info("\nCache update complete!")
     logger.info("\nNext steps:")
-    logger.info("  1. Commit the bundles: git add robosystems/arelle/bundles/*.tar.gz")
+    logger.info("  1. Commit the bundles: git add robosystems/adapters/sec/arelle/bundles/*.tar.gz")
     logger.info("  2. Docker build will use these bundles automatically")
 
 

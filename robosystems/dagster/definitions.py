@@ -65,11 +65,11 @@ from robosystems.dagster.jobs.graph import (
   materialize_file_job,
 )
 from robosystems.dagster.jobs.sec import (
-  sec_single_company_job,
-  sec_full_rebuild_job,
-  sec_materialize_only_job,
-  sec_daily_rebuild_schedule,
-  sec_weekly_refresh_schedule,
+  sec_download_job,
+  sec_process_job,
+  sec_materialize_job,
+  sec_daily_download_schedule,
+  sec_weekly_download_schedule,
 )
 
 # Import sensors
@@ -80,10 +80,15 @@ from robosystems.dagster.sensors import (
 
 # Import assets
 from robosystems.dagster.assets import (
-  # SEC pipeline (new assets)
+  # SEC pipeline - download phase
   sec_companies_list,
   sec_raw_filings,
-  sec_processed_filings,
+  # SEC pipeline - batch processing (for CLI workflows)
+  sec_batch_process,
+  # SEC pipeline - dynamic partition processing (for Dagster UI)
+  sec_filings_to_process,
+  sec_process_filing,
+  # SEC pipeline - staging and materialization
   sec_duckdb_staging,
   sec_graph_materialized,
   # QuickBooks pipeline
@@ -146,9 +151,9 @@ all_jobs = [
   stage_file_job,
   materialize_file_job,
   # SEC pipeline jobs
-  sec_single_company_job,
-  sec_full_rebuild_job,
-  sec_materialize_only_job,
+  sec_download_job,
+  sec_process_job,
+  sec_materialize_job,
 ]
 
 # ============================================================================
@@ -171,8 +176,8 @@ all_schedules = [
   volume_registry_cleanup_schedule,
   full_instance_maintenance_schedule,
   # SEC pipeline schedules
-  sec_daily_rebuild_schedule,
-  sec_weekly_refresh_schedule,
+  sec_daily_download_schedule,
+  sec_weekly_download_schedule,
 ]
 
 # ============================================================================
@@ -189,10 +194,15 @@ all_sensors = [
 # ============================================================================
 
 all_assets = [
-  # SEC pipeline assets (new)
+  # SEC pipeline - download phase
   sec_companies_list,
   sec_raw_filings,
-  sec_processed_filings,
+  # SEC pipeline - batch processing (for CLI workflows)
+  sec_batch_process,
+  # SEC pipeline - dynamic partition processing (for Dagster UI)
+  sec_filings_to_process,
+  sec_process_filing,
+  # SEC pipeline - staging and materialization
   sec_duckdb_staging,
   sec_graph_materialized,
   # QuickBooks pipeline assets

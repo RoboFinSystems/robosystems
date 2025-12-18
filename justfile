@@ -298,26 +298,44 @@ duckdb-query-i graph_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb
 
 
-## SEC Local Pipeline - Testing and Development ##
+## SEC Pipeline - XBRL Data Processing ##
 
-# SEC Local supports two ingestion approaches:
-#   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
-#   - "copy": Consolidation → COPY-based ingestion (emulates production pipeline, uses consolidated files)
+# SEC Pipeline commands (all use robosystems.scripts.sec_pipeline)
 # Examples:
-#   just sec-load NVDA 2025                              # Load NVIDIA 2025 data using defaults (duckdb, ladybug)
-#   just sec-load NVDA 2025 [duckdb|copy] [ladybug|neo4j]   # Specify ingestion method and/or backend
+#   just sec-load NVDA 2024              # Single company, single year
+#   just sec-load NVDA "2023 2024 2025"  # Single company, multiple years
+#   just sec-pipeline                    # Top 5 companies, all years (2019-2025)
+#   just sec-pipeline 10                 # Top 10 companies, all years
+#   just sec-pipeline 5 2024             # Top 5 companies, single year
+#   just sec-pipeline 10 "2023 2024"     # Top 10 companies, multiple years
+#   just sec-reset                       # Reset SEC database
+#   just sec-reset --clear-s3            # Reset and clear S3 buckets
+#   just sec-health                      # SEC database health check
+#   just sec-health verbose              # Detailed health report
 
-# SEC Local - Load single company by ticker and year(s)
-sec-load ticker year="" ingest_method="duckdb" backend="ladybug" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} {{ if ingest_method == "copy" { "--use-copy-pipeline" } else { "" } }}
+# SEC - Load single company (wrapper for sec-pipeline run --tickers)
+sec-load ticker years="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --tickers {{ticker}} {{ if years != "" { "--years " + years } else { "" } }}
 
-# SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
-sec-health verbose="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local_health {{ if verbose == "v" { "--verbose" } else { "" } }}
+# SEC - Health check (comprehensive validation of SEC repository)
+sec-health verbose="" json="" api_url="http://localhost:8001" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_health sec --api-url {{api_url}} {{ if verbose != "" { "--verbose" } else { "" } }} {{ if json != "" { "--json" } else { "" } }}
 
-# SEC Local - Reset database with proper schema
-sec-reset backend="ladybug" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
+# SEC - Reset database
+sec-reset clear_s3="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline reset {{ if clear_s3 != "" { "--clear-s3" } else { "" } }}
+
+# SEC Pipeline - Multi-company processing (top N by market cap)
+sec-pipeline count="5" years="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --count {{count}} {{ if years != "" { "--years " + years } else { "" } }}
+
+# SEC Pipeline - Quick test (2 companies, 2024 only)
+sec-pipeline-quick env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --count 2 --year 2024
+
+# SEC Pipeline - Materialize only (skip download)
+sec-pipeline-materialize count="5" years="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize --count {{count}} {{ if years != "" { "--years " + years } else { "" } }}
 
 
 ## Valkey/Redis ##

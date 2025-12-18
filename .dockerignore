@@ -1,6 +1,6 @@
 # Ignore EDGAR and cache in Docker context (will be fetched/extracted in builder)
-robosystems/arelle/EDGAR/
-robosystems/arelle/cache/
+robosystems/adapters/sec/arelle/EDGAR/
+robosystems/adapters/sec/arelle/cache/
 
 # Ignore other common files
 .git/

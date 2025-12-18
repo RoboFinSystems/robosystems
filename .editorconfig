@@ -15,9 +15,9 @@ indent_size = 2
 max_line_length = 88
 
 # Exclude arelle/EDGAR from all formatting
-[robosystems/arelle/EDGAR/**]
+[robosystems/adapters/sec/arelle/EDGAR/**]
 ignore = true
 
 # Exclude arelle directory
-[robosystems/arelle/**]
+[robosystems/adapters/sec/arelle/**]
 ignore = true
