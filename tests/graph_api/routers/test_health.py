@@ -1,6 +1,7 @@
 """Tests for health router endpoints."""
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient

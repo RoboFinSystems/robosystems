@@ -1,13 +1,16 @@
-import pytest
 import os
+from datetime import UTC
+from unittest.mock import Mock, patch
+
+import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from unittest.mock import Mock, patch
-import pandas as pd
-from robosystems.database import Model as Base
+
 from main import app
+from robosystems.database import Model as Base
 
 # Speed up password hashing for tests by reducing bcrypt rounds
 # Production uses 14 rounds, but that's too slow for tests
@@ -66,21 +69,21 @@ def client(test_db):
   """Create a test client."""
   # Import the dependency directly
   from robosystems.middleware.rate_limits import (
-    auth_rate_limit_dependency,
-    rate_limit_dependency,
-    user_management_rate_limit_dependency,
-    sync_operations_rate_limit_dependency,
-    connection_management_rate_limit_dependency,
     analytics_rate_limit_dependency,
-    backup_operations_rate_limit_dependency,
-    sensitive_auth_rate_limit_dependency,
-    tasks_management_rate_limit_dependency,
-    general_api_rate_limit_dependency,
-    subscription_aware_rate_limit_dependency,
+    auth_rate_limit_dependency,
     auth_status_rate_limit_dependency,
-    sso_rate_limit_dependency,
+    backup_operations_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
+    general_api_rate_limit_dependency,
     graph_scoped_rate_limit_dependency,
+    rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
     sse_connection_rate_limit_dependency,
+    sso_rate_limit_dependency,
+    subscription_aware_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    user_management_rate_limit_dependency,
   )
 
   # Disable rate limiting during tests (but keep authentication functional)
@@ -101,7 +104,7 @@ def client(test_db):
   app.dependency_overrides[sse_connection_rate_limit_dependency] = lambda: None
 
   # Override the get_db_session dependency to use test database
-  from robosystems.database import get_db_session, get_async_db_session
+  from robosystems.database import get_async_db_session, get_db_session
 
   def override_get_db():
     yield test_db
@@ -134,17 +137,17 @@ def client_with_mocked_auth(test_db, test_user):
     get_current_user_with_graph,
   )
   from robosystems.middleware.rate_limits import (
-    auth_rate_limit_dependency,
-    rate_limit_dependency,
-    user_management_rate_limit_dependency,
-    sync_operations_rate_limit_dependency,
-    connection_management_rate_limit_dependency,
     analytics_rate_limit_dependency,
+    auth_rate_limit_dependency,
     backup_operations_rate_limit_dependency,
-    sensitive_auth_rate_limit_dependency,
-    tasks_management_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
     general_api_rate_limit_dependency,
+    rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
     subscription_aware_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    user_management_rate_limit_dependency,
   )
 
   # Use the test_user from the fixture (which has an org)
@@ -197,21 +200,21 @@ async def async_client(test_db, test_user):
     get_current_user_with_graph,
   )
   from robosystems.middleware.rate_limits import (
-    auth_rate_limit_dependency,
-    rate_limit_dependency,
-    user_management_rate_limit_dependency,
-    sync_operations_rate_limit_dependency,
-    connection_management_rate_limit_dependency,
     analytics_rate_limit_dependency,
-    backup_operations_rate_limit_dependency,
-    sensitive_auth_rate_limit_dependency,
-    tasks_management_rate_limit_dependency,
-    general_api_rate_limit_dependency,
-    subscription_aware_rate_limit_dependency,
+    auth_rate_limit_dependency,
     auth_status_rate_limit_dependency,
-    sso_rate_limit_dependency,
+    backup_operations_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
+    general_api_rate_limit_dependency,
     graph_scoped_rate_limit_dependency,
+    rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
     sse_connection_rate_limit_dependency,
+    sso_rate_limit_dependency,
+    subscription_aware_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    user_management_rate_limit_dependency,
   )
 
   # Use the test_user from the fixture
@@ -271,25 +274,26 @@ async def auth_integration_client(test_db):
   - Database session (uses test_db)
   - GraphClient/GraphClientFactory (to avoid LadybugDB access)
   """
-  from robosystems.middleware.rate_limits import (
-    auth_rate_limit_dependency,
-    rate_limit_dependency,
-    user_management_rate_limit_dependency,
-    sync_operations_rate_limit_dependency,
-    connection_management_rate_limit_dependency,
-    analytics_rate_limit_dependency,
-    backup_operations_rate_limit_dependency,
-    sensitive_auth_rate_limit_dependency,
-    tasks_management_rate_limit_dependency,
-    general_api_rate_limit_dependency,
-    subscription_aware_rate_limit_dependency,
-    auth_status_rate_limit_dependency,
-    sso_rate_limit_dependency,
-    graph_scoped_rate_limit_dependency,
-    sse_connection_rate_limit_dependency,
-  )
-  from robosystems.database import get_db_session, get_async_db_session
   from unittest.mock import AsyncMock, patch
+
+  from robosystems.database import get_async_db_session, get_db_session
+  from robosystems.middleware.rate_limits import (
+    analytics_rate_limit_dependency,
+    auth_rate_limit_dependency,
+    auth_status_rate_limit_dependency,
+    backup_operations_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
+    general_api_rate_limit_dependency,
+    graph_scoped_rate_limit_dependency,
+    rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
+    sse_connection_rate_limit_dependency,
+    sso_rate_limit_dependency,
+    subscription_aware_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    user_management_rate_limit_dependency,
+  )
 
   # Disable ALL rate limiting during tests
   app.dependency_overrides[auth_rate_limit_dependency] = lambda: None
@@ -347,9 +351,11 @@ async def auth_integration_client(test_db):
 @pytest.fixture
 def test_user(test_db):
   """Create a test user with associated org."""
-  from robosystems.models.iam import User, Org, OrgUser, OrgRole, OrgType
   import uuid
+
   import bcrypt
+
+  from robosystems.models.iam import Org, OrgRole, OrgType, OrgUser, User
 
   unique_id = str(uuid.uuid4())[:8]
   password = "T3stP@ssw0rd!"
@@ -397,9 +403,10 @@ def test_org(test_db, test_user):
 @pytest.fixture
 def sample_graph(test_db, test_org):
   """Create a sample graph for testing."""
-  from robosystems.models.iam import Graph
-  from robosystems.config.graph_tier import GraphTier
   import uuid
+
+  from robosystems.config.graph_tier import GraphTier
+  from robosystems.models.iam import Graph
 
   unique_id = str(uuid.uuid4().hex)[:8]
   graph = Graph.create(
@@ -439,10 +446,11 @@ def test_user_graph(test_db, test_user, sample_graph):
 @pytest.fixture
 def test_graph_with_credits(test_db, test_user, sample_graph):
   """Create a graph with credits setup for testing."""
-  from robosystems.models.iam import GraphUser, GraphCredits
-  from decimal import Decimal
-  from datetime import datetime, timezone
   import uuid
+  from datetime import datetime
+  from decimal import Decimal
+
+  from robosystems.models.iam import GraphCredits, GraphUser
 
   # Create GraphUser relationship
   user_graph = GraphUser.create(
@@ -461,7 +469,7 @@ def test_graph_with_credits(test_db, test_user, sample_graph):
     billing_admin_id=test_user.id,
     current_balance=Decimal("1000.0"),
     monthly_allocation=Decimal("1000.0"),
-    last_allocation_date=datetime.now(timezone.utc),
+    last_allocation_date=datetime.now(UTC),
   )
   test_db.add(graph_credits)
   test_db.commit()
@@ -489,13 +497,13 @@ def setup_database(test_db):
   test_db.rollback()
   # Also clean any committed data by truncating tables
   from robosystems.models.iam import (
-    User,
-    UserAPIKey,
-    GraphUser,
-    GraphCredits,
     Graph,
+    GraphCredits,
+    GraphUser,
     Org,
     OrgUser,
+    User,
+    UserAPIKey,
   )
 
   try:
@@ -806,8 +814,8 @@ def create_lbug_relationship(
   from_node_id: str,
   to_node_id: str,
   rel_type: str,
-  from_label: str = None,
-  to_label: str = None,
+  from_label: str | None = None,
+  to_label: str | None = None,
 ):
   """Helper function to create a relationship in LadybugDB."""
   from_match = f"(a:{from_label})" if from_label else "(a)"
@@ -835,9 +843,11 @@ def lbug_helpers():
 @pytest.fixture
 def other_user(test_db):
   """Create another test user without access to sample_graph."""
-  from robosystems.models.iam import User
   import uuid
+
   import bcrypt
+
+  from robosystems.models.iam import User
 
   unique_id = str(uuid.uuid4())[:8]
   password = "0th3rP@ssw0rd!"

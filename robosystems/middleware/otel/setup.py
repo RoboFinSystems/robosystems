@@ -14,23 +14,24 @@ Features:
 """
 
 import logging
-from typing import Optional
-from fastapi import FastAPI
 from importlib.metadata import version as pkg_version
-from robosystems.config import env
+
+from fastapi import FastAPI
 
 # OpenTelemetry imports
-from opentelemetry import trace, metrics
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
-from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+
+from robosystems.config import env
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -45,8 +46,8 @@ resource_attributes = (
 )
 
 # Global variables to track instrumentation state
-_tracer_provider: Optional[TracerProvider] = None
-_meter_provider: Optional[MeterProvider] = None
+_tracer_provider: TracerProvider | None = None
+_meter_provider: MeterProvider | None = None
 _instrumentation_enabled = False
 
 
@@ -193,7 +194,7 @@ def setup_telemetry(app: FastAPI) -> None:
     # Graceful degradation - continue without tracing
 
 
-def get_tracer(name: Optional[str] = None):
+def get_tracer(name: str | None = None):
   """
   Returns a tracer instance.
 

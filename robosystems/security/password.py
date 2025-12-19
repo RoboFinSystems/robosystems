@@ -8,8 +8,8 @@ import re
 import secrets
 import string
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import Any
 
 import bcrypt
 
@@ -31,9 +31,9 @@ class PasswordValidationResult:
   is_valid: bool
   strength: PasswordStrength
   score: int  # 0-100
-  errors: List[str]
-  suggestions: List[str]
-  character_types: Dict[str, bool]
+  errors: list[str]
+  suggestions: list[str]
+  character_types: dict[str, bool]
 
 
 class PasswordSecurity:
@@ -87,7 +87,7 @@ class PasswordSecurity:
 
   @classmethod
   def validate_password(
-    cls, password: str, email: Optional[str] = None
+    cls, password: str, email: str | None = None
   ) -> PasswordValidationResult:
     """
     Validate password against security requirements.
@@ -303,7 +303,7 @@ class PasswordSecurity:
     return "".join(password_chars)
 
   @classmethod
-  def get_password_policy(cls) -> Dict[str, Any]:
+  def get_password_policy(cls) -> dict[str, Any]:
     """
     Get the current password policy for frontend display.
 

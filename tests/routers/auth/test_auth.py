@@ -6,9 +6,11 @@ including registration, login, and error scenarios.
 """
 
 import os
-from fastapi.testclient import TestClient
 from unittest.mock import patch
+
 import bcrypt
+from fastapi.testclient import TestClient
+
 from robosystems.models.iam import User
 
 
@@ -405,7 +407,7 @@ class TestAuthSecurity:
 
     # Verify password can be checked
     assert bcrypt.checkpw(
-      "MyS3cr3tP@ssw0rd!123".encode("utf-8"), user.password_hash.encode("utf-8")
+      b"MyS3cr3tP@ssw0rd!123", user.password_hash.encode("utf-8")
     )
 
   @patch.object(

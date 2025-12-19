@@ -2,15 +2,16 @@
 Simplified tests for MCP functionality that don't require full handler initialization.
 """
 
-import pytest
-import json
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
 from robosystems.middleware.auth.jwt import create_jwt_token
+from robosystems.models.iam import User
 
 
 class TestMCPEndpoints:
@@ -209,7 +210,8 @@ class TestMCPEndpoints:
   @pytest.mark.asyncio
   async def test_mcp_unauthorized_access(self, test_user_graph, test_db):
     """Test MCP endpoint without authorization."""
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     from main import app
     from robosystems.database import get_db_session
 
@@ -267,8 +269,8 @@ class TestMCPStrategies:
   def test_strategy_selection_logic(self):
     """Test strategy selection based on tool and client."""
     from robosystems.routers.graphs.mcp.strategies import (
-      MCPStrategySelector,
       MCPExecutionStrategy,
+      MCPStrategySelector,
     )
 
     # Test schema query - should be JSON_IMMEDIATE for fast operations
@@ -352,8 +354,9 @@ class TestMCPAccessControl:
     self, db_session: Session, test_user: User
   ):
     """Test MCP access denied for unauthorized graph."""
-    from robosystems.routers.graphs.mcp.handlers import validate_mcp_access
     from fastapi import HTTPException
+
+    from robosystems.routers.graphs.mcp.handlers import validate_mcp_access
 
     # User should not have access to random graph
     with pytest.raises(HTTPException) as exc_info:
@@ -370,15 +373,16 @@ class TestMCPAccessControl:
     self, db_session: Session, test_user: User
   ):
     """Test MCP access for shared repositories."""
-    from robosystems.routers.graphs.mcp.handlers import validate_mcp_access
-    from robosystems.models.iam.user_repository import (
-      UserRepository,
-      RepositoryType,
-      RepositoryPlan,
-      RepositoryAccessLevel,
-    )
     import uuid
+
     from robosystems.models.iam import Graph
+    from robosystems.models.iam.user_repository import (
+      RepositoryAccessLevel,
+      RepositoryPlan,
+      RepositoryType,
+      UserRepository,
+    )
+    from robosystems.routers.graphs.mcp.handlers import validate_mcp_access
 
     # Create SEC repository (required for foreign key)
     Graph.find_or_create_repository(

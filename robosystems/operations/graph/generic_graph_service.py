@@ -7,14 +7,16 @@ configurations including custom schemas and schema extensions.
 """
 
 import asyncio
-from typing import Dict, Any, List, Optional, Callable
-from datetime import datetime, timezone
-from ...logger import logger
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
 from ...config import env
-from ...models.iam import GraphUser
-from ...database import get_db_session
-from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...config.graph_tier import GraphTier
+from ...database import get_db_session
+from ...logger import logger
+from ...middleware.graph.allocation_manager import LadybugAllocationManager
+from ...models.iam import GraphUser
 
 
 class GenericGraphService:
@@ -22,16 +24,16 @@ class GenericGraphService:
 
   async def create_graph(
     self,
-    graph_id: Optional[str],
-    schema_extensions: List[str],
-    metadata: Dict[str, Any],
+    graph_id: str | None,
+    schema_extensions: list[str],
+    metadata: dict[str, Any],
     tier: str,
-    initial_data: Optional[Dict[str, Any]],
+    initial_data: dict[str, Any] | None,
     user_id: str,
-    custom_schema: Optional[Dict[str, Any]] = None,
-    cancellation_callback: Optional[Callable] = None,
-    progress_callback: Optional[Callable] = None,
-  ) -> Dict[str, Any]:
+    custom_schema: dict[str, Any] | None = None,
+    cancellation_callback: Callable | None = None,
+    progress_callback: Callable | None = None,
+  ) -> dict[str, Any]:
     """
     Create a new graph database with flexible configuration.
 
@@ -72,7 +74,7 @@ class GenericGraphService:
     if progress_callback:
       progress_callback("Checking organization limits and permissions...", 10)
 
-    from ...models.iam import OrgUser, OrgLimits
+    from ...models.iam import OrgLimits, OrgUser
 
     db_gen = get_db_session()
     db = next(db_gen)
@@ -131,7 +133,7 @@ class GenericGraphService:
     # Step 3: Prepare schema for database creation
     custom_ddl = None
 
-    schema_persistence: Dict[str, Any] | None = None
+    schema_persistence: dict[str, Any] | None = None
 
     if custom_schema:
       logger.info("Preparing custom custom schema")
@@ -171,7 +173,7 @@ class GenericGraphService:
 
       except Exception as e:
         logger.error(f"Failed to parse custom schema: {e}")
-        raise ValueError(f"Invalid custom schema: {str(e)}")
+        raise ValueError(f"Invalid custom schema: {e!s}")
 
     # Step 4: Create the database with schema
     if progress_callback:
@@ -421,7 +423,7 @@ class GenericGraphService:
         else None,
       },
       "tier": tier,
-      "created_at": datetime.now(timezone.utc).isoformat(),
+      "created_at": datetime.now(UTC).isoformat(),
     }
 
     logger.info(f"Graph creation completed: {graph_id}")
@@ -436,16 +438,16 @@ class GenericGraphServiceSync:
 
   def create_graph(
     self,
-    graph_id: Optional[str],
-    schema_extensions: List[str],
-    metadata: Dict[str, Any],
+    graph_id: str | None,
+    schema_extensions: list[str],
+    metadata: dict[str, Any],
     tier: str,
-    initial_data: Optional[Dict[str, Any]],
+    initial_data: dict[str, Any] | None,
     user_id: str,
-    custom_schema: Optional[Dict[str, Any]] = None,
-    cancellation_callback: Optional[Callable] = None,
-    progress_callback: Optional[Callable] = None,
-  ) -> Dict[str, Any]:
+    custom_schema: dict[str, Any] | None = None,
+    cancellation_callback: Callable | None = None,
+    progress_callback: Callable | None = None,
+  ) -> dict[str, Any]:
     """Synchronous wrapper for async graph creation."""
     return asyncio.run(
       self._async_service.create_graph(

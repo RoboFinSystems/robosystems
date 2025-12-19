@@ -5,7 +5,7 @@ Human resource management, employees, payroll, and benefits.
 Extends the base schema with HR-specific entities.
 """
 
-from ..models import Node, Relationship, Property
+from ..models import Node, Property, Relationship
 
 # RoboHRM Extension Nodes
 EXTENSION_NODES = [

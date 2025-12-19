@@ -1,5 +1,6 @@
 import pytest
-from robosystems.graph_api.backends import get_backend, LadybugBackend, Neo4jBackend
+
+from robosystems.graph_api.backends import LadybugBackend, Neo4jBackend, get_backend
 
 
 def test_backend_factory_lbug(monkeypatch, tmp_path):

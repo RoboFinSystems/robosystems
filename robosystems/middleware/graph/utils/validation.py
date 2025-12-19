@@ -5,12 +5,11 @@ Functions for validating graph identifiers and database names.
 """
 
 import re
-from typing import Optional
 
 from robosystems.logger import logger
 
 
-def is_shared_repository(graph_id: Optional[str]) -> bool:
+def is_shared_repository(graph_id: str | None) -> bool:
   """
   Check if the given graph_id refers to a shared repository.
 

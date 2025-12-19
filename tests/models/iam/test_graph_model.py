@@ -1,19 +1,22 @@
 """Comprehensive tests for the Graph model."""
 
-import pytest
+from datetime import UTC
 from unittest.mock import MagicMock
+
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import Graph, User
 from robosystems.config.graph_tier import GraphTier
+from robosystems.models.iam import Graph, User
 
 
 @pytest.fixture
 def test_user(db_session: Session):
   """Create a test user with org."""
-  from robosystems.models.iam import Org, OrgUser, OrgRole, OrgType
   import uuid
+
+  from robosystems.models.iam import Org, OrgRole, OrgType, OrgUser
 
   unique_id = str(uuid.uuid4())[:8]
 
@@ -409,7 +412,7 @@ class TestGraphModel:
     """Test getting graphs by schema extension."""
     # Clean up any existing graphs to ensure test isolation
     # Delete in correct order due to foreign key constraints
-    from robosystems.models.iam import GraphUser, GraphCredits
+    from robosystems.models.iam import GraphCredits, GraphUser
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
 
     # Delete in dependency order
@@ -477,7 +480,7 @@ class TestGraphModel:
     """Test getting graphs by type."""
     # Clean up any existing graphs to ensure test isolation
     # Delete in correct order due to foreign key constraints
-    from robosystems.models.iam import GraphUser, GraphCredits
+    from robosystems.models.iam import GraphCredits, GraphUser
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
 
     # Delete in dependency order
@@ -657,7 +660,7 @@ class TestGraphModel:
     """Test getting the next available subgraph index."""
     # Clean up any existing graphs to ensure test isolation
     # Delete in correct order due to foreign key constraints
-    from robosystems.models.iam import GraphUser, GraphCredits
+    from robosystems.models.iam import GraphCredits, GraphUser
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
 
     # Delete in dependency order
@@ -880,7 +883,7 @@ class TestGraphRepositoryFeatures:
 
   def test_repository_needs_sync_recent(self, test_org, db_session):
     """Test needs_sync when sync is recent."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     repo = Graph.find_or_create_repository(
       graph_id=f"sec_recent_{self.unique_id}",
@@ -891,7 +894,7 @@ class TestGraphRepositoryFeatures:
     )
 
     # Set recent sync
-    repo.last_sync_at = datetime.now(timezone.utc)
+    repo.last_sync_at = datetime.now(UTC)
     repo.sync_status = "active"
     db_session.commit()
 
@@ -899,7 +902,7 @@ class TestGraphRepositoryFeatures:
 
   def test_repository_needs_sync_stale(self, test_org, db_session):
     """Test needs_sync when sync is stale."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta
 
     repo = Graph.find_or_create_repository(
       graph_id=f"sec_stale_{self.unique_id}",
@@ -910,14 +913,14 @@ class TestGraphRepositoryFeatures:
     )
 
     # Set old sync (2 days ago)
-    repo.last_sync_at = datetime.now(timezone.utc) - timedelta(days=2)
+    repo.last_sync_at = datetime.now(UTC) - timedelta(days=2)
     db_session.commit()
 
     assert repo.needs_sync is True
 
   def test_repository_needs_sync_error_status(self, test_org, db_session):
     """Test needs_sync when sync_status is error."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     repo = Graph.find_or_create_repository(
       graph_id=f"sec_error_{self.unique_id}",
@@ -928,7 +931,7 @@ class TestGraphRepositoryFeatures:
     )
 
     repo.sync_status = "error"
-    repo.last_sync_at = datetime.now(timezone.utc)
+    repo.last_sync_at = datetime.now(UTC)
     db_session.commit()
 
     assert repo.needs_sync is True

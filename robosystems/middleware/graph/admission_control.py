@@ -5,12 +5,12 @@ Provides intelligent request filtering based on system resources
 and load to prevent overload and maintain system stability.
 """
 
-import psutil
 import random
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple
 from enum import Enum
+
+import psutil
 
 from robosystems.logger import logger
 
@@ -81,11 +81,11 @@ class AdmissionController:
 
     # Cached resource data
     self._last_check = 0.0
-    self._cached_resources: Optional[SystemResources] = None
+    self._cached_resources: SystemResources | None = None
 
     # Load shedding state
     self._rejection_rate = 0.0
-    self._shed_start_time: Optional[float] = None
+    self._shed_start_time: float | None = None
 
   def check_admission(
     self,
@@ -93,7 +93,7 @@ class AdmissionController:
     max_queue_size: int,
     active_queries: int,
     priority: int = 5,
-  ) -> Tuple[AdmissionDecision, Optional[str]]:
+  ) -> tuple[AdmissionDecision, str | None]:
     """
     Check if a new query should be admitted.
 
@@ -319,7 +319,7 @@ class AdmissionController:
 
 
 # Global admission controller instance
-_admission_controller: Optional[AdmissionController] = None
+_admission_controller: AdmissionController | None = None
 
 
 def get_admission_controller() -> AdmissionController:

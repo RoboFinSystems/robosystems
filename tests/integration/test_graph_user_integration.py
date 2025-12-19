@@ -1,10 +1,12 @@
 """Integration tests for Graph and GraphUser models working together."""
 
+from datetime import UTC
+
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from robosystems.models.iam import Graph, GraphUser, User, GraphCredits
 from robosystems.config.graph_tier import GraphTier
+from robosystems.models.iam import Graph, GraphCredits, GraphUser, User
 
 
 class TestGraphUserIntegration:
@@ -64,7 +66,7 @@ class TestGraphUserIntegration:
     import bcrypt
 
     salt = bcrypt.gensalt()
-    password_hash = bcrypt.hashpw("password123".encode("utf-8"), salt).decode("utf-8")
+    password_hash = bcrypt.hashpw(b"password123", salt).decode("utf-8")
 
     user2 = User.create(
       email="user2@test.com",
@@ -107,7 +109,7 @@ class TestGraphUserIntegration:
     import bcrypt
 
     salt = bcrypt.gensalt()
-    password_hash = bcrypt.hashpw("password123".encode("utf-8"), salt).decode("utf-8")
+    password_hash = bcrypt.hashpw(b"password123", salt).decode("utf-8")
 
     user1 = User(
       id="tenant1",
@@ -171,7 +173,7 @@ class TestGraphUserIntegration:
     import bcrypt
 
     salt = bcrypt.gensalt()
-    password_hash = bcrypt.hashpw("password123".encode("utf-8"), salt).decode("utf-8")
+    password_hash = bcrypt.hashpw(b"password123", salt).decode("utf-8")
 
     users = []
     roles = ["admin", "member", "member", "viewer"]
@@ -187,7 +189,7 @@ class TestGraphUserIntegration:
     test_db.commit()
 
     # Grant different levels of access
-    for user, role in zip(users, roles):
+    for user, role in zip(users, roles, strict=False):
       GraphUser.create(
         user_id=user.id,
         graph_id=graph.graph_id,
@@ -279,8 +281,8 @@ class TestGraphUserIntegration:
     )
 
     # Create credits for each graph
+    from datetime import datetime
     from decimal import Decimal
-    from datetime import datetime, timezone
 
     standard_credits = GraphCredits(
       id="sc_001",
@@ -289,7 +291,7 @@ class TestGraphUserIntegration:
       billing_admin_id=test_user.id,
       current_balance=Decimal("1000.0"),
       monthly_allocation=Decimal("1000.0"),
-      last_allocation_date=datetime.now(timezone.utc),
+      last_allocation_date=datetime.now(UTC),
     )
 
     premium_credits = GraphCredits(
@@ -299,7 +301,7 @@ class TestGraphUserIntegration:
       billing_admin_id=test_user.id,
       current_balance=Decimal("1000.0"),
       monthly_allocation=Decimal("1000.0"),
-      last_allocation_date=datetime.now(timezone.utc),
+      last_allocation_date=datetime.now(UTC),
     )
 
     test_db.add_all([standard_credits, premium_credits])
@@ -357,7 +359,7 @@ class TestGraphUserIntegration:
     import bcrypt
 
     salt = bcrypt.gensalt()
-    password_hash = bcrypt.hashpw("password123".encode("utf-8"), salt).decode("utf-8")
+    password_hash = bcrypt.hashpw(b"password123", salt).decode("utf-8")
 
     admin_user = User(
       id="admin", email="admin@test.com", name="Admin", password_hash=password_hash

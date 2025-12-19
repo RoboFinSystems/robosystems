@@ -1,8 +1,7 @@
 import json
-from typing import Union
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Path, Body, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Request
 from fastapi import status as http_status
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
@@ -31,7 +30,7 @@ async def query_tables(
   chunk_size: int = Query(
     default=1000, ge=10, le=10000, description="Rows per chunk for streaming"
   ),
-) -> Union[TableQueryResponse, StreamingResponse, EventSourceResponse]:
+) -> TableQueryResponse | StreamingResponse | EventSourceResponse:
   """
   Execute SQL query against DuckDB staging tables.
 
@@ -52,7 +51,7 @@ async def query_tables(
   **Note:** External tables query S3 directly and can take minutes for thousands of files.
   Use streaming to get progressive results. For repeated queries, ingest data into LadybugDB graph.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   # Auto-detect streaming from Accept header
   accept_header = full_request.headers.get("accept", "")
@@ -145,7 +144,7 @@ async def query_tables(
 
             # Send completion event
             execution_time_ms = (
-              datetime.now(timezone.utc) - start_time
+              datetime.now(UTC) - start_time
             ).total_seconds() * 1000
             yield {
               "event": "completed",
@@ -198,5 +197,5 @@ async def query_tables(
     logger.error(f"Query failed for graph {graph_id}: {e}")
     raise HTTPException(
       status_code=http_status.HTTP_400_BAD_REQUEST,
-      detail=f"Query failed: {str(e)}",
+      detail=f"Query failed: {e!s}",
     )

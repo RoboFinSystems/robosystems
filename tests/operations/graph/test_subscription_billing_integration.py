@@ -1,17 +1,18 @@
 """Integration tests for subscription billing with graph usage tracking."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, patch, MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, Mock, patch
 
-from robosystems.operations.graph.subscription_service import GraphSubscriptionService
-from robosystems.models.iam import (
-  User,
-  OrgLimits,
-  GraphUser,
-  GraphUsage,
-)
+import pytest
+
 from robosystems.models.billing import BillingSubscription, SubscriptionStatus
+from robosystems.models.iam import (
+  GraphUsage,
+  GraphUser,
+  OrgLimits,
+  User,
+)
+from robosystems.operations.graph.subscription_service import GraphSubscriptionService
 
 
 class TestSubscriptionBillingIntegration:
@@ -88,7 +89,7 @@ class TestSubscriptionBillingIntegration:
       graph.user_id = user.id
       graph.graph_id = f"entity_{1000 + i}"
       graph.entity_id = f"comp_{1000 + i}"
-      graph.created_at = datetime.now(timezone.utc) - timedelta(days=30)
+      graph.created_at = datetime.now(UTC) - timedelta(days=30)
       graphs.append(graph)
 
     return {"user": user, "graphs": graphs}
@@ -97,7 +98,7 @@ class TestSubscriptionBillingIntegration:
   def sample_usage_data(self, sample_user_with_graphs):
     """Create sample usage tracking data."""
     usage_records = []
-    base_time = datetime.now(timezone.utc) - timedelta(days=7)
+    base_time = datetime.now(UTC) - timedelta(days=7)
 
     for graph in sample_user_with_graphs["graphs"]:
       for day in range(7):
@@ -149,8 +150,8 @@ class TestSubscriptionBillingIntegration:
         sub.graph_id = graph.graph_id
         sub.plan_id = pro_plan.id
         sub.status = SubscriptionStatus.ACTIVE.value
-        sub.current_period_start = datetime.now(timezone.utc) - timedelta(days=15)
-        sub.current_period_end = datetime.now(timezone.utc) + timedelta(days=15)
+        sub.current_period_start = datetime.now(UTC) - timedelta(days=15)
+        sub.current_period_end = datetime.now(UTC) + timedelta(days=15)
         subscriptions.append(sub)
 
       # Calculate total storage used (latest records)
@@ -206,7 +207,7 @@ class TestSubscriptionBillingIntegration:
         record.graph_id = f"entity_{1000 + i}"
         record.size_bytes = 5 * 1024**3  # 5GB per database = 15GB total
         record.query_count = 1000
-        record.recorded_at = datetime.now(timezone.utc)
+        record.recorded_at = datetime.now(UTC)
         overage_usage.append(record)
 
       # Calculate totals
@@ -250,7 +251,7 @@ class TestSubscriptionBillingIntegration:
     total_monthly_queries = (
       sum(record.query_count for record in sample_usage_data) * 4
     )  # Extrapolate to month
-    graph_count = len(set(record.graph_id for record in sample_usage_data))
+    graph_count = len({record.graph_id for record in sample_usage_data})
 
     # Determine recommended plan based on usage
     recommended_plan = None
@@ -317,7 +318,7 @@ class TestSubscriptionBillingIntegration:
         record.graph_id = graph_id
         record.size_bytes = metrics["size_bytes"]
         record.query_count = metrics["query_count"]
-        record.recorded_at = datetime.now(timezone.utc)
+        record.recorded_at = datetime.now(UTC)
         usage_records.append(record)
 
     # Aggregate usage across instances
@@ -330,7 +331,7 @@ class TestSubscriptionBillingIntegration:
   def test_usage_anomaly_detection(self, sample_usage_data):
     """Test detecting unusual usage patterns for billing alerts."""
     # Create anomalous usage data
-    base_time = datetime.now(timezone.utc) - timedelta(days=7)
+    base_time = datetime.now(UTC) - timedelta(days=7)
     normal_storage = 1024 * 1024 * 1024  # 1GB
     normal_queries = 100
 

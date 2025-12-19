@@ -18,18 +18,18 @@ Enhanced features:
 """
 
 import logging
-from typing import Optional, Dict, Any, Union
+from typing import Any
 
 from .config import env
 from .config.logging import (
-  setup_logging,
   get_logger,
   log_api_request,
   log_database_query,
   log_error,
-  log_security_event,
   log_performance_metric,
+  log_security_event,
   performance_timer,
+  setup_logging,
 )
 
 # Initialize the advanced structured logging system
@@ -69,9 +69,9 @@ def log_api(
   path: str,
   status_code: int,
   duration_ms: float,
-  user_id: Optional[str] = None,
-  entity_id: Optional[str] = None,
-  request_id: Optional[str] = None,
+  user_id: str | None = None,
+  entity_id: str | None = None,
+  request_id: str | None = None,
 ) -> None:
   """Log API requests with structured data."""
   log_api_request(
@@ -83,9 +83,9 @@ def log_db_query(
   database: str,
   query_type: str,
   duration_ms: float,
-  row_count: Optional[int] = None,
-  user_id: Optional[str] = None,
-  entity_id: Optional[str] = None,
+  row_count: int | None = None,
+  user_id: str | None = None,
+  entity_id: str | None = None,
 ) -> None:
   """Log database queries with performance tracking."""
   log_database_query(
@@ -98,9 +98,9 @@ def log_app_error(
   component: str,
   action: str,
   error_category: str = "application",
-  user_id: Optional[str] = None,
-  entity_id: Optional[str] = None,
-  metadata: Optional[Dict[str, Any]] = None,
+  user_id: str | None = None,
+  entity_id: str | None = None,
+  metadata: dict[str, Any] | None = None,
 ) -> None:
   """Log application errors with context."""
   log_error(
@@ -110,10 +110,10 @@ def log_app_error(
 
 def log_auth_event(
   event_type: str,
-  user_id: Optional[str] = None,
-  ip_address: Optional[str] = None,
+  user_id: str | None = None,
+  ip_address: str | None = None,
   success: bool = True,
-  metadata: Optional[Dict[str, Any]] = None,
+  metadata: dict[str, Any] | None = None,
 ) -> None:
   """Log security/authentication events."""
   log_security_event(
@@ -123,10 +123,10 @@ def log_auth_event(
 
 def log_metric(
   metric_name: str,
-  value: Union[int, float],
+  value: int | float,
   unit: str = "count",
   component: str = "system",
-  metadata: Optional[Dict[str, Any]] = None,
+  metadata: dict[str, Any] | None = None,
 ) -> None:
   """Log performance metrics."""
   log_performance_metric(logger, metric_name, value, unit, component, metadata)
@@ -134,23 +134,23 @@ def log_metric(
 
 # Export all logging capabilities
 __all__ = [
-  "logger",  # Main backward-compatible logger
   "api_logger",  # API-specific structured logger
-  "worker_logger",  # Worker-specific structured logger
+  "get_logger",
   "lbug_logger",  # Database-specific structured logger
-  "security_logger",  # Security-specific structured logger
   # Convenience functions
   "log_api",
-  "log_db_query",
-  "log_app_error",
-  "log_auth_event",
-  "log_metric",
   # Advanced functions from config.logging
   "log_api_request",
+  "log_app_error",
+  "log_auth_event",
   "log_database_query",
+  "log_db_query",
   "log_error",
-  "log_security_event",
+  "log_metric",
   "log_performance_metric",
+  "log_security_event",
+  "logger",  # Main backward-compatible logger
   "performance_timer",
-  "get_logger",
+  "security_logger",  # Security-specific structured logger
+  "worker_logger",  # Worker-specific structured logger
 ]

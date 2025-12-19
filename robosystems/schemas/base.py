@@ -5,7 +5,7 @@ Defines common nodes and relationships shared across all applications.
 This serves as the foundation that all application-specific schemas extend.
 """
 
-from .models import Node, Relationship, Property
+from .models import Node, Property, Relationship
 
 # Base Schema Definition - Common Foundation
 # NOTE: Platform metadata (users, connections, graph metadata) are stored in PostgreSQL,

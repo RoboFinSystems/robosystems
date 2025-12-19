@@ -1,6 +1,6 @@
 """AWS SES adapter for sending transactional emails."""
 
-from typing import Dict, Any
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -30,8 +30,8 @@ class SESEmailService:
       logger.warning("EMAIL_FROM_ADDRESS not configured - emails will not be sent")
 
   def _get_email_template(
-    self, email_type: str, template_data: Dict[str, Any]
-  ) -> Dict[str, str]:
+    self, email_type: str, template_data: dict[str, Any]
+  ) -> dict[str, str]:
     """Get email subject and body templates based on email type."""
     app_name = template_data.get("app_name", "RoboSystems")
     user_name = template_data.get("user_name", "User")
@@ -225,7 +225,7 @@ The {app_name} Team""",
     )
 
   async def send_email(
-    self, email_type: str, to_email: str, template_data: Dict[str, Any]
+    self, email_type: str, to_email: str, template_data: dict[str, Any]
   ) -> bool:
     """
     Send an email via Amazon SES.
@@ -291,7 +291,7 @@ The {app_name} Team""",
 
     except Exception as e:
       logger.error(
-        f"Unexpected error sending {email_type} email to {to_email}: {str(e)}"
+        f"Unexpected error sending {email_type} email to {to_email}: {e!s}"
       )
       return False
 

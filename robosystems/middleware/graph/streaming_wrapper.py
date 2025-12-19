@@ -5,8 +5,9 @@ This module provides streaming query support for repositories that use
 the Graph API client, enabling memory-efficient processing of large result sets.
 """
 
-from typing import Dict, Any, Optional, AsyncIterator
 import time
+from collections.abc import AsyncIterator
+from typing import Any
 
 from robosystems.logger import logger
 
@@ -29,8 +30,8 @@ class StreamingRepositoryWrapper:
     self.client = client
 
   async def execute_query_streaming(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None, chunk_size: int = 1000
-  ) -> AsyncIterator[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None, chunk_size: int = 1000
+  ) -> AsyncIterator[dict[str, Any]]:
     """
     Execute a query and stream results in chunks.
 
@@ -117,7 +118,7 @@ class StreamingRepositoryWrapper:
 
       if hasattr(self.client, "execute_query"):
         # Execute normally and convert to chunks
-        if hasattr(self.client.execute_query, "__call__"):
+        if callable(self.client.execute_query):
           result = await self.client.execute_query(cypher, params)
           async for chunk in self._convert_to_chunks(result, chunk_size, start_time):
             yield chunk
@@ -126,7 +127,7 @@ class StreamingRepositoryWrapper:
 
   async def _convert_to_chunks(
     self, result: Any, chunk_size: int, start_time: float
-  ) -> AsyncIterator[Dict[str, Any]]:
+  ) -> AsyncIterator[dict[str, Any]]:
     """
     Convert a regular query result to streaming chunks.
 

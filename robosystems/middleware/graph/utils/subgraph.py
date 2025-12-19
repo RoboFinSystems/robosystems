@@ -7,8 +7,8 @@ This module provides utilities for working with subgraphs, including:
 """
 
 import re
-from typing import Optional, NamedTuple, Tuple
 from enum import Enum
+from typing import NamedTuple
 
 from ..types import SUBGRAPH_NAME_PATTERN as SUBGRAPH_NAME_PATTERN_STR
 
@@ -29,7 +29,7 @@ class SubgraphInfo(NamedTuple):
   parent_graph_id: str  # Parent graph ID (e.g., kg123)
   subgraph_name: str  # Subgraph name (e.g., dev, staging, prod1)
   database_name: str  # Actual database name on disk (e.g., kg123_dev)
-  subgraph_index: Optional[int] = None  # Numeric index if applicable
+  subgraph_index: int | None = None  # Numeric index if applicable
 
 
 # Regex patterns for subgraph parsing
@@ -46,7 +46,7 @@ SUBGRAPH_NAME_PATTERN = re.compile(SUBGRAPH_NAME_PATTERN_STR)
 FULL_SUBGRAPH_PATTERN = re.compile(r"^(kg[a-f0-9]{16,})_([a-zA-Z0-9]{1,20})$")
 
 
-def parse_subgraph_id(graph_id: str) -> Optional[SubgraphInfo]:
+def parse_subgraph_id(graph_id: str) -> SubgraphInfo | None:
   """Parse a graph ID to determine if it's a subgraph.
 
   Uses underscore notation for subgraphs:
@@ -149,7 +149,7 @@ def get_database_name(graph_id: str) -> str:
   return graph_id
 
 
-def split_graph_hierarchy(graph_id: str) -> Tuple[str, Optional[str]]:
+def split_graph_hierarchy(graph_id: str) -> tuple[str, str | None]:
   """Split a graph ID into parent and subgraph components.
 
   Args:

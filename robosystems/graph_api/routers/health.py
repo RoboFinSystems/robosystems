@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from robosystems.config import env
-from robosystems.logger import logger
 from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.logger import logger
 
 router = APIRouter(tags=["Health"])
 
@@ -86,7 +86,7 @@ async def health_check(
     )
   except Exception as e:
     # Log the detailed error securely
-    logger.error(f"Health check failed: {str(e)}")
+    logger.error(f"Health check failed: {e!s}")
     # Return generic error message to avoid information disclosure
     return JSONResponse(
       status_code=503,

@@ -7,27 +7,26 @@ These are reusable pipeline operations, not one-off scripts.
 """
 
 import os
-import tempfile
 import re
+import tempfile
 from pathlib import Path
-from typing import Optional, List, Tuple, Dict
 
-from ...logger import logger
-from ...security import SecurityAuditLogger
 from robosystems.adapters.sec.processors.schema import (
+  IngestTableInfo,
   XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
-  IngestTableInfo,
 )
-from ...config import env
 
+from ...config import env
+from ...logger import logger
+from ...security import SecurityAuditLogger
 
 # Cache schema adapters to avoid recompilation
-_schema_adapter_cache: Dict[str, XBRLSchemaConfigGenerator] = {}
+_schema_adapter_cache: dict[str, XBRLSchemaConfigGenerator] = {}
 
 
 def _get_cached_schema_adapter(
-  schema_config: Optional[dict] = None,
+  schema_config: dict | None = None,
 ) -> XBRLSchemaConfigGenerator:
   """
   Get a cached schema adapter to avoid recompilation.
@@ -66,7 +65,7 @@ def ingest_from_s3(
   bucket: str,
   db_name: str,
   s3_prefix: str = "processed/",
-  schema_config: Optional[dict] = None,
+  schema_config: dict | None = None,
 ) -> bool:
   """
   Ingest processed parquet files from S3 into graph database.
@@ -144,7 +143,7 @@ def ingest_from_s3(
 
 
 def ingest_from_local_files(
-  file_paths: List[str], db_name: str, schema_config: Optional[dict] = None
+  file_paths: list[str], db_name: str, schema_config: dict | None = None
 ) -> bool:
   """
   Ingest parquet files from local filesystem into graph database.
@@ -161,14 +160,15 @@ def ingest_from_local_files(
   """
   try:
     from robosystems.graph_api.core.ladybug import Engine
+
     from .schema_setup import ensure_schema
 
     logger.info(f"Starting LadybugDB ingestion: {len(file_paths)} files -> {db_name}")
 
     # Initialize LadybugDB engine
     from .path_utils import (
-      get_lbug_database_path,
       ensure_lbug_directory,
+      get_lbug_database_path,
     )
 
     # Get the correct database path using the utility
@@ -230,8 +230,8 @@ def ingest_from_local_files(
 
 
 def _categorize_files_schema_driven(
-  file_paths: List[str], schema_adapter: XBRLSchemaConfigGenerator
-) -> Tuple[List[str], List[str]]:
+  file_paths: list[str], schema_adapter: XBRLSchemaConfigGenerator
+) -> tuple[list[str], list[str]]:
   """
   Categorize files into nodes and relationships using schema-driven logic.
   No hardcoded arrays - everything derived from schema.
@@ -255,7 +255,7 @@ def _categorize_files_schema_driven(
 
 def _parse_filename_schema_driven(
   file_path: str, schema_adapter: XBRLSchemaConfigGenerator
-) -> Optional[dict]:
+) -> dict | None:
   """
   Parse filename using schema-driven logic to extract table information.
   No hardcoded mappings - everything derived from schema.
@@ -354,7 +354,7 @@ def _create_table_from_schema(
     arrow_schema = parquet_file.schema_arrow
 
     # Debug: Log what we found in the parquet file
-    parquet_columns = set(field.name for field in arrow_schema)
+    parquet_columns = {field.name for field in arrow_schema}
     logger.debug(
       f"Parquet file {file_path} has {len(parquet_columns)} columns: {sorted(parquet_columns)}"
     )
@@ -467,7 +467,7 @@ def _create_relationship_table_from_schema(
     # Read parquet schema to validate columns exist
     parquet_file = pq.ParquetFile(file_path)
     arrow_schema = parquet_file.schema_arrow
-    parquet_columns = set(field.name for field in arrow_schema)
+    parquet_columns = {field.name for field in arrow_schema}
 
     # Get from/to nodes from schema
     from_node = ingest_info.from_node
@@ -714,6 +714,7 @@ def _copy_node_data_schema_driven(
 
     # Track performance metrics
     import time
+
     import pyarrow.parquet as pq
 
     # Get row count for performance tracking
@@ -825,6 +826,7 @@ def _copy_relationship_data_schema_driven(
 
     # Track performance metrics
     import time
+
     import pyarrow.parquet as pq
 
     # Get row count for performance tracking

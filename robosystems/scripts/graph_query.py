@@ -26,6 +26,7 @@ Usage:
 import argparse
 import json
 import sys
+
 import requests
 
 from robosystems.utils.query_output import (
@@ -167,7 +168,7 @@ def execute_query(
   query: str,
   format_output: str = "table",
   timeout: int = 300,
-  parameters: dict = None,
+  parameters: dict | None = None,
 ) -> bool:
   try:
     # Normalize single quotes to double quotes for Cypher

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from typing import Any
 
 
 class S3IngestionError(Exception):
@@ -18,9 +18,9 @@ class DatabaseInfo:
 @dataclass
 class ClusterTopology:
   mode: str
-  leader: Optional[Dict[str, Any]] = None
-  followers: Optional[List[Dict[str, Any]]] = None
-  members: Optional[List[Dict[str, Any]]] = None
+  leader: dict[str, Any] | None = None
+  followers: list[dict[str, Any]] | None = None
+  members: list[dict[str, Any]] | None = None
 
 
 class GraphBackend(ABC):
@@ -29,9 +29,9 @@ class GraphBackend(ABC):
     self,
     graph_id: str,
     cypher: str,
-    parameters: Optional[Dict[str, Any]] = None,
-    database: Optional[str] = None,
-  ) -> List[Dict[str, Any]]:
+    parameters: dict[str, Any] | None = None,
+    database: str | None = None,
+  ) -> list[dict[str, Any]]:
     pass
 
   @abstractmethod
@@ -39,9 +39,9 @@ class GraphBackend(ABC):
     self,
     graph_id: str,
     cypher: str,
-    parameters: Optional[Dict[str, Any]] = None,
-    database: Optional[str] = None,
-  ) -> List[Dict[str, Any]]:
+    parameters: dict[str, Any] | None = None,
+    database: str | None = None,
+  ) -> list[dict[str, Any]]:
     pass
 
   @abstractmethod
@@ -53,7 +53,7 @@ class GraphBackend(ABC):
     pass
 
   @abstractmethod
-  async def list_databases(self) -> List[str]:
+  async def list_databases(self) -> list[str]:
     pass
 
   @abstractmethod
@@ -74,10 +74,10 @@ class GraphBackend(ABC):
     graph_id: str,
     table_name: str,
     s3_pattern: str,
-    s3_credentials: Optional[Dict[str, Any]] = None,
+    s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
-    database: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    database: str | None = None,
+  ) -> dict[str, Any]:
     pass
 
   @abstractmethod

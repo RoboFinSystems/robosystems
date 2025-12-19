@@ -3,19 +3,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from ...config import BillingConfig, env
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...models.iam import User
-from ...models.billing import BillingCustomer, BillingSubscription
 from ...models.api.billing.checkout import (
-  CreateCheckoutRequest,
   CheckoutResponse,
   CheckoutStatusResponse,
+  CreateCheckoutRequest,
 )
+from ...models.billing import BillingCustomer, BillingSubscription
+from ...models.iam import User
 from ...operations.providers.payment_provider import get_payment_provider
-from ...config import BillingConfig, env
-from ...logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -63,7 +63,7 @@ async def create_checkout_session(
     )
 
   try:
-    from ...models.iam import OrgUser, OrgRole
+    from ...models.iam import OrgRole, OrgUser
 
     # Get user's org - they must be an OWNER
     user_orgs = OrgUser.get_user_orgs(current_user.id, db)
@@ -157,7 +157,7 @@ async def create_checkout_session(
       logger.error(f"Failed to get Stripe price: {e}")
       raise HTTPException(
         status_code=500,
-        detail=f"Payment configuration error: {str(e)}",
+        detail=f"Payment configuration error: {e!s}",
       )
 
     # Create Stripe checkout session

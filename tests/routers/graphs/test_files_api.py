@@ -1,10 +1,11 @@
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from robosystems.routers.graphs.files import main as files_router
 from robosystems.models.api.graphs.tables import FileUploadRequest
+from robosystems.routers.graphs.files import main as files_router
 
 
 @pytest.mark.asyncio
@@ -135,11 +136,11 @@ async def test_get_file_returns_enhanced_status(monkeypatch):
     fake_repo,
   )
 
-  from datetime import datetime, timezone
+  from datetime import datetime
 
-  uploaded_time = datetime(2025, 1, 20, 10, 0, 0, tzinfo=timezone.utc)
-  duckdb_time = datetime(2025, 1, 20, 10, 1, 0, tzinfo=timezone.utc)
-  graph_time = datetime(2025, 1, 20, 10, 5, 0, tzinfo=timezone.utc)
+  uploaded_time = datetime(2025, 1, 20, 10, 0, 0, tzinfo=UTC)
+  duckdb_time = datetime(2025, 1, 20, 10, 1, 0, tzinfo=UTC)
+  graph_time = datetime(2025, 1, 20, 10, 5, 0, tzinfo=UTC)
 
   file_record = SimpleNamespace(
     id="file-123",

@@ -1,15 +1,16 @@
 """Edge case and error scenario tests for the subscription service."""
 
 import os
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
-from sqlalchemy.exc import IntegrityError
+from datetime import UTC, datetime
 from decimal import Decimal
+from unittest.mock import MagicMock, Mock, patch
 
-from robosystems.operations.graph.subscription_service import GraphSubscriptionService
+import pytest
+from sqlalchemy.exc import IntegrityError
+
 from robosystems.models.billing import SubscriptionStatus
 from robosystems.models.iam import GraphUsage
+from robosystems.operations.graph.subscription_service import GraphSubscriptionService
 
 
 class TestSubscriptionEdgeCases:
@@ -173,7 +174,7 @@ class TestSubscriptionEdgeCases:
     usage_record = Mock(spec=GraphUsage)
     usage_record.size_bytes = None  # Missing size
     usage_record.query_count = -1  # Invalid negative count
-    usage_record.recorded_at = datetime.now(timezone.utc)
+    usage_record.recorded_at = datetime.now(UTC)
 
     # Service should handle gracefully
     # In real implementation, might use defaults or skip invalid records

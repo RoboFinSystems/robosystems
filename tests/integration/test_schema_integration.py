@@ -2,8 +2,10 @@
 Integration tests for schema management functionality.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
+
 from tests.conftest import VALID_TEST_GRAPH_ID
 
 
@@ -252,7 +254,7 @@ class TestSchemaManagementIntegration:
 
       # Configure db.query to return the right mock based on the model
       def mock_query(model):
-        from robosystems.models.iam import GraphUser, GraphSchema, Graph
+        from robosystems.models.iam import Graph, GraphSchema, GraphUser
 
         if model == GraphUser or (
           hasattr(model, "__name__") and model.__name__ == "GraphUser"

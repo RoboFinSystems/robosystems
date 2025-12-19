@@ -1,19 +1,20 @@
 """Comprehensive tests for the credit management service."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
+from robosystems.config.graph_tier import GraphTier
+from robosystems.models.iam import (
+  GraphCredits,
+  User,
+)
 from robosystems.operations.graph.credit_service import (
   CreditService,
   get_operation_cost,
 )
-from robosystems.models.iam import (
-  User,
-  GraphCredits,
-)
-from robosystems.config.graph_tier import GraphTier
 
 
 class TestCreditService:
@@ -69,7 +70,7 @@ class TestCreditService:
     credits.monthly_allocation = Decimal("1000.0")
     credits.graph_tier = GraphTier.LADYBUG_STANDARD.value
     credits.is_active = True
-    credits.last_allocation_date = datetime.now(timezone.utc)
+    credits.last_allocation_date = datetime.now(UTC)
     return credits
 
   def test_create_graph_credits(
@@ -417,7 +418,7 @@ class TestCreditService:
     mock_credits.current_balance = Decimal("750.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
     mock_credits.graph_tier = GraphTier.LADYBUG_LARGE.value
-    mock_credits.last_allocation_date = datetime.now(timezone.utc)
+    mock_credits.last_allocation_date = datetime.now(UTC)
     mock_credits.get_usage_summary = Mock(
       return_value={
         "current_balance": 750.0,
@@ -430,12 +431,10 @@ class TestCreditService:
     with patch(
       "robosystems.middleware.billing.cache.credit_cache.get_cached_credit_summary",
       return_value=None,
-    ):
-      with patch(
-        "robosystems.middleware.billing.cache.credit_cache.cache_credit_summary"
-      ):
-        with patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits):
-          result = credit_service.get_credit_summary("graph123")
+    ), patch(
+      "robosystems.middleware.billing.cache.credit_cache.cache_credit_summary"
+    ), patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits):
+      result = credit_service.get_credit_summary("graph123")
 
     assert result["current_balance"] == 750.0
     assert result["monthly_allocation"] == 1000.0
@@ -444,7 +443,7 @@ class TestCreditService:
   def test_allocate_monthly_credits_recent(self, credit_service, mock_session):
     """Test monthly allocation when already allocated recently."""
     mock_credits = Mock(spec=GraphCredits)
-    mock_credits.last_allocation_date = datetime.now(timezone.utc) - timedelta(days=5)
+    mock_credits.last_allocation_date = datetime.now(UTC) - timedelta(days=5)
     mock_credits.graph_id = "graph123"
     mock_credits.allocate_monthly_credits = Mock(return_value=False)
 
@@ -458,7 +457,7 @@ class TestCreditService:
   def test_allocate_monthly_credits_overdue(self, credit_service, mock_session):
     """Test monthly allocation for overdue credits."""
     mock_credits = Mock(spec=GraphCredits)
-    mock_credits.last_allocation_date = datetime.now(timezone.utc) - timedelta(days=35)
+    mock_credits.last_allocation_date = datetime.now(UTC) - timedelta(days=35)
     mock_credits.monthly_allocation = Decimal("1000.0")
     mock_credits.current_balance = Decimal("1100.0")  # After allocation
     mock_credits.graph_id = "graph123"

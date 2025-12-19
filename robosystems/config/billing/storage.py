@@ -6,7 +6,6 @@ Each tier includes a certain amount of storage, with overages billed separately.
 """
 
 from decimal import Decimal
-from typing import Dict
 
 
 class StorageBillingConfig:
@@ -39,7 +38,7 @@ class StorageBillingConfig:
     storage_gb: Decimal,
     tier: str,
     storage_type: str = "standard",
-  ) -> Dict[str, Decimal]:
+  ) -> dict[str, Decimal]:
     """
     Calculate monthly storage overage charges.
 
@@ -78,7 +77,7 @@ class StorageBillingConfig:
     }
 
   @classmethod
-  def get_storage_limits(cls, tier: str) -> Dict[str, int]:
+  def get_storage_limits(cls, tier: str) -> dict[str, int]:
     """
     Get storage limits and recommendations for a tier.
 

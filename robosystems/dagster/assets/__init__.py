@@ -6,70 +6,70 @@ Assets represent data artifacts that are produced and consumed:
 - Plaid pipeline assets (sync, transform, materialize)
 """
 
-from robosystems.dagster.assets.sec import (
-  # Assets - download phase
-  sec_companies_list,
-  sec_raw_filings,
-  # Assets - batch processing (year-partitioned, for CLI workflows)
-  sec_batch_process,
-  # Assets - dynamic partition processing (for Dagster UI visibility)
-  sec_filings_to_process,
-  sec_process_filing,
-  # Assets - staging and materialization
-  sec_duckdb_staging,
-  sec_graph_materialized,
-  # Partitions
-  sec_year_partitions,
-  sec_filing_partitions,
-  # Config classes
-  SECCompaniesConfig,
-  SECDownloadConfig,
-  SECBatchProcessConfig,
-  SECFilingDiscoveryConfig,
-  SECSingleFilingConfig,
-  SECDuckDBConfig,
-  SECMaterializeConfig,
+from robosystems.dagster.assets.plaid import (
+  plaid_accounts,
+  plaid_graph_data,
+  plaid_transactions,
 )
 from robosystems.dagster.assets.quickbooks import (
   qb_accounts,
-  qb_transactions,
   qb_graph_data,
+  qb_transactions,
 )
-from robosystems.dagster.assets.plaid import (
-  plaid_accounts,
-  plaid_transactions,
-  plaid_graph_data,
+from robosystems.dagster.assets.sec import (
+  SECBatchProcessConfig,
+  # Config classes
+  SECCompaniesConfig,
+  SECDownloadConfig,
+  SECDuckDBConfig,
+  SECFilingDiscoveryConfig,
+  SECMaterializeConfig,
+  SECSingleFilingConfig,
+  # Assets - batch processing (year-partitioned, for CLI workflows)
+  sec_batch_process,
+  # Assets - download phase
+  sec_companies_list,
+  # Assets - staging and materialization
+  sec_duckdb_staging,
+  sec_filing_partitions,
+  # Assets - dynamic partition processing (for Dagster UI visibility)
+  sec_filings_to_process,
+  sec_graph_materialized,
+  sec_process_filing,
+  sec_raw_filings,
+  # Partitions
+  sec_year_partitions,
 )
 
 __all__ = [
-  # SEC assets - download phase
-  "sec_companies_list",
-  "sec_raw_filings",
-  # SEC assets - batch processing (for CLI workflows)
-  "sec_batch_process",
-  # SEC assets - dynamic partition processing (for Dagster UI)
-  "sec_filings_to_process",
-  "sec_process_filing",
-  # SEC assets - staging and materialization
-  "sec_duckdb_staging",
-  "sec_graph_materialized",
-  # SEC partitions
-  "sec_year_partitions",
-  "sec_filing_partitions",
+  "SECBatchProcessConfig",
   # SEC config
   "SECCompaniesConfig",
   "SECDownloadConfig",
-  "SECBatchProcessConfig",
-  "SECFilingDiscoveryConfig",
-  "SECSingleFilingConfig",
   "SECDuckDBConfig",
+  "SECFilingDiscoveryConfig",
   "SECMaterializeConfig",
-  # QuickBooks assets
-  "qb_accounts",
-  "qb_transactions",
-  "qb_graph_data",
+  "SECSingleFilingConfig",
   # Plaid assets
   "plaid_accounts",
-  "plaid_transactions",
   "plaid_graph_data",
+  "plaid_transactions",
+  # QuickBooks assets
+  "qb_accounts",
+  "qb_graph_data",
+  "qb_transactions",
+  # SEC assets - batch processing (for CLI workflows)
+  "sec_batch_process",
+  # SEC assets - download phase
+  "sec_companies_list",
+  # SEC assets - staging and materialization
+  "sec_duckdb_staging",
+  "sec_filing_partitions",
+  # SEC assets - dynamic partition processing (for Dagster UI)
+  "sec_filings_to_process",
+  "sec_graph_materialized",
+  "sec_process_filing",
+  "sec_raw_filings",
+  # SEC partitions
+  "sec_year_partitions",
 ]

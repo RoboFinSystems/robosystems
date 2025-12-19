@@ -6,14 +6,16 @@ based on execution profiles, client capabilities, and system state.
 """
 
 from enum import Enum
-from typing import Dict, Any, Optional, Tuple
+from typing import Any
 
-from robosystems.operations.agents.base import AgentMode, ExecutionProfile
+from robosystems.logger import logger
 from robosystems.middleware.graph.execution_strategies import (
   BaseClientDetector,
+)
+from robosystems.middleware.graph.execution_strategies import (
   ResponseMode as BaseResponseMode,
 )
-from robosystems.logger import logger
+from robosystems.operations.agents.base import AgentMode, ExecutionProfile
 
 
 class AgentExecutionStrategy(Enum):
@@ -31,7 +33,7 @@ class AgentClientDetector(BaseClientDetector):
   """Detect client type and capabilities for agent requests."""
 
   @classmethod
-  def detect_client_type(cls, headers: Dict[str, str]) -> Dict[str, Any]:
+  def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
     """
     Detect client type and capabilities from request headers.
 
@@ -64,11 +66,11 @@ class AgentStrategySelector:
   @classmethod
   def select_strategy(
     cls,
-    execution_profile: Optional[ExecutionProfile],
-    client_info: Dict[str, Any],
-    mode_override: Optional[ResponseMode] = None,
+    execution_profile: ExecutionProfile | None,
+    client_info: dict[str, Any],
+    mode_override: ResponseMode | None = None,
     force_extended: bool = False,
-  ) -> Tuple[AgentExecutionStrategy, Dict[str, Any]]:
+  ) -> tuple[AgentExecutionStrategy, dict[str, Any]]:
     """
     Select optimal execution strategy for agent.
 
@@ -156,7 +158,7 @@ class AgentStrategySelector:
   @classmethod
   def should_use_background(
     cls,
-    execution_profile: Optional[ExecutionProfile],
+    execution_profile: ExecutionProfile | None,
     mode: AgentMode,
   ) -> bool:
     """

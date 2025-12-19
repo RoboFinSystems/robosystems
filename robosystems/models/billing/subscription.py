@@ -1,9 +1,10 @@
 """Billing subscription model - polymorphic subscriptions for any resource type."""
 
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Index
+from typing import Optional
+
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
@@ -79,12 +80,12 @@ class BillingSubscription(Base):
   ends_at = Column(DateTime, nullable=True)
 
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -109,10 +110,10 @@ class BillingSubscription(Base):
     base_price_cents: int,
     session: Session,
     billing_interval: str = "monthly",
-    stripe_subscription_id: Optional[str] = None,
+    stripe_subscription_id: str | None = None,
   ) -> "BillingSubscription":
     """Create a new subscription."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     subscription = cls(
       org_id=org_id,
@@ -245,7 +246,7 @@ class BillingSubscription(Base):
 
   def activate(self, session: Session) -> None:
     """Activate the subscription."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     self.status = SubscriptionStatus.ACTIVE.value
     self.started_at = now
     self.current_period_start = now
@@ -260,7 +261,7 @@ class BillingSubscription(Base):
   def pause(self, session: Session) -> None:
     """Pause the subscription."""
     self.status = SubscriptionStatus.PAUSED.value
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     session.commit()
     session.refresh(self)
@@ -269,7 +270,7 @@ class BillingSubscription(Base):
 
   def cancel(self, session: Session, immediate: bool = False) -> None:
     """Cancel the subscription."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     self.status = SubscriptionStatus.CANCELED.value
     self.canceled_at = now
 
@@ -292,7 +293,7 @@ class BillingSubscription(Base):
     old_plan = self.plan_name
     self.plan_name = new_plan_name
     self.base_price_cents = new_price_cents
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     session.commit()
     session.refresh(self)
@@ -310,7 +311,7 @@ class BillingSubscription(Base):
     self.stripe_subscription_id = stripe_subscription_id
     self.stripe_product_id = stripe_product_id
     self.stripe_price_id = stripe_price_id
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     session.commit()
     session.refresh(self)

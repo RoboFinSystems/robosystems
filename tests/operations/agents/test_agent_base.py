@@ -4,18 +4,19 @@ Comprehensive test suite for the base agent architecture.
 Tests the abstract base class, agent modes, capabilities, and core behaviors.
 """
 
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, List, Optional, Any
+from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
 
-from robosystems.operations.agents.base import (
-  BaseAgent,
-  AgentCapability,
-  AgentMode,
-  AgentMetadata,
-  AgentResponse,
-)
+import pytest
+
 from robosystems.models.iam import User
+from robosystems.operations.agents.base import (
+  AgentCapability,
+  AgentMetadata,
+  AgentMode,
+  AgentResponse,
+  BaseAgent,
+)
 
 
 class TestAgentCapability:
@@ -152,9 +153,9 @@ class ConcreteTestAgent(BaseAgent):
     self,
     query: str,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict]] = None,
-    context: Optional[Dict] = None,
-    callback: Optional[Any] = None,
+    history: list[dict] | None = None,
+    context: dict | None = None,
+    callback: Any | None = None,
   ) -> AgentResponse:
     self.analyze_called = True
     return AgentResponse(
@@ -165,7 +166,7 @@ class ConcreteTestAgent(BaseAgent):
       tokens_used={"input": 10, "output": 5},
     )
 
-  def can_handle(self, query: str, context: Optional[Dict] = None) -> float:
+  def can_handle(self, query: str, context: dict | None = None) -> float:
     self.can_handle_called = True
     if "test" in query.lower():
       return 0.9

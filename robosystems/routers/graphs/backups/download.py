@@ -2,30 +2,31 @@
 Backup download URL generation endpoint.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import (
   APIRouter,
   Depends,
   HTTPException,
-  Query,
   Path,
+  Query,
   status,
 )
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.iam import User
-from robosystems.models.api.graphs.backups import BackupDownloadUrlResponse
-from robosystems.middleware.otel.metrics import (
-  get_endpoint_metrics,
-  endpoint_metrics_decorator,
-)
 from robosystems.logger import logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import (
+  endpoint_metrics_decorator,
+  get_endpoint_metrics,
+)
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.graphs.backups import BackupDownloadUrlResponse
+from robosystems.models.iam import User
 
 from .utils import get_backup_manager
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Create router
 router = APIRouter()
@@ -116,7 +117,7 @@ async def get_backup_download_url(
     return BackupDownloadUrlResponse(
       download_url=download_url,
       expires_in=expires_in,
-      expires_at=(datetime.now(timezone.utc).timestamp() + expires_in),
+      expires_at=(datetime.now(UTC).timestamp() + expires_in),
       backup_id=backup_id,
       graph_id=graph_id,
     )
@@ -135,7 +136,7 @@ async def get_backup_download_url(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to generate download URL for backup {backup_id}: {str(e)}")
+    logger.error(f"Failed to generate download URL for backup {backup_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to generate download URL",

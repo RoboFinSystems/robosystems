@@ -1,17 +1,18 @@
 """Tests for LadybugDB client factory."""
 
 import time
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
+from robosystems.config.graph_tier import GraphTier
 from robosystems.graph_api.client.factory import (
-  GraphClientFactory,
   CircuitBreaker,
+  GraphClientFactory,
   get_graph_client,
   get_graph_client_for_instance,
   get_graph_client_for_sec_ingestion,
 )
-from robosystems.config.graph_tier import GraphTier
 
 
 class TestCircuitBreaker:

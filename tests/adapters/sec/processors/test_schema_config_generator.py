@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaConfigGenerator,
-  create_roboledger_ingestion_processor,
   create_custom_ingestion_processor,
+  create_roboledger_ingestion_processor,
 )
 
 

@@ -2,11 +2,12 @@
 
 import hashlib
 import json
-from typing import Dict, Any
+from typing import Any
+
 from fastapi import Request
 
 
-def extract_device_fingerprint(request: Request) -> Dict[str, Any]:
+def extract_device_fingerprint(request: Request) -> dict[str, Any]:
   """Extract device fingerprint components from request.
 
   Args:
@@ -39,7 +40,7 @@ def extract_device_fingerprint(request: Request) -> Dict[str, Any]:
   return fingerprint
 
 
-def create_device_hash(fingerprint: Dict[str, Any]) -> str:
+def create_device_hash(fingerprint: dict[str, Any]) -> str:
   """Create a hash from device fingerprint components.
 
   Args:
@@ -54,7 +55,7 @@ def create_device_hash(fingerprint: Dict[str, Any]) -> str:
 
 
 def validate_device_fingerprint(
-  stored_hash: str, current_fingerprint: Dict[str, Any]
+  stored_hash: str, current_fingerprint: dict[str, Any]
 ) -> bool:
   """Validate if current request matches stored device fingerprint.
 
@@ -70,7 +71,7 @@ def validate_device_fingerprint(
 
 
 def is_fingerprint_suspicious(
-  stored_fingerprint: Dict[str, Any], current_fingerprint: Dict[str, Any]
+  stored_fingerprint: dict[str, Any], current_fingerprint: dict[str, Any]
 ) -> tuple[bool, list[str]]:
   """Check if device fingerprint changes indicate potential token theft.
 

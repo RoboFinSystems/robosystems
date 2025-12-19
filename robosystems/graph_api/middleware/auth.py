@@ -7,7 +7,6 @@ Supports both LadybugDB and Neo4j backends.
 """
 
 import time
-from typing import Optional
 
 import bcrypt
 from fastapi import HTTPException, Request, status
@@ -44,7 +43,7 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
     "/",
   }
 
-  def __init__(self, app, api_key: Optional[str] = None, key_type: str = "writer"):
+  def __init__(self, app, api_key: str | None = None, key_type: str = "writer"):
     super().__init__(app)
     self.environment = env.ENVIRONMENT
     self.auth_enabled = self.environment in ["prod", "staging"]
@@ -182,8 +181,8 @@ class GraphAuthMiddleware(BaseHTTPMiddleware):
 
 
 def get_api_key_from_secrets_manager(
-  key_type: str = "writer", secret_name: Optional[str] = None, region: str = "us-east-1"
-) -> Optional[str]:
+  key_type: str = "writer", secret_name: str | None = None, region: str = "us-east-1"
+) -> str | None:
   """
   Retrieve API key from AWS Secrets Manager using centralized secrets manager.
 

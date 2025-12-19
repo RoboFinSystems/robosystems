@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import sys
+
 import requests
 
 from robosystems.utils.query_output import (

@@ -28,12 +28,12 @@ more robust and maintainable at scale.
 """
 
 import time
-from typing import Dict, Any, List
+from typing import Any
 
-from robosystems.logger import logger
 from robosystems.config import env
-from robosystems.operations.aws.s3 import S3Client
 from robosystems.graph_api.client.factory import get_graph_client
+from robosystems.logger import logger
+from robosystems.operations.aws.s3 import S3Client
 
 
 class XBRLDuckDBGraphProcessor:
@@ -67,8 +67,8 @@ class XBRLDuckDBGraphProcessor:
   async def process_files(
     self,
     rebuild: bool = True,
-    year: int = None,
-  ) -> Dict[str, Any]:
+    year: int | None = None,
+  ) -> dict[str, Any]:
     """
     Process Parquet files into graph database using DuckDB-based pattern.
 
@@ -105,7 +105,7 @@ class XBRLDuckDBGraphProcessor:
         )
         return {
           "status": "error",
-          "error": f"Graph client initialization failed: {str(client_err)}",
+          "error": f"Graph client initialization failed: {client_err!s}",
           "duration_seconds": time.time() - start_time,
         }
 
@@ -192,7 +192,7 @@ class XBRLDuckDBGraphProcessor:
         "duration_seconds": time.time() - start_time,
       }
 
-  async def _discover_processed_files(self, year: int = None) -> Dict[str, List[str]]:
+  async def _discover_processed_files(self, year: int | None = None) -> dict[str, list[str]]:
     """
     Discover processed Parquet files from S3.
 
@@ -206,7 +206,7 @@ class XBRLDuckDBGraphProcessor:
     Returns:
         Dictionary mapping table names to list of S3 keys
     """
-    tables_info: Dict[str, List[str]] = {}
+    tables_info: dict[str, list[str]] = {}
 
     # Determine which years to scan
     if year is None:
@@ -290,7 +290,7 @@ class XBRLDuckDBGraphProcessor:
 
   async def _create_duckdb_tables(
     self,
-    tables_info: Dict[str, List[str]],
+    tables_info: dict[str, list[str]],
     graph_client,
   ) -> None:
     """
@@ -330,10 +330,10 @@ class XBRLDuckDBGraphProcessor:
 
   async def _trigger_ingestion(
     self,
-    table_names: List[str],
+    table_names: list[str],
     graph_client,
     rebuild: bool = False,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Trigger ingestion for all tables into LadybugDB graph via Graph API.
 

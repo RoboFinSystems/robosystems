@@ -8,10 +8,11 @@ This test suite covers:
 - Metrics collection
 """
 
-import pytest
-from unittest.mock import patch
-from httpx import AsyncClient
 from datetime import datetime
+from unittest.mock import patch
+
+import pytest
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ Graph API Client Exceptions.
 Defines exception hierarchy for Graph API operations across all backends.
 """
 
-from typing import Optional, Dict, Any
+from typing import Any
 
 
 class GraphAPIError(Exception):
@@ -13,8 +13,8 @@ class GraphAPIError(Exception):
   def __init__(
     self,
     message: str,
-    status_code: Optional[int] = None,
-    response_data: Optional[Dict[str, Any]] = None,
+    status_code: int | None = None,
+    response_data: dict[str, Any] | None = None,
   ):
     super().__init__(message)
     self.status_code = status_code

@@ -2,16 +2,17 @@
 
 import time
 from unittest.mock import patch
+
 import pytest
 
 from robosystems.graph_api.client.base import BaseGraphClient
 from robosystems.graph_api.client.config import GraphClientConfig
 from robosystems.graph_api.client.exceptions import (
   GraphAPIError,
-  GraphTransientError,
   GraphClientError,
   GraphServerError,
   GraphSyntaxError,
+  GraphTransientError,
 )
 
 

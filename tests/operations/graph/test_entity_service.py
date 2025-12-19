@@ -1,6 +1,7 @@
 """Tests for EntityGraphService business logic."""
 
 import pytest
+
 from robosystems.operations.graph.entity_graph_service import EntityGraphService
 
 

@@ -4,39 +4,40 @@ Main subgraph routes (list and create operations).
 
 import asyncio
 import json
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, status
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, status
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
+from robosystems.config import env
+from robosystems.config.graph_tier import get_tier_max_subgraphs
 from robosystems.database import get_async_db_session
+from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.api.graphs.subgraphs import (
   CreateSubgraphRequest,
+  ListSubgraphsResponse,
   SubgraphResponse,
   SubgraphSummary,
-  ListSubgraphsResponse,
   SubgraphType,
 )
 from robosystems.models.iam.graph import Graph
 from robosystems.models.iam.user import User
 from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.logger import logger, api_logger, log_metric
 
 from .utils import (
-  verify_parent_graph_access,
-  verify_subgraph_tier_support,
-  verify_parent_graph_active,
   check_subgraph_quota,
-  validate_subgraph_name_unique,
   get_subgraph_service,
-  record_operation_start,
-  record_operation_metrics,
   handle_circuit_breaker_check,
+  record_operation_metrics,
+  record_operation_start,
+  validate_subgraph_name_unique,
+  verify_parent_graph_access,
+  verify_parent_graph_active,
+  verify_subgraph_tier_support,
 )
-from robosystems.config.graph_tier import get_tier_max_subgraphs
-from robosystems.config import env
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -133,7 +134,7 @@ async def list_subgraphs(
 
     subgraph_summaries = []
     total_size_mb = 0.0
-    for subgraph, size_mb in zip(subgraphs, sizes):
+    for subgraph, size_mb in zip(subgraphs, sizes, strict=False):
       # Extract subgraph name from graph_id (format: {parent_id}_{subgraph_name})
       subgraph_name = subgraph.subgraph_name
       if not subgraph_name and "_" in subgraph.graph_id:
@@ -334,11 +335,11 @@ async def create_subgraph(
     # 6. Check if we need SSE for forking
     if request.fork_parent:
       # Use SSE for fork operations via Dagster
-      from robosystems.middleware.sse.operation_manager import create_operation_response
       from robosystems.middleware.sse import (
-        run_and_monitor_dagster_job,
         build_graph_job_config,
+        run_and_monitor_dagster_job,
       )
+      from robosystems.middleware.sse.operation_manager import create_operation_response
 
       # Create SSE operation
       operation_response = await create_operation_response(

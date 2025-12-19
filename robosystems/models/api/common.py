@@ -5,10 +5,11 @@ This module contains shared Pydantic models used throughout the API
 for consistent response structures and error handling.
 """
 
-from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
+
 from fastapi import HTTPException
+from pydantic import BaseModel, Field
 
 
 class ErrorResponse(BaseModel):
@@ -24,17 +25,17 @@ class ErrorResponse(BaseModel):
     description="Human-readable error message explaining what went wrong",
     examples=["Insufficient credits for operation"],
   )
-  code: Optional[str] = Field(
+  code: str | None = Field(
     None,
     description="Machine-readable error code for programmatic handling",
     examples=["INSUFFICIENT_CREDITS"],
   )
-  request_id: Optional[str] = Field(
+  request_id: str | None = Field(
     None,
     description="Unique request ID for tracking and debugging",
     examples=["req_1234567890abcdef"],
   )
-  timestamp: Optional[datetime] = Field(
+  timestamp: datetime | None = Field(
     None,
     description="Timestamp when the error occurred",
     examples=["2024-01-01T00:00:00Z"],
@@ -63,7 +64,7 @@ class SuccessResponse(BaseModel):
     description="Human-readable success message",
     examples=["Operation completed successfully"],
   )
-  data: Optional[Dict[str, Any]] = Field(
+  data: dict[str, Any] | None = Field(
     None, description="Optional additional data related to the operation"
   )
 
@@ -107,7 +108,7 @@ class HealthStatus(BaseModel):
   timestamp: datetime = Field(
     ..., description="Time of health check", examples=["2024-01-01T00:00:00Z"]
   )
-  details: Optional[Dict[str, Any]] = Field(
+  details: dict[str, Any] | None = Field(
     None, description="Additional health check details"
   )
 
@@ -135,8 +136,8 @@ class CreditCostInfo(BaseModel):
 def create_error_response(
   status_code: int,
   detail: str,
-  code: Optional[str] = None,
-  request_id: Optional[str] = None,
+  code: str | None = None,
+  request_id: str | None = None,
 ) -> HTTPException:
   """
   Create a consistent error response using ErrorResponse model.
@@ -154,7 +155,7 @@ def create_error_response(
     detail=detail,
     code=code,
     request_id=request_id,
-    timestamp=datetime.now(timezone.utc),
+    timestamp=datetime.now(UTC),
   )
   # Convert the error model to a dict with JSON-compatible values
   error_dict = error.model_dump(exclude_none=True)

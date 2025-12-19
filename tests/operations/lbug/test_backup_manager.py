@@ -5,19 +5,20 @@ This test suite validates backup manager functionality including
 job creation, multitenant validation, and LadybugDB integration.
 """
 
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock, AsyncMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from robosystems.middleware.graph.utils import MultiTenantUtils
+from robosystems.operations.aws.s3 import S3BackupAdapter
 from robosystems.operations.lbug.backup_manager import (
-  BackupManager,
-  BackupJob,
   BackupFormat,
+  BackupJob,
+  BackupManager,
   BackupType,
   RestoreJob,
 )
-from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.operations.aws.s3 import S3BackupAdapter
 
 
 class TestBackupManager:
@@ -167,7 +168,7 @@ class TestBackupManager:
         graph_id=graph_id,
         backup_type=BackupType.FULL,
         backup_format=BackupFormat.FULL_DUMP,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         retention_days=90,
         compression=True,
         encryption=True,
@@ -203,7 +204,7 @@ class TestBackupManager:
         graph_id=graph_id,
         backup_type=BackupType.FULL,
         backup_format=BackupFormat.FULL_DUMP,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         encryption=False,  # Disable encryption for this test
       )
 
@@ -358,7 +359,7 @@ class TestBackupManager:
     # Mock backup metadata
     backup_metadata = MagicMock()
     backup_metadata.s3_key = "test_backup_key"
-    backup_metadata.timestamp = datetime.now(timezone.utc)
+    backup_metadata.timestamp = datetime.now(UTC)
     backup_metadata.backup_type = "full"
 
     restore_job = RestoreJob(
@@ -444,7 +445,7 @@ class TestBackupManager:
     graph_id = "test_graph"
 
     # Mock backup listing
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     mock_backups = [
       {
@@ -452,7 +453,7 @@ class TestBackupManager:
         "key": f"{graph_id}/backup-20240101_000000-full.zip",
         "graph_id": graph_id,
         "backup_type": "full",
-        "last_modified": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        "last_modified": datetime(2024, 1, 1, tzinfo=UTC),
         "size": 1000,
       },
       {
@@ -460,7 +461,7 @@ class TestBackupManager:
         "key": f"{graph_id}/backup-20240102_000000-full.zip",
         "graph_id": graph_id,
         "backup_type": "full",
-        "last_modified": datetime(2024, 1, 2, tzinfo=timezone.utc),
+        "last_modified": datetime(2024, 1, 2, tzinfo=UTC),
         "size": 1500,
       },
     ]

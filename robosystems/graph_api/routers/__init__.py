@@ -2,6 +2,6 @@
 Graph API routers organized by domain.
 """
 
-from . import databases, health, info, tasks, metrics
+from . import databases, health, info, metrics, tasks
 
-__all__ = ["databases", "health", "info", "tasks", "metrics"]
+__all__ = ["databases", "health", "info", "metrics", "tasks"]

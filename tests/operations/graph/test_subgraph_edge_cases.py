@@ -1,15 +1,16 @@
-import pytest
 from decimal import Decimal
+
+import pytest
 from sqlalchemy.orm import Session
 
-from robosystems.operations.graph.credit_service import CreditService
-from robosystems.models.iam import User, GraphCredits
 from robosystems.middleware.graph.types import (
+  construct_subgraph_id,
   is_subgraph_id,
   parse_graph_id,
-  construct_subgraph_id,
 )
 from robosystems.middleware.graph.utils import MultiTenantUtils
+from robosystems.models.iam import GraphCredits, User
+from robosystems.operations.graph.credit_service import CreditService
 
 
 class TestSubgraphEdgeCases:
@@ -79,8 +80,9 @@ class TestSubgraphEdgeCases:
     for invalid_id in invalid_subgraph_ids:
       if "_" in invalid_id:
         parent_id, subgraph_name = parse_graph_id(invalid_id)
-        from robosystems.middleware.graph.types import SUBGRAPH_NAME_PATTERN
         import re
+
+        from robosystems.middleware.graph.types import SUBGRAPH_NAME_PATTERN
 
         if subgraph_name:
           assert not re.match(SUBGRAPH_NAME_PATTERN, subgraph_name)
@@ -233,8 +235,9 @@ class TestSubgraphEdgeCases:
     """Shared repository credit operations should use repository credit system"""
     credit_service = CreditService(db_session)
 
-    from robosystems.utils.ulid import generate_prefixed_ulid
     import uuid
+
+    from robosystems.utils.ulid import generate_prefixed_ulid
 
     user = User(
       id=generate_prefixed_ulid("user"),

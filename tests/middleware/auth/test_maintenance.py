@@ -1,15 +1,16 @@
 """Tests for authentication maintenance and cleanup functions."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
+
 import pytest
 from sqlalchemy.orm import Session
 
 from robosystems.middleware.auth.maintenance import (
+  cleanup_api_keys,
   cleanup_expired_api_keys,
   cleanup_inactive_api_keys,
   cleanup_jwt_cache_expired,
-  cleanup_api_keys,
 )
 from robosystems.models.iam import UserAPIKey
 
@@ -39,7 +40,7 @@ class TestCleanupExpiredAPIKeys:
     # Create a mock key that is expired
     mock_expired_key = MagicMock(spec=UserAPIKey)
     mock_expired_key.id = "expired-key"
-    mock_expired_key.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    mock_expired_key.expires_at = datetime.now(UTC) - timedelta(days=1)
 
     mock_query = mock_session.query.return_value
     mock_filter = mock_query.filter.return_value
@@ -61,7 +62,7 @@ class TestCleanupExpiredAPIKeys:
     for i in range(3):
       mock_key = MagicMock(spec=UserAPIKey)
       mock_key.id = f"expired-key-{i}"
-      mock_key.expires_at = datetime.now(timezone.utc) - timedelta(days=i + 1)
+      mock_key.expires_at = datetime.now(UTC) - timedelta(days=i + 1)
       mock_keys.append(mock_key)
 
     mock_query = mock_session.query.return_value
@@ -108,7 +109,7 @@ class TestCleanupExpiredAPIKeys:
     mock_session = MagicMock(spec=Session)
     mock_api_key = MagicMock(spec=UserAPIKey)
     mock_api_key.id = "expired-key"
-    mock_api_key.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    mock_api_key.expires_at = datetime.now(UTC) - timedelta(days=1)
 
     mock_query = mock_session.query.return_value
     mock_filter = mock_query.filter.return_value
@@ -264,13 +265,13 @@ class TestIntegrationScenarios:
 
     # Setup mock API keys with various states
     active_key = MagicMock(spec=UserAPIKey)
-    active_key.expires_at = datetime.now(timezone.utc) + timedelta(
+    active_key.expires_at = datetime.now(UTC) + timedelta(
       days=30
     )  # Future expiry
 
     expired_key = MagicMock(spec=UserAPIKey)
     expired_key.id = "expired-key"
-    expired_key.expires_at = datetime.now(timezone.utc) - timedelta(
+    expired_key.expires_at = datetime.now(UTC) - timedelta(
       days=1
     )  # Past expiry
 

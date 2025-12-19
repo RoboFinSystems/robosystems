@@ -7,24 +7,23 @@ Security Note:
 - Never log full request URLs; always use request.url.path for logging
 """
 
-from typing import Optional
 
-from fastapi import HTTPException, Security, status, Request, Header, Query
+from fastapi import Header, HTTPException, Query, Request, Security, status
 from fastapi.security import APIKeyHeader
 
-from ...models.iam import User
 from ...database import session
 from ...logger import logger
+from ...models.iam import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from .cache import api_key_cache
+
+# Import JWT verification from local jwt module to avoid circular imports
+from .jwt import verify_jwt_token as verify_jwt_token_from_auth
 from .utils import (
   validate_api_key,
   validate_api_key_with_graph,
   validate_repository_access,
 )
-
-# Import JWT verification from local jwt module to avoid circular imports
-from .jwt import verify_jwt_token as verify_jwt_token_from_auth
 
 
 def _validate_cached_user_data(user_data: dict) -> bool:
@@ -48,13 +47,10 @@ def _validate_cached_user_data(user_data: dict) -> bool:
     return False
 
   is_active = user_data.get("is_active")
-  if is_active is not None and not isinstance(is_active, bool):
-    return False
-
-  return True
+  return not (is_active is not None and not isinstance(is_active, bool))
 
 
-def _create_user_from_cache(user_data: dict) -> Optional[User]:
+def _create_user_from_cache(user_data: dict) -> User | None:
   """Safely create User object from validated cached data."""
   if not _validate_cached_user_data(user_data):
     logger.warning("Invalid cached user data detected, falling back to database")
@@ -80,7 +76,7 @@ def _create_user_from_cache(user_data: dict) -> Optional[User]:
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-def verify_jwt_token(token: str) -> Optional[str]:
+def verify_jwt_token(token: str) -> str | None:
   """Verify a JWT token and return the user_id if valid.
 
   This includes caching for performance.
@@ -113,7 +109,7 @@ def verify_jwt_token(token: str) -> Optional[str]:
 async def get_optional_user(
   request: Request,
   api_key: str = Security(API_KEY_HEADER),
-) -> Optional[User]:
+) -> User | None:
   """
   Get the authenticated user if API key or JWT token is valid (optional authentication).
 
@@ -483,8 +479,8 @@ def get_repository_user_dependency(repository_id: str, operation_type: str = "re
 async def get_current_user_sse(
   request: Request,
   api_key: str = Security(API_KEY_HEADER),
-  authorization: Optional[str] = Header(None),
-  token: Optional[str] = Query(None, description="JWT token for SSE authentication"),
+  authorization: str | None = Header(None),
+  token: str | None = Query(None, description="JWT token for SSE authentication"),
 ) -> User:
   """
   Get the authenticated user for SSE endpoints (supports query parameter tokens).

@@ -2,13 +2,13 @@
 
 from unittest.mock import patch
 
-from robosystems.middleware.rate_limits.subscription_rate_limits import (
-  get_subscription_rate_limit,
-  get_endpoint_category,
-  should_use_subscription_limits,
-  SUBSCRIPTION_RATE_LIMITS,
-)
 from robosystems.config.rate_limits import EndpointCategory, RateLimitPeriod
+from robosystems.middleware.rate_limits.subscription_rate_limits import (
+  SUBSCRIPTION_RATE_LIMITS,
+  get_endpoint_category,
+  get_subscription_rate_limit,
+  should_use_subscription_limits,
+)
 
 
 class TestSubscriptionRateLimits:

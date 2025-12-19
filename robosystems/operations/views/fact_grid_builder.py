@@ -1,7 +1,8 @@
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pandas as pd
+
 from robosystems.models.api.views import (
   Dimension,
   DimensionType,
@@ -102,7 +103,7 @@ class FactGridBuilder:
 
     return result
 
-  def _extract_dimensions(self, fact_data: pd.DataFrame) -> List[Dimension]:
+  def _extract_dimensions(self, fact_data: pd.DataFrame) -> list[Dimension]:
     """Extract dimensions from fact data."""
     dimensions = []
 
@@ -171,8 +172,8 @@ class FactGridBuilder:
     )
 
   def generate_pivot_table(
-    self, fact_grid: FactGrid, view_config: Optional[ViewConfig] = None
-  ) -> Dict[str, Any]:
+    self, fact_grid: FactGrid, view_config: ViewConfig | None = None
+  ) -> dict[str, Any]:
     """
     Generate pivot table presentation from FactGrid.
 
@@ -257,7 +258,7 @@ class FactGridBuilder:
       if "element_id" in df.columns and element_col in df.columns:
         mapping_df = df[["element_id", element_col]].drop_duplicates()
         element_id_to_name = dict(
-          zip(mapping_df["element_id"], mapping_df[element_col])
+          zip(mapping_df["element_id"], mapping_df[element_col], strict=False)
         )
 
       if element_id_to_name:

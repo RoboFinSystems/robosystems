@@ -1,12 +1,13 @@
 """Test JWT token revocation functionality."""
 
-from unittest.mock import patch, MagicMock
+from datetime import UTC
+from unittest.mock import MagicMock, patch
 
 from robosystems.middleware.auth.jwt import (
   create_jwt_token,
-  verify_jwt_token,
-  revoke_jwt_token,
   is_jwt_token_revoked,
+  revoke_jwt_token,
+  verify_jwt_token,
 )
 
 
@@ -25,6 +26,7 @@ class TestJWTRevocation:
 
     # Decode and verify it contains JTI
     import jwt
+
     from robosystems.config import env
 
     payload = jwt.decode(
@@ -96,14 +98,16 @@ class TestJWTRevocation:
   def test_token_revocation_without_jti(self):
     """Test that tokens without JTI are considered valid (backward compatibility)."""
     # Create a token manually without JTI
+    from datetime import datetime, timedelta
+
     import jwt
-    from datetime import datetime, timedelta, timezone
+
     from robosystems.config import env
 
     payload = {
       "user_id": "test-user-123",
-      "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-      "iat": datetime.now(timezone.utc),
+      "exp": datetime.now(UTC) + timedelta(hours=24),
+      "iat": datetime.now(UTC),
       "iss": "api.robosystems.ai",
       "aud": ["robosystems.ai", "roboledger.ai", "roboinvestor.ai"],
       # No JTI claim
@@ -160,15 +164,17 @@ class TestJWTRevocation:
     mock_redis.return_value = mock_redis_instance
 
     # Create an expired token manually
+    from datetime import datetime, timedelta
+
     import jwt
-    from datetime import datetime, timedelta, timezone
+
     from robosystems.config import env
 
     payload = {
       "user_id": "test-user-123",
       "jti": "test-jti-123",
-      "exp": datetime.now(timezone.utc) - timedelta(hours=1),  # Expired
-      "iat": datetime.now(timezone.utc) - timedelta(hours=2),
+      "exp": datetime.now(UTC) - timedelta(hours=1),  # Expired
+      "iat": datetime.now(UTC) - timedelta(hours=2),
       "iss": "api.robosystems.ai",
       "aud": ["robosystems.ai", "roboledger.ai", "roboinvestor.ai"],
     }

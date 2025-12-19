@@ -1,15 +1,15 @@
 import time
 from datetime import datetime
-from typing import Optional
+
 import psutil
 from fastapi import HTTPException, status
 
 from robosystems.graph_api.backends import get_backend
-from robosystems.graph_api.models.database import QueryRequest, QueryResponse
 from robosystems.graph_api.models.cluster import (
   ClusterHealthResponse,
   ClusterInfoResponse,
 )
+from robosystems.graph_api.models.database import QueryRequest, QueryResponse
 from robosystems.logger import logger
 
 
@@ -17,7 +17,7 @@ class Neo4jService:
   def __init__(self):
     self.backend = get_backend()
     self.start_time = time.time()
-    self.last_activity: Optional[datetime] = None
+    self.last_activity: datetime | None = None
     logger.info(
       f"Neo4jService initialized with backend type: {type(self.backend).__name__}"
     )
@@ -65,7 +65,7 @@ class Neo4jService:
       )
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Query execution failed: {str(e)}",
+        detail=f"Query execution failed: {e!s}",
       )
 
   async def get_cluster_health(self) -> ClusterHealthResponse:
@@ -100,7 +100,7 @@ class Neo4jService:
       logger.error(f"Health check failed: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Health check failed: {str(e)}",
+        detail=f"Health check failed: {e!s}",
       )
 
   async def get_cluster_info(self) -> ClusterInfoResponse:
@@ -124,5 +124,5 @@ class Neo4jService:
       logger.error(f"Failed to get cluster info: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to get cluster info: {str(e)}",
+        detail=f"Failed to get cluster info: {e!s}",
       )

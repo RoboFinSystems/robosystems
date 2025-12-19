@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...models.iam import User
-from ...models.billing import BillingSubscription
 from ...models.api.billing.subscription import GraphSubscriptionResponse
-from ...logger import get_logger
+from ...models.billing import BillingSubscription
+from ...models.iam import User
 
 logger = get_logger(__name__)
 
@@ -188,7 +188,7 @@ async def cancel_subscription(
 ):
   """Cancel an organization subscription."""
   try:
-    from ...models.iam import OrgUser, OrgRole
+    from ...models.iam import OrgRole, OrgUser
 
     # Verify user is an owner of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)

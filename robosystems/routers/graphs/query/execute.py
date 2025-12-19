@@ -6,59 +6,67 @@ selects the optimal execution strategy based on query characteristics,
 client capabilities, and system load.
 """
 
-import asyncio
 import hashlib
-from typing import Optional, Union
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import (
   APIRouter,
   Depends,
   HTTPException,
   Path,
-  Query as QueryParam,
   Request,
+)
+from fastapi import (
+  Query as QueryParam,
 )
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse, StreamingResponse
-from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
 
 from robosystems.database import get_db_session
+from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import User
-from robosystems.models.iam.graph import GraphTier
 from robosystems.middleware.graph import get_universal_repository
-from robosystems.middleware.rate_limits import (
-  subscription_aware_rate_limit_dependency,
-)
-from robosystems.models.api.graphs.query import (
-  CypherQueryRequest,
-  CypherQueryResponse,
-  DEFAULT_QUERY_TIMEOUT,
-)
-from robosystems.security.cypher_analyzer import (
-  is_write_operation,
-  is_bulk_operation,
-  is_admin_operation,
-  is_schema_ddl,
-)
-from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.graph.query_queue import get_query_queue
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
+from robosystems.middleware.rate_limits import (
+  subscription_aware_rate_limit_dependency,
+)
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.logger import logger, api_logger, log_metric
+from robosystems.middleware.sse.operation_manager import create_operation_response
+from robosystems.models.api.graphs.query import (
+  DEFAULT_QUERY_TIMEOUT,
+  CypherQueryRequest,
+  CypherQueryResponse,
+)
+from robosystems.models.iam import User
+from robosystems.models.iam.graph import GraphTier
+from robosystems.security.cypher_analyzer import (
+  is_admin_operation,
+  is_bulk_operation,
+  is_schema_ddl,
+  is_write_operation,
+)
 
+from .handlers import (
+  get_query_operation_type,
+)
+from .handlers import (
+  get_user_priority as get_user_priority_from_handler,
+)
 from .strategies import (
-  ExecutionStrategy,
-  ResponseMode,
-  QueryAnalyzer,
   ClientDetector,
-  StrategySelector,
+  ExecutionStrategy,
+  QueryAnalyzer,
   QueryTimeoutCoordinator,
+  ResponseMode,
+  StrategySelector,
 )
 from .streaming import (
   execute_query_with_timeout,
@@ -66,12 +74,6 @@ from .streaming import (
   stream_sse_response,
   stream_sse_with_queue,
 )
-from .handlers import (
-  get_query_operation_type,
-  get_user_priority as get_user_priority_from_handler,
-)
-from robosystems.middleware.sse.operation_manager import create_operation_response
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Initialize circuit breaker
 circuit_breaker = CircuitBreakerManager()
@@ -209,10 +211,10 @@ async def execute_cypher_query(
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
-  mode: Optional[ResponseMode] = QueryParam(
+  mode: ResponseMode | None = QueryParam(
     default=None, description="Response mode override"
   ),
-  chunk_size: Optional[int] = QueryParam(
+  chunk_size: int | None = QueryParam(
     default=None, ge=10, le=10000, description="Rows per chunk for streaming"
   ),
   test_mode: bool = QueryParam(
@@ -221,21 +223,21 @@ async def execute_cypher_query(
   current_user: User = Depends(get_current_user_with_graph),
   session: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Union[CypherQueryResponse, JSONResponse, StreamingResponse, EventSourceResponse]:
+) -> CypherQueryResponse | JSONResponse | StreamingResponse | EventSourceResponse:
   """
   Execute a Cypher query with intelligent response optimization.
 
   This endpoint automatically detects the best way to respond based on
   the query, client capabilities, and system state.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "cypher_query")
 
   # Get the graph tier for chunk size configuration
-  from robosystems.models.iam.graph import Graph
   from robosystems.config import env
+  from robosystems.models.iam.graph import Graph
 
   graph = session.query(Graph).filter(Graph.graph_id == graph_id).first()
 
@@ -518,7 +520,7 @@ async def execute_cypher_query(
 
         # Calculate execution time
         execution_time = (
-          datetime.now(timezone.utc) - start_time
+          datetime.now(UTC) - start_time
         ).total_seconds() * 1000
 
         # Extract columns
@@ -617,7 +619,7 @@ async def execute_cypher_query(
           timestamp=start_time.isoformat(),
         )
 
-      except asyncio.TimeoutError:
+      except TimeoutError:
         # Record circuit breaker failure for timeout
         circuit_breaker.record_failure(graph_id, "cypher_query")
 
@@ -639,7 +641,7 @@ async def execute_cypher_query(
 
         # Timeout - provide helpful error for testing
         if client_info["is_interactive"]:
-          elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+          elapsed = (datetime.now(UTC) - start_time).total_seconds()
 
           return JSONResponse(
             status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
@@ -764,7 +766,7 @@ async def execute_cypher_query(
         )
         raise HTTPException(
           status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"Failed to queue query: {str(queue_error)}",
+          detail=f"Failed to queue query: {queue_error!s}",
         )
 
     # Continue with the successfully queued query_id and status
@@ -894,11 +896,13 @@ async def _check_shared_repository_limits(
   Raises:
       HTTPException: If rate limits are exceeded or access is denied
   """
-  from robosystems.middleware.rate_limits import DualLayerRateLimiter
   from robosystems.config.billing.repositories import SharedRepository
+  from robosystems.config.valkey_registry import (
+    ValkeyDatabase,
+    create_async_redis_client,
+  )
+  from robosystems.middleware.rate_limits import DualLayerRateLimiter
   from robosystems.models.iam.user_repository import UserRepository
-  from robosystems.config.valkey_registry import ValkeyDatabase
-  from robosystems.config.valkey_registry import create_async_redis_client
 
   # Only apply to shared repositories
   if graph_id not in [repo.value for repo in SharedRepository]:

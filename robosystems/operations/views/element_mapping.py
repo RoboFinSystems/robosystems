@@ -9,15 +9,15 @@ For new implementations, use client-side extensions:
 - robosystems-python-client/robosystems_client/extensions/subgraph_workspace_client.py
 """
 
-from typing import List, Optional
+
 import pandas as pd
 
 from robosystems.middleware.graph import get_universal_repository
 from robosystems.models.api.views import (
   AggregationMethod,
+  ElementAssociation,
   MappingResponse,
   MappingStructure,
-  ElementAssociation,
 )
 from robosystems.models.iam.graph import GraphTier
 
@@ -26,7 +26,7 @@ async def get_mapping_structure(
   graph_id: str,
   structure_id: str,
   tier: GraphTier = GraphTier.LADYBUG_STANDARD,
-) -> Optional[MappingResponse]:
+) -> MappingResponse | None:
   """
   Get a mapping structure from the main graph (backward compatibility).
 
@@ -183,7 +183,7 @@ def apply_element_mapping(
 
 def _aggregate_values(
   facts: pd.DataFrame,
-  associations: List[ElementAssociation],
+  associations: list[ElementAssociation],
   method: AggregationMethod,
   value_col: str,
 ) -> float:

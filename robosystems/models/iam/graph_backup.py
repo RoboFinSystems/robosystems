@@ -1,22 +1,23 @@
 """Graph backup tracking model for PostgreSQL."""
 
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from enum import Enum
+from typing import Any, Optional
 
 from sqlalchemy import (
-  Column,
-  String,
-  DateTime,
-  Integer,
-  Float,
-  Boolean,
-  Text,
   JSON,
+  Boolean,
+  Column,
+  DateTime,
+  Float,
   ForeignKey,
+  Integer,
+  String,
+  Text,
   desc,
 )
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
@@ -96,12 +97,12 @@ class GraphBackup(Model):
   completed_at = Column(DateTime, nullable=True)
   expires_at = Column(DateTime, nullable=True)  # For retention management
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -154,9 +155,9 @@ class GraphBackup(Model):
     cls,
     graph_id: str,
     session: Session,
-    backup_type: Optional[str] = None,
-    status: Optional[str] = None,
-    limit: Optional[int] = None,
+    backup_type: str | None = None,
+    status: str | None = None,
+    limit: int | None = None,
     include_expired: bool = False,
   ) -> Sequence["GraphBackup"]:
     """Get backups for a specific graph."""
@@ -196,7 +197,7 @@ class GraphBackup(Model):
     )
 
   @classmethod
-  def get_pending_backups(cls, session: Session) -> List["GraphBackup"]:
+  def get_pending_backups(cls, session: Session) -> list["GraphBackup"]:
     """Get all pending backups."""
     return (
       session.query(cls)
@@ -208,7 +209,7 @@ class GraphBackup(Model):
   @classmethod
   def get_expired_backups(cls, session: Session) -> Sequence["GraphBackup"]:
     """Get all expired backups."""
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
     return (
       session.query(cls)
       .filter(cls.expires_at.isnot(None), cls.expires_at < current_time)
@@ -216,7 +217,7 @@ class GraphBackup(Model):
     )
 
   @classmethod
-  def get_backup_stats(cls, graph_id: str, session: Session) -> Dict[str, Any]:
+  def get_backup_stats(cls, graph_id: str, session: Session) -> dict[str, Any]:
     """Get backup statistics for a graph."""
     from sqlalchemy import func
 
@@ -289,8 +290,8 @@ class GraphBackup(Model):
   def start_backup(self, session: Session) -> None:
     """Mark backup as started."""
     self.status = BackupStatus.IN_PROGRESS.value
-    self.started_at = datetime.now(timezone.utc)
-    self.updated_at = datetime.now(timezone.utc)
+    self.started_at = datetime.now(UTC)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
 
@@ -304,11 +305,11 @@ class GraphBackup(Model):
     node_count: int = 0,
     relationship_count: int = 0,
     backup_duration: float = 0.0,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
   ) -> None:
     """Mark backup as completed with metrics."""
     self.status = BackupStatus.COMPLETED.value
-    self.completed_at = datetime.now(timezone.utc)
+    self.completed_at = datetime.now(UTC)
     self.original_size_bytes = original_size
     self.compressed_size_bytes = compressed_size
     self.encrypted_size_bytes = encrypted_size
@@ -323,7 +324,7 @@ class GraphBackup(Model):
     if metadata:
       self.backup_metadata = metadata
 
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
 
@@ -332,18 +333,18 @@ class GraphBackup(Model):
     self.status = BackupStatus.FAILED.value
     self.error_message = error_message
     self.retry_count += 1
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
 
   def expire_backup(self, session: Session) -> None:
     """Mark backup as expired."""
     self.status = BackupStatus.EXPIRED.value
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
 
-  def update_metadata(self, session: Session, metadata: Dict[str, Any]) -> None:
+  def update_metadata(self, session: Session, metadata: dict[str, Any]) -> None:
     """Update backup metadata."""
     from sqlalchemy.orm.attributes import flag_modified
 
@@ -354,7 +355,7 @@ class GraphBackup(Model):
     else:
       self.backup_metadata = metadata
 
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
 
@@ -363,7 +364,7 @@ class GraphBackup(Model):
     session.delete(self)
     session.commit()
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert backup record to dictionary."""
     return {
       "id": self.id,
@@ -419,7 +420,7 @@ class GraphBackup(Model):
     """Check if backup is expired."""
     if self.expires_at is None:
       return False
-    return datetime.now(timezone.utc) > self.expires_at
+    return datetime.now(UTC) > self.expires_at
 
   @property
   def storage_efficiency(self) -> float:

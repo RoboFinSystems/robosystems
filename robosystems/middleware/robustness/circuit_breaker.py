@@ -6,9 +6,9 @@ and enable graceful degradation across all endpoints.
 """
 
 import time
-from typing import Dict, Optional, Any
-from dataclasses import dataclass
 from collections import defaultdict
+from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -20,9 +20,9 @@ class CircuitState:
   """Circuit breaker state tracking."""
 
   failure_count: int = 0
-  last_failure_time: Optional[float] = None
+  last_failure_time: float | None = None
   is_open: bool = False
-  last_success_time: Optional[float] = None
+  last_success_time: float | None = None
 
 
 class CircuitBreakerManager:
@@ -47,7 +47,7 @@ class CircuitBreakerManager:
     self.half_open_max_calls = half_open_max_calls
 
     # Track circuit state per graph_id + operation key
-    self.circuits: Dict[str, CircuitState] = defaultdict(CircuitState)
+    self.circuits: dict[str, CircuitState] = defaultdict(CircuitState)
 
     logger.debug(
       f"Initialized CircuitBreakerManager with threshold={failure_threshold}, "
@@ -145,7 +145,7 @@ class CircuitBreakerManager:
     # Update metrics
     self._update_metrics(graph_id, operation, circuit)
 
-  def get_circuit_status(self, graph_id: str, operation: str) -> Dict[str, Any]:
+  def get_circuit_status(self, graph_id: str, operation: str) -> dict[str, Any]:
     """Get current circuit status for monitoring."""
     circuit_key = self._get_circuit_key(graph_id, operation)
     circuit = self.circuits[circuit_key]
@@ -158,7 +158,7 @@ class CircuitBreakerManager:
       "last_success_time": circuit.last_success_time,
     }
 
-  def get_all_circuit_status(self) -> Dict[str, Dict[str, Any]]:
+  def get_all_circuit_status(self) -> dict[str, dict[str, Any]]:
     """Get status of all circuits for monitoring."""
     status = {}
     for circuit_key, circuit in self.circuits.items():

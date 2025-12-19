@@ -14,7 +14,7 @@ Classes:
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 
@@ -22,7 +22,6 @@ from robosystems.logger import logger
 from robosystems.schemas.builder import LadybugSchemaBuilder
 from robosystems.schemas.manager import SchemaConfiguration, SchemaManager
 from robosystems.schemas.models import Node, Relationship
-
 
 # =============================================================================
 # Data Classes
@@ -35,12 +34,12 @@ class IngestTableInfo:
 
   name: str
   is_relationship: bool
-  file_patterns: List[str]
-  primary_keys: List[str]
-  columns: List[str]
-  from_node: Optional[str] = None
-  to_node: Optional[str] = None
-  properties: Optional[List[str]] = None
+  file_patterns: list[str]
+  primary_keys: list[str]
+  columns: list[str]
+  from_node: str | None = None
+  to_node: str | None = None
+  properties: list[str] | None = None
 
 
 @dataclass
@@ -49,11 +48,11 @@ class SchemaIngestConfig:
 
   schema_name: str
   base_schema: str
-  extensions: List[str]
-  node_tables: Dict[str, IngestTableInfo]
-  relationship_tables: Dict[str, IngestTableInfo]
-  file_pattern_mapping: Dict[str, str]
-  table_name_mapping: Dict[str, str]
+  extensions: list[str]
+  node_tables: dict[str, IngestTableInfo]
+  relationship_tables: dict[str, IngestTableInfo]
+  file_pattern_mapping: dict[str, str]
+  table_name_mapping: dict[str, str]
 
 
 # =============================================================================
@@ -98,7 +97,7 @@ class XBRLSchemaAdapter:
     "FactDimensionElements": "FACT_DIMENSION_REFERENCES_ELEMENT",
   }
 
-  def __init__(self, schema_config: Dict[str, Any]):
+  def __init__(self, schema_config: dict[str, Any]):
     """
     Initialize adapter with schema configuration.
 
@@ -110,8 +109,8 @@ class XBRLSchemaAdapter:
     self.schema_builder.load_schemas()
 
     self.compiled_schema = self.schema_builder.schema
-    self.node_schemas: Dict[str, Dict[str, Any]] = {}
-    self.relationship_schemas: Dict[str, Dict[str, Any]] = {}
+    self.node_schemas: dict[str, dict[str, Any]] = {}
+    self.relationship_schemas: dict[str, dict[str, Any]] = {}
 
     self._extract_schema_definitions()
 
@@ -185,7 +184,7 @@ class XBRLSchemaAdapter:
     return pd.DataFrame(columns=columns)
 
   def process_dataframe_for_schema(
-    self, table_name: str, data_dict: Dict[str, Any]
+    self, table_name: str, data_dict: dict[str, Any]
   ) -> pd.DataFrame:
     """
     Process data dictionary into a schema-compatible DataFrame.
@@ -219,7 +218,7 @@ class XBRLSchemaAdapter:
 
   def validate_dataframe_schema(
     self, table_name: str, df: pd.DataFrame
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Validate DataFrame structure against schema requirements.
 
@@ -265,7 +264,7 @@ class XBRLSchemaAdapter:
 
     return {"valid": True, "message": "DataFrame structure matches schema"}
 
-  def get_schema_info(self, table_name: str) -> Dict[str, Any]:
+  def get_schema_info(self, table_name: str) -> dict[str, Any]:
     """
     Get comprehensive information about a table's schema.
 
@@ -289,7 +288,7 @@ class XBRLSchemaAdapter:
       "schema_name": schema_name,
     }
 
-  def get_available_schemas(self) -> List[str]:
+  def get_available_schemas(self) -> list[str]:
     """Get list of all available schema names."""
     return list(self.node_schemas.keys()) + list(self.relationship_schemas.keys())
 
@@ -312,7 +311,7 @@ class XBRLSchemaAdapter:
     """Resolve table name to schema name using mapping."""
     return self.XBRL_TABLE_MAPPING.get(table_name, table_name)
 
-  def _get_schema_info(self, schema_name: str) -> Optional[Dict[str, Any]]:
+  def _get_schema_info(self, schema_name: str) -> dict[str, Any] | None:
     """Get schema info for a given schema name."""
     if schema_name in self.node_schemas:
       return self.node_schemas[schema_name]
@@ -320,7 +319,7 @@ class XBRLSchemaAdapter:
       return self.relationship_schemas[schema_name]
     return None
 
-  def _build_column_list(self, schema_info: Dict[str, Any]) -> List[str]:
+  def _build_column_list(self, schema_info: dict[str, Any]) -> list[str]:
     """Build complete column list for a schema."""
     columns = []
 
@@ -333,8 +332,8 @@ class XBRLSchemaAdapter:
     return columns
 
   def _process_data_with_schema(
-    self, data_dict: Dict[str, Any], schema_info: Dict[str, Any]
-  ) -> Dict[str, Any]:
+    self, data_dict: dict[str, Any], schema_info: dict[str, Any]
+  ) -> dict[str, Any]:
     """Process data dictionary with schema requirements."""
     processed_data = {}
 
@@ -398,7 +397,7 @@ class XBRLSchemaConfigGenerator:
   Replaces hardcoded ingestion logic with schema-driven automation.
   """
 
-  def __init__(self, schema_config: Dict[str, Any]):
+  def __init__(self, schema_config: dict[str, Any]):
     """
     Initialize generator with schema configuration.
 
@@ -421,7 +420,7 @@ class XBRLSchemaConfigGenerator:
       f"Generated {len(self.ingest_config.relationship_tables)} relationship tables"
     )
 
-  def _create_schema_configuration(self, config: Dict[str, Any]) -> SchemaConfiguration:
+  def _create_schema_configuration(self, config: dict[str, Any]) -> SchemaConfiguration:
     """Create schema configuration from input config."""
     return SchemaConfiguration(
       name=config.get("name", "Dynamic Ingestion Schema"),
@@ -513,7 +512,7 @@ class XBRLSchemaConfigGenerator:
 
   def _generate_file_patterns(
     self, table_name: str, is_relationship: bool
-  ) -> List[str]:
+  ) -> list[str]:
     """
     Generate file patterns for a table name.
 
@@ -556,7 +555,7 @@ class XBRLSchemaConfigGenerator:
 
     return False
 
-  def get_table_name_from_file(self, filename: str) -> Optional[str]:
+  def get_table_name_from_file(self, filename: str) -> str | None:
     """
     Get proper table name from filename using schema mappings.
 
@@ -581,7 +580,7 @@ class XBRLSchemaConfigGenerator:
 
     return None
 
-  def get_table_info(self, table_name: str) -> Optional[IngestTableInfo]:
+  def get_table_info(self, table_name: str) -> IngestTableInfo | None:
     """
     Get complete table information for ingestion.
 
@@ -599,7 +598,7 @@ class XBRLSchemaConfigGenerator:
 
     return None
 
-  def get_relationship_info(self, table_name: str) -> Optional[Tuple[str, str, str]]:
+  def get_relationship_info(self, table_name: str) -> tuple[str, str, str] | None:
     """
     Get relationship information for creating relationship tables.
 
@@ -616,15 +615,15 @@ class XBRLSchemaConfigGenerator:
 
     return None
 
-  def get_all_node_tables(self) -> List[str]:
+  def get_all_node_tables(self) -> list[str]:
     """Get list of all node table names."""
     return list(self.ingest_config.node_tables.keys())
 
-  def get_all_relationship_tables(self) -> List[str]:
+  def get_all_relationship_tables(self) -> list[str]:
     """Get list of all relationship table names."""
     return list(self.ingest_config.relationship_tables.keys())
 
-  def get_schema_statistics(self) -> Dict[str, Any]:
+  def get_schema_statistics(self) -> dict[str, Any]:
     """Get statistics about the schema-driven configuration."""
     return {
       "schema_name": self.ingest_config.schema_name,
@@ -681,7 +680,7 @@ def create_roboledger_ingestion_processor() -> XBRLSchemaConfigGenerator:
 
 
 def create_custom_ingestion_processor(
-  extensions: List[str],
+  extensions: list[str],
 ) -> XBRLSchemaConfigGenerator:
   """Create ingestion processor for custom schema extensions."""
   config = {

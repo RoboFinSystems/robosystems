@@ -15,20 +15,22 @@ Routing targets:
 """
 
 import asyncio
-import httpx
-import time
 import json
 import random
 import threading
-from typing import Dict, Any
+import time
 from enum import Enum
+from typing import Any
+
+import httpx
 import redis.asyncio as redis
-from robosystems.graph_api.client import GraphClient
+
 from robosystems.config import env
+from robosystems.config.graph_tier import GraphTier
 from robosystems.config.valkey_registry import ValkeyDatabase
+from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
-from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.middleware.graph.utils import parse_subgraph_id
 
@@ -204,8 +206,8 @@ class GraphClientFactory:
   _read_timeout = env.GRAPH_READ_TIMEOUT
 
   # Connection pools for reuse (HTTP/2 enabled for efficiency)
-  _connection_pools: Dict[str, httpx.AsyncClient] = {}
-  _pool_stats: Dict[str, Dict[str, Any]] = {}  # Track pool statistics
+  _connection_pools: dict[str, httpx.AsyncClient] = {}
+  _pool_stats: dict[str, dict[str, Any]] = {}  # Track pool statistics
 
   # Redis connection pool for caching (thread-local to avoid event loop issues)
   _redis_pool: redis.ConnectionPool | None = None
@@ -798,7 +800,7 @@ class GraphClientFactory:
         raise
 
   @classmethod
-  def get_pool_statistics(cls) -> Dict[str, Any]:
+  def get_pool_statistics(cls) -> dict[str, Any]:
     """
     Get connection pool statistics for monitoring.
 

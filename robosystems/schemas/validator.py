@@ -6,7 +6,7 @@ using the robosystems.schemas definitions as the source of truth.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 from .loader import get_schema_loader
 
@@ -31,7 +31,7 @@ class LadybugSchemaValidator:
       f"Loaded schemas for {len(self.schema_loader.list_relationship_types())} relationship types"
     )
 
-  def validate_node(self, node_type: str, properties: Dict[str, Any]) -> bool:
+  def validate_node(self, node_type: str, properties: dict[str, Any]) -> bool:
     """
     Validate node properties against schema.
 
@@ -49,7 +49,7 @@ class LadybugSchemaValidator:
     source_type: str,
     target_type: str,
     relationship_type: str,
-    properties: Optional[Dict[str, Any]] = None,
+    properties: dict[str, Any] | None = None,
   ) -> bool:
     """
     Validate relationship against schema.
@@ -67,7 +67,7 @@ class LadybugSchemaValidator:
       source_type, target_type, relationship_type, properties
     )
 
-  def get_node_schema(self, node_type: str) -> Optional[Dict[str, Any]]:
+  def get_node_schema(self, node_type: str) -> dict[str, Any] | None:
     """Get schema definition for a node type."""
     node = self.schema_loader.get_node_schema(node_type)
     if not node:
@@ -80,7 +80,7 @@ class LadybugSchemaValidator:
       "primary_key": self.schema_loader.get_node_primary_key(node_type),
     }
 
-  def get_relationship_schema(self, relationship_type: str) -> Optional[Dict[str, Any]]:
+  def get_relationship_schema(self, relationship_type: str) -> dict[str, Any] | None:
     """Get schema definition for a relationship type."""
     rel = self.schema_loader.get_relationship_schema(relationship_type)
     if not rel:
@@ -97,15 +97,15 @@ class LadybugSchemaValidator:
       },
     }
 
-  def list_node_types(self) -> List[str]:
+  def list_node_types(self) -> list[str]:
     """Get list of all defined node types."""
     return self.schema_loader.list_node_types()
 
-  def list_relationship_types(self) -> List[str]:
+  def list_relationship_types(self) -> list[str]:
     """Get list of all defined relationship types."""
     return self.schema_loader.list_relationship_types()
 
-  def get_node_relationships(self, node_type: str) -> Dict[str, List[str]]:
+  def get_node_relationships(self, node_type: str) -> dict[str, list[str]]:
     """Get all possible relationships for a node type."""
     relationships = self.schema_loader.get_node_relationships(node_type)
 

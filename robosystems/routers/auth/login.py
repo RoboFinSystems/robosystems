@@ -1,7 +1,6 @@
 """User login endpoint."""
 
 # Third-party
-from sqlalchemy.orm import Session
 from fastapi import (
   APIRouter,
   Depends,
@@ -10,21 +9,22 @@ from fastapi import (
   Response,
   status,
 )
+from sqlalchemy.orm import Session
+
+from ...database import get_async_db_session
+from ...middleware.auth.jwt import create_jwt_token
+from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_metrics
+from ...middleware.rate_limits import auth_rate_limit_dependency
+from ...models.api.auth import AuthResponse, LoginRequest
+from ...models.api.common import ErrorResponse
 
 # Local imports
 from ...models.iam import User
-from ...models.api.auth import LoginRequest, AuthResponse
-from ...models.api.common import ErrorResponse
-from ...database import get_async_db_session
-from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.auth_protection import AdvancedAuthProtection
-from ...security.input_validation import validate_email, sanitize_string
 from ...security.device_fingerprinting import extract_device_fingerprint
-from ...middleware.otel.metrics import record_auth_metrics, endpoint_metrics_decorator
-
+from ...security.input_validation import sanitize_string, validate_email
 from .utils import verify_password
-from ...middleware.auth.jwt import create_jwt_token
 
 # Create router for login endpoint
 router = APIRouter()

@@ -2,32 +2,33 @@
 Subgraph deletion endpoint.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Path, status
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
+from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN, SUBGRAPH_NAME_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.api.graphs.subgraphs import (
   DeleteSubgraphRequest,
   DeleteSubgraphResponse,
 )
-from robosystems.models.iam.user import User
 from robosystems.models.iam.graph_user import GraphUser
+from robosystems.models.iam.user import User
 from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.logger import logger, api_logger, log_metric
 
 from .utils import (
   circuit_breaker,
   get_subgraph_by_name,
   get_subgraph_service,
-  record_operation_start,
-  record_operation_metrics,
   handle_circuit_breaker_check,
+  record_operation_metrics,
+  record_operation_start,
 )
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN, SUBGRAPH_NAME_PATTERN
 
 router = APIRouter()
 
@@ -167,7 +168,7 @@ async def delete_subgraph(
       graph_id=subgraph_id,
       status="deleted",
       backup_location=backup_location,
-      deleted_at=datetime.now(timezone.utc),
+      deleted_at=datetime.now(UTC),
       message=f"Subgraph {subgraph_id} successfully deleted",
     )
 
@@ -192,5 +193,5 @@ async def delete_subgraph(
     circuit_breaker.record_failure(graph_id, "subgraph_delete")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete subgraph: {str(e)}",
+      detail=f"Failed to delete subgraph: {e!s}",
     )

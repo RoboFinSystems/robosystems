@@ -21,7 +21,6 @@ import time
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple
 
 # Configure logging
 logging.basicConfig(
@@ -267,7 +266,7 @@ class ArelleCacheManager:
     ),
   ]
 
-  def __init__(self, project_root: Optional[Path] = None):
+  def __init__(self, project_root: Path | None = None):
     """Initialize the cache manager."""
     if project_root:
       self.project_root = Path(project_root)
@@ -407,7 +406,7 @@ class ArelleCacheManager:
       logger.error(f"Failed to fetch EDGAR plugin: {e}")
       return False
 
-  def create_bundles(self) -> Tuple[Optional[Path], Optional[Path]]:
+  def create_bundles(self) -> tuple[Path | None, Path | None]:
     """Create tar.gz bundles for schemas and EDGAR plugin."""
     logger.info("Creating cache bundles...")
 

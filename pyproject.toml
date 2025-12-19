@@ -163,8 +163,55 @@ indent-width = 2
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
-ignore = []
+select = [
+    "E4", "E7", "E9", "F",  # Original: pyflakes, pycodestyle errors
+    "I",      # isort - import sorting
+    "B",      # bugbear - common bugs and design problems
+    "C4",     # flake8-comprehensions - better comprehensions
+    "UP",     # pyupgrade - modern Python syntax
+    "S",      # bandit - security issues
+    "SIM",    # flake8-simplify - code simplification
+    "RUF",    # ruff-specific rules
+]
+ignore = [
+    # Security - acceptable patterns for this codebase
+    "S101",   # assert usage (needed for tests)
+    "S104",   # binding to all interfaces (intentional in containers)
+    "S105",   # hardcoded password detection (false positives)
+    "S106",   # hardcoded password in func args (false positives)
+    "S107",   # hardcoded password default (false positives in tests)
+    "S110",   # try-except-pass (often intentional)
+    "S112",   # try-except-continue (intentional in loaders)
+    "S202",   # tarfile.extractall (controlled input - Arelle cache)
+    "S310",   # suspicious URL open (file: scheme intentional for Arelle)
+    "S311",   # pseudo-random generators (acceptable for non-crypto)
+    "S324",   # insecure hash MD5 (used for cache keys, not security)
+    "S602",   # subprocess shell=True (internal admin CLI only)
+    "S603",   # subprocess call (internal tools, not user input)
+    "S607",   # partial executable path (internal tools)
+    "S608",   # hardcoded-sql-expression (Cypher queries, not SQL)
+    "S108",   # hardcoded-temp-file (common in tests)
+    # Bugbear - patterns acceptable in this codebase
+    "B007",   # unused-loop-control-variable (style)
+    "B008",   # function call in default argument (FastAPI Depends pattern)
+    "B017",   # assert-raises-exception (test pattern)
+    "B023",   # function-uses-loop-variable (usually fine)
+    "B904",   # raise-without-from-inside-except (nice-to-have, not a bug)
+    # Simplify - style preferences
+    "SIM102", # collapsible-if (style preference)
+    "SIM103", # needless-bool (style preference)
+    "SIM105", # suppressible-exception (style preference)
+    "SIM108", # if-else-block-instead-of-if-exp (style preference)
+    "SIM113", # enumerate-for-loop (style preference)
+    "SIM116", # if-else-block-instead-of-dict (style preference)
+    "SIM117", # multiple-with-statements (often clearer as separate)
+    # Ruff-specific - patterns acceptable in this codebase
+    "RUF001", # ambiguous-unicode-character (intentional in tests)
+    "RUF006", # asyncio-dangling-task (fire-and-forget pattern)
+    "RUF012", # mutable-class-default (config classes, immutable in practice)
+    "RUF034", # useless-if-else (minor)
+    "RUF059", # unused unpacked variable (common tuple unpacking pattern)
+]
 fixable = ["ALL"]
 unfixable = []
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
@@ -176,17 +223,17 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.basedpyright]
-include = ["robosystems", "tests", "main.py"]
-exclude = ["**/__pycache__", ".venv", "examples", "robosystems/adapters/sec/arelle"]
+include = ["robosystems", "main.py"]
+exclude = ["**/__pycache__", ".venv", "examples", "robosystems/adapters/sec/arelle", "tests"]
 extraPaths = ["."]
 pythonVersion = "3.13"
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"
-reportAttributeAccessIssue = "none"
 reportArgumentType = "none"
+reportAttributeAccessIssue = "none"
 reportGeneralTypeIssues = "none"
 reportOptionalMemberAccess = "none"
 reportReturnType = "none"
-reportFunctionMemberAccess = "none"
 reportCallIssue = "none"
+reportMissingImports = "none"

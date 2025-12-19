@@ -1,7 +1,8 @@
 """Tests for LadybugAllocationManager."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
 from robosystems.middleware.graph.utils import parse_subgraph_id

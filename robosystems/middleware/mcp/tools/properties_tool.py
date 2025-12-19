@@ -2,10 +2,11 @@
 Properties Tool - Discovers available properties for specific node types.
 """
 
-from typing import Any, Dict
+from typing import Any
+
+from robosystems.logger import logger
 
 from .base_tool import BaseTool
-from robosystems.logger import logger
 
 
 class PropertiesTool(BaseTool):
@@ -13,7 +14,7 @@ class PropertiesTool(BaseTool):
   Tool for discovering properties of node types by sampling actual data.
   """
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for property discovery."""
     return {
       "name": "discover-properties",
@@ -53,7 +54,7 @@ This is more thorough than the schema tool - it actually samples the data to sho
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute the properties discovery tool."""
     self._log_tool_execution("discover-properties", arguments)
 
@@ -66,7 +67,7 @@ This is more thorough than the schema tool - it actually samples the data to sho
 
   async def _discover_properties(
     self, node_type: str, sample_size: int = 5
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Discover properties for a node type by sampling actual data.
 
@@ -174,7 +175,7 @@ This is more thorough than the schema tool - it actually samples the data to sho
 
     except Exception as e:
       logger.error(f"Error discovering properties for {node_type}: {e}")
-      result["error"] = f"Failed to analyze properties: {str(e)}"
+      result["error"] = f"Failed to analyze properties: {e!s}"
       result["usage_tips"].append(
         "Use get-graph-schema first to verify node types exist"
       )

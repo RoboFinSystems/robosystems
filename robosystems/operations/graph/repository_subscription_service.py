@@ -1,17 +1,16 @@
 """Service for managing shared repository subscriptions (SEC, industry, economic data)."""
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional, Dict, List
+from datetime import UTC, datetime
 
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from ...config import env
 from ...models.iam.user_repository import (
-  UserRepository,
-  RepositoryType,
   RepositoryPlan,
+  RepositoryType,
+  UserRepository,
 )
 from ...models.iam.user_repository_credits import UserRepositoryCredits
 
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 ENVIRONMENT = env.ENVIRONMENT
 
 
-def get_available_repositories() -> List[RepositoryType]:
+def get_available_repositories() -> list[RepositoryType]:
   """Get list of available repository types based on enabled status."""
   all_configs = UserRepository.get_all_repository_configs()
   return [
@@ -33,7 +32,7 @@ def get_available_repositories() -> List[RepositoryType]:
 
 def get_available_plans_for_repository(
   repository_type: RepositoryType,
-) -> List[RepositoryPlan]:
+) -> list[RepositoryPlan]:
   """Get available plans for a specific repository type."""
   if not UserRepository.is_repository_enabled(repository_type):
     return []
@@ -68,8 +67,8 @@ class RepositorySubscriptionService:
     Raises:
         ValueError: If repository type is invalid or not configured
     """
-    from ...models.iam.graph import Graph
     from ...config.billing.repositories import RepositoryBillingConfig
+    from ...models.iam.graph import Graph
 
     graph_id = repository_type.value
     existing = self.session.query(Graph).filter(Graph.graph_id == graph_id).first()
@@ -102,8 +101,8 @@ class RepositorySubscriptionService:
       schema_extensions=[],
       is_subgraph=False,
       parent_graph_id=None,
-      created_at=datetime.now(timezone.utc),
-      updated_at=datetime.now(timezone.utc),
+      created_at=datetime.now(UTC),
+      updated_at=datetime.now(UTC),
     )
 
     self.session.add(repository_graph)
@@ -180,7 +179,7 @@ class RepositorySubscriptionService:
         monthly_price_cents=monthly_price_cents,
         monthly_credits=plan_config["monthly_credits"],
         metadata={
-          "subscribed_at": datetime.now(timezone.utc).isoformat(),
+          "subscribed_at": datetime.now(UTC).isoformat(),
           "subscription_method": "api",
           "plan_features": plan_config.get("features", []),
         },
@@ -297,7 +296,7 @@ class RepositorySubscriptionService:
 
   def get_user_repository_subscriptions(
     self, user_id: str, active_only: bool = True
-  ) -> List[UserRepository]:
+  ) -> list[UserRepository]:
     """
     Get all repository subscriptions for a user.
 
@@ -315,8 +314,8 @@ class RepositorySubscriptionService:
     )
 
   def get_repository_credits_summary(
-    self, user_id: str, repository_type: Optional[RepositoryType] = None
-  ) -> Dict:
+    self, user_id: str, repository_type: RepositoryType | None = None
+  ) -> dict:
     """
     Get credits summary for repository subscriptions.
 
@@ -424,7 +423,7 @@ class RepositorySubscriptionService:
     self,
     repository_type: RepositoryType,
     user_id: str,
-    repository_plan: Optional[RepositoryPlan] = None,
+    repository_plan: RepositoryPlan | None = None,
   ) -> bool:
     """
     Grant repository access to a user.
@@ -460,7 +459,7 @@ class RepositorySubscriptionService:
       )
       if not existing.is_active:
         existing.is_active = True
-        existing.updated_at = datetime.now(timezone.utc)
+        existing.updated_at = datetime.now(UTC)
         self.session.commit()
         logger.info(f"Reactivated access for user {user_id}")
       return True
@@ -493,7 +492,7 @@ class RepositorySubscriptionService:
       monthly_price_cents=plan_config["price_cents"],
       monthly_credits=plan_config["monthly_credits"],
       metadata={
-        "granted_at": datetime.now(timezone.utc).isoformat(),
+        "granted_at": datetime.now(UTC).isoformat(),
         "granted_via": "provisioning",
       },
     )

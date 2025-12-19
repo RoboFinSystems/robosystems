@@ -1,39 +1,41 @@
-from datetime import datetime, timedelta
 import os
-import pandas as pd
+from datetime import datetime, timedelta
 from pathlib import Path
+
+import pandas as pd
 from arelle import XbrlConst
-from robosystems.logger import logger
-from robosystems.adapters.sec.client.arelle import ArelleClient
+
 from robosystems.adapters.sec import SEC_BASE_URL, SECClient
-from robosystems.operations.aws.s3 import S3Client
-from robosystems.utils.uuid import generate_uuid7
-from robosystems.utils import (
-  ISO_8601_URI,
-  ROLES_FILTERED,
+from robosystems.adapters.sec.client.arelle import ArelleClient
+from robosystems.adapters.sec.processors import (
+  DataFrameManager,
+  ParquetWriter,
+  TextBlockExternalizer,
+  create_dimension_id,
+  create_element_id,
+  create_entity_id,
+  create_fact_id,
+  create_factset_id,
+  create_label_id,
+  create_period_id,
+  create_reference_id,
+  create_report_id,
+  create_structure_id,
+  create_taxonomy_id,
+  create_unit_id,
+  safe_concat,
 )
 from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaAdapter,
   XBRLSchemaConfigGenerator,
 )
-from robosystems.adapters.sec.processors import (
-  create_element_id,
-  create_label_id,
-  create_taxonomy_id,
-  create_reference_id,
-  create_report_id,
-  create_fact_id,
-  create_entity_id,
-  create_period_id,
-  create_unit_id,
-  create_factset_id,
-  create_dimension_id,
-  create_structure_id,
-  safe_concat,
-  DataFrameManager,
-  ParquetWriter,
-  TextBlockExternalizer,
+from robosystems.logger import logger
+from robosystems.operations.aws.s3 import S3Client
+from robosystems.utils import (
+  ISO_8601_URI,
+  ROLES_FILTERED,
 )
+from robosystems.utils.uuid import generate_uuid7
 
 XBRL_GRAPH_PROCESSOR_VERSION = "1.0.0"
 
@@ -360,7 +362,7 @@ class XBRLGraphProcessor:
       logger.info("Adding report information from SEC report data")
       report_data["name"] = self.sec_report.get("form")
       report_data["accession_number"] = self.sec_report.get("accessionNumber")
-      if "filingDate" in self.sec_report and self.sec_report["filingDate"]:
+      if self.sec_report.get("filingDate"):
         try:
           report_data["filing_date"] = datetime.strptime(
             self.sec_report["filingDate"], "%Y-%m-%d"
@@ -368,7 +370,7 @@ class XBRLGraphProcessor:
         except ValueError:
           logger.warning(f"Invalid filingDate format: {self.sec_report['filingDate']}")
           report_data["filing_date"] = None
-      if "reportDate" in self.sec_report and self.sec_report["reportDate"]:
+      if self.sec_report.get("reportDate"):
         try:
           report_data["report_date"] = datetime.strptime(
             self.sec_report["reportDate"], "%Y-%m-%d"
@@ -380,8 +382,7 @@ class XBRLGraphProcessor:
 
       # Add acceptance_date if available
       if (
-        "acceptanceDateTime" in self.sec_report
-        and self.sec_report["acceptanceDateTime"]
+        self.sec_report.get("acceptanceDateTime")
       ):
         try:
           report_data["acceptance_date"] = datetime.strptime(
@@ -395,7 +396,7 @@ class XBRLGraphProcessor:
           report_data["acceptance_date"] = None
 
       # Add period_end_date if available
-      if "periodOfReport" in self.sec_report and self.sec_report["periodOfReport"]:
+      if self.sec_report.get("periodOfReport"):
         try:
           report_data["period_end_date"] = datetime.strptime(
             self.sec_report["periodOfReport"], "%Y-%m-%d"
@@ -1321,7 +1322,7 @@ class XBRLGraphProcessor:
   def make_structures(self):
     logger.info("Processing taxonomy structures")
     filing_roles = pd.DataFrame(
-      data=[(k[0], k[1]) for k in self.arelle_cntlr.baseSets.keys()],
+      data=[(k[0], k[1]) for k in self.arelle_cntlr.baseSets],
       columns=["arcrole", "linkrole"],
     )
 
@@ -1603,9 +1604,7 @@ class XBRLGraphProcessor:
       subgrp_qname == "xbrldt:hypercubeItem"
       and xconcept.periodType == "instant"
       and xconcept.abstract == "true"
-    ):
-      classification = "dimensionElement"
-    elif (
+    ) or (
       subgrp_qname == "xbrldt:hypercubeItem"
       and xconcept.periodType == "duration"
       and xconcept.abstract == "true"

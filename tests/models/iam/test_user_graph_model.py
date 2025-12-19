@@ -1,10 +1,11 @@
 """Comprehensive tests for the GraphUser model."""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.models.iam import GraphUser, User, Graph
+from robosystems.models.iam import Graph, GraphUser, User
 
 
 class TestGraphUserModel:

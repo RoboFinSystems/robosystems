@@ -1,13 +1,14 @@
 """QuickBooks provider-specific operations."""
 
-from typing import Dict, Any, Optional
-from sqlalchemy.orm import Session
-import httpx
+from typing import Any
 
-from ...logger import logger
-from ...operations.connection_service import ConnectionService
-from ...models.api.graphs.connections import QuickBooksConnectionConfig
+import httpx
+from sqlalchemy.orm import Session
+
 from ...config import env
+from ...logger import logger
+from ...models.api.graphs.connections import QuickBooksConnectionConfig
+from ...operations.connection_service import ConnectionService
 from .oauth_handler import OAuthHandler
 
 
@@ -47,19 +48,19 @@ class QuickBooksOAuthProvider:
   def scopes(self) -> list[str]:
     return ["com.intuit.quickbooks.accounting"]
 
-  def get_additional_auth_params(self) -> Dict[str, str]:
+  def get_additional_auth_params(self) -> dict[str, str]:
     """QuickBooks-specific auth parameters."""
     return {
       "access_type": "offline",  # To get refresh token
     }
 
-  def extract_provider_data(self, callback_data: Dict[str, Any]) -> Dict[str, Any]:
+  def extract_provider_data(self, callback_data: dict[str, Any]) -> dict[str, Any]:
     """Extract QuickBooks-specific data from callback."""
     return {
       "realm_id": callback_data.get("realmId", ""),
     }
 
-  async def get_entity_info(self, access_token: str, realm_id: str) -> Dict[str, Any]:
+  async def get_entity_info(self, access_token: str, realm_id: str) -> dict[str, Any]:
     """Get QuickBooks entity information."""
     url = f"{self._base_url}/v3/entity/{realm_id}/entityinfo/{realm_id}"
 
@@ -121,7 +122,7 @@ async def create_quickbooks_connection(
 
 
 async def sync_quickbooks_connection(
-  connection: Dict[str, Any], sync_options: Optional[Dict[str, Any]], graph_id: str
+  connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
   """Trigger QuickBooks sync.
 
@@ -142,7 +143,7 @@ async def sync_quickbooks_connection(
 
 
 async def cleanup_quickbooks_connection(
-  connection: Dict[str, Any], graph_id: str
+  connection: dict[str, Any], graph_id: str
 ) -> None:
   """Clean up QuickBooks connection."""
   # QuickBooks cleanup would involve revoking OAuth tokens

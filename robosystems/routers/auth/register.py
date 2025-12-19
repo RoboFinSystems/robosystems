@@ -1,6 +1,5 @@
 """User registration endpoint."""
 
-from sqlalchemy.orm import Session
 from fastapi import (
   APIRouter,
   Depends,
@@ -9,27 +8,27 @@ from fastapi import (
   Response,
   status,
 )
+from sqlalchemy.orm import Session
 
 from ...config import env
-from ...models.iam import User, OrgLimits, Org
-from ...models.api.auth import RegisterRequest, AuthResponse
-from ...models.api.common import ErrorResponse
 from ...database import get_async_db_session
 from ...logger import logger
+from ...middleware.auth.jwt import create_jwt_token
+from ...middleware.otel.metrics import endpoint_metrics_decorator, record_auth_metrics
 from ...middleware.rate_limits import auth_rate_limit_dependency
+from ...models.api.auth import AuthResponse, RegisterRequest
+from ...models.api.common import ErrorResponse
+from ...models.iam import Org, OrgLimits, User
 from ...security import SecurityAuditLogger, SecurityEventType
-from ...security.captcha import captcha_service
 from ...security.auth_protection import AdvancedAuthProtection
+from ...security.captcha import captcha_service
+from ...security.device_fingerprinting import extract_device_fingerprint
 from ...security.input_validation import (
-  validate_email,
   sanitize_string,
+  validate_email,
   validate_password_strength,
 )
-from ...security.device_fingerprinting import extract_device_fingerprint
-from ...middleware.otel.metrics import record_auth_metrics, endpoint_metrics_decorator
-
 from .utils import hash_password
-from ...middleware.auth.jwt import create_jwt_token
 
 # Create router for register endpoint
 router = APIRouter()

@@ -7,23 +7,23 @@ It leverages the shared streaming utilities for consistency across endpoints.
 """
 
 import asyncio
-import json
 import hashlib
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+import json
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
-from robosystems.models.api.graphs.query import (
-  CypherQueryRequest,
-  DEFAULT_QUERY_TIMEOUT,
-)
-from robosystems.middleware.graph.query_queue import get_query_queue, QueryStatus
+from robosystems.logger import api_logger, logger
+from robosystems.middleware.graph.query_queue import QueryStatus, get_query_queue
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.logger import logger, api_logger
-from robosystems.middleware.sse.streaming import emit_event_to_operation
 from robosystems.middleware.sse.event_storage import EventType
+from robosystems.middleware.sse.streaming import emit_event_to_operation
+from robosystems.models.api.graphs.query import (
+  DEFAULT_QUERY_TIMEOUT,
+  CypherQueryRequest,
+)
 from robosystems.models.iam import User
 
 # Initialize circuit breaker
@@ -31,8 +31,8 @@ circuit_breaker = CircuitBreakerManager()
 
 
 async def execute_query_with_timeout(
-  repository: Any, query: str, parameters: Optional[Dict[str, Any]], timeout: int
-) -> List[Dict[str, Any]]:
+  repository: Any, query: str, parameters: dict[str, Any] | None, timeout: int
+) -> list[dict[str, Any]]:
   """
   Execute a query with timeout handling.
 
@@ -67,7 +67,7 @@ async def execute_query_with_timeout(
 
   try:
     return await asyncio.wait_for(execute(), timeout=timeout)
-  except asyncio.TimeoutError:
+  except TimeoutError:
     raise TimeoutError(f"Query exceeded timeout of {timeout} seconds")
 
 
@@ -77,7 +77,7 @@ async def stream_ndjson_response(
   graph_id: str,
   current_user: User,
   chunk_size: int = 1000,
-  start_time: Optional[datetime] = None,
+  start_time: datetime | None = None,
 ) -> StreamingResponse:
   """
   Stream query results as NDJSON (newline-delimited JSON).
@@ -97,7 +97,7 @@ async def stream_ndjson_response(
       StreamingResponse with NDJSON content
   """
   if not start_time:
-    start_time = datetime.now(timezone.utc)
+    start_time = datetime.now(UTC)
 
   async def generate_ndjson():
     """Generate NDJSON chunks from query results."""
@@ -179,14 +179,14 @@ async def stream_ndjson_response(
           yield json.dumps(ndjson_chunk) + "\n"
 
       # Send completion metadata
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+      execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       final_chunk = {
         "complete": True,
         "total_rows": total_rows,
         "execution_time_ms": execution_time,
         "graph_id": graph_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
       }
       yield json.dumps(final_chunk) + "\n"
 
@@ -212,7 +212,7 @@ async def stream_ndjson_response(
         "error": str(e),
         "error_type": type(e).__name__,
         "graph_id": graph_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
       }
       yield json.dumps(error_chunk) + "\n"
 
@@ -240,7 +240,7 @@ async def stream_sse_response(
   current_user: User,
   chunk_size: int = 100,
   include_progress: bool = True,
-  start_time: Optional[datetime] = None,
+  start_time: datetime | None = None,
 ) -> EventSourceResponse:
   """
   Stream query results via Server-Sent Events (SSE).
@@ -261,7 +261,7 @@ async def stream_sse_response(
       EventSourceResponse with SSE stream
   """
   if not start_time:
-    start_time = datetime.now(timezone.utc)
+    start_time = datetime.now(UTC)
 
   async def sse_generator():
     """Generate SSE events from query results."""
@@ -384,7 +384,7 @@ async def stream_sse_response(
             }
 
       # Send completion event
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+      execution_time = (datetime.now(UTC) - start_time).total_seconds()
 
       yield {
         "event": "complete",
@@ -394,7 +394,7 @@ async def stream_sse_response(
             "total_chunks": chunk_count,
             "execution_time_seconds": execution_time,
             "graph_id": graph_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
           }
         ),
       }
@@ -415,7 +415,7 @@ async def stream_sse_response(
         },
       )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
       yield {
         "event": "timeout",
         "data": json.dumps(
@@ -459,7 +459,7 @@ async def stream_sse_with_queue(
   current_user: User,
   priority: int = 5,
   chunk_size: int = 100,
-  operation_id: Optional[str] = None,
+  operation_id: str | None = None,
 ) -> EventSourceResponse:
   """
   Handle queued queries with SSE, providing queue updates then streaming results.

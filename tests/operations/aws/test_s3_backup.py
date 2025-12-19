@@ -5,9 +5,10 @@ This test suite validates S3 integration, compression,
 and backup lifecycle management using LocalStack.
 """
 
-import pytest
 import asyncio
 import os
+
+import pytest
 
 from robosystems.operations.aws.s3 import S3BackupAdapter
 
@@ -223,7 +224,7 @@ class TestS3BackupAdapter:
     for i in range(3):
       metadata = await s3_adapter.upload_backup(
         graph_id=graph_id,
-        backup_data=f"{sample_cypher_data}\n// Backup {i}".encode("utf-8"),
+        backup_data=f"{sample_cypher_data}\n// Backup {i}".encode(),
         backup_type="full",
         metadata={"backup_number": i},
       )

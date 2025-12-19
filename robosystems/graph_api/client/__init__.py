@@ -6,33 +6,33 @@ backends via the Graph API with multi-backend support.
 """
 
 from .client import GraphClient
+from .config import GraphClientConfig
 from .exceptions import (
   GraphAPIError,
-  GraphTransientError,
   GraphClientError,
   GraphServerError,
-  GraphTimeoutError,
   GraphSyntaxError,
+  GraphTimeoutError,
+  GraphTransientError,
 )
-from .config import GraphClientConfig
 from .factory import (
   GraphClientFactory,
   get_graph_client,
-  get_graph_client_sync,
   get_graph_client_for_instance,
+  get_graph_client_sync,
 )
 
 __all__ = [
+  "GraphAPIError",
   "GraphClient",
   "GraphClientConfig",
-  "GraphAPIError",
-  "GraphTransientError",
   "GraphClientError",
-  "GraphServerError",
-  "GraphTimeoutError",
-  "GraphSyntaxError",
   "GraphClientFactory",
+  "GraphServerError",
+  "GraphSyntaxError",
+  "GraphTimeoutError",
+  "GraphTransientError",
   "get_graph_client",
-  "get_graph_client_sync",
   "get_graph_client_for_instance",
+  "get_graph_client_sync",
 ]

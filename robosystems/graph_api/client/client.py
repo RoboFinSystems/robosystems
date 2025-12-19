@@ -8,12 +8,14 @@ SSE-based monitoring for long-running ingestion tasks.
 import asyncio
 import json
 import time
-from typing import Any, Dict, Optional, List, Union, AsyncGenerator, cast
+from collections.abc import AsyncGenerator
+from typing import Any, cast
 
 import httpx
 from httpx_sse import aconnect_sse
 
 from robosystems.logger import logger
+
 from .base import BaseGraphClient
 from .config import GraphClientConfig
 from .exceptions import (
@@ -27,8 +29,8 @@ class GraphClient(BaseGraphClient):
 
   def __init__(
     self,
-    base_url: Optional[str] = None,
-    config: Optional[GraphClientConfig] = None,
+    base_url: str | None = None,
+    config: GraphClientConfig | None = None,
     **kwargs,
   ):
     """
@@ -58,11 +60,11 @@ class GraphClient(BaseGraphClient):
     )
 
     # Routing metadata (set by factory for debugging)
-    self._route_target: Optional[str] = None
-    self._graph_id: Optional[str] = None
-    self._database_name: Optional[str] = None
-    self._instance_id: Optional[str] = None
-    self._purpose: Optional[str] = None
+    self._route_target: str | None = None
+    self._graph_id: str | None = None
+    self._database_name: str | None = None
+    self._instance_id: str | None = None
+    self._purpose: str | None = None
 
   async def __aenter__(self):
     """Async context manager entry."""
@@ -141,9 +143,9 @@ class GraphClient(BaseGraphClient):
     self,
     method: str,
     path: str,
-    json_data: Optional[Dict[str, Any]] = None,
-    params: Optional[Dict[str, Any]] = None,
-    timeout: Optional[float] = None,
+    json_data: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+    timeout: float | None = None,
   ) -> httpx.Response:
     """
     Make HTTP request with retry logic.
@@ -159,7 +161,7 @@ class GraphClient(BaseGraphClient):
         Response object
     """
     # Build request kwargs with proper typing
-    request_kwargs: Dict[str, Any] = {
+    request_kwargs: dict[str, Any] = {
       "method": method,
       "url": path,
     }
@@ -200,7 +202,7 @@ class GraphClient(BaseGraphClient):
 
   # API Methods
 
-  async def health_check(self) -> Dict[str, Any]:
+  async def health_check(self) -> dict[str, Any]:
     """Check API health status."""
     response = await self._request("GET", "/health")
     return response.json()
@@ -209,9 +211,9 @@ class GraphClient(BaseGraphClient):
     self,
     cypher: str,
     graph_id: str = "sec",
-    parameters: Optional[Dict[str, Any]] = None,
+    parameters: dict[str, Any] | None = None,
     streaming: bool = False,
-  ) -> Union[Dict[str, Any], AsyncGenerator[Any, None]]:
+  ) -> dict[str, Any] | AsyncGenerator[Any]:
     """
     Execute a Cypher query.
 
@@ -224,7 +226,7 @@ class GraphClient(BaseGraphClient):
     Returns:
         Query results (dict for regular, async generator for streaming)
     """
-    payload: Dict[str, Any] = {"cypher": cypher, "database": graph_id}
+    payload: dict[str, Any] = {"cypher": cypher, "database": graph_id}
     if parameters:
       payload["parameters"] = parameters
 
@@ -256,10 +258,10 @@ class GraphClient(BaseGraphClient):
         return json_result
       except Exception as e:
         logger.error(
-          f"Failed to parse response as JSON: {e}, content: {repr(response.content[:100])}"
+          f"Failed to parse response as JSON: {e}, content: {response.content[:100]!r}"
         )
         return {
-          "error": f"Invalid JSON response: {str(e)}",
+          "error": f"Invalid JSON response: {e!s}",
           "data": [],
           "columns": [],
           "row_count": 0,
@@ -267,7 +269,7 @@ class GraphClient(BaseGraphClient):
 
     # For true streaming, use the streaming endpoint
     # This allows the graph database instance to do the chunking
-    async def stream_chunks() -> AsyncGenerator[Dict[str, Any], None]:
+    async def stream_chunks() -> AsyncGenerator[dict[str, Any]]:
       """Stream NDJSON chunks from Graph API server."""
       async with self.client.stream(
         "POST",
@@ -300,7 +302,7 @@ class GraphClient(BaseGraphClient):
 
     return stream_chunks()
 
-  async def get_info(self) -> Dict[str, Any]:
+  async def get_info(self) -> dict[str, Any]:
     """
     Get comprehensive cluster information.
 
@@ -314,10 +316,10 @@ class GraphClient(BaseGraphClient):
     graph_id: str,
     table_name: str,
     s3_pattern: str,
-    s3_credentials: Optional[Dict[str, Any]] = None,
+    s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
     timeout: int = 14400,  # 4 hours default
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Start background ingestion and monitor via SSE.
 
@@ -384,7 +386,7 @@ class GraphClient(BaseGraphClient):
 
   async def _monitor_task_sse(
     self, sse_path: str, task_id: str, task_type: str, timeout: int
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Monitor any task progress via SSE stream (generic).
 
@@ -407,7 +409,7 @@ class GraphClient(BaseGraphClient):
 
   async def _monitor_ingestion_sse(
     self, sse_path: str, task_id: str, table_name: str, timeout: int
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Monitor ingestion progress via SSE stream.
 
@@ -529,19 +531,19 @@ class GraphClient(BaseGraphClient):
         "error": "SSE stream ended unexpectedly",
       }
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
       logger.error(f"SSE connection timeout for task {task_id}")
       return {"status": "failed", "task_id": task_id, "error": "SSE connection timeout"}
     except Exception as e:
       logger.error(f"SSE monitoring error: {e}")
       return {"status": "failed", "task_id": task_id, "error": str(e)}
 
-  async def list_databases(self) -> Dict[str, Any]:
+  async def list_databases(self) -> dict[str, Any]:
     """List all databases."""
     response = await self._request("GET", "/databases")
     return response.json()
 
-  async def get_database(self, graph_id: str) -> Dict[str, Any]:
+  async def get_database(self, graph_id: str) -> dict[str, Any]:
     """Get specific database information."""
     response = await self._request("GET", f"/databases/{graph_id}")
     return response.json()
@@ -550,10 +552,10 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     schema_type: str = "entity",
-    repository_name: Optional[str] = None,
-    custom_schema_ddl: Optional[str] = None,
+    repository_name: str | None = None,
+    custom_schema_ddl: str | None = None,
     is_subgraph: bool = False,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Create a new database.
 
@@ -580,7 +582,7 @@ class GraphClient(BaseGraphClient):
     response = await self._request("POST", "/databases", json_data=payload)
     return response.json()
 
-  async def delete_database(self, graph_id: str) -> Dict[str, Any]:
+  async def delete_database(self, graph_id: str) -> dict[str, Any]:
     """Delete a database."""
     response = await self._request("DELETE", f"/databases/{graph_id}")
     return response.json()
@@ -588,15 +590,15 @@ class GraphClient(BaseGraphClient):
   async def ingest(
     self,
     graph_id: str,
-    file_path: Optional[str] = None,
-    table_name: Optional[str] = None,
-    pipeline_run_id: Optional[str] = None,
-    bucket: Optional[str] = None,
-    files: Optional[List[str]] = None,
+    file_path: str | None = None,
+    table_name: str | None = None,
+    pipeline_run_id: str | None = None,
+    bucket: str | None = None,
+    files: list[str] | None = None,
     mode: str = "sync",
     priority: int = 5,
     ignore_errors: bool = True,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Unified data ingestion with flexible execution modes.
 
@@ -643,28 +645,28 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
-  async def get_task_status(self, task_id: str) -> Dict[str, Any]:
+  async def get_task_status(self, task_id: str) -> dict[str, Any]:
     """Get background task status."""
     response = await self._request("GET", f"/tasks/{task_id}/status")
     return response.json()
 
   async def list_tasks(
-    self, status: Optional[str] = None, limit: int = 100
-  ) -> Dict[str, Any]:
+    self, status: str | None = None, limit: int = 100
+  ) -> dict[str, Any]:
     """List tasks with optional status filter."""
-    params: Dict[str, Any] = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit}
     if status:
       params["status"] = status
 
     response = await self._request("GET", "/tasks", params=params)
     return response.json()
 
-  async def cancel_task(self, task_id: str) -> Dict[str, Any]:
+  async def cancel_task(self, task_id: str) -> dict[str, Any]:
     """Cancel a pending task."""
     response = await self._request("DELETE", f"/tasks/{task_id}")
     return response.json()
 
-  async def get_queue_info(self) -> Dict[str, Any]:
+  async def get_queue_info(self) -> dict[str, Any]:
     """Get ingestion queue information."""
     response = await self._request("GET", "/tasks/queue/info")
     return response.json()
@@ -672,8 +674,8 @@ class GraphClient(BaseGraphClient):
   # Additional methods for compatibility with APIRepository
 
   async def execute_query(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """
     Execute a query and return data rows (APIRepository compatibility).
 
@@ -687,12 +689,12 @@ class GraphClient(BaseGraphClient):
     # Use _database_name if set (for subgraphs), otherwise fall back to graph_id
     database = getattr(self, "_database_name", None) or self.graph_id or "sec"
 
-    result = cast(Dict[str, Any], await self.query(cypher, database, params))
+    result = cast(dict[str, Any], await self.query(cypher, database, params))
     return result.get("data", [])
 
   async def execute_single(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> Optional[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> dict[str, Any] | None:
     """
     Execute a query expecting a single result.
 
@@ -706,7 +708,7 @@ class GraphClient(BaseGraphClient):
     results = await self.execute_query(cypher, params)
     return results[0] if results else None
 
-  async def get_schema(self) -> List[Dict[str, Any]]:
+  async def get_schema(self) -> list[dict[str, Any]]:
     """
     Get database schema information.
 
@@ -726,9 +728,9 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     base_schema: str = "base",
-    extensions: Optional[List[str]] = None,
-    custom_ddl: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    extensions: list[str] | None = None,
+    custom_ddl: str | None = None,
+  ) -> dict[str, Any]:
     """
     Install or update database schema.
 
@@ -772,7 +774,7 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", f"/databases/{graph_id}/backup")
     return response.content
 
-  async def get_database_info(self, graph_id: str) -> Dict[str, Any]:
+  async def get_database_info(self, graph_id: str) -> dict[str, Any]:
     """
     Get comprehensive database information and statistics.
 
@@ -785,7 +787,7 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", f"/databases/{graph_id}")
     return response.json()
 
-  async def get_database_metrics(self, graph_id: str) -> Dict[str, Any]:
+  async def get_database_metrics(self, graph_id: str) -> dict[str, Any]:
     """
     Get metrics for a specific database (optimized for billing).
 
@@ -798,7 +800,7 @@ class GraphClient(BaseGraphClient):
     response = await self._request("GET", f"/databases/{graph_id}/metrics")
     return response.json()
 
-  async def get_metrics(self) -> Dict[str, Any]:
+  async def get_metrics(self) -> dict[str, Any]:
     """
     Get comprehensive metrics for the entire cluster node.
 
@@ -829,8 +831,8 @@ class GraphClient(BaseGraphClient):
       await self.create_database(graph_id, schema_type)
 
   async def execute_ddl(
-    self, ddl: str, graph_id: Optional[str] = None
-  ) -> Dict[str, Any]:
+    self, ddl: str, graph_id: str | None = None
+  ) -> dict[str, Any]:
     """
     Execute DDL (Data Definition Language) statements.
 
@@ -844,10 +846,10 @@ class GraphClient(BaseGraphClient):
         Query result
     """
     target_graph = graph_id or self.graph_id or "sec"
-    return cast(Dict[str, Any], await self.query(ddl, target_graph))
+    return cast(dict[str, Any], await self.query(ddl, target_graph))
 
   async def node_exists(
-    self, label: str, filters: Optional[Dict[str, Any]] = None
+    self, label: str, filters: dict[str, Any] | None = None
   ) -> bool:
     """
     Check if a node exists with the given label and filters.
@@ -883,7 +885,7 @@ class GraphClient(BaseGraphClient):
       LIMIT 1
     """
 
-    result = cast(Dict[str, Any], await self.query(cypher, database, params))
+    result = cast(dict[str, Any], await self.query(cypher, database, params))
     data = result.get("data", [])
 
     if data and len(data) > 0:
@@ -897,7 +899,7 @@ class GraphClient(BaseGraphClient):
     backup_format: str = "full_dump",
     compression: bool = True,
     encryption: bool = False,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Create a backup of a database.
 
@@ -931,7 +933,7 @@ class GraphClient(BaseGraphClient):
     compression: bool = True,
     encryption: bool = False,
     timeout: int = 3600,  # 1 hour default
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Create a backup and monitor via SSE.
 
@@ -981,7 +983,7 @@ class GraphClient(BaseGraphClient):
   async def download_backup(
     self,
     graph_id: str,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Download the current database as a backup.
 
@@ -1013,7 +1015,7 @@ class GraphClient(BaseGraphClient):
     force_overwrite: bool = False,
     encrypted: bool = True,
     compressed: bool = True,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Restore a database from S3 backup.
 
@@ -1055,7 +1057,7 @@ class GraphClient(BaseGraphClient):
     encrypted: bool = True,
     compressed: bool = True,
     timeout: int = 3600,  # 1 hour default
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Restore a database from S3 backup and monitor via SSE.
 
@@ -1112,9 +1114,9 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     table_name: str,
-    s3_pattern: str | List[str],
-    file_id_map: Dict[str, str] | None = None,
-  ) -> Dict[str, Any]:
+    s3_pattern: str | list[str],
+    file_id_map: dict[str, str] | None = None,
+  ) -> dict[str, Any]:
     """
     Create a DuckDB staging table (external view over S3).
 
@@ -1142,7 +1144,7 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
-  async def list_tables(self, graph_id: str) -> List[Dict[str, Any]]:
+  async def list_tables(self, graph_id: str) -> list[dict[str, Any]]:
     """
     List all DuckDB staging tables for a graph.
 
@@ -1156,8 +1158,8 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def query_table(
-    self, graph_id: str, sql: str, parameters: Optional[List[Any]] = None
-  ) -> Dict[str, Any]:
+    self, graph_id: str, sql: str, parameters: list[Any] | None = None
+  ) -> dict[str, Any]:
     """
     Execute SQL query on DuckDB staging tables.
 
@@ -1180,7 +1182,7 @@ class GraphClient(BaseGraphClient):
     )
     return response.json()
 
-  async def delete_table(self, graph_id: str, table_name: str) -> Dict[str, Any]:
+  async def delete_table(self, graph_id: str, table_name: str) -> dict[str, Any]:
     """
     Delete a DuckDB staging table.
 
@@ -1198,7 +1200,7 @@ class GraphClient(BaseGraphClient):
 
   async def delete_file_data(
     self, graph_id: str, table_name: str, file_id: str
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Delete rows from a DuckDB table by file_id.
 
@@ -1221,7 +1223,7 @@ class GraphClient(BaseGraphClient):
     table_name: str,
     ignore_errors: bool = True,
     file_ids: list[str] | None = None,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Materialize a DuckDB staging table into the graph database.
 
@@ -1253,9 +1255,9 @@ class GraphClient(BaseGraphClient):
     self,
     parent_graph_id: str,
     subgraph_id: str,
-    tables: Optional[List[str]] = None,
+    tables: list[str] | None = None,
     ignore_errors: bool = True,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Fork data from parent graph's DuckDB directly into subgraph's LadybugDB.
 

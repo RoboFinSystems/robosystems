@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from robosystems.adapters.sec.processors.textblock import (
   TextBlockExternalizer,

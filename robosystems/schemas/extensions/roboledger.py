@@ -32,8 +32,8 @@ For direct context control, use:
   loader = get_contextual_schema_loader("application", "roboledger")
 """
 
-from typing import List, Set
-from ..models import Node, Relationship, Property
+
+from ..models import Node, Property, Relationship
 
 # ============================================================================
 # REPORTING SECTION (XBRL/Financial Statements)
@@ -360,7 +360,7 @@ class RoboLedgerContext:
   REPORTING_ONLY = "reporting_only"
 
   @classmethod
-  def get_nodes_for_context(cls, context: str) -> List[Node]:
+  def get_nodes_for_context(cls, context: str) -> list[Node]:
     """Get appropriate nodes based on context"""
     if context == cls.SEC_REPOSITORY or context == cls.REPORTING_ONLY:
       # SEC only has aggregated reports, no transaction data
@@ -376,7 +376,7 @@ class RoboLedgerContext:
       return REPORTING_NODES + TRANSACTION_NODES
 
   @classmethod
-  def get_relationships_for_context(cls, context: str) -> List[Relationship]:
+  def get_relationships_for_context(cls, context: str) -> list[Relationship]:
     """Get appropriate relationships based on context"""
     if context == cls.SEC_REPOSITORY or context == cls.REPORTING_ONLY:
       return REPORTING_RELATIONSHIPS
@@ -388,7 +388,7 @@ class RoboLedgerContext:
       return REPORTING_RELATIONSHIPS + TRANSACTION_RELATIONSHIPS
 
   @classmethod
-  def get_table_names_for_context(cls, context: str) -> Set[str]:
+  def get_table_names_for_context(cls, context: str) -> set[str]:
     """Get table names for a given context (useful for filtering)"""
     nodes = cls.get_nodes_for_context(context)
     return {node.name for node in nodes}

@@ -6,30 +6,30 @@ before ingestion into graph databases.
 
 from .manager import (
   DuckDBTableManager,
-  TableInfo,
   TableCreateRequest,
   TableCreateResponse,
+  TableInfo,
   TableQueryRequest,
   TableQueryResponse,
   validate_table_name,
 )
 from .pool import (
-  DuckDBConnectionPool,
   DuckDBConnectionInfo,
+  DuckDBConnectionPool,
   get_duckdb_pool,
   initialize_duckdb_pool,
 )
 
 __all__ = [
+  "DuckDBConnectionInfo",
+  "DuckDBConnectionPool",
   "DuckDBTableManager",
-  "TableInfo",
   "TableCreateRequest",
   "TableCreateResponse",
+  "TableInfo",
   "TableQueryRequest",
   "TableQueryResponse",
-  "validate_table_name",
-  "DuckDBConnectionPool",
-  "DuckDBConnectionInfo",
   "get_duckdb_pool",
   "initialize_duckdb_pool",
+  "validate_table_name",
 ]

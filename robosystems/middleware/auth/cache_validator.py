@@ -6,16 +6,16 @@ encrypted authentication cache system.
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 import redis.asyncio as redis_async
 
+from ...config.valkey_registry import ValkeyDatabase, create_async_redis_client
 from ...logger import logger
 from ...security import SecurityAuditLogger, SecurityEventType
 from .cache import APIKeyCache
-from ...config.valkey_registry import ValkeyDatabase
-from ...config.valkey_registry import create_async_redis_client
 
 
 @dataclass
@@ -23,8 +23,8 @@ class CacheValidationResult:
   """Result of cache validation operation."""
 
   is_valid: bool
-  issues_found: List[str]
-  corrective_actions_taken: List[str]
+  issues_found: list[str]
+  corrective_actions_taken: list[str]
   security_events_logged: int
   validation_timestamp: datetime
 
@@ -65,7 +65,7 @@ class CacheValidator:
     Returns:
         CacheValidationResult with detailed validation results
     """
-    validation_start = datetime.now(timezone.utc)
+    validation_start = datetime.now(UTC)
     issues_found = []
     corrective_actions = []
     security_events = 0
@@ -120,7 +120,7 @@ class CacheValidator:
             "issues_count": len(issues_found),
             "corrective_actions": len(corrective_actions),
             "validation_duration_ms": (
-              datetime.now(timezone.utc) - validation_start
+              datetime.now(UTC) - validation_start
             ).total_seconds()
             * 1000,
           },
@@ -132,7 +132,7 @@ class CacheValidator:
           details={
             "action": "cache_validation_passed",
             "validation_duration_ms": (
-              datetime.now(timezone.utc) - validation_start
+              datetime.now(UTC) - validation_start
             ).total_seconds()
             * 1000,
           },
@@ -158,13 +158,13 @@ class CacheValidator:
       )
       return CacheValidationResult(
         is_valid=False,
-        issues_found=[f"Validation failed: {str(e)}"],
+        issues_found=[f"Validation failed: {e!s}"],
         corrective_actions_taken=[],
         security_events_logged=1,
         validation_timestamp=validation_start,
       )
 
-  async def _validate_api_key_cache(self) -> Dict[str, Any]:
+  async def _validate_api_key_cache(self) -> dict[str, Any]:
     """Validate API key cache entries for encryption and signature integrity."""
     issues = []
     actions = []
@@ -233,22 +233,22 @@ class CacheValidator:
 
             except Exception as e:
               issues.append(
-                f"Cache validation error for {api_key_hash[:8]}...: {str(e)}"
+                f"Cache validation error for {api_key_hash[:8]}...: {e!s}"
               )
               await redis.delete(cache_key, signature_key)
               actions.append(f"Removed problematic cache entry: {api_key_hash[:8]}...")
               events += 1
 
         except Exception as e:
-          issues.append(f"Error validating cache key {cache_key}: {str(e)}")
+          issues.append(f"Error validating cache key {cache_key}: {e!s}")
 
     except Exception as e:
-      issues.append(f"API key cache validation failed: {str(e)}")
+      issues.append(f"API key cache validation failed: {e!s}")
       events += 1
 
     return {"issues": issues, "actions": actions, "events": events}
 
-  async def _validate_jwt_cache(self) -> Dict[str, Any]:
+  async def _validate_jwt_cache(self) -> dict[str, Any]:
     """Validate JWT cache entries for encryption and signature integrity."""
     issues = []
     actions = []
@@ -311,22 +311,22 @@ class CacheValidator:
 
             except Exception as e:
               issues.append(
-                f"JWT cache validation error for {jwt_hash[:8]}...: {str(e)}"
+                f"JWT cache validation error for {jwt_hash[:8]}...: {e!s}"
               )
               await redis.delete(cache_key, signature_key)
               actions.append(f"Removed problematic JWT cache: {jwt_hash[:8]}...")
               events += 1
 
         except Exception as e:
-          issues.append(f"Error validating JWT cache key {cache_key}: {str(e)}")
+          issues.append(f"Error validating JWT cache key {cache_key}: {e!s}")
 
     except Exception as e:
-      issues.append(f"JWT cache validation failed: {str(e)}")
+      issues.append(f"JWT cache validation failed: {e!s}")
       events += 1
 
     return {"issues": issues, "actions": actions, "events": events}
 
-  async def _check_cache_consistency(self) -> Dict[str, Any]:
+  async def _check_cache_consistency(self) -> dict[str, Any]:
     """Check for cache consistency issues and data integrity problems."""
     issues = []
     actions = []
@@ -376,12 +376,12 @@ class CacheValidator:
           actions.append(f"removed orphaned signature: {sig_id[:8]}...")
 
     except Exception as e:
-      issues.append(f"Cache consistency check failed: {str(e)}")
+      issues.append(f"Cache consistency check failed: {e!s}")
       events += 1
 
     return {"issues": issues, "actions": actions, "events": events}
 
-  async def _validate_cache_freshness(self) -> Dict[str, Any]:
+  async def _validate_cache_freshness(self) -> dict[str, Any]:
     """Validate cache freshness and clean up stale entries."""
     issues = []
     actions = []
@@ -390,7 +390,7 @@ class CacheValidator:
     try:
       redis = await self._get_async_redis()
       max_age = timedelta(hours=self.max_cache_age_hours)
-      now = datetime.now(timezone.utc)
+      now = datetime.now(UTC)
 
       # Check API key cache freshness
       api_key_keys = await redis.keys(f"{self.api_key_cache.CACHE_KEY_PREFIX}*")
@@ -420,15 +420,15 @@ class CacheValidator:
                 actions.append(f"removed stale cache: {api_key_hash[:8]}...")
 
         except Exception as e:
-          issues.append(f"Error checking cache freshness for {cache_key}: {str(e)}")
+          issues.append(f"Error checking cache freshness for {cache_key}: {e!s}")
 
     except Exception as e:
-      issues.append(f"Cache freshness validation failed: {str(e)}")
+      issues.append(f"Cache freshness validation failed: {e!s}")
       events += 1
 
     return {"issues": issues, "actions": actions, "events": events}
 
-  async def _detect_suspicious_patterns(self) -> Dict[str, Any]:
+  async def _detect_suspicious_patterns(self) -> dict[str, Any]:
     """Detect suspicious patterns in cache usage."""
     issues = []
     actions = []
@@ -478,7 +478,7 @@ class CacheValidator:
         events += 1
 
     except Exception as e:
-      issues.append(f"Suspicious pattern detection failed: {str(e)}")
+      issues.append(f"Suspicious pattern detection failed: {e!s}")
       events += 1
 
     return {"issues": issues, "actions": actions, "events": events}
@@ -520,7 +520,7 @@ class CacheValidator:
           "action": "emergency_cache_purge",
           "reason": reason,
           "keys_deleted": total_deleted,
-          "timestamp": datetime.now(timezone.utc).isoformat(),
+          "timestamp": datetime.now(UTC).isoformat(),
         },
         risk_level="critical",
       )
@@ -545,10 +545,10 @@ class CacheValidator:
 
 
 # Global cache validator instance
-cache_validator: Optional[CacheValidator] = None
+cache_validator: CacheValidator | None = None
 
 
-def get_cache_validator() -> Optional[CacheValidator]:
+def get_cache_validator() -> CacheValidator | None:
   """Get the global cache validator instance."""
   global cache_validator
   if cache_validator is None:

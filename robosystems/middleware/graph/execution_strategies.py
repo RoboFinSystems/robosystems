@@ -6,9 +6,9 @@ selection based on client capabilities, system load, and operation characteristi
 """
 
 import re
-from enum import Enum
-from typing import Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
+from enum import Enum
+from typing import Any
 
 from robosystems.config.query_queue import QueryQueueConfig
 
@@ -51,12 +51,12 @@ class BaseAnalyzer(ABC):
   LARGE_RESULT = 10000
 
   @abstractmethod
-  def analyze(self, *args, **kwargs) -> Dict[str, Any]:
+  def analyze(self, *args, **kwargs) -> dict[str, Any]:
     """Analyze operation to estimate characteristics."""
     pass
 
   @classmethod
-  def analyze_cypher_query(cls, query: str) -> Dict[str, Any]:
+  def analyze_cypher_query(cls, query: str) -> dict[str, Any]:
     """
     Analyze a Cypher query to estimate its characteristics and execution requirements.
 
@@ -141,8 +141,8 @@ class BaseAnalyzer(ABC):
 
   @classmethod
   def _estimate_result_size(
-    cls, query_upper: str, limit_value: Optional[int]
-  ) -> Union[int, str]:
+    cls, query_upper: str, limit_value: int | None
+  ) -> int | str:
     """
     Estimate the result size category based on query patterns and LIMIT clause.
 
@@ -201,7 +201,7 @@ class BaseClientDetector:
   """Base client capability detection."""
 
   @classmethod
-  def detect_client_capabilities(cls, headers: Dict[str, str]) -> Dict[str, Any]:
+  def detect_client_capabilities(cls, headers: dict[str, str]) -> dict[str, Any]:
     """
     Detect client capabilities from request headers.
 
@@ -265,7 +265,7 @@ class BaseStrategySelector(ABC):
 
   @classmethod
   def should_use_cache(
-    cls, is_cacheable: bool, cache_available: bool, cache_ttl: Optional[int] = None
+    cls, is_cacheable: bool, cache_available: bool, cache_ttl: int | None = None
   ) -> bool:
     """
     Determine if cache should be used.
@@ -303,7 +303,7 @@ class BaseStrategySelector(ABC):
     return queue_size > queue_threshold or running_count >= max_concurrent
 
   @classmethod
-  def get_priority_for_user(cls, user_tier: Optional[str]) -> int:
+  def get_priority_for_user(cls, user_tier: str | None) -> int:
     """
     Get priority based on user subscription tier.
 
@@ -323,7 +323,7 @@ class BaseStrategySelector(ABC):
     requires_streaming: bool,
     is_interactive: bool,
     estimated_size: str,
-  ) -> Optional[BaseExecutionStrategy]:
+  ) -> BaseExecutionStrategy | None:
     """
     Select appropriate streaming strategy.
 

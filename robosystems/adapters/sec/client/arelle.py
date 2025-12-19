@@ -1,12 +1,14 @@
 import logging
 import os
 import shutil
-from pathlib import Path
-from typing import Optional, Dict, Any
 from email.message import EmailMessage
+from pathlib import Path
+from typing import Any
+
 from arelle import Cntlr, ModelXbrl
 from arelle.Version import __version__ as ARELLE_VERSION
 from arelle.WebCache import WebCache
+
 from robosystems.config import env
 
 logger = logging.getLogger(__name__)
@@ -165,8 +167,9 @@ class ArelleClient:
     logger.debug("Loading Arelle plugins")
 
     # Import and use PluginManager directly
-    from arelle import PluginManager
     import sys
+
+    from arelle import PluginManager
 
     # Add the local EDGAR plugin path to Python path
     edgar_path = os.path.join(os.path.dirname(__file__), "..", "arelle", "EDGAR")
@@ -286,7 +289,7 @@ class ArelleClient:
     # Apply redirects to webcache normalize URL function
     original_normalize = webcache.normalizeUrl
 
-    def normalize_with_redirects(url: Optional[str], base: Optional[str] = None) -> str:
+    def normalize_with_redirects(url: str | None, base: str | None = None) -> str:
       # First apply original normalization
       normalized = original_normalize(url, base)
 
@@ -303,8 +306,8 @@ class ArelleClient:
   def _wrap_webcache_with_retry(self, webcache: WebCache):
     """Wrap WebCache methods to handle rate limiting without retries."""
     import urllib.error
-    from urllib.response import addinfourl
     from io import BytesIO
+    from urllib.response import addinfourl
 
     # Create a wrapper class for BytesIO that mimics urllib response
     class HTTPResponseWrapper:
@@ -654,10 +657,10 @@ class ArelleClient:
       return modelXbrl
 
     except Exception as e:
-      logger.error(f"Error loading XBRL document: {str(e)}")
+      logger.error(f"Error loading XBRL document: {e!s}")
       raise
 
-  def validate(self, modelXbrl: ModelXbrl.ModelXbrl) -> Dict[str, Any]:
+  def validate(self, modelXbrl: ModelXbrl.ModelXbrl) -> dict[str, Any]:
     """
     Validate an XBRL model with EFM validation if applicable.
 
@@ -724,14 +727,7 @@ class ArelleClient:
 
     # Set additional EFM parameters if supported
     if hasattr(self.cntlr, "efmFilingParms"):
-      setattr(
-        self.cntlr,
-        "efmFilingParms",
-        {
-          "exhibitType": "EX-101",
-          "includeExhibit": True,
-        },
-      )
+      self.cntlr.efmFilingParms = {"exhibitType": "EX-101", "includeExhibit": True}
 
   def _is_efm_enabled(self) -> bool:
     """Check if EFM validation is enabled."""

@@ -1,15 +1,14 @@
 """Credit system caching using Valkey/Redis."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Optional, Dict, Any, Tuple, cast
+from typing import Any, cast
 
 import redis
 
 from ...config import env
-from ...config.valkey_registry import ValkeyDatabase
-from ...config.valkey_registry import create_redis_client
+from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 
 
@@ -84,7 +83,7 @@ class CreditCache:
       cache_data = {
         "balance": str(balance),
         "graph_tier": graph_tier,
-        "cached_at": datetime.now(timezone.utc).isoformat(),
+        "cached_at": datetime.now(UTC).isoformat(),
       }
 
       self.redis.setex(cache_key, self.balance_ttl, json.dumps(cache_data))
@@ -95,7 +94,7 @@ class CreditCache:
 
   def get_cached_graph_credit_balance(
     self, graph_id: str
-  ) -> Optional[Tuple[Decimal, str]]:
+  ) -> tuple[Decimal, str] | None:
     """
     Get cached graph credit balance.
 
@@ -140,7 +139,7 @@ class CreditCache:
 
         # Update the cache with new balance
         data["balance"] = str(new_balance)
-        data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Get remaining TTL and preserve it
         ttl = cast(int, self.redis.ttl(cache_key))
@@ -153,7 +152,7 @@ class CreditCache:
       logger.error(f"Failed to update cached balance, invalidating: {e}")
       self.invalidate_graph_credit_balance(graph_id)
 
-  def cache_credit_summary(self, graph_id: str, summary: Dict[str, Any]) -> None:
+  def cache_credit_summary(self, graph_id: str, summary: dict[str, Any]) -> None:
     """Cache comprehensive credit summary for a graph."""
     try:
       cache_key = self._get_credit_summary_key(graph_id)
@@ -173,7 +172,7 @@ class CreditCache:
     except Exception as e:
       logger.error(f"Failed to cache credit summary: {e}")
 
-  def get_cached_credit_summary(self, graph_id: str) -> Optional[Dict[str, Any]]:
+  def get_cached_credit_summary(self, graph_id: str) -> dict[str, Any] | None:
     """Get cached credit summary for a graph."""
     try:
       cache_key = self._get_credit_summary_key(graph_id)
@@ -210,7 +209,7 @@ class CreditCache:
     except Exception as e:
       logger.error(f"Failed to cache operation cost: {e}")
 
-  def get_cached_operation_cost(self, operation_type: str) -> Optional[Decimal]:
+  def get_cached_operation_cost(self, operation_type: str) -> Decimal | None:
     """Get cached operation cost."""
     try:
       cache_key = self._get_operation_cost_key(operation_type)
@@ -262,7 +261,7 @@ class CreditCache:
     except Exception as e:
       logger.error(f"Failed to invalidate all credit caches: {e}")
 
-  def warmup_operation_costs(self, costs: Dict[str, Decimal]) -> None:
+  def warmup_operation_costs(self, costs: dict[str, Decimal]) -> None:
     """Pre-populate operation cost cache."""
     try:
       for operation_type, cost in costs.items():
@@ -272,7 +271,7 @@ class CreditCache:
     except Exception as e:
       logger.error(f"Failed to warmup operation costs: {e}")
 
-  def get_cache_stats(self) -> Dict[str, Any]:
+  def get_cache_stats(self) -> dict[str, Any]:
     """Get credit cache statistics."""
     try:
       info = self.redis.info()

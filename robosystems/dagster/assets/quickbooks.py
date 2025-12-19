@@ -60,8 +60,8 @@ def qb_accounts(
   """
   from robosystems.adapters.quickbooks import QBClient
   from robosystems.operations.connection_service import (
-    ConnectionService,
     SYSTEM_USER_ID,
+    ConnectionService,
   )
 
   context.log.info(f"Fetching QuickBooks accounts for entity {config.entity_id}")
@@ -160,8 +160,8 @@ def qb_transactions(
   """
   from robosystems.adapters.quickbooks import QBClient
   from robosystems.operations.connection_service import (
-    ConnectionService,
     SYSTEM_USER_ID,
+    ConnectionService,
   )
 
   context.log.info(f"Fetching QuickBooks transactions for entity {config.entity_id}")
@@ -268,8 +268,8 @@ def qb_graph_data(
   """
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.operations.connection_service import (
-    ConnectionService,
     SYSTEM_USER_ID,
+    ConnectionService,
   )
   from robosystems.operations.graph.credit_service import CreditService
 

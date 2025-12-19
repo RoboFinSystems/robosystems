@@ -4,6 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from robosystems.middleware.graph.types import NodeType, RepositoryType
@@ -194,11 +195,10 @@ class TestMain:
         "shared",  # Invalid: writer nodes must use entity type
       ]
 
-      with patch.object(sys, "argv", test_args):
-        with pytest.raises(SystemExit):
-          from robosystems.graph_api.main import main
+      with patch.object(sys, "argv", test_args), pytest.raises(SystemExit):
+        from robosystems.graph_api.main import main
 
-          main()
+        main()
 
   def test_main_invalid_shared_node_repository_combination(self):
     """Test main with invalid shared node/repository type combination."""
@@ -213,11 +213,10 @@ class TestMain:
         "entity",  # Invalid: shared nodes must use shared type
       ]
 
-      with patch.object(sys, "argv", test_args):
-        with pytest.raises(SystemExit):
-          from robosystems.graph_api.main import main
+      with patch.object(sys, "argv", test_args), pytest.raises(SystemExit):
+        from robosystems.graph_api.main import main
 
-          main()
+        main()
 
   @patch("robosystems.graph_api.main.uvicorn.run")
   @patch("robosystems.graph_api.main.create_app")

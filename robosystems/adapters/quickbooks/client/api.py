@@ -1,17 +1,19 @@
-import pandas as pd
+from typing import Any
+
 import numpy as np
+import pandas as pd
 from intuitlib.client import AuthClient
 from quickbooks import QuickBooks
-from robosystems.logger import logger
-from typing import Dict, Any
+
 from robosystems.config import env
+from robosystems.logger import logger
 
 
 class QBClient:
   def __init__(
     self,
     realm_id: str,
-    qb_credentials: Dict[str, Any],
+    qb_credentials: dict[str, Any],
   ):
     """
     Initializes the QuickBooks client using the new connection credentials system.

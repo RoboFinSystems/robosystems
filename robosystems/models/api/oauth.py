@@ -1,8 +1,9 @@
 """Shared OAuth models for connection providers."""
 
-from typing import Literal
-from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class OAuthProvider(BaseModel):

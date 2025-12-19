@@ -11,12 +11,13 @@ This function handles the 4-step rotation process:
 4. finishSecret - Complete the rotation
 """
 
-import boto3
 import json
 import logging
 import os
+from typing import Any
+
+import boto3
 import psycopg2
-from typing import Dict, Any
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -26,7 +27,7 @@ secrets_client = boto3.client("secretsmanager")
 rds_client = boto3.client("rds")
 
 
-def get_database_connection_info(secret_arn: str, environment: str) -> Dict[str, Any]:
+def get_database_connection_info(secret_arn: str, environment: str) -> dict[str, Any]:
   """
   Get database connection information based on the secret ARN and environment.
 
@@ -62,7 +63,7 @@ def get_database_connection_info(secret_arn: str, environment: str) -> Dict[str,
         logger.info(f"Found Aurora cluster: {cluster['DBClusterIdentifier']}")
         return db_info
   except Exception as e:
-    logger.warning(f"Error checking Aurora clusters: {str(e)}")
+    logger.warning(f"Error checking Aurora clusters: {e!s}")
 
   # Try RDS instances
   try:
@@ -77,7 +78,7 @@ def get_database_connection_info(secret_arn: str, environment: str) -> Dict[str,
         logger.info(f"Found RDS instance: {instance['DBInstanceIdentifier']}")
         return db_info
   except Exception as e:
-    logger.warning(f"Error checking RDS instances: {str(e)}")
+    logger.warning(f"Error checking RDS instances: {e!s}")
 
   raise ValueError(
     f"Could not find database instance for environment: {env_from_secret}"
@@ -94,7 +95,7 @@ def create_new_password() -> str:
   return response["RandomPassword"]
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> None:
+def lambda_handler(event: dict[str, Any], context: Any) -> None:
   """
   AWS Lambda handler for Secrets Manager rotation.
 
@@ -237,7 +238,7 @@ def set_secret(arn: str, token: str, environment: str) -> None:
     )
 
   except Exception as e:
-    logger.error(f"setSecret: Unable to set password: {str(e)}")
+    logger.error(f"setSecret: Unable to set password: {e!s}")
     raise
   finally:
     if conn:
@@ -282,7 +283,7 @@ def test_secret(arn: str, token: str, environment: str) -> None:
     )
 
   except Exception as e:
-    logger.error(f"testSecret: Unable to connect with pending secret: {str(e)}")
+    logger.error(f"testSecret: Unable to connect with pending secret: {e!s}")
     raise
   finally:
     if conn:

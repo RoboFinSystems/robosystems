@@ -6,12 +6,14 @@ This module provides LadybugDB database integration for the application.
 
 import re
 import time
-from typing import List, Dict, Any, Optional
 from pathlib import Path
+from typing import Any
+
 import real_ladybug as lbug
-from robosystems.graph_api.interfaces import GraphEngineInterface, GraphOperation
-from robosystems.logger import logger, log_db_query, log_app_error
+
 from robosystems.config import env
+from robosystems.graph_api.interfaces import GraphEngineInterface, GraphOperation
+from robosystems.logger import log_app_error, log_db_query, logger
 
 
 class ConnectionError(Exception):
@@ -110,8 +112,8 @@ class Engine(GraphEngineInterface):
       # Don't raise - timeout is non-critical
 
   def execute_query(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """
     Execute a single Cypher query and return results.
 
@@ -218,7 +220,7 @@ class Engine(GraphEngineInterface):
     else:
       return "OTHER"
 
-  def _validate_parameters(self, params: Dict[str, Any]) -> None:
+  def _validate_parameters(self, params: dict[str, Any]) -> None:
     """
     Validate query parameters for graph databases's native parameter binding.
 
@@ -291,8 +293,8 @@ class Engine(GraphEngineInterface):
       validate_value(key, value)
 
   def execute_single(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> Optional[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> dict[str, Any] | None:
     """
     Execute a query expecting a single result.
 
@@ -311,8 +313,8 @@ class Engine(GraphEngineInterface):
     return results[0]
 
   def execute_transaction(
-    self, operations: List[GraphOperation]
-  ) -> List[List[Dict[str, Any]]]:
+    self, operations: list[GraphOperation]
+  ) -> list[list[dict[str, Any]]]:
     """
     Execute multiple operations in a single transaction.
 
@@ -345,7 +347,7 @@ class Engine(GraphEngineInterface):
       # Note: LadybugDB doesn't support rollback like traditional databases
       raise
 
-  def health_check(self) -> Dict[str, Any]:
+  def health_check(self) -> dict[str, Any]:
     """
     Perform a health check on the database connection.
 
@@ -385,7 +387,7 @@ class Engine(GraphEngineInterface):
   # NOTE: _format_query_with_params method removed - we now use LadybugDB's native parameter binding
   # which is much safer than manual string substitution and prevents injection attacks
 
-  def _convert_result_to_dict_list(self, result) -> List[Dict[str, Any]]:
+  def _convert_result_to_dict_list(self, result) -> list[dict[str, Any]]:
     """
     Convert graph query result to list of dictionaries.
 
@@ -439,7 +441,7 @@ class Repository:
     self,
     database_path: str,
     read_only: bool = False,
-    validate_schema: Optional[bool] = None,
+    validate_schema: bool | None = None,
   ):
     """
     Initialize graph repository.
@@ -473,8 +475,8 @@ class Repository:
     self.engine.set_query_timeout(timeout_ms)
 
   def execute_query(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """Execute a single Cypher query and return results."""
     if (
       self.validate_schema
@@ -487,18 +489,18 @@ class Repository:
     return self.engine.execute_query(cypher, params)
 
   def execute_single(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> Optional[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> dict[str, Any] | None:
     """Execute a query expecting a single result."""
     return self.engine.execute_single(cypher, params)
 
   def execute_transaction(
-    self, operations: List[GraphOperation]
-  ) -> List[List[Dict[str, Any]]]:
+    self, operations: list[GraphOperation]
+  ) -> list[list[dict[str, Any]]]:
     """Execute multiple operations in a single transaction."""
     return self.engine.execute_transaction(operations)
 
-  def count_nodes(self, label: str, filters: Optional[Dict[str, Any]] = None) -> int:
+  def count_nodes(self, label: str, filters: dict[str, Any] | None = None) -> int:
     """Count nodes with optional filters."""
     where_clause = ""
     params = {}
@@ -515,7 +517,7 @@ class Repository:
     result = self.execute_single(cypher, params)
     return result["count"] if result else 0
 
-  def node_exists(self, label: str, filters: Dict[str, Any]) -> bool:
+  def node_exists(self, label: str, filters: dict[str, Any]) -> bool:
     """Check if a node exists with given filters."""
     try:
       return self.count_nodes(label, filters) > 0
@@ -530,12 +532,12 @@ class Repository:
       raise
 
   def execute(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """Alias for execute_query for backward compatibility."""
     return self.execute_query(cypher, params)
 
-  def health_check(self) -> Dict[str, Any]:
+  def health_check(self) -> dict[str, Any]:
     """Perform a health check on the database connection."""
     return self.engine.health_check()
 

@@ -11,20 +11,20 @@ This model tracks comprehensive usage metrics for:
 100% decoupled from subscription-based pricing logic.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Optional, Dict, Any
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
+  Boolean,
   Column,
-  String,
   DateTime,
   Float,
-  Integer,
   Index,
+  Integer,
   Numeric,
-  Boolean,
+  String,
   Text,
 )
 from sqlalchemy.exc import SQLAlchemyError
@@ -136,7 +136,7 @@ class GraphUsage(Model):
 
   # Timing
   recorded_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True
+    DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True
   )
 
   # Billing period tracking
@@ -169,13 +169,13 @@ class GraphUsage(Model):
     graph_tier: str,
     storage_bytes: float,
     session: Session,
-    storage_delta_gb: Optional[float] = None,
-    files_storage_gb: Optional[float] = None,
-    tables_storage_gb: Optional[float] = None,
-    graphs_storage_gb: Optional[float] = None,
-    subgraphs_storage_gb: Optional[float] = None,
-    instance_id: Optional[str] = None,
-    region: Optional[str] = None,
+    storage_delta_gb: float | None = None,
+    files_storage_gb: float | None = None,
+    tables_storage_gb: float | None = None,
+    graphs_storage_gb: float | None = None,
+    subgraphs_storage_gb: float | None = None,
+    instance_id: str | None = None,
+    region: str | None = None,
     auto_commit: bool = True,
   ) -> "GraphUsage":
     """
@@ -199,7 +199,7 @@ class GraphUsage(Model):
     Returns:
         Created usage record
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     storage_gb = storage_bytes / (1024**3)
 
     usage_record = cls(
@@ -245,16 +245,16 @@ class GraphUsage(Model):
     credits_consumed: Decimal,
     base_credit_cost: Decimal,
     session: Session,
-    duration_ms: Optional[int] = None,
+    duration_ms: int | None = None,
     cached_operation: bool = False,
-    status_code: Optional[int] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    status_code: int | None = None,
+    metadata: dict[str, Any] | None = None,
     auto_commit: bool = True,
   ) -> "GraphUsage":
     """Record credit consumption event."""
     import json
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     usage_record = cls(
       user_id=user_id,
@@ -295,22 +295,22 @@ class GraphUsage(Model):
     graph_tier: str,
     operation_type: str,
     session: Session,
-    duration_ms: Optional[int] = None,
-    status_code: Optional[int] = None,
-    request_size_kb: Optional[float] = None,
-    response_size_kb: Optional[float] = None,
+    duration_ms: int | None = None,
+    status_code: int | None = None,
+    request_size_kb: float | None = None,
+    response_size_kb: float | None = None,
     cached_operation: bool = False,
-    user_agent: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    error_type: Optional[str] = None,
-    error_message: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+    error_type: str | None = None,
+    error_message: str | None = None,
+    metadata: dict[str, Any] | None = None,
     auto_commit: bool = True,
   ) -> "GraphUsage":
     """Record API usage event."""
     import json
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Determine event type based on operation
     event_type_map = {
@@ -367,7 +367,7 @@ class GraphUsage(Model):
     year: int,
     month: int,
     session: Session,
-  ) -> Dict[str, Dict]:
+  ) -> dict[str, dict]:
     """Get monthly storage summary for billing."""
     # Get storage snapshots for the month
     records = (
@@ -438,7 +438,7 @@ class GraphUsage(Model):
     year: int,
     month: int,
     session: Session,
-  ) -> Dict[str, Dict]:
+  ) -> dict[str, dict]:
     """Get monthly credit consumption summary."""
     # Get credit consumption records for the month
     records = (
@@ -520,9 +520,9 @@ class GraphUsage(Model):
     graph_id: str,
     session: Session,
     days: int = 30,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """Get performance insights for cost optimization."""
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_date = datetime.now(UTC) - timedelta(days=days)
 
     # Get performance data
     records = (
@@ -606,7 +606,7 @@ class GraphUsage(Model):
     }
 
   @classmethod
-  def _calculate_performance_score(cls, operation_stats: Dict) -> int:
+  def _calculate_performance_score(cls, operation_stats: dict) -> int:
     """Calculate performance score (0-100) based on operation stats."""
     if not operation_stats:
       return 100
@@ -642,9 +642,9 @@ class GraphUsage(Model):
     older_than_days: int = 365,
     keep_monthly_summaries: bool = True,
     auto_commit: bool = True,
-  ) -> Dict[str, int]:
+  ) -> dict[str, int]:
     """Clean up old usage records with optional summary preservation."""
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    cutoff_date = datetime.now(UTC) - timedelta(days=older_than_days)
 
     # Count records to be deleted
     total_count = session.query(cls).filter(cls.recorded_at < cutoff_date).count()
@@ -684,7 +684,7 @@ class GraphUsage(Model):
       "total_processed": total_count,
     }
 
-  def get_metadata(self) -> Dict[str, Any]:
+  def get_metadata(self) -> dict[str, Any]:
     """Parse metadata JSON."""
     if self.event_metadata is None:
       return {}
@@ -696,7 +696,7 @@ class GraphUsage(Model):
     except Exception:
       return {}
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for API responses."""
     return {
       "id": self.id,

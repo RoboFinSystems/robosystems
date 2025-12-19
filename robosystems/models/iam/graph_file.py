@@ -1,15 +1,16 @@
-from datetime import datetime, timezone
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Optional
 
 from sqlalchemy import (
   Column,
-  String,
   DateTime,
   ForeignKey,
-  Integer,
   Index,
+  Integer,
+  String,
 )
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
@@ -62,7 +63,7 @@ class GraphFile(Base):
 
   created_at = Column(
     DateTime(timezone=True),
-    default=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
     nullable=False,
   )
   uploaded_at = Column(DateTime(timezone=True), nullable=True)
@@ -84,7 +85,7 @@ class GraphFile(Base):
     file_size_bytes: int,
     upload_method: str,
     session: Session,
-    row_count: Optional[int] = None,
+    row_count: int | None = None,
     upload_status: str = "pending",
     commit: bool = True,
   ) -> "GraphFile":
@@ -122,7 +123,7 @@ class GraphFile(Base):
 
   def mark_uploaded(self, session: Session) -> None:
     self.upload_status = "completed"
-    self.uploaded_at = datetime.now(timezone.utc)
+    self.uploaded_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
 
@@ -132,11 +133,11 @@ class GraphFile(Base):
     session.refresh(self)
 
   def mark_duckdb_staged(
-    self, session: Session, row_count: Optional[int] = None
+    self, session: Session, row_count: int | None = None
   ) -> None:
     """Mark file as successfully staged in DuckDB."""
     self.duckdb_status = "staged"
-    self.duckdb_staged_at = datetime.now(timezone.utc)
+    self.duckdb_staged_at = datetime.now(UTC)
     if row_count is not None:
       self.duckdb_row_count = row_count
     session.commit()
@@ -151,7 +152,7 @@ class GraphFile(Base):
   def mark_graph_ingested(self, session: Session) -> None:
     """Mark file as successfully ingested to graph database."""
     self.graph_status = "ingested"
-    self.graph_ingested_at = datetime.now(timezone.utc)
+    self.graph_ingested_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
 

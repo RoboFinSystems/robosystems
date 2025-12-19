@@ -1,15 +1,15 @@
 """OrgLimits model - Safety limits for organization resource provisioning."""
 
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
-from ...database import Model
 from ...config import env
+from ...database import Model
 
 
 class OrgLimits(Model):
@@ -29,12 +29,12 @@ class OrgLimits(Model):
   max_graphs = Column(Integer, nullable=False, default=env.ORG_GRAPHS_DEFAULT_LIMIT)
 
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -105,9 +105,9 @@ class OrgLimits(Model):
 
   def get_current_usage(self, session: Session) -> dict:
     """Get current usage statistics for the organization."""
+    from .graph import Graph
     from .graph_user import GraphUser
     from .org_user import OrgUser
-    from .graph import Graph
 
     org_user_ids = [
       ou.user_id
@@ -141,7 +141,7 @@ class OrgLimits(Model):
         session: Database session
     """
     self.max_graphs = new_limit
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     try:
       session.commit()

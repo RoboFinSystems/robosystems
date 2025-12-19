@@ -1,8 +1,9 @@
 """Comprehensive tests for the User model."""
 
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
+
 import pytest
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.models.iam import User
@@ -68,8 +69,8 @@ class TestUserModel:
 
     assert isinstance(created, datetime)
     assert isinstance(updated, datetime)
-    assert created.tzinfo == timezone.utc
-    assert updated.tzinfo == timezone.utc
+    assert created.tzinfo == UTC
+    assert updated.tzinfo == UTC
 
   def test_get_by_id(self, db_session):
     """Test getting user by ID."""
@@ -167,7 +168,7 @@ class TestUserModel:
   def test_get_all_users(self, db_session):
     """Test getting all users."""
     # Clean up existing users to ensure test isolation
-    from robosystems.models.iam import GraphUser, Graph, GraphCredits
+    from robosystems.models.iam import Graph, GraphCredits, GraphUser
     from robosystems.models.iam.graph_credits import GraphCreditTransaction
     from robosystems.models.iam.graph_usage import GraphUsage
 
@@ -219,10 +220,10 @@ class TestUserModel:
     try:
       from robosystems.models.billing import (
         BillingAuditLog,
-        BillingInvoiceLineItem,
-        BillingInvoice,
-        BillingSubscription,
         BillingCustomer,
+        BillingInvoice,
+        BillingInvoiceLineItem,
+        BillingSubscription,
       )
 
       db_session.query(BillingAuditLog).delete()
@@ -235,7 +236,7 @@ class TestUserModel:
 
     # Delete org-related tables before deleting users
     try:
-      from robosystems.models.iam import OrgUser, Org, OrgLimits
+      from robosystems.models.iam import Org, OrgLimits, OrgUser
 
       db_session.query(OrgUser).delete()
       db_session.query(OrgLimits).delete()

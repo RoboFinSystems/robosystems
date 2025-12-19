@@ -3,8 +3,9 @@ Tests for multitenant utility functions.
 """
 
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from robosystems.middleware.graph.utils import MultiTenantUtils
 

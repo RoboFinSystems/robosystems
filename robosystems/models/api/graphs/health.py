@@ -1,6 +1,6 @@
 """Graph query API models."""
 
-from typing import Optional, List
+
 from pydantic import BaseModel, Field
 
 
@@ -17,7 +17,7 @@ class DatabaseHealthResponse(BaseModel):
   uptime_seconds: float = Field(
     ..., description="Database uptime in seconds", examples=[3600.5]
   )
-  last_query_time: Optional[str] = Field(
+  last_query_time: str | None = Field(
     None,
     description="Timestamp of last query execution",
     examples=["2024-01-15T10:30:00Z"],
@@ -31,13 +31,13 @@ class DatabaseHealthResponse(BaseModel):
   error_rate_24h: float = Field(
     ..., description="Error rate in last 24 hours (percentage)", examples=[0.5]
   )
-  memory_usage_mb: Optional[float] = Field(
+  memory_usage_mb: float | None = Field(
     None, description="Memory usage in MB", examples=[512.3]
   )
-  storage_usage_mb: Optional[float] = Field(
+  storage_usage_mb: float | None = Field(
     None, description="Storage usage in MB", examples=[1024.7]
   )
-  alerts: List[str] = Field(
+  alerts: list[str] = Field(
     default_factory=list,
     description="Active alerts or warnings",
     examples=[["High memory usage detected"]],
@@ -62,10 +62,10 @@ class DatabaseInfoResponse(BaseModel):
   relationship_count: int = Field(
     ..., description="Total number of relationships", examples=[2340]
   )
-  node_labels: List[str] = Field(
+  node_labels: list[str] = Field(
     ..., description="List of node labels", examples=[["Entity", "Report", "Fact"]]
   )
-  relationship_types: List[str] = Field(
+  relationship_types: list[str] = Field(
     ...,
     description="List of relationship types",
     examples=[["HAS_REPORT", "REPORTED_IN", "HAS_ELEMENT"]],
@@ -76,7 +76,7 @@ class DatabaseInfoResponse(BaseModel):
   last_modified: str = Field(
     ..., description="Last modification timestamp", examples=["2024-01-15T10:30:00Z"]
   )
-  schema_version: Optional[str] = Field(
+  schema_version: str | None = Field(
     None, description="Schema version", examples=["1.0.0"]
   )
   read_only: bool = Field(
@@ -85,6 +85,6 @@ class DatabaseInfoResponse(BaseModel):
   backup_count: int = Field(
     ..., description="Number of available backups", examples=[5]
   )
-  last_backup_date: Optional[str] = Field(
+  last_backup_date: str | None = Field(
     None, description="Date of last backup", examples=["2024-01-15T09:00:00Z"]
   )

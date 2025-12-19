@@ -1,9 +1,10 @@
-import pytest
 from unittest.mock import Mock
+
+import pytest
 from sqlalchemy.orm import Session
 
-from robosystems.operations.graph.table_service import TableService, infer_table_type
 from robosystems.models.iam import GraphTable
+from robosystems.operations.graph.table_service import TableService, infer_table_type
 
 
 class TestInferTableType:
@@ -104,9 +105,9 @@ class TestTableServiceCreateTablesFromSchema:
     assert len(result) == 3
 
     create_calls = GraphTable.create.call_args_list
-    relationship_call = [
+    relationship_call = next(
       call for call in create_calls if call[1]["table_type"] == "relationship"
-    ][0]
+    )
 
     assert relationship_call[1]["table_name"] == "PERSON_WORKS_FOR_COMPANY"
     assert relationship_call[1]["table_type"] == "relationship"

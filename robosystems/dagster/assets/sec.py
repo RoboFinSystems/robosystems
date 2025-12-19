@@ -228,9 +228,7 @@ def sec_raw_filings(
     for _, company in companies_raw.items():
       ticker = company.get("ticker", "")
       cik = str(company.get("cik_str", company.get("cik", "")))
-      if config.tickers and ticker in config.tickers:
-        companies.append({"cik": cik, "ticker": ticker})
-      elif config.ciks and cik in config.ciks:
+      if (config.tickers and ticker in config.tickers) or (config.ciks and cik in config.ciks):
         companies.append({"cik": cik, "ticker": ticker})
   else:
     # Full mode - get all companies
@@ -278,8 +276,8 @@ def sec_raw_filings(
 
             if xbrl_zip:
               # Save to S3 as bytes
-              from io import BytesIO
               import zipfile
+              from io import BytesIO
 
               buffer = BytesIO()
               with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -399,10 +397,10 @@ def sec_batch_process(
   total_files = 0
   total_errors = 0
 
-  import tempfile
-  from io import BytesIO
-  import zipfile
   import os
+  import tempfile
+  import zipfile
+  from io import BytesIO
 
   for cik, filings in filings_by_cik.items():
     for file_info in filings:
@@ -648,10 +646,10 @@ def sec_process_filing(
   # Download raw ZIP
   raw_key = f"raw/year={year}/{cik}/{accession}.zip"
 
-  import tempfile
-  from io import BytesIO
-  import zipfile
   import os
+  import tempfile
+  import zipfile
+  from io import BytesIO
 
   try:
     buffer = BytesIO()
@@ -791,6 +789,7 @@ def sec_duckdb_staging(
       MaterializeResult with staging statistics
   """
   import asyncio
+
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
 
   context.log.info("Creating DuckDB staging tables from processed files")
@@ -860,6 +859,7 @@ def sec_graph_materialized(
       MaterializeResult with materialization statistics
   """
   import asyncio
+
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
 
   context.log.info(f"Materializing to graph: {config.graph_id}")

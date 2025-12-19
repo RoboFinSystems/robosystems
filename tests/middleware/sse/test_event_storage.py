@@ -1,14 +1,15 @@
 """Tests for SSE event storage module."""
 
 import json
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
 
 from robosystems.middleware.sse.event_storage import (
   EventType,
+  OperationMetadata,
   OperationStatus,
   SSEEvent,
-  OperationMetadata,
   SSEEventStorage,
   get_event_storage,
 )

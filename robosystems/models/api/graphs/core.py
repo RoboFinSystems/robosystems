@@ -1,7 +1,7 @@
 """Graph core API models - graph creation and metadata."""
 
-from typing import Optional, List
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .schema import CustomSchemaDefinition
 
@@ -12,17 +12,17 @@ class GraphMetadata(BaseModel):
   graph_name: str = Field(
     ..., description="Display name for the graph", examples=["Acme Consulting LLC"]
   )
-  description: Optional[str] = Field(
+  description: str | None = Field(
     None,
     description="Optional description",
     examples=["Professional consulting services with full accounting integration"],
   )
-  schema_extensions: List[str] = Field(
+  schema_extensions: list[str] = Field(
     default_factory=list,
     description="Schema extensions to enable",
     examples=[["roboledger"]],
   )
-  tags: List[str] = Field(
+  tags: list[str] = Field(
     default_factory=list,
     description="Tags for organizing graphs",
     examples=[["consulting", "professional-services"]],
@@ -78,15 +78,15 @@ class InitialEntityData(BaseModel):
 
   name: str = Field(..., min_length=1, max_length=255, description="Entity name")
   uri: str = Field(..., min_length=1, description="Entity website or URI")
-  cik: Optional[str] = Field(None, description="CIK number for SEC filings")
-  sic: Optional[str] = Field(None, description="SIC code")
-  sic_description: Optional[str] = Field(None, description="SIC description")
-  category: Optional[str] = Field(None, description="Business category")
-  state_of_incorporation: Optional[str] = Field(
+  cik: str | None = Field(None, description="CIK number for SEC filings")
+  sic: str | None = Field(None, description="SIC code")
+  sic_description: str | None = Field(None, description="SIC description")
+  category: str | None = Field(None, description="Business category")
+  state_of_incorporation: str | None = Field(
     None, description="State of incorporation"
   )
-  fiscal_year_end: Optional[str] = Field(None, description="Fiscal year end (MMDD)")
-  ein: Optional[str] = Field(None, description="Employer Identification Number")
+  fiscal_year_end: str | None = Field(None, description="Fiscal year end (MMDD)")
+  ein: str | None = Field(None, description="Employer Identification Number")
 
 
 class CreateGraphRequest(BaseModel):
@@ -252,11 +252,11 @@ class CreateGraphRequest(BaseModel):
     description="Instance tier: ladybug-standard, ladybug-large, ladybug-xlarge, neo4j-community-large, neo4j-enterprise-xlarge",
     pattern="^(ladybug-standard|ladybug-large|ladybug-xlarge|neo4j-community-large|neo4j-enterprise-xlarge)$",
   )
-  custom_schema: Optional[CustomSchemaDefinition] = Field(
+  custom_schema: CustomSchemaDefinition | None = Field(
     None,
     description="Custom schema definition to apply. If provided, creates a generic custom graph. If omitted, creates an entity graph using schema_extensions.",
   )
-  initial_entity: Optional[InitialEntityData] = Field(
+  initial_entity: InitialEntityData | None = Field(
     None,
     description="Optional initial entity to create in the graph. If provided with entity graph, populates the first entity node.",
   )
@@ -264,7 +264,7 @@ class CreateGraphRequest(BaseModel):
     default=True,
     description="Whether to create the entity node and upload initial data. Only applies when initial_entity is provided. Set to False to create graph without populating entity data (useful for file-based ingestion workflows).",
   )
-  tags: List[str] = Field(
+  tags: list[str] = Field(
     default_factory=list,
     description="Optional tags for organization",
     max_length=10,

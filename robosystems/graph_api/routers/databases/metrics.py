@@ -5,14 +5,15 @@ This module provides endpoints for retrieving metrics for individual databases,
 primarily used for billing and monitoring purposes.
 """
 
-from typing import Dict, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi import status as http_status
 
-from robosystems.graph_api.core.utils import validate_database_name
+from robosystems.config import env
 from robosystems.graph_api.backends import get_backend
 from robosystems.graph_api.core.ladybug import get_ladybug_service
-from robosystems.config import env
+from robosystems.graph_api.core.utils import validate_database_name
 from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases", tags=["Metrics"])
@@ -34,7 +35,7 @@ async def get_database_metrics(
   graph_id: str = Path(..., description="Graph database identifier"),
   backend=Depends(get_backend),
   service=Depends(_get_service_for_metrics),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Get metrics for a specific database.
 
@@ -93,7 +94,7 @@ async def get_database_metrics(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to get metrics for database {graph_id}: {str(e)}")
+    logger.error(f"Failed to get metrics for database {graph_id}: {e!s}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to retrieve database metrics",

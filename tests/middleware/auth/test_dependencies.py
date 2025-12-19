@@ -6,22 +6,23 @@ including JWT token verification, user authentication, graph access validation,
 and repository access controls.
 """
 
-import pytest
 from unittest.mock import Mock, patch
-from fastapi import HTTPException, status, Request
+
 import jwt
+import pytest
+from fastapi import HTTPException, Request, status
 
 from robosystems.middleware.auth.dependencies import (
-  _validate_cached_user_data,
+  API_KEY_HEADER,
   _create_user_from_cache,
-  verify_jwt_token,
-  get_optional_user,
+  _validate_cached_user_data,
   get_current_user,
   get_current_user_sse,
   get_current_user_with_graph,
   get_current_user_with_repository_access,
+  get_optional_user,
   get_repository_user_dependency,
-  API_KEY_HEADER,
+  verify_jwt_token,
 )
 from robosystems.models.iam import User
 
@@ -839,26 +840,25 @@ class TestGetCurrentUserWithGraph:
     # Mock shared repository detection and access validation
     with patch(
       "robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository"
-    ) as mock_is_shared:
-      with patch(
-        "robosystems.middleware.graph.utils.MultiTenantUtils.validate_repository_access"
-      ) as mock_validate_repo:
-        mock_is_shared.return_value = True
-        mock_validate_repo.return_value = True
+    ) as mock_is_shared, patch(
+      "robosystems.middleware.graph.utils.MultiTenantUtils.validate_repository_access"
+    ) as mock_validate_repo:
+      mock_is_shared.return_value = True
+      mock_validate_repo.return_value = True
 
-        result = await get_current_user_with_graph(
-          self.mock_request,
-          shared_repo_id,
-          api_key=None,
-        )
+      result = await get_current_user_with_graph(
+        self.mock_request,
+        shared_repo_id,
+        api_key=None,
+      )
 
-        assert result == mock_user
-        mock_is_shared.assert_called_once_with(shared_repo_id)
-        mock_validate_repo.assert_called_once_with(shared_repo_id, user_id, "read")
-        mock_cache.cache_jwt_graph_access.assert_called_once_with(
-          str(user_id), shared_repo_id, True
-        )
-        mock_audit_logger.log_auth_success.assert_called_once()
+      assert result == mock_user
+      mock_is_shared.assert_called_once_with(shared_repo_id)
+      mock_validate_repo.assert_called_once_with(shared_repo_id, user_id, "read")
+      mock_cache.cache_jwt_graph_access.assert_called_once_with(
+        str(user_id), shared_repo_id, True
+      )
+      mock_audit_logger.log_auth_success.assert_called_once()
 
 
 class TestRepositoryAccess:

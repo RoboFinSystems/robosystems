@@ -9,14 +9,14 @@ Calculates storage breakdown by type:
 """
 
 import logging
-from typing import Dict
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
-from ...models.iam import GraphUser, GraphFile, GraphTable
 from robosystems.operations.aws.s3 import S3Client
+
+from ...models.iam import GraphFile, GraphTable, GraphUser
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class StorageCalculator:
     self.session = session
     self.s3_client = S3Client()
 
-  def calculate_graph_storage(self, graph_id: str, user_id: str) -> Dict[str, Decimal]:
+  def calculate_graph_storage(self, graph_id: str, user_id: str) -> dict[str, Decimal]:
     """
     Calculate total storage for a graph with breakdown by type.
 
@@ -176,7 +176,7 @@ class StorageCalculator:
     """
     return 0
 
-  def calculate_all_user_graphs(self, user_id: str) -> Dict[str, Dict[str, Decimal]]:
+  def calculate_all_user_graphs(self, user_id: str) -> dict[str, dict[str, Decimal]]:
     """
     Calculate storage for all graphs owned by a user.
 
@@ -210,7 +210,7 @@ class StorageCalculator:
 
 def calculate_storage_for_graph(
   graph_id: str, user_id: str, session: Session
-) -> Dict[str, Decimal]:
+) -> dict[str, Decimal]:
   """
   Convenience function to calculate storage for a single graph.
 

@@ -2,27 +2,28 @@
 OAuth endpoints for connection authentication.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.operations.connection_service import ConnectionService
 from robosystems.database import get_db_session
 from robosystems.logger import logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
-from robosystems.models.api.oauth import (
-  OAuthInitRequest,
-  OAuthInitResponse,
-  OAuthCallbackRequest,
-)
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
-  ErrorResponse,
   ErrorCode,
+  ErrorResponse,
   create_error_response,
 )
+from robosystems.models.api.oauth import (
+  OAuthCallbackRequest,
+  OAuthInitRequest,
+  OAuthInitResponse,
+)
+from robosystems.models.iam import User
+from robosystems.operations.connection_service import ConnectionService
 
 from .utils import provider_registry
 
@@ -84,7 +85,7 @@ async def init_oauth(
     return OAuthInitResponse(
       auth_url=auth_url,
       state=state,
-      expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+      expires_at=datetime.now(UTC) + timedelta(minutes=10),
     )
 
   except HTTPException:
@@ -93,7 +94,7 @@ async def init_oauth(
     logger.error(f"OAuth initialization failed: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"OAuth initialization failed: {str(e)}",
+      detail=f"OAuth initialization failed: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -233,7 +234,7 @@ async def oauth_callback(
         {
           "status": "connected",
           "realm_id": provider_data.get("realm_id"),
-          "last_auth": datetime.now(timezone.utc).isoformat(),
+          "last_auth": datetime.now(UTC).isoformat(),
         }
       )
 
@@ -290,6 +291,6 @@ async def oauth_callback(
     logger.error(f"OAuth callback failed: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"OAuth callback failed: {str(e)}",
+      detail=f"OAuth callback failed: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )

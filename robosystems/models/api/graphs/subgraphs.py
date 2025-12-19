@@ -4,10 +4,11 @@ This module defines Pydantic models for subgraph-related API requests and respon
 Subgraphs are only available for Enterprise and Premium tier graphs.
 """
 
-from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
-from enum import Enum
 import re
+from datetime import datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class SubgraphType(str, Enum):

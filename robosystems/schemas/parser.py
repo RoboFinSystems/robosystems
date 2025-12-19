@@ -1,21 +1,21 @@
 import re
-from typing import List, Dict, Any
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
 class NodeType:
   name: str
-  properties: List[Dict[str, str]]
+  properties: list[dict[str, str]]
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     return {
       "name": self.name,
       "properties": self.properties,
     }
 
 
-def parse_cypher_schema(ddl: str) -> List[NodeType]:
+def parse_cypher_schema(ddl: str) -> list[NodeType]:
   """
   Parse Cypher DDL to extract node types and their properties.
 
@@ -43,7 +43,7 @@ def parse_cypher_schema(ddl: str) -> List[NodeType]:
   try:
     matches = re.finditer(pattern, ddl, re.IGNORECASE | re.DOTALL)
   except re.error as e:
-    raise ValueError(f"Invalid regex pattern in DDL parsing: {str(e)}") from e
+    raise ValueError(f"Invalid regex pattern in DDL parsing: {e!s}") from e
 
   for match in matches:
     try:
@@ -107,12 +107,12 @@ def parse_cypher_schema(ddl: str) -> List[NodeType]:
       if properties:
         node_types.append(NodeType(name=node_name, properties=properties))
     except (IndexError, AttributeError, ValueError) as e:
-      raise ValueError(f"Failed to parse node type definition: {str(e)}") from e
+      raise ValueError(f"Failed to parse node type definition: {e!s}") from e
 
   return node_types
 
 
-def parse_relationship_types(ddl: str) -> List[str]:
+def parse_relationship_types(ddl: str) -> list[str]:
   """
   Parse Cypher DDL to extract relationship types.
 

@@ -18,16 +18,17 @@ import os
 import shutil
 import tempfile
 import zipfile
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
-from robosystems.operations.aws.s3 import S3BackupAdapter, BackupMetadata
+from robosystems.operations.aws.s3 import BackupMetadata, S3BackupAdapter
+
+from ...logger import logger
 from ...middleware.graph import get_universal_repository
 from ...middleware.graph.utils import MultiTenantUtils
-from ...logger import logger
 
 
 class BackupFormat(str, Enum):
@@ -53,8 +54,8 @@ class BackupJob:
   graph_id: str
   backup_format: BackupFormat = BackupFormat.FULL_DUMP
   backup_type: BackupType = BackupType.FULL
-  timestamp: Optional[datetime] = None
-  schedule: Optional[str] = None
+  timestamp: datetime | None = None
+  schedule: str | None = None
   retention_days: int = 90
   compression: bool = True
   encryption: bool = True
@@ -63,7 +64,7 @@ class BackupJob:
   def __post_init__(self):
     """Validate backup job configuration."""
     if self.timestamp is None:
-      self.timestamp = datetime.now(timezone.utc)
+      self.timestamp = datetime.now(UTC)
 
     if self.backup_format not in BackupFormat:
       raise ValueError(f"Invalid backup_format: {self.backup_format}")
@@ -96,7 +97,7 @@ class RestoreJob:
   create_new_database: bool = True
   drop_existing: bool = False
   verify_after_restore: bool = True
-  progress_tracker: Optional[Any] = None
+  progress_tracker: Any | None = None
 
   def __post_init__(self):
     """Validate restore job configuration."""
@@ -113,7 +114,7 @@ class BackupManager:
 
   def __init__(
     self,
-    s3_adapter: Optional[S3BackupAdapter] = None,
+    s3_adapter: S3BackupAdapter | None = None,
     graph_router=None,
   ):
     """
@@ -145,7 +146,7 @@ class BackupManager:
 
   async def get_backup_download_url(
     self, graph_id: str, backup_id: str, expires_in: int = 3600
-  ) -> Optional[str]:
+  ) -> str | None:
     """
     Get a temporary download URL for a backup.
 
@@ -220,8 +221,8 @@ class BackupManager:
       return None
 
   async def download_backup(
-    self, graph_id: str, backup_id: str, target_format: Optional[str] = None
-  ) -> Tuple[bytes, str, str]:
+    self, graph_id: str, backup_id: str, target_format: str | None = None
+  ) -> tuple[bytes, str, str]:
     """
     Download a backup file with optional format conversion.
 
@@ -269,7 +270,7 @@ class BackupManager:
 
   async def _convert_backup_format(
     self, backup_data: bytes, from_format: str, to_format: str, backup_id: str
-  ) -> Tuple[bytes, str, str]:
+  ) -> tuple[bytes, str, str]:
     """
     Convert backup data between formats.
 
@@ -312,7 +313,7 @@ class BackupManager:
 
   def _get_content_type_and_filename(
     self, format: str, backup_id: str
-  ) -> Tuple[str, str]:
+  ) -> tuple[str, str]:
     """Get appropriate content type and filename for backup format."""
     format_map = {
       "csv": ("text/csv", f"{backup_id}.csv.zip"),
@@ -337,11 +338,12 @@ class BackupManager:
 
   async def _convert_json_to_csv(self, json_file: Path) -> bytes:
     """Convert JSON backup to CSV format."""
-    import pandas as pd
     import json
 
+    import pandas as pd
+
     # Read JSON data
-    with open(json_file, "r") as f:
+    with open(json_file) as f:
       json_data = json.load(f)
 
     # Convert to DataFrame and then CSV
@@ -352,8 +354,8 @@ class BackupManager:
 
   async def _convert_full_dump_to_zip(self, dump_file: Path) -> bytes:
     """Convert full dump to structured ZIP archive."""
-    import zipfile
     import io
+    import zipfile
 
     zip_buffer = io.BytesIO()
 
@@ -363,7 +365,7 @@ class BackupManager:
 
       # Add metadata file
       metadata = {
-        "export_timestamp": datetime.now(timezone.utc).isoformat(),
+        "export_timestamp": datetime.now(UTC).isoformat(),
         "database_type": "ladybug",
         "format": "full_dump",
         "contents": ["database_files", "metadata"],
@@ -498,7 +500,7 @@ class BackupManager:
       logger.error(f"Restore failed for graph '{graph_id}': {e}")
       raise
 
-  async def list_backups(self, graph_id: Optional[str] = None) -> List[Dict[str, Any]]:
+  async def list_backups(self, graph_id: str | None = None) -> list[dict[str, Any]]:
     """
     List available backups.
 
@@ -522,7 +524,7 @@ class BackupManager:
         int: Number of backups deleted
     """
     backups = await self.list_backups(graph_id)
-    cutoff_date = datetime.now(timezone.utc).timestamp() - (retention_days * 24 * 3600)
+    cutoff_date = datetime.now(UTC).timestamp() - (retention_days * 24 * 3600)
 
     deleted_count = 0
     for backup in backups:
@@ -533,7 +535,7 @@ class BackupManager:
           filename = key_parts[-1]
           timestamp_str = filename.split("-")[1].split(".")[0]
           timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S").replace(
-            tzinfo=timezone.utc
+            tzinfo=UTC
           )
 
           success = await self.s3_adapter.delete_backup(
@@ -551,7 +553,7 @@ class BackupManager:
     logger.info(f"Deleted {deleted_count} old backups for graph '{graph_id}'")
     return deleted_count
 
-  async def _get_database_stats(self, graph_id: str) -> Dict[str, Any]:
+  async def _get_database_stats(self, graph_id: str) -> dict[str, Any]:
     """Get database statistics for backup metadata."""
     repository = await get_universal_repository(graph_id, operation_type="read")
 
@@ -574,7 +576,7 @@ class BackupManager:
 
   async def _export_database(
     self, graph_id: str, backup_format: BackupFormat, backup_type: BackupType
-  ) -> Tuple[bytes, str]:
+  ) -> tuple[bytes, str]:
     """
     Export database based on specified format.
 
@@ -594,7 +596,7 @@ class BackupManager:
 
   async def _export_to_csv(
     self, graph_id: str, backup_type: BackupType
-  ) -> Tuple[bytes, str]:
+  ) -> tuple[bytes, str]:
     """Export database to CSV format."""
     logger.info(f"Exporting graph '{graph_id}' to CSV format")
 
@@ -710,7 +712,7 @@ class BackupManager:
 
   async def _export_to_parquet(
     self, graph_id: str, backup_type: BackupType
-  ) -> Tuple[bytes, str]:
+  ) -> tuple[bytes, str]:
     """Export database to Parquet format."""
     logger.info(f"Exporting graph '{graph_id}' to Parquet format")
 
@@ -828,7 +830,7 @@ class BackupManager:
 
   async def _export_to_json(
     self, graph_id: str, backup_type: BackupType
-  ) -> Tuple[bytes, str]:
+  ) -> tuple[bytes, str]:
     """Export database to JSON format."""
     logger.info(f"Exporting graph '{graph_id}' to JSON format")
 
@@ -979,7 +981,7 @@ class BackupManager:
 
   async def _export_full_dump(
     self, graph_id: str, backup_type: BackupType
-  ) -> Tuple[bytes, str]:
+  ) -> tuple[bytes, str]:
     """Export full database dump via Graph API."""
     logger.info(f"Creating full dump for graph '{graph_id}' via Graph API")
 
@@ -1218,7 +1220,7 @@ class BackupManager:
             shutil.move(backup_dir, final_backup_dir)
 
           # Create ZIP archive of the backup
-          timestamp = datetime.now(timezone.utc)
+          timestamp = datetime.now(UTC)
           timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
           system_backup_zip = backup_temp_path / f"system_backup_{timestamp_str}.zip"
 
@@ -1269,9 +1271,9 @@ class BackupManager:
             )
 
       except Exception as e:
-        logger.error(f"Error creating system backup for graph '{graph_id}': {str(e)}")
+        logger.error(f"Error creating system backup for graph '{graph_id}': {e!s}")
         raise RuntimeError(
-          f"Failed to create system backup before restore: {str(e)}. "
+          f"Failed to create system backup before restore: {e!s}. "
           "Aborting restore for safety. Set create_system_backup=False to skip backup and force restore."
         ) from e
 
@@ -1368,7 +1370,7 @@ class BackupManager:
 
   async def export_backup(
     self, backup_metadata: BackupMetadata, export_format: str = "original"
-  ) -> Optional[bytes]:
+  ) -> bytes | None:
     """
     Export backup data for download.
 
@@ -1443,7 +1445,7 @@ class BackupManager:
     )
     return backup_data
 
-  def health_check(self) -> Dict[str, Any]:
+  def health_check(self) -> dict[str, Any]:
     """Perform health check on backup system."""
     s3_health = self.s3_adapter.health_check()
 

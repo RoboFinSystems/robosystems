@@ -5,12 +5,14 @@ Handles all Parquet file I/O operations with schema validation, type fixes,
 and standardized filename generation for XBRL graph data.
 """
 
-import pandas as pd
 from pathlib import Path
-from robosystems.logger import logger
+
+import pandas as pd
+
 from robosystems.adapters.sec.processors.ids import (
   convert_schema_name_to_filename,
 )
+from robosystems.logger import logger
 
 
 class ParquetWriter:

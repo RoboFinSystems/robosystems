@@ -17,14 +17,15 @@ Key features:
 """
 
 import threading
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, Any
-from dataclasses import dataclass
-from contextlib import contextmanager
-from pathlib import Path
 import weakref
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import duckdb
+
 from robosystems.logger import logger
 from robosystems.utils.path_validation import get_duckdb_staging_path
 
@@ -89,8 +90,8 @@ class DuckDBConnectionPool:
       logger.warning(f"Could not create DuckDB staging directory: {e}")
 
     # Thread-safe storage
-    self._pools: Dict[str, Dict[str, DuckDBConnectionInfo]] = {}
-    self._locks: Dict[str, threading.RLock] = {}
+    self._pools: dict[str, dict[str, DuckDBConnectionInfo]] = {}
+    self._locks: dict[str, threading.RLock] = {}
     self._global_lock = threading.RLock()
 
     # Monitoring
@@ -104,8 +105,8 @@ class DuckDBConnectionPool:
     }
 
     # Cleanup tracking
-    self._last_cleanup = datetime.now(timezone.utc)
-    self._last_health_check = datetime.now(timezone.utc)
+    self._last_cleanup = datetime.now(UTC)
+    self._last_health_check = datetime.now(UTC)
 
     # Register cleanup on process exit
     weakref.finalize(self, self._cleanup_all_connections)
@@ -146,7 +147,7 @@ class DuckDBConnectionPool:
       connection_info = self._get_existing_connection(graph_id)
 
       if connection_info and self._is_connection_valid(connection_info):
-        connection_info.last_used = datetime.now(timezone.utc)
+        connection_info.last_used = datetime.now(UTC)
         connection_info.use_count += 1
         self._stats["connections_reused"] += 1
         logger.debug(
@@ -167,7 +168,7 @@ class DuckDBConnectionPool:
         self._locks[graph_id] = threading.RLock()
       return self._locks[graph_id]
 
-  def _get_existing_connection(self, graph_id: str) -> Optional[DuckDBConnectionInfo]:
+  def _get_existing_connection(self, graph_id: str) -> DuckDBConnectionInfo | None:
     """Get an existing connection for a database if available."""
     if graph_id not in self._pools:
       return None
@@ -175,7 +176,7 @@ class DuckDBConnectionPool:
     pool = self._pools[graph_id]
 
     best_connection = None
-    oldest_time = datetime.now(timezone.utc)
+    oldest_time = datetime.now(UTC)
 
     for conn_id, conn_info in pool.items():
       if (
@@ -210,7 +211,7 @@ class DuckDBConnectionPool:
       # Test connection health
       is_healthy = self._test_new_connection(conn)
 
-      now = datetime.now(timezone.utc)
+      now = datetime.now(UTC)
       connection_info = DuckDBConnectionInfo(
         connection=conn,
         database_path=db_path,
@@ -248,7 +249,7 @@ class DuckDBConnectionPool:
       return get_duckdb_staging_path(graph_id, base_path=str(self.base_path))
     except Exception as e:
       logger.error(f"Path validation failed for DuckDB graph_id {graph_id}: {e}")
-      raise ValueError(f"Invalid graph_id: {str(e)}") from e
+      raise ValueError(f"Invalid graph_id: {e!s}") from e
 
   def _configure_connection(self, conn: duckdb.DuckDBPyConnection):
     """Configure a DuckDB connection with extensions and settings."""
@@ -304,13 +305,10 @@ class DuckDBConnectionPool:
 
   def _is_connection_valid(self, connection_info: DuckDBConnectionInfo) -> bool:
     """Check if a connection is still valid."""
-    if datetime.now(timezone.utc) - connection_info.created_at > self.connection_ttl:
+    if datetime.now(UTC) - connection_info.created_at > self.connection_ttl:
       return False
 
-    if not connection_info.is_healthy:
-      return False
-
-    return True
+    return connection_info.is_healthy
 
   def _remove_oldest_connection(self, graph_id: str):
     """Remove the oldest connection from a database pool."""
@@ -320,7 +318,7 @@ class DuckDBConnectionPool:
     pool = self._pools[graph_id]
 
     oldest_conn_id = None
-    oldest_time = datetime.now(timezone.utc)
+    oldest_time = datetime.now(UTC)
 
     for conn_id, conn_info in pool.items():
       if conn_info.created_at < oldest_time:
@@ -356,7 +354,7 @@ class DuckDBConnectionPool:
 
   def _maybe_run_maintenance(self):
     """Run maintenance tasks if needed."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if now - self._last_cleanup > self.cleanup_interval:
       self._cleanup_expired_connections()
@@ -479,7 +477,7 @@ class DuckDBConnectionPool:
         del self._pools[graph_id]
         logger.info(f"Invalidated all DuckDB connections for: {graph_id}")
 
-  def get_stats(self) -> Dict[str, Any]:
+  def get_stats(self) -> dict[str, Any]:
     """Get connection pool statistics."""
     with self._global_lock:
       pool_stats = {}
@@ -566,7 +564,7 @@ class DuckDBConnectionPool:
 
 
 # Global connection pool instance (initialized by the application)
-_duckdb_pool: Optional[DuckDBConnectionPool] = None
+_duckdb_pool: DuckDBConnectionPool | None = None
 
 
 def initialize_duckdb_pool(

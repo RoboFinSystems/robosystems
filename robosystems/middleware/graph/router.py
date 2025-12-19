@@ -16,14 +16,15 @@ Key features:
 - Maintains backward compatibility with existing code
 """
 
-from typing import Dict, Any, Union
+from typing import Any
 
 from robosystems.config import env
-from .types import GraphTier
-from robosystems.logger import logger
 from robosystems.graph_api.client import GraphClient
 from robosystems.graph_api.client.factory import GraphClientFactory
 from robosystems.graph_api.core.ladybug import Repository
+from robosystems.logger import logger
+
+from .types import GraphTier
 
 
 class GraphRouter:
@@ -50,7 +51,7 @@ class GraphRouter:
     graph_id: str,
     operation_type: str = "write",
     tier: GraphTier = GraphTier.LADYBUG_STANDARD,
-  ) -> Union[Repository, Any]:
+  ) -> Repository | Any:
     """
     Get a repository for the specified graph.
 
@@ -92,7 +93,7 @@ class GraphRouter:
 
       return client
 
-  async def get_health_status(self) -> Dict[str, Any]:
+  async def get_health_status(self) -> dict[str, Any]:
     """Get health status of the graph backend."""
     health_status = {"status": "healthy", "backend": {}, "errors": []}
 
@@ -145,7 +146,7 @@ async def get_graph_repository(
   graph_id: str,
   operation_type: str = "write",
   tier: GraphTier = GraphTier.LADYBUG_STANDARD,
-) -> Union[Repository, Any]:
+) -> Repository | Any:
   """
   Get a graph repository for the specified database.
 

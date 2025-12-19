@@ -1,21 +1,22 @@
 """Tests for MCP workspace and data operation tools."""
 
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
 
+import pytest
+
+from robosystems.middleware.mcp.tools.data_tools import (
+  BuildFactGridTool,
+  IngestFileTool,
+  MapElementsTool,
+  MaterializeGraphTool,
+  QueryStagingTool,
+)
 from robosystems.middleware.mcp.tools.workspace import (
   CreateWorkspaceTool,
   DeleteWorkspaceTool,
   ListWorkspacesTool,
   SwitchWorkspaceTool,
-)
-from robosystems.middleware.mcp.tools.data_tools import (
-  BuildFactGridTool,
-  QueryStagingTool,
-  MaterializeGraphTool,
-  MapElementsTool,
-  IngestFileTool,
 )
 
 
@@ -45,7 +46,7 @@ def mock_graph_model():
   graph.graph_id = "kg1234567890abcdef"
   graph.graph_name = "Test Graph"
   graph.parent_graph_id = None
-  graph.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+  graph.created_at = datetime(2025, 1, 1, tzinfo=UTC)
   return graph
 
 
@@ -56,7 +57,7 @@ def mock_subgraph_model():
   subgraph.graph_id = "kg1234567890abcdef_dev"
   subgraph.graph_name = "dev"
   subgraph.parent_graph_id = "kg1234567890abcdef"
-  subgraph.created_at = datetime(2025, 1, 2, tzinfo=timezone.utc)
+  subgraph.created_at = datetime(2025, 1, 2, tzinfo=UTC)
   return subgraph
 
 

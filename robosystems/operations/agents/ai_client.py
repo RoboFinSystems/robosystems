@@ -8,10 +8,9 @@ Production-grade AI client using AWS Bedrock exclusively for:
 """
 
 import json
-from typing import List, Optional
 from dataclasses import dataclass
 
-from robosystems.config import env, AgentConfig, BedrockModel
+from robosystems.config import AgentConfig, BedrockModel, env
 from robosystems.logger import logger
 
 
@@ -27,7 +26,7 @@ class AIResponse:
   model: str
   input_tokens: int
   output_tokens: int
-  stop_reason: Optional[str] = None
+  stop_reason: str | None = None
 
 
 class AIClient:
@@ -87,7 +86,7 @@ class AIClient:
       )
 
   def _get_model_id(
-    self, model: Optional[str] = None, agent_type: Optional[str] = None
+    self, model: str | None = None, agent_type: str | None = None
   ) -> str:
     """
     Get the Bedrock model ID.
@@ -116,12 +115,12 @@ class AIClient:
 
   async def create_message(
     self,
-    messages: List[AIMessage],
-    system: Optional[str] = None,
+    messages: list[AIMessage],
+    system: str | None = None,
     max_tokens: int = 4000,
     temperature: float = 0.7,
-    model: Optional[str] = None,
-    agent_type: Optional[str] = None,
+    model: str | None = None,
+    agent_type: str | None = None,
   ) -> AIResponse:
     """
     Create a message using AWS Bedrock.
@@ -144,8 +143,8 @@ class AIClient:
 
   async def _bedrock_create_message(
     self,
-    messages: List[AIMessage],
-    system: Optional[str],
+    messages: list[AIMessage],
+    system: str | None,
     max_tokens: int,
     temperature: float,
     model: str,

@@ -1,14 +1,14 @@
 """Authentication utilities."""
 
 import hashlib
-from typing import Optional
+
 from sqlalchemy.orm import Session
 
-from ...models.iam import UserAPIKey, User, GraphUser
 from ...database import session
 from ...logger import logger
-from .cache import api_key_cache
+from ...models.iam import GraphUser, User, UserAPIKey
 from ...security import SecurityAuditLogger
+from .cache import api_key_cache
 
 
 def _safe_cache_call(func_name: str, *args, **kwargs):
@@ -24,8 +24,8 @@ def _safe_cache_call(func_name: str, *args, **kwargs):
 
 
 def validate_api_key(
-  api_key: str, db_session: Optional[Session] = None
-) -> Optional[User]:
+  api_key: str, db_session: Session | None = None
+) -> User | None:
   """
   Validate an API key and return the associated user if valid.
   Uses secure bcrypt verification with encrypted cache.
@@ -108,8 +108,8 @@ def validate_api_key(
 
 
 def validate_api_key_with_graph(
-  api_key: str, graph_id: str, db_session: Optional[Session] = None
-) -> Optional[User]:
+  api_key: str, graph_id: str, db_session: Session | None = None
+) -> User | None:
   """
   Validate an API key with graph ID authorization and return the associated user.
   Uses Valkey cache with PostgreSQL fallback for performance.
@@ -255,7 +255,7 @@ def validate_repository_access(
   user: User,
   repository_id: str,
   operation_type: str = "read",
-  db_session: Optional[Session] = None,
+  db_session: Session | None = None,
 ) -> bool:
   """
   Validate repository access for a user using the generic repository access system.

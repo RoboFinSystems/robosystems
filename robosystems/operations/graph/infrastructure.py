@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import boto3
@@ -34,7 +34,9 @@ from robosystems.logger import logger
 
 if TYPE_CHECKING:
   from mypy_boto3_cloudwatch import CloudWatchClient  # type: ignore[import-not-found]
-  from mypy_boto3_dynamodb import DynamoDBServiceResource  # type: ignore[import-not-found]
+  from mypy_boto3_dynamodb import (
+    DynamoDBServiceResource,  # type: ignore[import-not-found]
+  )
   from mypy_boto3_ec2 import EC2Client  # type: ignore[import-not-found]
 
 
@@ -193,7 +195,7 @@ class InstanceMonitor:
     logger.info("Starting instance health check")
 
     result = HealthCheckResult(
-      timestamp=datetime.now(timezone.utc).isoformat(),
+      timestamp=datetime.now(UTC).isoformat(),
     )
 
     try:
@@ -268,7 +270,7 @@ class InstanceMonitor:
             raise
 
       # Update each instance in registry
-      current_time = datetime.now(timezone.utc).isoformat()
+      current_time = datetime.now(UTC).isoformat()
 
       for item in items:
         instance_id = item.get("instance_id")
@@ -419,7 +421,7 @@ class InstanceMonitor:
     logger.info("Starting graph registry cleanup")
 
     result = CleanupResult(
-      timestamp=datetime.now(timezone.utc).isoformat(),
+      timestamp=datetime.now(UTC).isoformat(),
     )
 
     try:
@@ -452,7 +454,7 @@ class InstanceMonitor:
         if status == "deleted" and deleted_at:
           try:
             deleted_time = datetime.fromisoformat(deleted_at.replace("Z", "+00:00"))
-            age_days = (datetime.now(timezone.utc) - deleted_time).days
+            age_days = (datetime.now(UTC) - deleted_time).days
             if age_days > STALE_GRAPH_DAYS:
               should_remove = True
               logger.info(f"Removing graph {graph_id}: deleted {age_days} days ago")
@@ -498,7 +500,7 @@ class InstanceMonitor:
     logger.info("Starting volume registry cleanup")
 
     result = CleanupResult(
-      timestamp=datetime.now(timezone.utc).isoformat(),
+      timestamp=datetime.now(UTC).isoformat(),
     )
 
     try:
@@ -543,7 +545,7 @@ class InstanceMonitor:
         if instance_id == "unattached" and status == "available" and created_at:
           try:
             created_time = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            age_days = (datetime.now(timezone.utc) - created_time).days
+            age_days = (datetime.now(UTC) - created_time).days
             if age_days > STALE_VOLUME_DAYS:
               should_remove = True
               logger.info(
@@ -568,7 +570,7 @@ class InstanceMonitor:
               ExpressionAttributeValues={
                 ":status": new_status,
                 ":instance": "unattached",
-                ":timestamp": datetime.now(timezone.utc).isoformat(),
+                ":timestamp": datetime.now(UTC).isoformat(),
               },
             )
             result.updated_count += 1
@@ -610,7 +612,7 @@ class InstanceMonitor:
     logger.info("Starting Graph metrics collection")
 
     result = MetricsResult(
-      timestamp=datetime.now(timezone.utc).isoformat(),
+      timestamp=datetime.now(UTC).isoformat(),
     )
 
     try:
@@ -639,7 +641,7 @@ class InstanceMonitor:
       total_used = 0
       total_available = 0
       instance_age_buckets = {"new": 0, "stabilizing": 0, "stable": 0}
-      tier_counts = {tier: 0 for tier in TIER_CAPACITY_MAP}
+      tier_counts = dict.fromkeys(TIER_CAPACITY_MAP, 0)
       metrics: list[dict[str, Any]] = []
 
       default_max_dbs = 50
@@ -664,7 +666,7 @@ class InstanceMonitor:
         if created_at:
           try:
             created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            age = datetime.now(timezone.utc) - created_dt
+            age = datetime.now(UTC) - created_dt
             age_hours = age.total_seconds() / 3600
           except Exception:
             pass

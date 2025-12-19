@@ -3,6 +3,7 @@ Integration tests for circuit breaker functionality in LadybugDB client factory.
 """
 
 import asyncio
+
 import pytest
 
 from robosystems.graph_api.client.factory import CircuitBreaker

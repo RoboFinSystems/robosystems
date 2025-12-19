@@ -9,13 +9,13 @@ errors with redis-py clients, while background tasks requires them.
 
 import os
 import ssl
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,
   ValkeyURLBuilder,
-  create_redis_client,
   create_async_redis_client,
+  create_redis_client,
   get_redis_connection_params,
 )
 
@@ -52,48 +52,46 @@ class TestProductionSSLHandling:
     """Test that create_redis_client doesn't include SSL params in URL."""
     with patch.dict(
       os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
-    ):
-      with patch("redis.Redis.from_url") as mock_from_url:
-        mock_client = MagicMock()
-        mock_from_url.return_value = mock_client
+    ), patch("redis.Redis.from_url") as mock_from_url:
+      mock_client = MagicMock()
+      mock_from_url.return_value = mock_client
 
-        create_redis_client(ValkeyDatabase.AUTH_CACHE)
+      create_redis_client(ValkeyDatabase.AUTH_CACHE)
 
-        # Check the URL passed to Redis.from_url
-        call_args = mock_from_url.call_args
-        url = call_args[0][0]
+      # Check the URL passed to Redis.from_url
+      call_args = mock_from_url.call_args
+      url = call_args[0][0]
 
-        # URL should NOT contain SSL params
-        assert "ssl_cert_reqs=CERT_NONE" not in url
+      # URL should NOT contain SSL params
+      assert "ssl_cert_reqs=CERT_NONE" not in url
 
-        # But connection params should include SSL settings
-        kwargs = call_args[1]
-        assert "ssl_cert_reqs" in kwargs
-        assert kwargs["ssl_cert_reqs"] == ssl.CERT_NONE
-        assert kwargs["ssl_check_hostname"] is False
+      # But connection params should include SSL settings
+      kwargs = call_args[1]
+      assert "ssl_cert_reqs" in kwargs
+      assert kwargs["ssl_cert_reqs"] == ssl.CERT_NONE
+      assert kwargs["ssl_check_hostname"] is False
 
   def test_create_async_redis_client_production_no_ssl_in_url(self):
     """Test that create_async_redis_client doesn't include SSL params in URL."""
     with patch.dict(
       os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
-    ):
-      with patch("redis.asyncio.from_url") as mock_from_url:
-        mock_client = MagicMock()
-        mock_from_url.return_value = mock_client
+    ), patch("redis.asyncio.from_url") as mock_from_url:
+      mock_client = MagicMock()
+      mock_from_url.return_value = mock_client
 
-        create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
+      create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
 
-        # Check the URL passed to redis_async.from_url
-        call_args = mock_from_url.call_args
-        url = call_args[0][0]
+      # Check the URL passed to redis_async.from_url
+      call_args = mock_from_url.call_args
+      url = call_args[0][0]
 
-        # URL should NOT contain SSL params
-        assert "ssl_cert_reqs=CERT_NONE" not in url
+      # URL should NOT contain SSL params
+      assert "ssl_cert_reqs=CERT_NONE" not in url
 
-        # But connection params should include SSL settings
-        kwargs = call_args[1]
-        assert "ssl_cert_reqs" in kwargs
-        assert kwargs["ssl_cert_reqs"] == ssl.CERT_NONE
+      # But connection params should include SSL settings
+      kwargs = call_args[1]
+      assert "ssl_cert_reqs" in kwargs
+      assert kwargs["ssl_cert_reqs"] == ssl.CERT_NONE
 
   def test_get_redis_connection_params_production(self):
     """Test that connection params include SSL settings in production."""

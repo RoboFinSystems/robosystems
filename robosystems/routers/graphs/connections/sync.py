@@ -2,32 +2,32 @@
 Connection sync endpoint.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.operations.connection_service import ConnectionService
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.models.api.graphs.connections import SyncConnectionRequest
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
-  ErrorResponse,
   ErrorCode,
+  ErrorResponse,
   create_error_response,
 )
+from robosystems.models.api.graphs.connections import SyncConnectionRequest
+from robosystems.models.iam import User
+from robosystems.operations.connection_service import ConnectionService
 
 from .utils import (
-  provider_registry,
   create_robustness_components,
+  provider_registry,
+  record_operation_failure,
   record_operation_start,
   record_operation_success,
-  record_operation_failure,
 )
-
-import asyncio
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -178,7 +178,7 @@ async def sync_connection(
       "status": "pending",
     }
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     # Record circuit breaker failure and timeout metrics
     record_operation_failure(
       components=components,
@@ -241,6 +241,6 @@ async def sync_connection(
     logger.error(f"Failed to sync connection {connection_id}: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to sync connection: {str(e)}",
+      detail=f"Failed to sync connection: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )

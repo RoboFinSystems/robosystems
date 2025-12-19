@@ -6,12 +6,11 @@ using the LadybugDB single-file format with .lbug extension.
 """
 
 from pathlib import Path
-from typing import Union, Optional
 
 from ...config import env
 
 
-def get_lbug_database_path(db_name: str, base_path: Optional[str] = None) -> Path:
+def get_lbug_database_path(db_name: str, base_path: str | None = None) -> Path:
   """
   Get the correct path for a graph database, handling shared repositories.
 
@@ -38,7 +37,7 @@ def get_lbug_database_path(db_name: str, base_path: Optional[str] = None) -> Pat
   return db_path
 
 
-def ensure_lbug_directory(db_path: Union[str, Path]) -> None:
+def ensure_lbug_directory(db_path: str | Path) -> None:
   """
   Ensure the parent directory for a graph database exists.
 

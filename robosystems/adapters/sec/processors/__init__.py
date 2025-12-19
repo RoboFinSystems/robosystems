@@ -14,75 +14,75 @@ Main Components:
 - ids: UUID generation and naming utilities
 """
 
+from .dataframe import DataFrameManager
 from .ids import (
-  # ID generation
-  create_element_id,
-  create_label_id,
-  create_taxonomy_id,
-  create_reference_id,
-  create_report_id,
-  create_fact_id,
-  create_entity_id,
-  create_period_id,
-  create_unit_id,
-  create_factset_id,
-  create_dimension_id,
-  create_structure_id,
   # Naming utilities
   camel_to_snake,
-  make_plural,
   convert_schema_name_to_filename,
+  create_dimension_id,
+  # ID generation
+  create_element_id,
+  create_entity_id,
+  create_fact_id,
+  create_factset_id,
+  create_label_id,
+  create_period_id,
+  create_reference_id,
+  create_report_id,
+  create_structure_id,
+  create_taxonomy_id,
+  create_unit_id,
+  make_plural,
   safe_concat,
 )
-from .dataframe import DataFrameManager
+from .ingestion import XBRLDuckDBGraphProcessor
 from .parquet import ParquetWriter
-from .textblock import TextBlockExternalizer
-from .xbrl_graph import XBRLGraphProcessor, XBRL_GRAPH_PROCESSOR_VERSION
 from .schema import (
+  IngestTableInfo,
+  SchemaIngestConfig,
   XBRLSchemaAdapter,
   XBRLSchemaConfigGenerator,
-  SchemaIngestConfig,
-  IngestTableInfo,
-  create_roboledger_ingestion_processor,
   create_custom_ingestion_processor,
+  create_roboledger_ingestion_processor,
 )
-from .ingestion import XBRLDuckDBGraphProcessor
+from .textblock import TextBlockExternalizer
+from .xbrl_graph import XBRL_GRAPH_PROCESSOR_VERSION, XBRLGraphProcessor
 
 __all__ = [
-  # ID utilities
-  "create_element_id",
-  "create_label_id",
-  "create_taxonomy_id",
-  "create_reference_id",
-  "create_report_id",
-  "create_fact_id",
-  "create_entity_id",
-  "create_period_id",
-  "create_unit_id",
-  "create_factset_id",
-  "create_dimension_id",
-  "create_structure_id",
-  # Naming utilities
-  "camel_to_snake",
-  "make_plural",
-  "convert_schema_name_to_filename",
-  "safe_concat",
+  "XBRL_GRAPH_PROCESSOR_VERSION",
   # DataFrame management
   "DataFrameManager",
+  "IngestTableInfo",
   # Parquet file output
   "ParquetWriter",
+  "SchemaIngestConfig",
   # S3 externalization
   "TextBlockExternalizer",
+  # DuckDB ingestion
+  "XBRLDuckDBGraphProcessor",
   # Graph processing
   "XBRLGraphProcessor",
-  "XBRL_GRAPH_PROCESSOR_VERSION",
   # Schema utilities
   "XBRLSchemaAdapter",
   "XBRLSchemaConfigGenerator",
-  "SchemaIngestConfig",
-  "IngestTableInfo",
-  "create_roboledger_ingestion_processor",
+  # Naming utilities
+  "camel_to_snake",
+  "convert_schema_name_to_filename",
   "create_custom_ingestion_processor",
-  # DuckDB ingestion
-  "XBRLDuckDBGraphProcessor",
+  "create_dimension_id",
+  # ID utilities
+  "create_element_id",
+  "create_entity_id",
+  "create_fact_id",
+  "create_factset_id",
+  "create_label_id",
+  "create_period_id",
+  "create_reference_id",
+  "create_report_id",
+  "create_roboledger_ingestion_processor",
+  "create_structure_id",
+  "create_taxonomy_id",
+  "create_unit_id",
+  "make_plural",
+  "safe_concat",
 ]

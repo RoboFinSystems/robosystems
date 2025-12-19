@@ -7,14 +7,14 @@ utilities for creating LadybugDB models from schema definitions.
 Supports context-aware loading for unified schemas like RoboLedger.
 """
 
-import logging
 import importlib
+import logging
 import pkgutil
-from typing import Dict, Any, List, Optional
+from typing import Any
 
+import robosystems.schemas.extensions as extensions_pkg
 from robosystems.schemas.base import BASE_NODES, BASE_RELATIONSHIPS
 from robosystems.schemas.models import Node, Relationship
-import robosystems.schemas.extensions as extensions_pkg
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class LadybugSchemaLoader:
   """Loads and manages LadybugDB schema definitions with selective extension loading."""
 
-  def __init__(self, extensions: Optional[List[str]] = None):
+  def __init__(self, extensions: list[str] | None = None):
     """
     Initialize schema loader with optional extension filtering.
 
@@ -62,8 +62,8 @@ class LadybugSchemaLoader:
         if hasattr(extension_module, "EXTENSION_NODES") and hasattr(
           extension_module, "EXTENSION_RELATIONSHIPS"
         ):
-          extension_nodes = getattr(extension_module, "EXTENSION_NODES")
-          extension_relationships = getattr(extension_module, "EXTENSION_RELATIONSHIPS")
+          extension_nodes = extension_module.EXTENSION_NODES
+          extension_relationships = extension_module.EXTENSION_RELATIONSHIPS
 
           # Add to our collections
           all_nodes.extend(extension_nodes)
@@ -107,7 +107,7 @@ class LadybugSchemaLoader:
     logger.debug(f"Available node types: {sorted(self.nodes.keys())}")
     logger.debug(f"Available relationship types: {sorted(self.relationships.keys())}")
 
-  def _discover_all_extensions(self) -> List[str]:
+  def _discover_all_extensions(self) -> list[str]:
     """Discover all available extensions for backward compatibility."""
     available_extensions = []
 
@@ -139,23 +139,23 @@ class LadybugSchemaLoader:
 
     return available_extensions
 
-  def get_node_schema(self, node_name: str) -> Optional[Node]:
+  def get_node_schema(self, node_name: str) -> Node | None:
     """Get schema definition for a node type."""
     return self.nodes.get(node_name)
 
-  def get_relationship_schema(self, relationship_name: str) -> Optional[Relationship]:
+  def get_relationship_schema(self, relationship_name: str) -> Relationship | None:
     """Get schema definition for a relationship type."""
     return self.relationships.get(relationship_name)
 
-  def list_node_types(self) -> List[str]:
+  def list_node_types(self) -> list[str]:
     """Get list of all defined node types."""
     return list(self.nodes.keys())
 
-  def list_relationship_types(self) -> List[str]:
+  def list_relationship_types(self) -> list[str]:
     """Get list of all defined relationship types."""
     return list(self.relationships.keys())
 
-  def get_node_properties(self, node_name: str) -> Dict[str, Dict[str, Any]]:
+  def get_node_properties(self, node_name: str) -> dict[str, dict[str, Any]]:
     """
     Get properties for a node type in a format suitable for LadybugDB models.
 
@@ -178,7 +178,7 @@ class LadybugSchemaLoader:
 
     return properties
 
-  def get_node_primary_key(self, node_name: str) -> Optional[str]:
+  def get_node_primary_key(self, node_name: str) -> str | None:
     """Get the primary key field name for a node type."""
     node = self.get_node_schema(node_name)
     if not node:
@@ -191,7 +191,7 @@ class LadybugSchemaLoader:
     return None
 
   def validate_node_properties(
-    self, node_name: str, properties: Dict[str, Any]
+    self, node_name: str, properties: dict[str, Any]
   ) -> bool:
     """
     Validate node properties against schema.
@@ -231,7 +231,7 @@ class LadybugSchemaLoader:
     from_node: str,
     to_node: str,
     relationship_name: str,
-    properties: Optional[Dict[str, Any]] = None,
+    properties: dict[str, Any] | None = None,
   ) -> bool:
     """
     Validate relationship against schema.
@@ -294,7 +294,7 @@ class LadybugSchemaLoader:
     allowed_types = type_mapping.get(expected_type, (str,))
     return isinstance(value, allowed_types)
 
-  def get_node_relationships(self, node_name: str) -> Dict[str, List[Relationship]]:
+  def get_node_relationships(self, node_name: str) -> dict[str, list[Relationship]]:
     """
     Get all relationships for a node type.
 
@@ -314,11 +314,11 @@ class LadybugSchemaLoader:
 
 
 # Global schema loader instances (cache by extension configuration)
-_schema_loader_cache: Dict[str, LadybugSchemaLoader] = {}
+_schema_loader_cache: dict[str, LadybugSchemaLoader] = {}
 _default_schema_loader = None
 
 
-def get_schema_loader(extensions: Optional[List[str]] = None) -> LadybugSchemaLoader:
+def get_schema_loader(extensions: list[str] | None = None) -> LadybugSchemaLoader:
   """
   Get a schema loader instance with specified extensions.
 
@@ -361,7 +361,7 @@ def get_sec_schema_loader() -> LadybugSchemaLoader:
   return get_contextual_schema_loader("repository", "sec")
 
 
-def get_entity_schema_loader(entity_type: Optional[str] = None) -> LadybugSchemaLoader:
+def get_entity_schema_loader(entity_type: str | None = None) -> LadybugSchemaLoader:
   """
   Get schema loader configured for entity databases based on entity type.
 
@@ -386,7 +386,7 @@ def get_entity_schema_loader(entity_type: Optional[str] = None) -> LadybugSchema
 def get_contextual_schema_loader(
   context_type: str,
   context_name: str,
-  additional_extensions: Optional[List[str]] = None,
+  additional_extensions: list[str] | None = None,
 ) -> LadybugSchemaLoader:
   """
   Get schema loader based on context (repository, application, custom).
@@ -481,7 +481,7 @@ class ContextAwareSchemaLoader(LadybugSchemaLoader):
 
       # Check if it has context-aware support
       if hasattr(extension_module, "RoboLedgerContext"):
-        context_class = getattr(extension_module, "RoboLedgerContext")
+        context_class = extension_module.RoboLedgerContext
 
         # Get nodes and relationships for the specific context
         context_nodes = context_class.get_nodes_for_context(context)

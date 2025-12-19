@@ -10,26 +10,27 @@ Graph Ownership:
 - Only users within the organization can be granted access
 """
 
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, Optional
 
 from sqlalchemy import (
-  Column,
-  String,
-  DateTime,
-  Index,
-  CheckConstraint,
   Boolean,
-  Integer,
-  UniqueConstraint,
+  CheckConstraint,
+  Column,
+  DateTime,
   ForeignKey,
+  Index,
+  Integer,
+  String,
+  UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
-from ...database import Model
 from ...config.graph_tier import GraphTier
+from ...database import Model
 
 
 class Graph(Model):
@@ -135,12 +136,12 @@ class Graph(Model):
 
   # Timestamps
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -165,8 +166,8 @@ class Graph(Model):
   def __repr__(self) -> str:
     """String representation of the graph."""
     if bool(self.is_subgraph):
-      return f"<Graph {str(self.graph_id)} (subgraph of {str(self.parent_graph_id)}) type={str(self.graph_type)}>"
-    return f"<Graph {str(self.graph_id)} type={str(self.graph_type)} extensions={str(self.schema_extensions)}>"
+      return f"<Graph {self.graph_id!s} (subgraph of {self.parent_graph_id!s}) type={self.graph_type!s}>"
+    return f"<Graph {self.graph_id!s} type={self.graph_type!s} extensions={self.schema_extensions!s}>"
 
   @property
   def has_extension(self) -> bool:
@@ -186,7 +187,7 @@ class Graph(Model):
       and self.subgraph_name is not None
     ):
       # Subgraph uses parent_id_subgraphname format
-      return f"{str(self.parent_graph_id)}_{str(self.subgraph_name)}"
+      return f"{self.parent_graph_id!s}_{self.subgraph_name!s}"
     # Regular graph uses its ID directly
     return str(self.graph_id)
 
@@ -208,21 +209,21 @@ class Graph(Model):
   def create(
     cls,
     graph_id: str,
-    org_id: Optional[str],
+    org_id: str | None,
     graph_name: str,
     graph_type: str,
     session: Session,
-    base_schema: Optional[str] = None,
-    schema_extensions: Optional[List[str]] = None,
+    base_schema: str | None = None,
+    schema_extensions: list[str] | None = None,
     graph_instance_id: str = "default",
-    graph_cluster_region: Optional[str] = None,
+    graph_cluster_region: str | None = None,
     graph_tier: GraphTier = GraphTier.LADYBUG_STANDARD,
-    graph_metadata: Optional[Dict[str, Any]] = None,
-    parent_graph_id: Optional[str] = None,
-    subgraph_index: Optional[int] = None,
-    subgraph_name: Optional[str] = None,
+    graph_metadata: dict[str, Any] | None = None,
+    parent_graph_id: str | None = None,
+    subgraph_index: int | None = None,
+    subgraph_name: str | None = None,
     is_subgraph: bool = False,
-    subgraph_metadata: Optional[Dict[str, Any]] = None,
+    subgraph_metadata: dict[str, Any] | None = None,
     commit: bool = True,
   ) -> "Graph":
     """Create a new graph metadata entry."""
@@ -297,7 +298,7 @@ class Graph(Model):
     """Get all graphs of a specific type."""
     return session.query(cls).filter(cls.graph_type == graph_type).all()
 
-  def update_extensions(self, extensions: List[str], session: Session) -> None:
+  def update_extensions(self, extensions: list[str], session: Session) -> None:
     """
     Update the schema extensions for this graph.
 
@@ -313,7 +314,7 @@ class Graph(Model):
         SQLAlchemyError: If the database update fails
     """
     self.schema_extensions = extensions
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
@@ -401,10 +402,10 @@ class Graph(Model):
     graph_name: str,
     repository_type: str,
     session: Session,
-    base_schema: Optional[str] = None,
-    data_source_type: Optional[str] = None,
-    data_source_url: Optional[str] = None,
-    sync_frequency: Optional[str] = None,
+    base_schema: str | None = None,
+    data_source_type: str | None = None,
+    data_source_url: str | None = None,
+    sync_frequency: str | None = None,
     graph_tier: GraphTier = GraphTier.LADYBUG_SHARED,
     graph_instance_id: str = "ladybug-shared-prod",
   ) -> "Graph":
@@ -464,7 +465,7 @@ class Graph(Model):
   def update_sync_status(
     self,
     status: str,
-    error_message: Optional[str] = None,
+    error_message: str | None = None,
     session: Session = None,
   ) -> None:
     """
@@ -495,12 +496,12 @@ class Graph(Model):
 
     self.sync_status = status
     if status == "active":
-      self.last_sync_at = datetime.now(timezone.utc)
+      self.last_sync_at = datetime.now(UTC)
       self.sync_error_message = None
     elif status == "error":
       self.sync_error_message = error_message
 
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     if session:
       try:
@@ -545,9 +546,9 @@ class Graph(Model):
 
     last_sync = self.last_sync_at
     if last_sync.tzinfo is None:
-      last_sync = last_sync.replace(tzinfo=timezone.utc)
+      last_sync = last_sync.replace(tzinfo=UTC)
 
-    time_since_sync = datetime.now(timezone.utc) - last_sync
+    time_since_sync = datetime.now(UTC) - last_sync
     return time_since_sync > sync_interval
 
   def mark_stale(self, session: Session, reason: str) -> None:
@@ -559,7 +560,7 @@ class Graph(Model):
     """
     self.graph_stale = True
     self.graph_stale_reason = reason
-    self.graph_stale_at = datetime.now(timezone.utc)
+    self.graph_stale_at = datetime.now(UTC)
     session.commit()
 
   def mark_fresh(self, session: Session) -> None:
@@ -575,7 +576,7 @@ class Graph(Model):
     self.graph_stale_at = None
 
     metadata = {**self.graph_metadata} if self.graph_metadata else {}
-    metadata["last_materialized_at"] = datetime.now(timezone.utc).isoformat()
+    metadata["last_materialized_at"] = datetime.now(UTC).isoformat()
 
     if "materialization_count" in metadata:
       metadata["materialization_count"] += 1

@@ -4,12 +4,13 @@ Tests for storage limits API endpoints.
 Tests the FastAPI endpoints for storage limit functionality.
 """
 
-import pytest
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 
+import pytest
 from fastapi.testclient import TestClient
+
 from robosystems.config.graph_tier import GraphTier
 from robosystems.models.iam.graph_credits import GraphCredits
 from robosystems.models.iam.graph_usage import (
@@ -22,6 +23,7 @@ from robosystems.models.iam.graph_usage import (
 def client_with_test_user(test_db, test_user):
   """Create a test client with the actual test user."""
   from main import app
+  from robosystems.database import get_db_session
   from robosystems.middleware.auth.dependencies import (
     get_current_user,
     get_current_user_with_graph,
@@ -29,7 +31,6 @@ def client_with_test_user(test_db, test_user):
   from robosystems.middleware.rate_limits import (
     subscription_aware_rate_limit_dependency,
   )
-  from robosystems.database import get_db_session
 
   # Use the test_user from the fixture
   mock_user = Mock()
@@ -64,7 +65,7 @@ class TestStorageLimitsAPI:
   ):
     """Test successful storage limits retrieval."""
     # Create usage record (30GB = 30% of 100GB, below 80% threshold)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     usage_record = GraphUsage(
       id="api_usage_1",
       graph_id=sample_graph_credits.graph_id,
@@ -103,7 +104,7 @@ class TestStorageLimitsAPI:
   ):
     """Test storage limits when approaching threshold."""
     # Create usage record at 90% (90GB of 100GB)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     usage_record = GraphUsage(
       id="api_usage_2",
       graph_id=sample_graph_credits.graph_id,
@@ -141,7 +142,7 @@ class TestStorageLimitsAPI:
   ):
     """Test storage limits when exceeding limit."""
     # Create usage record that exceeds limit (120GB > 100GB)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     usage_record = GraphUsage(
       id="api_usage_3",
       graph_id=sample_graph_credits.graph_id,
@@ -182,7 +183,7 @@ class TestStorageLimitsAPI:
     db_session.commit()
 
     # Create usage record (120GB = 60% of 200GB override)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     usage_record = GraphUsage(
       id="api_usage_4",
       graph_id=sample_graph_credits.graph_id,
@@ -277,7 +278,7 @@ class TestStorageUsageAPI:
   ):
     """Test successful storage usage retrieval."""
     # Create some usage records
-    base_date = datetime.now(timezone.utc)
+    base_date = datetime.now(UTC)
     for i in range(5):
       record_time = base_date - timedelta(days=i)
       usage_record = GraphUsage(
@@ -409,6 +410,7 @@ def sample_graph_credits(db_session, test_user, test_org):
 def sample_user(db_session):
   """Create sample user for API testing."""
   import uuid
+
   from robosystems.models.iam import User
 
   user = User(

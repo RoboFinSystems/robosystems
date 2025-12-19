@@ -5,20 +5,21 @@ Tests the critical SEC data provider that handles CIK validation,
 filing counts, and SEC connection management.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
 import httpx
+import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from robosystems.operations.providers.sec_provider import (
-  validate_cik_with_sec_api,
-  get_sec_filing_count,
-  create_sec_connection,
-  sync_sec_connection,
-  cleanup_sec_connection,
-)
 from robosystems.models.api.graphs.connections import SECConnectionConfig
+from robosystems.operations.providers.sec_provider import (
+  cleanup_sec_connection,
+  create_sec_connection,
+  get_sec_filing_count,
+  sync_sec_connection,
+  validate_cik_with_sec_api,
+)
 
 
 class TestValidateCIKWithSECAPI:

@@ -4,12 +4,13 @@ Standardized OpenTelemetry metrics collection for RoboSystems API endpoints.
 This module provides consistent metrics patterns for observability across all API endpoints.
 """
 
-import time
 import functools
 import inspect
-from typing import Dict, Any, Optional, Callable, List
+import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from enum import Enum
+from typing import Any
 
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
@@ -182,8 +183,8 @@ class EndpointMetrics:
     method: str,
     status_code: int,
     duration: float,
-    user_id: Optional[str] = None,
-    additional_attributes: Optional[Dict[str, Any]] = None,
+    user_id: str | None = None,
+    additional_attributes: dict[str, Any] | None = None,
   ):
     """Record standard request metrics."""
     self._ensure_instruments()
@@ -214,7 +215,7 @@ class EndpointMetrics:
     method: str,
     status_code: int,
     duration: float,
-    user_id: Optional[str] = None,
+    user_id: str | None = None,
   ):
     """Record request duration metrics only."""
     self._ensure_instruments()
@@ -237,8 +238,8 @@ class EndpointMetrics:
     method: str,
     auth_type: str,
     success: bool,
-    failure_reason: Optional[str] = None,
-    user_id: Optional[str] = None,
+    failure_reason: str | None = None,
+    user_id: str | None = None,
   ):
     """Record authentication attempt metrics."""
     self._ensure_instruments()
@@ -270,8 +271,8 @@ class EndpointMetrics:
     endpoint: str,
     method: str,
     error_type: str,
-    error_code: Optional[str] = None,
-    user_id: Optional[str] = None,
+    error_code: str | None = None,
+    user_id: str | None = None,
   ):
     """Record error metrics."""
     self._ensure_instruments()
@@ -298,8 +299,8 @@ class EndpointMetrics:
     endpoint: str,
     method: str,
     event_type: str,
-    event_data: Optional[Dict[str, Any]] = None,
-    user_id: Optional[str] = None,
+    event_data: dict[str, Any] | None = None,
+    user_id: str | None = None,
   ):
     """Record business logic events."""
     # Skip business events for high-frequency health check endpoints to reduce costs
@@ -334,8 +335,8 @@ class EndpointMetrics:
     node_count: int,
     relationship_count: int,
     estimated_size_bytes: int,
-    user_id: Optional[str] = None,
-    additional_attributes: Optional[Dict[str, Any]] = None,
+    user_id: str | None = None,
+    additional_attributes: dict[str, Any] | None = None,
   ):
     """Record graph database metrics."""
     self._ensure_instruments()
@@ -364,7 +365,7 @@ class EndpointMetrics:
     user_id: str,
     priority: int,
     success: bool,
-    rejection_reason: Optional[str] = None,
+    rejection_reason: str | None = None,
   ):
     """Record query submission to queue."""
     self._ensure_instruments()
@@ -413,7 +414,7 @@ class EndpointMetrics:
     user_id: str,
     execution_time_seconds: float,
     status: str,  # completed, failed, cancelled, timeout
-    error_type: Optional[str] = None,
+    error_type: str | None = None,
   ):
     """Record query execution metrics."""
     self._ensure_instruments()
@@ -511,7 +512,7 @@ class EndpointMetrics:
     if self._sse_connection_queue_overflows is not None:
       self._sse_connection_queue_overflows.add(1, attributes)
 
-  def _observe_queue_size(self, options: CallbackOptions) -> List[Observation]:
+  def _observe_queue_size(self, options: CallbackOptions) -> list[Observation]:
     """Observable callback for queue size metrics."""
     try:
       # Import here to avoid circular dependency
@@ -535,7 +536,7 @@ class EndpointMetrics:
 
 
 # Global metrics instance
-_global_metrics: Optional[EndpointMetrics] = None
+_global_metrics: EndpointMetrics | None = None
 
 
 def get_endpoint_metrics() -> EndpointMetrics:
@@ -551,7 +552,7 @@ def record_request_metrics(
   method: str,
   status_code: int,
   duration: float,
-  user_id: Optional[str] = None,
+  user_id: str | None = None,
   **kwargs,
 ):
   """Convenience function to record request metrics."""
@@ -570,8 +571,8 @@ def record_auth_metrics(
   method: str,
   auth_type: str,
   success: bool,
-  failure_reason: Optional[str] = None,
-  user_id: Optional[str] = None,
+  failure_reason: str | None = None,
+  user_id: str | None = None,
 ):
   """Convenience function to record auth metrics."""
   metrics_instance = get_endpoint_metrics()
@@ -584,8 +585,8 @@ def record_error_metrics(
   endpoint: str,
   method: str,
   error_type: str,
-  error_code: Optional[str] = None,
-  user_id: Optional[str] = None,
+  error_code: str | None = None,
+  user_id: str | None = None,
 ):
   """Convenience function to record error metrics."""
   metrics_instance = get_endpoint_metrics()
@@ -629,9 +630,9 @@ def record_query_queue_metrics(
 
 
 def endpoint_metrics_decorator(
-  endpoint_name: Optional[str] = None,
+  endpoint_name: str | None = None,
   extract_user_id: bool = True,
-  business_event_type: Optional[str] = None,
+  business_event_type: str | None = None,
 ):
   """
   Enhanced decorator to automatically collect standard metrics for FastAPI endpoints.
@@ -795,9 +796,9 @@ def endpoint_metrics_decorator(
 def endpoint_metrics_context(
   endpoint: str,
   method: str,
-  user_id: Optional[str] = None,
-  business_event_type: Optional[str] = None,
-  event_data: Optional[Dict[str, Any]] = None,
+  user_id: str | None = None,
+  business_event_type: str | None = None,
+  event_data: dict[str, Any] | None = None,
 ):
   """
   Context manager for manual metrics collection with automatic timing and error handling.
@@ -822,7 +823,7 @@ def endpoint_metrics_context(
       self.business_events = []
 
     def record_business_event(
-      self, event_type: str, data: Optional[Dict[str, Any]] = None
+      self, event_type: str, data: dict[str, Any] | None = None
     ):
       """Record a business event within the context."""
       self.business_events.append((event_type, data or {}))

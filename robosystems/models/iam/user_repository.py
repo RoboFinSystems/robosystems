@@ -5,35 +5,40 @@ This model manages user access to repositories (formerly "shared repositories")
 including subscriptions, permissions, and billing information.
 """
 
-from datetime import datetime, timezone
+import logging
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Optional, Dict, Any, Sequence, cast
 from enum import Enum
+from typing import Any, Optional, cast
 
 from sqlalchemy import (
+  Boolean,
   Column,
-  String,
-  Integer,
   DateTime,
   ForeignKey,
-  Boolean,
-  Text,
   Index,
+  Integer,
+  String,
+  Text,
   UniqueConstraint,
+)
+from sqlalchemy import (
   Enum as SQLEnum,
 )
-from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, relationship
 
-from ...database import Model
-from ...config.graph_tier import GraphTier
 from ...config.billing.repositories import (
-  SharedRepository,
-  RepositoryPlan as BillingRepositoryPlan,
   RepositoryBillingConfig,
+  SharedRepository,
 )
+from ...config.billing.repositories import (
+  RepositoryPlan as BillingRepositoryPlan,
+)
+from ...config.graph_tier import GraphTier
+from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +102,7 @@ class UserRepository(Model):
   # Status and lifecycle
   is_active = Column(Boolean, nullable=False, default=True)
   activated_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc)
+    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
   )
   expires_at = Column(DateTime(timezone=True), nullable=True)  # None = no expiration
 
@@ -125,13 +130,13 @@ class UserRepository(Model):
 
   # Timestamps
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc)
+    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
   )
   updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
-    default=datetime.now(timezone.utc),
-    onupdate=datetime.now(timezone.utc),
+    default=datetime.now(UTC),
+    onupdate=datetime.now(UTC),
   )
 
   # Relationships
@@ -176,11 +181,11 @@ class UserRepository(Model):
     access_level: RepositoryAccessLevel,
     repository_plan: RepositoryPlan,
     session: Session,
-    granted_by: Optional[str] = None,
+    granted_by: str | None = None,
     monthly_price_cents: int = 0,
     monthly_credits: int = 0,
-    expires_at: Optional[datetime] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    expires_at: datetime | None = None,
+    metadata: dict[str, Any] | None = None,
   ) -> "UserRepository":
     """Create or update repository access for a user."""
     import json
@@ -189,7 +194,7 @@ class UserRepository(Model):
     # Check if access already exists
     existing = cls.get_by_user_and_repository(user_id, repository_name, session)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if existing:
       # Update existing access
@@ -285,7 +290,7 @@ class UserRepository(Model):
       return False
 
     # Check if expired
-    if access.expires_at and access.expires_at < datetime.now(timezone.utc):
+    if access.expires_at and access.expires_at < datetime.now(UTC):
       return False
 
     return access.access_level != RepositoryAccessLevel.NONE
@@ -300,7 +305,7 @@ class UserRepository(Model):
       return RepositoryAccessLevel.NONE
 
     # Check if expired
-    if access.expires_at and access.expires_at < datetime.now(timezone.utc):
+    if access.expires_at and access.expires_at < datetime.now(UTC):
       return RepositoryAccessLevel.NONE
 
     return cast(RepositoryAccessLevel, access.access_level)
@@ -355,8 +360,8 @@ class UserRepository(Model):
   def revoke_access(self, session: Session) -> None:
     """Revoke repository access for a user."""
     self.is_active = False
-    self.expires_at = datetime.now(timezone.utc)
-    self.updated_at = datetime.now(timezone.utc)
+    self.expires_at = datetime.now(UTC)
+    self.updated_at = datetime.now(UTC)
 
     # Also deactivate the credit pool
     if self.user_credits:
@@ -372,8 +377,8 @@ class UserRepository(Model):
     self,
     new_plan: RepositoryPlan,
     session: Session,
-    new_price_cents: Optional[int] = None,
-    new_credits: Optional[int] = None,
+    new_price_cents: int | None = None,
+    new_credits: int | None = None,
   ) -> None:
     """
     Upgrade or downgrade repository subscription plan.
@@ -399,7 +404,7 @@ class UserRepository(Model):
     """
     old_plan = self.repository_plan
     self.repository_plan = new_plan
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     if new_price_cents is not None:
       self.monthly_price_cents = new_price_cents
@@ -427,7 +432,7 @@ class UserRepository(Model):
     """Check if the access has expired."""
     if self.expires_at is None:
       return False
-    return self.expires_at < datetime.now(timezone.utc)
+    return self.expires_at < datetime.now(UTC)
 
   def can_read(self) -> bool:
     """Check if user can read from repository."""
@@ -454,7 +459,7 @@ class UserRepository(Model):
       return False
     return self.access_level == RepositoryAccessLevel.ADMIN  # type: ignore[return-value]
 
-  def get_graph_connection_info(self) -> Dict[str, Any]:
+  def get_graph_connection_info(self) -> dict[str, Any]:
     """
     Get graph database connection information for this repository.
 
@@ -480,7 +485,7 @@ class UserRepository(Model):
       "repository_type": self.repository_type.value,
     }
 
-  def get_repository_plan_config(self) -> Dict[str, Any]:
+  def get_repository_plan_config(self) -> dict[str, Any]:
     """
     Get repository plan configuration for this repository type and plan.
 
@@ -518,7 +523,7 @@ class UserRepository(Model):
     }
 
   @classmethod
-  def get_all_repository_configs(cls) -> Dict[str, Dict[str, Any]]:
+  def get_all_repository_configs(cls) -> dict[str, dict[str, Any]]:
     """
     Get all repository configurations including enabled status.
 
@@ -561,7 +566,7 @@ class UserRepository(Model):
     """Check if a repository type is enabled for subscriptions."""
     return RepositoryBillingConfig.is_repository_enabled(repository_type)
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for API responses."""
     import json
 

@@ -1,12 +1,13 @@
-import pytest
 import re
 
+import pytest
+
 from robosystems.middleware.graph.types import (
-  is_subgraph_id,
-  parse_graph_id,
-  construct_subgraph_id,
   SUBGRAPH_NAME_PATTERN,
   GraphTypeRegistry,
+  construct_subgraph_id,
+  is_subgraph_id,
+  parse_graph_id,
 )
 
 
@@ -408,7 +409,7 @@ class TestErrorMessages:
   def test_construct_error_message_empty_parent(self):
     try:
       construct_subgraph_id("", "dev")
-      assert False, "Should have raised ValueError"
+      raise AssertionError("Should have raised ValueError")
     except ValueError as e:
       assert "parent_graph_id cannot be empty" in str(e)
 
@@ -416,7 +417,7 @@ class TestErrorMessages:
   def test_construct_error_message_empty_subgraph(self):
     try:
       construct_subgraph_id("kg123", "")
-      assert False, "Should have raised ValueError"
+      raise AssertionError("Should have raised ValueError")
     except ValueError as e:
       assert "subgraph_name cannot be empty" in str(e)
 
@@ -424,7 +425,7 @@ class TestErrorMessages:
   def test_construct_error_message_underscore_in_parent(self):
     try:
       construct_subgraph_id("kg123_test", "dev")
-      assert False, "Should have raised ValueError"
+      raise AssertionError("Should have raised ValueError")
     except ValueError as e:
       assert "parent_graph_id cannot contain underscore" in str(e)
       assert "kg123_test" in str(e)
@@ -433,7 +434,7 @@ class TestErrorMessages:
   def test_construct_error_message_invalid_subgraph_name(self):
     try:
       construct_subgraph_id("kg123", "dev-test")
-      assert False, "Should have raised ValueError"
+      raise AssertionError("Should have raised ValueError")
     except ValueError as e:
       assert "subgraph_name must be alphanumeric" in str(e)
       assert "dev-test" in str(e)

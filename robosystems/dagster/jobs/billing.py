@@ -4,7 +4,7 @@ These jobs handle credit allocation, storage billing, usage collection,
 and Stripe webhook processing.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -154,7 +154,7 @@ def process_stripe_webhook_event(
     )
 
     result["status"] = "completed"
-    result["processed_at"] = datetime.now(timezone.utc).isoformat()
+    result["processed_at"] = datetime.now(UTC).isoformat()
 
     context.log.info(f"Webhook processing completed: {result}")
 
@@ -266,8 +266,8 @@ async def _handle_invoice_created(
 
   invoice = BillingInvoice.create_invoice(
     org_id=subscription.org_id,
-    period_start=datetime.fromtimestamp(period_start, tz=timezone.utc),
-    period_end=datetime.fromtimestamp(period_end, tz=timezone.utc),
+    period_start=datetime.fromtimestamp(period_start, tz=UTC),
+    period_end=datetime.fromtimestamp(period_end, tz=UTC),
     payment_terms="immediate",
     session=db_session,
   )
@@ -276,7 +276,7 @@ async def _handle_invoice_created(
   invoice.status = "open"
 
   if due_date:
-    invoice.due_date = datetime.fromtimestamp(due_date, tz=timezone.utc)
+    invoice.due_date = datetime.fromtimestamp(due_date, tz=UTC)
 
   invoice.add_line_item(
     subscription_id=subscription.id,
@@ -333,7 +333,7 @@ async def _handle_payment_succeeded(
 
   if invoice:
     invoice.status = "paid"
-    invoice.paid_at = datetime.now(timezone.utc)
+    invoice.paid_at = datetime.now(UTC)
     invoice.payment_method = "stripe"
     invoice.payment_reference = stripe_invoice_id
     db_session.commit()
@@ -639,7 +639,7 @@ def process_overage_invoices(
               "invoice_type": "overage",
               "overage_credits": str(overage_credits),
               "amount_usd": str(usd_amount),
-              "billing_period_end": datetime.now(timezone.utc)
+              "billing_period_end": datetime.now(UTC)
               .replace(day=1)
               .isoformat(),
               "graph_tier": str(graph_info["graph_tier"]),
@@ -652,7 +652,7 @@ def process_overage_invoices(
           "user_id": graph_info["user_id"],
           "overage_credits": float(overage_credits),
           "amount_usd": usd_amount,
-          "invoice_date": datetime.now(timezone.utc).isoformat(),
+          "invoice_date": datetime.now(UTC).isoformat(),
           "status": "pending_payment",
         }
         invoices.append(invoice)
@@ -687,7 +687,7 @@ def allocate_monthly_credits(
     return {
       "allocation_result": result,
       "overage_invoices_count": len(overage_invoices),
-      "timestamp": datetime.now(timezone.utc).isoformat(),
+      "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -699,7 +699,7 @@ def cleanup_old_credit_transactions(
 ) -> dict[str, Any]:
   """Clean up old credit transaction records."""
   months_to_keep = 12
-  cutoff_date = datetime.now(timezone.utc) - timedelta(days=months_to_keep * 30)
+  cutoff_date = datetime.now(UTC) - timedelta(days=months_to_keep * 30)
 
   with db.get_session() as session:
     from sqlalchemy import and_
@@ -744,7 +744,7 @@ def get_graphs_with_storage_usage(
   """Get all graphs that have storage usage records for yesterday."""
   from sqlalchemy import func
 
-  billing_date = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+  billing_date = (datetime.now(UTC) - timedelta(days=1)).date()
   context.log.info(f"Getting storage usage for date: {billing_date}")
 
   with db.get_session() as session:
@@ -838,7 +838,7 @@ def bill_storage_credits(
     "total_credits_consumed": float(total_credits),
     "negative_balances": negative_balances,
     "errors": errors,
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
   }
 
 
@@ -906,7 +906,7 @@ def collect_graph_usage(
   return {
     "graphs_collected": collected,
     "errors": errors,
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
   }
 
 
@@ -921,7 +921,7 @@ def generate_usage_report(
   context: OpExecutionContext, db: DatabaseResource
 ) -> dict[str, Any]:
   """Generate comprehensive monthly usage report."""
-  last_month = datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)
+  last_month = datetime.now(UTC).replace(day=1) - timedelta(days=1)
   year = last_month.year
   month = last_month.month
 
@@ -935,11 +935,11 @@ def generate_usage_report(
   with db.get_session() as session:
     all_graphs = session.query(GraphCredits).all()
 
-    month_start = datetime(year, month, 1, tzinfo=timezone.utc)
+    month_start = datetime(year, month, 1, tzinfo=UTC)
     if month == 12:
-      month_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+      month_end = datetime(year + 1, 1, 1, tzinfo=UTC)
     else:
-      month_end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+      month_end = datetime(year, month + 1, 1, tzinfo=UTC)
 
     for graph_credits in all_graphs:
       transactions = (
@@ -992,7 +992,7 @@ def generate_usage_report(
     "total_credits_consumed": float(total_credits_consumed),
     "total_credits_allocated": float(total_credits_allocated),
     "graphs_with_overage": graphs_with_overage,
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
   }
 
 

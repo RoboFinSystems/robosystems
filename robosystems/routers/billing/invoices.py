@@ -1,22 +1,23 @@
 """Billing invoices endpoints for payment history."""
 
 from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...models.iam import User
-from ...models.billing import BillingCustomer, BillingInvoice
 from ...models.api.billing.invoice import (
   Invoice,
   InvoiceLineItem,
   InvoicesResponse,
   UpcomingInvoice,
 )
+from ...models.billing import BillingCustomer, BillingInvoice
+from ...models.iam import User
 from ...operations.providers.payment_provider import get_payment_provider
-from ...logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -45,7 +46,7 @@ async def list_invoices(
 ):
   """List invoices for the organization."""
   try:
-    from ...models.iam import OrgUser, OrgRole
+    from ...models.iam import OrgRole, OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -184,7 +185,7 @@ async def get_upcoming_invoice(
 ):
   """Get upcoming invoice preview for organization."""
   try:
-    from ...models.iam import OrgUser, OrgRole
+    from ...models.iam import OrgRole, OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)

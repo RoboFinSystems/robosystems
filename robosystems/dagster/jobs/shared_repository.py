@@ -9,7 +9,7 @@ These jobs are typically triggered after SEC materialization completes,
 or can be run manually for ad-hoc snapshot/refresh operations.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import boto3
@@ -23,7 +23,6 @@ from dagster import (
 )
 
 from robosystems.config import env
-
 
 # ============================================================================
 # Configuration
@@ -138,7 +137,7 @@ def create_snapshot(
   """
   ec2 = boto3.client("ec2", region_name=env.AWS_REGION)
 
-  timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+  timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
   description = (
     f"{config.description_prefix} {config.graph_id} - Dagster run {context.run_id[:8]}"
   )

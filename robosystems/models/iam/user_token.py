@@ -1,13 +1,12 @@
 """User token model for email verification and password reset."""
 
-import secrets
 import hashlib
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+import secrets
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Column, String, DateTime, Index, Text
-from sqlalchemy.orm import Session
+from sqlalchemy import Column, DateTime, Index, String, Text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from ...database import Model
 from ...logger import logger
@@ -27,7 +26,7 @@ class UserToken(Model):
   expires_at = Column(DateTime, nullable=False)
   used_at = Column(DateTime, nullable=True)
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   ip_address = Column(String(45), nullable=True)
   user_agent = Column(Text, nullable=True)
@@ -50,8 +49,8 @@ class UserToken(Model):
     token_type: str,
     hours: int,
     session: Session,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
   ) -> str:
     """
     Create a new token for a user.
@@ -84,7 +83,7 @@ class UserToken(Model):
       user_id=user_id,
       token_hash=token_hash,
       token_type=token_type,
-      expires_at=datetime.now(timezone.utc) + timedelta(hours=hours),
+      expires_at=datetime.now(UTC) + timedelta(hours=hours),
       ip_address=ip_address,
       user_agent=user_agent,
     )
@@ -103,7 +102,7 @@ class UserToken(Model):
   @classmethod
   def verify_token(
     cls, raw_token: str, token_type: str, session: Session
-  ) -> Optional[str]:
+  ) -> str | None:
     """
     Verify and consume a token.
 
@@ -123,7 +122,7 @@ class UserToken(Model):
         cls.token_hash == token_hash,
         cls.token_type == token_type,
         cls.used_at.is_(None),
-        cls.expires_at > datetime.now(timezone.utc),
+        cls.expires_at > datetime.now(UTC),
       )
       .first()
     )
@@ -133,7 +132,7 @@ class UserToken(Model):
       return None
 
     # Mark token as used
-    token.used_at = datetime.now(timezone.utc)
+    token.used_at = datetime.now(UTC)
     try:
       session.commit()
       logger.info(f"Successfully verified {token_type} token for user {token.user_id}")
@@ -147,7 +146,7 @@ class UserToken(Model):
   @classmethod
   def validate_token(
     cls, raw_token: str, token_type: str, session: Session
-  ) -> Optional[str]:
+  ) -> str | None:
     """
     Validate a token without consuming it.
 
@@ -167,7 +166,7 @@ class UserToken(Model):
         cls.token_hash == token_hash,
         cls.token_type == token_type,
         cls.used_at.is_(None),
-        cls.expires_at > datetime.now(timezone.utc),
+        cls.expires_at > datetime.now(UTC),
       )
       .first()
     )
@@ -200,7 +199,7 @@ class UserToken(Model):
           cls.token_type == token_type,
           cls.used_at.is_(None),
         )
-        .update({"used_at": datetime.now(timezone.utc)})
+        .update({"used_at": datetime.now(UTC)})
       )
       session.commit()
       if count > 0:
@@ -226,12 +225,12 @@ class UserToken(Model):
       # Delete tokens that are either:
       # 1. Expired and unused
       # 2. Used more than 30 days ago
-      cutoff_date = datetime.now(timezone.utc) - timedelta(days=30)
+      cutoff_date = datetime.now(UTC) - timedelta(days=30)
 
       count = (
         session.query(cls)
         .filter(
-          ((cls.expires_at < datetime.now(timezone.utc)) & cls.used_at.is_(None))
+          ((cls.expires_at < datetime.now(UTC)) & cls.used_at.is_(None))
           | (cls.used_at < cutoff_date)
         )
         .delete()
@@ -247,7 +246,7 @@ class UserToken(Model):
 
   @classmethod
   def get_active_tokens_for_user(
-    cls, user_id: str, session: Session, token_type: Optional[str] = None
+    cls, user_id: str, session: Session, token_type: str | None = None
   ) -> list:
     """
     Retrieve active tokens for a user.
@@ -263,7 +262,7 @@ class UserToken(Model):
     query = session.query(cls).filter(
       cls.user_id == user_id,
       cls.used_at.is_(None),
-      cls.expires_at > datetime.now(timezone.utc),
+      cls.expires_at > datetime.now(UTC),
     )
 
     if token_type:

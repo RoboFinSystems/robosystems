@@ -1,6 +1,7 @@
 """Tests for distributed lock module."""
 
 from unittest.mock import Mock, patch
+
 import pytest
 import redis
 from redis.exceptions import RedisError

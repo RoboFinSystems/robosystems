@@ -4,12 +4,12 @@ Graph access authorization dependencies.
 FastAPI dependency functions for validating user access to graphs.
 """
 
-from typing import Optional
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
+from robosystems.graph_api.core.ladybug import Repository
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user
 from robosystems.middleware.graph.utils import MultiTenantUtils
@@ -20,7 +20,6 @@ from robosystems.models.iam.user_repository import (
   UserRepository,
 )
 from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.graph_api.core.ladybug import Repository
 
 from ..router import get_graph_repository
 from ..types import AccessPattern
@@ -29,7 +28,7 @@ from ..types import AccessPattern
 async def get_graph_database(
   graph_id: str,
   current_user: User = Depends(get_current_user),
-  required_access: Optional[AccessPattern] = None,
+  required_access: AccessPattern | None = None,
   db: Session = Depends(get_db_session),
 ) -> str:
   """

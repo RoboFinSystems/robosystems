@@ -1,9 +1,10 @@
 """Admin authentication middleware using AWS Secrets Manager."""
 
 from functools import wraps
-from typing import Optional, Dict, Any
-from fastapi import Request, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Any
+
+from fastapi import HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ...config.secrets_manager import get_secrets_manager
 from ...logger import get_logger
@@ -20,7 +21,7 @@ class AdminAuthMiddleware:
     """Initialize the admin auth middleware."""
     self.secrets_manager = get_secrets_manager()
 
-  def _get_admin_key(self) -> Optional[str]:
+  def _get_admin_key(self) -> str | None:
     """Get admin API key from AWS Secrets Manager.
 
     Returns:
@@ -38,10 +39,10 @@ class AdminAuthMiddleware:
         return None
 
     except Exception as e:
-      logger.error(f"Error fetching admin key: {str(e)}")
+      logger.error(f"Error fetching admin key: {e!s}")
       return None
 
-  def verify_admin_key(self, api_key: str) -> Optional[Dict[str, Any]]:
+  def verify_admin_key(self, api_key: str) -> dict[str, Any] | None:
     """Verify an admin API key.
 
     Args:
@@ -121,7 +122,7 @@ class AdminAuthMiddleware:
 admin_auth = AdminAuthMiddleware()
 
 
-def require_admin(permissions: Optional[list[str]] = None):
+def require_admin(permissions: list[str] | None = None):
   """Decorator to require admin authentication and check permissions.
 
   Args:

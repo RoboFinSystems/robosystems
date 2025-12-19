@@ -26,33 +26,34 @@ Use Cases:
 """
 
 import uuid
+from datetime import UTC
 
 from fastapi import (
   APIRouter,
   BackgroundTasks,
+  Body,
   Depends,
   HTTPException,
   Path,
-  Body,
   status,
 )
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import Graph, User
-from robosystems.models.api.common import ErrorResponse
+from robosystems.database import get_db_session
+from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.types import (
   GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  GraphTypeRegistry,
   SHARED_REPO_WRITE_ERROR_MESSAGE,
+  GraphTypeRegistry,
 )
-from robosystems.database import get_db_session
-from robosystems.logger import logger, api_logger
-from robosystems.middleware.robustness import CircuitBreakerManager
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.middleware.robustness import CircuitBreakerManager
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.iam import Graph, User
 
 router = APIRouter(
   tags=["Materialize"],
@@ -200,7 +201,7 @@ async def get_materialization_status(
 
   Shows staleness, last materialization time, and whether rebuild is recommended.
   """
-  from datetime import datetime, timezone
+  from datetime import datetime
 
   repository = await get_universal_repository(graph_id, "read")
   if not repository:
@@ -230,7 +231,7 @@ async def get_materialization_status(
       from dateutil import parser as date_parser
 
       last_mat_dt = date_parser.isoparse(last_materialized_at)
-      delta = datetime.now(timezone.utc) - last_mat_dt
+      delta = datetime.now(UTC) - last_mat_dt
       hours_since_materialization = delta.total_seconds() / 3600
     except Exception:
       pass
@@ -411,11 +412,11 @@ async def materialize_graph(
     )
 
   # Create SSE operation for progress tracking
-  from robosystems.middleware.sse.event_storage import get_event_storage
   from robosystems.middleware.sse import (
-    run_and_monitor_dagster_job,
     build_graph_job_config,
+    run_and_monitor_dagster_job,
   )
+  from robosystems.middleware.sse.event_storage import get_event_storage
 
   operation_id = str(uuid.uuid4())
   event_storage = get_event_storage()

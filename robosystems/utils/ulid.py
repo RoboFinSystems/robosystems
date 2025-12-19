@@ -11,7 +11,7 @@ Benefits over UUIDs:
 - Still globally unique
 """
 
-from typing import Optional
+
 from ulid import ULID
 
 
@@ -40,7 +40,7 @@ def generate_prefixed_ulid(prefix: str) -> str:
   return f"{prefix}_{ULID()}"
 
 
-def parse_ulid(ulid_str: str) -> Optional[ULID]:
+def parse_ulid(ulid_str: str) -> ULID | None:
   """
   Parse a ULID string back to a ULID object.
 
@@ -59,7 +59,7 @@ def parse_ulid(ulid_str: str) -> Optional[ULID]:
     return None
 
 
-def get_timestamp_from_ulid(ulid_str: str) -> Optional[float]:
+def get_timestamp_from_ulid(ulid_str: str) -> float | None:
   """
   Extract the timestamp from a ULID string.
 

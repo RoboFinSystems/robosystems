@@ -8,8 +8,8 @@ capabilities, and system load. Designed for seamless AI agent integration.
 
 import asyncio
 import json
-from typing import Union, Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import (
   APIRouter,
@@ -17,55 +17,57 @@ from fastapi import (
   Depends,
   HTTPException,
   Path,
-  Query as QueryParam,
   Request,
+)
+from fastapi import (
+  Query as QueryParam,
 )
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse, StreamingResponse
-from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
 
-from robosystems.database import get_db_session
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import (
-  subscription_aware_rate_limit_dependency,
-)
-from robosystems.middleware.graph import get_graph_repository
-from robosystems.models.iam import User
-from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
-from robosystems.models.api.common import ErrorResponse
-from robosystems.security.cypher_analyzer import (
-  is_write_operation,
-  is_bulk_operation,
-  is_admin_operation,
-)
-from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.config.query_queue import QueryQueueConfig
+from robosystems.database import get_db_session
+from robosystems.logger import api_logger, logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_graph_repository
+from robosystems.middleware.graph.query_queue import get_query_queue
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
+from robosystems.middleware.rate_limits import (
+  subscription_aware_rate_limit_dependency,
+)
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
-  OperationType,
   OperationStatus,
+  OperationType,
   record_operation_metric,
 )
-from robosystems.logger import logger, api_logger
 from robosystems.middleware.sse.operation_manager import create_operation_response
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.mcp import MCPToolCall, MCPToolResult
+from robosystems.models.iam import User
+from robosystems.security.cypher_analyzer import (
+  is_admin_operation,
+  is_bulk_operation,
+  is_write_operation,
+)
 
 # Import MCP components
 from .handlers import MCPHandler, validate_mcp_access
 from .strategies import (
-  MCPExecutionStrategy,
   MCPClientDetector,
+  MCPExecutionStrategy,
   MCPStrategySelector,
 )
 from .streaming import (
-  stream_mcp_tool_execution,
   aggregate_streamed_results,
+  stream_mcp_tool_execution,
 )
 
 router = APIRouter()
@@ -96,14 +98,14 @@ async def execute_tool_directly(
   handler: MCPHandler,
   tool_call: MCPToolCall,
   timeout: int = 60,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """Execute MCP tool directly without queuing."""
   try:
     result = await asyncio.wait_for(
       handler.call_tool(tool_call.name, tool_call.arguments), timeout=timeout
     )
     return result
-  except asyncio.TimeoutError:
+  except TimeoutError:
     raise HTTPException(
       status_code=http_status.HTTP_408_REQUEST_TIMEOUT,
       detail=f"Tool execution timed out after {timeout} seconds",
@@ -243,7 +245,7 @@ async def call_mcp_tool(
       },
     },
   ),
-  format: Optional[str] = QueryParam(
+  format: str | None = QueryParam(
     default=None,
     description="Response format override (json, sse, ndjson)",
   ),
@@ -254,7 +256,7 @@ async def call_mcp_tool(
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Union[MCPToolResult, JSONResponse, StreamingResponse, EventSourceResponse]:
+) -> MCPToolResult | JSONResponse | StreamingResponse | EventSourceResponse:
   """
   Execute an MCP tool with intelligent response optimization.
 
@@ -262,7 +264,7 @@ async def call_mcp_tool(
   strategy selection. For AI agents using the Node.js MCP client, all
   response formats are handled transparently and presented uniformly.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   # Import config
   from robosystems.config import env
@@ -334,10 +336,12 @@ async def call_mcp_tool(
 
     # Apply dual-layer rate limiting for shared repositories
     if MultiTenantUtils.is_shared_repository(graph_id):
+      from robosystems.config.valkey_registry import (
+        ValkeyDatabase,
+        create_async_redis_client,
+      )
       from robosystems.middleware.rate_limits import DualLayerRateLimiter
       from robosystems.models.iam.user_repository import UserRepository
-      from robosystems.config.valkey_registry import ValkeyDatabase
-      from robosystems.config.valkey_registry import create_async_redis_client
 
       # Get user's repository access plan
       repo_access = UserRepository.get_by_user_and_repository(
@@ -672,7 +676,7 @@ async def call_mcp_tool(
             logger.error(f"Direct tool execution failed: {e}")
             raise HTTPException(
               status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-              detail=f"Tool execution failed: {str(e)}",
+              detail=f"Tool execution failed: {e!s}",
             )
 
       elif strategy == MCPExecutionStrategy.SCHEMA_CACHED:
@@ -707,7 +711,7 @@ async def call_mcp_tool(
         await handler.close()
 
       # Record success metrics
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+      execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
       record_operation_metric(
         operation_type=OperationType.TOOL_EXECUTION,
         status=OperationStatus.SUCCESS,
@@ -727,7 +731,7 @@ async def call_mcp_tool(
 
   except HTTPException:
     # Record failure metrics
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
     record_operation_metric(
       operation_type=OperationType.TOOL_EXECUTION,
       status=OperationStatus.FAILURE,

@@ -15,8 +15,8 @@ Organization:
 """
 
 import os
-from typing import Any, Dict, Optional, List, Union, TYPE_CHECKING
 from functools import lru_cache
+from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
   from .valkey_registry import ValkeyDatabase
@@ -41,72 +41,71 @@ except ImportError:
 
 
 from .constants import (
-  # Database constants
-  DEFAULT_POOL_SIZE,
-  DEFAULT_MAX_OVERFLOW,
-  DEFAULT_POOL_TIMEOUT,
-  DEFAULT_POOL_RECYCLE,
-  # Performance constants
-  DEFAULT_HTTP_TIMEOUT,
-  DEFAULT_QUERY_TIMEOUT,
-  MAX_QUERY_LENGTH,
-  DEFAULT_QUERY_LIMIT,
-  DEFAULT_QUEUE_SIZE,
-  DEFAULT_MAX_CONCURRENT,
-  MAX_CONCURRENT_DOWNLOADS,
-  MAX_DATABASES_PER_NODE,
-  # Cache constants
-  CACHE_TTL_SHORT,
-  CACHE_TTL_LONG,
+  ADMISSION_CHECK_INTERVAL,
+  ADMISSION_CPU_THRESHOLD_DEFAULT,
   # Task constants
   ADMISSION_MEMORY_THRESHOLD_DEFAULT,
-  ADMISSION_CPU_THRESHOLD_DEFAULT,
   ADMISSION_QUEUE_THRESHOLD_DEFAULT,
-  ADMISSION_CHECK_INTERVAL,
-  # Fixed technical limits
-  GRAPH_MAX_REQUEST_SIZE,
-  GRAPH_CONNECT_TIMEOUT,
-  GRAPH_READ_TIMEOUT,
-  ARELLE_MIN_SCHEMA_COUNT,
   ARELLE_DOWNLOAD_TIMEOUT,
-  XBRL_EXTERNALIZATION_THRESHOLD,
-  XBRL_GRAPH_LARGE_NODES,
-  # Resiliency and circuit breaker
-  GRAPH_INSTANCE_CACHE_TTL,
-  GRAPH_CIRCUIT_BREAKER_THRESHOLD,
-  GRAPH_CIRCUIT_BREAKER_TIMEOUT,
-  # Queue configuration
-  QUERY_QUEUE_MAX_PER_USER,
-  QUERY_DEFAULT_PRIORITY,
-  QUERY_PRIORITY_BOOST_PREMIUM,
-  QUERY_QUEUE_TIMEOUT,
-  # Load shedding
-  LOAD_SHED_START_PRESSURE_DEFAULT,
-  LOAD_SHED_STOP_PRESSURE_DEFAULT,
-  # Retry configuration
-  SEC_PIPELINE_MAX_RETRIES,
-  OPENFIGI_RETRY_MIN_WAIT,
-  OPENFIGI_RETRY_MAX_WAIT,
+  ARELLE_MIN_SCHEMA_COUNT,
+  CACHE_TTL_LONG,
+  # Cache constants
+  CACHE_TTL_SHORT,
   # Fixed business rules
   CREDIT_ALLOCATION_DAY,
   CREDIT_ALLOCATION_HOUR,
-  SEC_RATE_LIMIT,
-  # Tier-specific memory allocations
-  GRAPH_STANDARD_MAX_MEMORY_MB,
-  GRAPH_LARGE_MAX_MEMORY_MB,
-  GRAPH_XLARGE_MAX_MEMORY_MB,
-  GRAPH_STANDARD_MEMORY_PER_DB_MB,
-  GRAPH_LARGE_MEMORY_PER_DB_MB,
-  GRAPH_XLARGE_MEMORY_PER_DB_MB,
-  # Tier-specific chunk sizes
-  GRAPH_STANDARD_CHUNK_SIZE,
-  GRAPH_LARGE_CHUNK_SIZE,
-  GRAPH_XLARGE_CHUNK_SIZE,
+  # Performance constants
+  DEFAULT_HTTP_TIMEOUT,
+  DEFAULT_MAX_CONCURRENT,
+  DEFAULT_MAX_OVERFLOW,
+  DEFAULT_POOL_RECYCLE,
+  # Database constants
+  DEFAULT_POOL_SIZE,
+  DEFAULT_POOL_TIMEOUT,
+  DEFAULT_QUERY_LIMIT,
+  DEFAULT_QUERY_TIMEOUT,
+  DEFAULT_QUEUE_SIZE,
   # DuckDB configuration
   DUCKDB_MAX_THREADS,
   DUCKDB_MEMORY_LIMIT,
+  GRAPH_CIRCUIT_BREAKER_THRESHOLD,
+  GRAPH_CIRCUIT_BREAKER_TIMEOUT,
+  GRAPH_CONNECT_TIMEOUT,
+  # Resiliency and circuit breaker
+  GRAPH_INSTANCE_CACHE_TTL,
+  GRAPH_LARGE_CHUNK_SIZE,
+  GRAPH_LARGE_MAX_MEMORY_MB,
+  GRAPH_LARGE_MEMORY_PER_DB_MB,
+  # Fixed technical limits
+  GRAPH_MAX_REQUEST_SIZE,
+  GRAPH_READ_TIMEOUT,
+  # Tier-specific chunk sizes
+  GRAPH_STANDARD_CHUNK_SIZE,
+  # Tier-specific memory allocations
+  GRAPH_STANDARD_MAX_MEMORY_MB,
+  GRAPH_STANDARD_MEMORY_PER_DB_MB,
+  GRAPH_XLARGE_CHUNK_SIZE,
+  GRAPH_XLARGE_MAX_MEMORY_MB,
+  GRAPH_XLARGE_MEMORY_PER_DB_MB,
+  # Load shedding
+  LOAD_SHED_START_PRESSURE_DEFAULT,
+  LOAD_SHED_STOP_PRESSURE_DEFAULT,
+  MAX_CONCURRENT_DOWNLOADS,
+  MAX_DATABASES_PER_NODE,
+  MAX_QUERY_LENGTH,
+  OPENFIGI_RETRY_MAX_WAIT,
+  OPENFIGI_RETRY_MIN_WAIT,
+  QUERY_DEFAULT_PRIORITY,
+  QUERY_PRIORITY_BOOST_PREMIUM,
+  # Queue configuration
+  QUERY_QUEUE_MAX_PER_USER,
+  QUERY_QUEUE_TIMEOUT,
+  # Retry configuration
+  SEC_PIPELINE_MAX_RETRIES,
+  SEC_RATE_LIMIT,
+  XBRL_EXTERNALIZATION_THRESHOLD,
+  XBRL_GRAPH_LARGE_NODES,
 )
-
 
 # ==========================================================================
 # HELPER FUNCTIONS FOR TYPE-SAFE ENVIRONMENT VARIABLE ACCESS
@@ -180,7 +179,7 @@ def get_str_env(key: str, default: str = "") -> str:
   return os.getenv(key, default)
 
 
-def get_list_env(key: str, default: str = "", separator: str = ",") -> List[str]:
+def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]:
   """
   Get a list environment variable (comma-separated by default).
 
@@ -887,7 +886,7 @@ class EnvConfig:
 
   @classmethod
   @lru_cache(maxsize=1)
-  def validate(cls) -> List[str]:
+  def validate(cls) -> list[str]:
     """
     Validate required environment variables.
 
@@ -918,7 +917,7 @@ class EnvConfig:
     return errors
 
   @classmethod
-  def get_lbug_tier_config(cls) -> Dict[str, Any]:
+  def get_lbug_tier_config(cls) -> dict[str, Any]:
     """
     Get LadybugDB tier-specific configuration, with overrides from graph.yml.
 
@@ -1028,12 +1027,12 @@ class EnvConfig:
     }
 
   @classmethod
-  def get_lbug_memory_config(cls) -> Dict[str, Any]:
+  def get_lbug_memory_config(cls) -> dict[str, Any]:
     """Alias for backward compatibility with existing code."""
     return cls.get_lbug_tier_config()
 
   @classmethod
-  def get_database_url(cls, database_name: Optional[str] = None) -> str:
+  def get_database_url(cls, database_name: str | None = None) -> str:
     """
     Get database URL, optionally with a specific database name.
 
@@ -1090,12 +1089,12 @@ class EnvConfig:
     return config
 
   @classmethod
-  def get_cors_origins(cls) -> List[str]:
+  def get_cors_origins(cls) -> list[str]:
     """Get CORS origins for Main API (backward compatibility)."""
     return cls.get_main_cors_origins()
 
   @classmethod
-  def get_main_cors_origins(cls) -> List[str]:
+  def get_main_cors_origins(cls) -> list[str]:
     """Get CORS origins for Main API (public-facing)."""
     if cls.is_production():
       return [
@@ -1122,7 +1121,7 @@ class EnvConfig:
       ]
 
   @classmethod
-  def get_lbug_cors_origins(cls) -> List[str]:
+  def get_lbug_cors_origins(cls) -> list[str]:
     """Get CORS origins for Graph API (VPC-internal)."""
     if cls.is_production() or cls.is_staging():
       # VPC-internal APIs don't need CORS for browsers
@@ -1133,7 +1132,7 @@ class EnvConfig:
 
   @classmethod
   def get_valkey_url(
-    cls, database: Optional[Union[int, "ValkeyDatabase"]] = None
+    cls, database: Union[int, "ValkeyDatabase"] | None = None
   ) -> str:
     """
     Get Valkey/Redis URL with optional database number.
@@ -1154,7 +1153,7 @@ class EnvConfig:
       return cls.VALKEY_URL
 
     # Import here to avoid circular dependency
-    from .valkey_registry import ValkeyURLBuilder, ValkeyDatabase
+    from .valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 
     # Handle both int and enum
     if isinstance(database, ValkeyDatabase):

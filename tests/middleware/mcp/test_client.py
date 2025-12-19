@@ -1,12 +1,14 @@
 """Tests for the Graph MCP client implementation."""
 
-import pytest
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from robosystems.middleware.mcp import (
+  GraphAPIError,
   GraphMCPClient,
   GraphMCPTools,
-  GraphAPIError,
 )
 
 
@@ -399,7 +401,7 @@ class TestGraphMCPTools:
   @pytest.mark.unit
   async def test_call_workspace_tools(self, mock_graph_client):
     """Test routing calls to workspace tools."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     mock_graph_client.graph_id = "kg1234567890abcdef"
     mock_graph_client.user = MagicMock()
@@ -415,7 +417,7 @@ class TestGraphMCPTools:
       mock_graph.graph_id = "kg1234567890abcdef"
       mock_graph.graph_name = "Test Graph"
       mock_graph.parent_graph_id = None
-      mock_graph.created_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+      mock_graph.created_at = datetime(2025, 1, 1, tzinfo=UTC)
 
       # Mock the query chain for both subgraphs and parent graph
       mock_query = MagicMock()
@@ -551,7 +553,7 @@ class TestGraphMCPConfigurableSchema:
       assert other["count"] == 50
 
       # Verify query calls
-      query_calls = [call for call in mock_async_graph_client.query.call_args_list]
+      query_calls = list(mock_async_graph_client.query.call_args_list)
       # Should have: 1 SHOW_TABLES + 3 COUNT queries (for all 3 tables)
       assert len(query_calls) == 4
 

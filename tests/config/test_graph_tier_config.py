@@ -5,12 +5,11 @@ import pytest
 from robosystems.config import graph_tier as tier_config_module
 from robosystems.config.graph_tier import (
   GraphTierConfig,
+  get_tier_api_rate_multiplier,
   get_tier_backup_limits,
   get_tier_copy_operation_limits,
   get_tier_max_subgraphs,
-  get_tier_api_rate_multiplier,
 )
-
 
 GRAPH_CONFIG_YAML = """
 production:

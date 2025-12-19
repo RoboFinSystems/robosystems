@@ -1,7 +1,8 @@
 """Tests for LadybugDB database schema setup operations."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from robosystems.operations.lbug.schema_setup import (
   LadybugSchemaManager,
@@ -295,20 +296,19 @@ class TestLadybugSchemaManagerAdditional:
         # Mock _create_node_table and _create_relationship_table to track calls
         with patch.object(
           manager, "_create_node_table", return_value=True
-        ) as mock_create_node:
-          with patch.object(
-            manager, "_create_relationship_table", return_value=True
-          ) as mock_create_rel:
-            # Initialize schema
-            manager.initialize_schema()
+        ) as mock_create_node, patch.object(
+          manager, "_create_relationship_table", return_value=True
+        ) as mock_create_rel:
+          # Initialize schema
+          manager.initialize_schema()
 
-            # Verify only new tables were created (existing ones skipped)
-            mock_create_node.assert_called_once_with(
-              "NewNode", mock_processor.ingest_config.node_tables["NewNode"]
-            )
-            mock_create_rel.assert_called_once_with(
-              "NEW_REL", mock_processor.ingest_config.relationship_tables["NEW_REL"]
-            )
+          # Verify only new tables were created (existing ones skipped)
+          mock_create_node.assert_called_once_with(
+            "NewNode", mock_processor.ingest_config.node_tables["NewNode"]
+          )
+          mock_create_rel.assert_called_once_with(
+            "NEW_REL", mock_processor.ingest_config.relationship_tables["NEW_REL"]
+          )
 
 
 class TestEnsureSchema:

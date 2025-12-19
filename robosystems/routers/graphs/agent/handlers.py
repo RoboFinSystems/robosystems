@@ -4,34 +4,35 @@ Agent execution handlers for different strategies.
 Provides handler functions for sync, SSE, and background queue execution paths.
 """
 
-from typing import Dict, Any
-from fastapi.responses import JSONResponse
-from sse_starlette.sse import EventSourceResponse
-from sqlalchemy.orm import Session
+from typing import Any
 
-from robosystems.models.iam import User
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
+
+from robosystems.logger import logger
+from robosystems.middleware.sse.operation_manager import create_operation_response
 from robosystems.models.api.graphs.agent import AgentMode, AgentResponse
+from robosystems.models.iam import User
+from robosystems.operations.agents.base import AgentMode as BaseAgentMode
 from robosystems.operations.agents.orchestrator import (
   AgentOrchestrator,
+  AgentSelectionCriteria,
   OrchestratorConfig,
   RoutingStrategy,
-  AgentSelectionCriteria,
 )
-from robosystems.operations.agents.base import AgentMode as BaseAgentMode
-from robosystems.middleware.sse.operation_manager import create_operation_response
-from robosystems.logger import logger
 
 from .streaming import stream_agent_execution
 
 
 async def handle_sync_execution(
   graph_id: str,
-  request_data: Dict[str, Any],
+  request_data: dict[str, Any],
   base_mode: BaseAgentMode,
   current_user: User,
   db: Session,
   selection_criteria: AgentSelectionCriteria = None,
-  agent_type: str = None,
+  agent_type: str | None = None,
 ) -> AgentResponse:
   """
   Handle synchronous agent execution.
@@ -80,10 +81,10 @@ async def handle_sync_execution(
 
 async def handle_sse_streaming(
   graph_id: str,
-  request_data: Dict[str, Any],
+  request_data: dict[str, Any],
   current_user: User,
   db: Session,
-  agent_type: str = None,
+  agent_type: str | None = None,
 ) -> EventSourceResponse:
   """
   Handle SSE streaming execution.
@@ -134,11 +135,11 @@ async def handle_sse_streaming(
 
 async def handle_background_queue(
   graph_id: str,
-  request_data: Dict[str, Any],
+  request_data: dict[str, Any],
   current_user: User,
   db: Session,
   background_tasks,
-  agent_type: str = None,
+  agent_type: str | None = None,
 ) -> JSONResponse:
   """
   Handle async background execution.
@@ -208,18 +209,19 @@ async def handle_background_queue(
 async def _run_agent_analysis_background(
   agent_type: str,
   graph_id: str,
-  request_data: Dict[str, Any],
+  request_data: dict[str, Any],
   operation_id: str,
   user_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Run agent analysis in background with SSE progress updates.
   """
   import time
+
   from robosystems.database import get_db_session
-  from robosystems.operations.agents.registry import AgentRegistry
-  from robosystems.middleware.sse.operation_manager import emit_sse_event
   from robosystems.middleware.sse.event_storage import OperationStatus
+  from robosystems.middleware.sse.operation_manager import emit_sse_event
+  from robosystems.operations.agents.registry import AgentRegistry
 
   start_time = time.time()
 
@@ -328,14 +330,14 @@ async def _run_agent_analysis_background(
       db.close()
 
   except Exception as e:
-    logger.error(f"Background agent analysis failed: {str(e)}", exc_info=True)
+    logger.error(f"Background agent analysis failed: {e!s}", exc_info=True)
 
     # Emit error event
     emit_sse_event(
       operation_id=operation_id,
       status=OperationStatus.FAILED,
       data={"error": str(e), "error_type": type(e).__name__},
-      message=f"Agent analysis failed: {str(e)}",
+      message=f"Agent analysis failed: {e!s}",
     )
 
     raise

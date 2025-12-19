@@ -9,9 +9,10 @@ Tests the complete flow of creating and managing subgraphs including:
 - Security validation
 """
 
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-from unittest.mock import Mock, AsyncMock
-from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from robosystems.operations.graph.subgraph_service import SubgraphService
@@ -43,7 +44,7 @@ class TestSubgraphOperations:
       return_value={
         "name": "test_subgraph",
         "size_mb": 10.5,
-        "last_modified": datetime.now(timezone.utc).isoformat(),
+        "last_modified": datetime.now(UTC).isoformat(),
       }
     )
 

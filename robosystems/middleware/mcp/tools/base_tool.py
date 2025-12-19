@@ -4,8 +4,8 @@ Base tool class for MCP tools.
 Provides common functionality and interface for all MCP tools.
 """
 
-from typing import Any, Dict, TYPE_CHECKING
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
   from ..client import GraphMCPClient
@@ -26,7 +26,7 @@ class BaseTool(ABC):
     self.validator = GraphQueryValidator()
 
   @abstractmethod
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """
     Get the tool definition for this tool.
 
@@ -36,7 +36,7 @@ class BaseTool(ABC):
     pass
 
   @abstractmethod
-  async def execute(self, arguments: Dict[str, Any]) -> Any:
+  async def execute(self, arguments: dict[str, Any]) -> Any:
     """
     Execute the tool with the given arguments.
 
@@ -48,6 +48,6 @@ class BaseTool(ABC):
     """
     pass
 
-  def _log_tool_execution(self, tool_name: str, arguments: Dict[str, Any]) -> None:
+  def _log_tool_execution(self, tool_name: str, arguments: dict[str, Any]) -> None:
     """Log tool execution for debugging."""
     logger.info(f"Executing MCP tool: {tool_name} with args: {list(arguments.keys())}")

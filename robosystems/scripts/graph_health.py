@@ -122,7 +122,7 @@ class GraphHealthChecker:
         except Exception as e:
           logger.warning(f"    Failed to query {name}: {e}")
           result.data[name] = None
-          result.errors.append(f"Query {name}: {str(e)}")
+          result.errors.append(f"Query {name}: {e!s}")
 
       # Run relationship count
       try:
@@ -131,7 +131,7 @@ class GraphHealthChecker:
           result.data["relationships"] = rel_result.get_next()[0]
           logger.info(f"    relationships: {result.data['relationships']:,}")
       except Exception as e:
-        result.errors.append(f"Relationship count: {str(e)}")
+        result.errors.append(f"Relationship count: {e!s}")
 
       # Run sample query
       try:
@@ -148,7 +148,7 @@ class GraphHealthChecker:
         if samples:
           logger.info(f"    Sample data retrieved ({len(samples)} records)")
       except Exception as e:
-        result.errors.append(f"Sample query: {str(e)}")
+        result.errors.append(f"Sample query: {e!s}")
 
       # Determine status
       primary_count = None
@@ -203,7 +203,7 @@ class GraphHealthChecker:
           result.errors.append(f"Health check: HTTP {response.status_code}")
       except Exception as e:
         logger.error(f"  API connection failed: {e}")
-        result.errors.append(f"Connection: {str(e)}")
+        result.errors.append(f"Connection: {e!s}")
         result.status = "error"
         return result
 
@@ -219,7 +219,7 @@ class GraphHealthChecker:
             result.errors.append(f"Database {self.graph_id} not registered")
             return result
       except Exception as e:
-        result.errors.append(f"Database list: {str(e)}")
+        result.errors.append(f"Database list: {e!s}")
 
       # Run queries through API
       query_url = f"{self.api_url}/databases/{self.graph_id}/query"
@@ -244,7 +244,7 @@ class GraphHealthChecker:
             result.errors.append(f"Query {name}: HTTP {response.status_code}")
         except Exception as e:
           result.data[name] = None
-          result.errors.append(f"Query {name}: {str(e)}")
+          result.errors.append(f"Query {name}: {e!s}")
 
       # Relationship count
       try:
@@ -259,7 +259,7 @@ class GraphHealthChecker:
             result.data["relationships"] = data["data"][0].get("count", 0)
             logger.info(f"    relationships: {result.data['relationships']:,}")
       except Exception as e:
-        result.errors.append(f"Relationship count: {str(e)}")
+        result.errors.append(f"Relationship count: {e!s}")
 
       # Sample query
       try:
@@ -276,7 +276,7 @@ class GraphHealthChecker:
               f"    Sample data retrieved ({len(result.data['samples'])} records)"
             )
       except Exception as e:
-        result.errors.append(f"Sample query: {str(e)}")
+        result.errors.append(f"Sample query: {e!s}")
 
       # Determine status
       has_data = any(
@@ -366,9 +366,7 @@ class GraphHealthChecker:
     self.results["comparison"] = self.compare_results(direct_result, api_result)
 
     # Overall status (prefer API status)
-    if api_result.status == "healthy":
-      overall = "healthy"
-    elif direct_result.status == "healthy":
+    if api_result.status == "healthy" or direct_result.status == "healthy":
       overall = "healthy"
     elif api_result.status == "empty" or direct_result.status == "empty":
       overall = "empty"

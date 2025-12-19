@@ -5,17 +5,20 @@ routers and middleware to avoid circular dependencies.
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional, Tuple
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import jwt
 import redis
 from fastapi import HTTPException, status
 
 from ...config import env
-from ...config.valkey_registry import ValkeyDatabase
-from ...config.valkey_registry import create_redis_client, create_async_redis_client
 from ...config.logging import get_logger
+from ...config.valkey_registry import (
+  ValkeyDatabase,
+  create_async_redis_client,
+  create_redis_client,
+)
 from ...security.device_fingerprinting import create_device_hash
 
 logger = get_logger("robosystems.auth.jwt")
@@ -95,8 +98,8 @@ def is_jwt_token_revoked(token: str) -> bool:
 
 
 def verify_jwt_token(
-  token: str, device_fingerprint: Optional[Dict[str, Any]] = None
-) -> Optional[str]:
+  token: str, device_fingerprint: dict[str, Any] | None = None
+) -> str | None:
   """Verify a JWT token and return the user_id if valid.
 
   Args:
@@ -148,7 +151,7 @@ def verify_jwt_token(
 
 
 def create_jwt_token(
-  user_id: str, device_fingerprint: Optional[Dict[str, Any]] = None
+  user_id: str, device_fingerprint: dict[str, Any] | None = None
 ) -> str:
   """Create a JWT token for authentication with optional device binding.
 
@@ -167,8 +170,8 @@ def create_jwt_token(
   payload = {
     "user_id": user_id,
     "jti": jti,  # JWT ID for revocation tracking
-    "exp": datetime.now(timezone.utc) + timedelta(hours=env.JWT_EXPIRY_HOURS),
-    "iat": datetime.now(timezone.utc),
+    "exp": datetime.now(UTC) + timedelta(hours=env.JWT_EXPIRY_HOURS),
+    "iat": datetime.now(UTC),
     "iss": env.JWT_ISSUER,
     "aud": env.JWT_AUDIENCE,
   }
@@ -179,7 +182,7 @@ def create_jwt_token(
   return jwt.encode(payload, secret_key, algorithm="HS256")
 
 
-def create_sso_token(user_id: str) -> Tuple[str, str]:
+def create_sso_token(user_id: str) -> tuple[str, str]:
   """Create a temporary SSO token for cross-app authentication.
 
   Args:
@@ -197,9 +200,9 @@ def create_sso_token(user_id: str) -> Tuple[str, str]:
     "user_id": user_id,
     "sso": True,
     "token_id": token_id,
-    "exp": datetime.now(timezone.utc)
+    "exp": datetime.now(UTC)
     + timedelta(seconds=300),  # 5 minutes for better UX
-    "iat": datetime.now(timezone.utc),
+    "iat": datetime.now(UTC),
     "iss": "api.robosystems.ai",  # Issuer claim
     "aud": ["robosystems.ai", "roboledger.ai", "roboinvestor.ai"],  # Audience claim
   }
@@ -240,8 +243,8 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
       return False
 
     # Calculate TTL (time until natural expiration)
-    exp_datetime = datetime.fromtimestamp(exp, tz=timezone.utc)
-    ttl_seconds = int((exp_datetime - datetime.now(timezone.utc)).total_seconds())
+    exp_datetime = datetime.fromtimestamp(exp, tz=UTC)
+    ttl_seconds = int((exp_datetime - datetime.now(UTC)).total_seconds())
 
     if ttl_seconds <= 0:
       logger.info("Token already expired, no need to revoke")
@@ -251,7 +254,7 @@ def revoke_jwt_token(token: str, reason: str = "user_logout") -> bool:
     redis_client = get_redis_client()
     revocation_key = f"revoked_jwt:{jti}"
     revocation_data = {
-      "revoked_at": datetime.now(timezone.utc).isoformat(),
+      "revoked_at": datetime.now(UTC).isoformat(),
       "reason": reason,
       "user_id": user_id,
     }

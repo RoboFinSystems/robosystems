@@ -1,5 +1,5 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from datetime import datetime, timezone
 
 import pytest
 
@@ -17,7 +17,7 @@ async def test_get_materialization_status_fresh_graph(monkeypatch):
     fake_repo,
   )
 
-  last_materialized_at = datetime.now(timezone.utc)
+  last_materialized_at = datetime.now(UTC)
 
   graph_record = SimpleNamespace(
     graph_id="graph-123",
@@ -63,8 +63,8 @@ async def test_get_materialization_status_stale_graph(monkeypatch):
     fake_repo,
   )
 
-  last_materialized_at = datetime.now(timezone.utc)
-  stale_at = datetime.now(timezone.utc)
+  last_materialized_at = datetime.now(UTC)
+  stale_at = datetime.now(UTC)
 
   graph_record = SimpleNamespace(
     graph_id="graph-123",

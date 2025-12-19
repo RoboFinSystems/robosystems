@@ -4,20 +4,20 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy.orm import Session
 
 from robosystems.middleware.sse import (
-  run_and_monitor_dagster_job,
   build_email_job_config,
+  run_and_monitor_dagster_job,
 )
+
 from ...config import env
 from ...database import get_async_db_session
 from ...logger import logger
+from ...middleware.auth.jwt import create_jwt_token, verify_jwt_token
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, EmailVerificationRequest
 from ...models.api.common import ErrorResponse
 from ...models.iam import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
-
 from .utils import detect_app_source
-from ...middleware.auth.jwt import verify_jwt_token, create_jwt_token
 
 # Create router for email verification endpoints
 router = APIRouter()

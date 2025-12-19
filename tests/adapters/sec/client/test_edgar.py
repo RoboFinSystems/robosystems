@@ -1,18 +1,20 @@
 """Tests for SEC API client adapter."""
 
 import os
-import pytest
-import pandas as pd
-import numpy as np
 from unittest.mock import Mock, patch
 from zipfile import ZipFile
-from requests.exceptions import HTTPError
+
+import numpy as np
+import pandas as pd
+import pytest
 import requests
+from requests.exceptions import HTTPError
 
 # Set test environment variables before importing to ensure fast retries
 os.environ["TESTING"] = "true"
 
 from robosystems.adapters.sec import SECClient, enable_test_mode
+from robosystems.adapters.sec.client.edgar import SEC_REQUEST_TIMEOUT
 
 # Enable fast retries for all tests in this module
 enable_test_mode()
@@ -53,7 +55,7 @@ class TestSECClient:
 
     # Verify
     expected_url = "https://www.sec.gov/files/company_tickers.json"
-    mock_get.assert_called_once_with(expected_url, headers=client._headers)
+    mock_get.assert_called_once_with(expected_url, headers=client._headers, timeout=SEC_REQUEST_TIMEOUT)
     assert result == mock_response.json.return_value
 
   @patch("robosystems.adapters.sec.client.edgar.requests.get")
@@ -140,7 +142,7 @@ class TestSECClient:
 
     # Verify
     expected_url = "https://data.sec.gov/submissions/CIK0000320193.json"
-    mock_get.assert_called_once_with(expected_url, headers=client_with_cik._headers)
+    mock_get.assert_called_once_with(expected_url, headers=client_with_cik._headers, timeout=SEC_REQUEST_TIMEOUT)
     assert result == mock_response.json.return_value
 
   def test_get_submissions_no_cik(self, client):
@@ -357,7 +359,7 @@ class TestSECClient:
 
     # Verify
     assert isinstance(result, ZipFile)
-    mock_get.assert_called_once_with(zip_url, headers=client._headers)
+    mock_get.assert_called_once_with(zip_url, headers=client._headers, timeout=SEC_REQUEST_TIMEOUT)
 
   @patch("robosystems.adapters.sec.client.edgar.requests.get")
   def test_download_xbrlzip_empty_response(self, mock_get, client):

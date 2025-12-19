@@ -1,15 +1,16 @@
 import pytest
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, Graph, GraphUser
 from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import is_subgraph_id, parse_graph_id
+from robosystems.models.iam import Graph, GraphUser, User
 
 
 @pytest.fixture
 def auth_user(db_session: Session) -> User:
-  from robosystems.utils.ulid import generate_prefixed_ulid
   import uuid
+
+  from robosystems.utils.ulid import generate_prefixed_ulid
 
   user = User(
     id=generate_prefixed_ulid("user"),
@@ -26,8 +27,9 @@ def auth_user(db_session: Session) -> User:
 
 @pytest.fixture
 def other_user(db_session: Session) -> User:
-  from robosystems.utils.ulid import generate_prefixed_ulid
   import uuid
+
+  from robosystems.utils.ulid import generate_prefixed_ulid
 
   user = User(
     id=generate_prefixed_ulid("user"),

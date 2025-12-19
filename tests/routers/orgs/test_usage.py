@@ -6,29 +6,29 @@ Focus on quota warnings and usage aggregation over credit + storage telemetry.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 
 from robosystems.models.iam import (
   Graph,
+  GraphUsage,
   GraphUser,
   Org,
   OrgLimits,
   OrgRole,
   OrgType,
   OrgUser,
-  GraphUsage,
   UsageEventType,
   User,
 )
 
 # Safety: router expects UsageEventType.AI_OPERATION; create alias if missing.
 if not hasattr(UsageEventType, "AI_OPERATION"):
-  setattr(UsageEventType, "AI_OPERATION", UsageEventType.AGENT_CALL)
+  UsageEventType.AI_OPERATION = UsageEventType.AGENT_CALL
 
 pytestmark = pytest.mark.asyncio
 
@@ -160,7 +160,7 @@ class TestOrgUsageEndpoints:
 
     graph = _create_graph(test_db, org.id, "Telemetry")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     previous = now - timedelta(days=1)
 
     usage_records = [

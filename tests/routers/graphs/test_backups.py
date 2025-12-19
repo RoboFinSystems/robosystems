@@ -5,12 +5,13 @@ This test suite validates REST API endpoints for backup management
 including authentication, request validation, and response formatting.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from tests.conftest import VALID_TEST_GRAPH_ID
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from main import app
+from tests.conftest import VALID_TEST_GRAPH_ID
 
 
 class TestBackupEndpoints:
@@ -20,19 +21,19 @@ class TestBackupEndpoints:
   def client(self):
     """Create test client with rate limiting disabled."""
     from robosystems.middleware.rate_limits import (
-      auth_rate_limit_dependency,
-      user_management_rate_limit_dependency,
-      sync_operations_rate_limit_dependency,
-      connection_management_rate_limit_dependency,
       analytics_rate_limit_dependency,
-      backup_operations_rate_limit_dependency,
-      sensitive_auth_rate_limit_dependency,
-      tasks_management_rate_limit_dependency,
-      general_api_rate_limit_dependency,
-      subscription_aware_rate_limit_dependency,
+      auth_rate_limit_dependency,
       auth_status_rate_limit_dependency,
-      sso_rate_limit_dependency,
+      backup_operations_rate_limit_dependency,
+      connection_management_rate_limit_dependency,
+      general_api_rate_limit_dependency,
       graph_scoped_rate_limit_dependency,
+      sensitive_auth_rate_limit_dependency,
+      sso_rate_limit_dependency,
+      subscription_aware_rate_limit_dependency,
+      sync_operations_rate_limit_dependency,
+      tasks_management_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
 
     # Save original overrides
@@ -125,8 +126,8 @@ class TestBackupEndpoints:
     mock_auth_user,
   ):
     """Test backup creation endpoint."""
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Create mock session
     mock_session = MagicMock()
@@ -202,8 +203,8 @@ class TestBackupEndpoints:
     self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
   ):
     """Test backup listing endpoint."""
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Create mock session
     mock_session = MagicMock()
@@ -258,7 +259,7 @@ class TestBackupEndpoints:
     paths = schema.get("paths", {})
 
     # Check for backup endpoints
-    backup_paths = [p for p in paths.keys() if "/backups" in p]
+    backup_paths = [p for p in paths if "/backups" in p]
     assert len(backup_paths) > 0, "No backup endpoints found in OpenAPI schema"
 
     # Verify operation IDs exist

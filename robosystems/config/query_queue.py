@@ -4,7 +4,7 @@ Configuration for query queue and admission control.
 Routes all configuration through the centralized env.py config.
 """
 
-from typing import Optional
+
 from robosystems.config import env
 
 
@@ -54,7 +54,7 @@ class QueryQueueConfig:
     }
 
   @classmethod
-  def get_priority_for_user(cls, user_tier: Optional[str]) -> int:
+  def get_priority_for_user(cls, user_tier: str | None) -> int:
     """Get priority based on user tier."""
     if user_tier in ["ladybug-xlarge", "ladybug-large"]:
       return cls.DEFAULT_PRIORITY + cls.PRIORITY_BOOST_PREMIUM

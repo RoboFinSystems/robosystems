@@ -5,12 +5,14 @@ This module handles installing both predefined schema extensions and
 custom custom schemas into LadybugDB databases.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 import real_ladybug as lbug
 
 from robosystems.logger import logger
-from .manager import SchemaManager
+
 from .custom import CustomSchemaManager
+from .manager import SchemaManager
 
 
 class SchemaInstaller:
@@ -32,8 +34,8 @@ class SchemaInstaller:
     self.custom_schema_manager = CustomSchemaManager()
 
   def install_extensions(
-    self, base_schema: str = "base", extensions: Optional[List[str]] = None
-  ) -> Dict[str, Any]:
+    self, base_schema: str = "base", extensions: list[str] | None = None
+  ) -> dict[str, Any]:
     """
     Install predefined schema extensions.
 
@@ -64,7 +66,7 @@ class SchemaInstaller:
       logger.error(f"Failed to install schema extensions: {e}")
       raise
 
-  def install_custom_schema(self, schema_definition: Dict[str, Any]) -> Dict[str, Any]:
+  def install_custom_schema(self, schema_definition: dict[str, Any]) -> dict[str, Any]:
     """
     Install custom custom schema.
 
@@ -91,7 +93,7 @@ class SchemaInstaller:
       logger.error(f"Failed to install custom schema: {e}")
       raise
 
-  def _install_schema(self, schema) -> Dict[str, Any]:
+  def _install_schema(self, schema) -> dict[str, Any]:
     """
     Install a compiled schema to the database.
 
@@ -164,7 +166,7 @@ class SchemaInstaller:
     finally:
       conn.close()
 
-  def _get_schema_info(self, conn) -> Dict[str, Any]:
+  def _get_schema_info(self, conn) -> dict[str, Any]:
     """Get current schema information from database."""
     try:
       # Query node tables

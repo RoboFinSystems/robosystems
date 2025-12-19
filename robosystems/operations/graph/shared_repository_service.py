@@ -20,11 +20,11 @@ Key differences from user graphs:
 - Multiple users subscribe individually
 """
 
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
-from ...logger import logger
 from ...config.graph_tier import GraphTier
+from ...logger import logger
 
 
 class SharedRepositoryService:
@@ -60,9 +60,9 @@ class SharedRepositoryService:
   async def create_shared_repository(
     self,
     repository_name: str,
-    created_by: Optional[str] = None,
+    created_by: str | None = None,
     instance_id: str = "ladybug-shared-prod",
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Create a shared repository following the same pattern as user graphs.
 
@@ -204,7 +204,7 @@ class SharedRepositoryService:
         "graph_id": graph_id,
         "instance_id": instance_id,
         "status": "created",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "created_by": created_by or "system",
         "database_info": db_info,
         "config": config,
@@ -236,9 +236,9 @@ class SharedRepositoryService:
 
 async def ensure_shared_repository_exists(
   repository_name: str,
-  created_by: Optional[str] = None,
+  created_by: str | None = None,
   instance_id: str = "ladybug-shared-prod",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Ensure a shared repository exists, creating it if necessary.
 

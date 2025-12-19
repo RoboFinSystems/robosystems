@@ -5,43 +5,43 @@ This module handles creating new graph databases with flexible configurations,
 optionally including initial entities like companies.
 """
 
-from typing import Optional, Dict, Any
+from typing import Any
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from robosystems.database import session
 from robosystems.logger import logger
-from robosystems.models.iam import User, OrgUser, OrgLimits, GraphUser
-from robosystems.models.api.graphs.core import CreateGraphRequest
-from robosystems.models.api.user import (
-  GraphInfo,
-  UserGraphsResponse,
-)
-from robosystems.models.api.common import (
-  ErrorResponse,
-  SuccessResponse,
-  ErrorCode,
-  create_error_response,
-)
-from robosystems.middleware.sse import create_operation_response
-from robosystems.models.api import (
-  AvailableExtensionsResponse,
-  AvailableExtension,
-  AvailableGraphTiersResponse,
-)
 from robosystems.middleware.auth.dependencies import (
   get_current_user,
   get_current_user_with_graph,
-)
-from robosystems.middleware.rate_limits import (
-  subscription_aware_rate_limit_dependency,
-  general_api_rate_limit_dependency,
-  user_management_rate_limit_dependency,
 )
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.database import session
-
+from robosystems.middleware.rate_limits import (
+  general_api_rate_limit_dependency,
+  subscription_aware_rate_limit_dependency,
+  user_management_rate_limit_dependency,
+)
+from robosystems.middleware.sse import create_operation_response
+from robosystems.models.api import (
+  AvailableExtension,
+  AvailableExtensionsResponse,
+  AvailableGraphTiersResponse,
+)
+from robosystems.models.api.common import (
+  ErrorCode,
+  ErrorResponse,
+  SuccessResponse,
+  create_error_response,
+)
+from robosystems.models.api.graphs.core import CreateGraphRequest
+from robosystems.models.api.user import (
+  GraphInfo,
+  UserGraphsResponse,
+)
+from robosystems.models.iam import GraphUser, OrgLimits, OrgUser, User
 
 # Create router for unified graph creation
 router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
@@ -50,9 +50,9 @@ router = APIRouter(prefix="/v1/graphs", tags=["Graphs"])
 def _create_error_response(
   error_code: str,
   message: str,
-  field: Optional[str] = None,
-  details: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+  field: str | None = None,
+  details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
   """Create a standardized error response."""
   error_obj = {"code": error_code, "message": message}
   if field:
@@ -66,8 +66,8 @@ def _raise_http_exception(
   status_code: int,
   error_code: str,
   message: str,
-  field: Optional[str] = None,
-  details: Optional[Dict[str, Any]] = None,
+  field: str | None = None,
+  details: dict[str, Any] | None = None,
 ):
   """Raise an HTTPException with standardized error format."""
   raise HTTPException(
@@ -287,7 +287,7 @@ async def get_graphs(
     return UserGraphsResponse(graphs=graphs, selectedGraphId=selected_graph_id)
 
   except Exception as e:
-    logger.error(f"Error retrieving user graphs: {str(e)}")
+    logger.error(f"Error retrieving user graphs: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error retrieving user graphs",
@@ -371,7 +371,7 @@ async def create_graph(
   request: CreateGraphRequest,
   background_tasks: BackgroundTasks,
   current_user: User = Depends(get_current_user),
-  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),  # noqa: ARG001
+  _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
 ):
   """
   Create a new graph database asynchronously using SSE monitoring.
@@ -385,8 +385,8 @@ async def create_graph(
   Returns operation details for SSE monitoring instead of legacy task polling.
   """
   try:
-    from robosystems.database import get_db_session
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.database import get_db_session
     from robosystems.middleware.billing.enforcement import (
       check_can_provision_graph,
     )
@@ -503,8 +503,8 @@ async def create_graph(
       operation_id = response["operation_id"]
 
       from robosystems.middleware.sse import (
-        run_and_monitor_dagster_job,
         build_graph_job_config,
+        run_and_monitor_dagster_job,
       )
 
       if request.initial_entity:
@@ -567,7 +567,7 @@ async def create_graph(
     logger.error(f"Failed to create graph creation operation: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to create graph creation operation: {str(e)}",
+      detail=f"Failed to create graph creation operation: {e!s}",
     )
 
 
@@ -630,8 +630,8 @@ Extension listing is included - no credit consumption required.""",
   },
 )
 async def get_available_extensions(
-  current_user: User = Depends(get_current_user),  # noqa: ARG001
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
+  current_user: User = Depends(get_current_user),
+  _rate_limit: None = Depends(general_api_rate_limit_dependency),
 ):
   """
   Get available schema extensions for graph creation.
@@ -667,8 +667,8 @@ async def get_available_extensions(
         # Try to get actual node/relationship counts
         try:
           from robosystems.schemas.loader import (
-            get_schema_loader,
             get_contextual_schema_loader,
+            get_schema_loader,
           )
 
           # Use context-aware loading for RoboLedger to show accurate counts
@@ -832,8 +832,8 @@ Tier listing is included - no credit consumption required.""",
   },
 )
 async def get_available_graph_tiers(
-  current_user: User = Depends(get_current_user),  # noqa: ARG001
-  _rate_limit: None = Depends(general_api_rate_limit_dependency),  # noqa: ARG001
+  current_user: User = Depends(get_current_user),
+  _rate_limit: None = Depends(general_api_rate_limit_dependency),
   include_disabled: bool = False,
 ) -> AvailableGraphTiersResponse:
   """
@@ -846,8 +846,8 @@ async def get_available_graph_tiers(
       include_disabled: Whether to include disabled/optional tiers (default: False)
   """
   try:
-    from robosystems.config.graph_tier import GraphTierConfig
     from robosystems.config import BillingConfig
+    from robosystems.config.graph_tier import GraphTierConfig
 
     # Get tier configurations from graph.yml
     tiers = GraphTierConfig.get_available_tiers(include_disabled=include_disabled)
@@ -876,7 +876,7 @@ async def get_available_graph_tiers(
         tier_key = tier.get("tier", "")
         mapped_key = pricing_mapping.get(tier_key, tier_key)
 
-        if mapped_key in tier_pricing and tier_pricing[mapped_key]:
+        if tier_pricing.get(mapped_key):
           tier["monthly_price"] = tier_pricing[mapped_key].get("monthly_price")
         else:
           # Default pricing if not found
@@ -887,7 +887,7 @@ async def get_available_graph_tiers(
             "neo4j-community-large": 299.99,
             "neo4j-enterprise-xlarge": 999.99,
           }
-          tier["monthly_price"] = default_prices.get(tier_key, None)
+          tier["monthly_price"] = default_prices.get(tier_key)
 
     except Exception as pricing_error:
       logger.warning(f"Could not load pricing information: {pricing_error}")
@@ -900,7 +900,7 @@ async def get_available_graph_tiers(
     _raise_http_exception(
       status.HTTP_500_INTERNAL_SERVER_ERROR,
       ErrorCode.INTERNAL_ERROR,
-      f"Failed to retrieve tier configurations: {str(e)}",
+      f"Failed to retrieve tier configurations: {e!s}",
     )
 
 
@@ -1044,7 +1044,7 @@ async def select_graph(
     raise
 
   except Exception as e:
-    logger.error(f"Error selecting graph: {str(e)}")
+    logger.error(f"Error selecting graph: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error selecting graph",

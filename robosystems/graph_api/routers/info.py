@@ -7,9 +7,9 @@ about the node and its capabilities.
 
 from fastapi import APIRouter, Depends
 
-from robosystems.graph_api.models.cluster import ClusterInfoResponse
-from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.config import env
+from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.models.cluster import ClusterInfoResponse
 
 router = APIRouter(tags=["Info"])
 

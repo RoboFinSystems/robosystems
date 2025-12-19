@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -15,7 +15,7 @@ class DimensionType(str, Enum):
 class Dimension(BaseModel):
   name: str = Field(..., description="Dimension name (e.g., 'Element', 'Period')")
   type: DimensionType = Field(..., description="Dimension type")
-  members: List[str] = Field(
+  members: list[str] = Field(
     default_factory=list, description="List of dimension members"
   )
 
@@ -33,14 +33,14 @@ class FactGridMetadata(BaseModel):
     ...,
     description="Source of facts (e.g., 'trial_balance_aggregation', 'fact_set_query')",
   )
-  lineage: Optional[Dict[str, Any]] = Field(
+  lineage: dict[str, Any] | None = Field(
     None, description="Lineage information for traceability"
   )
 
 
 class FactGrid(BaseModel):
-  dimensions: List[Dimension] = Field(..., description="Dimensions in the grid")
-  facts_df: Optional[Any] = Field(
+  dimensions: list[Dimension] = Field(..., description="Dimensions in the grid")
+  facts_df: Any | None = Field(
     None,
     description="Pandas DataFrame with fact data (not serialized, internal use only)",
     exclude=True,
@@ -50,7 +50,7 @@ class FactGrid(BaseModel):
   class Config:
     arbitrary_types_allowed = True
 
-  def as_pivot_table(self, config: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+  def as_pivot_table(self, config: dict[str, Any] | None = None) -> pd.DataFrame:
     if self.facts_df is None:
       return pd.DataFrame()
 

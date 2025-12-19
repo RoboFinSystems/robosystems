@@ -11,11 +11,11 @@ or environment variables, never in code.
 """
 
 import base64
-from typing import Union
+
 from cryptography.fernet import Fernet
 
-from robosystems.logger import logger
 from robosystems.config import env
+from robosystems.logger import logger
 
 
 def _get_encryption_key() -> bytes:
@@ -48,7 +48,7 @@ def _get_encryption_key() -> bytes:
     )
 
 
-def encrypt_data(data: Union[bytes, str]) -> bytes:
+def encrypt_data(data: bytes | str) -> bytes:
   """
   Encrypt data using Fernet symmetric encryption.
 
@@ -81,7 +81,7 @@ def encrypt_data(data: Union[bytes, str]) -> bytes:
 
   except Exception as e:
     logger.error(f"Encryption failed: {e}")
-    raise ValueError(f"Failed to encrypt data: {str(e)}")
+    raise ValueError(f"Failed to encrypt data: {e!s}")
 
 
 def decrypt_data(encrypted_data: bytes) -> bytes:
@@ -115,7 +115,7 @@ def decrypt_data(encrypted_data: bytes) -> bytes:
 
   except Exception as e:
     logger.error(f"Decryption failed: {e}")
-    raise ValueError(f"Failed to decrypt data: {str(e)}")
+    raise ValueError(f"Failed to decrypt data: {e!s}")
 
 
 def generate_encryption_key() -> str:
@@ -134,7 +134,7 @@ def generate_encryption_key() -> str:
 
 
 # For backward compatibility, provide these aliases
-def encrypt(data: Union[bytes, str]) -> bytes:
+def encrypt(data: bytes | str) -> bytes:
   """Alias for encrypt_data for backward compatibility."""
   return encrypt_data(data)
 

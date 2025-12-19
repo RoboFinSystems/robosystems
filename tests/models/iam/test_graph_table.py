@@ -1,8 +1,8 @@
 # pyright: reportGeneralTypeIssues=false, reportArgumentType=false, reportOperatorIssue=false, reportOptionalMemberAccess=false
 import pytest
 
-from robosystems.models.iam.graph_table import GraphTable
 from robosystems.models.iam import Graph
+from robosystems.models.iam.graph_table import GraphTable
 
 
 @pytest.mark.unit
@@ -255,8 +255,8 @@ class TestGraphTableModel:
     assert len(found.schema_json["columns"]) == 3
 
   def test_multiple_graphs_same_table_name(self, db_session, test_user, test_org):
-    from robosystems.models.iam import GraphUser
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.iam import GraphUser
 
     graph1 = Graph.create(
       graph_id="graph1",

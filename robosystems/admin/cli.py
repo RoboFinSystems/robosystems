@@ -22,12 +22,13 @@ Examples:
     uv run python -m robosystems.admin.cli stats
 """
 
-import subprocess
 import json
 import os
+import subprocess
+from typing import Any
+
 import click
 import requests
-from typing import Optional, Dict, Any
 from rich.console import Console
 from rich.table import Table
 
@@ -44,7 +45,7 @@ class AdminAPIClient:
   def __init__(
     self,
     environment: str = "prod",
-    api_base_url: Optional[str] = None,
+    api_base_url: str | None = None,
     aws_profile: str = "robosystems",
   ):
     """Initialize the admin API client.
@@ -132,15 +133,15 @@ class AdminAPIClient:
         f'Invalid JSON in secret {secret_id}. Expected format: {{"ADMIN_API_KEY": "..."}}'
       )
     except Exception as e:
-      raise click.ClickException(f"Error fetching admin key: {str(e)}")
+      raise click.ClickException(f"Error fetching admin key: {e!s}")
 
   def _make_request(
     self,
     method: str,
     endpoint: str,
-    data: Optional[Dict[str, Any]] = None,
-    params: Optional[Dict[str, Any]] = None,
-  ) -> Dict[str, Any]:
+    data: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+  ) -> dict[str, Any]:
     """Make an authenticated request to the admin API.
 
     Args:
@@ -198,7 +199,7 @@ class AdminAPIClient:
         f"Connection failed. Unable to reach API at {self.api_base_url}"
       )
     except requests.RequestException as e:
-      raise click.ClickException(f"Network error: {str(e)}")
+      raise click.ClickException(f"Network error: {e!s}")
 
 
 @click.group()

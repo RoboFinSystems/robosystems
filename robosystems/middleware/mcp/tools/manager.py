@@ -6,29 +6,30 @@ functionality for interacting with graph databases.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from robosystems.logger import logger
 from robosystems.middleware.mcp.query_validator import GraphQueryValidator
+
 from ..exceptions import (
   GraphAPIError,
-  GraphQueryTimeoutError,
   GraphQueryComplexityError,
+  GraphQueryTimeoutError,
   GraphValidationError,
 )
-from . import (
-  ExampleQueriesTool,
-  CypherTool,
-  SchemaTool,
-  PropertiesTool,
-  StructureTool,
-  ElementsTool,
-  FactsTool,
+from .cypher_tool import CypherTool
+from .data_tools import BuildFactGridTool
+from .elements_tool import ElementsTool
+from .example_queries_tool import ExampleQueriesTool
+from .facts_tool import FactsTool
+from .properties_tool import PropertiesTool
+from .schema_tool import SchemaTool
+from .structure_tool import StructureTool
+from .workspace import (
   CreateWorkspaceTool,
   DeleteWorkspaceTool,
   ListWorkspacesTool,
   SwitchWorkspaceTool,
-  BuildFactGridTool,
 )
 
 
@@ -84,7 +85,7 @@ class GraphMCPTools:
     # So we'll include it by default and let the tool handle the check
     return False
 
-  def _get_workspace_tool_definitions(self) -> List[Dict[str, Any]]:
+  def _get_workspace_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get workspace management tool definitions from actual tool implementations.
 
@@ -98,7 +99,7 @@ class GraphMCPTools:
       self.list_workspaces_tool.get_tool_definition(),
     ]
 
-  def _get_data_tool_definitions(self) -> List[Dict[str, Any]]:
+  def _get_data_tool_definitions(self) -> list[dict[str, Any]]:
     """
     Get data operation tool definitions from actual tool implementations.
 
@@ -109,7 +110,7 @@ class GraphMCPTools:
       self.build_fact_grid_tool.get_tool_definition(),
     ]
 
-  def get_tool_definitions_as_dict(self) -> List[Dict[str, Any]]:
+  def get_tool_definitions_as_dict(self) -> list[dict[str, Any]]:
     """
     Get MCP tool definitions for graph databases, using compatible naming.
 
@@ -143,7 +144,7 @@ class GraphMCPTools:
     return tools
 
   async def call_tool(
-    self, name: str, arguments: Dict[str, Any], return_raw: bool = False
+    self, name: str, arguments: dict[str, Any], return_raw: bool = False
   ) -> Any:
     """
     Call a specific MCP tool by name.
@@ -285,7 +286,7 @@ class GraphMCPTools:
 
       if return_raw:
         # Preserve original exception with enhanced message
-        e.args = (enhanced_msg,) + e.args[1:] if len(e.args) > 1 else (enhanced_msg,)
+        e.args = (enhanced_msg, *e.args[1:]) if len(e.args) > 1 else (enhanced_msg,)
         if hasattr(e, "details"):
           e.details = {**e.details, **error_context}
         raise
@@ -319,8 +320,8 @@ class GraphMCPTools:
       return f"Error: {error_msg}"
 
   async def execute_cypher_tool(
-    self, query: str, parameters: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, query: str, parameters: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """
     Execute Cypher tool directly.
 
@@ -331,13 +332,13 @@ class GraphMCPTools:
     Returns:
         Query result
     """
-    arguments: Dict[str, Any] = {"query": query}
+    arguments: dict[str, Any] = {"query": query}
     if parameters:
       arguments["parameters"] = parameters
 
     return await self.call_tool("read-graph-cypher", arguments, return_raw=True)
 
-  async def execute_schema_tool(self) -> List[Dict[str, Any]]:
+  async def execute_schema_tool(self) -> list[dict[str, Any]]:
     """
     Execute schema retrieval tool.
 
@@ -347,10 +348,10 @@ class GraphMCPTools:
     return await self.call_tool("get-graph-schema", {}, return_raw=True)
 
   def _build_error_context(
-    self, tool_name: str, arguments: Dict[str, Any], exception: Exception
-  ) -> Dict[str, Any]:
+    self, tool_name: str, arguments: dict[str, Any], exception: Exception
+  ) -> dict[str, Any]:
     """Build comprehensive error context for logging and debugging."""
-    context: Dict[str, Any] = {
+    context: dict[str, Any] = {
       "tool_name": tool_name,
       "graph_id": self.client.graph_id,
       "exception_type": type(exception).__name__,
@@ -359,7 +360,7 @@ class GraphMCPTools:
     # Add argument context (sanitized)
     if arguments:
       # Don't log full query content for security, just metadata
-      arg_context: Dict[str, Any] = {}
+      arg_context: dict[str, Any] = {}
       for key, value in arguments.items():
         if key == "query" and isinstance(value, str):
           arg_context[key] = {
@@ -384,7 +385,7 @@ class GraphMCPTools:
     return context
 
   def _enhance_error_message(
-    self, error_msg: str, tool_name: str, arguments: Dict[str, Any]
+    self, error_msg: str, tool_name: str, arguments: dict[str, Any]
   ) -> str:
     """Enhance error messages with tool-specific context and suggestions."""
     enhanced_msg = error_msg
@@ -415,7 +416,7 @@ class GraphMCPTools:
       enhanced_msg += "\n\n💡 Large schema detected. Consider using discover-properties for specific node types."
 
     elif tool_name == "discover-properties":
-      if "node_type" in arguments and arguments["node_type"]:
+      if arguments.get("node_type"):
         node_type = arguments["node_type"]
         enhanced_msg += f"\n\n💡 If '{node_type}' doesn't exist, check available labels with get-graph-schema first."
 
@@ -473,7 +474,7 @@ class GraphMCPTools:
     self.schema_tool.clear_schema_cache()
     logger.debug("Schema cache cleared")
 
-  def get_cache_stats(self) -> Dict[str, Any]:
+  def get_cache_stats(self) -> dict[str, Any]:
     """Get cache performance statistics."""
     return self.schema_tool.get_cache_stats()
 

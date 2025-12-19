@@ -5,10 +5,13 @@ Tests complete user journeys including registration, authentication,
 entity management, and user profile operations with metrics verification.
 """
 
-import pytest
 import os
+from datetime import UTC
+from unittest.mock import MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+
 from robosystems.models.iam import GraphUser, UserAPIKey
 
 
@@ -163,9 +166,10 @@ class TestEntityManagementWorkflow:
     )
 
     # Create graph credits for the workflow
-    from robosystems.models.iam import GraphCredits
+    from datetime import datetime
     from decimal import Decimal
-    from datetime import datetime, timezone
+
+    from robosystems.models.iam import GraphCredits
 
     graph_credits = GraphCredits(
       id="gc_workflow-graph",
@@ -174,7 +178,7 @@ class TestEntityManagementWorkflow:
       billing_admin_id=user_id,
       current_balance=Decimal("1000.0"),
       monthly_allocation=Decimal("1000.0"),
-      last_allocation_date=datetime.now(timezone.utc),
+      last_allocation_date=datetime.now(UTC),
     )
     test_db.add(graph_credits)
     test_db.commit()

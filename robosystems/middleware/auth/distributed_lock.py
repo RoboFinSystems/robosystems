@@ -8,8 +8,8 @@ in SSO token operations, ensuring atomic operations across multiple instances.
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional, Dict, cast, Any
 from dataclasses import dataclass
+from typing import Any, cast
 
 import redis
 from redis.exceptions import RedisError
@@ -23,10 +23,10 @@ class LockAcquisitionResult:
   """Result of lock acquisition attempt."""
 
   acquired: bool
-  lock_id: Optional[str]
-  holder_id: Optional[str]
-  ttl_remaining: Optional[int]
-  error_message: Optional[str] = None
+  lock_id: str | None
+  holder_id: str | None
+  ttl_remaining: int | None
+  error_message: str | None = None
 
 
 class DistributedLock:
@@ -55,10 +55,10 @@ class DistributedLock:
     self.ttl_seconds = ttl_seconds
     self.lock_id = str(uuid.uuid4())
     self.acquired = False
-    self.acquisition_time: Optional[float] = None
+    self.acquisition_time: float | None = None
 
   def acquire(
-    self, blocking: bool = True, timeout: Optional[float] = None
+    self, blocking: bool = True, timeout: float | None = None
   ) -> LockAcquisitionResult:
     """
     Acquire the distributed lock.
@@ -111,8 +111,8 @@ class DistributedLock:
 
         # Lock is held by another process
         if not blocking:
-          current_holder = cast(Optional[bytes], self.redis.get(self.lock_key))
-          ttl = cast(Optional[int], self.redis.ttl(self.lock_key))
+          current_holder = cast(bytes | None, self.redis.get(self.lock_key))
+          ttl = cast(int | None, self.redis.ttl(self.lock_key))
 
           return LockAcquisitionResult(
             acquired=False,
@@ -163,7 +163,7 @@ class DistributedLock:
           lock_id=None,
           holder_id=None,
           ttl_remaining=None,
-          error_message=f"Redis error: {str(e)}",
+          error_message=f"Redis error: {e!s}",
         )
 
     # Max retries exceeded
@@ -433,7 +433,7 @@ class SSOTokenLockManager:
         lock.release()
         logger.debug(f"Released SSO session lock for {operation}: {session_id[:8]}...")
 
-  def cleanup_expired_locks(self) -> Dict[str, Any]:
+  def cleanup_expired_locks(self) -> dict[str, Any]:
     """
     Clean up expired SSO locks (maintenance operation).
 
@@ -504,7 +504,7 @@ class SSOTokenLockManager:
       }
 
 
-def get_sso_lock_manager() -> Optional[SSOTokenLockManager]:
+def get_sso_lock_manager() -> SSOTokenLockManager | None:
   """
   Get the global SSO lock manager instance.
 

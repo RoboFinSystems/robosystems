@@ -4,17 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...models.iam import User
-from ...models.billing import BillingCustomer as BillingCustomerModel
 from ...models.api.billing.customer import (
   BillingCustomer,
   PaymentMethod,
   PortalSessionResponse,
 )
+from ...models.billing import BillingCustomer as BillingCustomerModel
+from ...models.iam import User
 from ...operations.providers.payment_provider import get_payment_provider
-from ...logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -42,7 +42,7 @@ async def get_customer(
 ):
   """Get billing customer information for an organization."""
   try:
-    from ...models.iam import OrgUser, OrgRole
+    from ...models.iam import OrgRole, OrgUser
 
     # Verify user is a member of the org
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
@@ -126,8 +126,8 @@ async def create_portal_session(
 ):
   """Create Stripe Customer Portal session for payment management."""
   try:
-    from ...models.iam import OrgUser, OrgRole
     from ...config import env
+    from ...models.iam import OrgRole, OrgUser
 
     membership = OrgUser.get_by_org_and_user(org_id, current_user.id, db)
     if not membership:

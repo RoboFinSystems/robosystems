@@ -7,15 +7,14 @@ Calculates monthly bills for individual graph databases based on:
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Dict, Optional
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import UTC, datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy.orm import Session
 
-from ...models.iam import GraphUsage
-from ...models.billing import BillingSubscription
 from ...config import BillingConfig
+from ...models.billing import BillingSubscription
+from ...models.iam import GraphUsage
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ class GraphPricingService:
     """Initialize pricing service with database session."""
     self.session = session
 
-  def get_subscription_plan(self, user_id: str, graph_id: str) -> Optional[Dict]:
+  def get_subscription_plan(self, user_id: str, graph_id: str) -> dict | None:
     """Get the billing plan for a graph subscription."""
     from ...models.billing import BillingCustomer
 
@@ -58,7 +57,7 @@ class GraphPricingService:
     graph_id: str,
     year: int,
     month: int,
-  ) -> Dict:
+  ) -> dict:
     """
     Calculate monthly bill for a specific graph database.
 
@@ -104,7 +103,7 @@ class GraphPricingService:
           "storage_overage": 0,
           "total": 0,
         },
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
       }
 
     # Calculate usage metrics
@@ -130,10 +129,10 @@ class GraphPricingService:
         "storage_overage": charges["storage_overage"],
         "total": charges["total"],
       },
-      "generated_at": datetime.now(timezone.utc).isoformat(),
+      "generated_at": datetime.now(UTC).isoformat(),
     }
 
-  def _calculate_usage_metrics(self, usage_records: list) -> Dict:
+  def _calculate_usage_metrics(self, usage_records: list) -> dict:
     """Calculate usage metrics from hourly records."""
     total_gb_hours = sum(record.size_gb for record in usage_records)
     total_queries = sum(record.query_count for record in usage_records)
@@ -148,7 +147,7 @@ class GraphPricingService:
       "measurement_count": len(usage_records),
     }
 
-  def _calculate_charges(self, plan: Dict, avg_size_gb: float) -> Dict:
+  def _calculate_charges(self, plan: dict, avg_size_gb: float) -> dict:
     """Calculate charges based on plan and usage.
 
     NOTE: This method is deprecated. Storage is now credit-based rather than GB-based.

@@ -1,21 +1,21 @@
 """Organization management endpoints."""
 
-from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...models.iam import User, Org, OrgUser, OrgRole, Graph
 from ...models.api.orgs import (
-  OrgResponse,
   CreateOrgRequest,
-  UpdateOrgRequest,
-  OrgListResponse,
   OrgDetailResponse,
+  OrgListResponse,
+  OrgResponse,
+  UpdateOrgRequest,
 )
-from ...logger import get_logger
+from ...models.iam import Graph, Org, OrgRole, OrgUser, User
 
 logger = get_logger(__name__)
 
@@ -65,7 +65,7 @@ async def list_user_orgs(
     )
 
   except Exception as e:
-    logger.error(f"Error listing user organizations: {str(e)}")
+    logger.error(f"Error listing user organizations: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to list organizations",
@@ -121,7 +121,7 @@ async def create_org(
 
   except Exception as e:
     db.rollback()
-    logger.error(f"Error creating organization: {str(e)}")
+    logger.error(f"Error creating organization: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to create organization",
@@ -205,7 +205,7 @@ async def get_org(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error getting organization {org_id}: {str(e)}")
+    logger.error(f"Error getting organization {org_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to get organization",
@@ -261,7 +261,7 @@ async def update_org(
     raise
   except Exception as e:
     db.rollback()
-    logger.error(f"Error updating organization {org_id}: {str(e)}")
+    logger.error(f"Error updating organization {org_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to update organization",
@@ -270,7 +270,7 @@ async def update_org(
 
 @router.get(
   "/orgs/{org_id}/graphs",
-  response_model=List[dict],
+  response_model=list[dict],
   summary="List Organization Graphs",
   description="Get all graphs belonging to an organization.",
   operation_id="listOrgGraphs",
@@ -280,7 +280,7 @@ async def list_org_graphs(
   current_user: User = Depends(get_current_user),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(general_api_rate_limit_dependency),
-) -> List[dict]:
+) -> list[dict]:
   """List all graphs in an organization."""
   try:
     # Check if user is a member of the org
@@ -319,7 +319,7 @@ async def list_org_graphs(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error listing organization graphs: {str(e)}")
+    logger.error(f"Error listing organization graphs: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to list organization graphs",

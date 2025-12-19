@@ -1,8 +1,9 @@
 """Graph management API models."""
 
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, field_validator
 import re
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 # Import secure write operation detection
 
@@ -94,26 +95,26 @@ class GraphMetricsResponse(BaseModel):
   """Response model for graph metrics."""
 
   graph_id: str = Field(..., description="Graph database identifier")
-  graph_name: Optional[str] = Field(None, description="Display name for the graph")
-  user_role: Optional[str] = Field(None, description="User's role in this graph")
+  graph_name: str | None = Field(None, description="Display name for the graph")
+  user_role: str | None = Field(None, description="User's role in this graph")
   timestamp: str = Field(..., description="Metrics collection timestamp")
   total_nodes: int = Field(..., description="Total number of nodes")
   total_relationships: int = Field(..., description="Total number of relationships")
-  node_counts: Dict[str, int] = Field(..., description="Node counts by label")
-  relationship_counts: Dict[str, int] = Field(
+  node_counts: dict[str, int] = Field(..., description="Node counts by label")
+  relationship_counts: dict[str, int] = Field(
     ..., description="Relationship counts by type"
   )
-  estimated_size: Dict[str, Any] = Field(..., description="Database size estimates")
-  health_status: Dict[str, Any] = Field(..., description="Database health information")
+  estimated_size: dict[str, Any] = Field(..., description="Database size estimates")
+  health_status: dict[str, Any] = Field(..., description="Database health information")
 
 
 class GraphUsageResponse(BaseModel):
   """Response model for graph usage statistics."""
 
   graph_id: str = Field(..., description="Graph database identifier")
-  storage_usage: Dict[str, Any] = Field(..., description="Storage usage information")
-  query_statistics: Dict[str, Any] = Field(..., description="Query statistics")
-  recent_activity: Dict[str, Any] = Field(..., description="Recent activity summary")
+  storage_usage: dict[str, Any] = Field(..., description="Storage usage information")
+  query_statistics: dict[str, Any] = Field(..., description="Query statistics")
+  recent_activity: dict[str, Any] = Field(..., description="Recent activity summary")
   timestamp: str = Field(..., description="Usage collection timestamp")
 
 
@@ -132,7 +133,7 @@ class CypherQueryRequest(BaseModel):
       "MATCH (n) RETURN n LIMIT 10",
     ],
   )
-  parameters: Optional[Dict[str, Any]] = Field(
+  parameters: dict[str, Any] | None = Field(
     default=None,
     description="Query parameters for safe value substitution. ALWAYS use parameters instead of string interpolation.",
     examples=[
@@ -142,7 +143,7 @@ class CypherQueryRequest(BaseModel):
       None,
     ],
   )
-  timeout: Optional[int] = Field(
+  timeout: int | None = Field(
     default=DEFAULT_QUERY_TIMEOUT,
     ge=1,
     le=300,
@@ -210,10 +211,10 @@ class CypherQueryResponse(BaseModel):
   """Response model for Cypher query results."""
 
   success: bool = Field(..., description="Whether the query executed successfully")
-  data: Optional[List[Dict[str, Any]]] = Field(
+  data: list[dict[str, Any]] | None = Field(
     default=None, description="Query results as a list of dictionaries"
   )
-  columns: Optional[List[str]] = Field(
+  columns: list[str] | None = Field(
     default=None, description="Column names from the query result"
   )
   row_count: int = Field(..., description="Number of rows returned")
@@ -222,7 +223,7 @@ class CypherQueryResponse(BaseModel):
   )
   graph_id: str = Field(..., description="Graph database identifier")
   timestamp: str = Field(..., description="Query execution timestamp")
-  error: Optional[str] = Field(
+  error: str | None = Field(
     default=None, description="Error message if query failed"
   )
 

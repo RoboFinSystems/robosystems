@@ -5,15 +5,16 @@ Tests the schema-driven ingestion configuration generation and file pattern matc
 for XBRL processing.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaConfigGenerator,
-  create_roboledger_ingestion_processor,
   create_custom_ingestion_processor,
+  create_roboledger_ingestion_processor,
 )
-from robosystems.schemas.models import Node, Relationship, Property, Schema
+from robosystems.schemas.models import Node, Property, Relationship, Schema
 
 
 @pytest.fixture

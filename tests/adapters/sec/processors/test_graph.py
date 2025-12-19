@@ -1,19 +1,21 @@
 """Comprehensive tests for XBRL Graph Engine."""
 
-import pytest
-import re
-import tempfile
-import shutil
 import datetime
+import re
+import shutil
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import pandas as pd
+import pytest
 
 from robosystems.adapters.sec.processors import (
-  XBRLGraphProcessor,
   XBRL_GRAPH_PROCESSOR_VERSION,
+  XBRLGraphProcessor,
+  camel_to_snake,
+  make_plural,
 )
-from robosystems.adapters.sec.processors import camel_to_snake, make_plural
 
 
 def setup_mock_schema_processor(mock_schema_processor, node_names=None, rel_names=None):

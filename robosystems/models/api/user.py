@@ -1,6 +1,6 @@
 """User management API models."""
 
-from typing import Optional
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -99,7 +99,7 @@ class GraphInfo(BaseModel):
     description="Whether this is a shared repository (vs user graph)",
     examples=[False, True],
   )
-  repositoryType: Optional[str] = Field(
+  repositoryType: str | None = Field(
     default=None,
     description="Repository type if isRepository=true",
     examples=[None, "sec", "industry", "economic"],
@@ -114,7 +114,7 @@ class GraphInfo(BaseModel):
     description="Whether this is a subgraph (vs a main graph)",
     examples=[False, True],
   )
-  parentGraphId: Optional[str] = Field(
+  parentGraphId: str | None = Field(
     default=None,
     description="Parent graph ID if this is a subgraph",
     examples=[None, "kg1a2b3c4d5"],

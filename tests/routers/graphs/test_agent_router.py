@@ -5,12 +5,13 @@ Tests all agent router functionality including authentication, routing,
 error handling, and response formats.
 """
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
 from fastapi.testclient import TestClient
 
-from robosystems.operations.agents.base import AgentMode
 from robosystems.models.iam import User
+from robosystems.operations.agents.base import AgentMode
 from tests.conftest import VALID_TEST_GRAPH_ID
 
 
@@ -110,12 +111,12 @@ class TestAgentEndpoints:
   def client(self, mock_dependencies, mock_orchestrator, mock_registry):
     """Create test client with mocked dependencies."""
     from main import app
+    from robosystems.database import get_db_session
     from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.middleware.rate_limits import (
-      subscription_aware_rate_limit_dependency,
       graph_scoped_rate_limit_dependency,
+      subscription_aware_rate_limit_dependency,
     )
-    from robosystems.database import get_db_session
 
     # Create a mock user
     mock_user = Mock()
@@ -274,8 +275,9 @@ class TestAgentEndpoints:
 
   def test_agent_authentication_required(self):
     """Test that authentication is required."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     # Create a client without any mocked dependencies
     test_client = TestClient(app)

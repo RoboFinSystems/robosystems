@@ -6,11 +6,11 @@ Sensors monitor for conditions and trigger jobs when criteria are met:
 """
 
 from robosystems.dagster.sensors.provisioning import (
-  pending_subscription_sensor,
   pending_repository_sensor,
+  pending_subscription_sensor,
 )
 
 __all__ = [
-  "pending_subscription_sensor",
   "pending_repository_sensor",
+  "pending_subscription_sensor",
 ]

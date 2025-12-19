@@ -5,10 +5,12 @@ Centralized DataFrame initialization and management for XBRL graph processing.
 Handles schema-driven DataFrame creation, mapping, and completeness validation.
 """
 
+from typing import cast
+
 import pandas as pd
-from typing import Dict, Optional, cast
-from robosystems.logger import logger
+
 from robosystems.adapters.sec.processors.ids import camel_to_snake, make_plural
+from robosystems.logger import logger
 
 
 class DataFrameManager:
@@ -36,10 +38,10 @@ class DataFrameManager:
     self.ingest_adapter = ingest_adapter
     self.enable_column_standardization = enable_column_standardization
 
-    self.dataframes: Dict[str, pd.DataFrame] = {}
-    self.schema_to_dataframe_mapping: Dict[str, str] = {}
+    self.dataframes: dict[str, pd.DataFrame] = {}
+    self.schema_to_dataframe_mapping: dict[str, str] = {}
 
-  def initialize_all_dataframes(self) -> Dict[str, pd.DataFrame]:
+  def initialize_all_dataframes(self) -> dict[str, pd.DataFrame]:
     """
     Initialize all DataFrames dynamically from schema definitions.
 
@@ -137,13 +139,7 @@ class DataFrameManager:
             logger.warning(
               f"Could not create schema-based DataFrame for {df_name}, trying empty with proper columns"
             )
-            if "fact_has_dimension_rel" in df_name:
-              df = pd.DataFrame(columns=["from", "to"])
-            elif "axis_element" in df_name:
-              df = pd.DataFrame(columns=["from", "to"])
-            elif "member_element" in df_name:
-              df = pd.DataFrame(columns=["from", "to"])
-            elif "fact_set_contains" in df_name:
+            if "fact_has_dimension_rel" in df_name or "axis_element" in df_name or "member_element" in df_name or "fact_set_contains" in df_name:
               df = pd.DataFrame(columns=["from", "to"])
             else:
               df = pd.DataFrame(columns=["from", "to"])
@@ -161,7 +157,7 @@ class DataFrameManager:
 
     return self.dataframes
 
-  def create_dynamic_dataframe_mapping(self) -> Dict[str, str]:
+  def create_dynamic_dataframe_mapping(self) -> dict[str, str]:
     """
     Create mapping from schema names to DataFrame attributes for dynamic file saving.
 
@@ -240,7 +236,7 @@ class DataFrameManager:
 
     return self.schema_to_dataframe_mapping
 
-  def get_dataframe(self, df_attr_name: str) -> Optional[pd.DataFrame]:
+  def get_dataframe(self, df_attr_name: str) -> pd.DataFrame | None:
     """
     Get DataFrame by attribute name.
 

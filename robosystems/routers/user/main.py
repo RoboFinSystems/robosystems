@@ -1,30 +1,31 @@
 """User profile management endpoints."""
 
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, status, Request, HTTPException
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from ...database import get_db_session
+from ...logger import logger
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from ...models.iam import User
-from ...models.api.user import (
-  UserResponse,
-  UpdateUserRequest,
-)
+from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...models.api.common import (
   ErrorCode,
   create_error_response,
 )
-from ...database import get_db_session
-from ...logger import logger
+from ...models.api.user import (
+  UpdateUserRequest,
+  UserResponse,
+)
+from ...models.iam import User
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
-  validate_email,
   sanitize_string,
+  validate_email,
 )
 
 router = APIRouter(tags=["User"])
@@ -83,7 +84,7 @@ async def get_current_user_info(
     return user_response
 
   except Exception as e:
-    logger.error(f"Error retrieving user info: {str(e)}")
+    logger.error(f"Error retrieving user info: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error retrieving user information",
@@ -184,7 +185,7 @@ async def update_user_profile(
         sanitized_email if sanitized_email else update_data["email"]
       )
 
-    user_in_session.updated_at = datetime.now(timezone.utc)
+    user_in_session.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(user_in_session)
@@ -242,7 +243,7 @@ async def update_user_profile(
     raise
   except Exception as e:
     db.rollback()
-    logger.error(f"Error updating user profile: {str(e)}")
+    logger.error(f"Error updating user profile: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error updating user profile",

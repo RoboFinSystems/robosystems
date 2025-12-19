@@ -1,10 +1,11 @@
 """Tests for metrics router endpoints."""
 
-from unittest.mock import MagicMock, patch, AsyncMock
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-from datetime import datetime
 
 from robosystems.graph_api.app import create_app
 from robosystems.middleware.graph.types import NodeType

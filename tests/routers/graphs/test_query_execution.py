@@ -2,20 +2,21 @@
 Tests for query execution and streaming functionality.
 """
 
-import pytest
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
 from robosystems.middleware.auth.jwt import create_jwt_token
+from robosystems.middleware.graph.query_queue import QueryStatus
+from robosystems.models.iam import User
 from robosystems.routers.graphs.query.strategies import (
   ExecutionStrategy,
   StrategySelector,
 )
 from robosystems.routers.graphs.query.streaming import execute_query_with_timeout
-from robosystems.middleware.graph.query_queue import QueryStatus
 
 
 @pytest.fixture

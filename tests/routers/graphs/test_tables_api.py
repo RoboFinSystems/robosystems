@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from robosystems.routers.graphs.tables import main as tables_main
-from robosystems.routers.graphs.files import upload as files_upload
 from robosystems.models.api.graphs.tables import FileUploadRequest
+from robosystems.routers.graphs.files import upload as files_upload
+from robosystems.routers.graphs.tables import main as tables_main
 
 
 @pytest.mark.asyncio

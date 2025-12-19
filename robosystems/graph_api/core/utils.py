@@ -3,7 +3,8 @@ Utility functions for the Graph API.
 """
 
 import re
-from typing import Dict, Any, Optional
+from typing import Any
+
 from fastapi import HTTPException, status
 
 
@@ -48,7 +49,7 @@ def validate_database_name(graph_id: str) -> str:
   return graph_id
 
 
-def validate_query_parameters(params: Optional[Dict[str, Any]]) -> None:
+def validate_query_parameters(params: dict[str, Any] | None) -> None:
   """
   Validate query parameters for safety.
 

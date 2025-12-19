@@ -2,10 +2,11 @@
 Example Queries Tool - Provides example Cypher queries for graph exploration.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from robosystems.logger import logger
 
 from .base_tool import BaseTool
-from robosystems.logger import logger
 
 
 class ExampleQueriesTool(BaseTool):
@@ -13,7 +14,7 @@ class ExampleQueriesTool(BaseTool):
   Tool for generating example Cypher queries based on the graph schema.
   """
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for example queries."""
     return {
       "name": "get-example-queries",
@@ -45,15 +46,15 @@ List of example queries with explanations, tailored to the actual schema present
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
+  async def execute(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
     """Execute the example queries tool."""
     self._log_tool_execution("get-example-queries", arguments)
     category = arguments.get("category")
     return await self._get_example_queries(category)
 
   async def _get_example_queries(
-    self, category: Optional[str] = None
-  ) -> List[Dict[str, Any]]:
+    self, category: str | None = None
+  ) -> list[dict[str, Any]]:
     """
     Generate example queries based on the actual graph schema.
 

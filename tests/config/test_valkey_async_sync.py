@@ -6,15 +6,16 @@ This module tests that async operations use async Redis clients and
 synchronous operations use synchronous Redis clients to prevent runtime errors.
 """
 
-import os
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,
-  create_redis_client,
   create_async_redis_client,
+  create_redis_client,
 )
 
 

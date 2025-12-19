@@ -25,20 +25,19 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.assets import (
-  sec_companies_list,
-  sec_raw_filings,
-  sec_batch_process,
-  sec_filings_to_process,
-  sec_process_filing,
-  sec_duckdb_staging,
-  sec_graph_materialized,
-  sec_year_partitions,
-  sec_filing_partitions,
+  SECBatchProcessConfig,
   SECCompaniesConfig,
   SECDownloadConfig,
-  SECBatchProcessConfig,
+  sec_batch_process,
+  sec_companies_list,
+  sec_duckdb_staging,
+  sec_filing_partitions,
+  sec_filings_to_process,
+  sec_graph_materialized,
+  sec_process_filing,
+  sec_raw_filings,
+  sec_year_partitions,
 )
-
 
 # ============================================================================
 # SEC Pipeline Jobs

@@ -1,19 +1,18 @@
 """Rate limiting dependencies for FastAPI."""
 
 import time
-from typing import Optional
 
 import jwt
 from fastapi import HTTPException, Request, status
 
 from ...config import env
+from ...security import SecurityAuditLogger, SecurityEventType
 from .cache import rate_limit_cache
 from .subscription_rate_limits import (
-  get_subscription_rate_limit,
   get_endpoint_category,
+  get_subscription_rate_limit,
   should_use_subscription_limits,
 )
-from ...security import SecurityAuditLogger, SecurityEventType
 
 
 def get_int_env(key: str, default: str) -> int:
@@ -25,7 +24,7 @@ def get_int_env(key: str, default: str) -> int:
   return int(value)
 
 
-def _verify_jwt_for_rate_limiting(token: str) -> Optional[str]:
+def _verify_jwt_for_rate_limiting(token: str) -> str | None:
   """Safely verify JWT token for rate limiting purposes only."""
   try:
     secret_key = env.JWT_SECRET_KEY
@@ -206,7 +205,7 @@ def auth_rate_limit_dependency(request: Request):
   request.state.auth_rate_limit_limit = limit
 
 
-def get_user_from_request(request: Request) -> Optional[str]:
+def get_user_from_request(request: Request) -> str | None:
   """Extract user ID from request for user-specific rate limiting."""
   # Check for JWT authentication in Authorization header
   auth_header = request.headers.get("Authorization")
@@ -487,7 +486,7 @@ def sse_connection_rate_limit_dependency(request: Request):
   Uses subscription-tier-based rate limits from centralized configuration.
   Note: SSE endpoints require authentication, so anonymous users cannot access them.
   """
-  from robosystems.config.rate_limits import RateLimitConfig, EndpointCategory
+  from robosystems.config.rate_limits import EndpointCategory, RateLimitConfig
 
   # Get user ID from request (SSE requires authentication)
   user_id = get_user_from_request(request)

@@ -6,17 +6,17 @@ import asyncio
 import gzip
 import hashlib
 import json
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
-from concurrent.futures import ThreadPoolExecutor
 import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
-from robosystems.logger import logger
 from robosystems.config import env
+from robosystems.logger import logger
 
 
 class S3Client:
@@ -28,7 +28,7 @@ class S3Client:
   """
 
   def __init__(
-    self, region_name: Optional[str] = None, endpoint_url: Optional[str] = None
+    self, region_name: str | None = None, endpoint_url: str | None = None
   ):
     """
     Initialize S3 client.
@@ -72,8 +72,8 @@ class S3Client:
     content: str,
     bucket: str,
     key: str,
-    content_type: Optional[str] = None,
-    metadata: Optional[Dict[str, str]] = None,
+    content_type: str | None = None,
+    metadata: dict[str, str] | None = None,
     max_retries: int = 3,
   ) -> bool:
     """
@@ -127,7 +127,7 @@ class S3Client:
         if error_code in security_errors:
           logger.critical(
             f"S3 SECURITY VIOLATION - {error_code}: Bucket={bucket}, Key={key}, "
-            f"Error={str(e)}, Attempt={attempt + 1}"
+            f"Error={e!s}, Attempt={attempt + 1}"
           )
           # Security errors should not be retried
           return False
@@ -160,8 +160,8 @@ class S3Client:
     file_path: str,
     bucket: str,
     key: str,
-    content_type: Optional[str] = None,
-    metadata: Optional[Dict[str, str]] = None,
+    content_type: str | None = None,
+    metadata: dict[str, str] | None = None,
     max_retries: int = 3,
   ) -> bool:
     """
@@ -228,7 +228,7 @@ class S3Client:
 
   def download_string(
     self, bucket: str, key: str, max_retries: int = 3
-  ) -> Optional[str]:
+  ) -> str | None:
     """
     Download an S3 object as a string with retry logic.
 
@@ -305,7 +305,7 @@ class S3Client:
       if error_code in {"AccessDenied", "UnauthorizedAccess"}:
         logger.critical(
           f"S3 SECURITY VIOLATION - {error_code}: Delete operation denied for "
-          f"Bucket={bucket}, Key={key}, Error={str(e)}"
+          f"Bucket={bucket}, Key={key}, Error={e!s}"
         )
       else:
         logger.error(f"Failed to delete from S3: {e}")
@@ -339,8 +339,8 @@ class S3Client:
       return False
 
   def list_objects(
-    self, bucket: str, prefix: Optional[str] = None, max_keys: int = 1000
-  ) -> List[str]:
+    self, bucket: str, prefix: str | None = None, max_keys: int = 1000
+  ) -> list[str]:
     """
     List objects in an S3 bucket.
 
@@ -377,12 +377,12 @@ class S3Client:
 
   def batch_upload_strings(
     self,
-    items: List[Tuple[str, str, str]],  # List of (content, bucket, key) tuples
-    content_type: Optional[str] = None,
-    metadata: Optional[Dict[str, str]] = None,
+    items: list[tuple[str, str, str]],  # List of (content, bucket, key) tuples
+    content_type: str | None = None,
+    metadata: dict[str, str] | None = None,
     max_workers: int = 10,
     max_retries: int = 3,
-  ) -> Dict[str, bool]:
+  ) -> dict[str, bool]:
     """
     Upload multiple strings to S3 in parallel with retry logic.
 
@@ -398,7 +398,7 @@ class S3Client:
     """
     results = {}
 
-    def upload_item(item: Tuple[str, str, str]) -> Tuple[str, bool]:
+    def upload_item(item: tuple[str, str, str]) -> tuple[str, bool]:
       """Upload a single item with retry logic."""
       content, bucket, key = item
       success = self.upload_string(
@@ -450,20 +450,20 @@ class BackupMetadata:
   node_count: int
   relationship_count: int
   backup_duration_seconds: float
-  database_version: Optional[str] = None
+  database_version: str | None = None
   backup_format: str = "cypher"
-  s3_key: Optional[str] = None
+  s3_key: str | None = None
   is_encrypted: bool = False  # Track if data was encrypted before S3 upload
-  encryption_method: Optional[str] = None  # e.g., "fernet", "aes-256-gcm"
+  encryption_method: str | None = None  # e.g., "fernet", "aes-256-gcm"
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert metadata to dictionary for JSON serialization."""
     data = asdict(self)
     data["timestamp"] = self.timestamp.isoformat()
     return data
 
   @classmethod
-  def from_dict(cls, data: Dict[str, Any]) -> "BackupMetadata":
+  def from_dict(cls, data: dict[str, Any]) -> "BackupMetadata":
     """Create metadata from dictionary."""
     data["timestamp"] = datetime.fromisoformat(data["timestamp"])
     return cls(**data)
@@ -474,8 +474,8 @@ class S3BackupAdapter:
 
   def __init__(
     self,
-    bucket_name: Optional[str] = None,
-    region: Optional[str] = None,
+    bucket_name: str | None = None,
+    region: str | None = None,
     enable_compression: bool = True,
   ):
     """
@@ -568,7 +568,7 @@ class S3BackupAdapter:
     graph_id: str,
     backup_type: str,
     timestamp: datetime,
-    file_extension: Optional[str] = None,
+    file_extension: str | None = None,
   ) -> str:
     """Generate S3 key path for backup file."""
     timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
@@ -615,7 +615,7 @@ class S3BackupAdapter:
     bucket: str,
     key: str,
     data: bytes,
-    metadata: Optional[Dict[str, str]] = None,
+    metadata: dict[str, str] | None = None,
   ) -> None:
     """
     Perform multipart upload for large files.
@@ -710,9 +710,9 @@ class S3BackupAdapter:
     graph_id: str,
     backup_data: bytes,
     backup_type: str,
-    metadata: Dict[str, Any],
-    timestamp: Optional[datetime] = None,
-    file_extension: Optional[str] = None,
+    metadata: dict[str, Any],
+    timestamp: datetime | None = None,
+    file_extension: str | None = None,
   ) -> BackupMetadata:
     """
     Upload backup data to S3 with compression and encryption.
@@ -745,7 +745,7 @@ class S3BackupAdapter:
 
     if timestamp is None:
       # This should only happen for direct API calls, not backup operations
-      timestamp = datetime.now(timezone.utc)
+      timestamp = datetime.now(UTC)
       logger.warning(
         f"No timestamp provided to upload_backup - this may cause S3 key mismatches. Generated: {timestamp.isoformat()}"
       )
@@ -934,7 +934,7 @@ class S3BackupAdapter:
       logger.error(f"Failed to download backup from S3: {e}")
       raise
 
-  async def list_backups(self, graph_id: Optional[str] = None) -> List[Dict[str, Any]]:
+  async def list_backups(self, graph_id: str | None = None) -> list[dict[str, Any]]:
     """
     List available backups in S3.
 
@@ -1059,7 +1059,7 @@ class S3BackupAdapter:
 
   async def get_backup_metadata(
     self, graph_id: str, backup_id: str
-  ) -> Optional[Dict[str, Any]]:
+  ) -> dict[str, Any] | None:
     """
     Get backup metadata by backup ID.
 
@@ -1073,7 +1073,7 @@ class S3BackupAdapter:
     try:
       # Parse backup_id as timestamp
       timestamp = datetime.strptime(backup_id, "%Y%m%d_%H%M%S").replace(
-        tzinfo=timezone.utc
+        tzinfo=UTC
       )
       metadata_path = self._generate_metadata_path(graph_id, timestamp)
 
@@ -1092,7 +1092,7 @@ class S3BackupAdapter:
       logger.warning(f"Failed to get backup metadata for {backup_id}: {e}")
       return None
 
-  async def get_backup_metadata_by_key(self, s3_key: str) -> Optional[BackupMetadata]:
+  async def get_backup_metadata_by_key(self, s3_key: str) -> BackupMetadata | None:
     """
     Get backup metadata by extracting info from S3 backup key.
 
@@ -1124,7 +1124,7 @@ class S3BackupAdapter:
 
       # Parse timestamp
       timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S").replace(
-        tzinfo=timezone.utc
+        tzinfo=UTC
       )
 
       # Generate metadata path
@@ -1200,8 +1200,8 @@ class S3BackupAdapter:
   async def download_backup(
     self,
     graph_id: str,
-    backup_id: Optional[str] = None,
-    timestamp: Optional[datetime] = None,
+    backup_id: str | None = None,
+    timestamp: datetime | None = None,
     backup_type: str = "full",
   ) -> bytes:
     """
@@ -1221,7 +1221,7 @@ class S3BackupAdapter:
       if backup_id is not None:
         # New API: Parse backup_id as timestamp
         parsed_timestamp = datetime.strptime(backup_id, "%Y%m%d_%H%M%S").replace(
-          tzinfo=timezone.utc
+          tzinfo=UTC
         )
         return await self.download_backup_by_timestamp(
           graph_id, parsed_timestamp, backup_type
@@ -1253,7 +1253,7 @@ class S3BackupAdapter:
     backup_path = self._generate_backup_path(graph_id, backup_type, timestamp)
     return await self.download_backup_by_key(backup_path)
 
-  def health_check(self) -> Dict[str, Any]:
+  def health_check(self) -> dict[str, Any]:
     """
     Perform health check on S3 connectivity.
 

@@ -14,18 +14,18 @@ Key features:
 - CloudWatch metrics for backup monitoring
 """
 
-import tempfile
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional, List
-from pathlib import Path
 import hashlib
+import tempfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
 
-from ...middleware.graph.allocation_manager import LadybugAllocationManager
-from ...logger import logger
 from ...config import env
+from ...logger import logger
+from ...middleware.graph.allocation_manager import LadybugAllocationManager
 
 # Backup configuration
 DEFAULT_BACKUP_BUCKET = "robosystems-graph-backups"
@@ -53,7 +53,7 @@ class LadybugGraphBackupService:
     self,
     environment: str,
     base_path: str,
-    s3_bucket: Optional[str] = None,
+    s3_bucket: str | None = None,
     retention_days: int = DEFAULT_RETENTION_DAYS,
     compression_level: int = DEFAULT_COMPRESSION_LEVEL,
   ):
@@ -106,14 +106,14 @@ class LadybugGraphBackupService:
       f"Initialized graph backup service for {environment} on instance {self.instance_id}"
     )
 
-  async def backup_all_graph_databases(self) -> Dict[str, Any]:
+  async def backup_all_graph_databases(self) -> dict[str, Any]:
     """
     Backup all customer graph databases allocated to this instance.
 
     Returns:
         Backup summary with success/failure counts and details
     """
-    start_time = datetime.now(timezone.utc)
+    start_time = datetime.now(UTC)
     logger.info("Starting automated backup of all graph databases")
 
     try:
@@ -157,7 +157,7 @@ class LadybugGraphBackupService:
           results.append({"graph_id": graph_id, "status": "failed", "error": str(e)})
 
       # Calculate summary
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() / 60
+      execution_time = (datetime.now(UTC) - start_time).total_seconds() / 60
 
       summary = {
         "status": "success" if failed == 0 else "partial_failure",
@@ -181,7 +181,7 @@ class LadybugGraphBackupService:
       logger.error(f"Graph database backup failed: {e}")
       raise LadybugGraphBackupError(f"Backup operation failed: {e}")
 
-  async def backup_graph_database(self, graph_id: str) -> Dict[str, Any]:
+  async def backup_graph_database(self, graph_id: str) -> dict[str, Any]:
     """
     Backup a specific graph database to S3.
 
@@ -191,7 +191,7 @@ class LadybugGraphBackupService:
     Returns:
         Backup result details
     """
-    start_time = datetime.now(timezone.utc)
+    start_time = datetime.now(UTC)
 
     try:
       # Construct database path
@@ -244,7 +244,7 @@ class LadybugGraphBackupService:
         await self._upload_backup_to_s3(backup_file, s3_key, checksum)
 
         backup_size_mb = backup_file.stat().st_size / (1024**2)
-        execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+        execution_time = (datetime.now(UTC) - start_time).total_seconds()
 
         logger.info(
           f"Successfully backed up {graph_id}: {backup_size_mb:.1f}MB in {execution_time:.1f}s"
@@ -263,7 +263,7 @@ class LadybugGraphBackupService:
       logger.error(f"Failed to backup graph database {graph_id}: {e}")
       return {"graph_id": graph_id, "status": "failed", "error": str(e)}
 
-  async def _get_instance_databases(self) -> List[str]:
+  async def _get_instance_databases(self) -> list[str]:
     """Get all customer graph databases allocated to this instance."""
     try:
       # Get databases from allocation manager
@@ -346,7 +346,7 @@ class LadybugGraphBackupService:
       extra_args = {
         "Metadata": {
           "checksum": checksum,
-          "created_at": datetime.now(timezone.utc).isoformat(),
+          "created_at": datetime.now(UTC).isoformat(),
           "instance_id": self.instance_id,
           "backup_type": "graph_database",
         },
@@ -363,7 +363,7 @@ class LadybugGraphBackupService:
       logger.error(f"Failed to upload backup to S3: {e}")
       raise LadybugGraphBackupError(f"S3 upload failed: {e}")
 
-  async def _publish_backup_metrics(self, summary: Dict[str, Any]) -> None:
+  async def _publish_backup_metrics(self, summary: dict[str, Any]) -> None:
     """Publish backup metrics to CloudWatch."""
     try:
       metric_data = [
@@ -413,7 +413,7 @@ class LadybugGraphBackupService:
         Number of files deleted
     """
     try:
-      cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
+      cutoff_date = datetime.now(UTC) - timedelta(days=self.retention_days)
       deleted_count = 0
 
       # List all objects in the backup prefix
@@ -452,7 +452,7 @@ class LadybugGraphBackupService:
       logger.error(f"Failed to cleanup old backups: {e}")
       return 0
 
-  def _delete_s3_objects(self, objects: List[Dict[str, str]]) -> None:
+  def _delete_s3_objects(self, objects: list[dict[str, str]]) -> None:
     """Delete a batch of S3 objects."""
     try:
       self.s3_client.delete_objects(Bucket=self.s3_bucket, Delete={"Objects": objects})

@@ -1,11 +1,12 @@
 """Comprehensive tests for BillingCustomer model."""
 
-import pytest
 import uuid
+
+import pytest
 from sqlalchemy.orm import Session
 
 from robosystems.models.billing import BillingCustomer
-from robosystems.models.iam import User, Org, OrgUser, OrgRole, OrgType
+from robosystems.models.iam import Org, OrgRole, OrgType, OrgUser, User
 
 
 @pytest.fixture

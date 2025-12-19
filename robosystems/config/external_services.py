@@ -5,7 +5,7 @@ This module contains all configuration for external APIs and services.
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Any
 
 from . import env
 
@@ -96,13 +96,13 @@ class ExternalServicesConfig:
   }
 
   @classmethod
-  def get_config(cls, service: str) -> Dict[str, Any]:
+  def get_config(cls, service: str) -> dict[str, Any]:
     """Get configuration for a specific service."""
     config_attr = f"{service.upper()}_CONFIG"
     return getattr(cls, config_attr, {})
 
   @classmethod
-  def get_api_key(cls, service: str) -> Optional[str]:
+  def get_api_key(cls, service: str) -> str | None:
     """Get API key for a service from environment."""
     # Dynamic env var lookup - must use os.getenv directly
     env_var = f"{service.upper()}_API_KEY"

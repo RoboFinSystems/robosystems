@@ -1,38 +1,39 @@
 """Admin API for subscription management."""
 
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Request, HTTPException, status, Query
+from datetime import UTC, datetime
+from typing import Any
 
+from fastapi import APIRouter, HTTPException, Query, Request, status
+
+from ...config.billing import BillingConfig
 from ...database import get_db_session
-from ...models.billing import (
-  BillingCustomer,
-  BillingSubscription,
-  BillingAuditLog,
-  SubscriptionStatus,
-)
-from ...models.iam import User, Graph
+from ...logger import get_logger
+from ...middleware.auth.admin import require_admin
 from ...models.api.admin import (
   SubscriptionCreateRequest,
-  SubscriptionUpdateRequest,
   SubscriptionResponse,
+  SubscriptionUpdateRequest,
 )
-from ...middleware.auth.admin import require_admin
-from ...logger import get_logger
-from ...config.billing import BillingConfig
+from ...models.billing import (
+  BillingAuditLog,
+  BillingCustomer,
+  BillingSubscription,
+  SubscriptionStatus,
+)
+from ...models.iam import Graph, User
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin/v1/subscriptions", tags=["admin"])
 
 
-@router.get("", response_model=List[SubscriptionResponse])
+@router.get("", response_model=list[SubscriptionResponse])
 @require_admin(permissions=["subscription:read"])
 async def list_subscriptions(
   request: Request,
-  resource_type: Optional[str] = Query("graph", description="Filter by resource type"),
-  status_filter: Optional[str] = Query(None, description="Filter by status"),
-  user_email: Optional[str] = None,
+  resource_type: str | None = Query("graph", description="Filter by resource type"),
+  status_filter: str | None = Query(None, description="Filter by status"),
+  user_email: str | None = None,
   include_canceled: bool = False,
   limit: int = Query(100, ge=1, le=1000),
   offset: int = Query(0, ge=0),
@@ -152,7 +153,7 @@ async def get_subscription(request: Request, subscription_id: str):
         detail=f"Subscription {subscription_id} not found",
       )
 
-    from ...models.iam import OrgUser, Org
+    from ...models.iam import Org, OrgUser
 
     org = session.query(Org).filter(Org.id == subscription.org_id).first()
 
@@ -390,7 +391,7 @@ async def update_subscription(
       new_values["base_price_cents"] = data.base_price_cents
       subscription.base_price_cents = data.base_price_cents
 
-    subscription.updated_at = datetime.now(timezone.utc)
+    subscription.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(subscription)
 
@@ -410,7 +411,7 @@ async def update_subscription(
         },
       )
 
-    from ...models.iam import OrgUser, Org
+    from ...models.iam import Org, OrgUser
 
     org = session.query(Org).filter(Org.id == subscription.org_id).first()
 
@@ -468,12 +469,12 @@ async def update_subscription(
     session.close()
 
 
-@router.get("/{subscription_id}/audit", response_model=List[Dict[str, Any]])
+@router.get("/{subscription_id}/audit", response_model=list[dict[str, Any]])
 @require_admin(permissions=["subscription:read"])
 async def get_subscription_audit_log(
   request: Request,
   subscription_id: str,
-  event_type: Optional[str] = None,
+  event_type: str | None = None,
   limit: int = Query(100, ge=1, le=1000),
 ):
   """Get audit history for a subscription."""

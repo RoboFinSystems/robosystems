@@ -1,12 +1,14 @@
 """Organization model for multi-tenant billing and resource management."""
 
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional, Sequence
+from typing import Optional
 
-from sqlalchemy import Column, String, DateTime, Enum as SQLEnum
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy import Column, DateTime, String
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
@@ -28,12 +30,12 @@ class Org(Model):
   org_type = Column(SQLEnum(OrgType), nullable=False, default=OrgType.PERSONAL)
 
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
   deleted_at = Column(DateTime, nullable=True)
@@ -119,7 +121,7 @@ class Org(Model):
       auto_commit=False,
     )
 
-    from .org_user import OrgUser, OrgRole
+    from .org_user import OrgRole, OrgUser
 
     OrgUser.create(
       org_id=org.id,
@@ -158,7 +160,7 @@ class Org(Model):
     for key, value in kwargs.items():
       if hasattr(self, key):
         setattr(self, key, value)
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     try:
       session.commit()
@@ -196,8 +198,8 @@ class Org(Model):
         "Cancel all subscriptions first."
       )
 
-    self.deleted_at = datetime.now(timezone.utc)
-    self.updated_at = datetime.now(timezone.utc)
+    self.deleted_at = datetime.now(UTC)
+    self.updated_at = datetime.now(UTC)
 
     try:
       session.commit()
@@ -212,7 +214,7 @@ class Org(Model):
       return
 
     self.deleted_at = None
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     try:
       session.commit()
@@ -262,7 +264,7 @@ class Org(Model):
 
   def get_owner(self, session: Session):
     """Get the owner of this organization."""
-    from .org_user import OrgUser, OrgRole
+    from .org_user import OrgRole, OrgUser
 
     return (
       session.query(OrgUser)

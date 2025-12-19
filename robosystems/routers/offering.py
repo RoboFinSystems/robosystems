@@ -9,14 +9,15 @@ Provides comprehensive information about all subscription offerings:
 """
 
 import logging
-from typing import Dict, List, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
-from ..middleware.rate_limits import public_api_rate_limit_dependency
-from ..models.api.common import ErrorResponse, ErrorCode, create_error_response
-from ..models.api import ServiceOfferingsResponse
 from ..config import BillingConfig, env
 from ..config.billing import RepositoryBillingConfig
+from ..middleware.rate_limits import public_api_rate_limit_dependency
+from ..models.api import ServiceOfferingsResponse
+from ..models.api.common import ErrorCode, ErrorResponse, create_error_response
 from ..models.iam.user_repository import UserRepository
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,8 @@ class OfferingFeatureGenerator:
 
   @staticmethod
   def get_features_for_repository(
-    repo_type: str, plan_type: str, plan_config: Dict[str, Any]
-  ) -> List[str]:
+    repo_type: str, plan_type: str, plan_config: dict[str, Any]
+  ) -> list[str]:
     """Get marketing-friendly features for a specific repository and plan.
 
     Args:
@@ -50,7 +51,7 @@ class OfferingFeatureGenerator:
       return OfferingFeatureGenerator._get_default_features(plan_config)
 
   @staticmethod
-  def _get_sec_features(plan_type: str, plan_config: Dict[str, Any]) -> List[str]:
+  def _get_sec_features(plan_type: str, plan_config: dict[str, Any]) -> list[str]:
     """Get features for SEC repository plans."""
     base_features = [
       f"{plan_config['monthly_credits']:,} credits per month",
@@ -62,34 +63,26 @@ class OfferingFeatureGenerator:
     if plan_type == "basic":
       return base_features
     elif plan_type == "advanced":
-      return base_features + [
-        "Priority query processing",
-        "Advanced analytics endpoints",
-      ]
+      return [*base_features, "Priority query processing", "Advanced analytics endpoints"]
     elif plan_type == "unlimited":
-      return base_features + [
-        "Priority query processing",
-        "Advanced analytics endpoints",
-        "Bulk export capabilities",
-        "Dedicated support",
-      ]
+      return [*base_features, "Priority query processing", "Advanced analytics endpoints", "Bulk export capabilities", "Dedicated support"]
     else:
       return base_features
 
   @staticmethod
-  def _get_industry_features(_plan_type: str, plan_config: Dict[str, Any]) -> List[str]:
+  def _get_industry_features(_plan_type: str, plan_config: dict[str, Any]) -> list[str]:
     """Get features for industry repository plans (placeholder for future implementation)."""
     # Currently uses default features, but can be customized in the future
     return OfferingFeatureGenerator._get_default_features(plan_config)
 
   @staticmethod
-  def _get_economic_features(_plan_type: str, plan_config: Dict[str, Any]) -> List[str]:
+  def _get_economic_features(_plan_type: str, plan_config: dict[str, Any]) -> list[str]:
     """Get features for economic repository plans (placeholder for future implementation)."""
     # Currently uses default features, but can be customized in the future
     return OfferingFeatureGenerator._get_default_features(plan_config)
 
   @staticmethod
-  def _get_default_features(plan_config: Dict[str, Any]) -> List[str]:
+  def _get_default_features(plan_config: dict[str, Any]) -> list[str]:
     """Get default features for any repository."""
     return [
       f"{plan_config['monthly_credits']:,} credits per month",
@@ -272,7 +265,7 @@ async def get_service_offerings(
       plans = []
       for plan_type, plan_config in repo_config.get("plans", {}).items():
         # Get rate limits from RepositoryBillingConfig if available
-        from ..config.billing.repositories import SharedRepository, RepositoryPlan
+        from ..config.billing.repositories import RepositoryPlan, SharedRepository
 
         try:
           repo_enum = SharedRepository(repo_type.value)

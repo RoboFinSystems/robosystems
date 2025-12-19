@@ -25,10 +25,11 @@ Examples:
     "kg1234567890abcdef_prod"
 """
 
-from enum import Enum
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
 import re
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from ...config.graph_tier import GraphTier
 from ...logger import get_logger
@@ -112,9 +113,9 @@ class GraphIdentity(BaseModel):
 
   graph_id: str = Field(..., description="Unique graph identifier")
   category: GraphCategory = Field(..., description="High-level graph category")
-  graph_type: Optional[str] = Field(None, description="Specific type within category")
-  graph_tier: Optional[GraphTier] = Field(None, description="Graph tier for routing")
-  access_pattern: Optional[AccessPattern] = Field(
+  graph_type: str | None = Field(None, description="Specific type within category")
+  graph_tier: GraphTier | None = Field(None, description="Graph tier for routing")
+  access_pattern: AccessPattern | None = Field(
     None, description="Access pattern for this graph"
   )
 
@@ -145,7 +146,7 @@ class GraphIdentity(BaseModel):
     else:
       return AccessPattern.RESTRICTED
 
-  def get_routing_info(self) -> Dict[str, Any]:
+  def get_routing_info(self) -> dict[str, Any]:
     """Get routing information for this graph."""
     access = self.get_access_pattern()
 
@@ -178,7 +179,7 @@ class GraphTypeRegistry:
   """Registry for graph type mappings and validation."""
 
   # Shared repository mappings (static, well-known)
-  SHARED_REPOSITORIES: Dict[str, SharedRepositoryType] = {
+  SHARED_REPOSITORIES: dict[str, SharedRepositoryType] = {
     "sec": SharedRepositoryType.SEC,
     "industry": SharedRepositoryType.INDUSTRY,
     "economic": SharedRepositoryType.ECONOMIC,
@@ -218,8 +219,8 @@ class GraphTypeRegistry:
   def identify_graph(
     cls,
     graph_id: str,
-    session: Optional[Any] = None,
-    graph_tier: Optional[GraphTier] = None,
+    session: Any | None = None,
+    graph_tier: GraphTier | None = None,
   ) -> GraphIdentity:
     """
     Identify a graph from its ID using database lookup.
@@ -327,7 +328,7 @@ class GraphTypeRegistry:
       return graph_id in ["system", "metadata", "config"]
 
   @classmethod
-  def list_shared_repositories(cls) -> List[str]:
+  def list_shared_repositories(cls) -> list[str]:
     """Get list of all available shared repositories."""
     return list(cls.SHARED_REPOSITORIES.keys())
 
@@ -394,13 +395,10 @@ def is_subgraph_id(graph_id: str) -> bool:
   # Subgraph name must be non-empty and match pattern
   if not subgraph_part or len(subgraph_part) > 20:
     return False
-  if not all(c.isalnum() for c in subgraph_part):
-    return False
-
-  return True
+  return all(c.isalnum() for c in subgraph_part)
 
 
-def parse_graph_id(graph_id: str) -> tuple[str, Optional[str]]:
+def parse_graph_id(graph_id: str) -> tuple[str, str | None]:
   """
   Parse graph_id into parent graph ID and optional subgraph name.
 

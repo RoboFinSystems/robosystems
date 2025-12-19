@@ -6,9 +6,9 @@ authorization violations, and suspicious activities.
 """
 
 import json
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
 
 from ..config import env
 from ..logger import logger
@@ -52,11 +52,11 @@ class SecurityAuditLogger:
   @staticmethod
   def log_security_event(
     event_type: SecurityEventType,
-    user_id: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
-    endpoint: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None,
+    user_id: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    endpoint: str | None = None,
+    details: dict[str, Any] | None = None,
     risk_level: str = "medium",
   ):
     """
@@ -79,7 +79,7 @@ class SecurityAuditLogger:
       return
 
     audit_data = {
-      "timestamp": datetime.now(timezone.utc).isoformat(),
+      "timestamp": datetime.now(UTC).isoformat(),
       "event_type": event_type.value,
       "risk_level": risk_level,
       "user_id": user_id,
@@ -95,10 +95,10 @@ class SecurityAuditLogger:
   @staticmethod
   def log_auth_failure(
     reason: str,
-    user_id: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
-    endpoint: Optional[str] = None,
+    user_id: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+    endpoint: str | None = None,
   ):
     """Log authentication failure."""
     SecurityAuditLogger.log_security_event(
@@ -114,8 +114,8 @@ class SecurityAuditLogger:
   @staticmethod
   def log_auth_success(
     user_id: str,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
     auth_method: str = "api_key",
   ):
     """Log successful authentication."""
@@ -133,8 +133,8 @@ class SecurityAuditLogger:
     user_id: str,
     resource: str,
     action: str,
-    ip_address: Optional[str] = None,
-    endpoint: Optional[str] = None,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
   ):
     """Log authorization denial."""
     SecurityAuditLogger.log_security_event(
@@ -148,11 +148,11 @@ class SecurityAuditLogger:
 
   @staticmethod
   def log_rate_limit_exceeded(
-    user_id: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    endpoint: Optional[str] = None,
+    user_id: str | None = None,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
     limit_type: str = "api",
-    user_agent: Optional[str] = None,
+    user_agent: str | None = None,
   ):
     """Log rate limit violation."""
     SecurityAuditLogger.log_security_event(
@@ -167,9 +167,9 @@ class SecurityAuditLogger:
 
   @staticmethod
   def log_injection_attempt(
-    user_id: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    endpoint: Optional[str] = None,
+    user_id: str | None = None,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
     payload: str = "",
     injection_type: str = "sql",
   ):
@@ -188,9 +188,9 @@ class SecurityAuditLogger:
 
   @staticmethod
   def log_input_validation_failure(
-    user_id: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    endpoint: Optional[str] = None,
+    user_id: str | None = None,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
     field_name: str = "",
     invalid_value: str = "",
     validation_error: str = "",
@@ -216,11 +216,11 @@ class SecurityAuditLogger:
     user_id: str,
     transaction_type: str,
     amount: float,
-    balance_before: Optional[float] = None,
-    balance_after: Optional[float] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-    ip_address: Optional[str] = None,
-    endpoint: Optional[str] = None,
+    balance_before: float | None = None,
+    balance_after: float | None = None,
+    metadata: dict[str, Any] | None = None,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
   ):
     """Log financial transaction for audit trail."""
     details = {
@@ -243,12 +243,12 @@ class SecurityAuditLogger:
 
   @staticmethod
   def log_suspicious_activity(
-    user_id: Optional[str] = None,
+    user_id: str | None = None,
     activity_type: str = "",
     description: str = "",
-    ip_address: Optional[str] = None,
-    endpoint: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    ip_address: str | None = None,
+    endpoint: str | None = None,
+    metadata: dict[str, Any] | None = None,
   ):
     """Log suspicious activity."""
     details = {

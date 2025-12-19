@@ -2,25 +2,25 @@
 Comprehensive tests for MCP tool execution endpoints.
 """
 
-import pytest
-from tests.conftest import VALID_TEST_GRAPH_ID
 import json
-import asyncio
+from enum import Enum
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
-from robosystems.models.api.graphs.mcp import MCPToolCall
 from robosystems.middleware.auth.jwt import create_jwt_token
 from robosystems.middleware.mcp.client import GraphMCPClient
+from robosystems.models.api.graphs.mcp import MCPToolCall
+from robosystems.models.iam import User
+from robosystems.routers.graphs.mcp.handlers import MCPHandler
 from robosystems.routers.graphs.mcp.strategies import (
-  MCPExecutionStrategy,
   MCPClientDetector,
+  MCPExecutionStrategy,
   MCPStrategySelector,
 )
-from robosystems.routers.graphs.mcp.handlers import MCPHandler
-from enum import Enum
+from tests.conftest import VALID_TEST_GRAPH_ID
 
 
 # Define CircuitBreakerState enum for testing
@@ -286,7 +286,7 @@ class TestMCPToolExecution:
       mock_repo.return_value = mock_repository
 
       MockHandler.return_value = mock_mcp_handler
-      mock_mcp_handler.call_tool.side_effect = asyncio.TimeoutError("Query timeout")
+      mock_mcp_handler.call_tool.side_effect = TimeoutError("Query timeout")
 
       token = create_jwt_token(test_user.id)
       headers = {"Authorization": f"Bearer {token}"}
@@ -639,16 +639,17 @@ class TestMCPAccessControl:
     db_session: Session,
   ):
     """Test MCP access to shared repositories."""
+    import uuid
+    from decimal import Decimal
+
+    from robosystems.models.iam import Graph
     from robosystems.models.iam.user_repository import (
-      UserRepository,
-      RepositoryType,
-      RepositoryPlan,
       RepositoryAccessLevel,
+      RepositoryPlan,
+      RepositoryType,
+      UserRepository,
     )
     from robosystems.models.iam.user_repository_credits import UserRepositoryCredits
-    from robosystems.models.iam import Graph
-    from decimal import Decimal
-    import uuid
 
     # Create SEC repository (required for foreign key)
     Graph.find_or_create_repository(

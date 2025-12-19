@@ -2,7 +2,7 @@
 Cluster-related Pydantic models for the Graph API.
 """
 
-from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -17,7 +17,7 @@ class ClusterHealthResponse(BaseModel):
   current_databases: int = Field(..., description="Current number of databases")
   capacity_remaining: int = Field(..., description="Remaining database capacity")
   read_only: bool = Field(..., description="Whether node is in read-only mode")
-  last_activity: Optional[str] = Field(None, description="Last activity timestamp")
+  last_activity: str | None = Field(None, description="Last activity timestamp")
 
 
 class MemoryConfiguration(BaseModel):
@@ -73,11 +73,11 @@ class ClusterInfoResponse(BaseModel):
   cluster_version: str = Field(..., description="Cluster software version")
   base_path: str = Field(..., description="Base path for databases")
   max_databases: int = Field(..., description="Maximum database capacity")
-  databases: List[str] = Field(..., description="List of database names")
+  databases: list[str] = Field(..., description="List of database names")
   uptime_seconds: float = Field(..., description="Node uptime")
   read_only: bool = Field(..., description="Read-only mode status")
 
   # New comprehensive configuration section
-  configuration: Optional[NodeConfiguration] = Field(
+  configuration: NodeConfiguration | None = Field(
     None, description="Complete node configuration"
   )

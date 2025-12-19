@@ -1,11 +1,12 @@
-from typing import Dict, Any, List, Optional
-from pathlib import Path
 import shutil
 import time
+from pathlib import Path
+from typing import Any
 
-from robosystems.logger import logger
 from robosystems.graph_api.core.ladybug import get_connection_pool
-from .base import GraphBackend, DatabaseInfo, ClusterTopology, S3IngestionError
+from robosystems.logger import logger
+
+from .base import ClusterTopology, DatabaseInfo, GraphBackend, S3IngestionError
 
 
 class LadybugBackend(GraphBackend):
@@ -29,9 +30,9 @@ class LadybugBackend(GraphBackend):
     self,
     graph_id: str,
     cypher: str,
-    parameters: Optional[Dict[str, Any]] = None,
-    database: Optional[str] = None,
-  ) -> List[Dict[str, Any]]:
+    parameters: dict[str, Any] | None = None,
+    database: str | None = None,
+  ) -> list[dict[str, Any]]:
     # Use connection pool's get_connection context manager
     # Note: database parameter is unused for LadybugDB - graph_id directly maps to a .lbug database file
     with self.connection_pool.get_connection(graph_id, read_only=False) as conn:
@@ -47,7 +48,7 @@ class LadybugBackend(GraphBackend):
         column_names = result.get_column_names()
         while result.has_next():
           row_data = result.get_next()
-          row_dict = dict(zip(column_names, row_data))
+          row_dict = dict(zip(column_names, row_data, strict=False))
           rows.append(row_dict)
 
         return rows
@@ -59,9 +60,9 @@ class LadybugBackend(GraphBackend):
     self,
     graph_id: str,
     cypher: str,
-    parameters: Optional[Dict[str, Any]] = None,
-    database: Optional[str] = None,
-  ) -> List[Dict[str, Any]]:
+    parameters: dict[str, Any] | None = None,
+    database: str | None = None,
+  ) -> list[dict[str, Any]]:
     # For LadybugDB, write operations use the same pattern as queries
     return await self.execute_query(graph_id, cypher, parameters, database)
 
@@ -94,7 +95,7 @@ class LadybugBackend(GraphBackend):
       logger.info(f"Deleted LadybugDB database for {database_name}")
     return True
 
-  async def list_databases(self) -> List[str]:
+  async def list_databases(self) -> list[str]:
     if not self.data_path.exists():
       return []
     return [f.stem for f in self.data_path.iterdir() if f.suffix == ".lbug"]
@@ -146,10 +147,10 @@ class LadybugBackend(GraphBackend):
     graph_id: str,
     table_name: str,
     s3_pattern: str,
-    s3_credentials: Optional[Dict[str, Any]] = None,
+    s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
-    database: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    database: str | None = None,
+  ) -> dict[str, Any]:
     # Use ConnectionPool's context manager - this is the 1.0.1 pattern
     with self.connection_pool.get_connection(graph_id, read_only=False) as conn:
       # Load httpfs extension (try bundled local file first, fallback to standard load)

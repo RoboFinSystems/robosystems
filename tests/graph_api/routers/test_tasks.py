@@ -1,10 +1,11 @@
 """Tests for tasks router endpoints."""
 
-from unittest.mock import MagicMock, patch, AsyncMock
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-import json
 
 from robosystems.graph_api.app import create_app
 from robosystems.graph_api.core.task_sse import TaskType

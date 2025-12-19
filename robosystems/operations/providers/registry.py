@@ -1,27 +1,28 @@
 """Provider registry for dynamic provider management."""
 
 import logging
-from typing import Dict, Any, Optional, Protocol
+from typing import Any, Protocol
+
 from sqlalchemy.orm import Session
 
-from .sec_provider import (
-  create_sec_connection,
-  sync_sec_connection,
-  cleanup_sec_connection,
+from ...config import env
+from ...middleware.otel.metrics import get_endpoint_metrics
+from ...models.api.graphs.connections import (
+  PlaidConnectionConfig,
+  QuickBooksConnectionConfig,
+  SECConnectionConfig,
 )
 from .plaid_provider import PlaidProvider
 from .quickbooks_provider import (
+  cleanup_quickbooks_connection,
   create_quickbooks_connection,
   sync_quickbooks_connection,
-  cleanup_quickbooks_connection,
 )
-from ...models.api.graphs.connections import (
-  SECConnectionConfig,
-  PlaidConnectionConfig,
-  QuickBooksConnectionConfig,
+from .sec_provider import (
+  cleanup_sec_connection,
+  create_sec_connection,
+  sync_sec_connection,
 )
-from ...config import env
-from ...middleware.otel.metrics import get_endpoint_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -37,14 +38,14 @@ class ConnectionProvider(Protocol):
 
   async def sync_connection(
     self,
-    connection: Dict[str, Any],
-    sync_options: Optional[Dict[str, Any]],
+    connection: dict[str, Any],
+    sync_options: dict[str, Any] | None,
     graph_id: str,
   ) -> str:
     """Sync a connection."""
     ...
 
-  async def cleanup_connection(self, connection: Dict[str, Any], graph_id: str) -> None:
+  async def cleanup_connection(self, connection: dict[str, Any], graph_id: str) -> None:
     """Clean up a connection."""
     ...
 
@@ -116,7 +117,7 @@ class ProviderRegistry:
       # Don't fail initialization if metrics fail
       logger.warning(f"Failed to record feature flag metrics: {e}")
 
-  def get_provider(self, provider_type: str) -> Dict[str, Any]:
+  def get_provider(self, provider_type: str) -> dict[str, Any]:
     """Get provider configuration."""
     provider_lower = provider_type.lower()
 
@@ -205,8 +206,8 @@ class ProviderRegistry:
   async def sync_connection(
     self,
     provider_type: str,
-    connection: Dict[str, Any],
-    sync_options: Optional[Dict[str, Any]],
+    connection: dict[str, Any],
+    sync_options: dict[str, Any] | None,
     graph_id: str,
   ) -> str:
     """Sync a connection using the appropriate provider."""
@@ -215,7 +216,7 @@ class ProviderRegistry:
     return await sync_func(connection, sync_options, graph_id)
 
   async def cleanup_connection(
-    self, provider_type: str, connection: Dict[str, Any], graph_id: str
+    self, provider_type: str, connection: dict[str, Any], graph_id: str
   ) -> None:
     """Clean up a connection using the appropriate provider."""
     provider = self.get_provider(provider_type)

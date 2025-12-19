@@ -5,10 +5,10 @@ Monitors system resources and rejects requests when the server is overloaded,
 preventing OOM kills and maintaining service stability.
 """
 
-import psutil
 import time
-from typing import Tuple, Optional
 from enum import Enum
+
+import psutil
 
 from robosystems.logger import logger
 
@@ -80,7 +80,7 @@ class LadybugAdmissionController:
 
   def check_admission(
     self, database_name: str, operation_type: str = "query"
-  ) -> Tuple[AdmissionDecision, Optional[str]]:
+  ) -> tuple[AdmissionDecision, str | None]:
     """
     Check if a new request should be admitted.
 
@@ -161,7 +161,7 @@ class LadybugAdmissionController:
 
 
 # Global admission controller instance
-_admission_controller: Optional[LadybugAdmissionController] = None
+_admission_controller: LadybugAdmissionController | None = None
 
 
 def get_admission_controller() -> LadybugAdmissionController:

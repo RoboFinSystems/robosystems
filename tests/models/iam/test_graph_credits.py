@@ -1,15 +1,16 @@
 """Test GraphCredits and GraphCreditTransaction models functionality."""
 
-import pytest
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
-from robosystems.models.iam import GraphCredits, Graph, User
+import pytest
+
+from robosystems.models.iam import Graph, GraphCredits, User
 from robosystems.models.iam.graph_credits import (
-  GraphCreditTransaction,
   CreditTransactionType,
+  GraphCreditTransaction,
   GraphTier,
   safe_float,
 )
@@ -246,7 +247,7 @@ class TestGraphCredits:
 
   def test_allocate_monthly_credits(self):
     """Test monthly credit allocation."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     last_month = now - timedelta(days=35)
 
     credits = GraphCredits(
@@ -280,7 +281,7 @@ class TestGraphCredits:
 
   def test_allocate_monthly_credits_not_due(self):
     """Test monthly allocation when not due yet."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recent = now - timedelta(days=15)
 
     credits = GraphCredits(
@@ -417,7 +418,7 @@ class TestGraphCredits:
       monthly_allocation=Decimal("1000"),
       current_balance=Decimal("700"),
       storage_limit_gb=Decimal("500"),
-      last_allocation_date=datetime.now(timezone.utc),
+      last_allocation_date=datetime.now(UTC),
     )
     credits.graph = self.graph
     self.session.add(credits)

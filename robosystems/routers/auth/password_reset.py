@@ -12,12 +12,14 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.middleware.sse import (
-  run_and_monitor_dagster_job,
   build_email_job_config,
+  run_and_monitor_dagster_job,
 )
+
 from ...config import env
 from ...database import get_async_db_session
 from ...logger import logger
+from ...middleware.auth.jwt import create_jwt_token, revoke_jwt_token
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import (
   AuthResponse,
@@ -29,13 +31,11 @@ from ...models.api.common import ErrorResponse
 from ...models.iam import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.input_validation import (
-  validate_email,
   sanitize_string,
+  validate_email,
   validate_password_strength,
 )
-
 from .utils import detect_app_source, hash_password
-from ...middleware.auth.jwt import create_jwt_token, revoke_jwt_token
 
 # Create router for password reset endpoints
 router = APIRouter()

@@ -1,8 +1,9 @@
 """Tests for QuickBooks API client adapter."""
 
-import pytest
-import pandas as pd
 from unittest.mock import Mock, patch
+
+import pandas as pd
+import pytest
 from intuitlib.client import AuthClient
 from quickbooks import QuickBooks
 

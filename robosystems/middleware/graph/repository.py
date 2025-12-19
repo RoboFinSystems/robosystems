@@ -13,14 +13,15 @@ Key features:
 - Comprehensive method coverage
 """
 
-import inspect
 import asyncio
-from typing import List, Dict, Any, Optional, Union
+import inspect
+from typing import Any
+
+from robosystems.graph_api.client import GraphClient
+from robosystems.graph_api.core.ladybug import Repository
+from robosystems.logger import logger
 
 from .base import GraphOperation
-from robosystems.graph_api.core.ladybug import Repository
-from robosystems.graph_api.client import GraphClient
-from robosystems.logger import logger
 
 
 class UniversalRepository:
@@ -32,7 +33,7 @@ class UniversalRepository:
   method calls accordingly.
   """
 
-  def __init__(self, repository: Union[Repository, GraphClient]):
+  def __init__(self, repository: Repository | GraphClient):
     """
     Initialize the universal repository wrapper.
 
@@ -129,13 +130,13 @@ class UniversalRepository:
 
   # Core database operations
   async def execute_query(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """Execute a single Cypher query and return results."""
     return await self._call_method("execute_query", cypher, params)
 
   async def execute_query_streaming(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None, chunk_size: int = 1000
+    self, cypher: str, params: dict[str, Any] | None = None, chunk_size: int = 1000
   ):
     """
     Execute a query and yield results in chunks for streaming.
@@ -154,7 +155,7 @@ class UniversalRepository:
     # Check if underlying repository supports streaming
     if hasattr(self._repository, "execute_query_streaming"):
       # Use native streaming support
-      streaming_method = getattr(self._repository, "execute_query_streaming")
+      streaming_method = self._repository.execute_query_streaming
       async for chunk in streaming_method(cypher, params, chunk_size):
         yield chunk
     else:
@@ -178,24 +179,24 @@ class UniversalRepository:
         yield chunk
 
   async def execute_single(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> Optional[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> dict[str, Any] | None:
     """Execute a query expecting a single result."""
     return await self._call_method("execute_single", cypher, params)
 
   async def execute_transaction(
-    self, operations: List[GraphOperation]
-  ) -> List[List[Dict[str, Any]]]:
+    self, operations: list[GraphOperation]
+  ) -> list[list[dict[str, Any]]]:
     """Execute multiple operations in a transaction."""
     return await self._call_method("execute_transaction", operations)
 
   async def count_nodes(
-    self, label: str, filters: Optional[Dict[str, Any]] = None
+    self, label: str, filters: dict[str, Any] | None = None
   ) -> int:
     """Count nodes with optional filters."""
     return await self._call_method("count_nodes", label, filters)
 
-  async def node_exists(self, label: str, filters: Dict[str, Any]) -> bool:
+  async def node_exists(self, label: str, filters: dict[str, Any]) -> bool:
     """Check if a node exists with given filters."""
     logger.debug(f"UniversalRepository.node_exists called for label: {label}")
     try:
@@ -206,7 +207,7 @@ class UniversalRepository:
       logger.error(f"UniversalRepository.node_exists failed: {e}")
       raise
 
-  async def health_check(self) -> Dict[str, Any]:
+  async def health_check(self) -> dict[str, Any]:
     """Perform a health check on the repository."""
     return await self._call_method("health_check")
 
@@ -216,34 +217,34 @@ class UniversalRepository:
 
   # Backward compatibility methods (synchronous versions)
   def execute_query_sync(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """Execute a single Cypher query and return results (sync)."""
     return self._call_method_sync("execute_query", cypher, params)
 
   def execute_single_sync(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> Optional[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> dict[str, Any] | None:
     """Execute a query expecting a single result (sync)."""
     return self._call_method_sync("execute_single", cypher, params)
 
   def execute_transaction_sync(
-    self, operations: List[GraphOperation]
-  ) -> List[List[Dict[str, Any]]]:
+    self, operations: list[GraphOperation]
+  ) -> list[list[dict[str, Any]]]:
     """Execute multiple operations in a transaction (sync)."""
     return self._call_method_sync("execute_transaction", operations)
 
   def count_nodes_sync(
-    self, label: str, filters: Optional[Dict[str, Any]] = None
+    self, label: str, filters: dict[str, Any] | None = None
   ) -> int:
     """Count nodes with optional filters (sync)."""
     return self._call_method_sync("count_nodes", label, filters)
 
-  def node_exists_sync(self, label: str, filters: Dict[str, Any]) -> bool:
+  def node_exists_sync(self, label: str, filters: dict[str, Any]) -> bool:
     """Check if a node exists with given filters (sync)."""
     return self._call_method_sync("node_exists", label, filters)
 
-  def health_check_sync(self) -> Dict[str, Any]:
+  def health_check_sync(self) -> dict[str, Any]:
     """Perform a health check on the repository (sync)."""
     return self._call_method_sync("health_check")
 
@@ -253,8 +254,8 @@ class UniversalRepository:
 
   # Alias for backward compatibility
   def execute(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """Alias for execute_query_sync for backward compatibility."""
     return self.execute_query_sync(cypher, params)
 
@@ -262,14 +263,14 @@ class UniversalRepository:
   async def __aenter__(self):
     """Async context manager entry."""
     if hasattr(self._repository, "__aenter__"):
-      aenter_method = getattr(self._repository, "__aenter__")
+      aenter_method = self._repository.__aenter__
       await aenter_method()
     return self
 
   async def __aexit__(self, exc_type, exc_val, exc_tb):
     """Async context manager exit."""
     if hasattr(self._repository, "__aexit__"):
-      aexit_method = getattr(self._repository, "__aexit__")
+      aexit_method = self._repository.__aexit__
       await aexit_method(exc_type, exc_val, exc_tb)
     elif hasattr(self._repository, "close"):
       await self.close()
@@ -278,14 +279,14 @@ class UniversalRepository:
   def __enter__(self):
     """Sync context manager entry."""
     if hasattr(self._repository, "__enter__"):
-      enter_method = getattr(self._repository, "__enter__")
+      enter_method = self._repository.__enter__
       enter_method()
     return self
 
   def __exit__(self, exc_type, exc_val, exc_tb):
     """Sync context manager exit."""
     if hasattr(self._repository, "__exit__"):
-      exit_method = getattr(self._repository, "__exit__")
+      exit_method = self._repository.__exit__
       exit_method(exc_type, exc_val, exc_tb)
     elif hasattr(self._repository, "close"):
       self.close_sync()
@@ -311,14 +312,14 @@ class UniversalRepository:
     return getattr(self._repository, "read_only", False)
 
   # API-specific methods (only available for APIRepository)
-  async def get_schema(self) -> List[Dict[str, Any]]:
+  async def get_schema(self) -> list[dict[str, Any]]:
     """Get database schema information (API repositories only)."""
     if not hasattr(self._repository, "get_schema"):
       raise NotImplementedError("get_schema is only available for API repositories")
     return await self._call_method("get_schema")
 
   # Direct access to underlying repository for advanced use cases
-  def get_underlying_repository(self) -> Union[Repository, GraphClient]:
+  def get_underlying_repository(self) -> Repository | GraphClient:
     """Get the underlying repository instance."""
     return self._repository
 
@@ -382,7 +383,7 @@ async def create_universal_repository_with_auth(
 
 # Utility functions for repository detection
 def is_api_repository(
-  repository: Union[Repository, GraphClient, UniversalRepository],
+  repository: Repository | GraphClient | UniversalRepository,
 ) -> bool:
   """Check if a repository is an API repository."""
   if isinstance(repository, UniversalRepository):
@@ -391,7 +392,7 @@ def is_api_repository(
 
 
 def is_direct_repository(
-  repository: Union[Repository, GraphClient, UniversalRepository],
+  repository: Repository | GraphClient | UniversalRepository,
 ) -> bool:
   """Check if a repository is a direct file repository."""
   if isinstance(repository, UniversalRepository):
@@ -400,7 +401,7 @@ def is_direct_repository(
 
 
 def get_repository_type(
-  repository: Union[Repository, GraphClient, UniversalRepository],
+  repository: Repository | GraphClient | UniversalRepository,
 ) -> str:
   """Get the type of a repository."""
   if isinstance(repository, UniversalRepository):

@@ -1,9 +1,10 @@
-import pytest
-from unittest.mock import patch, MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from robosystems.graph_api.backends.lbug import LadybugBackend
+import pytest
+
 from robosystems.graph_api.backends.base import S3IngestionError
+from robosystems.graph_api.backends.lbug import LadybugBackend
 
 
 @pytest.fixture(autouse=True)

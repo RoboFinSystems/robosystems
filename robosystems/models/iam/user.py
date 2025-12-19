@@ -1,11 +1,12 @@
 """User authentication model."""
 
-from datetime import datetime, timezone
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Optional
 
-from sqlalchemy import Column, String, DateTime, Boolean
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy import Boolean, Column, DateTime, String
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
@@ -23,12 +24,12 @@ class User(Model):
   is_active = Column(Boolean, default=True, nullable=False)
   email_verified = Column(Boolean, default=False, nullable=False)
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -98,7 +99,7 @@ class User(Model):
           setattr(self, key, value.lower())
         else:
           setattr(self, key, value)
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     if auto_commit:
       try:
@@ -120,7 +121,7 @@ class User(Model):
   def verify_email(self, session: Session) -> None:
     """Mark user's email as verified."""
     self.email_verified = True
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
@@ -131,7 +132,7 @@ class User(Model):
   def deactivate(self, session: Session) -> None:
     """Deactivate the user."""
     self.is_active = False
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
@@ -142,7 +143,7 @@ class User(Model):
   def activate(self, session: Session) -> None:
     """Activate the user."""
     self.is_active = True
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)

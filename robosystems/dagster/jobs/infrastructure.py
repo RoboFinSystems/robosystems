@@ -6,7 +6,7 @@ These jobs handle system maintenance:
 - Graph instance monitoring
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from dagster import (
@@ -20,7 +20,6 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.resources import DatabaseResource
 from robosystems.models.iam import UserAPIKey
-
 
 # ============================================================================
 # Environment-based Schedule Status
@@ -45,7 +44,7 @@ INSTANCE_SCHEDULE_STATUS = (
 def cleanup_expired_api_keys(context: OpExecutionContext, db: DatabaseResource) -> dict:
   """Clean up expired API keys from the database."""
   with db.get_session() as session:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Find and delete expired API keys
     expired_keys = (
@@ -125,7 +124,7 @@ def check_shared_credit_allocation_health(
   return {
     "status": health_status,
     "issues": issues,
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
   }
 
 
@@ -162,7 +161,7 @@ def check_graph_credit_health(
     "status": health_status,
     "issues": issues,
     "negative_balance_count": negative_count if "negative_count" in dir() else 0,
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
   }
 
 
@@ -185,7 +184,7 @@ def aggregate_health_results(
     "overall_status": overall_status,
     "shared_credits": shared_health,
     "graph_credits": graph_health,
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
   }
 
 
@@ -403,7 +402,7 @@ def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]
   )
 
   return {
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
     "results": results,
   }
 

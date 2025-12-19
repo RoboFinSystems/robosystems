@@ -2,10 +2,11 @@
 Tests for MCP handlers and tool execution.
 """
 
-import pytest
-import json
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 from fastapi import HTTPException
 
 from robosystems.models.api.graphs.mcp import MCPToolCall
@@ -249,7 +250,7 @@ class TestMCPAccessValidation:
       assert True
     except HTTPException:
       # Access was denied
-      assert False, "User should have access to their own graph"
+      raise AssertionError("User should have access to their own graph")
 
   @pytest.mark.asyncio
   async def test_validate_mcp_access_no_permission(self, db_session, test_user):
@@ -264,13 +265,14 @@ class TestMCPAccessValidation:
   @pytest.mark.asyncio
   async def test_validate_mcp_access_shared_repository(self, db_session, test_user):
     """Test access validation for shared repositories."""
-    from robosystems.models.iam.user_repository import (
-      UserRepository,
-      RepositoryType,
-      RepositoryPlan,
-      RepositoryAccessLevel,
-    )
     import uuid
+
+    from robosystems.models.iam.user_repository import (
+      RepositoryAccessLevel,
+      RepositoryPlan,
+      RepositoryType,
+      UserRepository,
+    )
 
     # Grant SEC repository access
     access_record = UserRepository(
@@ -290,7 +292,7 @@ class TestMCPAccessValidation:
       await validate_mcp_access(graph_id="sec", current_user=test_user, db=db_session)
       assert True
     except HTTPException:
-      assert False, "User should have access to SEC repository"
+      raise AssertionError("User should have access to SEC repository")
 
   @pytest.mark.asyncio
   async def test_validate_mcp_access_write_level(
@@ -307,7 +309,7 @@ class TestMCPAccessValidation:
       )
       assert True
     except HTTPException:
-      assert False, "User should have write access"
+      raise AssertionError("User should have write access")
 
   @pytest.mark.asyncio
   async def test_validate_mcp_access_inactive_graph(
@@ -329,7 +331,7 @@ class TestMCPAccessValidation:
       assert True
     except HTTPException:
       # If this starts failing, it means the implementation now checks is_active
-      assert False, "Implementation changed - now checks is_active field"
+      raise AssertionError("Implementation changed - now checks is_active field")
 
 
 class TestMCPErrorSanitization:

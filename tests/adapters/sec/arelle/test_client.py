@@ -1,10 +1,11 @@
 """Tests for Arelle XBRL client adapter."""
 
-import pytest
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from arelle import ModelXbrl
 
 from robosystems.adapters.sec.client.arelle import ArelleClient
@@ -297,7 +298,7 @@ class TestArelleClient:
           assert True
         except Exception as e:
           # If we get an exception, verify it's handled gracefully
-          assert False, f"_load_plugins raised unexpected exception: {e}"
+          raise AssertionError(f"_load_plugins raised unexpected exception: {e}")
 
   @patch("robosystems.adapters.sec.client.arelle.env")
   def test_configure_webcache(self, mock_env, temp_dir):

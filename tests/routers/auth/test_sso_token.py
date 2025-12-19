@@ -2,13 +2,14 @@
 Tests for SSO token generation endpoint.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 from fastapi import HTTPException, status
 
-from robosystems.routers.auth.sso import generate_sso_token
 from robosystems.models.iam import User
+from robosystems.routers.auth.sso import generate_sso_token
 
 
 @pytest.fixture

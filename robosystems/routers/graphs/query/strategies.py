@@ -6,17 +6,19 @@ based on client capabilities, system load, and query characteristics.
 """
 
 import re
-from typing import Dict, Any, Optional, Tuple
-
 from enum import Enum
+from typing import Any
+
+from robosystems.logger import logger
 from robosystems.middleware.graph.execution_strategies import (
   BaseAnalyzer,
   BaseClientDetector,
   BaseStrategySelector,
+)
+from robosystems.middleware.graph.execution_strategies import (
   ResponseMode as BaseResponseMode,
 )
 from robosystems.middleware.robustness import TimeoutCoordinator
-from robosystems.logger import logger
 
 
 class ExecutionStrategy(Enum):
@@ -46,7 +48,7 @@ class QueryAnalyzer(BaseAnalyzer):
   """Analyze Cypher queries to estimate characteristics."""
 
   @classmethod
-  def analyze_query(cls, query: str) -> Dict[str, Any]:
+  def analyze_query(cls, query: str) -> dict[str, Any]:
     """
     Analyze a Cypher query to estimate its characteristics.
 
@@ -60,8 +62,8 @@ class QueryAnalyzer(BaseAnalyzer):
     return cls.analyze_cypher_query(query)
 
   def analyze(
-    self, query: str, parameters: Optional[Dict[str, Any]] = None
-  ) -> Dict[str, Any]:
+    self, query: str, parameters: dict[str, Any] | None = None
+  ) -> dict[str, Any]:
     """
     Implementation of abstract analyze method.
 
@@ -76,7 +78,7 @@ class QueryAnalyzer(BaseAnalyzer):
     return self.analyze_query(query)
 
   @classmethod
-  def _estimate_result_size(cls, query_upper: str, limit_value: Optional[int]) -> int:
+  def _estimate_result_size(cls, query_upper: str, limit_value: int | None) -> int:
     """Estimate the number of rows a query will return."""
     if limit_value:
       return limit_value
@@ -112,7 +114,7 @@ class ClientDetector(BaseClientDetector):
   """Detect client type and capabilities from request headers."""
 
   @classmethod
-  def detect_client_type(cls, headers: Dict[str, str]) -> Dict[str, Any]:
+  def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
     """
     Detect client type and capabilities from request headers.
 
@@ -165,12 +167,12 @@ class StrategySelector(BaseStrategySelector):
   @classmethod
   def select_strategy(
     cls,
-    query_analysis: Dict[str, Any],
-    client_info: Dict[str, Any],
-    system_state: Dict[str, Any],
-    mode_override: Optional[ResponseMode] = None,
+    query_analysis: dict[str, Any],
+    client_info: dict[str, Any],
+    system_state: dict[str, Any],
+    mode_override: ResponseMode | None = None,
     is_write_operation: bool = False,
-  ) -> Tuple[ExecutionStrategy, Dict[str, Any]]:
+  ) -> tuple[ExecutionStrategy, dict[str, Any]]:
     """
     Select the optimal execution strategy.
 
@@ -298,7 +300,7 @@ class QueryTimeoutCoordinator(TimeoutCoordinator):
   @classmethod
   def calculate_timeouts(
     cls, requested_timeout: int, strategy: ExecutionStrategy, is_testing: bool = False
-  ) -> Dict[str, int]:
+  ) -> dict[str, int]:
     """
     Calculate coordinated timeouts for query execution layers.
 

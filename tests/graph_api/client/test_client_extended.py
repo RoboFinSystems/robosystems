@@ -2,18 +2,19 @@
 
 import json
 import time
-from unittest.mock import Mock, patch, AsyncMock
-import pytest
+from unittest.mock import AsyncMock, Mock, patch
+
 import httpx
+import pytest
 
 from robosystems.graph_api.client.client import GraphClient
 from robosystems.graph_api.client.exceptions import (
   GraphAPIError,
-  GraphTimeoutError,
-  GraphTransientError,
-  GraphSyntaxError,
   GraphClientError,
   GraphServerError,
+  GraphSyntaxError,
+  GraphTimeoutError,
+  GraphTransientError,
 )
 
 

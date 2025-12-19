@@ -5,7 +5,7 @@ Front office, CRM, sales, and marketing functionality.
 Extends the base schema with sales and marketing-specific entities.
 """
 
-from ..models import Node, Relationship, Property
+from ..models import Node, Property, Relationship
 
 # RoboFO Extension Nodes
 EXTENSION_NODES = [

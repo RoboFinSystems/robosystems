@@ -2,6 +2,7 @@
 
 import os
 from unittest.mock import patch
+
 import pytest
 
 from robosystems.graph_api.client.config import GraphClientConfig
@@ -200,9 +201,8 @@ class TestGraphClientConfig:
       "GRAPH_CLIENT_TIMEOUT": "not_a_number",
     }
 
-    with patch.dict(os.environ, env_vars):
-      with pytest.raises(ValueError):
-        GraphClientConfig.from_env()
+    with patch.dict(os.environ, env_vars), pytest.raises(ValueError):
+      GraphClientConfig.from_env()
 
   def test_float_env_parsing(self):
     """Test float parsing from environment variables."""

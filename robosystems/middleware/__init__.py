@@ -6,8 +6,6 @@ including tracing, authentication, graph database operations, and other
 cross-cutting concerns.
 """
 
-from .otel.setup import setup_telemetry, get_tracer, shutdown_telemetry
-
 # Authentication middleware
 from .auth import (
   get_current_user,
@@ -20,17 +18,18 @@ from .graph import (
   GraphOperation,
   get_graph_repository,
 )
+from .otel.setup import get_tracer, setup_telemetry, shutdown_telemetry
 
 __all__ = [
-  # Tracing
-  "setup_telemetry",
-  "get_tracer",
-  "shutdown_telemetry",
-  # Authentication
-  "get_current_user",
-  "get_optional_user",
-  "validate_api_key",
   # Graph database
   "GraphOperation",
+  # Authentication
+  "get_current_user",
   "get_graph_repository",
+  "get_optional_user",
+  "get_tracer",
+  # Tracing
+  "setup_telemetry",
+  "shutdown_telemetry",
+  "validate_api_key",
 ]

@@ -6,9 +6,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from robosystems.graph_api.routers.databases.tables import materialize
-from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.database import get_db_session
+from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.routers.databases.tables import materialize
 
 
 @pytest.fixture

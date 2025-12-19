@@ -1,7 +1,7 @@
 """Tests for authentication utility functions."""
 
-from unittest.mock import Mock, patch
 import hashlib
+from unittest.mock import Mock, patch
 
 from robosystems.middleware.auth.utils import (
   validate_api_key,

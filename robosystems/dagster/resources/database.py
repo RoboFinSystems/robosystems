@@ -4,8 +4,9 @@ Provides database session management for Dagster jobs and assets,
 matching the patterns used in the existing RoboSystems codebase.
 """
 
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Generator
+from typing import Any
 
 from dagster import ConfigurableResource, InitResourceContext
 from sqlalchemy import create_engine
@@ -31,7 +32,7 @@ class DatabaseResource(ConfigurableResource):
     self._session_factory = sessionmaker(bind=self._engine)
 
   @contextmanager
-  def get_session(self) -> Generator[Session, None, None]:
+  def get_session(self) -> Generator[Session]:
     """Get a database session context manager.
 
     Yields:

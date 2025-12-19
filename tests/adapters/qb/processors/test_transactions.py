@@ -1,7 +1,9 @@
 """Tests for QuickBooks integration with LadybugDB database."""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from robosystems.adapters.quickbooks import QBClient
 
 

@@ -10,11 +10,11 @@ This module provides metrics collection for LadybugDB databases, including:
 The metrics are exposed via OpenTelemetry for Prometheus consumption.
 """
 
-import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
 import logging
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from robosystems.config import env
 
@@ -94,7 +94,7 @@ class LadybugMetricsCollector:
     self.node_type = node_type
 
     # Track query counts for the current hour
-    self._query_counts: Dict[str, int] = {}
+    self._query_counts: dict[str, int] = {}
     self._query_count_reset_time = time.time()
 
     # Get meter from OpenTelemetry
@@ -105,10 +105,11 @@ class LadybugMetricsCollector:
     callbacks = None
     if env.OTEL_ENABLED and not isinstance(meter, NoOpMeter):
       # Use type casting to ensure the callback has the correct type for OpenTelemetry
-      from typing import cast, List
+      from typing import cast
+
       from opentelemetry.metrics import CallbackT
 
-      callbacks = cast(List[CallbackT], [self._observe_database_metrics])
+      callbacks = cast(list[CallbackT], [self._observe_database_metrics])
 
     self.database_size_bytes = meter.create_observable_gauge(
       name="lbug_database_size_bytes",
@@ -160,8 +161,8 @@ class LadybugMetricsCollector:
     )
 
     # Cache for database sizes to avoid excessive disk I/O
-    self._size_cache: Dict[str, int] = {}
-    self._cache_timestamp: Optional[float] = None
+    self._size_cache: dict[str, int] = {}
+    self._cache_timestamp: float | None = None
     self._cache_ttl = 300  # 5 minutes
 
   def _get_directory_size(self, path: Path) -> int:
@@ -178,7 +179,7 @@ class LadybugMetricsCollector:
       logger.warning(f"Error calculating size for {path}: {e}")
     return total_size
 
-  def _get_database_sizes(self) -> Dict[str, int]:
+  def _get_database_sizes(self) -> dict[str, int]:
     """Get sizes of all databases, using cache if available."""
     current_time = time.time()
 
@@ -279,7 +280,7 @@ class LadybugMetricsCollector:
         },
       )
 
-  async def get_database_metrics_for_usage(self) -> List[Dict]:
+  async def get_database_metrics_for_usage(self) -> list[dict]:
     """
     Get database metrics formatted for usage tracking.
 
@@ -289,7 +290,7 @@ class LadybugMetricsCollector:
     database_sizes = self._get_database_sizes()
 
     metrics_list = []
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
 
     for db_name, size_bytes in database_sizes.items():
       metrics_list.append(
@@ -305,15 +306,16 @@ class LadybugMetricsCollector:
 
     return metrics_list
 
-  def collect_system_metrics(self) -> Dict[str, Any]:
+  def collect_system_metrics(self) -> dict[str, Any]:
     """
     Collect system-level metrics including CPU, memory, and disk usage.
 
     Returns:
         Dictionary with system metrics
     """
-    import psutil
     import os
+
+    import psutil
 
     # Get disk usage for the data volume
     data_path = "/mnt/lbug-data"
@@ -344,7 +346,7 @@ class LadybugMetricsCollector:
     cpu_percent = psutil.cpu_percent(interval=0.1)
 
     return {
-      "timestamp": datetime.now(timezone.utc).isoformat(),
+      "timestamp": datetime.now(UTC).isoformat(),
       "cpu": {
         "usage_percent": cpu_percent,
         "count": psutil.cpu_count(),
@@ -368,7 +370,7 @@ class LadybugMetricsCollector:
       },
     }
 
-  def collect_database_metrics(self) -> Dict[str, Any]:
+  def collect_database_metrics(self) -> dict[str, Any]:
     """
     Collect metrics for all databases.
 
@@ -392,7 +394,7 @@ class LadybugMetricsCollector:
       },
     }
 
-  def get_query_metrics(self) -> Dict[str, Any]:
+  def get_query_metrics(self) -> dict[str, Any]:
     """
     Get query execution metrics.
 
@@ -405,11 +407,11 @@ class LadybugMetricsCollector:
       "total_queries": total_queries,
       "queries_by_database": self._query_counts.copy(),
       "reset_time": datetime.fromtimestamp(
-        self._query_count_reset_time, tz=timezone.utc
+        self._query_count_reset_time, tz=UTC
       ).isoformat(),
     }
 
-  async def collect_ingestion_metrics(self) -> Dict[str, Any]:
+  async def collect_ingestion_metrics(self) -> dict[str, Any]:
     """
     Collect ingestion queue metrics.
 

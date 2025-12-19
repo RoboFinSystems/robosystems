@@ -4,6 +4,7 @@ Swagger and ReDoc documentation template utility for generating custom API docs.
 
 import html
 from pathlib import Path
+
 from ..config.logging import get_logger
 
 logger = get_logger(__name__)
@@ -118,7 +119,7 @@ def _load_template_safely(template_path: Path, fallback_func) -> str:
   try:
     if template_path.exists() and template_path.is_file():
       return template_path.read_text(encoding="utf-8")
-  except (IOError, OSError) as e:
+  except OSError as e:
     logger.warning(f"Failed to load template {template_path}: {e}")
   return fallback_func()
 
@@ -242,7 +243,7 @@ def generate_redoc_docs(
         title=title,
         openapi_url=openapi_url,
       )
-  except (IOError, OSError) as e:
+  except OSError as e:
     logger.warning(f"Failed to load template {template_path}: {e}")
 
   # Use fallback template

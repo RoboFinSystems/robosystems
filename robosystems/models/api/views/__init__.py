@@ -13,6 +13,12 @@ from robosystems.models.api.views.fact_grid import (
   FactGrid,
   FactGridMetadata,
 )
+from robosystems.models.api.views.save_view import (
+  FactDetail,
+  SaveViewRequest,
+  SaveViewResponse,
+  StructureDetail,
+)
 from robosystems.models.api.views.view_config import (
   CreateViewRequest,
   ViewAxisConfig,
@@ -25,35 +31,29 @@ from robosystems.models.api.views.view_response import (
   ViewMetadata,
   ViewResponse,
 )
-from robosystems.models.api.views.save_view import (
-  SaveViewRequest,
-  SaveViewResponse,
-  FactDetail,
-  StructureDetail,
-)
 
 __all__ = [
   "AggregationMethod",
   "CreateAssociationRequest",
   "CreateMappingRequest",
+  "CreateViewRequest",
   "Dimension",
   "DimensionType",
   "ElementAssociation",
+  "FactDetail",
   "FactGrid",
   "FactGridMetadata",
-  "CreateViewRequest",
   "MappingResponse",
   "MappingStructure",
+  "PivotTablePresentation",
+  "SaveViewRequest",
+  "SaveViewResponse",
+  "StructureDetail",
   "UpdateAssociationRequest",
   "ViewAxisConfig",
   "ViewConfig",
-  "ViewSource",
-  "ViewSourceType",
-  "PivotTablePresentation",
   "ViewMetadata",
   "ViewResponse",
-  "SaveViewRequest",
-  "SaveViewResponse",
-  "FactDetail",
-  "StructureDetail",
+  "ViewSource",
+  "ViewSourceType",
 ]

@@ -10,9 +10,8 @@ from fastapi import (
 
 from ...logger import logger
 from ...middleware.auth.cache import api_key_cache
-from ...middleware.rate_limits import logout_rate_limit_dependency
-
 from ...middleware.auth.jwt import revoke_jwt_token
+from ...middleware.rate_limits import logout_rate_limit_dependency
 
 # Create router for logout endpoint
 router = APIRouter()
@@ -64,5 +63,5 @@ async def logout(
     return {"message": "Logout successful"}
 
   except Exception as e:
-    logger.error(f"Logout error: {str(e)}")
+    logger.error(f"Logout error: {e!s}")
     return {"message": "Logout completed"}

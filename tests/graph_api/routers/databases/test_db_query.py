@@ -1,10 +1,11 @@
 """Tests for database query router endpoints."""
 
+import json
 from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-import json
 
 from robosystems.graph_api.app import create_app
 from robosystems.graph_api.core.admission_control import AdmissionDecision

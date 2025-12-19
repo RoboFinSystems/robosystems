@@ -7,11 +7,11 @@ Resources provide shared infrastructure components to Dagster jobs and assets:
 """
 
 from robosystems.dagster.resources.database import DatabaseResource
-from robosystems.dagster.resources.storage import S3Resource
 from robosystems.dagster.resources.graph import GraphResource
+from robosystems.dagster.resources.storage import S3Resource
 
 __all__ = [
   "DatabaseResource",
-  "S3Resource",
   "GraphResource",
+  "S3Resource",
 ]

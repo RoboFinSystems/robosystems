@@ -1,12 +1,12 @@
 """Tests for LadybugDB database path utility functions."""
 
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
-import tempfile
 
 from robosystems.operations.lbug.path_utils import (
-  get_lbug_database_path,
   ensure_lbug_directory,
+  get_lbug_database_path,
 )
 
 

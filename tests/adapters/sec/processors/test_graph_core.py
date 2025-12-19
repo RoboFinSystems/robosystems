@@ -8,12 +8,13 @@ Tests the critical data extraction logic including:
 - Element processing (make_element, make_element_labels)
 """
 
-import pytest
-import tempfile
 import shutil
-from unittest.mock import MagicMock, patch
-import pandas as pd
+import tempfile
 from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
 
 from robosystems.adapters.sec.processors import XBRLGraphProcessor
 

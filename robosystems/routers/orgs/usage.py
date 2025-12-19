@@ -1,29 +1,30 @@
 """Organization usage and limits endpoints."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...models.iam import (
-  User,
-  OrgUser,
-  OrgLimits,
-  Graph,
-  GraphCredits,
-  GraphUsage,
-  UsageEventType,
-)
 from ...models.api.orgs import (
   OrgLimitsResponse,
   OrgUsageResponse,
   OrgUsageSummary,
 )
-from ...logger import get_logger
+from ...models.iam import (
+  Graph,
+  GraphCredits,
+  GraphUsage,
+  OrgLimits,
+  OrgUser,
+  UsageEventType,
+  User,
+)
 
 logger = get_logger(__name__)
 
@@ -81,7 +82,7 @@ async def get_org_limits(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error getting organization limits: {str(e)}")
+    logger.error(f"Error getting organization limits: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to get organization limits",
@@ -117,7 +118,7 @@ async def get_org_usage(
     graph_ids = [g.graph_id for g in graphs]
 
     # Calculate time range
-    end_date = datetime.now(timezone.utc)
+    end_date = datetime.now(UTC)
     start_date = end_date - timedelta(days=days)
 
     # Aggregate credit usage across all graphs
@@ -246,7 +247,7 @@ async def get_org_usage(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error getting organization usage: {str(e)}")
+    logger.error(f"Error getting organization usage: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to get organization usage",

@@ -1,8 +1,7 @@
 """Input validation and sanitization utilities."""
 
-import re
 import html
-from typing import Optional
+import re
 
 
 def sanitize_string(value: str, max_length: int = 1000) -> str:
@@ -139,7 +138,7 @@ def validate_uuid(value: str) -> bool:
   return bool(re.match(uuid_pattern, value.lower()))
 
 
-def sanitize_url(url: str) -> Optional[str]:
+def sanitize_url(url: str) -> str | None:
   """Sanitize and validate URL.
 
   Args:

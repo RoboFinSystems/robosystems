@@ -1,7 +1,8 @@
 """Tests for password reset endpoints."""
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import patch, Mock
 
 from robosystems.models.iam import User, UserToken
 

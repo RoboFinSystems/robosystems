@@ -1,13 +1,12 @@
 """Rate limiting cache using Valkey/Redis."""
 
 import time
-from typing import Dict, Any, Tuple, cast, List, Optional
+from typing import Any, cast
 
 import redis
 
 from ...config import env
-from ...config.valkey_registry import ValkeyDatabase
-from ...config.valkey_registry import create_redis_client
+from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import logger
 
 
@@ -44,7 +43,7 @@ class RateLimitCache:
 
   def check_rate_limit(
     self, identifier: str, limit: int, window: int
-  ) -> Tuple[bool, int]:
+  ) -> tuple[bool, int]:
     """
     Check if request is within rate limit using sliding window.
 
@@ -89,7 +88,7 @@ class RateLimitCache:
       """
 
       result = cast(
-        List[int],
+        list[int],
         self.redis.eval(lua_script, 1, key, str(window), str(limit), str(now)),
       )
       allowed = bool(result[0])
@@ -114,14 +113,14 @@ class RateLimitCache:
       # Fail open - allow request if rate limiting is broken
       return True, limit
 
-  def get_rate_limit_stats(self) -> Dict[str, Any]:
+  def get_rate_limit_stats(self) -> dict[str, Any]:
     """Get rate limiting statistics."""
     if not self.enabled:
       return {"enabled": False}
 
     try:
       # Get all rate limit keys
-      keys = cast(List[str], self.redis.keys(f"{self.RATE_LIMIT_PREFIX}*")) or []
+      keys = cast(list[str], self.redis.keys(f"{self.RATE_LIMIT_PREFIX}*")) or []
 
       stats = {
         "enabled": True,
@@ -160,7 +159,7 @@ class RateLimitCache:
     except Exception:
       return None
 
-  def set(self, key: str, value: Any, expire: Optional[int] = None) -> bool:
+  def set(self, key: str, value: Any, expire: int | None = None) -> bool:
     """Set value in cache with optional expiration."""
     if not self.enabled:
       return False

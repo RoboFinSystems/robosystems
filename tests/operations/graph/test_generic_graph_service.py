@@ -5,14 +5,15 @@ These tests focus on the core graph creation functionality with proper mocking
 of all dependencies including the new GraphSchema and TableService features.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
+from robosystems.config.graph_tier import GraphTier
 from robosystems.operations.graph.generic_graph_service import (
   GenericGraphService,
   GenericGraphServiceSync,
 )
-from robosystems.config.graph_tier import GraphTier
 
 
 class TestGenericGraphService:

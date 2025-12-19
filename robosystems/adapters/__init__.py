@@ -13,11 +13,10 @@ AWS infrastructure services are in robosystems.operations.aws
 """
 
 # SEC EDGAR adapter
-from robosystems.adapters.sec import (
-  SECClient,
-  ArelleClient,
-  XBRLGraphProcessor,
-  XBRLDuckDBGraphProcessor,
+# Plaid adapter
+from robosystems.adapters.plaid import (
+  PlaidClient,
+  PlaidTransactionsProcessor,
 )
 
 # QuickBooks adapter
@@ -25,23 +24,23 @@ from robosystems.adapters.quickbooks import (
   QBClient,
   QBTransactionsProcessor,
 )
-
-# Plaid adapter
-from robosystems.adapters.plaid import (
-  PlaidClient,
-  PlaidTransactionsProcessor,
+from robosystems.adapters.sec import (
+  ArelleClient,
+  SECClient,
+  XBRLDuckDBGraphProcessor,
+  XBRLGraphProcessor,
 )
 
 __all__ = [
-  # SEC
-  "SECClient",
   "ArelleClient",
-  "XBRLGraphProcessor",
-  "XBRLDuckDBGraphProcessor",
-  # QuickBooks
-  "QBClient",
-  "QBTransactionsProcessor",
   # Plaid
   "PlaidClient",
   "PlaidTransactionsProcessor",
+  # QuickBooks
+  "QBClient",
+  "QBTransactionsProcessor",
+  # SEC
+  "SECClient",
+  "XBRLDuckDBGraphProcessor",
+  "XBRLGraphProcessor",
 ]

@@ -1,9 +1,11 @@
 """Tests for admin invoice endpoints."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from fastapi import HTTPException, Request
+
 from robosystems.models.billing import BillingInvoice, BillingInvoiceLineItem
 from robosystems.models.iam import User
 
@@ -216,8 +218,8 @@ class TestGetInvoice:
   @pytest.mark.asyncio
   async def test_get_invoice_success(self, mock_request, mock_get_db_session):
     """Test successful invoice retrieval."""
-    from robosystems.routers.admin.invoice import get_invoice
     from robosystems.models.iam import OrgUser
+    from robosystems.routers.admin.invoice import get_invoice
 
     mock_get_db, mock_session = mock_get_db_session
 
@@ -320,8 +322,8 @@ class TestMarkInvoicePaid:
   @pytest.mark.asyncio
   async def test_mark_invoice_paid_success(self, mock_request, mock_get_db_session):
     """Test successfully marking invoice as paid."""
-    from robosystems.routers.admin.invoice import mark_invoice_paid
     from robosystems.models.iam import OrgUser
+    from robosystems.routers.admin.invoice import mark_invoice_paid
 
     mock_get_db, mock_session = mock_get_db_session
 
@@ -433,8 +435,8 @@ class TestMarkInvoicePaid:
     self, mock_request, mock_get_db_session
   ):
     """Test marking invoice as paid without payment reference."""
-    from robosystems.routers.admin.invoice import mark_invoice_paid
     from robosystems.models.iam import OrgUser
+    from robosystems.routers.admin.invoice import mark_invoice_paid
 
     mock_get_db, mock_session = mock_get_db_session
 

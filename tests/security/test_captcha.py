@@ -5,19 +5,20 @@ These tests cover Cloudflare Turnstile CAPTCHA verification, including token val
 error handling, environment-based configuration, and security scenarios.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
-import aiohttp
 import asyncio
 import json
 from dataclasses import asdict
+from unittest.mock import AsyncMock, Mock, patch
+
+import aiohttp
+import pytest
 
 from robosystems.security.captcha import (
+  TURNSTILE_ERROR_DESCRIPTIONS,
+  TURNSTILE_VERIFY_URL,
   CaptchaService,
   CaptchaVerificationResult,
   captcha_service,
-  TURNSTILE_VERIFY_URL,
-  TURNSTILE_ERROR_DESCRIPTIONS,
   get_error_description,
 )
 
@@ -537,10 +538,9 @@ class TestSecurityScenarios:
     mock_env.TURNSTILE_SECRET_KEY = "test_secret"
 
     # Simulate timeout
-    import asyncio
 
     mock_session_instance = Mock()
-    mock_session_instance.post.side_effect = asyncio.TimeoutError("Request timed out")
+    mock_session_instance.post.side_effect = TimeoutError("Request timed out")
     mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_session_instance)
     mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
@@ -577,7 +577,6 @@ class TestSecurityScenarios:
   @pytest.mark.asyncio
   async def test_concurrent_verification_requests(self):
     """Test handling of concurrent CAPTCHA verification requests."""
-    import asyncio
 
     service = CaptchaService()
 
@@ -708,7 +707,7 @@ class TestPerformanceAndReliability:
 
     network_errors = [
       aiohttp.ClientConnectionError("Connection refused"),
-      asyncio.TimeoutError("Request timeout"),
+      TimeoutError("Request timeout"),
       aiohttp.ClientError("Generic client error"),
     ]
 

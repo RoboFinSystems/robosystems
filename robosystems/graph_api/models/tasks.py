@@ -5,8 +5,8 @@ These models are used for tracking long-running background operations
 like ingestion, backup, restore, and export.
 """
 
-from typing import Optional
 from enum import Enum
+
 from pydantic import BaseModel, Field
 
 
@@ -37,7 +37,7 @@ class BackgroundIngestRequest(BaseModel):
     description="S3 glob pattern for bulk loading (e.g., s3://bucket/path/*.parquet)",
   )
   table_name: str = Field(..., description="Target table name")
-  s3_credentials: Optional[dict] = Field(
+  s3_credentials: dict | None = Field(
     None, description="S3 credentials for LocalStack/MinIO"
   )
   ignore_errors: bool = Field(

@@ -45,52 +45,52 @@ Performance:
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path as PathLib
 
 from fastapi import (
   APIRouter,
   BackgroundTasks,
+  Body,
   Depends,
   HTTPException,
   Path,
-  Body,
   status,
 )
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphTable, GraphFile, Graph
-from robosystems.models.api.graphs.tables import (
-  FileUploadRequest,
-  FileUploadResponse,
-  FileStatusUpdate,
-  FileUploadStatus,
-)
-from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph import get_universal_repository
-from robosystems.database import get_db_session
-from robosystems.operations.aws.s3 import S3Client
 from robosystems.config import env
+from robosystems.config.billing.storage import StorageBillingConfig
 from robosystems.config.constants import (
-  MAX_FILE_SIZE_MB,
-  PRESIGNED_URL_EXPIRY_SECONDS,
-  FALLBACK_BYTES_PER_ROW_PARQUET,
   FALLBACK_BYTES_PER_ROW_CSV,
   FALLBACK_BYTES_PER_ROW_JSON,
+  FALLBACK_BYTES_PER_ROW_PARQUET,
+  MAX_FILE_SIZE_MB,
+  PRESIGNED_URL_EXPIRY_SECONDS,
 )
-from robosystems.config.billing.storage import StorageBillingConfig
-from robosystems.logger import logger, api_logger
+from robosystems.database import get_db_session
+from robosystems.logger import api_logger, logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.types import (
-  GraphTypeRegistry,
-  SHARED_REPO_WRITE_ERROR_MESSAGE,
   GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  SHARED_REPO_WRITE_ERROR_MESSAGE,
+  GraphTypeRegistry,
 )
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.tables import (
+  FileStatusUpdate,
+  FileUploadRequest,
+  FileUploadResponse,
+  FileUploadStatus,
+)
+from robosystems.models.iam import Graph, GraphFile, GraphTable, User
+from robosystems.operations.aws.s3 import S3Client
 
 router = APIRouter()
 
@@ -175,7 +175,7 @@ async def create_file_upload(
   Creates secure upload URL for direct S3 upload. Requires table_name in request body
   to associate file with table.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   table_name = getattr(request, "table_name", None)
   if not table_name:
@@ -305,7 +305,7 @@ async def create_file_upload(
       session=db,
     )
 
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -352,7 +352,7 @@ async def create_file_upload(
     raise
 
   except Exception as e:
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -387,7 +387,7 @@ async def create_file_upload(
     logger.error(f"Failed to generate upload URL for {request.file_name}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to generate upload URL: {str(e)}",
+      detail=f"Failed to generate upload URL: {e!s}",
     )
 
 
@@ -470,7 +470,7 @@ async def update_file(
   """
   Update file status and trigger processing.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     logger.warning(
@@ -530,7 +530,7 @@ async def update_file(
       db.commit()
       db.refresh(graph_file)
 
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+      execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
@@ -558,7 +558,7 @@ async def update_file(
       db.commit()
       db.refresh(graph_file)
 
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+      execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
@@ -634,8 +634,9 @@ async def update_file(
 
       file_format = str(graph_file.file_format)
       if file_format == "parquet":
-        import pyarrow.parquet as pq
         from io import BytesIO
+
+        import pyarrow.parquet as pq
 
         parquet_file = pq.read_table(BytesIO(file_content))
         actual_row_count = parquet_file.num_rows
@@ -703,8 +704,8 @@ async def update_file(
 
       if new_file_count > 0:
         from robosystems.middleware.sse import (
-          run_and_monitor_dagster_job,
           build_graph_job_config,
+          run_and_monitor_dagster_job,
         )
         from robosystems.middleware.sse.event_storage import get_event_storage
 
@@ -794,7 +795,7 @@ async def update_file(
     raise
 
   except Exception as e:
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     api_logger.error(
       "File status update failed",
@@ -812,5 +813,5 @@ async def update_file(
     logger.error(f"Failed to update file {file_id}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to update file: {str(e)}",
+      detail=f"Failed to update file: {e!s}",
     )

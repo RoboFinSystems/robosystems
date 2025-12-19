@@ -5,12 +5,13 @@ Tests the DataFrame-to-Schema transformation adapter that handles schema validat
 column mapping, and DataFrame structure compatibility for XBRL processing.
 """
 
-import pytest
-import pandas as pd
 from unittest.mock import Mock, patch
 
+import pandas as pd
+import pytest
+
 from robosystems.adapters.sec.processors.schema import XBRLSchemaAdapter
-from robosystems.schemas.models import Node, Relationship, Property, Schema
+from robosystems.schemas.models import Node, Property, Relationship, Schema
 
 
 @pytest.fixture

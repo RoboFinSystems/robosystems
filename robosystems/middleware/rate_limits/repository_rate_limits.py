@@ -9,14 +9,14 @@ Rate limits are applied to prevent abuse and ensure fair usage across tiers.
 No credits are consumed for any query operations.
 """
 
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Dict, Optional
-from datetime import datetime, timezone
+
 import redis.asyncio as redis
 
-from robosystems.config.rate_limits import RateLimitConfig, EndpointCategory
-from robosystems.config.billing.repositories import RepositoryPlan
 from robosystems.config import RepositoryBillingConfig, SharedRepository
+from robosystems.config.billing.repositories import RepositoryPlan
+from robosystems.config.rate_limits import EndpointCategory, RateLimitConfig
 
 
 class AllowedSharedEndpoints(str, Enum):
@@ -51,12 +51,12 @@ class SharedRepositoryRateLimits:
   """
 
   @classmethod
-  def get_repository_limits(cls) -> Dict:
+  def get_repository_limits(cls) -> dict:
     """Get rate limits from the centralized billing config."""
     return RepositoryBillingConfig.RATE_LIMITS
 
   @classmethod
-  def get_limits(cls, repository: str, plan: RepositoryPlan) -> Dict:
+  def get_limits(cls, repository: str, plan: RepositoryPlan) -> dict:
     """Get rate limits for a repository and plan."""
     # Convert string repository to SharedRepository enum if needed
     if isinstance(repository, str):
@@ -92,8 +92,8 @@ class DualLayerRateLimiter:
     operation: str,
     endpoint: str,
     user_tier: str,
-    repository_plan: Optional[RepositoryPlan] = None,
-  ) -> Dict:
+    repository_plan: RepositoryPlan | None = None,
+  ) -> dict:
     """
     Check both burst and repository-specific limits.
 
@@ -159,7 +159,7 @@ class DualLayerRateLimiter:
       "repo": repo_check if self._is_shared_repository(graph_id) else None,
     }
 
-  async def _check_burst_limit(self, user_id: str, operation: str, tier: str) -> Dict:
+  async def _check_burst_limit(self, user_id: str, operation: str, tier: str) -> dict:
     """Check existing burst protection limits."""
     category = self._operation_to_category(operation)
     limit_config = RateLimitConfig.get_rate_limit(tier, category)
@@ -170,7 +170,7 @@ class DualLayerRateLimiter:
     limit, window = limit_config
 
     # Use sliding window counter
-    now = int(datetime.now(timezone.utc).timestamp())
+    now = int(datetime.now(UTC).timestamp())
     window_start = now - window
     key = f"burst:{user_id}:{operation}"
 
@@ -194,7 +194,7 @@ class DualLayerRateLimiter:
 
   async def _check_repository_limit(
     self, user_id: str, repository: str, operation: str, plan: RepositoryPlan
-  ) -> Dict:
+  ) -> dict:
     """Check repository-specific volume limits."""
     limits = SharedRepositoryRateLimits.get_limits(repository, plan)
 
@@ -208,7 +208,7 @@ class DualLayerRateLimiter:
 
     # Check different time windows
     checks = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Check minute limit
     minute_limit_key = f"{base_key}_per_minute"
@@ -289,13 +289,13 @@ class DualLayerRateLimiter:
 
   async def get_usage_stats(
     self, user_id: str, repository: str, plan: RepositoryPlan
-  ) -> Dict:
+  ) -> dict:
     """Get current usage statistics for a user."""
     limits = SharedRepositoryRateLimits.get_limits(repository, plan)
     if not limits:
       return {}
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stats = {}
 
     # Get current usage for each operation type

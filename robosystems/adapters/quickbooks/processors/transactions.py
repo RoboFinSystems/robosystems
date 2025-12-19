@@ -13,11 +13,12 @@ transformation patterns and QuickBooks API interactions.
 """
 
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
-from typing import Dict, Any, Optional
+from typing import Any
 
-from robosystems.logger import logger
+from dateutil.relativedelta import relativedelta
+
 from robosystems.adapters.quickbooks.client import QBClient
+from robosystems.logger import logger
 
 
 class QBTransactionsProcessor:
@@ -35,13 +36,13 @@ class QBTransactionsProcessor:
 
   def __init__(
     self,
-    entity_id: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    user_id: Optional[str] = None,
-    realm_id: Optional[str] = None,
-    database_name: Optional[str] = None,
-    qb_credentials: Optional[Dict[str, Any]] = None,
+    entity_id: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    user_id: str | None = None,
+    realm_id: str | None = None,
+    database_name: str | None = None,
+    qb_credentials: dict[str, Any] | None = None,
   ):
     """Initialize the QuickBooks transactions processor.
 
@@ -62,7 +63,7 @@ class QBTransactionsProcessor:
     self.database_name = database_name
     self.realm_id = realm_id
     self.qb_credentials = qb_credentials
-    self.qb: Optional[QBClient] = None
+    self.qb: QBClient | None = None
     self._initialized = False
 
     # Date range for transaction sync
@@ -137,7 +138,7 @@ class QBTransactionsProcessor:
       "Connections have moved to PostgreSQL."
     )
 
-  def get_entity_info(self) -> Dict[str, Any]:
+  def get_entity_info(self) -> dict[str, Any]:
     """Get QuickBooks company info.
 
     Returns:
@@ -159,8 +160,8 @@ class QBTransactionsProcessor:
     return self.qb.get_accounts()
 
   def get_transactions(
-    self, start_date: Optional[str] = None, end_date: Optional[str] = None
-  ) -> Dict[str, Any]:
+    self, start_date: str | None = None, end_date: str | None = None
+  ) -> dict[str, Any]:
     """Get QuickBooks transactions for date range.
 
     Args:

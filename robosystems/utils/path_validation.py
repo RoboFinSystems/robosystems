@@ -1,6 +1,5 @@
 import re
 from pathlib import Path
-from typing import Optional
 
 from fastapi import HTTPException, status
 
@@ -42,7 +41,7 @@ def validate_graph_id(graph_id: str) -> str:
   return graph_id
 
 
-def get_lbug_database_path(graph_id: str, base_path: Optional[str] = None) -> Path:
+def get_lbug_database_path(graph_id: str, base_path: str | None = None) -> Path:
   """
   Get validated LadybugDB database path for a graph_id.
 
@@ -83,7 +82,7 @@ def get_lbug_database_path(graph_id: str, base_path: Optional[str] = None) -> Pa
   return db_path
 
 
-def get_duckdb_staging_path(graph_id: str, base_path: Optional[str] = None) -> Path:
+def get_duckdb_staging_path(graph_id: str, base_path: str | None = None) -> Path:
   """
   Get validated DuckDB staging database path for a graph_id.
 

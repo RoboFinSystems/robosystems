@@ -2,38 +2,37 @@
 Connection management endpoints (create, list, get, delete).
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Depends, Query, Request, Path, status
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.operations.connection_service import ConnectionService
 from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.models.api.graphs.connections import (
-  ProviderType,
-  CreateConnectionRequest,
-  ConnectionResponse,
-)
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
+  ErrorCode,
   ErrorResponse,
   SuccessResponse,
-  ErrorCode,
   create_error_response,
 )
+from robosystems.models.api.graphs.connections import (
+  ConnectionResponse,
+  CreateConnectionRequest,
+  ProviderType,
+)
+from robosystems.models.iam import User
+from robosystems.operations.connection_service import ConnectionService
 
 from .utils import (
-  provider_registry,
   create_robustness_components,
+  provider_registry,
+  record_operation_failure,
   record_operation_start,
   record_operation_success,
-  record_operation_failure,
 )
-
-import asyncio
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -195,7 +194,7 @@ async def create_connection(
       metadata=connection["metadata"],
     )
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     # Record circuit breaker failure and timeout metrics
     record_operation_failure(
       components=components,
@@ -259,14 +258,14 @@ async def create_connection(
     logger.error(f"Failed to create connection: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to create connection: {str(e)}",
+      detail=f"Failed to create connection: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
 
 @router.get(
   "",
-  response_model=List[ConnectionResponse],
+  response_model=list[ConnectionResponse],
   summary="List Connections",
   description="""List all data connections in the graph.
 
@@ -309,12 +308,12 @@ async def list_connections(
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
-  entity_id: Optional[str] = Query(None, description="Filter by entity ID"),
-  provider: Optional[ProviderType] = Query(None, description="Filter by provider type"),
+  entity_id: str | None = Query(None, description="Filter by entity ID"),
+  provider: ProviderType | None = Query(None, description="Filter by provider type"),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> List[ConnectionResponse]:
+) -> list[ConnectionResponse]:
   """
   List all connections accessible to the current user.
 
@@ -351,7 +350,7 @@ async def list_connections(
     logger.error(f"Failed to list connections: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list connections: {str(e)}",
+      detail=f"Failed to list connections: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -434,7 +433,7 @@ async def get_connection(
     logger.error(f"Failed to get connection: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to get connection: {str(e)}",
+      detail=f"Failed to get connection: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -531,6 +530,6 @@ async def delete_connection(
     logger.error(f"Failed to delete connection {connection_id}: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete connection: {str(e)}",
+      detail=f"Failed to delete connection: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )

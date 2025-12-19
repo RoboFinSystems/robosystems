@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from . import management, query, materialize
+from . import management, materialize, query
 
 router = APIRouter(
   tags=["Tables"],

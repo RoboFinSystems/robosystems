@@ -5,22 +5,23 @@ This module provides endpoints for monitoring and managing
 background tasks (ingestion, backup, restore, etc.).
 """
 
-from typing import Dict, Any, List, Optional
+import json
+from typing import Any
+
+import redis.asyncio as redis_async
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi import status as http_status
 from sse_starlette.sse import EventSourceResponse
 
-from robosystems.graph_api.core.task_sse import generate_task_sse_events, TaskType
-from robosystems.graph_api.routers.databases.copy import (
-  task_manager as ingestion_task_manager,
-)
+from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.graph_api.core.task_manager import (
   backup_task_manager,
   restore_task_manager,
 )
-from robosystems.config.valkey_registry import ValkeyDatabase
-import redis.asyncio as redis_async
-import json
+from robosystems.graph_api.core.task_sse import TaskType, generate_task_sse_events
+from robosystems.graph_api.routers.databases.copy import (
+  task_manager as ingestion_task_manager,
+)
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
@@ -50,7 +51,7 @@ class UnifiedTaskManager:
       )
     return self._redis_client
 
-  async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+  async def get_task(self, task_id: str) -> dict[str, Any] | None:
     """
     Get task by ID, checking all task types.
 
@@ -77,8 +78,8 @@ class UnifiedTaskManager:
     return None
 
   async def list_all_tasks(
-    self, status_filter: Optional[str] = None
-  ) -> List[Dict[str, Any]]:
+    self, status_filter: str | None = None
+  ) -> list[dict[str, Any]]:
     """
     List all tasks across all types.
 
@@ -130,10 +131,10 @@ unified_task_manager = UnifiedTaskManager()
 
 @router.get("")
 async def list_tasks(
-  status: Optional[str] = Query(None, description="Filter by task status"),
-  task_type: Optional[str] = Query(None, description="Filter by task type prefix"),
+  status: str | None = Query(None, description="Filter by task status"),
+  task_type: str | None = Query(None, description="Filter by task type prefix"),
   limit: int = Query(100, ge=1, le=1000, description="Maximum tasks to return"),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
   """
   List all tasks across all types.
 
@@ -193,7 +194,7 @@ async def monitor_task(
 @router.get("/{task_id}/status")
 async def get_task_status(
   task_id: str = Path(..., description="Task ID"),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Get the status of any background task.
 
@@ -214,7 +215,7 @@ async def get_task_status(
 
 
 @router.get("/stats")
-async def get_task_statistics() -> Dict[str, Any]:
+async def get_task_statistics() -> dict[str, Any]:
   """
   Get statistics about all tasks.
 

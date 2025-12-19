@@ -8,8 +8,9 @@ Supports both LadybugDB and Neo4j backends.
 """
 
 import json
-import boto3
 import os
+
+import boto3
 
 # Initialize AWS clients
 ec2 = boto3.client("ec2")
@@ -68,7 +69,7 @@ def handler(event, context):
   except Exception as e:
     print(f"ERROR parsing message: {e}")
     print(f"Raw event: {json.dumps(event, indent=2)}")
-    return {"statusCode": 500, "body": f"Message parsing error: {str(e)}"}
+    return {"statusCode": 500, "body": f"Message parsing error: {e!s}"}
 
   try:
     print(f"Processing termination for instance: {instance_id}")

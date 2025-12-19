@@ -1,17 +1,17 @@
 """Admin API for organization management."""
 
-from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, Request, HTTPException, status, Query
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import func
 
 from ...database import get_db_session
-from ...models.iam import Org, OrgUser, User, Graph
-from ...models.iam.graph_credits import GraphCredits
-from ...models.billing import BillingCustomer, BillingAuditLog
-from ...models.api.admin import OrgResponse, OrgUserInfo, OrgGraphInfo
-from ...middleware.auth.admin import require_admin
 from ...logger import get_logger
+from ...middleware.auth.admin import require_admin
+from ...models.api.admin import OrgGraphInfo, OrgResponse, OrgUserInfo
+from ...models.billing import BillingAuditLog, BillingCustomer
+from ...models.iam import Graph, Org, OrgUser, User
+from ...models.iam.graph_credits import GraphCredits
 
 logger = get_logger(__name__)
 
@@ -37,7 +37,7 @@ def _get_org_total_credits(org_id: str, session) -> float:
   return float(total)
 
 
-def _get_org_customer(org_id: str, session) -> Optional[BillingCustomer]:
+def _get_org_customer(org_id: str, session) -> BillingCustomer | None:
   """Get billing customer for an organization.
 
   Args:
@@ -50,7 +50,7 @@ def _get_org_customer(org_id: str, session) -> Optional[BillingCustomer]:
   return session.query(BillingCustomer).filter(BillingCustomer.org_id == org_id).first()
 
 
-def _get_org_users(org_id: str, session) -> List[OrgUserInfo]:
+def _get_org_users(org_id: str, session) -> list[OrgUserInfo]:
   """Get user list for an organization.
 
   Args:
@@ -79,7 +79,7 @@ def _get_org_users(org_id: str, session) -> List[OrgUserInfo]:
   ]
 
 
-def _get_org_graphs(org_id: str, session) -> List[OrgGraphInfo]:
+def _get_org_graphs(org_id: str, session) -> list[OrgGraphInfo]:
   """Get graph list for an organization.
 
   Args:
@@ -102,7 +102,7 @@ def _get_org_graphs(org_id: str, session) -> List[OrgGraphInfo]:
   ]
 
 
-@router.get("", response_model=List[OrgResponse])
+@router.get("", response_model=list[OrgResponse])
 @require_admin(permissions=["orgs:read"])
 async def list_orgs(
   request: Request,
@@ -220,10 +220,10 @@ async def get_org(request: Request, org_id: str):
 async def update_org(
   request: Request,
   org_id: str,
-  invoice_billing_enabled: Optional[bool] = None,
-  billing_email: Optional[str] = None,
-  billing_contact_name: Optional[str] = None,
-  payment_terms: Optional[str] = None,
+  invoice_billing_enabled: bool | None = None,
+  billing_email: str | None = None,
+  billing_contact_name: str | None = None,
+  payment_terms: str | None = None,
 ):
   """Update organization billing settings."""
   session = next(get_db_session())
@@ -266,7 +266,7 @@ async def update_org(
       new_values["payment_terms"] = payment_terms
       customer.payment_terms = payment_terms
 
-    customer.updated_at = datetime.now(timezone.utc)
+    customer.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(customer)
 

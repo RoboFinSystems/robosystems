@@ -1,20 +1,21 @@
 import os
-import requests
-from retrying import retry
 from io import BytesIO
-from zipfile import BadZipFile, ZipFile
-import pandas as pd
-from bs4 import BeautifulSoup, Tag
 from typing import cast
+from zipfile import BadZipFile, ZipFile
 
-from robosystems.logger import logger
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup, Tag
+from retrying import retry
+
 from robosystems.config import ExternalServicesConfig
-
+from robosystems.logger import logger
 
 SEC_CONFIG = ExternalServicesConfig.SEC_CONFIG
 SEC_BASE_URL = SEC_CONFIG["base_url"]
 SEC_DATA_BASE_URL = SEC_CONFIG["data_base_url"]
 SEC_HEADERS = SEC_CONFIG["headers"]
+SEC_REQUEST_TIMEOUT = 30  # seconds
 
 
 # Global flag for test mode (can be set by tests)
@@ -81,7 +82,7 @@ class SECClient:
     url = os.path.join(SEC_BASE_URL, "files/company_tickers.json")
     try:
       logger.debug(f"Making request to {url}")
-      resp = requests.get(url, headers=self._headers)
+      resp = requests.get(url, headers=self._headers, timeout=SEC_REQUEST_TIMEOUT)
       logger.debug(f"Request status code: {resp.status_code}")
 
       # Check for empty response (SEC throttling)
@@ -127,7 +128,7 @@ class SECClient:
     url = os.path.join(SEC_DATA_BASE_URL, "submissions", file_to_use)
     try:
       logger.debug(f"Making request to {url}")
-      resp = requests.get(url, headers=self._headers)
+      resp = requests.get(url, headers=self._headers, timeout=SEC_REQUEST_TIMEOUT)
       logger.debug(f"Request status code: {resp.status_code}")
 
       # Check for empty response (SEC throttling behavior)
@@ -248,7 +249,9 @@ class SECClient:
   def download_xbrlzip(self, xbrlzip_url):
     logger.debug(f"Downloading XBRL ZIP from: {xbrlzip_url}")
     try:
-      response = requests.get(xbrlzip_url, headers=self._headers)
+      response = requests.get(
+        xbrlzip_url, headers=self._headers, timeout=SEC_REQUEST_TIMEOUT
+      )
 
       # Check for empty response (SEC throttling)
       if not response.content or len(response.content) == 0:
@@ -306,7 +309,9 @@ class SECClient:
     logger.debug(f"Finding largest XML file at URL: {filing_url}")
     try:
       logger.debug(f"Making request to {filing_url}")
-      resp = requests.get(filing_url, headers=self._headers)
+      resp = requests.get(
+        filing_url, headers=self._headers, timeout=SEC_REQUEST_TIMEOUT
+      )
       logger.debug(f"Request status code: {resp.status_code}")
       soup = BeautifulSoup(resp.text, "html.parser")
     except Exception as e:

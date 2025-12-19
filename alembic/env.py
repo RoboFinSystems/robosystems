@@ -2,39 +2,46 @@
 
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
 # Import your models here
 from robosystems.database import Model, get_database_url
+from robosystems.models.billing.audit_log import BillingAuditLog  # noqa: F401
+
+# Import all billing models
+from robosystems.models.billing.customer import BillingCustomer  # noqa: F401
+from robosystems.models.billing.invoice import (  # noqa: F401
+  BillingInvoice,
+  BillingInvoiceLineItem,
+)
+from robosystems.models.billing.subscription import BillingSubscription  # noqa: F401
+from robosystems.models.iam.connection_credentials import (
+  ConnectionCredentials,  # noqa: F401
+)
+from robosystems.models.iam.graph import Graph  # noqa: F401
+from robosystems.models.iam.graph_backup import GraphBackup  # noqa: F401
+from robosystems.models.iam.graph_credits import (  # noqa: F401
+  GraphCredits,
+  GraphCreditTransaction,
+)
+from robosystems.models.iam.graph_usage import GraphUsage  # noqa: F401
+from robosystems.models.iam.graph_user import GraphUser  # noqa: F401
+from robosystems.models.iam.org import Org  # noqa: F401
+from robosystems.models.iam.org_limits import OrgLimits  # noqa: F401
+from robosystems.models.iam.org_user import OrgUser  # noqa: F401
 
 # Import all IAM models directly without going through models.__init__.py to avoid circular imports
 from robosystems.models.iam.user import User  # noqa: F401
 from robosystems.models.iam.user_api_key import UserAPIKey  # noqa: F401
-from robosystems.models.iam.graph_user import GraphUser  # noqa: F401
-from robosystems.models.iam.connection_credentials import ConnectionCredentials  # noqa: F401
-from robosystems.models.iam.graph_backup import GraphBackup  # noqa: F401
-from robosystems.models.iam.graph_usage import GraphUsage  # noqa: F401
-from robosystems.models.iam.graph import Graph  # noqa: F401
-from robosystems.models.iam.graph_credits import GraphCredits, GraphCreditTransaction  # noqa: F401
-from robosystems.models.iam.org import Org  # noqa: F401
-from robosystems.models.iam.org_user import OrgUser  # noqa: F401
-from robosystems.models.iam.org_limits import OrgLimits  # noqa: F401
+from robosystems.models.iam.user_repository import (
+  UserRepository,  # noqa: F401
+)
 from robosystems.models.iam.user_repository_credits import (  # noqa: F401
   UserRepositoryCredits,
   UserRepositoryCreditTransaction,
 )
-from robosystems.models.iam.user_repository import (
-  UserRepository,  # noqa: F401
-)
-
-# Import all billing models
-from robosystems.models.billing.customer import BillingCustomer  # noqa: F401
-from robosystems.models.billing.subscription import BillingSubscription  # noqa: F401
-from robosystems.models.billing.invoice import BillingInvoice, BillingInvoiceLineItem  # noqa: F401
-from robosystems.models.billing.audit_log import BillingAuditLog  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

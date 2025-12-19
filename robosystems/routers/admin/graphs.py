@@ -1,25 +1,25 @@
 """Admin API for graph management."""
 
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List
-from fastapi import APIRouter, Request, HTTPException, status, Query
+from datetime import UTC, datetime, timedelta
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import func
 
+from ...config.graph_tier import GraphTierConfig
 from ...database import get_db_session
-from ...models.iam import User, Graph
-from ...models.iam.graph_backup import GraphBackup
-from ...models.iam.graph_usage import GraphUsage, UsageEventType
-from ...models.iam.graph_credits import GraphCredits
+from ...logger import get_logger
+from ...middleware.auth.admin import require_admin
 from ...models.api.admin import (
-  GraphResponse,
-  GraphStorageResponse,
+  GraphAnalyticsResponse,
   GraphBackupResponse,
   GraphInfrastructureResponse,
-  GraphAnalyticsResponse,
+  GraphResponse,
+  GraphStorageResponse,
 )
-from ...middleware.auth.admin import require_admin
-from ...logger import get_logger
-from ...config.graph_tier import GraphTierConfig
+from ...models.iam import Graph, User
+from ...models.iam.graph_backup import GraphBackup
+from ...models.iam.graph_credits import GraphCredits
+from ...models.iam.graph_usage import GraphUsage, UsageEventType
 
 logger = get_logger(__name__)
 
@@ -53,14 +53,14 @@ def _get_graph_status(graph: Graph) -> str:
   return "active"
 
 
-@router.get("", response_model=List[GraphResponse])
+@router.get("", response_model=list[GraphResponse])
 @require_admin(permissions=["graphs:read"])
 async def list_graphs(
   request: Request,
-  user_email: Optional[str] = Query(None, description="Filter by owner email"),
-  tier: Optional[str] = Query(None, description="Filter by tier"),
-  backend: Optional[str] = Query(None, description="Filter by backend"),
-  status_filter: Optional[str] = Query(None, description="Filter by status"),
+  user_email: str | None = Query(None, description="Filter by owner email"),
+  tier: str | None = Query(None, description="Filter by tier"),
+  backend: str | None = Query(None, description="Filter by backend"),
+  status_filter: str | None = Query(None, description="Filter by status"),
   limit: int = Query(100, ge=1, le=1000),
   offset: int = Query(0, ge=0),
 ):
@@ -236,7 +236,7 @@ async def get_graph_storage(request: Request, graph_id: str):
       .filter(
         GraphUsage.graph_id == graph.graph_id,
         GraphUsage.event_type == UsageEventType.STORAGE_SNAPSHOT.value,
-        GraphUsage.recorded_at <= datetime.now(timezone.utc) - timedelta(days=7),
+        GraphUsage.recorded_at <= datetime.now(UTC) - timedelta(days=7),
       )
       .order_by(GraphUsage.recorded_at.desc())
       .first()
@@ -328,7 +328,7 @@ async def get_graph_backups(request: Request, graph_id: str):
     backup_status = "healthy"
     if not backups:
       backup_status = "no_backups"
-    elif last_backup and (datetime.now(timezone.utc) - last_backup.created_at).days > 7:
+    elif last_backup and (datetime.now(UTC) - last_backup.created_at).days > 7:
       backup_status = "stale"
 
     logger.info(
@@ -412,7 +412,7 @@ async def get_graph_infrastructure(request: Request, graph_id: str):
 @require_admin(permissions=["graphs:read"])
 async def get_graph_analytics(
   request: Request,
-  tier: Optional[str] = Query(None, description="Filter by tier"),
+  tier: str | None = Query(None, description="Filter by tier"),
 ):
   """Get cross-graph analytics."""
   session = next(get_db_session())

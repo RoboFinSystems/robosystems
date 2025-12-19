@@ -10,30 +10,30 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from datetime import datetime
-from typing import List, Optional
+from datetime import UTC, datetime
 
 import psutil
 from fastapi import HTTPException, status
 
 from robosystems.config import env
-from .manager import LadybugDatabaseManager
-from robosystems.graph_api.core.metrics_collector import LadybugMetricsCollector
-from robosystems.graph_api.models.database import QueryRequest, QueryResponse
-from robosystems.graph_api.models.cluster import (
-  ClusterHealthResponse,
-  ClusterInfoResponse,
+from robosystems.exceptions import (
+  ConfigurationError,
 )
+from robosystems.graph_api.core.metrics_collector import LadybugMetricsCollector
 from robosystems.graph_api.core.utils import (
   validate_database_name,
   validate_query_parameters,
 )
+from robosystems.graph_api.models.cluster import (
+  ClusterHealthResponse,
+  ClusterInfoResponse,
+)
+from robosystems.graph_api.models.database import QueryRequest, QueryResponse
+from robosystems.logger import logger
 from robosystems.middleware.graph.types import NodeType, RepositoryType
 from robosystems.models.api.graphs.query import translate_neo4j_to_lbug
-from robosystems.logger import logger
-from robosystems.exceptions import (
-  ConfigurationError,
-)
+
+from .manager import LadybugDatabaseManager
 
 # OpenTelemetry imports - conditional based on OTEL_ENABLED
 
@@ -79,7 +79,7 @@ except Exception:
   __version__ = "1.0.0"
 
 
-def _extract_column_aliases_from_cypher(cypher_query: str) -> List[str]:
+def _extract_column_aliases_from_cypher(cypher_query: str) -> list[str]:
   """
   Extract column aliases from RETURN clause in Cypher query.
 
@@ -206,7 +206,7 @@ class LadybugService:
     self.node_type = node_type
     self.repository_type = repository_type
     self.start_time = time.time()
-    self.last_activity: Optional[datetime] = None
+    self.last_activity: datetime | None = None
 
     # Initialize database manager
     self.db_manager = LadybugDatabaseManager(
@@ -378,7 +378,7 @@ class LadybugService:
               return
           except Exception as e:
             # Catch-all for unexpected errors
-            logger.error(f"Unexpected query error for {validated_graph_id}: {str(e)}")
+            logger.error(f"Unexpected query error for {validated_graph_id}: {e!s}")
             yield {
               "error": str(e),
               "error_type": type(e).__name__,
@@ -396,7 +396,7 @@ class LadybugService:
 
         if hasattr(query_result, "get_schema"):
           schema = query_result.get_schema()
-          schema_columns = [col for col in schema.keys()]
+          schema_columns = list(schema.keys())
 
           # Use extracted aliases if available and count matches schema columns
           if extracted_aliases and len(extracted_aliases) == len(schema_columns):
@@ -613,12 +613,12 @@ class LadybugService:
               )
           except Exception as e:
             # Catch-all for unexpected errors
-            logger.error(f"Unexpected query error for {validated_graph_id}: {str(e)}")
+            logger.error(f"Unexpected query error for {validated_graph_id}: {e!s}")
             span.set_attribute("error", True)
             span.set_attribute("error.type", type(e).__name__)
             raise HTTPException(
               status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-              detail=f"Unexpected error: {str(e)}",
+              detail=f"Unexpected error: {e!s}",
             )
 
           # Parse results based on LadybugDB's output format
@@ -632,7 +632,7 @@ class LadybugService:
           if hasattr(query_result, "get_schema"):
             # Get column names from schema (these are generic: col0, col1, etc.)
             schema = query_result.get_schema()
-            schema_columns = [col for col in schema.keys()]
+            schema_columns = list(schema.keys())
 
             # Use extracted aliases if available and count matches schema columns
             if extracted_aliases and len(extracted_aliases) == len(schema_columns):
@@ -719,7 +719,7 @@ class LadybugService:
 
         raise HTTPException(
           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"Query execution failed: {str(e)}",
+          detail=f"Query execution failed: {e!s}",
         )
 
   def get_cluster_health(self) -> ClusterHealthResponse:
@@ -768,10 +768,10 @@ class LadybugService:
     """Get detailed cluster information including all configuration parameters."""
     from robosystems.config import env
     from robosystems.graph_api.models.cluster import (
-      MemoryConfiguration,
-      QueryConfiguration,
       AdmissionControlConfig,
+      MemoryConfiguration,
       NodeConfiguration,
+      QueryConfiguration,
     )
 
     databases = self.db_manager.list_databases()
@@ -838,10 +838,11 @@ class LadybugService:
       # For now, since we're just creating the backup locally on the LadybugDB instance,
       # we'll create a simple file-based backup that can be retrieved
       import os
-      import tempfile
       import shutil
+      import tempfile
       import zipfile
       from pathlib import Path
+
       from robosystems.middleware.graph.utils import MultiTenantUtils
 
       db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
@@ -901,11 +902,12 @@ class LadybugService:
       logger.info(f"Starting restore task {task_id} for database {graph_id}")
 
       import os
-      import tempfile
       import shutil
+      import tempfile
       import zipfile
+      from datetime import datetime
       from pathlib import Path
-      from datetime import datetime, timezone
+
       from robosystems.middleware.graph.utils import MultiTenantUtils
 
       db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
@@ -921,7 +923,7 @@ class LadybugService:
         backup_dir = Path(self.base_path) / "system_backups"
         backup_dir.mkdir(exist_ok=True)
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         system_backup = backup_dir / f"{graph_id}_system_{timestamp}.zip"
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -989,7 +991,7 @@ class LadybugService:
 
 
 # Global service instance with thread-safe initialization
-_ladybug_service: Optional[LadybugService] = None
+_ladybug_service: LadybugService | None = None
 _ladybug_service_lock = threading.Lock()
 
 

@@ -1,36 +1,36 @@
 """Admin API for user management."""
 
-from datetime import datetime, timezone
-from typing import Optional, List
-from fastapi import APIRouter, Request, HTTPException, status, Query
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import func
 
 from ...database import get_db_session
-from ...models.iam import User, Graph, GraphUser, OrgUser
-from ...models.iam.user_api_key import UserAPIKey
-from ...models.iam.user_repository import UserRepository
-from ...models.iam.graph_credits import GraphCreditTransaction, CreditTransactionType
-from ...models.iam.graph_usage import GraphUsage, UsageEventType
+from ...logger import get_logger
+from ...middleware.auth.admin import require_admin
 from ...models.api.admin import (
-  UserResponse,
+  UserActivityResponse,
+  UserAPIKeyResponse,
   UserGraphAccessResponse,
   UserRepositoryAccessResponse,
-  UserAPIKeyResponse,
-  UserActivityResponse,
+  UserResponse,
 )
-from ...middleware.auth.admin import require_admin
-from ...logger import get_logger
+from ...models.iam import Graph, GraphUser, OrgUser, User
+from ...models.iam.graph_credits import CreditTransactionType, GraphCreditTransaction
+from ...models.iam.graph_usage import GraphUsage, UsageEventType
+from ...models.iam.user_api_key import UserAPIKey
+from ...models.iam.user_repository import UserRepository
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin/v1/users", tags=["admin-users"])
 
 
-@router.get("", response_model=List[UserResponse])
+@router.get("", response_model=list[UserResponse])
 @require_admin(permissions=["users:read"])
 async def list_users(
   request: Request,
-  email: Optional[str] = Query(None, description="Filter by email (partial match)"),
+  email: str | None = Query(None, description="Filter by email (partial match)"),
   verified_only: bool = Query(False, description="Only show verified users"),
   limit: int = Query(100, ge=1, le=1000),
   offset: int = Query(0, ge=0),
@@ -123,7 +123,7 @@ async def get_user(request: Request, user_id: str):
     session.close()
 
 
-@router.get("/{user_id}/graphs", response_model=List[UserGraphAccessResponse])
+@router.get("/{user_id}/graphs", response_model=list[UserGraphAccessResponse])
 @require_admin(permissions=["users:read"])
 async def get_user_graphs(request: Request, user_id: str):
   """Get all graphs accessible by a user."""
@@ -181,7 +181,7 @@ async def get_user_graphs(request: Request, user_id: str):
 
 
 @router.get(
-  "/{user_id}/repositories", response_model=List[UserRepositoryAccessResponse]
+  "/{user_id}/repositories", response_model=list[UserRepositoryAccessResponse]
 )
 @require_admin(permissions=["users:read"])
 async def get_user_repositories(request: Request, user_id: str):
@@ -225,7 +225,7 @@ async def get_user_repositories(request: Request, user_id: str):
     session.close()
 
 
-@router.get("/{user_id}/api-keys", response_model=List[UserAPIKeyResponse])
+@router.get("/{user_id}/api-keys", response_model=list[UserAPIKeyResponse])
 @require_admin(permissions=["users:read"])
 async def get_user_api_keys(request: Request, user_id: str):
   """Get metadata for user's API keys (not the actual key values)."""
@@ -290,7 +290,7 @@ async def get_user_activity(request: Request, user_id: str):
         detail=f"User {user_id} not found",
       )
 
-    start_of_month = datetime.now(timezone.utc).replace(
+    start_of_month = datetime.now(UTC).replace(
       day=1, hour=0, minute=0, second=0, microsecond=0
     )
 

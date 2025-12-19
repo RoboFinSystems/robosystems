@@ -5,11 +5,12 @@ Tests the critical subgraph service that manages subgraph operations for
 Enterprise and Premium tier graphs, including creation, deletion, and management.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
-from robosystems.operations.graph.subgraph_service import SubgraphService
+import pytest
+
 from robosystems.exceptions import GraphAllocationError
+from robosystems.operations.graph.subgraph_service import SubgraphService
 
 
 class TestSubgraphService:
@@ -71,8 +72,8 @@ class TestSubgraphService:
     db_session,
   ):
     """Test successful subgraph creation."""
-    from robosystems.models.iam.graph import Graph
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.iam.graph import Graph
 
     existing_graph = (
       db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
@@ -137,8 +138,8 @@ class TestSubgraphService:
     valid_parent_graph_id,
   ):
     """Test creating a subgraph that already exists."""
-    from robosystems.models.iam.graph import Graph
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.iam.graph import Graph
 
     # Check if parent graph already exists (from previous test)
     existing_graph = (
@@ -184,8 +185,8 @@ class TestSubgraphService:
     valid_parent_graph_id,
   ):
     """Test creating a subgraph with schema extensions."""
-    from robosystems.models.iam.graph import Graph
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.iam.graph import Graph
 
     existing_graph = (
       db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
@@ -278,8 +279,8 @@ class TestSubgraphService:
     valid_parent_graph_id,
   ):
     """Test handling of database creation failure."""
-    from robosystems.models.iam.graph import Graph
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.iam.graph import Graph
 
     existing_graph = (
       db_session.query(Graph).filter(Graph.graph_id == valid_parent_graph_id).first()
@@ -666,8 +667,8 @@ class TestSubgraphServiceIntegration:
   @pytest.mark.integration
   async def test_full_subgraph_lifecycle(self, db_session):
     """Test complete subgraph lifecycle: create, list, get info, delete."""
-    from robosystems.models.iam.graph import Graph
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.iam.graph import Graph
 
     parent_graph_id = "kg5f2e5e0da65d45d69645"
 
@@ -721,29 +722,28 @@ class TestSubgraphServiceIntegration:
 
       with patch(
         "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
-      ) as mock_get_client:
-        with patch(
-          "robosystems.graph_api.client.GraphClient"
-        ) as mock_graph_client_class:
-          mock_graph_client_class.return_value = mock_client
-          mock_get_client.return_value = mock_client
+      ) as mock_get_client, patch(
+        "robosystems.graph_api.client.GraphClient"
+      ) as mock_graph_client_class:
+        mock_graph_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
-          # Create
-          create_result = await service.create_subgraph_database(
-            parent_graph_id, "test"
-          )
-          assert create_result["status"] == "created"
+        # Create
+        create_result = await service.create_subgraph_database(
+          parent_graph_id, "test"
+        )
+        assert create_result["status"] == "created"
 
-          # List
-          list_result = await service.list_subgraph_databases(parent_graph_id)
-          assert len(list_result) == 1
+        # List
+        list_result = await service.list_subgraph_databases(parent_graph_id)
+        assert len(list_result) == 1
 
-          # Get Info
-          info_result = await service.get_subgraph_info(f"{parent_graph_id}_test")
-          assert info_result is not None
+        # Get Info
+        info_result = await service.get_subgraph_info(f"{parent_graph_id}_test")
+        assert info_result is not None
 
-          # Delete
-          delete_result = await service.delete_subgraph_database(
-            f"{parent_graph_id}_test"
-          )
-          assert delete_result["status"] == "deleted"
+        # Delete
+        delete_result = await service.delete_subgraph_database(
+          f"{parent_graph_id}_test"
+        )
+        assert delete_result["status"] == "deleted"

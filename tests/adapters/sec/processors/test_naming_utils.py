@@ -2,8 +2,8 @@ import pandas as pd
 
 from robosystems.adapters.sec.processors.ids import (
   camel_to_snake,
-  make_plural,
   convert_schema_name_to_filename,
+  make_plural,
   safe_concat,
 )
 

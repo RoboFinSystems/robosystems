@@ -6,7 +6,7 @@ and endpoint categories.
 """
 
 from enum import Enum
-from typing import Dict, Tuple, Optional
+
 from .graph_tier import get_tier_api_rate_multiplier
 
 
@@ -83,8 +83,8 @@ class RateLimitConfig:
   # BURST-FOCUSED CONFIGURATION: Short windows for burst protection
   # Volume control is handled by the credit system
   # Format: {tier: {category: (limit, period)}}
-  SUBSCRIPTION_RATE_LIMITS: Dict[
-    str, Dict[EndpointCategory, Tuple[int, RateLimitPeriod]]
+  SUBSCRIPTION_RATE_LIMITS: dict[
+    str, dict[EndpointCategory, tuple[int, RateLimitPeriod]]
   ] = {
     "free": {
       # Non-graph endpoints - keep some restrictions for free tier
@@ -232,7 +232,7 @@ class RateLimitConfig:
   @classmethod
   def get_rate_limit(
     cls, tier: str, category: EndpointCategory
-  ) -> Optional[Tuple[int, int]]:
+  ) -> tuple[int, int] | None:
     """
     Get rate limit for a subscription tier and endpoint category.
 
@@ -254,7 +254,7 @@ class RateLimitConfig:
   @classmethod
   def get_rate_limit_with_multiplier(
     cls, tier: str, category: EndpointCategory, use_tier_config: bool = True
-  ) -> Optional[Tuple[int, int]]:
+  ) -> tuple[int, int] | None:
     """
     Get rate limit with optional tier config multiplier applied.
 
@@ -284,7 +284,7 @@ class RateLimitConfig:
   @classmethod
   def get_endpoint_category(
     cls, path: str, method: str = "GET"
-  ) -> Optional[EndpointCategory]:
+  ) -> EndpointCategory | None:
     """
     Determine the category of an endpoint based on its path and method.
 

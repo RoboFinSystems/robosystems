@@ -1,6 +1,7 @@
 """Tests for environment variable validation."""
 
 from unittest.mock import patch
+
 import pytest
 
 from robosystems.config.validation import (

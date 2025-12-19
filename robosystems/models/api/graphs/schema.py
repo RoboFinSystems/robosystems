@@ -1,7 +1,8 @@
 """Graph query API models."""
 
-from typing import Optional, Dict, Any, List, Union
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CustomSchemaDefinition(BaseModel):
@@ -183,17 +184,17 @@ class CustomSchemaDefinition(BaseModel):
 
   name: str = Field(..., description="Schema name")
   version: str = Field("1.0.0", description="Schema version")
-  description: Optional[str] = Field(None, description="Schema description")
-  extends: Optional[str] = Field(
+  description: str | None = Field(None, description="Schema description")
+  extends: str | None = Field(
     None, description="Base schema to extend (e.g., 'base' for common utilities)"
   )
-  nodes: List[Dict[str, Any]] = Field(
+  nodes: list[dict[str, Any]] = Field(
     default_factory=list, description="List of node definitions with properties"
   )
-  relationships: List[Dict[str, Any]] = Field(
+  relationships: list[dict[str, Any]] = Field(
     default_factory=list, description="List of relationship definitions"
   )
-  metadata: Dict[str, Any] = Field(
+  metadata: dict[str, Any] = Field(
     default_factory=dict, description="Additional schema metadata"
   )
 
@@ -201,7 +202,7 @@ class CustomSchemaDefinition(BaseModel):
 class SchemaValidationRequest(BaseModel):
   """Request model for schema validation."""
 
-  schema_definition: Union[Dict[str, Any], str] = Field(
+  schema_definition: dict[str, Any] | str = Field(
     ...,
     description="Schema definition as JSON dict or JSON/YAML string",
     examples=[
@@ -288,7 +289,7 @@ relationships:
     description="Schema format: json, yaml, or dict",
     examples=["json", "yaml", "dict"],
   )
-  check_compatibility: Optional[List[str]] = Field(
+  check_compatibility: list[str] | None = Field(
     None,
     description="List of existing schema extensions to check compatibility with",
     examples=[None, ["roboledger"], ["sec_base", "industry"]],
@@ -312,7 +313,7 @@ class SchemaValidationResponse(BaseModel):
       "Schema is valid with 2 warning(s)",
     ],
   )
-  errors: Optional[List[str]] = Field(
+  errors: list[str] | None = Field(
     None,
     description="List of validation errors (only present when valid=false)",
     examples=[
@@ -324,7 +325,7 @@ class SchemaValidationResponse(BaseModel):
       ],
     ],
   )
-  warnings: Optional[List[str]] = Field(
+  warnings: list[str] | None = Field(
     None,
     description="List of validation warnings (schema is still valid but has potential issues)",
     examples=[
@@ -336,7 +337,7 @@ class SchemaValidationResponse(BaseModel):
       ],
     ],
   )
-  stats: Optional[Dict[str, int]] = Field(
+  stats: dict[str, int] | None = Field(
     None,
     description="Schema statistics (only present when valid=true)",
     examples=[
@@ -344,7 +345,7 @@ class SchemaValidationResponse(BaseModel):
       {"nodes": 5, "relationships": 8, "total_properties": 32, "primary_keys": 5},
     ],
   )
-  compatibility: Optional[Dict[str, Any]] = Field(
+  compatibility: dict[str, Any] | None = Field(
     None,
     description="Compatibility check results (only when check_compatibility specified)",
     examples=[
@@ -379,7 +380,7 @@ class SchemaExportResponse(BaseModel):
   """Response model for schema export."""
 
   graph_id: str = Field(..., description="Graph ID", examples=["sec", "kg1a2b3c4d5"])
-  schema_definition: Union[Dict[str, Any], str] = Field(
+  schema_definition: dict[str, Any] | str = Field(
     ...,
     description="Exported schema definition (format depends on 'format' parameter)",
     examples=[
@@ -468,7 +469,7 @@ CREATE REL TABLE FILED (
   exported_at: str = Field(
     ..., description="Export timestamp", examples=["2025-10-29T10:30:00Z"]
   )
-  data_stats: Optional[Dict[str, Any]] = Field(
+  data_stats: dict[str, Any] | None = Field(
     None,
     description="Data statistics if requested (only when include_data_stats=true)",
     examples=[
@@ -649,7 +650,7 @@ class SchemaInfoResponse(BaseModel):
     ...,
     description="Graph database identifier",
   )
-  schema_data: Dict[str, Any] = Field(
+  schema_data: dict[str, Any] = Field(
     ...,
     description="Runtime schema information showing actual database structure",
     alias="schema",

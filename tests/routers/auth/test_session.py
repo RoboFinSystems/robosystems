@@ -4,13 +4,14 @@ Tests for session management endpoints.
 Comprehensive test coverage for /me and /refresh endpoints.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi import HTTPException, status
 
-from robosystems.routers.auth.session import get_me, refresh_session
-from robosystems.models.iam import User
 from robosystems.models.api.auth import AuthResponse
+from robosystems.models.iam import User
+from robosystems.routers.auth.session import get_me, refresh_session
 
 
 @pytest.fixture

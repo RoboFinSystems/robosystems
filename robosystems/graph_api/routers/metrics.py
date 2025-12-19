@@ -6,11 +6,12 @@ about the cluster node, including system resources, database statistics,
 query performance, and ingestion queue status.
 """
 
-from typing import Dict, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
-from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.admission_control import get_admission_controller
+from robosystems.graph_api.core.ladybug import get_ladybug_service
 
 router = APIRouter(tags=["Cluster Metrics"])
 
@@ -18,7 +19,7 @@ router = APIRouter(tags=["Cluster Metrics"])
 @router.get("/metrics")
 async def get_metrics(
   ladybug_service=Depends(get_ladybug_service),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Get comprehensive metrics for the cluster node.
 

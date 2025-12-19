@@ -5,19 +5,19 @@ This agent uses Claude (via Bedrock or Anthropic SDK) to convert natural languag
 questions into Cypher queries, executes them via MCP tools, and returns results.
 """
 
-from typing import Dict, List, Optional, Any
 import json
+from typing import Any
 
+from robosystems.logger import logger
+from robosystems.operations.agents.ai_client import AIClient, AIMessage
 from robosystems.operations.agents.base import (
-  BaseAgent,
-  AgentMode,
   AgentCapability,
   AgentMetadata,
+  AgentMode,
   AgentResponse,
+  BaseAgent,
 )
 from robosystems.operations.agents.registry import AgentRegistry
-from robosystems.operations.agents.ai_client import AIClient, AIMessage
-from robosystems.logger import logger
 
 
 @AgentRegistry.register("cypher")
@@ -60,9 +60,9 @@ class CypherAgent(BaseAgent):
     self,
     query: str,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict[str, Any]]] = None,
-    context: Optional[Dict[str, Any]] = None,
-    callback: Optional[Any] = None,
+    history: list[dict[str, Any]] | None = None,
+    context: dict[str, Any] | None = None,
+    callback: Any | None = None,
   ) -> AgentResponse:
     """
     Convert natural language query to Cypher and execute.
@@ -145,10 +145,10 @@ class CypherAgent(BaseAgent):
     except Exception as e:
       import traceback
 
-      logger.error(f"Cypher agent error: {str(e)}")
+      logger.error(f"Cypher agent error: {e!s}")
       logger.error(f"Full traceback:\n{traceback.format_exc()}")
       return AgentResponse(
-        content=f"Query processing failed: {str(e)}",
+        content=f"Query processing failed: {e!s}",
         agent_name=self.metadata.name,
         mode_used=mode,
         tokens_used=self.total_tokens_used,
@@ -159,7 +159,7 @@ class CypherAgent(BaseAgent):
         },
       )
 
-  def can_handle(self, query: str, context: Optional[Dict[str, Any]] = None) -> float:
+  def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
     """
     Cypher agent can handle all queries with varying confidence.
 
@@ -194,8 +194,8 @@ class CypherAgent(BaseAgent):
   async def _generate_cypher(
     self,
     user_query: str,
-    schema: List[Dict[str, Any]],
-    history: Optional[List[Dict[str, Any]]],
+    schema: list[dict[str, Any]],
+    history: list[dict[str, Any]] | None,
     mode: AgentMode,
   ) -> str:
     """
@@ -286,7 +286,7 @@ Return ONLY the Cypher query, nothing else."""
     self,
     user_query: str,
     cypher_query: str,
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     mode: AgentMode,
   ) -> str:
     """
@@ -361,7 +361,7 @@ Please explain these results in a clear, natural way.""",
 
     return formatted
 
-  def _simple_format(self, cypher_query: str, results: List[Dict[str, Any]]) -> str:
+  def _simple_format(self, cypher_query: str, results: list[dict[str, Any]]) -> str:
     """Simple formatting for QUICK mode (no AI)."""
     formatted = f"**Generated Cypher:**\n```cypher\n{cypher_query}\n```\n\n"
     formatted += f"**Results:** {len(results)} rows\n\n"
@@ -375,7 +375,7 @@ Please explain these results in a clear, natural way.""",
 
     return formatted
 
-  def _format_schema_for_ai(self, schema: List[Dict[str, Any]]) -> str:
+  def _format_schema_for_ai(self, schema: list[dict[str, Any]]) -> str:
     """Format schema for AI context."""
     formatted = []
 
@@ -400,7 +400,7 @@ Please explain these results in a clear, natural way.""",
       AgentMode.EXTENDED: 500,
     }.get(mode, 100)
 
-  def _calculate_confidence(self, cypher_query: str, results: Optional[List]) -> float:
+  def _calculate_confidence(self, cypher_query: str, results: list | None) -> float:
     """Calculate confidence in the response."""
     if not cypher_query or "ERROR" in cypher_query.upper():
       return 0.3

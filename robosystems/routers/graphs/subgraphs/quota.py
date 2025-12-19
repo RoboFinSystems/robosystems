@@ -3,26 +3,26 @@ Subgraph quota endpoint.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
+from robosystems.config.graph_tier import get_tier_max_subgraphs
 from robosystems.database import get_async_db_session
+from robosystems.logger import api_logger, log_metric, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.models.api.graphs.subgraphs import SubgraphQuotaResponse
 from robosystems.models.iam.graph import Graph
 from robosystems.models.iam.user import User
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.logger import logger, api_logger, log_metric
 
 from .utils import (
   circuit_breaker,
-  verify_parent_graph_access,
-  record_operation_start,
-  record_operation_metrics,
   handle_circuit_breaker_check,
+  record_operation_metrics,
+  record_operation_start,
+  verify_parent_graph_access,
 )
-from robosystems.config.graph_tier import get_tier_max_subgraphs
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -141,5 +141,5 @@ async def get_subgraph_quota(
     circuit_breaker.record_failure(graph_id, "subgraph_quota")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to get subgraph quota: {str(e)}",
+      detail=f"Failed to get subgraph quota: {e!s}",
     )

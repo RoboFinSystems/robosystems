@@ -1,8 +1,8 @@
 from decimal import Decimal
 
-from robosystems.config.billing import core
-from robosystems.config.billing.core import BillingConfig, DEFAULT_GRAPH_BILLING_PLANS
 from robosystems.config import credits as credits_module
+from robosystems.config.billing import core
+from robosystems.config.billing.core import DEFAULT_GRAPH_BILLING_PLANS, BillingConfig
 from robosystems.config.credits import CreditConfig
 
 

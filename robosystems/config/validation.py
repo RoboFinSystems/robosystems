@@ -5,9 +5,9 @@ This module provides validation functions to ensure all required
 environment variables are properly configured at application startup.
 """
 
-from typing import List, Dict, Any
 import logging
 import os
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ class EnvValidator:
     logger.info("Configuration validation passed")
 
   @staticmethod
-  def _validate_numeric_ranges(env_config, errors: List[str]) -> None:
+  def _validate_numeric_ranges(env_config, errors: list[str]) -> None:
     """Validate numeric configuration values are within reasonable ranges."""
     validations = [
       ("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 1440, "JWT access token expiry"),
@@ -167,7 +167,7 @@ class EnvValidator:
           )
 
   @staticmethod
-  def _validate_urls(env_config, errors: List[str]) -> None:
+  def _validate_urls(env_config, errors: list[str]) -> None:
     """Validate URL format for various endpoints."""
     url_vars = [
       "DATABASE_URL",
@@ -206,7 +206,7 @@ class EnvValidator:
           )
 
   @staticmethod
-  def _validate_paths(env_config, warnings: List[str]) -> None:
+  def _validate_paths(env_config, warnings: list[str]) -> None:
     """Validate file paths exist or can be created."""
     import os
 
@@ -246,7 +246,7 @@ class EnvValidator:
       return False
 
   @staticmethod
-  def get_config_summary(env_config) -> Dict[str, Any]:
+  def get_config_summary(env_config) -> dict[str, Any]:
     """
     Get a summary of the current configuration for logging.
 

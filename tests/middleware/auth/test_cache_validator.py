@@ -5,13 +5,14 @@ Tests the CacheValidator class which provides validation, monitoring,
 and cleanup services for the encrypted authentication cache system.
 """
 
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timezone, timedelta
 
 from robosystems.middleware.auth.cache_validator import (
-  CacheValidator,
   CacheValidationResult,
+  CacheValidator,
   get_cache_validator,
 )
 from robosystems.security import SecurityEventType
@@ -27,7 +28,7 @@ class TestCacheValidationResult:
       issues_found=[],
       corrective_actions_taken=[],
       security_events_logged=0,
-      validation_timestamp=datetime.now(timezone.utc),
+      validation_timestamp=datetime.now(UTC),
     )
 
     assert result.is_valid is True
@@ -46,7 +47,7 @@ class TestCacheValidationResult:
       issues_found=issues,
       corrective_actions_taken=actions,
       security_events_logged=2,
-      validation_timestamp=datetime.now(timezone.utc),
+      validation_timestamp=datetime.now(UTC),
     )
 
     assert result.is_valid is False
@@ -63,7 +64,7 @@ class TestCacheValidationResult:
       issues_found=[],
       corrective_actions_taken=[],
       security_events_logged=0,
-      validation_timestamp=datetime.now(timezone.utc),
+      validation_timestamp=datetime.now(UTC),
     )
     assert result_clean.has_security_issues is False
 
@@ -73,7 +74,7 @@ class TestCacheValidationResult:
       issues_found=["Test issue"],
       corrective_actions_taken=["Test action"],
       security_events_logged=1,
-      validation_timestamp=datetime.now(timezone.utc),
+      validation_timestamp=datetime.now(UTC),
     )
     assert result_issues.has_security_issues is True
 
@@ -314,7 +315,7 @@ class TestCacheValidator:
     # Mock successful decryption and validation
     mock_api_key_cache._decrypt_cache_data.return_value = {
       "user_data": {"user_id": "test_user"},
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
     }
     mock_api_key_cache._verify_cache_signature.return_value = True
     mock_api_key_cache._validate_user_data_integrity.return_value = True
@@ -435,7 +436,7 @@ class TestCacheValidator:
     # Mock successful decryption but failed signature verification
     mock_api_key_cache._decrypt_cache_data.return_value = {
       "user_data": {"user_id": "test_user"},
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
     }
     mock_api_key_cache._verify_cache_signature.return_value = False
 
@@ -468,7 +469,7 @@ class TestCacheValidator:
     # Mock successful decryption and signature verification but invalid user data
     mock_api_key_cache._decrypt_cache_data.return_value = {
       "user_data": {"invalid": "data"},
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
     }
     mock_api_key_cache._verify_cache_signature.return_value = True
     mock_api_key_cache._validate_user_data_integrity.return_value = False
@@ -502,7 +503,7 @@ class TestCacheValidator:
     # Mock successful decryption and validation
     mock_api_key_cache._decrypt_cache_data.return_value = {
       "user_data": {"user_id": "test_user"},
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
     }
     mock_api_key_cache._verify_cache_signature.return_value = True
     mock_api_key_cache._validate_user_data_integrity.return_value = True
@@ -583,7 +584,7 @@ class TestCacheValidator:
     mock_redis.get = AsyncMock(return_value=b"encrypted_data")
 
     # Mock fresh cache data
-    fresh_time = datetime.now(timezone.utc) - timedelta(hours=1)  # 1 hour old
+    fresh_time = datetime.now(UTC) - timedelta(hours=1)  # 1 hour old
     mock_api_key_cache._decrypt_cache_data.return_value = {
       "user_data": {"user_id": "test_user"},
       "cached_at": fresh_time.isoformat(),
@@ -612,7 +613,7 @@ class TestCacheValidator:
     )
 
     # Mock stale cache data (25 hours old, max age is 24 hours)
-    stale_time = datetime.now(timezone.utc) - timedelta(hours=25)
+    stale_time = datetime.now(UTC) - timedelta(hours=25)
     mock_api_key_cache._decrypt_cache_data.return_value = {
       "user_data": {"user_id": "test_user"},
       "cached_at": stale_time.isoformat(),

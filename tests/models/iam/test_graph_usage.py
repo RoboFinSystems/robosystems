@@ -1,10 +1,11 @@
 """Test GraphUsage model functionality."""
 
-import pytest
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
+
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.models.iam import GraphUsage
@@ -258,7 +259,7 @@ class TestGraphUsage:
           billing_month=1,
           billing_day=day,
           billing_hour=hour,
-          recorded_at=datetime(2024, 1, day, hour, 0, 0, tzinfo=timezone.utc),
+          recorded_at=datetime(2024, 1, day, hour, 0, 0, tzinfo=UTC),
         )
         self.session.add(usage)
 
@@ -349,7 +350,7 @@ class TestGraphUsage:
     self.session.commit()
 
     # Create various performance records
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     operations = [
       ("query", 100, 200, None),
@@ -435,7 +436,7 @@ class TestGraphUsage:
 
   def test_cleanup_old_records(self):
     """Test cleaning up old records."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_date = now - timedelta(days=400)
     recent_date = now - timedelta(days=100)
 
@@ -484,7 +485,7 @@ class TestGraphUsage:
 
   def test_cleanup_old_records_keep_summaries(self):
     """Test cleanup keeping monthly summaries."""
-    old_date = datetime.now(timezone.utc) - timedelta(days=400)
+    old_date = datetime.now(UTC) - timedelta(days=400)
 
     # Create different types of old records
     api_record = GraphUsage(
@@ -530,7 +531,7 @@ class TestGraphUsage:
     self.session.query(GraphUsage).delete()
     self.session.commit()
 
-    old_date = datetime.now(timezone.utc) - timedelta(days=400)
+    old_date = datetime.now(UTC) - timedelta(days=400)
 
     old_record = GraphUsage(
       user_id=self.test_user_id,
@@ -616,7 +617,7 @@ class TestGraphUsage:
     self.session.query(GraphUsage).delete()
     self.session.commit()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     metadata = {"test": "data"}
 
     usage = GraphUsage(
@@ -727,7 +728,7 @@ class TestGraphUsage:
 
   def test_billing_period_fields(self):
     """Test billing period fields are set correctly."""
-    now = datetime(2024, 3, 15, 14, 30, 0, tzinfo=timezone.utc)
+    now = datetime(2024, 3, 15, 14, 30, 0, tzinfo=UTC)
 
     with patch("robosystems.models.iam.graph_usage.datetime") as mock_datetime:
       mock_datetime.now.return_value = now

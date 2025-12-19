@@ -1,6 +1,7 @@
+from unittest.mock import MagicMock
+
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock
 
 from robosystems.adapters.sec.processors.dataframe import DataFrameManager
 

@@ -24,25 +24,28 @@ Security:
 - Full audit logging of query patterns
 """
 
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
-from robosystems.models.api.graphs.tables import TableQueryRequest, TableQueryResponse
-from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
-from robosystems.logger import logger, api_logger
-from robosystems.middleware.graph.types import GraphTypeRegistry
+from robosystems.logger import api_logger, logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_universal_repository
+from robosystems.middleware.graph.types import (
+  GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  GraphTypeRegistry,
+)
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.tables import TableQueryRequest, TableQueryResponse
+from robosystems.models.iam import User
 
 router = APIRouter()
 
@@ -161,7 +164,7 @@ async def query_tables(
   This endpoint provides direct SQL access to staging tables for data
   inspection and validation before ingestion into the graph database.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   # Check circuit breaker
   circuit_breaker.check_circuit(graph_id, "table_query")
@@ -212,7 +215,7 @@ async def query_tables(
     )
 
     # Calculate execution time
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     # Record success
     circuit_breaker.record_success(graph_id, "table_query")
@@ -283,5 +286,5 @@ async def query_tables(
 
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
-      detail=f"Query failed: {str(e)}",
+      detail=f"Query failed: {e!s}",
     )

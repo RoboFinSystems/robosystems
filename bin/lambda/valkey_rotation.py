@@ -18,7 +18,7 @@ import json
 import logging
 import os
 import time
-from typing import Dict, Any
+from typing import Any
 
 import boto3
 import redis
@@ -32,7 +32,7 @@ secrets_client = boto3.client("secretsmanager")
 elasticache_client = boto3.client("elasticache")
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
   """
   Main Lambda handler for Valkey auth token rotation.
 
@@ -66,7 +66,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     return {"statusCode": 200, "body": f"Successfully completed {step}"}
 
   except Exception as e:
-    logger.error(f"Error in {step}: {str(e)}")
+    logger.error(f"Error in {step}: {e!s}")
     raise
 
 
@@ -114,7 +114,7 @@ def create_secret(secret_arn: str, token: str) -> None:
     logger.info("Successfully created new auth token in AWSPENDING version")
 
   except Exception as e:
-    logger.error(f"Failed to create secret: {str(e)}")
+    logger.error(f"Failed to create secret: {e!s}")
     raise
 
 
@@ -162,7 +162,7 @@ def set_secret(secret_arn: str, token: str) -> None:
     logger.info("Auth token rotation completed successfully")
 
   except Exception as e:
-    logger.error(f"Failed to set secret in Valkey: {str(e)}")
+    logger.error(f"Failed to set secret in Valkey: {e!s}")
     raise
 
 
@@ -250,7 +250,7 @@ def test_secret(secret_arn: str, token: str) -> None:
     )
 
   except Exception as e:
-    logger.error(f"Failed to test secret: {str(e)}")
+    logger.error(f"Failed to test secret: {e!s}")
     raise
 
 
@@ -299,7 +299,7 @@ def finish_secret(secret_arn: str, token: str) -> None:
     logger.info("Successfully removed AWSPENDING stage")
 
   except Exception as e:
-    logger.error(f"Failed to finish secret rotation: {str(e)}")
+    logger.error(f"Failed to finish secret rotation: {e!s}")
     raise
 
 

@@ -11,7 +11,7 @@ Usage:
 - User gets real-time progress via SSE connection
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from dagster import (
@@ -24,7 +24,6 @@ from dagster import (
 )
 
 from robosystems.dagster.resources import DatabaseResource, GraphResource, S3Resource
-
 
 # ============================================================================
 # Helper Functions
@@ -495,7 +494,7 @@ def create_backup(
   database_name = MultiTenantUtils.get_database_name(config.graph_id)
 
   # Generate S3 key
-  timestamp = datetime.now(timezone.utc)
+  timestamp = datetime.now(UTC)
   timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
   format_extensions = {
@@ -527,7 +526,7 @@ def create_backup(
       created_by_user_id=config.user_id,
       compression_enabled=config.compression,
       encryption_enabled=config.encryption,
-      expires_at=datetime.now(timezone.utc) + timedelta(days=config.retention_days),
+      expires_at=datetime.now(UTC) + timedelta(days=config.retention_days),
     )
 
     backup_record.start_backup(session)
@@ -699,7 +698,7 @@ def restore_backup(
   with db.get_session() as session:
     backup_record = GraphBackup.get_by_id(config.backup_id, session)
     if backup_record and hasattr(backup_record, "last_restored_at"):
-      backup_record.last_restored_at = datetime.now(timezone.utc)
+      backup_record.last_restored_at = datetime.now(UTC)
       session.commit()
 
   context.log.info(f"Restore completed: {verification_status}")
@@ -709,7 +708,7 @@ def restore_backup(
     "backup_id": config.backup_id,
     "status": "completed",
     "verification_status": verification_status,
-    "restored_at": datetime.now(timezone.utc).isoformat(),
+    "restored_at": datetime.now(UTC).isoformat(),
   }
 
 
@@ -1086,7 +1085,7 @@ def materialize_graph_tables(
           graph_record.graph_metadata = graph_metadata
           session.commit()
           raise Failure(
-            description=f"Failed to rebuild graph database: {str(e)}",
+            description=f"Failed to rebuild graph database: {e!s}",
             metadata={"graph_id": graph_id, "error": str(e)},
           )
 
@@ -1158,7 +1157,7 @@ def materialize_graph_tables(
           context.log.error(f"Failed to materialize table {table_name}: {e}")
           if not config.ignore_errors:
             raise Failure(
-              description=f"Materialization failed on table {table_name}: {str(e)}",
+              description=f"Materialization failed on table {table_name}: {e!s}",
               metadata={
                 "graph_id": graph_id,
                 "table_name": table_name,

@@ -1,7 +1,8 @@
 """Tests for SES email service adapter."""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from botocore.exceptions import ClientError
 
 from robosystems.operations.aws.ses import SESEmailService

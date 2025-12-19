@@ -3,13 +3,14 @@
 Tests connection management across graph database and PostgreSQL.
 """
 
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, Mock
+
 import pytest
-from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock
 
 from robosystems.operations.connection_service import (
-  _safe_datetime_conversion,
   ConnectionService,
+  _safe_datetime_conversion,
 )
 
 
@@ -22,13 +23,13 @@ class TestSafeDatetimeConversion:
 
   def test_datetime_passthrough(self):
     """Test that datetime objects are returned as-is."""
-    dt = datetime.now(timezone.utc)
+    dt = datetime.now(UTC)
     assert _safe_datetime_conversion(dt) == dt
 
   def test_datetime_attribute_extraction(self):
     """Test extraction of datetime from objects with datetime attribute."""
     mock_obj = Mock()
-    dt = datetime.now(timezone.utc)
+    dt = datetime.now(UTC)
     mock_obj.datetime = dt
     assert _safe_datetime_conversion(mock_obj) == dt
 

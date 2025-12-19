@@ -2,16 +2,17 @@
 
 from fastapi import APIRouter
 
-# Import sub-routers
-from .register import router as register_router
-from .login import router as login_router
-from .logout import router as logout_router
-from .session import router as session_router
-from .sso import router as sso_router
-from .password import router as password_router
 from .captcha import router as captcha_router
 from .email_verification import router as email_verification_router
+from .login import router as login_router
+from .logout import router as logout_router
+from .password import router as password_router
 from .password_reset import router as password_reset_router
+
+# Import sub-routers
+from .register import router as register_router
+from .session import router as session_router
+from .sso import router as sso_router
 
 # Create main auth router
 router = APIRouter()

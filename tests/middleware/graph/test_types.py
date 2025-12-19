@@ -2,14 +2,14 @@
 
 import pytest
 
+from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import (
-  GraphTypeRegistry,
-  GraphCategory,
   AccessPattern,
+  GraphCategory,
+  GraphTypeRegistry,
 )
 from robosystems.models.iam import Graph, Org
 from robosystems.models.iam.org import OrgType
-from robosystems.config.graph_tier import GraphTier
 
 
 class TestGraphTypeRegistry:

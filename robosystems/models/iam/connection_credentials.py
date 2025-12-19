@@ -1,18 +1,19 @@
 """Connection credentials model for secure storage of OAuth tokens and API keys."""
 
-import secrets
-import json
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Sequence
-from cryptography.fernet import Fernet
 import base64
+import json
+import secrets
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, Optional
 
-from sqlalchemy import Column, String, DateTime, Text, Boolean
+from cryptography.fernet import Fernet
+from sqlalchemy import Boolean, Column, DateTime, String, Text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from ...database import Model
 from ...config import env
+from ...database import Model
 from ...logger import logger
 
 
@@ -41,12 +42,12 @@ class ConnectionCredentials(Model):
   expires_at = Column(DateTime, nullable=True)  # When credentials expire
   is_active = Column(Boolean, default=True, nullable=False)
   created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    DateTime, default=lambda: datetime.now(UTC), nullable=False
   )
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -97,7 +98,7 @@ class ConnectionCredentials(Model):
       )
       raise ValueError("Invalid encryption key format.")
 
-  def _encrypt_credentials(self, credentials: Dict[str, Any]) -> str:
+  def _encrypt_credentials(self, credentials: dict[str, Any]) -> str:
     """Encrypt credentials dictionary."""
     key = self._get_encryption_key()
     try:
@@ -112,7 +113,7 @@ class ConnectionCredentials(Model):
     encrypted_data = fernet.encrypt(credentials_json.encode())
     return base64.urlsafe_b64encode(encrypted_data).decode()
 
-  def _decrypt_credentials(self) -> Dict[str, Any]:
+  def _decrypt_credentials(self) -> dict[str, Any]:
     """Decrypt and return credentials dictionary."""
     key = self._get_encryption_key()
     fernet = Fernet(key)
@@ -120,11 +121,11 @@ class ConnectionCredentials(Model):
     decrypted_json = fernet.decrypt(encrypted_data).decode()
     return json.loads(decrypted_json)
 
-  def set_credentials(self, credentials: Dict[str, Any]) -> None:
+  def set_credentials(self, credentials: dict[str, Any]) -> None:
     """Set and encrypt credentials."""
     self.encrypted_credentials = self._encrypt_credentials(credentials)
 
-  def get_credentials(self) -> Dict[str, Any]:
+  def get_credentials(self) -> dict[str, Any]:
     """Get and decrypt credentials."""
     return self._decrypt_credentials()
 
@@ -134,9 +135,9 @@ class ConnectionCredentials(Model):
     connection_id: str,
     provider: str,
     user_id: str,
-    credentials: Dict[str, Any],
+    credentials: dict[str, Any],
     session: Session,
-    expires_at: Optional[datetime] = None,
+    expires_at: datetime | None = None,
   ) -> "ConnectionCredentials":
     """Create new connection credentials."""
     cred = cls(
@@ -183,10 +184,10 @@ class ConnectionCredentials(Model):
       .all()
     )
 
-  def update_credentials(self, credentials: Dict[str, Any], session: Session) -> None:
+  def update_credentials(self, credentials: dict[str, Any], session: Session) -> None:
     """Update existing credentials."""
     self.set_credentials(credentials)
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
@@ -197,7 +198,7 @@ class ConnectionCredentials(Model):
   def deactivate(self, session: Session) -> None:
     """Deactivate credentials (don't delete for audit trail)."""
     self.is_active = False
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
@@ -209,12 +210,12 @@ class ConnectionCredentials(Model):
     """Check if credentials are expired."""
     if not self.expires_at:
       return False
-    return datetime.now(timezone.utc) > self.expires_at  # type: ignore[return-value]
+    return datetime.now(UTC) > self.expires_at  # type: ignore[return-value]
 
   def update_expiry(self, expires_at: datetime, session: Session) -> None:
     """Update credential expiry time."""
     self.expires_at = expires_at
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)

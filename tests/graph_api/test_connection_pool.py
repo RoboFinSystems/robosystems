@@ -1,19 +1,20 @@
 """Comprehensive tests for LadybugConnectionPool."""
 
-import pytest
-import tempfile
 import shutil
+import tempfile
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from robosystems.graph_api.core.ladybug.pool import (
-  LadybugConnectionPool,
   ConnectionInfo,
-  initialize_connection_pool,
+  LadybugConnectionPool,
   get_connection_pool,
+  initialize_connection_pool,
 )
 
 
@@ -24,7 +25,7 @@ class TestConnectionInfo:
     """Test ConnectionInfo creation and attributes."""
     mock_conn = MagicMock()
     mock_db = MagicMock()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     info = ConnectionInfo(
       connection=mock_conn,
@@ -265,7 +266,7 @@ class TestLadybugConnectionPool:
     # Manually expire the connection by modifying its created_at time
     db_pool = pool._pools["test_db"]
     for conn_info in db_pool.values():
-      conn_info.created_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+      conn_info.created_at = datetime.now(UTC) - timedelta(minutes=2)
 
     # Mock new LadybugDB objects for the replacement connection
     mock_db_new = MagicMock()
@@ -307,7 +308,7 @@ class TestLadybugConnectionPool:
 
     # Simulate health check failure by calling directly
     db_pool = pool._pools["test_db"]
-    conn_info = list(db_pool.values())[0]
+    conn_info = next(iter(db_pool.values()))
     is_healthy = pool._test_connection_health(conn_info)
 
     assert is_healthy is False
@@ -341,7 +342,7 @@ class TestLadybugConnectionPool:
       connection_ttl_minutes=30,
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Create connection info with different states
     mock_conn = MagicMock()
@@ -408,7 +409,7 @@ class TestLadybugConnectionPool:
     # Manually expire the connection
     db_pool = pool._pools["test_db"]
     for conn_info in db_pool.values():
-      conn_info.created_at = datetime.now(timezone.utc) - timedelta(minutes=40)
+      conn_info.created_at = datetime.now(UTC) - timedelta(minutes=40)
 
     # Run cleanup
     pool._cleanup_expired_connections()
@@ -433,8 +434,8 @@ class TestLadybugConnectionPool:
     pool._check_connection_health = MagicMock()
 
     # Set last maintenance times to force running
-    pool._last_cleanup = datetime.now(timezone.utc) - timedelta(minutes=2)
-    pool._last_health_check = datetime.now(timezone.utc) - timedelta(minutes=2)
+    pool._last_cleanup = datetime.now(UTC) - timedelta(minutes=2)
+    pool._last_health_check = datetime.now(UTC) - timedelta(minutes=2)
 
     # Trigger maintenance
     pool._maybe_run_maintenance()
@@ -689,9 +690,9 @@ class TestConnectionPoolIntegration:
 
   def test_connection_pool_integration_with_mocked_lbug(self):
     """Test connection pool integration with mocked LadybugDB to avoid segfaults."""
-    import tempfile
     import shutil
-    from unittest.mock import patch, MagicMock
+    import tempfile
+    from unittest.mock import MagicMock, patch
 
     # Create temporary directory
     temp_base = tempfile.mkdtemp()
@@ -778,13 +779,13 @@ class TestConnectionPoolIntegration:
 
   def test_high_concurrency_stress_test(self):
     """Test connection pool under high concurrency with mocked LadybugDB."""
-    import threading
-    import time
     import concurrent.futures
     import random
-    import tempfile
     import shutil
-    from unittest.mock import patch, MagicMock
+    import tempfile
+    import threading
+    import time
+    from unittest.mock import MagicMock, patch
 
     # Create temporary directory for stress test
     temp_base = tempfile.mkdtemp()
@@ -874,7 +875,7 @@ class TestConnectionPoolIntegration:
               with results_lock:
                 results["errors"] += 1
                 results["exceptions"].append(
-                  f"Worker {worker_id}, Op {op_num}: {str(e)}"
+                  f"Worker {worker_id}, Op {op_num}: {e!s}"
                 )
 
               # Don't fail the test on individual operation errors

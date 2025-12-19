@@ -1,10 +1,10 @@
 """Generic OAuth2 handler for connection providers."""
 
 # Standard library
-import secrets
 import hashlib
-from typing import Dict, Any, Optional, Protocol
-from datetime import datetime, timedelta, timezone
+import secrets
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol
 from urllib.parse import urlencode
 
 # Third-party
@@ -12,10 +12,11 @@ import httpx
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from ...config import env
+
 # Local imports
 from ...logger import logger
 from ...models.iam import ConnectionCredentials
-from ...config import env
 
 
 class OAuthProviderProtocol(Protocol):
@@ -51,15 +52,15 @@ class OAuthProviderProtocol(Protocol):
     """Required OAuth scopes."""
     ...
 
-  def get_additional_auth_params(self) -> Dict[str, str]:
+  def get_additional_auth_params(self) -> dict[str, str]:
     """Get provider-specific auth parameters."""
     return {}
 
-  def extract_provider_data(self, callback_data: Dict[str, Any]) -> Dict[str, Any]:
+  def extract_provider_data(self, callback_data: dict[str, Any]) -> dict[str, Any]:
     """Extract provider-specific data from callback."""
     return {}
 
-  def get_refresh_params(self) -> Dict[str, str]:
+  def get_refresh_params(self) -> dict[str, str]:
     """Get provider-specific refresh parameters."""
     return {}
 
@@ -69,7 +70,7 @@ class OAuthState:
 
   # In production, these should be stored in Redis or database
   # For now, we'll use in-memory storage
-  _states: Dict[str, Dict[str, Any]] = {}
+  _states: dict[str, dict[str, Any]] = {}
 
   @classmethod
   def create(cls, connection_id: str, user_id: str, redirect_uri: str) -> str:
@@ -81,14 +82,14 @@ class OAuthState:
       "connection_id": connection_id,
       "user_id": user_id,
       "redirect_uri": redirect_uri,
-      "created_at": datetime.now(timezone.utc),
-      "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+      "created_at": datetime.now(UTC),
+      "expires_at": datetime.now(UTC) + timedelta(minutes=10),
     }
 
     return state
 
   @classmethod
-  def validate(cls, state: str) -> Optional[Dict[str, Any]]:
+  def validate(cls, state: str) -> dict[str, Any] | None:
     """Validate and retrieve OAuth state data."""
     state_hash = hashlib.sha256(state.encode()).hexdigest()
     state_data = cls._states.get(state_hash)
@@ -97,7 +98,7 @@ class OAuthState:
       return None
 
     # Check expiry
-    if datetime.now(timezone.utc) > state_data["expires_at"]:
+    if datetime.now(UTC) > state_data["expires_at"]:
       del cls._states[state_hash]
       return None
 
@@ -108,7 +109,7 @@ class OAuthState:
   @classmethod
   def cleanup_expired(cls):
     """Clean up expired states."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expired_states = [
       state_hash for state_hash, data in cls._states.items() if now > data["expires_at"]
     ]
@@ -123,7 +124,7 @@ class OAuthHandler:
     self.provider = provider
 
   def get_authorization_url(
-    self, connection_id: str, user_id: str, redirect_uri: Optional[str] = None
+    self, connection_id: str, user_id: str, redirect_uri: str | None = None
   ) -> tuple[str, str]:
     """Generate OAuth authorization URL."""
     # Use provided redirect_uri or default from environment
@@ -149,7 +150,7 @@ class OAuthHandler:
 
   async def exchange_code_for_tokens(
     self, code: str, redirect_uri: str
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """Exchange authorization code for tokens."""
     token_data = {
       "grant_type": "authorization_code",
@@ -180,13 +181,13 @@ class OAuthHandler:
 
       # Calculate token expiry if provided
       if "expires_in" in tokens:
-        tokens["expires_at"] = datetime.now(timezone.utc) + timedelta(
+        tokens["expires_at"] = datetime.now(UTC) + timedelta(
           seconds=tokens["expires_in"]
         )
 
       return tokens
 
-  async def refresh_tokens(self, refresh_token: str) -> Dict[str, Any]:
+  async def refresh_tokens(self, refresh_token: str) -> dict[str, Any]:
     """Refresh OAuth tokens."""
     refresh_data = {
       "grant_type": "refresh_token",
@@ -217,7 +218,7 @@ class OAuthHandler:
 
       # Calculate token expiry if provided
       if "expires_in" in tokens:
-        tokens["expires_at"] = datetime.now(timezone.utc) + timedelta(
+        tokens["expires_at"] = datetime.now(UTC) + timedelta(
           seconds=tokens["expires_in"]
         )
 
@@ -226,8 +227,8 @@ class OAuthHandler:
   def store_tokens(
     self,
     connection_id: str,
-    tokens: Dict[str, Any],
-    provider_data: Dict[str, Any],
+    tokens: dict[str, Any],
+    provider_data: dict[str, Any],
     db: Session,
   ):
     """Store OAuth tokens securely."""

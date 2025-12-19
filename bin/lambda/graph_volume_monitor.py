@@ -8,13 +8,14 @@ This Lambda handles proactive volume monitoring and expansion for Graph instance
 - Handles both scheduled checks and alarm-triggered expansions
 """
 
-import boto3
 import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from datetime import UTC, datetime
+from typing import Any
+
+import boto3
 import urllib3
 
 # Configure logging
@@ -44,7 +45,7 @@ GRAPH_API_KEY = os.environ.get("GRAPH_API_KEY", "")
 http = urllib3.PoolManager()
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
   """Main Lambda handler"""
 
   # Determine the action based on event source
@@ -71,7 +72,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     return monitor_all_instances()
 
 
-def handle_alarm_trigger(event: Dict[str, Any]) -> Dict[str, Any]:
+def handle_alarm_trigger(event: dict[str, Any]) -> dict[str, Any]:
   """Handle CloudWatch alarm trigger"""
   try:
     # Parse the alarm message
@@ -91,11 +92,11 @@ def handle_alarm_trigger(event: Dict[str, Any]) -> Dict[str, Any]:
     return {"statusCode": 500, "error": str(e)}
 
 
-def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
+def monitor_all_instances(expand_immediately: bool = False) -> dict[str, Any]:
   """Monitor all Graph instances and expand volumes as needed"""
 
   results = {
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
     "instances_checked": 0,
     "volumes_expanded": [],
     "errors": [],
@@ -110,7 +111,7 @@ def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
       logger.info("Volume registry synchronized with EC2 state")
     except Exception as e:
       logger.warning(f"Failed to sync volume registry: {e}")
-      results["errors"].append(f"Registry sync failed: {str(e)}")
+      results["errors"].append(f"Registry sync failed: {e!s}")
 
     # Discover all Graph instances
     instances = discover_lbug_instances()
@@ -128,7 +129,7 @@ def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
           results["volumes_expanded"].append(check_result)
 
       except Exception as e:
-        error_msg = f"Failed to check instance {instance['instance_id']}: {str(e)}"
+        error_msg = f"Failed to check instance {instance['instance_id']}: {e!s}"
         logger.error(error_msg)
         results["errors"].append(error_msg)
 
@@ -149,7 +150,7 @@ def monitor_all_instances(expand_immediately: bool = False) -> Dict[str, Any]:
   return results
 
 
-def discover_lbug_instances() -> List[Dict]:
+def discover_lbug_instances() -> list[dict]:
   """Discover all running Graph instances"""
 
   instances = []
@@ -193,13 +194,13 @@ def discover_lbug_instances() -> List[Dict]:
   return instances
 
 
-def check_and_expand_volume(instance: Dict, expand_immediately: bool = False) -> Dict:
+def check_and_expand_volume(instance: dict, expand_immediately: bool = False) -> dict:
   """Check a single instance and expand if needed"""
 
   result = {
     "instance_id": instance["instance_id"],
     "tier": instance["tier"],
-    "checked_at": datetime.now(timezone.utc).isoformat(),
+    "checked_at": datetime.now(UTC).isoformat(),
   }
 
   try:
@@ -339,7 +340,7 @@ def check_and_expand_volume(instance: Dict, expand_immediately: bool = False) ->
   return result
 
 
-def check_volume_modification_state(volume_id: str) -> Optional[str]:
+def check_volume_modification_state(volume_id: str) -> str | None:
   """Check if a volume has an active modification in progress"""
 
   try:
@@ -361,7 +362,7 @@ def check_volume_modification_state(volume_id: str) -> Optional[str]:
       start_time = modification.get("StartTime")
       if state == "optimizing" and start_time:
         time_elapsed = (
-          datetime.now(timezone.utc) - start_time.replace(tzinfo=timezone.utc)
+          datetime.now(UTC) - start_time.replace(tzinfo=UTC)
         ).total_seconds()
         if time_elapsed > 1800:  # 30 minutes
           logger.warning(
@@ -378,7 +379,7 @@ def check_volume_modification_state(volume_id: str) -> Optional[str]:
     return None
 
 
-def get_data_volume_id(instance_id: str) -> Optional[str]:
+def get_data_volume_id(instance_id: str) -> str | None:
   """Get the data volume ID for a Graph instance"""
 
   try:
@@ -419,7 +420,7 @@ def get_data_volume_id(instance_id: str) -> Optional[str]:
     return None
 
 
-def get_volume_metrics_from_instance(instance: Dict) -> Optional[Dict]:
+def get_volume_metrics_from_instance(instance: dict) -> dict | None:
   """Query Graph API for volume metrics"""
 
   try:
@@ -467,7 +468,7 @@ def get_volume_metrics_from_instance(instance: Dict) -> Optional[Dict]:
 
 def perform_volume_expansion(
   volume_id: str, current_size: int, new_size: int, instance_id: str
-) -> Dict:
+) -> dict:
   """Perform the actual EBS volume expansion"""
 
   try:
@@ -494,7 +495,7 @@ def perform_volume_expansion(
         ExpressionAttributeValues={
           ":size": new_size,
           ":status": "expanding",
-          ":timestamp": datetime.now(timezone.utc).isoformat(),
+          ":timestamp": datetime.now(UTC).isoformat(),
         },
       )
 
@@ -624,7 +625,7 @@ def wait_for_volume_modification(
   return False
 
 
-def trigger_filesystem_growth(instance: Dict) -> Dict:
+def trigger_filesystem_growth(instance: dict) -> dict:
   """Trigger filesystem growth via SSM command with retry logic"""
 
   try:
@@ -756,7 +757,7 @@ def calculate_new_volume_size(current_size: int, usage_percent: float) -> int:
   return new_size
 
 
-def monitor_single_instance(event: Dict) -> Dict:
+def monitor_single_instance(event: dict) -> dict:
   """Monitor a specific instance"""
 
   instance_id = event.get("instance_id")
@@ -791,7 +792,7 @@ def monitor_single_instance(event: Dict) -> Dict:
     return {"statusCode": 500, "error": str(e)}
 
 
-def expand_volume_with_filesystem(event: Dict) -> Dict:
+def expand_volume_with_filesystem(event: dict) -> dict:
   """Direct volume expansion with filesystem growth"""
 
   volume_id = event.get("volume_id")
@@ -839,7 +840,7 @@ def expand_volume_with_filesystem(event: Dict) -> Dict:
     return {"statusCode": 500, "error": str(e)}
 
 
-def publish_monitoring_metrics(results: Dict):
+def publish_monitoring_metrics(results: dict):
   """Publish monitoring metrics to CloudWatch"""
 
   try:
@@ -880,7 +881,7 @@ def publish_monitoring_metrics(results: Dict):
     logger.error(f"Failed to publish metrics: {e}")
 
 
-def send_expansion_alert(expansions: List[Dict]):
+def send_expansion_alert(expansions: list[dict]):
   """Send SNS alert about volume expansions"""
 
   if not expansions or not ALERT_TOPIC_ARN:
@@ -909,7 +910,7 @@ def send_expansion_alert(expansions: List[Dict]):
     logger.error(f"Failed to send expansion alert: {e}")
 
 
-def send_error_alert(errors: List[str]):
+def send_error_alert(errors: list[str]):
   """Send SNS alert about monitoring errors"""
 
   if not errors or not ALERT_TOPIC_ARN:
@@ -934,7 +935,7 @@ def send_error_alert(errors: List[str]):
     logger.error(f"Failed to send error alert: {e}")
 
 
-def grow_filesystem_only(event: Dict) -> Dict:
+def grow_filesystem_only(event: dict) -> dict:
   """Manually trigger filesystem growth for a specific instance"""
 
   instance_id = event.get("instance_id")
@@ -988,11 +989,11 @@ def grow_filesystem_only(event: Dict) -> Dict:
     return {"statusCode": 500, "error": str(e)}
 
 
-def fix_stuck_optimizing_volumes() -> Dict:
+def fix_stuck_optimizing_volumes() -> dict:
   """Find and fix volumes stuck in optimizing state"""
 
   results = {
-    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp": datetime.now(UTC).isoformat(),
     "volumes_checked": 0,
     "volumes_fixed": [],
     "errors": [],
@@ -1015,7 +1016,7 @@ def fix_stuck_optimizing_volumes() -> Dict:
       # Check if stuck (optimizing for more than 30 minutes)
       if start_time:
         time_elapsed = (
-          datetime.now(timezone.utc) - start_time.replace(tzinfo=timezone.utc)
+          datetime.now(UTC) - start_time.replace(tzinfo=UTC)
         ).total_seconds()
 
         if time_elapsed > 1800:  # 30 minutes
@@ -1056,7 +1057,7 @@ def fix_stuck_optimizing_volumes() -> Dict:
   return results
 
 
-def send_stuck_volume_alert(fixed_volumes: List[Dict]):
+def send_stuck_volume_alert(fixed_volumes: list[dict]):
   """Send alert about stuck volumes that were fixed"""
 
   if not fixed_volumes or not ALERT_TOPIC_ARN:
@@ -1148,7 +1149,7 @@ def sync_volume_registry():
             ExpressionAttributeValues={
               ":status": "available",
               ":instance_id": "unattached",
-              ":timestamp": datetime.now(timezone.utc).isoformat(),
+              ":timestamp": datetime.now(UTC).isoformat(),
               ":databases": databases,
             },
           )
@@ -1181,7 +1182,7 @@ def sync_volume_registry():
                     UpdateExpression="SET instance_id = :instance_id, last_attached = :timestamp",
                     ExpressionAttributeValues={
                       ":instance_id": current_instance,
-                      ":timestamp": datetime.now(timezone.utc).isoformat(),
+                      ":timestamp": datetime.now(UTC).isoformat(),
                     },
                   )
                   updated_count += 1

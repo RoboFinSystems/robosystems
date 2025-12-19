@@ -6,9 +6,8 @@ and improve performance by reducing initialization overhead.
 """
 
 import asyncio
-from typing import Dict, Optional
-from datetime import datetime
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from robosystems.logger import logger
 
@@ -40,9 +39,9 @@ class MCPConnectionPool:
     self.max_lifetime = max_lifetime
 
     # Pool storage: graph_id -> list of (client, last_used, created_at)
-    self._pools: Dict[str, list] = {}
-    self._locks: Dict[str, asyncio.Lock] = {}
-    self._cleanup_task: Optional[asyncio.Task] = None
+    self._pools: dict[str, list] = {}
+    self._locks: dict[str, asyncio.Lock] = {}
+    self._cleanup_task: asyncio.Task | None = None
     self._running = False
 
   async def start(self):
@@ -138,7 +137,7 @@ class MCPConnectionPool:
         del self._pools[graph_id]
 
   @asynccontextmanager
-  async def acquire(self, graph_id: str, api_base_url: Optional[str] = None):
+  async def acquire(self, graph_id: str, api_base_url: str | None = None):
     """
     Acquire a client from the pool.
 
@@ -195,7 +194,7 @@ class MCPConnectionPool:
             except Exception as e:
               logger.error(f"Error closing client: {e}")
 
-  async def get_stats(self) -> Dict[str, Dict]:
+  async def get_stats(self) -> dict[str, dict]:
     """
     Get statistics about the connection pool.
 
@@ -232,7 +231,7 @@ class MCPConnectionPool:
 
 
 # Global connection pool instance
-_global_pool: Optional[MCPConnectionPool] = None
+_global_pool: MCPConnectionPool | None = None
 
 
 def get_connection_pool() -> MCPConnectionPool:

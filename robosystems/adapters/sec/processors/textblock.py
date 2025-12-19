@@ -1,6 +1,6 @@
 import hashlib
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from robosystems.logger import logger
 
@@ -15,7 +15,7 @@ class TextBlockExternalizer:
     self,
     s3_client,
     bucket: str,
-    cdn_url: Optional[str],
+    cdn_url: str | None,
     threshold: int,
     enabled: bool = True,
   ):
@@ -25,9 +25,9 @@ class TextBlockExternalizer:
     self.threshold = threshold
     self.enabled = enabled
 
-    self.upload_queue: List[Tuple[str, str, str]] = []
-    self.upload_map: Dict[str, Dict[str, Any]] = {}
-    self.content_cache: Dict[str, Dict[str, Any]] = {}
+    self.upload_queue: list[tuple[str, str, str]] = []
+    self.upload_map: dict[str, dict[str, Any]] = {}
+    self.content_cache: dict[str, dict[str, Any]] = {}
 
     if self.enabled and self.bucket:
       logger.info(
@@ -43,18 +43,15 @@ class TextBlockExternalizer:
     if "<" in value_str and ">" in value_str:
       return True
 
-    if len(value_str) > self.threshold:
-      return True
-
-    return False
+    return len(value_str) > self.threshold
 
   def queue_value_for_s3(
     self,
     value: Any,
     fact_id: str,
-    entity_data: Optional[Dict],
-    report_data: Optional[Dict],
-  ) -> Optional[Dict[str, Any]]:
+    entity_data: dict | None,
+    report_data: dict | None,
+  ) -> dict[str, Any] | None:
     if not self.s3_client or not self.bucket:
       logger.warning("S3 client not initialized, cannot externalize value")
       return None
@@ -161,9 +158,9 @@ class TextBlockExternalizer:
     self,
     value: Any,
     fact_id: str,
-    entity_data: Optional[Dict],
-    report_data: Optional[Dict],
-  ) -> Optional[Dict[str, Any]]:
+    entity_data: dict | None,
+    report_data: dict | None,
+  ) -> dict[str, Any] | None:
     if not self.s3_client or not self.bucket:
       logger.warning("S3 client not initialized, cannot externalize value")
       return None
@@ -231,8 +228,8 @@ class TextBlockExternalizer:
   def _generate_s3_key(
     self,
     fact_id: str,
-    entity_data: Optional[Dict],
-    report_data: Optional[Dict],
+    entity_data: dict | None,
+    report_data: dict | None,
     file_extension: str,
   ) -> str:
     year = None
@@ -268,8 +265,8 @@ class TextBlockExternalizer:
   def _generate_s3_key_with_hash(
     self,
     content_hash: str,
-    entity_data: Optional[Dict],
-    report_data: Optional[Dict],
+    entity_data: dict | None,
+    report_data: dict | None,
     file_extension: str,
   ) -> str:
     year = None

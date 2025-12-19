@@ -9,15 +9,16 @@ import asyncio
 import time
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Callable
+from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
 
 from robosystems.logger import logger
 from robosystems.middleware.graph.admission_control import (
-  get_admission_controller,
   AdmissionDecision,
+  get_admission_controller,
 )
 from robosystems.middleware.otel.metrics import record_query_queue_metrics
 
@@ -38,27 +39,27 @@ class QueuedQuery:
 
   id: str
   cypher: str
-  parameters: Optional[Dict[str, Any]]
+  parameters: dict[str, Any] | None
   graph_id: str
   user_id: str
   credits_reserved: float
   priority: int = 5
-  created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-  started_at: Optional[datetime] = None
-  completed_at: Optional[datetime] = None
+  created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+  started_at: datetime | None = None
+  completed_at: datetime | None = None
   status: QueryStatus = QueryStatus.PENDING
-  result: Optional[Any] = None
-  error: Optional[str] = None
+  result: Any | None = None
+  error: str | None = None
 
   @property
   def wait_time_seconds(self) -> float:
     """Get time spent waiting in queue."""
     if self.started_at:
       return (self.started_at - self.created_at).total_seconds()
-    return (datetime.now(timezone.utc) - self.created_at).total_seconds()
+    return (datetime.now(UTC) - self.created_at).total_seconds()
 
   @property
-  def execution_time_seconds(self) -> Optional[float]:
+  def execution_time_seconds(self) -> float | None:
     """Get query execution time."""
     if self.started_at and self.completed_at:
       return (self.completed_at - self.started_at).total_seconds()
@@ -100,19 +101,19 @@ class QueryQueueManager:
 
     # Query storage
     self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=max_queue_size)
-    self._queries: Dict[str, QueuedQuery] = {}
-    self._user_query_counts: Dict[str, int] = {}
+    self._queries: dict[str, QueuedQuery] = {}
+    self._user_query_counts: dict[str, int] = {}
 
     # Execution tracking
-    self._running_queries: Dict[str, asyncio.Task] = {}
+    self._running_queries: dict[str, asyncio.Task] = {}
     self._completed_queries: OrderedDict[str, QueuedQuery] = OrderedDict()
     self._max_completed = 10000  # Keep last N completed queries
 
     # Executor function (set by router)
-    self._query_executor: Optional[Callable] = None
+    self._query_executor: Callable | None = None
 
     # Worker task (started on first use)
-    self._worker_task: Optional[asyncio.Task] = None
+    self._worker_task: asyncio.Task | None = None
     self._started = False
 
     logger.info(
@@ -130,7 +131,7 @@ class QueryQueueManager:
   async def submit_query(
     self,
     cypher: str,
-    parameters: Optional[Dict[str, Any]],
+    parameters: dict[str, Any] | None,
     graph_id: str,
     user_id: str,
     credits_required: float,
@@ -258,7 +259,7 @@ class QueryQueueManager:
 
     return query_id
 
-  async def get_query_status(self, query_id: str) -> Optional[Dict[str, Any]]:
+  async def get_query_status(self, query_id: str) -> dict[str, Any] | None:
     """Get current status of a query."""
     # Check running queries
     if query_id in self._running_queries:
@@ -299,7 +300,7 @@ class QueryQueueManager:
 
   async def get_query_result(
     self, query_id: str, wait_seconds: int = 0
-  ) -> Optional[Dict[str, Any]]:
+  ) -> dict[str, Any] | None:
     """
     Get query result, optionally waiting for completion.
 
@@ -358,7 +359,7 @@ class QueryQueueManager:
 
     # Mark as cancelled
     query.status = QueryStatus.CANCELLED
-    query.completed_at = datetime.now(timezone.utc)
+    query.completed_at = datetime.now(UTC)
 
     # Record cancellation metric
     record_query_queue_metrics(
@@ -398,7 +399,7 @@ class QueryQueueManager:
           priority, timestamp, query_id = await asyncio.wait_for(
             self._queue.get(), timeout=1.0
           )
-        except asyncio.TimeoutError:
+        except TimeoutError:
           continue
 
         # Get query details
@@ -408,7 +409,7 @@ class QueryQueueManager:
 
         # Start execution
         query.status = QueryStatus.RUNNING
-        query.started_at = datetime.now(timezone.utc)
+        query.started_at = datetime.now(UTC)
 
         # Record wait time metric
         record_query_queue_metrics(
@@ -460,7 +461,7 @@ class QueryQueueManager:
       query.status = QueryStatus.COMPLETED
       query.result = result
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
       query.status = QueryStatus.FAILED
       query.error = f"Query timeout after {self.query_timeout} seconds"
       logger.error(f"Query {query.id} timed out")
@@ -472,7 +473,7 @@ class QueryQueueManager:
 
     finally:
       # Clean up
-      query.completed_at = datetime.now(timezone.utc)
+      query.completed_at = datetime.now(UTC)
 
       # Record execution metrics
       if query.execution_time_seconds is not None:
@@ -542,7 +543,7 @@ class QueryQueueManager:
     concurrent = self.max_concurrent_queries
     return (position / concurrent) * avg_query_time
 
-  def get_stats(self) -> Dict[str, Any]:
+  def get_stats(self) -> dict[str, Any]:
     """Get queue statistics."""
     return {
       "queue_size": self._queue.qsize(),
@@ -552,7 +553,7 @@ class QueryQueueManager:
       "capacity_used": self._queue.qsize() / self.max_queue_size,
     }
 
-  def get_deep_health_status(self) -> Dict[str, Any]:
+  def get_deep_health_status(self) -> dict[str, Any]:
     """Get comprehensive health status including system resources."""
     admission_controller = get_admission_controller()
 
@@ -578,7 +579,7 @@ class QueryQueueManager:
       },
     }
 
-  def get_queue_metrics_by_priority(self) -> Dict[int, int]:
+  def get_queue_metrics_by_priority(self) -> dict[int, int]:
     """Get queue size broken down by priority (for metrics)."""
     # Note: This is approximate since we can't efficiently inspect priority queue
     # In production, you might want to maintain separate counters
@@ -594,7 +595,7 @@ class QueryQueueManager:
 
 
 # Global instance
-_queue_manager: Optional[QueryQueueManager] = None
+_queue_manager: QueryQueueManager | None = None
 
 
 def get_query_queue() -> QueryQueueManager:

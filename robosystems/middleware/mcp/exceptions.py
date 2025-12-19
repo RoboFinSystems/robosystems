@@ -4,14 +4,13 @@ MCP exceptions for Graph client operations.
 Custom exceptions for graph databases MCP client error handling with enhanced hierarchy.
 """
 
-from typing import Optional
 
 
 class GraphAPIError(Exception):
   """Base exception for Graph API errors."""
 
   def __init__(
-    self, message: str, error_code: Optional[str] = None, details: Optional[dict] = None
+    self, message: str, error_code: str | None = None, details: dict | None = None
   ):
     super().__init__(message)
     self.error_code = error_code
@@ -24,7 +23,7 @@ class GraphQueryTimeoutError(GraphAPIError):
   def __init__(
     self,
     message: str = "Query execution timed out",
-    timeout_seconds: Optional[int] = None,
+    timeout_seconds: int | None = None,
   ):
     super().__init__(message, error_code="QUERY_TIMEOUT")
     if timeout_seconds:
@@ -35,7 +34,7 @@ class GraphQueryComplexityError(GraphAPIError):
   """Exception raised when query is too complex or risky."""
 
   def __init__(
-    self, message: str = "Query is too complex", complexity_score: Optional[int] = None
+    self, message: str = "Query is too complex", complexity_score: int | None = None
   ):
     super().__init__(message, error_code="QUERY_COMPLEXITY")
     if complexity_score:
@@ -48,7 +47,7 @@ class GraphValidationError(GraphAPIError):
   def __init__(
     self,
     message: str = "Query validation failed",
-    validation_errors: Optional[list] = None,
+    validation_errors: list | None = None,
   ):
     super().__init__(message, error_code="QUERY_VALIDATION")
     if validation_errors:
@@ -68,7 +67,7 @@ class GraphAuthorizationError(GraphAPIError):
   def __init__(
     self,
     message: str = "Authorization failed",
-    required_permission: Optional[str] = None,
+    required_permission: str | None = None,
   ):
     super().__init__(message, error_code="AUTH_DENIED")
     if required_permission:
@@ -79,7 +78,7 @@ class GraphConnectionError(GraphAPIError):
   """Exception raised when connection to Graph API fails."""
 
   def __init__(
-    self, message: str = "Connection failed", endpoint: Optional[str] = None
+    self, message: str = "Connection failed", endpoint: str | None = None
   ):
     super().__init__(message, error_code="CONNECTION_FAILED")
     if endpoint:
@@ -92,8 +91,8 @@ class GraphResourceNotFoundError(GraphAPIError):
   def __init__(
     self,
     message: str = "Resource not found",
-    resource_type: Optional[str] = None,
-    resource_id: Optional[str] = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
   ):
     super().__init__(message, error_code="RESOURCE_NOT_FOUND")
     if resource_type:
@@ -108,7 +107,7 @@ class GraphRateLimitError(GraphAPIError):
   def __init__(
     self,
     message: str = "Rate limit exceeded",
-    retry_after_seconds: Optional[int] = None,
+    retry_after_seconds: int | None = None,
   ):
     super().__init__(message, error_code="RATE_LIMIT")
     if retry_after_seconds:
@@ -118,7 +117,7 @@ class GraphRateLimitError(GraphAPIError):
 class GraphSchemaError(GraphAPIError):
   """Exception raised when there's a schema-related error."""
 
-  def __init__(self, message: str = "Schema error", schema_item: Optional[str] = None):
+  def __init__(self, message: str = "Schema error", schema_item: str | None = None):
     super().__init__(message, error_code="SCHEMA_ERROR")
     if schema_item:
       self.details["schema_item"] = schema_item

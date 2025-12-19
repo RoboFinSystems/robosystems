@@ -7,8 +7,8 @@ expose membership, limits, and graph state correctly for the authenticated user.
 
 from __future__ import annotations
 
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 

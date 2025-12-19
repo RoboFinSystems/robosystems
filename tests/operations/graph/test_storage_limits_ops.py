@@ -8,9 +8,10 @@ Tests the storage limit system including:
 - Credit service integration
 """
 
-import pytest
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
+
+import pytest
 
 from robosystems.config.graph_tier import GraphTier
 from robosystems.models.iam.graph_credits import GraphCredits
@@ -94,7 +95,7 @@ class TestStorageLimitChecking:
   ):
     """Test storage check fetches latest usage data when not provided."""
     # Create usage tracking record
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     usage_record = GraphUsage(
       id="usage_test_1",
       graph_id=sample_graph_credits.graph_id,
@@ -227,7 +228,7 @@ class TestStorageViolationDetection:
     import uuid
 
     # First create organization and add user to it
-    from robosystems.models.iam import Graph, Org, OrgUser, OrgType
+    from robosystems.models.iam import Graph, Org, OrgType, OrgUser
 
     org = Org.create(
       name="Test Organization",
@@ -263,7 +264,7 @@ class TestStorageViolationDetection:
     )
 
     # Create usage record that exceeds limit (120GB > 100GB limit)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     usage_record = GraphUsage(
       id="violation_usage_1",
       graph_id=credits.graph_id,
@@ -301,7 +302,7 @@ class TestStorageViolationDetection:
     import uuid
 
     # First create organization and add user to it
-    from robosystems.models.iam import Graph, Org, OrgUser, OrgType
+    from robosystems.models.iam import Graph, Org, OrgType, OrgUser
 
     org = Org.create(
       name="Test Organization",
@@ -337,7 +338,7 @@ class TestStorageViolationDetection:
     )
 
     # Create usage record that approaches limit (90GB = 90% of 100GB)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     usage_record = GraphUsage(
       id="approaching_usage_1",
       graph_id=credits.graph_id,
@@ -434,8 +435,8 @@ class TestStorageCreditsConsumption:
 
     # Check transaction was created
     from robosystems.models.iam.graph_credits import (
-      GraphCreditTransaction,
       CreditTransactionType,
+      GraphCreditTransaction,
     )
 
     transaction = (
@@ -479,7 +480,7 @@ def sample_graph_credits(db_session, sample_user):
   import uuid
 
   # First create organization and add user to it
-  from robosystems.models.iam import Graph, Org, OrgUser, OrgType
+  from robosystems.models.iam import Graph, Org, OrgType, OrgUser
 
   org = Org.create(
     name="Test Organization",
@@ -519,6 +520,7 @@ def sample_graph_credits(db_session, sample_user):
 def sample_user(db_session):
   """Create sample user for testing."""
   import uuid
+
   from robosystems.models.iam import User
 
   user = User(

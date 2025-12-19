@@ -11,8 +11,8 @@ from robosystems.adapters.plaid.processors import (
   PlaidTransactionsProcessor,
   plaid_account_element_uri,
   plaid_account_qname,
-  plaid_transaction_uri,
   plaid_line_item_uri,
+  plaid_transaction_uri,
 )
 
 __all__ = [
@@ -23,6 +23,6 @@ __all__ = [
   # URI utilities
   "plaid_account_element_uri",
   "plaid_account_qname",
-  "plaid_transaction_uri",
   "plaid_line_item_uri",
+  "plaid_transaction_uri",
 ]

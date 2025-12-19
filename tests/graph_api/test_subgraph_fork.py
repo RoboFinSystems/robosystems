@@ -1,9 +1,11 @@
 """Test subgraph fork functionality and write permissions."""
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from robosystems.security.cypher_analyzer import is_write_operation
+
 from robosystems.middleware.graph.utils import parse_subgraph_id
+from robosystems.security.cypher_analyzer import is_write_operation
 
 
 def test_parse_subgraph_id():
@@ -35,8 +37,8 @@ def test_write_operation_detection():
 @pytest.mark.asyncio
 async def test_fork_parent_data():
   """Test the fork_parent_data method."""
-  from robosystems.operations.graph.subgraph_service import SubgraphService
   from robosystems.config import env
+  from robosystems.operations.graph.subgraph_service import SubgraphService
 
   service = SubgraphService()
 

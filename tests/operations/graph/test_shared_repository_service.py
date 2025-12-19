@@ -5,8 +5,9 @@ Tests the shared repository service that manages shared graph repositories
 like SEC, industry, and economic data accessible across multiple users.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 
 from robosystems.operations.graph.shared_repository_service import (
   SharedRepositoryService,

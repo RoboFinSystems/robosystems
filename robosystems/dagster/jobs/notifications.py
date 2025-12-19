@@ -1,12 +1,12 @@
 """Dagster jobs for notification operations (email, SMS, push)."""
 
 from dagster import (
-  job,
-  op,
+  Backoff,
   Config,
   OpExecutionContext,
   RetryPolicy,
-  Backoff,
+  job,
+  op,
 )
 
 from robosystems.logger import get_logger
@@ -72,6 +72,7 @@ def send_email_op(context: OpExecutionContext, config: SendEmailConfig) -> dict:
   Results are logged and can be tracked via SSE if operation_id is provided.
   """
   import asyncio
+
   from robosystems.operations.aws.ses import ses_service
 
   context.log.info(

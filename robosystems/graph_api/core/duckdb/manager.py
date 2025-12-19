@@ -1,18 +1,18 @@
 import re
 from functools import wraps
-from typing import Dict, List, Any
+from typing import Any
 
 from fastapi import HTTPException, status
 
-from robosystems.logger import logger
 from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 from robosystems.graph_api.models.tables import (
-  TableInfo,
   TableCreateRequest,
   TableCreateResponse,
+  TableInfo,
   TableQueryRequest,
   TableQueryResponse,
 )
+from robosystems.logger import logger
 
 
 def validate_table_name(table_name: str) -> None:
@@ -146,8 +146,8 @@ class DuckDBTableManager:
     quoted_table: str,
     has_identifier: bool,
     has_from_to: bool,
-    s3_files: List[str],
-    file_id_map: Dict[str, str],
+    s3_files: list[str],
+    file_id_map: dict[str, str],
   ) -> str:
     """
     Build CREATE TABLE SQL with file_id column injection (v2 incremental ingestion).
@@ -330,7 +330,7 @@ class DuckDBTableManager:
       logger.error(f"Failed to create table {request.table_name}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to create table: {str(e)}",
+        detail=f"Failed to create table: {e!s}",
       )
 
   def query_table(self, request: TableQueryRequest) -> TableQueryResponse:
@@ -368,7 +368,7 @@ class DuckDBTableManager:
       logger.error(f"Query failed for graph {request.graph_id}: {e}")
       raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=f"Query failed: {str(e)}",
+        detail=f"Query failed: {e!s}",
       )
 
   def query_table_streaming(self, request: TableQueryRequest, chunk_size: int = 1000):
@@ -460,7 +460,7 @@ class DuckDBTableManager:
         "execution_time_ms": (time.time() - start_time) * 1000,
       }
 
-  def list_tables(self, graph_id: str) -> List[TableInfo]:
+  def list_tables(self, graph_id: str) -> list[TableInfo]:
     logger.info(f"Listing tables for graph {graph_id}")
 
     pool = get_duckdb_pool()
@@ -499,11 +499,11 @@ class DuckDBTableManager:
       logger.error(f"Failed to list tables for graph {graph_id}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to list tables: {str(e)}",
+        detail=f"Failed to list tables: {e!s}",
       )
 
   @validate_table_name_decorator
-  def refresh_table(self, graph_id: str, table_name: str) -> Dict[str, Any]:
+  def refresh_table(self, graph_id: str, table_name: str) -> dict[str, Any]:
     """
     Refresh an external table from current PostgreSQL file registry.
 
@@ -521,9 +521,10 @@ class DuckDBTableManager:
         HTTPException: If table doesn't exist
     """
     import time
+
     from robosystems.database import SessionFactory
-    from robosystems.models.iam.graph_table import GraphTable
     from robosystems.models.iam.graph_file import GraphFile
+    from robosystems.models.iam.graph_table import GraphTable
 
     validate_table_name(table_name)
 
@@ -591,13 +592,13 @@ class DuckDBTableManager:
       logger.error(f"Failed to refresh table {table_name}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to refresh table: {str(e)}",
+        detail=f"Failed to refresh table: {e!s}",
       )
     finally:
       db.close()
 
   @validate_table_name_decorator
-  def delete_table(self, graph_id: str, table_name: str) -> Dict[str, str]:
+  def delete_table(self, graph_id: str, table_name: str) -> dict[str, str]:
     # Explicit validation (decorator provides safety net)
     validate_table_name(table_name)
 
@@ -619,12 +620,12 @@ class DuckDBTableManager:
       logger.error(f"Failed to delete table {table_name}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to delete table: {str(e)}",
+        detail=f"Failed to delete table: {e!s}",
       )
 
   def delete_file_data(
     self, graph_id: str, table_name: str, file_id: str
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Delete all rows for a specific file from DuckDB staging table.
 
@@ -725,5 +726,5 @@ class DuckDBTableManager:
       logger.error(f"Failed to delete file data from {table_name}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to delete file data: {str(e)}",
+        detail=f"Failed to delete file data: {e!s}",
       )

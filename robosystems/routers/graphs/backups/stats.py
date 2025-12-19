@@ -2,7 +2,8 @@
 Backup statistics endpoint.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import (
   APIRouter,
   Depends,
@@ -14,13 +15,13 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.graphs.backups import BackupStatsResponse
 from robosystems.models.iam import User
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.logger import logger
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 # Constants
 PERCENTAGE_MULTIPLIER = 100.0
@@ -62,7 +63,7 @@ async def get_backup_stats(
     )
 
     # Query database for backups instead of S3
-    from robosystems.models.iam import GraphBackup, BackupStatus
+    from robosystems.models.iam import BackupStatus, GraphBackup
 
     backup_records = (
       db.query(GraphBackup).filter(GraphBackup.graph_id == graph_id).all()
@@ -116,7 +117,7 @@ async def get_backup_stats(
     if backup_records:
       latest_backup = max(
         backup_records,
-        key=lambda x: x.created_at or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda x: x.created_at or datetime.min.replace(tzinfo=UTC),
       )
       if latest_backup.created_at:
         latest_backup_date = latest_backup.created_at.isoformat()
@@ -153,7 +154,7 @@ async def get_backup_stats(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to get backup stats for graph {graph_id}: {str(e)}")
+    logger.error(f"Failed to get backup stats for graph {graph_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to retrieve backup statistics",

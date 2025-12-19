@@ -4,15 +4,16 @@ Agent registry for discovery and lifecycle management.
 Provides registration, discovery, and management of agent implementations.
 """
 
-from typing import Dict, Type, Optional, List, Any
 import importlib
+from typing import Any
+
+from robosystems.logger import logger
+from robosystems.models.iam import User
 from robosystems.operations.agents.base import (
-  BaseAgent,
   AgentCapability,
   AgentMode,
+  BaseAgent,
 )
-from robosystems.models.iam import User
-from robosystems.logger import logger
 
 
 class AgentRegistrationError(Exception):
@@ -41,11 +42,11 @@ class AgentRegistry:
   """
 
   _instance = None
-  _agents: Dict[str, Type[BaseAgent]] = {}
-  _aliases: Dict[str, str] = {}
-  _versions: Dict[str, Dict[str, Type[BaseAgent]]] = {}
-  _dependencies: Dict[str, List[str]] = {}
-  _lazy_imports: Dict[str, str] = {}
+  _agents: dict[str, type[BaseAgent]] = {}
+  _aliases: dict[str, str] = {}
+  _versions: dict[str, dict[str, type[BaseAgent]]] = {}
+  _dependencies: dict[str, list[str]] = {}
+  _lazy_imports: dict[str, str] = {}
 
   def __new__(cls):
     """Ensure singleton pattern."""
@@ -54,7 +55,7 @@ class AgentRegistry:
     return cls._instance
 
   @classmethod
-  def register(cls, agent_type: str, depends_on: Optional[List[str]] = None):
+  def register(cls, agent_type: str, depends_on: list[str] | None = None):
     """
     Decorator for registering agents.
 
@@ -66,7 +67,7 @@ class AgentRegistry:
         Decorator function
     """
 
-    def decorator(agent_class: Type[BaseAgent]):
+    def decorator(agent_class: type[BaseAgent]):
       cls._register_agent(agent_type, agent_class, depends_on=depends_on)
       return agent_class
 
@@ -76,10 +77,10 @@ class AgentRegistry:
   def _register_agent(
     cls,
     agent_type: str,
-    agent_class: Type[BaseAgent],
+    agent_class: type[BaseAgent],
     override: bool = False,
-    version: Optional[str] = None,
-    depends_on: Optional[List[str]] = None,
+    version: str | None = None,
+    depends_on: list[str] | None = None,
   ):
     """Internal method to register an agent."""
     # Validate agent class
@@ -112,9 +113,9 @@ class AgentRegistry:
   def register_agent(
     self,
     agent_type: str,
-    agent_class: Type[BaseAgent],
+    agent_class: type[BaseAgent],
     override: bool = False,
-    version: Optional[str] = None,
+    version: str | None = None,
   ):
     """
     Register an agent programmatically.
@@ -165,8 +166,8 @@ class AgentRegistry:
     graph_id: str,
     user: User,
     db_session=None,
-    version: Optional[str] = None,
-  ) -> Optional[BaseAgent]:
+    version: str | None = None,
+  ) -> BaseAgent | None:
     """
     Get an agent instance.
 
@@ -210,12 +211,12 @@ class AgentRegistry:
       agent = agent_class(graph_id, user, db_session)
       return agent
     except Exception as e:
-      logger.error(f"Failed to instantiate agent '{agent_type}': {str(e)}")
-      raise AgentRegistrationError(f"Failed to create agent: {str(e)}")
+      logger.error(f"Failed to instantiate agent '{agent_type}': {e!s}")
+      raise AgentRegistrationError(f"Failed to create agent: {e!s}")
 
   def get_all_agents(
     self, graph_id: str, user: User, db_session=None
-  ) -> Dict[str, BaseAgent]:
+  ) -> dict[str, BaseAgent]:
     """
     Get all registered agents.
 
@@ -235,11 +236,11 @@ class AgentRegistry:
         if agent:
           agents[agent_type] = agent
       except Exception as e:
-        logger.warning(f"Could not instantiate agent '{agent_type}': {str(e)}")
+        logger.warning(f"Could not instantiate agent '{agent_type}': {e!s}")
 
     return agents
 
-  def list_agents(self) -> Dict[str, Dict[str, Any]]:
+  def list_agents(self) -> dict[str, dict[str, Any]]:
     """
     List all available agents with metadata.
 
@@ -264,7 +265,7 @@ class AgentRegistry:
           "requires_credits": metadata.requires_credits,
         }
       except Exception as e:
-        logger.warning(f"Could not get metadata for '{agent_type}': {str(e)}")
+        logger.warning(f"Could not get metadata for '{agent_type}': {e!s}")
         agent_list[agent_type] = {
           "name": agent_type,
           "error": "Could not retrieve metadata",
@@ -274,7 +275,7 @@ class AgentRegistry:
 
   def get_agents_by_capability(
     self, capability: AgentCapability
-  ) -> Dict[str, Type[BaseAgent]]:
+  ) -> dict[str, type[BaseAgent]]:
     """
     Get agents that have a specific capability.
 
@@ -299,7 +300,7 @@ class AgentRegistry:
 
     return matching
 
-  def get_agents_by_mode(self, mode: AgentMode) -> Dict[str, Type[BaseAgent]]:
+  def get_agents_by_mode(self, mode: AgentMode) -> dict[str, type[BaseAgent]]:
     """
     Get agents that support a specific mode.
 
@@ -325,7 +326,7 @@ class AgentRegistry:
 
   def discover_agent(
     self, query: str, graph_id: str, user: User, db_session=None
-  ) -> Optional[BaseAgent]:
+  ) -> BaseAgent | None:
     """
     Discover the best agent for a query.
 
@@ -350,11 +351,11 @@ class AgentRegistry:
           best_score = score
           best_agent = agent
       except Exception as e:
-        logger.warning(f"Error evaluating agent '{agent_type}': {str(e)}")
+        logger.warning(f"Error evaluating agent '{agent_type}': {e!s}")
 
     return best_agent
 
-  def register_bulk(self, agents: Dict[str, Type[BaseAgent]]):
+  def register_bulk(self, agents: dict[str, type[BaseAgent]]):
     """
     Register multiple agents at once.
 
@@ -387,7 +388,7 @@ class AgentRegistry:
     self._aliases[alias] = agent_type
     logger.info(f"Added alias '{alias}' for agent '{agent_type}'")
 
-  def get_agent_metadata(self, agent_type: str) -> Optional[Dict[str, Any]]:
+  def get_agent_metadata(self, agent_type: str) -> dict[str, Any] | None:
     """
     Get agent metadata without instantiation.
 
@@ -418,7 +419,7 @@ class AgentRegistry:
         "requires_credits": metadata.requires_credits,
       }
     except Exception as e:
-      logger.error(f"Failed to get metadata for '{agent_type}': {str(e)}")
+      logger.error(f"Failed to get metadata for '{agent_type}': {e!s}")
       return None
 
   def is_registered(self, agent_type: str) -> bool:
@@ -437,7 +438,7 @@ class AgentRegistry:
 
   def check_agent_health(
     self, agent_type: str, graph_id: str, user: User, db_session=None
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Check health of a specific agent.
 
@@ -511,5 +512,5 @@ class AgentRegistry:
       logger.info(f"Lazy loaded agent '{agent_type}' from {import_path}")
 
     except Exception as e:
-      logger.error(f"Failed to lazy load '{agent_type}' from {import_path}: {str(e)}")
-      raise AgentRegistrationError(f"Failed to load agent: {str(e)}")
+      logger.error(f"Failed to lazy load '{agent_type}' from {import_path}: {e!s}")
+      raise AgentRegistrationError(f"Failed to load agent: {e!s}")
