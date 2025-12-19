@@ -72,6 +72,9 @@ from robosystems.dagster.jobs.sec import (
   sec_daily_download_schedule,
   sec_weekly_download_schedule,
 )
+from robosystems.dagster.jobs.notifications import (
+  send_email_job,
+)
 
 # Import sensors
 from robosystems.dagster.sensors import (
@@ -156,6 +159,8 @@ all_jobs = [
   sec_download_job,
   sec_process_job,
   sec_materialize_job,
+  # Notification jobs
+  send_email_job,
 ]
 
 # ============================================================================

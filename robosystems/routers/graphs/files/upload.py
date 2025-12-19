@@ -431,7 +431,8 @@ immediate DuckDB staging and optional graph ingestion.
             "file_id": "f123",
             "status": "uploaded",
             "message": "File uploaded and queued for DuckDB staging",
-            "duckdb_task_id": "op_abc123",
+            "operation_id": "op_abc123",
+            "monitor_url": "/v1/operations/op_abc123/stream",
           }
         }
       },
@@ -736,9 +737,7 @@ async def update_file(
             run_config=run_config,
           )
 
-          graph_file.celery_task_id = (
-            operation_id  # Legacy field name, stores operation_id
-          )
+          graph_file.operation_id = operation_id
 
           db.commit()
           db.refresh(graph_file)
@@ -773,9 +772,9 @@ async def update_file(
       "message": "File validated and ready for ingestion",
     }
 
-    if graph_file.celery_task_id:
-      response["duckdb_staging_task_id"] = graph_file.celery_task_id
-      response["monitor_url"] = f"/v1/operations/{graph_file.celery_task_id}/stream"
+    if graph_file.operation_id:
+      response["operation_id"] = graph_file.operation_id
+      response["monitor_url"] = f"/v1/operations/{graph_file.operation_id}/stream"
 
       if request.ingest_to_graph:
         response["message"] = (

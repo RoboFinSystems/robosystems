@@ -1,9 +1,20 @@
 """Password reset endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import (
+  APIRouter,
+  BackgroundTasks,
+  Depends,
+  HTTPException,
+  Query,
+  Request,
+  status,
+)
 from sqlalchemy.orm import Session
 
-from robosystems.operations.aws import ses_service as sns_service
+from robosystems.middleware.sse import (
+  run_and_monitor_dagster_job,
+  build_email_job_config,
+)
 from ...config import env
 from ...database import get_async_db_session
 from ...logger import logger
@@ -43,6 +54,7 @@ router = APIRouter()
 async def forgot_password(
   request: ForgotPasswordRequest,
   fastapi_request: Request,
+  background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_rate_limit_dependency),
 ) -> dict:
@@ -52,6 +64,7 @@ async def forgot_password(
   Args:
       request: Forgot password request with email
       fastapi_request: FastAPI request object
+      background_tasks: FastAPI background tasks for async email
       session: Database session
       _rate_limit: Rate limiting dependency
 
@@ -88,31 +101,35 @@ async def forgot_password(
     # Detect app source
     app = detect_app_source(fastapi_request)
 
-    # Send reset email
-    email_sent = await sns_service.send_password_reset_email(
-      user_email=user.email,
+    # Queue reset email via Dagster (async with retry logic)
+    run_config = build_email_job_config(
+      email_type="password_reset",
+      to_email=user.email,
       user_name=user.name,
       token=token,
       app=app,
     )
+    background_tasks.add_task(
+      run_and_monitor_dagster_job,
+      job_name="send_email_job",
+      operation_id=None,  # No SSE tracking needed for auth emails
+      run_config=run_config,
+    )
 
-    if email_sent:
-      logger.info(f"Password reset email sent to {sanitized_email}")
+    logger.info(f"Queued password reset email to {sanitized_email}")
 
-      # Log security event
-      SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.PASSWORD_RESET_REQUESTED,
-        user_id=user.id,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        endpoint="/v1/auth/password/forgot",
-        details={
-          "app_source": app,
-        },
-        risk_level="medium",
-      )
-    else:
-      logger.error(f"Failed to send password reset email to {sanitized_email}")
+    # Log security event
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.PASSWORD_RESET_REQUESTED,
+      user_id=user.id,
+      ip_address=client_ip,
+      user_agent=user_agent,
+      endpoint="/v1/auth/password/forgot",
+      details={
+        "app_source": app,
+      },
+      risk_level="medium",
+    )
   else:
     # Log attempt for non-existent user (security monitoring)
     logger.warning(

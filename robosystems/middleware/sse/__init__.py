@@ -54,6 +54,8 @@ from .dagster_monitor import (
   build_graph_job_config,
 )
 
+from robosystems.dagster.jobs.notifications import build_email_job_config
+
 __all__ = [
   # Event Storage
   "SSEEventStorage",
@@ -77,4 +79,5 @@ __all__ = [
   "run_and_monitor_dagster_job",
   "submit_dagster_job_sync",
   "build_graph_job_config",
+  "build_email_job_config",
 ]

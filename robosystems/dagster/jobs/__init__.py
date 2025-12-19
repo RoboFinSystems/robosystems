@@ -13,6 +13,8 @@ from robosystems.dagster.jobs.billing import (
   daily_storage_billing_job,
   hourly_usage_collection_job,
   monthly_usage_report_job,
+  process_stripe_webhook_job,
+  build_stripe_webhook_job_config,
 )
 from robosystems.dagster.jobs.infrastructure import (
   hourly_auth_cleanup_job,
@@ -35,6 +37,10 @@ from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
   weekly_shared_repository_snapshot_schedule,
 )
+from robosystems.dagster.jobs.notifications import (
+  send_email_job,
+  build_email_job_config,
+)
 
 __all__ = [
   # Billing
@@ -42,6 +48,8 @@ __all__ = [
   "daily_storage_billing_job",
   "hourly_usage_collection_job",
   "monthly_usage_report_job",
+  "process_stripe_webhook_job",
+  "build_stripe_webhook_job_config",
   # Infrastructure
   "hourly_auth_cleanup_job",
   "weekly_health_check_job",
@@ -59,4 +67,7 @@ __all__ = [
   "shared_repository_snapshot_only_job",
   "shared_repository_refresh_replicas_job",
   "weekly_shared_repository_snapshot_schedule",
+  # Notifications
+  "send_email_job",
+  "build_email_job_config",
 ]

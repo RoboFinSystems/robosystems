@@ -49,7 +49,7 @@ class GraphFile(Base):
   upload_status = Column(String, nullable=False, default="pending")
   upload_method = Column(String, nullable=False)
 
-  # v2 Incremental Ingestion: Multi-layer status tracking
+  # Incremental ingestion: Multi-layer status tracking
   duckdb_status = Column(String, nullable=False, default="pending")
   duckdb_row_count = Column(Integer, nullable=True)
   duckdb_staged_at = Column(DateTime(timezone=True), nullable=True)
@@ -57,7 +57,8 @@ class GraphFile(Base):
   graph_status = Column(String, nullable=False, default="pending")
   graph_ingested_at = Column(DateTime(timezone=True), nullable=True)
 
-  celery_task_id = Column(String, nullable=True)
+  # Dagster operation ID for tracking async processing (SSE streaming)
+  operation_id = Column(String, nullable=True)
 
   created_at = Column(
     DateTime(timezone=True),

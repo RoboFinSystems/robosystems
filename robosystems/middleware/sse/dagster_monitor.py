@@ -147,6 +147,27 @@ class DagsterRunMonitor:
       "run_id": run_id,
     }
 
+  async def emit_started(
+    self,
+    operation_id: str,
+    job_name: str,
+    run_id: str,
+  ):
+    """Emit an operation_started event when Dagster job begins."""
+    try:
+      self.event_storage.store_event_sync(
+        operation_id,
+        EventType.OPERATION_STARTED,
+        {
+          "message": f"Job '{job_name}' started",
+          "job_name": job_name,
+          "run_id": run_id,
+          "progress_percent": 0,
+        },
+      )
+    except Exception as e:
+      logger.warning(f"Failed to emit started event: {e}")
+
   async def emit_progress(
     self,
     operation_id: str,
@@ -238,13 +259,6 @@ class DagsterRunMonitor:
 
     start_time = time.time()
     last_status = None
-
-    await self.emit_progress(
-      operation_id,
-      "Starting Dagster job...",
-      progress_percent=0,
-      details={"run_id": run_id},
-    )
 
     while True:
       # Check timeout
@@ -345,6 +359,9 @@ async def run_and_monitor_dagster_job(
   try:
     # Submit the job
     run_id = monitor.submit_job(job_name, run_config, tags)
+
+    # Emit started event
+    await monitor.emit_started(operation_id, job_name, run_id)
 
     # Monitor until completion
     result = await monitor.monitor_run(run_id, operation_id)
