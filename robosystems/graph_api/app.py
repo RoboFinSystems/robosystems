@@ -36,7 +36,7 @@ except ImportError:
 try:
   from importlib.metadata import version
 
-  __version__ = version("robosystems-service")
+  __version__ = version("robosystems")
 except Exception:
   __version__ = "1.0.0"
 

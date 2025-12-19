@@ -363,6 +363,7 @@ async def create_subgraph(
         fork_parent=True,
         fork_tables=fork_options.get("tables", []),
         fork_exclude_patterns=fork_options.get("exclude_patterns", []),
+        operation_id=operation_id,
       )
 
       # Run Dagster job with SSE monitoring in background

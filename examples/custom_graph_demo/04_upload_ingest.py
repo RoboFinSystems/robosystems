@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -107,6 +108,69 @@ def upload_tables(
     except Exception as exc:  # noqa: BLE001
       print(f"   ❌ Upload failed: {exc}")
       raise
+
+
+def wait_for_staging(
+  extensions: RoboSystemsExtensions, graph_id: str, timeout_seconds: int = 600
+) -> bool:
+  """Wait for all uploaded files to be staged in DuckDB."""
+  print(f"\n{'=' * 70}")
+  print("⏳ Waiting for DuckDB Staging to Complete")
+  print("=" * 70)
+
+  start_time = time.time()
+  poll_interval = 2
+
+  while True:
+    elapsed = time.time() - start_time
+    if elapsed > timeout_seconds:
+      print(f"\n⚠️  Staging timeout after {timeout_seconds}s - some files may not be staged")
+      return False
+
+    # Get all files for the graph
+    files = extensions.files.list(graph_id)
+    if not files:
+      print("   No files found")
+      return True
+
+    # Check status of each file
+    pending_count = 0
+    staged_count = 0
+    failed_count = 0
+
+    for f in files:
+      # Get detailed file info with layers
+      file_info = extensions.files.get(graph_id, f.file_id)
+      if file_info and file_info.layers:
+        # layers is a Pydantic model with duckdb attribute
+        duckdb_layer = getattr(file_info.layers, "duckdb", None)
+        if duckdb_layer:
+          duckdb_status = getattr(duckdb_layer, "status", "pending")
+        else:
+          duckdb_status = "pending"
+        if duckdb_status == "staged":
+          staged_count += 1
+        elif duckdb_status == "failed":
+          failed_count += 1
+        else:
+          pending_count += 1
+      else:
+        pending_count += 1
+
+    total = staged_count + pending_count + failed_count
+    print(
+      f"   Staging progress: {staged_count}/{total} staged, "
+      f"{pending_count} pending, {failed_count} failed ({elapsed:.0f}s)"
+    )
+
+    if pending_count == 0:
+      if failed_count > 0:
+        print(f"\n⚠️  {failed_count} files failed to stage")
+      else:
+        print(f"\n✅ All {staged_count} files staged successfully!")
+      return failed_count == 0
+
+    time.sleep(poll_interval)
 
 
 def materialize_graph_data(extensions: RoboSystemsExtensions, graph_id: str) -> None:
@@ -224,6 +288,10 @@ def main() -> None:
     upload_tables(
       extensions, graph_id, relationship_files, "Phase 2 - Relationship Tables"
     )
+    # Wait for DuckDB staging to complete before materializing
+    staging_ok = wait_for_staging(extensions, graph_id, timeout_seconds=600)
+    if not staging_ok:
+      print("\n⚠️  Continuing with materialization despite staging issues...")
     materialize_graph_data(extensions, graph_id)
     run_post_ingest_checks(extensions, graph_id)
   except Exception:

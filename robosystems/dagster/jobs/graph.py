@@ -71,6 +71,7 @@ class CreateGraphConfig(Config):
   tags: list[str] = []
   skip_billing: bool = False
   operation_id: str | None = None  # For SSE result updates
+  custom_schema: dict | None = None  # Custom schema definition for custom graphs
 
 
 class CreateEntityGraphConfig(Config):
@@ -101,6 +102,7 @@ class CreateSubgraphConfig(Config):
   fork_parent: bool = False
   fork_tables: list[str] = []
   fork_exclude_patterns: list[str] = []
+  operation_id: str | None = None  # For SSE result updates
 
 
 class BackupGraphConfig(Config):
@@ -186,7 +188,7 @@ def create_graph_database(
     tier=config.tier,
     initial_data=None,
     user_id=config.user_id,
-    custom_schema=None,
+    custom_schema=config.custom_schema,
     progress_callback=progress_callback,
   )
 
@@ -442,7 +444,13 @@ def fork_parent_to_subgraph(
   finally:
     loop.close()
 
-  return {**subgraph_result, "fork_status": fork_status}
+  result = {**subgraph_result, "fork_status": fork_status}
+
+  # Emit result to SSE storage if operation_id provided
+  if config.operation_id:
+    _emit_graph_result_to_sse(context, config.operation_id, result)
+
+  return result
 
 
 @job

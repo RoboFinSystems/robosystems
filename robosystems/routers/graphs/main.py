@@ -538,6 +538,9 @@ async def create_graph(
           tags=request.tags or [],
           skip_billing=False,
           operation_id=operation_id,
+          custom_schema=request.custom_schema.model_dump()
+          if request.custom_schema
+          else None,
         )
 
       # Run Dagster job with SSE monitoring in background

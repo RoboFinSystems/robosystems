@@ -338,21 +338,6 @@ sec-pipeline-materialize count="5" years="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize --count {{count}} {{ if years != "" { "--years " + years } else { "" } }}
 
 
-## Valkey/Redis ##
-
-# Clear Valkey/Redis queues
-valkey-clear-queue queue env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues {{queue}}
-
-# Clear Valkey/Redis queues including unacknowledged messages
-valkey-clear-queue-all queue env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --clear-unacked {{queue}}
-
-# List Valkey/Redis queue contents without clearing
-valkey-list-queue queue env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
-
-
 ## Setup ##
 
 # AWS Secrets Manager setup
