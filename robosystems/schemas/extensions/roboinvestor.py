@@ -5,7 +5,7 @@ Portfolio management, investment tracking, and securities analysis.
 Extends the base schema with investment-specific entities.
 """
 
-from ..models import Node, Relationship, Property
+from ..models import Node, Property, Relationship
 
 # RoboInvestor Extension Nodes
 EXTENSION_NODES = [

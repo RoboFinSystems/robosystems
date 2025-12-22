@@ -5,13 +5,15 @@ This endpoint is intentionally unprotected as it's used by AWS resources
 for health checks and monitoring.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, version
+
 from fastapi import APIRouter
+
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
 )
 from robosystems.models.api.common import HealthStatus
-from importlib.metadata import version, PackageNotFoundError
 
 # Create router without authentication requirements
 router = APIRouter()
@@ -51,6 +53,6 @@ async def service_status():
   """
   return HealthStatus(
     status="healthy",
-    timestamp=datetime.now(timezone.utc),
+    timestamp=datetime.now(UTC),
     details={"service": "robosystems-api", "version": get_app_version()},
   )

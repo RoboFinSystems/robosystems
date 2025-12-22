@@ -61,6 +61,13 @@ on:
         type: string
         default: "userdata/bastion.sh"
 
+    outputs:
+      bastion_sg_id:
+        description: "Security group ID for bastion host"
+        value: ${{ jobs.action.outputs.bastion_sg_id }}
+      bastion_public_ip:
+        description: "Public IP address of bastion host"
+        value: ${{ jobs.action.outputs.bastion_public_ip }}
 
     secrets:
       ACTIONS_TOKEN:
@@ -74,6 +81,9 @@ jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
     timeout-minutes: 20
+    outputs:
+      bastion_sg_id: ${{ steps.stack-outputs.outputs.bastion_sg_id }}
+      bastion_public_ip: ${{ steps.stack-outputs.outputs.bastion_public_ip }}
 
     steps:
       - name: Checkout
@@ -196,3 +206,34 @@ jobs:
           stack-name: ${{ inputs.stack_name }}
           timeout: "1800"
           interval: "10"
+
+      - name: Get Stack Outputs
+        id: stack-outputs
+        run: |
+          echo "Retrieving bastion stack outputs..."
+
+          # Get security group ID
+          BASTION_SG_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='BastionSecurityGroupId'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$BASTION_SG_ID" ] && [ "$BASTION_SG_ID" != "None" ]; then
+            echo "bastion_sg_id=$BASTION_SG_ID" >> $GITHUB_OUTPUT
+            echo "Bastion Security Group ID: $BASTION_SG_ID"
+          else
+            echo "Warning: Could not retrieve Bastion Security Group ID"
+          fi
+
+          # Get public IP
+          BASTION_PUBLIC_IP=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack_name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='BastionPublicIP'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$BASTION_PUBLIC_IP" ] && [ "$BASTION_PUBLIC_IP" != "None" ]; then
+            echo "bastion_public_ip=$BASTION_PUBLIC_IP" >> $GITHUB_OUTPUT
+            echo "Bastion Public IP: $BASTION_PUBLIC_IP"
+          else
+            echo "Warning: Could not retrieve Bastion Public IP"
+          fi

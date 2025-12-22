@@ -9,19 +9,20 @@ Tests the fixes for:
 - Rate limiting for credit operations
 """
 
-import pytest
 import asyncio
 from decimal import Decimal
+from unittest.mock import Mock, patch
 
+import pytest
+
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.models.iam import User
 from robosystems.models.iam.user_repository import (
-  UserRepository,
-  RepositoryType,
-  RepositoryPlan,
   RepositoryAccessLevel,
+  RepositoryPlan,
+  RepositoryType,
+  UserRepository,
 )
-from robosystems.middleware.graph.utils import MultiTenantUtils
-from unittest.mock import Mock, patch
 
 
 class TestCreditRaceConditions:
@@ -234,7 +235,7 @@ class TestCypherParameterValidation:
       def mock_validate_parameters(params):
         import re
 
-        for param_name in params.keys():
+        for param_name in params:
           # Check for invalid characters
           if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", param_name):
             raise Exception(f"Invalid parameter name: {param_name}")

@@ -7,17 +7,20 @@ real-time operation monitoring with event replay capability.
 
 import asyncio
 import json
-from typing import Dict, Any, Optional, AsyncGenerator, Set
-from fastapi import Request, HTTPException
+from collections.abc import AsyncGenerator
+from datetime import UTC
+from typing import Any
+
+from fastapi import HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.middleware.sse.event_storage import (
-  get_event_storage,
-  SSEEvent,
   EventType,
   OperationStatus,
+  SSEEvent,
+  get_event_storage,
 )
 
 
@@ -30,11 +33,11 @@ class SSEConnectionManager:
 
   def __init__(self):
     """Initialize the connection manager."""
-    self.connections: Dict[str, Set[str]] = {}  # operation_id -> set of connection_ids
-    self.connection_queues: Dict[
+    self.connections: dict[str, set[str]] = {}  # operation_id -> set of connection_ids
+    self.connection_queues: dict[
       str, asyncio.Queue
     ] = {}  # connection_key -> event queue
-    self.user_connections: Dict[str, Set[str]] = {}  # user_id -> set of connection_keys
+    self.user_connections: dict[str, set[str]] = {}  # user_id -> set of connection_keys
     self._lock = asyncio.Lock()
 
     # Configuration from environment
@@ -112,7 +115,7 @@ class SSEConnectionManager:
       return queue
 
   async def remove_connection(
-    self, operation_id: str, connection_id: str, user_id: Optional[str] = None
+    self, operation_id: str, connection_id: str, user_id: str | None = None
   ):
     """
     Remove an SSE connection.
@@ -224,7 +227,7 @@ class SSEConnectionManager:
 
 
 # Global connection manager
-_connection_manager: Optional[SSEConnectionManager] = None
+_connection_manager: SSEConnectionManager | None = None
 
 
 def get_connection_manager() -> SSEConnectionManager:
@@ -239,8 +242,8 @@ async def create_sse_stream_starlette(
   operation_id: str,
   user_id: str,
   from_sequence: int = 0,
-  request: Optional[Request] = None,
-) -> AsyncGenerator[Dict[str, Any], None]:
+  request: Request | None = None,
+) -> AsyncGenerator[dict[str, Any]]:
   """
   Create an SSE stream for an operation using sse-starlette format.
 
@@ -404,7 +407,7 @@ async def create_sse_stream_starlette(
           }
           break
 
-      except asyncio.TimeoutError:
+      except TimeoutError:
         # Send keepalive
         yield {
           "event": "keepalive",
@@ -432,8 +435,8 @@ async def create_sse_stream_starlette(
 async def emit_event_to_operation(
   operation_id: str,
   event_type: EventType,
-  data: Dict[str, Any],
-  sequence_number: Optional[int] = None,
+  data: dict[str, Any],
+  sequence_number: int | None = None,
 ) -> bool:
   """
   Emit an event to all active SSE connections for an operation.
@@ -449,7 +452,7 @@ async def emit_event_to_operation(
   Returns:
       bool: True if event was sent to at least one connection
   """
-  from datetime import datetime, timezone
+  from datetime import datetime
 
   connection_manager = get_connection_manager()
 
@@ -457,7 +460,7 @@ async def emit_event_to_operation(
   event = SSEEvent(
     event_type=event_type,
     operation_id=operation_id,
-    timestamp=datetime.now(timezone.utc).isoformat(),
+    timestamp=datetime.now(UTC).isoformat(),
     data=data,
     sequence_number=sequence_number or 0,
   )
@@ -484,7 +487,7 @@ def create_sse_response_starlette(
   operation_id: str,
   user_id: str,
   from_sequence: int = 0,
-  request: Optional[Request] = None,
+  request: Request | None = None,
 ) -> EventSourceResponse:
   """
   Create a FastAPI EventSourceResponse using sse-starlette.

@@ -5,7 +5,7 @@ Regulatory filing, compliance, and submission management.
 Extends the base schema with regulatory-specific entities.
 """
 
-from ..models import Node, Relationship, Property
+from ..models import Node, Property, Relationship
 
 # RoboReport Extension Nodes
 EXTENSION_NODES = [

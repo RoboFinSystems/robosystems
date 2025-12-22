@@ -5,7 +5,6 @@ Defines the data structures used to represent LadybugDB schema elements.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 
 @dataclass
@@ -28,8 +27,8 @@ class Node:
   """Represents a node table in LadybugDB."""
 
   name: str
-  properties: List[Property]
-  description: Optional[str] = None
+  properties: list[Property]
+  description: str | None = None
 
   def to_cypher(self, safe_mode: bool = True) -> str:
     """
@@ -71,8 +70,8 @@ class Relationship:
   name: str
   from_node: str
   to_node: str
-  properties: List[Property] = field(default_factory=list)
-  description: Optional[str] = None
+  properties: list[Property] = field(default_factory=list)
+  description: str | None = None
 
   def to_cypher(self, safe_mode: bool = True) -> str:
     """
@@ -106,9 +105,9 @@ class Schema:
   """Represents a complete schema with nodes and relationships."""
 
   name: str
-  nodes: List[Node] = field(default_factory=list)
-  relationships: List[Relationship] = field(default_factory=list)
-  description: Optional[str] = None
+  nodes: list[Node] = field(default_factory=list)
+  relationships: list[Relationship] = field(default_factory=list)
+  description: str | None = None
   version: str = "1.0.0"
 
   def to_cypher(self) -> str:

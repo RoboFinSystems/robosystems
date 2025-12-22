@@ -1,11 +1,12 @@
 """Comprehensive tests for the ConnectionCredentials model."""
 
-import pytest
 import json
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
-from sqlalchemy.exc import SQLAlchemyError
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
+
+import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.models.iam import ConnectionCredentials
 
@@ -464,7 +465,7 @@ class TestConnectionCredentialsModel:
       connection_id="conn_2",
       provider="Plaid",
       user_id="user_2",
-      expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+      expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
     assert cred2.is_expired() is False
 
@@ -473,7 +474,7 @@ class TestConnectionCredentialsModel:
       connection_id="conn_3",
       provider="SEC",
       user_id="user_3",
-      expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+      expires_at=datetime.now(UTC) - timedelta(hours=1),
     )
     assert cred3.is_expired() is True
 
@@ -519,7 +520,7 @@ class TestConnectionCredentialsModel:
       user_id="user_test",
     )
 
-    new_expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+    new_expiry = datetime.now(UTC) + timedelta(hours=1)
 
     with pytest.raises(SQLAlchemyError):
       cred.update_expiry(new_expiry, mock_session)

@@ -2,15 +2,16 @@
 
 import json
 from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from robosystems.graph_api.core.task_sse import (
   TaskType,
-  generate_task_sse_events,
-  _get_progress_message,
+  _calculate_duration,
   _get_completion_message,
   _get_failure_message,
-  _calculate_duration,
+  _get_progress_message,
+  generate_task_sse_events,
 )
 
 

@@ -111,11 +111,11 @@ COPY robosystems/ ./robosystems/
 COPY main.py ./
 
 # Copy pre-built cache bundles and cache manager script (required for build)
-COPY robosystems/arelle/bundles/ ./robosystems/arelle/bundles/
+COPY robosystems/adapters/sec/arelle/bundles/ ./robosystems/adapters/sec/arelle/bundles/
 COPY robosystems/scripts/arelle_cache_manager.py ./robosystems/scripts/
 
 # Validate that required bundles exist before attempting extraction
-RUN if [ ! -f "./robosystems/arelle/bundles/arelle-schemas-latest.tar.gz" ]; then \
+RUN if [ ! -f "./robosystems/adapters/sec/arelle/bundles/arelle-schemas-latest.tar.gz" ]; then \
         echo "ERROR: Schema bundle (arelle-schemas-latest.tar.gz) is missing!" && \
         echo "Run 'just cache-arelle-update' to generate bundles before building" && \
         exit 1; \
@@ -139,8 +139,9 @@ ARG LADYBUG_VERSION=0.12.0
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/build/.venv/bin:$PATH" \
-    ARELLE_CACHE_DIR="/app/robosystems/arelle/cache" \
-    LADYBUG_HOME="/app/data/.ladybug"
+    ARELLE_CACHE_DIR="/app/robosystems/adapters/sec/arelle/cache" \
+    LADYBUG_HOME="/app/data/.ladybug" \
+    DAGSTER_HOME="/app/dagster_home"
 
 # Install runtime dependencies and uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -161,9 +162,9 @@ WORKDIR /app
 # Copy application code first (includes arelle/bundles but not EDGAR/cache)
 COPY robosystems/ /app/robosystems/
 # Remove the incomplete arelle directory and replace with builder's complete version
-RUN rm -rf /app/robosystems/arelle
+RUN rm -rf /app/robosystems/adapters/sec/arelle
 # Copy builder's complete arelle directory (includes EDGAR + cache + bundles)
-COPY --from=builder /build/robosystems/arelle/ /app/robosystems/arelle/
+COPY --from=builder /build/robosystems/adapters/sec/arelle/ /app/robosystems/adapters/sec/arelle/
 COPY main.py ./
 COPY bin/ /app/bin/
 # Copy static files for serving directly from container
@@ -174,6 +175,8 @@ COPY alembic/ /app/alembic/
 # Copy configuration files
 COPY .github/configs/graph.yml /app/configs/graph.yml
 COPY .github/configs/stacks.yml /app/configs/stacks.yml
+# Copy Dagster configuration (production and development)
+COPY dagster_home/ /app/dagster_home/
 
 # Make entrypoint script executable
 RUN chmod +x bin/entrypoint.sh

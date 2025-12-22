@@ -2,10 +2,11 @@
 Structure Tool - Provides natural language description of graph structure.
 """
 
-from typing import Any, Dict
+from typing import Any
+
+from robosystems.logger import logger
 
 from .base_tool import BaseTool
-from robosystems.logger import logger
 
 
 class StructureTool(BaseTool):
@@ -13,7 +14,7 @@ class StructureTool(BaseTool):
   Tool for generating natural language descriptions of graph structure.
   """
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for structure description."""
     return {
       "name": "describe-graph-structure",
@@ -45,7 +46,7 @@ class StructureTool(BaseTool):
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> str:
+  async def execute(self, arguments: dict[str, Any]) -> str:
     """Execute the structure description tool."""
     self._log_tool_execution("describe-graph-structure", arguments)
     return await self._describe_graph_structure()
@@ -151,4 +152,4 @@ class StructureTool(BaseTool):
 
     except Exception as e:
       logger.error(f"Error describing graph structure: {e}")
-      return f"Unable to fully analyze graph structure: {str(e)}\n\nUse 'get-graph-schema' tool for detailed schema information."
+      return f"Unable to fully analyze graph structure: {e!s}\n\nUse 'get-graph-schema' tool for detailed schema information."

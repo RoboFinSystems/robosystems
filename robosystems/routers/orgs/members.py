@@ -3,18 +3,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from ...config import env
 from ...database import get_db_session
+from ...logger import get_logger
 from ...middleware.auth.dependencies import get_current_user
 from ...middleware.rate_limits import general_api_rate_limit_dependency
-from ...models.iam import User, OrgUser, OrgRole
-from ...config import env
 from ...models.api.orgs import (
-  OrgMemberResponse,
   InviteMemberRequest,
-  UpdateMemberRoleRequest,
   OrgMemberListResponse,
+  OrgMemberResponse,
+  UpdateMemberRoleRequest,
 )
-from ...logger import get_logger
+from ...models.iam import OrgRole, OrgUser, User
 from ..auth.utils import hash_password
 
 logger = get_logger(__name__)
@@ -71,7 +71,7 @@ async def list_org_members(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error listing organization members: {str(e)}")
+    logger.error(f"Error listing organization members: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to list organization members",
@@ -204,7 +204,7 @@ async def invite_member(
     raise
   except Exception as e:
     db.rollback()
-    logger.error(f"Error inviting member to organization: {str(e)}")
+    logger.error(f"Error inviting member to organization: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to invite member",
@@ -318,7 +318,7 @@ async def update_member_role(
     raise
   except Exception as e:
     db.rollback()
-    logger.error(f"Error updating member role: {str(e)}")
+    logger.error(f"Error updating member role: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to update member role",
@@ -414,7 +414,7 @@ async def remove_member(
     raise
   except Exception as e:
     db.rollback()
-    logger.error(f"Error removing member from organization: {str(e)}")
+    logger.error(f"Error removing member from organization: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to remove member",

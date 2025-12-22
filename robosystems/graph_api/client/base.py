@@ -4,18 +4,19 @@ Base Graph API Client.
 Shared functionality for sync and async clients with multi-backend support.
 """
 
-import time
 import random
-from typing import Optional, Dict, Any, TypeVar
+import time
+from typing import Any, TypeVar
 from urllib.parse import urljoin
 
 from robosystems.logger import logger
+
 from .config import GraphClientConfig
 from .exceptions import (
   GraphAPIError,
-  GraphTransientError,
   GraphClientError,
   GraphServerError,
+  GraphTransientError,
 )
 
 T = TypeVar("T")
@@ -26,8 +27,8 @@ class BaseGraphClient:
 
   def __init__(
     self,
-    base_url: Optional[str] = None,
-    config: Optional[GraphClientConfig] = None,
+    base_url: str | None = None,
+    config: GraphClientConfig | None = None,
     **kwargs,
   ):
     """
@@ -75,7 +76,7 @@ class BaseGraphClient:
     self._circuit_breaker_open = False
 
     # Graph ID for operations (can be set for compatibility)
-    self.graph_id: Optional[str] = None
+    self.graph_id: str | None = None
 
   def _build_url(self, path: str) -> str:
     """Build full URL from base and path."""
@@ -173,7 +174,7 @@ class BaseGraphClient:
     self._circuit_breaker_open = False
 
   def _handle_response_error(
-    self, status_code: int, response_data: Optional[Dict[str, Any]] = None
+    self, status_code: int, response_data: dict[str, Any] | None = None
   ) -> GraphAPIError:
     """
     Convert HTTP status code to appropriate exception.

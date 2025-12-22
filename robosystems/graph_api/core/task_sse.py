@@ -8,11 +8,12 @@ any long-running background task (ingestion, backup, restore, etc.).
 import asyncio
 import json
 import time
-from datetime import datetime, timezone
-from typing import AsyncGenerator, Dict, Any
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
-from robosystems.logger import logger
 from robosystems.graph_api.models.tasks import TaskType
+from robosystems.logger import logger
 
 
 async def generate_task_sse_events(
@@ -20,7 +21,7 @@ async def generate_task_sse_events(
   task_id: str,
   task_type: TaskType = TaskType.INGESTION,
   heartbeat_interval: int = 30,
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any]]:
   """
   Generate SSE events for any background task with progress monitoring.
 
@@ -49,7 +50,7 @@ async def generate_task_sse_events(
       {
         "task_id": task_id,
         "task_type": task_type.value,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "message": f"Connected to {task_type.value} task monitor",
       }
     ),
@@ -79,7 +80,7 @@ async def generate_task_sse_events(
               "task_id": task_id,
               "task_type": task_type.value,
               "status": task["status"],
-              "timestamp": datetime.now(timezone.utc).isoformat(),
+              "timestamp": datetime.now(UTC).isoformat(),
               "message": "Task is still running...",
             }
           ),
@@ -157,7 +158,7 @@ async def generate_task_sse_events(
       break
 
 
-def _get_progress_message(task_type: TaskType, task: Dict[str, Any]) -> str:
+def _get_progress_message(task_type: TaskType, task: dict[str, Any]) -> str:
   """Generate task-specific progress message."""
   if task_type == TaskType.INGESTION:
     table_name = task.get("metadata", {}).get("table_name", "table")
@@ -172,7 +173,7 @@ def _get_progress_message(task_type: TaskType, task: Dict[str, Any]) -> str:
     return f"Processing {task_type.value} task..."
 
 
-def _get_completion_message(task_type: TaskType, task: Dict[str, Any]) -> str:
+def _get_completion_message(task_type: TaskType, task: dict[str, Any]) -> str:
   """Generate task-specific completion message."""
   metadata = task.get("metadata", {})
   result = task.get("result", {})
@@ -198,7 +199,7 @@ def _get_completion_message(task_type: TaskType, task: Dict[str, Any]) -> str:
     return f"Successfully completed {task_type.value} task"
 
 
-def _get_failure_message(task_type: TaskType, task: Dict[str, Any]) -> str:
+def _get_failure_message(task_type: TaskType, task: dict[str, Any]) -> str:
   """Generate task-specific failure message."""
   metadata = task.get("metadata", {})
 
@@ -215,7 +216,7 @@ def _get_failure_message(task_type: TaskType, task: Dict[str, Any]) -> str:
     return f"Failed to complete {task_type.value} task"
 
 
-def _calculate_duration(task: Dict[str, Any]) -> float:
+def _calculate_duration(task: dict[str, Any]) -> float:
   """Calculate task duration in seconds."""
   if task.get("completed_at") and task.get("started_at"):
     try:

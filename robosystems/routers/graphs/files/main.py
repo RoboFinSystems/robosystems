@@ -20,37 +20,37 @@ Files are first-class resources queried by file_id, independent of table context
 This enables clean REST semantics and file-centric operations.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphTable, GraphFile, Graph
-from robosystems.models.api.common import ErrorResponse
-from robosystems.models.api.graphs.tables import (
-  FileUploadStatus,
-  ListTableFilesResponse,
-  GetFileInfoResponse,
-  DeleteFileResponse,
-  EnhancedFileStatusLayers,
-  FileLayerStatus,
-)
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph import get_universal_repository
-from robosystems.database import get_db_session
-from robosystems.adapters.s3 import S3Client
 from robosystems.config import env
-from robosystems.logger import logger, api_logger
+from robosystems.database import get_db_session
+from robosystems.logger import api_logger, logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.types import (
-  GraphTypeRegistry,
-  SHARED_REPO_DELETE_ERROR_MESSAGE,
   GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  SHARED_REPO_DELETE_ERROR_MESSAGE,
+  GraphTypeRegistry,
 )
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.tables import (
+  DeleteFileResponse,
+  EnhancedFileStatusLayers,
+  FileLayerStatus,
+  FileUploadStatus,
+  GetFileInfoResponse,
+  ListTableFilesResponse,
+)
+from robosystems.models.iam import Graph, GraphFile, GraphTable, User
+from robosystems.operations.aws.s3 import S3Client
 
 router = APIRouter()
 
@@ -153,7 +153,7 @@ async def list_files(
   Files are first-class resources queried at graph level, with optional
   filtering by table or status.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   try:
     repository = await get_universal_repository(graph_id, "read")
@@ -191,7 +191,7 @@ async def list_files(
       files = [f for f in files if f.upload_status == file_status]
 
     total_size = sum(f.file_size_bytes for f in files)
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -249,7 +249,7 @@ async def list_files(
     raise
 
   except Exception as e:
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     api_logger.error(
       "Failed to list files",
@@ -265,7 +265,7 @@ async def list_files(
 
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list files: {str(e)}",
+      detail=f"Failed to list files: {e!s}",
     )
 
 
@@ -379,7 +379,7 @@ async def get_file(
 
   Returns comprehensive file metadata by file_id, independent of table context.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   try:
     repository = await get_universal_repository(graph_id, "read")
@@ -398,7 +398,7 @@ async def get_file(
       )
 
     table = GraphTable.get_by_id(file.table_id, db)
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -460,7 +460,7 @@ async def get_file(
     raise
 
   except Exception as e:
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     api_logger.error(
       "Failed to get file",
@@ -477,7 +477,7 @@ async def get_file(
 
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve file: {str(e)}",
+      detail=f"Failed to retrieve file: {e!s}",
     )
 
 
@@ -572,7 +572,7 @@ async def delete_file(
   Removes file by file_id, independent of table context. Supports cascade
   deletion across S3, DuckDB, and graph layers.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     logger.warning(
@@ -689,7 +689,7 @@ async def delete_file(
     db.delete(file)
     db.commit()
 
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -754,7 +754,7 @@ async def delete_file(
     raise
 
   except Exception as e:
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -788,5 +788,5 @@ async def delete_file(
     db.rollback()
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete file: {str(e)}",
+      detail=f"Failed to delete file: {e!s}",
     )

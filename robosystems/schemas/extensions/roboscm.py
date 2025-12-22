@@ -5,7 +5,7 @@ Supply chain management, procurement, inventory, and logistics.
 Extends the base schema with supply chain-specific entities.
 """
 
-from ..models import Node, Relationship, Property
+from ..models import Node, Property, Relationship
 
 # RoboSCM Extension Nodes
 EXTENSION_NODES = [

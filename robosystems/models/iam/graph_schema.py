@@ -1,18 +1,19 @@
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, Optional
 
 from sqlalchemy import (
+  Boolean,
   Column,
-  String,
   DateTime,
   ForeignKey,
-  Integer,
-  Text,
-  Boolean,
   Index,
+  Integer,
+  String,
+  Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
@@ -45,7 +46,7 @@ class GraphSchema(Base):
 
   created_at = Column(
     DateTime(timezone=True),
-    default=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
     nullable=False,
   )
   is_active = Column(Boolean, default=True, nullable=False)
@@ -62,10 +63,10 @@ class GraphSchema(Base):
     schema_type: str,
     schema_ddl: str,
     session: Session,
-    schema_json: Optional[Dict[str, Any]] = None,
+    schema_json: dict[str, Any] | None = None,
     schema_version: int = 1,
-    custom_schema_name: Optional[str] = None,
-    custom_schema_version: Optional[str] = None,
+    custom_schema_name: str | None = None,
+    custom_schema_version: str | None = None,
     is_active: bool = True,
     commit: bool = True,
   ) -> "GraphSchema":

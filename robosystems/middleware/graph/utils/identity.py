@@ -4,23 +4,25 @@ Graph identity utilities.
 Functions for resolving graph identity, routing, and access patterns.
 """
 
-from typing import Optional, Any, Dict
+from typing import Any
 
 from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from ..types import (
+  AccessPattern as GraphAccessPattern,
+)
+from ..types import (
+  ConnectionPattern,
   GraphIdentity,
   GraphTypeRegistry,
-  AccessPattern as GraphAccessPattern,
-  ConnectionPattern,
 )
 from .database import get_database_name
 from .validation import is_shared_repository
 
 
-def get_graph_identity(graph_id: str, session: Optional[Any] = None) -> GraphIdentity:
+def get_graph_identity(graph_id: str, session: Any | None = None) -> GraphIdentity:
   """
   Get complete graph identity including category and type.
 
@@ -34,7 +36,7 @@ def get_graph_identity(graph_id: str, session: Optional[Any] = None) -> GraphIde
   return GraphTypeRegistry.identify_graph(graph_id, session=session)
 
 
-def get_graph_routing(graph_id: str, session: Optional[Any] = None) -> Dict[str, Any]:
+def get_graph_routing(graph_id: str, session: Any | None = None) -> dict[str, Any]:
   """
   Get routing information for a graph based on its type.
 
@@ -57,7 +59,7 @@ def get_graph_routing(graph_id: str, session: Optional[Any] = None) -> Dict[str,
 def validate_graph_access(
   graph_id: str,
   required_access: GraphAccessPattern,
-  user_permissions: Optional[Dict[str, Any]] = None,
+  user_permissions: dict[str, Any] | None = None,
 ) -> bool:
   """
   Validate if the requested access pattern is allowed for this graph.
@@ -164,11 +166,13 @@ def validate_repository_access(
   if not is_shared_repository(graph_id):
     return False
 
+  from robosystems.database import session
   from robosystems.models.iam import (
     UserRepository,
+  )
+  from robosystems.models.iam import (
     UserRepositoryAccessLevel as RepositoryAccessLevel,
   )
-  from robosystems.database import session
 
   from .database import get_repository_database_name
 
@@ -251,7 +255,7 @@ def log_cluster_operation(
   )
 
 
-def get_migration_status() -> Dict[str, Any]:
+def get_migration_status() -> dict[str, Any]:
   """
   Get the current graph database migration status.
 

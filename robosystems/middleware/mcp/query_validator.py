@@ -5,9 +5,8 @@ Validates queries before execution to prevent common errors, detect Neo4j patter
 and provide helpful suggestions for AI agents.
 """
 
-import re
 import logging
-from typing import Dict, List, Optional, Set, Tuple
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -18,12 +17,12 @@ class ValidationResult:
   """Result of query validation."""
 
   is_valid: bool
-  errors: List[str] = field(default_factory=list)
-  warnings: List[str] = field(default_factory=list)
-  suggestions: List[str] = field(default_factory=list)
+  errors: list[str] = field(default_factory=list)
+  warnings: list[str] = field(default_factory=list)
+  suggestions: list[str] = field(default_factory=list)
   complexity_score: int = 0
-  neo4j_patterns_found: List[str] = field(default_factory=list)
-  fixed_query: Optional[str] = None
+  neo4j_patterns_found: list[str] = field(default_factory=list)
+  fixed_query: str | None = None
 
 
 class GraphQueryValidator:
@@ -126,11 +125,11 @@ class GraphQueryValidator:
     "STRUCTURE_HAS_PARENT",
   }
 
-  def __init__(self, schema: Optional[List[Dict]] = None):
+  def __init__(self, schema: list[dict] | None = None):
     self.schema = schema or []
-    self._node_labels: Set[str] = set()
-    self._rel_labels: Set[str] = set()
-    self._properties: Dict[str, Set[str]] = {}  # label -> set of properties
+    self._node_labels: set[str] = set()
+    self._rel_labels: set[str] = set()
+    self._properties: dict[str, set[str]] = {}  # label -> set of properties
 
     if schema:
       self._parse_schema(schema)
@@ -139,7 +138,7 @@ class GraphQueryValidator:
       self._node_labels = self.SEC_NODE_LABELS.copy()
       self._rel_labels = self.SEC_RELATIONSHIP_LABELS.copy()
 
-  def _parse_schema(self, schema: List[Dict]) -> None:
+  def _parse_schema(self, schema: list[dict]) -> None:
     """Parse schema to extract labels and properties."""
     for item in schema:
       label = item.get("label", "")
@@ -156,7 +155,7 @@ class GraphQueryValidator:
         if prop_names:
           self._properties[label] = prop_names
 
-  def validate(self, query: str, params: Optional[Dict] = None) -> ValidationResult:
+  def validate(self, query: str, params: dict | None = None) -> ValidationResult:
     """Validate a graph database query comprehensively."""
     result = ValidationResult(is_valid=True)
 
@@ -214,7 +213,7 @@ class GraphQueryValidator:
       pattern.search(query) for pattern in self.COMPILED_PATTERNS["metadata_queries"]
     )
 
-  def _validate_basic_syntax(self, query: str) -> List[str]:
+  def _validate_basic_syntax(self, query: str) -> list[str]:
     """Validate basic query syntax."""
     errors = []
 
@@ -249,7 +248,7 @@ class GraphQueryValidator:
 
     return errors
 
-  def _detect_neo4j_patterns(self, query: str) -> List[Dict[str, str]]:
+  def _detect_neo4j_patterns(self, query: str) -> list[dict[str, str]]:
     """Detect Neo4j-specific patterns that will fail in graph database."""
     issues = []
 
@@ -377,7 +376,7 @@ class GraphQueryValidator:
     }
     return type_mappings.get(neo4j_type.upper(), neo4j_type.upper())
 
-  def _validate_against_schema(self, query: str) -> List[str]:
+  def _validate_against_schema(self, query: str) -> list[str]:
     """Validate query against known schema."""
     warnings = []
 
@@ -401,7 +400,7 @@ class GraphQueryValidator:
 
     return warnings
 
-  def _analyze_performance(self, query: str) -> Tuple[List[str], int]:
+  def _analyze_performance(self, query: str) -> tuple[list[str], int]:
     """Analyze query for performance issues."""
     warnings = []
     complexity_score = 0
@@ -464,7 +463,7 @@ class GraphQueryValidator:
 
     return warnings, complexity_score
 
-  def _check_financial_best_practices(self, query: str) -> List[str]:
+  def _check_financial_best_practices(self, query: str) -> list[str]:
     """Check for SEC/financial query best practices."""
     warnings = []
 
@@ -510,7 +509,7 @@ class GraphQueryValidator:
 
     return warnings
 
-  def _validate_parameters(self, query: str, params: Dict) -> List[str]:
+  def _validate_parameters(self, query: str, params: dict) -> list[str]:
     """Validate query parameters."""
     warnings = []
 

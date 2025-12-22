@@ -6,15 +6,16 @@ This module tests that async operations use async Redis clients and
 synchronous operations use synchronous Redis clients to prevent runtime errors.
 """
 
-import os
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,
-  create_redis_client,
   create_async_redis_client,
+  create_redis_client,
 )
 
 
@@ -37,7 +38,8 @@ class TestAsyncSyncClientUsage:
       # Should NOT be a coroutine
       assert not asyncio.iscoroutine(result)
 
-  def test_create_async_redis_client_returns_async_client(self):
+  @pytest.mark.asyncio
+  async def test_create_async_redis_client_returns_async_client(self):
     """Test that create_async_redis_client returns an async Redis client."""
     with patch("redis.asyncio.from_url") as mock_from_url:
       mock_client = AsyncMock()
@@ -49,9 +51,9 @@ class TestAsyncSyncClientUsage:
       # The client itself is not a coroutine
       assert not asyncio.iscoroutine(client)
 
-      # But its methods should return coroutines
-      ping_result = client.ping()
-      assert asyncio.iscoroutine(ping_result)
+      # Methods should be awaitable - actually await to avoid warning
+      ping_result = await client.ping()
+      assert ping_result is True
 
   @pytest.mark.asyncio
   async def test_async_client_operations_are_awaitable(self):

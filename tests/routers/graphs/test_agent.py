@@ -1,6 +1,8 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
+
 from robosystems.models.api.graphs.agent import AgentMessage
 from tests.conftest import VALID_TEST_GRAPH_ID
 
@@ -216,8 +218,9 @@ class TestAgentUnauthorizedAccess:
 
   def test_unauthorized_access(self):
     """Test access without authentication."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     # Save current dependency overrides and clear them
     original_overrides = app.dependency_overrides.copy()
@@ -237,8 +240,9 @@ class TestAgentUnauthorizedAccess:
 
   def test_invalid_api_key(self):
     """Test access with invalid API key."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     # Save current dependency overrides and clear them
     original_overrides = app.dependency_overrides.copy()

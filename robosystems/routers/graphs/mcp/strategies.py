@@ -5,9 +5,9 @@ This module provides intelligent strategy selection for MCP tool execution,
 optimized for AI agent consumption and shared repository scalability.
 """
 
-from typing import Dict, Any, Optional
 import re
 from enum import Enum
+from typing import Any
 
 from robosystems.middleware.graph.execution_strategies import (
   BaseAnalyzer,
@@ -44,7 +44,7 @@ class MCPToolAnalyzer(BaseAnalyzer):
   SCHEMA_TOOLS = ["get-graph-schema", "get-neo4j-schema", "get-ladybug-schema"]
   INFO_TOOLS = ["get-graph-info", "describe-graph-structure"]
 
-  def analyze(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  def analyze(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Implementation of abstract analyze method.
 
@@ -59,8 +59,8 @@ class MCPToolAnalyzer(BaseAnalyzer):
 
   @classmethod
   def analyze_tool_call(
-    cls, tool_name: str, arguments: Dict[str, Any]
-  ) -> Dict[str, Any]:
+    cls, tool_name: str, arguments: dict[str, Any]
+  ) -> dict[str, Any]:
     """
     Analyze an MCP tool call to estimate its characteristics.
 
@@ -117,7 +117,7 @@ class MCPToolAnalyzer(BaseAnalyzer):
     return tool_name in cls.SCHEMA_TOOLS or tool_name in cls.INFO_TOOLS
 
   @classmethod
-  def _estimate_duration(cls, tool_name: str, arguments: Dict[str, Any]) -> int:
+  def _estimate_duration(cls, tool_name: str, arguments: dict[str, Any]) -> int:
     """Estimate execution duration in milliseconds."""
     if tool_name in cls.QUERY_TOOLS:
       query = arguments.get("query", "")
@@ -134,7 +134,7 @@ class MCPToolAnalyzer(BaseAnalyzer):
       return 100  # Info tools are fast
 
   @classmethod
-  def _estimate_mcp_result_size(cls, tool_name: str, arguments: Dict[str, Any]) -> str:
+  def _estimate_mcp_result_size(cls, tool_name: str, arguments: dict[str, Any]) -> str:
     """Estimate result size category: small, medium, large."""
     if tool_name in cls.QUERY_TOOLS:
       query = arguments.get("query", "")
@@ -156,7 +156,7 @@ class MCPToolAnalyzer(BaseAnalyzer):
       return "small"  # Info is typically compact
 
   @classmethod
-  def _analyze_cypher_query(cls, query: str) -> Dict[str, Any]:
+  def _analyze_cypher_query(cls, query: str) -> dict[str, Any]:
     """Analyze a Cypher query for MCP-specific optimizations."""
     query_upper = query.upper()
 
@@ -187,11 +187,11 @@ class MCPStrategySelector(BaseStrategySelector):
   def select_strategy(
     cls,
     tool_name: str,
-    arguments: Dict[str, Any],
-    client_info: Dict[str, Any],
-    system_state: Dict[str, Any],
+    arguments: dict[str, Any],
+    client_info: dict[str, Any],
+    system_state: dict[str, Any],
     graph_id: str,
-    user_tier: Optional[str] = None,
+    user_tier: str | None = None,
   ) -> MCPExecutionStrategy:
     """
     Select the optimal execution strategy for an MCP tool call.
@@ -250,8 +250,8 @@ class MCPStrategySelector(BaseStrategySelector):
 
   @classmethod
   def _select_cached_strategy(
-    cls, analysis: Dict[str, Any], system_state: Dict[str, Any]
-  ) -> Optional[MCPExecutionStrategy]:
+    cls, analysis: dict[str, Any], system_state: dict[str, Any]
+  ) -> MCPExecutionStrategy | None:
     """Select cached strategy if applicable."""
     if not (analysis["is_cacheable"] and system_state.get("cache_available")):
       return None
@@ -265,8 +265,8 @@ class MCPStrategySelector(BaseStrategySelector):
 
   @classmethod
   def _select_high_load_strategy(
-    cls, system_state: Dict[str, Any], is_mcp_client: bool, client_info: Dict[str, Any]
-  ) -> Optional[MCPExecutionStrategy]:
+    cls, system_state: dict[str, Any], is_mcp_client: bool, client_info: dict[str, Any]
+  ) -> MCPExecutionStrategy | None:
     """Select strategy for high system load."""
     queue_size = system_state.get("queue_size", 0)
     running_count = system_state.get("running_queries", 0)
@@ -282,7 +282,7 @@ class MCPStrategySelector(BaseStrategySelector):
 
   @classmethod
   def _select_query_strategy(
-    cls, analysis: Dict[str, Any], is_mcp_client: bool, client_info: Dict[str, Any]
+    cls, analysis: dict[str, Any], is_mcp_client: bool, client_info: dict[str, Any]
   ) -> MCPExecutionStrategy:
     """Select strategy for query tools based on complexity."""
     result_size = analysis["estimated_result_size"]
@@ -309,7 +309,7 @@ class MCPStrategySelector(BaseStrategySelector):
 
   @classmethod
   def _select_schema_strategy(
-    cls, analysis: Dict[str, Any], client_info: Dict[str, Any]
+    cls, analysis: dict[str, Any], client_info: dict[str, Any]
   ) -> MCPExecutionStrategy:
     """Select strategy for schema tools."""
     if analysis["supports_progress"] and client_info.get("supports_sse"):
@@ -343,7 +343,7 @@ class MCPClientDetector(BaseClientDetector):
   """Detect MCP client capabilities and optimize responses."""
 
   @classmethod
-  def detect_client_type(cls, headers: Dict[str, str]) -> Dict[str, Any]:
+  def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
     """
     Detect MCP client capabilities from request headers.
 

@@ -6,11 +6,12 @@ Uses the enhanced SchemaManager for better inheritance and compatibility.
 """
 
 import importlib
-from typing import Dict, Any
+from typing import Any
 
-from .models import Schema
-from .manager import SchemaManager, SchemaConfiguration
 from robosystems.logger import logger
+
+from .manager import SchemaConfiguration, SchemaManager
+from .models import Schema
 
 
 class LadybugSchemaBuilder:
@@ -23,7 +24,7 @@ class LadybugSchemaBuilder:
   Now uses the enhanced SchemaManager for better inheritance support.
   """
 
-  def __init__(self, config: Dict[str, Any]):
+  def __init__(self, config: dict[str, Any]):
     """
     Initialize the schema builder.
 
@@ -204,7 +205,7 @@ class LadybugSchemaBuilder:
     return self.schema
 
 
-def create_schema_from_config(config: Dict[str, Any]) -> Schema:
+def create_schema_from_config(config: dict[str, Any]) -> Schema:
   """
   Convenience function to create a schema from configuration.
 
@@ -219,7 +220,7 @@ def create_schema_from_config(config: Dict[str, Any]) -> Schema:
   return builder.get_schema()
 
 
-def apply_schema_to_database(database_path: str, config: Dict[str, Any]):
+def apply_schema_to_database(database_path: str, config: dict[str, Any]):
   """
   Convenience function to apply schema to a LadybugDB database.
 

@@ -16,8 +16,8 @@ class TestValkeyDatabase:
 
   def test_database_values(self):
     """Test that database numbers are assigned correctly."""
-    assert ValkeyDatabase.CELERY_BROKER == 0
-    assert ValkeyDatabase.CELERY_RESULTS == 1
+    assert ValkeyDatabase.RESERVED_0 == 0
+    assert ValkeyDatabase.RESERVED_1 == 1
     assert ValkeyDatabase.AUTH_CACHE == 2
     assert ValkeyDatabase.SSE_EVENTS == 3
     assert ValkeyDatabase.DISTRIBUTED_LOCKS == 4
@@ -67,7 +67,7 @@ class TestValkeyDatabase:
     """Test that we can iterate over database enum."""
     databases = list(ValkeyDatabase)
     assert len(databases) == 10  # Currently 10 databases allocated (0-9)
-    assert ValkeyDatabase.CELERY_BROKER in databases
+    assert ValkeyDatabase.RESERVED_0 in databases
     assert ValkeyDatabase.LBUG_CACHE in databases
     assert ValkeyDatabase.BILLING_CACHE in databases
 
@@ -210,9 +210,9 @@ class TestValkeyURLBuilder:
     assert url == "redis://auto-discovered:6379/5"
 
   def test_build_url_default_database(self):
-    """Test that default database is CELERY_BROKER."""
+    """Test that default database is AUTH_CACHE."""
     url = ValkeyURLBuilder.build_url("redis://localhost:6379")
-    assert url == "redis://localhost:6379/0"
+    assert url == "redis://localhost:6379/2"
 
   def test_parse_url_basic(self):
     """Test parsing a basic Redis URL."""
@@ -250,8 +250,8 @@ class TestDatabasePurpose:
 
   def test_get_database_purpose_known(self):
     """Test getting purpose for known databases."""
-    purpose = get_database_purpose(ValkeyDatabase.CELERY_BROKER)
-    assert "Celery task queue" in purpose
+    purpose = get_database_purpose(ValkeyDatabase.RESERVED_0)
+    assert "Reserved" in purpose
 
     purpose = get_database_purpose(ValkeyDatabase.AUTH_CACHE)
     assert "Authentication" in purpose
@@ -265,7 +265,6 @@ class TestDatabasePurpose:
       purpose = get_database_purpose(db)
       assert purpose is not None
       assert len(purpose) > 0
-      assert "Reserved for future use" not in purpose
 
   def test_print_database_registry(self, capsys):
     """Test printing the database registry."""
@@ -273,7 +272,7 @@ class TestDatabasePurpose:
 
     captured = capsys.readouterr()
     assert "VALKEY/REDIS DATABASE REGISTRY" in captured.out
-    assert "CELERY_BROKER" in captured.out
+    assert "RESERVED_0" in captured.out
     assert "AUTH_CACHE" in captured.out
     assert "LBUG_CACHE" in captured.out
     assert "USAGE EXAMPLE" in captured.out
@@ -328,12 +327,12 @@ class TestIntegration:
 
       # Build URLs for different services
       urls = {
-        "celery": ValkeyURLBuilder.build_url(database=ValkeyDatabase.CELERY_BROKER),
+        "reserved": ValkeyURLBuilder.build_url(database=ValkeyDatabase.RESERVED_0),
         "auth": ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH_CACHE),
         "sse": ValkeyURLBuilder.build_url(database=ValkeyDatabase.SSE_EVENTS),
       }
 
-      assert urls["celery"] == "redis://prod.cluster.cache.amazonaws.com:6379/0"
+      assert urls["reserved"] == "redis://prod.cluster.cache.amazonaws.com:6379/0"
       assert urls["auth"] == "redis://prod.cluster.cache.amazonaws.com:6379/2"
       assert urls["sse"] == "redis://prod.cluster.cache.amazonaws.com:6379/3"
 

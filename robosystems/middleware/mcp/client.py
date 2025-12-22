@@ -5,23 +5,23 @@ This module contains the GraphMCPClient class which provides MCP functionality
 using the Graph API instead of direct database connections.
 """
 
-import json
 import asyncio
+import json
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from httpx import HTTPError, TimeoutException
 
-from robosystems.logger import logger
 from robosystems.config import env
 from robosystems.graph_api.client import GraphClient
+from robosystems.logger import logger
 
 from .exceptions import (
   GraphAPIError,
-  GraphQueryTimeoutError,
   GraphQueryComplexityError,
+  GraphQueryTimeoutError,
 )
 
 
@@ -41,7 +41,7 @@ class GraphMCPClient:
   def __init__(
     self,
     api_base_url: str,
-    timeout: int = None,
+    timeout: int | None = None,
     query_timeout: int = 120,
     max_query_length: int = 50000,
     graph_id: str = "sec",
@@ -185,8 +185,8 @@ class GraphMCPClient:
     )
 
   async def execute_query(
-    self, cypher: str, parameters: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, parameters: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """
     Execute a Cypher query via Graph API with timeout and complexity controls.
 
@@ -242,7 +242,7 @@ class GraphMCPClient:
           ),
           timeout=self.query_timeout,
         )
-      except asyncio.TimeoutError:
+      except TimeoutError:
         error_msg = f"Query execution timed out after {self.query_timeout} seconds"
         logger.error(error_msg)
         raise GraphQueryTimeoutError(error_msg)
@@ -364,7 +364,7 @@ class GraphMCPClient:
       user_msg = self._sanitize_error_message(e, "query execution")
       raise GraphAPIError(user_msg)
 
-  async def get_schema(self) -> List[Dict[str, Any]]:
+  async def get_schema(self) -> list[dict[str, Any]]:
     """
     Get database schema information (simplified for performance).
 
@@ -467,7 +467,7 @@ class GraphMCPClient:
       logger.error(f"Failed to get schema: {e}")
       raise GraphAPIError(f"Schema retrieval failed: {e}")
 
-  def _get_common_properties(self, node_name: str) -> List[str]:
+  def _get_common_properties(self, node_name: str) -> list[str]:
     """Get commonly used properties for node types."""
     common_props = {
       "Entity": [
@@ -642,7 +642,7 @@ class GraphMCPClient:
     mcp_tools = GraphMCPTools(self)
     return await mcp_tools.structure_tool._describe_graph_structure()
 
-  async def get_graph_info(self) -> Dict[str, Any]:
+  async def get_graph_info(self) -> dict[str, Any]:
     """
     Get basic graph information and statistics.
 
@@ -762,6 +762,7 @@ class GraphMCPClient:
 
     # Check if this is a query error that should be passed through
     import re
+
     from robosystems.config import env
 
     # Only preserve query errors in development/staging for debugging
@@ -867,11 +868,7 @@ class GraphMCPClient:
       "COUNT{",  # Graph database COUNT subquery syntax
     ]
 
-    for func in aggregation_functions:
-      if func in query_upper:
-        return True
-
-    return False
+    return any(func in query_upper for func in aggregation_functions)
 
   def _inject_limit_intelligently(self, query: str, limit: int) -> str:
     """

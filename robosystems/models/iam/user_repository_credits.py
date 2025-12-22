@@ -6,29 +6,28 @@ Unlike graph credits which are tied to specific graphs, these credits are user-l
 and can be used across any repository the user has access to.
 """
 
-from datetime import datetime, timezone
+import logging
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Optional, Dict, Any, cast
 from enum import Enum
+from typing import Any, Optional, cast
 
 from sqlalchemy import (
+  Boolean,
   Column,
-  String,
   DateTime,
   ForeignKey,
-  Numeric,
-  Boolean,
-  Text,
   Index,
+  Numeric,
+  String,
+  Text,
 )
-from sqlalchemy.orm import relationship, Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
-from .user_repository import RepositoryType, RepositoryPlan
-
-import logging
+from .user_repository import RepositoryPlan, RepositoryType
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +99,13 @@ class UserRepositoryCredits(Base):
 
   # Metadata
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc)
+    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
   )
   updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
-    default=datetime.now(timezone.utc),
-    onupdate=datetime.now(timezone.utc),
+    default=datetime.now(UTC),
+    onupdate=datetime.now(UTC),
   )
 
   # Relationships
@@ -136,6 +135,7 @@ class UserRepositoryCredits(Base):
   ) -> "UserRepositoryCredits":
     """Create credit pool for a new access record."""
     from datetime import timedelta
+
     from .user_repository import RepositoryPlan
 
     # Convert string values to enums if needed
@@ -146,7 +146,7 @@ class UserRepositoryCredits(Base):
     allows_rollover = False
     max_rollover = Decimal("0")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     credits = cls(
       user_repository_id=access_id,
@@ -185,7 +185,7 @@ class UserRepositoryCredits(Base):
     repository_name: str,
     operation_type: str,
     session: Session,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
   ) -> bool:
     """
     Consume credits for a repository operation.
@@ -199,7 +199,7 @@ class UserRepositoryCredits(Base):
     # Use atomic update to prevent race conditions
     from sqlalchemy import text
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = session.execute(
       text("""
         UPDATE user_repository_credits
@@ -268,7 +268,7 @@ class UserRepositoryCredits(Base):
     """Allocate monthly credits if due - no rollover, same as user graphs."""
     from datetime import timedelta
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Check if allocation is due
     if self.next_allocation_date and now < self.next_allocation_date:
@@ -319,7 +319,7 @@ class UserRepositoryCredits(Base):
     difference = new_allocation - old_allocation
 
     self.monthly_allocation = new_allocation
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     # If immediate credit, add the difference to current balance with overflow protection
     if immediate_credit and difference > 0:
@@ -351,7 +351,7 @@ class UserRepositoryCredits(Base):
       session.rollback()
       raise
 
-  def get_summary(self) -> Dict[str, Any]:
+  def get_summary(self) -> dict[str, Any]:
     """Get credit summary for API responses."""
     return {
       "current_balance": safe_float(self.current_balance),
@@ -379,10 +379,10 @@ class UserRepositoryCredits(Base):
     operation_type: str,
     session: Session,
     reservation_id: str,
-    request_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    request_id: str | None = None,
+    user_id: str | None = None,
     timeout_seconds: int = 300,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Atomically reserve credits for a repository operation with timeout protection.
 
@@ -401,12 +401,13 @@ class UserRepositoryCredits(Base):
     Returns:
         Dict with reservation results and status
     """
-    from sqlalchemy import text
     from datetime import timedelta
+
+    from sqlalchemy import text
 
     # For shared repositories, no credit multiplier - use base amount
     actual_cost = amount
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+    expires_at = datetime.now(UTC) + timedelta(seconds=timeout_seconds)
 
     try:
       # Use atomic SELECT FOR UPDATE with immediate reservation
@@ -423,7 +424,7 @@ class UserRepositoryCredits(Base):
         """),
         {
           "actual_cost": actual_cost,
-          "updated_at": datetime.now(timezone.utc),
+          "updated_at": datetime.now(UTC),
           "credits_id": self.id,
         },
       )
@@ -478,7 +479,7 @@ class UserRepositoryCredits(Base):
 
       # Update the local object to match database state
       self.current_balance = reservation_result.new_balance
-      self.updated_at = datetime.now(timezone.utc)
+      self.updated_at = datetime.now(UTC)
 
       # Commit the reservation
       session.commit()
@@ -498,7 +499,7 @@ class UserRepositoryCredits(Base):
       session.rollback()
       return {
         "success": False,
-        "error": f"Reservation failed: {str(e)}",
+        "error": f"Reservation failed: {e!s}",
         "reservation_id": reservation_id,
       }
 
@@ -507,8 +508,8 @@ class UserRepositoryCredits(Base):
     reservation_id: str,
     operation_type: str,
     session: Session,
-    final_metadata: Optional[Dict[str, Any]] = None,
-  ) -> Dict[str, Any]:
+    final_metadata: dict[str, Any] | None = None,
+  ) -> dict[str, Any]:
     """
     Confirm a credit reservation and finalize the consumption.
 
@@ -549,7 +550,7 @@ class UserRepositoryCredits(Base):
         expires_at = datetime.fromisoformat(
           metadata["expires_at"].replace("Z", "+00:00")
         )
-        if datetime.now(timezone.utc) > expires_at:
+        if datetime.now(UTC) > expires_at:
           # Reservation expired - rollback the credits
           self.cancel_credit_reservation(reservation_id, session, "expired")
           return {
@@ -564,7 +565,7 @@ class UserRepositoryCredits(Base):
       updated_metadata.update(
         {
           "reservation_status": "confirmed",
-          "confirmed_at": datetime.now(timezone.utc).isoformat(),
+          "confirmed_at": datetime.now(UTC).isoformat(),
         }
       )
       if final_metadata:
@@ -574,9 +575,7 @@ class UserRepositoryCredits(Base):
 
       reservation_transaction.description = f"{operation_type} operation (confirmed)"
       reservation_transaction.transaction_metadata = json.dumps(updated_metadata)
-      reservation_transaction.created_at = datetime.now(
-        timezone.utc
-      )  # Update timestamp
+      reservation_transaction.created_at = datetime.now(UTC)  # Update timestamp
 
       session.commit()
 
@@ -592,7 +591,7 @@ class UserRepositoryCredits(Base):
       session.rollback()
       return {
         "success": False,
-        "error": f"Confirmation failed: {str(e)}",
+        "error": f"Confirmation failed: {e!s}",
         "reservation_id": reservation_id,
       }
 
@@ -601,7 +600,7 @@ class UserRepositoryCredits(Base):
     reservation_id: str,
     session: Session,
     reason: str = "cancelled",
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Cancel a credit reservation and return the credits to the balance.
 
@@ -651,7 +650,7 @@ class UserRepositoryCredits(Base):
         """),
         {
           "refund_amount": refund_amount,
-          "updated_at": datetime.now(timezone.utc),
+          "updated_at": datetime.now(UTC),
           "credits_id": self.id,
         },
       )
@@ -668,7 +667,7 @@ class UserRepositoryCredits(Base):
           "reservation_id": reservation_id,
           "cancellation_reason": reason,
           "original_transaction_id": reservation_transaction.id,
-          "cancelled_at": datetime.now(timezone.utc).isoformat(),
+          "cancelled_at": datetime.now(UTC).isoformat(),
         },
         session=session,
       )
@@ -679,7 +678,7 @@ class UserRepositoryCredits(Base):
         metadata.update(
           {
             "reservation_status": "cancelled",
-            "cancelled_at": datetime.now(timezone.utc).isoformat(),
+            "cancelled_at": datetime.now(UTC).isoformat(),
             "cancellation_reason": reason,
           }
         )
@@ -690,7 +689,7 @@ class UserRepositoryCredits(Base):
       # Update the local object to match database state
       if refund_result:
         self.current_balance = refund_result.new_balance
-      self.updated_at = datetime.now(timezone.utc)
+      self.updated_at = datetime.now(UTC)
 
       session.commit()
 
@@ -698,7 +697,7 @@ class UserRepositoryCredits(Base):
         "success": True,
         "reservation_id": reservation_id,
         "credits_refunded": float(refund_amount),
-        "cancelled_at": datetime.now(timezone.utc).isoformat(),
+        "cancelled_at": datetime.now(UTC).isoformat(),
         "reason": reason,
       }
 
@@ -707,7 +706,7 @@ class UserRepositoryCredits(Base):
       session.rollback()
       return {
         "success": False,
-        "error": f"Cancellation failed: {str(e)}",
+        "error": f"Cancellation failed: {e!s}",
         "reservation_id": reservation_id,
       }
 
@@ -775,7 +774,7 @@ class UserRepositoryCreditTransaction(Base):
   # Metadata
   transaction_metadata = Column("metadata", Text, nullable=True)  # JSON
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc)
+    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
   )
 
   # Relationships
@@ -798,8 +797,8 @@ class UserRepositoryCreditTransaction(Base):
     transaction_type: UserRepositoryCreditTransactionType,
     amount: Decimal,
     description: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    session: Optional[Session] = None,
+    metadata: dict[str, Any] | None = None,
+    session: Session | None = None,
   ) -> "UserRepositoryCreditTransaction":
     """Create a new transaction record."""
     import json
@@ -823,7 +822,7 @@ class UserRepositoryCreditTransaction(Base):
 
     return transaction
 
-  def get_metadata(self) -> Dict[str, Any]:
+  def get_metadata(self) -> dict[str, Any]:
     """Parse transaction metadata."""
     if not self.transaction_metadata:
       return {}

@@ -1,14 +1,16 @@
 """Test rate limit isolation between different endpoint categories."""
 
+from unittest.mock import MagicMock, Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
+
+from robosystems.middleware.rate_limits.cache import rate_limit_cache
 from robosystems.middleware.rate_limits.rate_limiting import (
+  create_custom_rate_limit_dependency,
   logout_rate_limit_dependency,
   sensitive_auth_rate_limit_dependency,
-  create_custom_rate_limit_dependency,
 )
-from robosystems.middleware.rate_limits.cache import rate_limit_cache
 
 
 class TestRateLimitIsolation:
@@ -272,8 +274,8 @@ class TestRateLimitIsolation:
   def test_public_api_does_not_affect_general_api(self, monkeypatch):
     """Test that public API rate limit does not pollute general API rate limit."""
     from robosystems.middleware.rate_limits.rate_limiting import (
-      public_api_rate_limit_dependency,
       general_api_rate_limit_dependency,
+      public_api_rate_limit_dependency,
     )
 
     # Mock the get_int_env function to return our test values

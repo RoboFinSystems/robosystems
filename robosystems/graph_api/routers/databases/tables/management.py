@@ -1,6 +1,4 @@
-from typing import List
-
-from fastapi import APIRouter, HTTPException, Path, Body
+from fastapi import APIRouter, Body, HTTPException, Path
 from fastapi import status as http_status
 
 from robosystems.graph_api.core.duckdb.manager import (
@@ -33,14 +31,14 @@ async def create_table(
     logger.error(f"Failed to create table {request.table_name}: {e}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to create table: {str(e)}",
+      detail=f"Failed to create table: {e!s}",
     )
 
 
-@router.get("", response_model=List[TableInfo])
+@router.get("", response_model=list[TableInfo])
 async def list_tables(
   graph_id: str = Path(..., description="Graph database identifier"),
-) -> List[TableInfo]:
+) -> list[TableInfo]:
   logger.info(f"Listing tables for graph {graph_id}")
 
   try:
@@ -49,7 +47,7 @@ async def list_tables(
     logger.error(f"Failed to list tables for graph {graph_id}: {e}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list tables: {str(e)}",
+      detail=f"Failed to list tables: {e!s}",
     )
 
 
@@ -66,7 +64,7 @@ async def delete_table(
     logger.error(f"Failed to delete table {table_name}: {e}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete table: {str(e)}",
+      detail=f"Failed to delete table: {e!s}",
     )
 
 
@@ -88,5 +86,5 @@ async def delete_file_data(
     )
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to delete file data: {str(e)}",
+      detail=f"Failed to delete file data: {e!s}",
     )

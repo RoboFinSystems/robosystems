@@ -6,7 +6,7 @@ It is designed to be a drop-in replacement for the previous AWS X-Ray implementa
 
 Features:
 - Environment-conditional tracing (dev/staging/prod)
-- Automatic instrumentation for FastAPI, requests, psycopg2, and celery
+- Automatic instrumentation for FastAPI, requests, and psycopg2
 - OTLP exporter for sending telemetry data to a collector
 - Graceful degradation if the collector is not available
 - Resource attributes for better observability
@@ -14,24 +14,24 @@ Features:
 """
 
 import logging
-from typing import Optional
-from fastapi import FastAPI
 from importlib.metadata import version as pkg_version
-from robosystems.config import env
+
+from fastapi import FastAPI
 
 # OpenTelemetry imports
-from opentelemetry import trace, metrics
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
-from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
-from opentelemetry.instrumentation.celery import CeleryInstrumentor
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+
+from robosystems.config import env
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -46,8 +46,8 @@ resource_attributes = (
 )
 
 # Global variables to track instrumentation state
-_tracer_provider: Optional[TracerProvider] = None
-_meter_provider: Optional[MeterProvider] = None
+_tracer_provider: TracerProvider | None = None
+_meter_provider: MeterProvider | None = None
 _instrumentation_enabled = False
 
 
@@ -185,7 +185,6 @@ def setup_telemetry(app: FastAPI) -> None:
     # Instrument other libraries
     RequestsInstrumentor().instrument()
     Psycopg2Instrumentor().instrument()
-    CeleryInstrumentor().instrument()
 
     _instrumentation_enabled = True
     logger.info(f"OpenTelemetry tracing enabled for service: {service_name}")
@@ -195,7 +194,7 @@ def setup_telemetry(app: FastAPI) -> None:
     # Graceful degradation - continue without tracing
 
 
-def get_tracer(name: Optional[str] = None):
+def get_tracer(name: str | None = None):
   """
   Returns a tracer instance.
 

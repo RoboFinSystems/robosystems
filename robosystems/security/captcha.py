@@ -5,11 +5,10 @@ Provides server-side verification of Turnstile CAPTCHA tokens to prevent bot
 registrations and other automated attacks.
 """
 
-import asyncio
-import aiohttp
 import logging
-from typing import Optional
 from dataclasses import dataclass
+
+import aiohttp
 
 from ..config import env
 
@@ -25,10 +24,10 @@ class CaptchaVerificationResult:
 
   success: bool
   error_codes: list[str]
-  challenge_ts: Optional[str] = None
-  hostname: Optional[str] = None
-  action: Optional[str] = None
-  cdata: Optional[str] = None
+  challenge_ts: str | None = None
+  hostname: str | None = None
+  action: str | None = None
+  cdata: str | None = None
 
 
 class CaptchaService:
@@ -41,8 +40,8 @@ class CaptchaService:
   async def verify_turnstile_token(
     self,
     token: str,
-    remote_ip: Optional[str] = None,
-    idempotency_key: Optional[str] = None,
+    remote_ip: str | None = None,
+    idempotency_key: str | None = None,
   ) -> CaptchaVerificationResult:
     """
     Verify a Cloudflare Turnstile CAPTCHA token.
@@ -82,26 +81,28 @@ class CaptchaService:
       data["idempotency_key"] = idempotency_key
 
     try:
-      async with aiohttp.ClientSession() as session:
-        async with session.post(
+      async with (
+        aiohttp.ClientSession() as session,
+        session.post(
           TURNSTILE_VERIFY_URL, data=data, timeout=aiohttp.ClientTimeout(total=10)
-        ) as response:
-          if response.status != 200:
-            logger.error(f"Turnstile API returned status {response.status}")
-            return CaptchaVerificationResult(success=False, error_codes=["api-error"])
+        ) as response,
+      ):
+        if response.status != 200:
+          logger.error(f"Turnstile API returned status {response.status}")
+          return CaptchaVerificationResult(success=False, error_codes=["api-error"])
 
-          result_data = await response.json()
+        result_data = await response.json()
 
-          return CaptchaVerificationResult(
-            success=result_data.get("success", False),
-            error_codes=result_data.get("error-codes", []),
-            challenge_ts=result_data.get("challenge_ts"),
-            hostname=result_data.get("hostname"),
-            action=result_data.get("action"),
-            cdata=result_data.get("cdata"),
-          )
+        return CaptchaVerificationResult(
+          success=result_data.get("success", False),
+          error_codes=result_data.get("error-codes", []),
+          challenge_ts=result_data.get("challenge_ts"),
+          hostname=result_data.get("hostname"),
+          action=result_data.get("action"),
+          cdata=result_data.get("cdata"),
+        )
 
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
       logger.error(f"HTTP error during CAPTCHA verification: {e}")
       return CaptchaVerificationResult(success=False, error_codes=["network-error"])
     except Exception as e:
@@ -117,7 +118,7 @@ class CaptchaService:
     return self.site_key
 
   async def verify_captcha_or_skip(
-    self, token: Optional[str], remote_ip: Optional[str] = None
+    self, token: str | None, remote_ip: str | None = None
   ) -> CaptchaVerificationResult:
     """
     Verify CAPTCHA token if required, or skip if in development mode.

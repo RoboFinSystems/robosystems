@@ -6,11 +6,12 @@ This module defines:
 """
 
 import os
-import yaml
 import warnings
-from typing import Dict, Any, Optional, List
-from functools import lru_cache
 from enum import Enum
+from functools import lru_cache
+from typing import Any
+
+import yaml
 
 from robosystems.config import env
 
@@ -37,10 +38,10 @@ class GraphTierConfig:
   instance configuration, backup limits, and more from the centralized graph.yml file.
   """
 
-  _config_cache: Optional[Dict[str, Any]] = None
+  _config_cache: dict[str, Any] | None = None
 
   @classmethod
-  def _load_config(cls) -> Dict[str, Any]:
+  def _load_config(cls) -> dict[str, Any]:
     """Load the graph.yml configuration file."""
     if cls._config_cache is not None:
       return cls._config_cache
@@ -57,12 +58,12 @@ class GraphTierConfig:
     config_path = container_path if os.path.exists(container_path) else dev_path
 
     if not os.path.exists(config_path):
-      warnings.warn(f"Graph config file not found at {config_path}")
+      warnings.warn(f"Graph config file not found at {config_path}", stacklevel=2)
       cls._config_cache = {}
       return cls._config_cache
 
     try:
-      with open(config_path, "r") as f:
+      with open(config_path) as f:
         config = yaml.safe_load(f)
       cls._config_cache = config or {}
       # Use print for debug since logger isn't available due to circular import
@@ -71,14 +72,12 @@ class GraphTierConfig:
       assert cls._config_cache is not None
       return cls._config_cache
     except Exception as e:
-      warnings.warn(f"Failed to load graph config: {e}")
+      warnings.warn(f"Failed to load graph config: {e}", stacklevel=2)
       cls._config_cache = {}
       return cls._config_cache
 
   @classmethod
-  def get_tier_config(
-    cls, tier: str, environment: Optional[str] = None
-  ) -> Dict[str, Any]:
+  def get_tier_config(cls, tier: str, environment: str | None = None) -> dict[str, Any]:
     """Get configuration for a specific tier.
 
     Args:
@@ -108,9 +107,7 @@ class GraphTierConfig:
     return {}
 
   @classmethod
-  def get_max_subgraphs(
-    cls, tier: str, environment: Optional[str] = None
-  ) -> Optional[int]:
+  def get_max_subgraphs(cls, tier: str, environment: str | None = None) -> int | None:
     """Get maximum subgraphs allowed for a tier.
 
     Args:
@@ -124,7 +121,7 @@ class GraphTierConfig:
     return tier_config.get("max_subgraphs")
 
   @classmethod
-  def get_query_timeout(cls, tier: str, environment: Optional[str] = None) -> int:
+  def get_query_timeout(cls, tier: str, environment: str | None = None) -> int:
     """Get query timeout for a tier.
 
     Args:
@@ -139,7 +136,7 @@ class GraphTierConfig:
     return instance_config.get("query_timeout", 30)
 
   @classmethod
-  def get_memory_per_db_mb(cls, tier: str, environment: Optional[str] = None) -> int:
+  def get_memory_per_db_mb(cls, tier: str, environment: str | None = None) -> int:
     """Get memory allocation per database for a tier.
 
     Args:
@@ -154,7 +151,7 @@ class GraphTierConfig:
     return instance_config.get("memory_per_db_mb", 2048)
 
   @classmethod
-  def get_max_memory_mb(cls, tier: str, environment: Optional[str] = None) -> int:
+  def get_max_memory_mb(cls, tier: str, environment: str | None = None) -> int:
     """Get total memory allocation for a tier.
 
     Args:
@@ -169,7 +166,7 @@ class GraphTierConfig:
     return instance_config.get("max_memory_mb", 2048)
 
   @classmethod
-  def get_chunk_size(cls, tier: str, environment: Optional[str] = None) -> int:
+  def get_chunk_size(cls, tier: str, environment: str | None = None) -> int:
     """Get chunk size for a tier.
 
     Args:
@@ -185,8 +182,8 @@ class GraphTierConfig:
 
   @classmethod
   def get_instance_config(
-    cls, tier: str, environment: Optional[str] = None
-  ) -> Dict[str, Any]:
+    cls, tier: str, environment: str | None = None
+  ) -> dict[str, Any]:
     """Get complete instance configuration for a tier.
 
     Args:
@@ -200,9 +197,7 @@ class GraphTierConfig:
     return tier_config.get("instance", {})
 
   @classmethod
-  def get_api_rate_multiplier(
-    cls, tier: str, environment: Optional[str] = None
-  ) -> float:
+  def get_api_rate_multiplier(cls, tier: str, environment: str | None = None) -> float:
     """Get rate limit multiplier for a tier.
 
     Args:
@@ -217,8 +212,8 @@ class GraphTierConfig:
 
   @classmethod
   def get_copy_operation_limits(
-    cls, tier: str, environment: Optional[str] = None
-  ) -> Dict[str, Any]:
+    cls, tier: str, environment: str | None = None
+  ) -> dict[str, Any]:
     """Get copy operation limits for a tier.
 
     Args:
@@ -240,8 +235,8 @@ class GraphTierConfig:
 
   @classmethod
   def get_backup_limits(
-    cls, tier: str, environment: Optional[str] = None
-  ) -> Dict[str, Any]:
+    cls, tier: str, environment: str | None = None
+  ) -> dict[str, Any]:
     """Get backup limits for a tier.
 
     Args:
@@ -260,7 +255,7 @@ class GraphTierConfig:
     return tier_config.get("backup_limits", default_limits)
 
   @classmethod
-  def _generate_tier_features(cls, tier_config: Dict[str, Any]) -> List[str]:
+  def _generate_tier_features(cls, tier_config: dict[str, Any]) -> list[str]:
     """Generate human-readable features list for a tier.
 
     Args:
@@ -338,8 +333,8 @@ class GraphTierConfig:
 
   @classmethod
   def get_available_tiers(
-    cls, environment: Optional[str] = None, include_disabled: bool = False
-  ) -> List[Dict[str, Any]]:
+    cls, environment: str | None = None, include_disabled: bool = False
+  ) -> list[dict[str, Any]]:
     """Get all available tiers for the environment.
 
     Args:
@@ -450,9 +445,7 @@ class GraphTierConfig:
     cls._config_cache = None
 
 
-def get_tier_max_subgraphs(
-  tier: str, environment: Optional[str] = None
-) -> Optional[int]:
+def get_tier_max_subgraphs(tier: str, environment: str | None = None) -> int | None:
   """Get max subgraphs for a tier.
 
   Args:
@@ -466,7 +459,7 @@ def get_tier_max_subgraphs(
 
 
 @lru_cache(maxsize=32)
-def get_tier_api_rate_multiplier(tier: str, environment: Optional[str] = None) -> float:
+def get_tier_api_rate_multiplier(tier: str, environment: str | None = None) -> float:
   """Cached function to get rate limit multiplier for a tier.
 
   Args:
@@ -481,8 +474,8 @@ def get_tier_api_rate_multiplier(tier: str, environment: Optional[str] = None) -
 
 @lru_cache(maxsize=32)
 def get_tier_copy_operation_limits(
-  tier: str, environment: Optional[str] = None
-) -> Dict[str, Any]:
+  tier: str, environment: str | None = None
+) -> dict[str, Any]:
   """Cached function to get copy operation limits for a tier.
 
   Args:
@@ -496,9 +489,7 @@ def get_tier_copy_operation_limits(
 
 
 @lru_cache(maxsize=32)
-def get_tier_backup_limits(
-  tier: str, environment: Optional[str] = None
-) -> Dict[str, Any]:
+def get_tier_backup_limits(tier: str, environment: str | None = None) -> dict[str, Any]:
   """Cached function to get backup limits for a tier.
 
   Args:

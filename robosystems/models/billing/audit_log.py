@@ -1,9 +1,9 @@
 """Billing audit log - consolidated audit trail for all billing events."""
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from enum import Enum
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Index
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Session
 
 from ...database import Base
@@ -62,9 +62,7 @@ class BillingAuditLog(Base):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("baud"))
 
   event_type = Column(String, nullable=False)
-  event_timestamp = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-  )
+  event_timestamp = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
   org_id = Column(String, ForeignKey("orgs.id"), nullable=True)
 
@@ -81,9 +79,7 @@ class BillingAuditLog(Base):
   actor_type = Column(String, nullable=False)
   actor_ip = Column(String, nullable=True)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
   __table_args__ = (
     Index("idx_billing_audit_org", "org_id"),
@@ -104,12 +100,12 @@ class BillingAuditLog(Base):
     event_type: BillingEventType | str,
     description: str,
     actor_type: str = "system",
-    org_id: Optional[str] = None,
-    subscription_id: Optional[str] = None,
-    invoice_id: Optional[str] = None,
-    event_data: Optional[dict] = None,
-    actor_user_id: Optional[str] = None,
-    actor_ip: Optional[str] = None,
+    org_id: str | None = None,
+    subscription_id: str | None = None,
+    invoice_id: str | None = None,
+    event_data: dict | None = None,
+    actor_user_id: str | None = None,
+    actor_ip: str | None = None,
   ) -> "BillingAuditLog":
     """Create an audit log entry.
 
@@ -161,7 +157,7 @@ class BillingAuditLog(Base):
     cls,
     session: Session,
     org_id: str,
-    event_type: Optional[BillingEventType] = None,
+    event_type: BillingEventType | None = None,
     limit: int = 100,
   ) -> list["BillingAuditLog"]:
     """Get audit history for an organization."""
@@ -177,7 +173,7 @@ class BillingAuditLog(Base):
     cls,
     session: Session,
     user_id: str,
-    event_type: Optional[BillingEventType] = None,
+    event_type: BillingEventType | None = None,
     limit: int = 100,
   ) -> list["BillingAuditLog"]:
     """Get audit history for a user (looks up user's org first)."""

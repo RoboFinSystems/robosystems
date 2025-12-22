@@ -3,20 +3,21 @@ Connection service for managing connections across graph database (metadata) and
 """
 
 # Standard library
-from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 # Third-party
 from sqlalchemy.orm import Session
 
+from ..config import URIConstants
+from ..database import session
+from ..logger import logger
+from ..middleware.graph import get_graph_repository
+from ..middleware.graph.utils import MultiTenantUtils
+
 # Local imports
 # Connection model removed - using direct Cypher queries instead
 from ..models.iam.connection_credentials import ConnectionCredentials
-from ..database import session
-from ..logger import logger
-from ..config import URIConstants
-from ..middleware.graph import get_graph_repository
-from ..middleware.graph.utils import MultiTenantUtils
 
 SYSTEM_USER_ID = "__system__"
 
@@ -86,7 +87,7 @@ def _safe_datetime_conversion(dt_value):
   # If it's a float or int, assume it's a Unix timestamp
   if isinstance(dt_value, (float, int)):
     try:
-      return datetime.fromtimestamp(dt_value, tz=timezone.utc)
+      return datetime.fromtimestamp(dt_value, tz=UTC)
     except (ValueError, OSError):
       logger.debug(f"Could not parse timestamp: {dt_value}")
       return None
@@ -117,12 +118,12 @@ class ConnectionService:
     entity_id: str,
     provider: str,
     user_id: str,
-    credentials: Dict[str, Any],
-    metadata: Optional[Dict[str, Any]] = None,
-    expires_at: Optional[datetime] = None,
-    graph_id: Optional[str] = None,
-    db_session: Optional[Session] = None,
-  ) -> Dict[str, Any]:
+    credentials: dict[str, Any],
+    metadata: dict[str, Any] | None = None,
+    expires_at: datetime | None = None,
+    graph_id: str | None = None,
+    db_session: Session | None = None,
+  ) -> dict[str, Any]:
     """
     Create a new connection with metadata in graph database and credentials in PostgreSQL.
 
@@ -268,7 +269,7 @@ class ConnectionService:
             "institution_name": metadata.get("institution_name"),
             "auto_sync_enabled": metadata.get("auto_sync_enabled", True),
           },
-          "created_at": datetime.now(timezone.utc),
+          "created_at": datetime.now(UTC),
           "expires_at": expires_at,
         }
 
@@ -287,9 +288,9 @@ class ConnectionService:
     cls,
     connection_id: str,
     user_id: str,
-    graph_id: Optional[str] = None,
-    db_session: Optional[Session] = None,
-  ) -> Optional[Dict[str, Any]]:
+    graph_id: str | None = None,
+    db_session: Session | None = None,
+  ) -> dict[str, Any] | None:
     """
     Get connection details including metadata and credentials.
 
@@ -400,10 +401,10 @@ class ConnectionService:
   async def list_connections(
     cls,
     entity_id: str,
-    provider: Optional[str] = None,
-    user_id: Optional[str] = None,
-    graph_id: Optional[str] = None,
-  ) -> List[Dict[str, Any]]:
+    provider: str | None = None,
+    user_id: str | None = None,
+    graph_id: str | None = None,
+  ) -> list[dict[str, Any]]:
     """
     List connections for a entity, optionally filtered by provider and user.
 
@@ -539,8 +540,8 @@ class ConnectionService:
     cls,
     connection_id: str,
     user_id: str,
-    credentials: Dict[str, Any],
-    db_session: Optional[Session] = None,
+    credentials: dict[str, Any],
+    db_session: Session | None = None,
   ) -> bool:
     """
     Update connection credentials.
@@ -584,7 +585,7 @@ class ConnectionService:
 
   @classmethod
   async def update_last_sync(
-    cls, connection_id: str, graph_id: Optional[str] = None
+    cls, connection_id: str, graph_id: str | None = None
   ) -> bool:
     """
     Update the last sync timestamp for a connection.
@@ -617,7 +618,7 @@ class ConnectionService:
         """
         result = repository.execute_single(
           update_query,
-          {"connection_id": connection_id, "last_sync": datetime.now(timezone.utc)},
+          {"connection_id": connection_id, "last_sync": datetime.now(UTC)},
         )
 
         if result:
@@ -636,8 +637,8 @@ class ConnectionService:
     cls,
     connection_id: str,
     user_id: str,
-    graph_id: Optional[str] = None,
-    db_session: Optional[Session] = None,
+    graph_id: str | None = None,
+    db_session: Session | None = None,
   ) -> bool:
     """
     Delete a connection from graph database and deactivate credentials in PostgreSQL.
@@ -699,7 +700,7 @@ class ConnectionService:
 
   @classmethod
   async def mark_connection_error(
-    cls, connection_id: str, graph_id: Optional[str] = None
+    cls, connection_id: str, graph_id: str | None = None
   ) -> bool:
     """
     Mark a connection as having an error.
@@ -747,7 +748,7 @@ class ConnectionService:
 
   @classmethod
   async def mark_connection_connected(
-    cls, connection_id: str, graph_id: Optional[str] = None
+    cls, connection_id: str, graph_id: str | None = None
   ) -> bool:
     """
     Mark a connection as connected/healthy.
@@ -799,11 +800,11 @@ class ConnectionService:
     cls,
     connection_id: str,
     user_id: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    credentials: Optional[Dict[str, Any]] = None,
-    status: Optional[str] = None,
-    graph_id: Optional[str] = None,
-    db_session: Optional[Session] = None,
+    metadata: dict[str, Any] | None = None,
+    credentials: dict[str, Any] | None = None,
+    status: str | None = None,
+    graph_id: str | None = None,
+    db_session: Session | None = None,
   ) -> bool:
     """
     Update connection metadata and/or credentials.

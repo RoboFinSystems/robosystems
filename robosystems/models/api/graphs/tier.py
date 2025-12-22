@@ -3,7 +3,7 @@
 This module contains Pydantic models for graph tier configuration responses.
 """
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GraphTierCopyOperations(BaseModel):

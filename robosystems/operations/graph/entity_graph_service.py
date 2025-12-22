@@ -16,19 +16,21 @@ Key features:
 
 import hashlib
 import logging
-from typing import Dict, Any, Optional, Callable, Union
+from collections.abc import Callable
+from typing import Any
+
 from sqlalchemy.orm import Session, scoped_session
 
-from ...models.iam import GraphUser, OrgUser, OrgLimits
 from ...config import env
-from ...models.api import EntityCreate, EntityResponse
-from ...graph_api.client import GraphClient, get_graph_client_for_instance
-from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...config.graph_tier import GraphTier
 from ...exceptions import (
-  InsufficientPermissionsError,
   GraphAllocationError,
+  InsufficientPermissionsError,
 )
+from ...graph_api.client import GraphClient, get_graph_client_for_instance
+from ...middleware.graph.allocation_manager import LadybugAllocationManager
+from ...models.api import EntityCreate, EntityResponse
+from ...models.iam import GraphUser, OrgLimits, OrgUser
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +51,7 @@ class EntityGraphService:
   entity-specific workflows and optimizations.
   """
 
-  def __init__(
-    self, session: Optional[Union[Session, scoped_session[Session]]] = None
-  ) -> None:
+  def __init__(self, session: Session | scoped_session[Session] | None = None) -> None:
     if session is None:
       # For backward compatibility, create a new session if not provided
       from ...database import session as global_session
@@ -62,12 +62,12 @@ class EntityGraphService:
 
   async def create_entity_with_new_graph(
     self,
-    entity_data_dict: Dict[str, Any],
+    entity_data_dict: dict[str, Any],
     user_id: str,
-    tier: Optional[str] = None,
-    cancellation_callback: Optional[Callable] = None,
-    progress_callback: Optional[Callable] = None,
-  ) -> Dict[str, Any]:
+    tier: str | None = None,
+    cancellation_callback: Callable | None = None,
+    progress_callback: Callable | None = None,
+  ) -> dict[str, Any]:
     """
     Create a new entity with its own graph database.
 
@@ -371,7 +371,7 @@ class EntityGraphService:
       }
 
     except Exception as e:
-      logger.error(f"Entity creation failed: {type(e).__name__}: {str(e)}")
+      logger.error(f"Entity creation failed: {type(e).__name__}: {e!s}")
       if "allocation" in str(e).lower():
         raise GraphAllocationError(
           reason=str(e), graph_id=graph_id, entity_name=entity_data.name
@@ -429,7 +429,7 @@ class EntityGraphService:
     return graph_id
 
   async def _install_entity_schema(
-    self, graph_client: GraphClient, graph_id: str, extensions: Optional[list] = None
+    self, graph_client: GraphClient, graph_id: str, extensions: list | None = None
   ) -> str:
     """
     Install entity graph schema via Graph API using selected extensions.
@@ -506,7 +506,7 @@ class EntityGraphService:
     import datetime
 
     entity_identifier = f"entity_{graph_id}"
-    current_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    current_time = datetime.datetime.now(datetime.UTC).isoformat()
 
     entity_uri = entity_data.uri or f"https://robosystems.ai/entities#{graph_id}"
 
@@ -568,9 +568,10 @@ class EntityGraphService:
       logger.info(f"Generated entity data for {entity_row['identifier']}")
 
       # Step 2: Convert to Parquet in-memory
+      import io
+
       import pyarrow as pa
       import pyarrow.parquet as pq
-      import io
 
       schema_fields = [
         ("identifier", pa.string()),
@@ -610,7 +611,8 @@ class EntityGraphService:
       logger.info(f"Converted entity data to Parquet ({len(parquet_bytes)} bytes)")
 
       # Step 3: Upload to S3
-      from ...adapters.s3 import S3Client
+      from robosystems.operations.aws.s3 import S3Client
+
       from ...models.iam import GraphFile, GraphTable
 
       s3_client = S3Client()
@@ -688,10 +690,10 @@ class EntityGraphService:
 
     except Exception as e:
       logger.error(
-        f"Failed to create entity node via controlled ingestion: {type(e).__name__}: {str(e)}"
+        f"Failed to create entity node via controlled ingestion: {type(e).__name__}: {e!s}"
       )
       raise RuntimeError(
-        f"Failed to create entity node via controlled ingestion: {str(e)}"
+        f"Failed to create entity node via controlled ingestion: {e!s}"
       )
 
   def _create_user_graph_relationship(
@@ -701,7 +703,7 @@ class EntityGraphService:
     entity_name: str,
     cluster_id: str,
     org_id: str,
-    extensions: Optional[list] = None,
+    extensions: list | None = None,
     graph_tier_str: str = "ladybug-standard",
   ) -> None:
     """Create user-graph relationship in PostgreSQL."""
@@ -709,8 +711,8 @@ class EntityGraphService:
 
     try:
       # First, create Graph entry to store metadata
-      from ...models.iam.graph import Graph
       from ...config.graph_tier import GraphTier
+      from ...models.iam.graph import Graph
 
       # Use the provided extensions or default to empty list
       schema_extensions = extensions or []
@@ -775,7 +777,7 @@ class EntityGraphService:
 
       # Close repository connection if it has close method
       if hasattr(repository, "close"):
-        if hasattr(repository.close, "__call__"):
+        if callable(repository.close):
           # Check if it's async
           import inspect
 
@@ -797,19 +799,17 @@ class EntityGraphServiceSync:
   by wrapping async operations in asyncio.run().
   """
 
-  def __init__(
-    self, session: Optional[Union[Session, scoped_session[Session]]] = None
-  ) -> None:
+  def __init__(self, session: Session | scoped_session[Session] | None = None) -> None:
     self._async_service = EntityGraphService(session=session)
 
   def create_entity_with_new_graph(
     self,
-    entity_data_dict: Dict[str, Any],
+    entity_data_dict: dict[str, Any],
     user_id: str,
-    tier: Optional[str] = None,
-    cancellation_callback: Optional[Callable] = None,
-    progress_callback: Optional[Callable] = None,
-  ) -> Dict[str, Any]:
+    tier: str | None = None,
+    cancellation_callback: Callable | None = None,
+    progress_callback: Callable | None = None,
+  ) -> dict[str, Any]:
     """Synchronous wrapper for async entity creation."""
     import asyncio
 

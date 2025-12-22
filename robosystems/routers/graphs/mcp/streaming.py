@@ -5,10 +5,11 @@ This module provides streaming capabilities that are transparently handled
 by the Node.js MCP client, presenting a unified interface to AI agents.
 """
 
-import json
 import asyncio
-from typing import AsyncGenerator, Dict, Any, List
-from datetime import datetime, timezone
+import json
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
 from robosystems.logger import logger
 
@@ -16,10 +17,10 @@ from robosystems.logger import logger
 async def stream_mcp_tool_execution(
   handler: Any,
   tool_name: str,
-  arguments: Dict[str, Any],
+  arguments: dict[str, Any],
   strategy: str,
   chunk_size: int = 1000,
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any]]:
   """
   Stream MCP tool execution with progress updates.
 
@@ -38,7 +39,7 @@ async def stream_mcp_tool_execution(
   Yields:
       Event dictionaries with type and data
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   try:
     # Send start event
@@ -90,17 +91,17 @@ async def stream_mcp_tool_execution(
       }
 
     # Send completion event
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
+    execution_time = (datetime.now(UTC) - start_time).total_seconds()
     yield {
       "event": "complete",
       "data": {
         "tool": tool_name,
         "execution_time_seconds": execution_time,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
       },
     }
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     yield {
       "event": "error",
       "data": {
@@ -123,9 +124,9 @@ async def stream_mcp_tool_execution(
 
 async def stream_cypher_query(
   handler: Any,
-  arguments: Dict[str, Any],
+  arguments: dict[str, Any],
   chunk_size: int = 1000,
-) -> AsyncGenerator[Dict[str, Any], None]:
+) -> AsyncGenerator[dict[str, Any]]:
   """
   Stream Cypher query results in chunks.
 
@@ -227,8 +228,8 @@ async def stream_cypher_query(
 async def stream_schema_retrieval(
   handler: Any,
   tool_name: str,
-  arguments: Dict[str, Any],
-) -> AsyncGenerator[Dict[str, Any], None]:
+  arguments: dict[str, Any],
+) -> AsyncGenerator[dict[str, Any]]:
   """
   Stream schema information in digestible parts.
 
@@ -306,8 +307,8 @@ async def stream_schema_retrieval(
 
 async def stream_graph_description(
   handler: Any,
-  arguments: Dict[str, Any],
-) -> AsyncGenerator[Dict[str, Any], None]:
+  arguments: dict[str, Any],
+) -> AsyncGenerator[dict[str, Any]]:
   """
   Stream graph description in parts for better AI agent comprehension.
   """
@@ -354,7 +355,7 @@ async def stream_graph_description(
   }
 
 
-def aggregate_streamed_results(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+def aggregate_streamed_results(events: list[dict[str, Any]]) -> dict[str, Any]:
   """
   Aggregate streamed events into a unified result for AI agents.
 

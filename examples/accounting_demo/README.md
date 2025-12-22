@@ -233,8 +233,8 @@ uv run 05_query_graph.py
 
 This demo shows patterns used in real RoboSystems integrations:
 
-- **XBRL Processing**: SEC financial filings (`/robosystems/processors/xbrl_graph.py`)
-- **QuickBooks Sync**: Small business accounting (`/robosystems/processors/qb_transactions.py`)
+- **XBRL Processing**: SEC financial filings (`/robosystems/adapters/sec/`)
+- **QuickBooks Sync**: Small business accounting (`/robosystems/adapters/quickbooks/`)
 - **Custom ERPs**: Any double-entry accounting system
 
 ## Troubleshooting

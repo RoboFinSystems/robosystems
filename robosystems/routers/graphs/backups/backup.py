@@ -2,38 +2,39 @@
 Main backup routes (list and create operations).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import (
   APIRouter,
+  BackgroundTasks,
   Depends,
   HTTPException,
-  Query,
   Path,
+  Query,
   Request,
-  BackgroundTasks,
   status,
 )
 from sqlalchemy.orm import Session
 
+from robosystems.config import env
 from robosystems.database import get_async_db_session
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils import MultiTenantUtils
+from robosystems.middleware.otel.metrics import (
+  endpoint_metrics_decorator,
+  get_endpoint_metrics,
+)
 from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.backups import (
+  BackupCreateRequest,
   BackupListResponse,
   BackupResponse,
-  BackupCreateRequest,
 )
-from robosystems.models.api.common import ErrorResponse
 from robosystems.models.iam import User
-from robosystems.middleware.otel.metrics import (
-  get_endpoint_metrics,
-  endpoint_metrics_decorator,
-)
-from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.logger import logger
 from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.config import env
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 from .utils import verify_admin_access
 
@@ -82,7 +83,7 @@ async def list_backups(
     # List backups from database instead of S3
     logger.info(f"Querying database for backups of graph: {graph_id}")
 
-    from robosystems.models.iam import GraphBackup, BackupStatus
+    from robosystems.models.iam import BackupStatus, GraphBackup
 
     # Query database for backups
     backup_records = (
@@ -148,7 +149,7 @@ async def list_backups(
           allow_export=not backup.encryption_enabled,  # Encrypted backups cannot be exported
           created_at=backup.created_at.isoformat()
           if backup.created_at
-          else datetime.now(timezone.utc).isoformat(),
+          else datetime.now(UTC).isoformat(),
           completed_at=backup.completed_at.isoformat() if backup.completed_at else None,
           expires_at=backup.expires_at.isoformat() if backup.expires_at else None,
         )
@@ -179,7 +180,7 @@ async def list_backups(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to list backups for graph {graph_id}: {str(e)}")
+    logger.error(f"Failed to list backups for graph {graph_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to list backups",
@@ -351,15 +352,19 @@ async def create_backup(
         detail="Database service temporarily unavailable",
       )
 
-    # Queue Celery task for backup creation with SSE progress tracking
+    # Queue Dagster job for backup creation with SSE progress tracking
     import uuid
-    from robosystems.tasks.graph_operations.backup import create_graph_backup
+
+    from robosystems.middleware.sse import (
+      build_graph_job_config,
+      run_and_monitor_dagster_job,
+    )
     from robosystems.middleware.sse.event_storage import get_event_storage
 
     operation_id = str(uuid.uuid4())
 
     logger.info(
-      f"Queueing backup task for graph {graph_id} with operation_id {operation_id}"
+      f"Queueing Dagster backup job for graph {graph_id} with operation_id {operation_id}"
     )
 
     # Register operation with SSE before queuing task
@@ -371,16 +376,24 @@ async def create_backup(
       operation_id=operation_id,
     )
 
-    # Queue Celery task with SSE progress tracking
-    create_graph_backup.delay(  # type: ignore[attr-defined]
+    # Build Dagster job config
+    run_config = build_graph_job_config(
+      "backup_graph_job",
       graph_id=graph_id,
-      backup_type="full",
       user_id=str(current_user.id),
+      backup_type="full",
+      backup_format=request.backup_format,
       retention_days=request.retention_days,
       compression=True,
       encryption=request.encryption,
-      backup_format=request.backup_format,
+    )
+
+    # Run Dagster job with SSE monitoring in background
+    background_tasks.add_task(
+      run_and_monitor_dagster_job,
+      job_name="backup_graph_job",
       operation_id=operation_id,
+      run_config=run_config,
     )
 
     # Record business event
@@ -430,8 +443,8 @@ async def create_backup(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to create backup for graph {graph_id}: {str(e)}")
+    logger.error(f"Failed to create backup for graph {graph_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to initiate backup: {str(e)}",
+      detail=f"Failed to initiate backup: {e!s}",
     )

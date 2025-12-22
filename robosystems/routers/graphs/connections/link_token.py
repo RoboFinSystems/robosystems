@@ -2,35 +2,35 @@
 Link token endpoints for embedded authentication.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 
-from robosystems.models.iam import User
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph import get_graph_repository
-from robosystems.operations.connection_service import ConnectionService
 from robosystems.logger import logger
-from robosystems.security import SecurityAuditLogger, SecurityEventType
-from robosystems.models.api.graphs.connections import (
-  LinkTokenRequest,
-  ExchangeTokenRequest,
-)
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_graph_repository
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.models.api.common import (
-  ErrorResponse,
   ErrorCode,
+  ErrorResponse,
   create_error_response,
 )
+from robosystems.models.api.graphs.connections import (
+  ExchangeTokenRequest,
+  LinkTokenRequest,
+)
+from robosystems.models.iam import User
+from robosystems.operations.connection_service import ConnectionService
+from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import (
-  provider_registry,
   create_robustness_components,
+  provider_registry,
+  record_operation_failure,
   record_operation_start,
   record_operation_success,
-  record_operation_failure,
 )
-
-import asyncio
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -188,7 +188,7 @@ async def create_link_token(
       "provider": provider,  # Let frontend know which UI to initialize
     }
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     # Record circuit breaker failure and timeout metrics
     record_operation_failure(
       components=components,
@@ -252,7 +252,7 @@ async def create_link_token(
     logger.error(f"Link token creation failed: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Link token creation failed: {str(e)}",
+      detail=f"Link token creation failed: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )
 
@@ -444,6 +444,6 @@ async def exchange_link_token(
     logger.error(f"Link token exchange failed: {e}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Token exchange failed: {str(e)}",
+      detail=f"Token exchange failed: {e!s}",
       code=ErrorCode.INTERNAL_ERROR,
     )

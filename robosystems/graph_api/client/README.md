@@ -14,7 +14,7 @@ The Graph Client and Factory system provides the critical interface between the 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Application Layer                           │
-│                  (FastAPI Routes / Celery Workers)              │
+│                  (FastAPI Routes / Dagster Workers)             │
 ├─────────────────────────────────────────────────────────────────┤
 │                    GraphClientFactory                           │
 │              (Intelligent Routing & Discovery)                  │
@@ -24,7 +24,7 @@ The Graph Client and Factory system provides the critical interface between the 
 ├─────────────────────────────────────────────────────────────────┤
 │              Backend-Specific Infrastructure                    │
 │                                                                 │
-│  LadybugDB Backend:          │  Neo4j Backend:                       │
+│  LadybugDB Backend:     │  Neo4j Backend:                       │
 │  ┌──────────────────┐   │  ┌──────────────────┐                 │
 │  │ EC2 Instances    │   │  │ EC2 Instances    │                 │
 │  │ - Multi-Tenant   │   │  │ - Dedicated      │                 │
@@ -515,38 +515,4 @@ async def get_graph_client(graph_id: str):
         graph_id=graph_id,
         operation_type="read"
     )
-```
-
-### Celery Task
-
-```python
-from celery import shared_task
-from robosystems.graph_api.client.factory import GraphClientFactory
-
-@shared_task
-async def process_graph_data(graph_id: str, data_files: list):
-    # Create client for write operations
-    client = await GraphClientFactory.create_client(
-        graph_id=graph_id,
-        operation_type="write",
-        tier=GraphTier.LBUG_STANDARD
-    )
-
-    # Ingest data
-    task = await client.ingest(
-        graph_id=graph_id,
-        mode="async",
-        bucket="robosystems-data",
-        files=data_files,
-        priority=5
-    )
-
-    # Monitor task
-    while True:
-        status = await client.get_task_status(task.task_id)
-        if status["status"] in ["completed", "failed"]:
-            break
-        await asyncio.sleep(5)
-
-    return status
 ```

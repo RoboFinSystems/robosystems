@@ -7,24 +7,36 @@ This module contains high-level graph database business logic including:
 - Graph metrics and analytics
 - Entity graph management
 - Repository subscription management
+- Infrastructure monitoring and maintenance
 """
 
-from .generic_graph_service import GenericGraphService, GenericGraphServiceSync
-from .subscription_service import GraphSubscriptionService
-from .metrics_service import GraphMetricsService
-from .pricing_service import GraphPricingService
 from .credit_service import CreditService
 from .entity_graph_service import EntityGraphService, EntityGraphServiceSync
+from .generic_graph_service import GenericGraphService, GenericGraphServiceSync
+from .infrastructure import (
+  CleanupResult,
+  HealthCheckResult,
+  InstanceMonitor,
+  MetricsResult,
+)
+from .metrics_service import GraphMetricsService
+from .pricing_service import GraphPricingService
 from .repository_subscription_service import RepositorySubscriptionService
+from .subscription_service import GraphSubscriptionService
 
 __all__ = [
-  "GenericGraphService",
-  "GenericGraphServiceSync",
-  "GraphSubscriptionService",
-  "GraphMetricsService",
-  "GraphPricingService",
+  "CleanupResult",
   "CreditService",
   "EntityGraphService",
   "EntityGraphServiceSync",
+  "GenericGraphService",
+  "GenericGraphServiceSync",
+  "GraphMetricsService",
+  "GraphPricingService",
+  "GraphSubscriptionService",
+  "HealthCheckResult",
+  # Infrastructure monitoring
+  "InstanceMonitor",
+  "MetricsResult",
   "RepositorySubscriptionService",
 ]

@@ -5,22 +5,23 @@ Tests the critical backup service that protects customer data through automated
 S3 backups with integrity checks and lifecycle management.
 """
 
-import tempfile
 import hashlib
-from datetime import datetime, timezone
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock
-import pytest
+from unittest.mock import AsyncMock, Mock, patch
+
 import boto3
+import pytest
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from robosystems.operations.lbug.backup import (
-  LadybugGraphBackupService,
-  create_graph_backup_service,
   DEFAULT_BACKUP_BUCKET,
   DEFAULT_RETENTION_DAYS,
   MAX_BACKUP_SIZE_GB,
+  LadybugGraphBackupService,
+  create_graph_backup_service,
 )
 
 
@@ -33,7 +34,7 @@ def mock_allocation_manager():
   )
   manager.get_database_metadata = AsyncMock(
     return_value={
-      "allocated_at": datetime.now(timezone.utc).isoformat(),
+      "allocated_at": datetime.now(UTC).isoformat(),
       "tier": "standard",
       "user_id": "test-user",
     }
@@ -196,7 +197,7 @@ class TestLadybugGraphBackupService:
       Key=recent_key,
       Body=b"recent backup data",
       Metadata={
-        "backup-timestamp": datetime.now(timezone.utc).isoformat(),
+        "backup-timestamp": datetime.now(UTC).isoformat(),
         "checksum": "abc123",
       },
     )

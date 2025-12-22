@@ -6,51 +6,64 @@ similar to MCP tool execution.
 """
 
 import asyncio
-from typing import Optional, Union
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
-from sse_starlette.sse import EventSourceResponse
-from sqlalchemy.orm import Session
 
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from fastapi import (
+  APIRouter,
+  BackgroundTasks,
+  Depends,
+  HTTPException,
+  Path,
+  Query,
+  Request,
+)
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+from sse_starlette.sse import EventSourceResponse
+
+from robosystems.config import env
 from robosystems.database import get_db_session
-from robosystems.models.iam import User
+from robosystems.logger import logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.agent import (
-  AgentRequest,
-  AgentResponse,
   AgentListResponse,
   AgentMetadataResponse,
+  AgentMode,
+  AgentRecommendation,
   AgentRecommendationRequest,
   AgentRecommendationResponse,
-  AgentRecommendation,
+  AgentRequest,
+  AgentResponse,
   BatchAgentRequest,
   BatchAgentResponse,
-  AgentMode,
+)
+from robosystems.models.iam import User
+from robosystems.operations.agents.base import (
+  AgentMode as BaseAgentMode,
+)
+from robosystems.operations.agents.base import (
+  ExecutionProfile,
 )
 from robosystems.operations.agents.orchestrator import (
   AgentOrchestrator,
   AgentSelectionCriteria,
 )
 from robosystems.operations.agents.registry import AgentRegistry
-from robosystems.operations.agents.base import (
-  AgentMode as BaseAgentMode,
-  ExecutionProfile,
-)
-from robosystems.logger import logger
-from robosystems.models.api.common import ErrorResponse
-from robosystems.config import env
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
+from .handlers import (
+  handle_background_queue,
+  handle_sse_streaming,
+  handle_sync_execution,
+)
 from .strategies import (
+  AgentClientDetector,
   AgentExecutionStrategy,
   AgentStrategySelector,
-  AgentClientDetector,
   ResponseMode,
 )
-from .handlers import handle_sync_execution, handle_sse_streaming, handle_celery_queue
-
 
 router = APIRouter()
 
@@ -65,7 +78,7 @@ def _check_agent_post_enabled():
     )
 
 
-def _convert_agent_mode(mode: Optional[AgentMode]) -> BaseAgentMode:
+def _convert_agent_mode(mode: AgentMode | None) -> BaseAgentMode:
   """Convert API AgentMode to base AgentMode."""
   if mode is None:
     return BaseAgentMode.STANDARD
@@ -107,7 +120,7 @@ async def list_agents(
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  capability: Optional[str] = Query(
+  capability: str | None = Query(
     None,
     description="Filter by capability (e.g., 'financial_analysis', 'rag_search')",
   ),
@@ -157,7 +170,7 @@ The orchestrator intelligently routes your query by:
 **Execution Strategies (automatic):**
 - Fast operations (<5s): Immediate synchronous response
 - Medium operations (5-30s): SSE streaming with progress updates
-- Long operations (>30s): Async Celery worker with operation tracking
+- Long operations (>30s): Background queue with operation tracking
 
 **Response Mode Override:**
 Use query parameter `?mode=sync|async` to override automatic strategy selection.
@@ -206,18 +219,19 @@ See request/response examples in the "Examples" dropdown below.""",
 async def auto_agent(
   request: AgentRequest,
   full_request: Request,
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  mode: Optional[ResponseMode] = Query(
+  mode: ResponseMode | None = Query(
     None, description="Override execution mode: sync, async, stream, or auto"
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Union[AgentResponse, JSONResponse, EventSourceResponse]:
+) -> AgentResponse | JSONResponse | EventSourceResponse:
   """Automatically select the best agent for the query with intelligent execution strategy."""
   _check_agent_post_enabled()
 
@@ -295,16 +309,17 @@ async def auto_agent(
         db=db,
       )
 
-    elif strategy == AgentExecutionStrategy.CELERY_QUEUE_STREAM:
-      return await handle_celery_queue(
+    elif strategy == AgentExecutionStrategy.BACKGROUND_QUEUE:
+      return await handle_background_queue(
         graph_id=graph_id,
         request_data=request_data,
         current_user=current_user,
         db=db,
+        background_tasks=background_tasks,
       )
 
   except Exception as e:
-    logger.error(f"Agent routing error: {str(e)}")
+    logger.error(f"Agent routing error: {e!s}")
     raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -371,7 +386,7 @@ Available agents:
 **Execution Strategies (automatic):**
 - Fast operations (<5s): Immediate synchronous response
 - Medium operations (5-30s): SSE streaming with progress updates
-- Long operations (>30s): Async Celery worker with operation tracking
+- Long operations (>30s): Background queue with operation tracking
 
 **Response Mode Override:**
 Use query parameter `?mode=sync|async` to override automatic strategy selection.
@@ -396,18 +411,19 @@ async def specific_agent(
   agent_type: str,
   request: AgentRequest,
   full_request: Request,
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
     pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN,
   ),
-  mode: Optional[ResponseMode] = Query(
+  mode: ResponseMode | None = Query(
     None, description="Override execution mode: sync, async, stream, or auto"
   ),
   current_user: User = Depends(get_current_user_with_graph),
   db: Session = Depends(get_db_session),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Union[AgentResponse, JSONResponse, EventSourceResponse]:
+) -> AgentResponse | JSONResponse | EventSourceResponse:
   """Execute a specific agent type with intelligent execution strategy."""
   _check_agent_post_enabled()
 
@@ -477,19 +493,20 @@ async def specific_agent(
         agent_type=agent_type,
       )
 
-    elif strategy == AgentExecutionStrategy.CELERY_QUEUE_STREAM:
-      return await handle_celery_queue(
+    elif strategy == AgentExecutionStrategy.BACKGROUND_QUEUE:
+      return await handle_background_queue(
         graph_id=graph_id,
         request_data=request_data,
         current_user=current_user,
         db=db,
+        background_tasks=background_tasks,
         agent_type=agent_type,
       )
 
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Agent execution error: {str(e)}")
+    logger.error(f"Agent execution error: {e!s}")
     raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -578,10 +595,10 @@ async def batch_agent(
     valid_results = []
     for r in results:
       if isinstance(r, Exception):
-        logger.error(f"Batch query failed: {str(r)}")
+        logger.error(f"Batch query failed: {r!s}")
         valid_results.append(
           AgentResponse(
-            content=f"Query failed: {str(r)}",
+            content=f"Query failed: {r!s}",
             agent_used="error",
             mode_used=AgentMode.STANDARD,
             error_details={"error": str(r)},
@@ -605,10 +622,10 @@ async def batch_agent(
         result = await process_single(q)
         results.append(result)
       except Exception as e:
-        logger.error(f"Batch query failed: {str(e)}")
+        logger.error(f"Batch query failed: {e!s}")
         results.append(
           AgentResponse(
-            content=f"Query failed: {str(e)}",
+            content=f"Query failed: {e!s}",
             agent_used="error",
             mode_used=AgentMode.STANDARD,
             error_details={"error": str(e)},

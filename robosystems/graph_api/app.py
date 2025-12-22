@@ -5,29 +5,28 @@ This module creates the FastAPI application with all routers and middleware.
 """
 
 import os
-from pathlib import Path
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+# OpenTelemetry import - conditional based on OTEL_ENABLED
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
+from robosystems.config import env
+from robosystems.config.openapi_tags import GRAPH_API_TAGS
 from robosystems.graph_api.routers import (
   databases,
   health,
   info,
-  tasks,
   metrics,
+  tasks,
 )
-from robosystems.config import env
-from robosystems.config.openapi_tags import GRAPH_API_TAGS
 from robosystems.logger import logger
 
-# OpenTelemetry import - conditional based on OTEL_ENABLED
-from typing import Optional, Callable
-
-setup_telemetry: Optional[Callable[[FastAPI], None]] = None
+setup_telemetry: Callable[[FastAPI], None] | None = None
 try:
   from robosystems.middleware.otel import setup_telemetry
 except ImportError:
@@ -36,7 +35,7 @@ except ImportError:
 try:
   from importlib.metadata import version
 
-  __version__ = version("robosystems-service")
+  __version__ = version("robosystems")
 except Exception:
   __version__ = "1.0.0"
 

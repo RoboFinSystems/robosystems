@@ -322,6 +322,41 @@ production:
         enabled_default: false # DISABLED - Do not deploy unless explicitly enabled
         optional: true # Mark as optional tier
 
+  # ===========================================================================
+  # SHARED REPLICAS - Read-Only Fleet
+  # ===========================================================================
+  replicas:
+    - name: shared-replicas
+      description: Read replicas for shared repositories (SEC, industry, economic)
+      template: graph-ladybug-replicas.yaml
+      depends_on: ladybug-shared  # Only deploy after shared master exists
+
+      # Instance configuration
+      instance:
+        type: r7g.medium  # Smaller than master - read-only workloads
+        min: 2            # Minimum for HA
+        max: 10           # Scale for read traffic
+        desired: 2        # Start with 2
+
+      # Scaling configuration
+      scaling:
+        target_cpu: 70              # Scale up when CPU > 70%
+        scale_in_cooldown: 300      # 5 min cooldown before scale in
+        scale_out_cooldown: 60      # 1 min cooldown before scale out
+
+      # Health check configuration
+      health_check:
+        path: /status
+        interval: 30
+        timeout: 10
+        healthy_threshold: 2
+        unhealthy_threshold: 3
+
+      # Deployment configuration
+      deployment:
+        enable_var: SHARED_REPLICAS_ENABLED_PROD
+        enabled_default: false  # Manual enable - requires snapshot to exist first
+
 # =============================================================================
 # STAGING ENVIRONMENT
 # =============================================================================
@@ -569,6 +604,41 @@ staging:
         enable_var: NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING
         enabled_default: false # DISABLED
         optional: true
+
+  # ===========================================================================
+  # SHARED REPLICAS - Read-Only Fleet (Staging)
+  # ===========================================================================
+  replicas:
+    - name: shared-replicas
+      description: Read replicas for staging shared repositories
+      template: graph-ladybug-replicas.yaml
+      depends_on: ladybug-shared
+
+      # Instance configuration (smaller for staging)
+      instance:
+        type: r7g.medium
+        min: 1            # Single replica for staging
+        max: 3
+        desired: 1
+
+      # Scaling configuration
+      scaling:
+        target_cpu: 70
+        scale_in_cooldown: 300
+        scale_out_cooldown: 60
+
+      # Health check configuration
+      health_check:
+        path: /status
+        interval: 30
+        timeout: 10
+        healthy_threshold: 2
+        unhealthy_threshold: 3
+
+      # Deployment configuration
+      deployment:
+        enable_var: SHARED_REPLICAS_ENABLED_STAGING
+        enabled_default: false
 
 # =============================================================================
 # DEVELOPMENT ENVIRONMENT

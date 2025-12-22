@@ -2,10 +2,11 @@
 Tests for schema management API endpoints.
 """
 
-from unittest.mock import patch, MagicMock
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi import status
-from contextlib import contextmanager
 
 
 @contextmanager
@@ -36,7 +37,7 @@ def mock_database_session(test_user_graph, schema_record=None):
 
   # Configure db.query to return the right mock based on the model
   def mock_query(model):
-    from robosystems.models.iam import GraphUser, GraphSchema
+    from robosystems.models.iam import GraphSchema, GraphUser
 
     if model == GraphUser or (
       hasattr(model, "__name__") and model.__name__ == "GraphUser"

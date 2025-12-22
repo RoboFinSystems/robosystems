@@ -1,7 +1,8 @@
 """Tests for password reset endpoints."""
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import patch, Mock, AsyncMock
 
 from robosystems.models.iam import User, UserToken
 
@@ -10,11 +11,18 @@ class TestPasswordResetEndpoints:
   """Tests for password reset functionality."""
 
   @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.password_reset.sns_service")
+  @patch("robosystems.routers.auth.password_reset.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.auth.password_reset.build_email_job_config")
   @patch.object(UserToken, "create_token")
   @patch.object(User, "get_by_email")
   async def test_forgot_password_success(
-    self, mock_get_user, mock_create_token, mock_sns_service, client, test_db
+    self,
+    mock_get_user,
+    mock_create_token,
+    mock_build_config,
+    mock_dagster_job,
+    client,
+    test_db,
   ):
     """Test successful password reset request."""
     # Mock user retrieval
@@ -28,8 +36,9 @@ class TestPasswordResetEndpoints:
     # Mock token creation
     mock_create_token.return_value = "reset_token_123"
 
-    # Mock SNS service
-    mock_sns_service.send_password_reset_email = AsyncMock(return_value=True)
+    # Mock Dagster job
+    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
+    mock_dagster_job.return_value = {"status": "success"}
 
     # Request password reset
     response = client.post(
@@ -55,12 +64,13 @@ class TestPasswordResetEndpoints:
     assert token_args.kwargs["token_type"] == "password_reset"
     assert token_args.kwargs["hours"] == 1  # Default expiry
 
-    # Verify email was sent
-    mock_sns_service.send_password_reset_email.assert_called_once()
-    email_args = mock_sns_service.send_password_reset_email.call_args
-    assert email_args.kwargs["user_email"] == "forgot@example.com"
-    assert email_args.kwargs["user_name"] == "Forgot User"
-    assert email_args.kwargs["token"] == "reset_token_123"
+    # Verify email job config was built
+    mock_build_config.assert_called_once()
+    config_args = mock_build_config.call_args
+    assert config_args.kwargs["email_type"] == "password_reset"
+    assert config_args.kwargs["to_email"] == "forgot@example.com"
+    assert config_args.kwargs["user_name"] == "Forgot User"
+    assert config_args.kwargs["token"] == "reset_token_123"
 
   @pytest.mark.asyncio
   @patch.object(User, "get_by_email")
@@ -288,16 +298,18 @@ class TestPasswordResetEndpoints:
     assert response.status_code == 422  # Validation error
 
   @pytest.mark.asyncio
+  @patch("robosystems.routers.auth.password_reset.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.auth.password_reset.build_email_job_config")
   @patch("robosystems.routers.auth.password_reset.detect_app_source")
-  @patch("robosystems.routers.auth.password_reset.sns_service")
   @patch.object(UserToken, "create_token")
   @patch.object(User, "get_by_email")
   async def test_forgot_password_app_detection(
     self,
     mock_get_user,
     mock_create_token,
-    mock_sns_service,
     mock_detect_app,
+    mock_build_config,
+    mock_dagster_job,
     client,
     test_db,
   ):
@@ -310,7 +322,8 @@ class TestPasswordResetEndpoints:
     mock_get_user.return_value = mock_user
 
     mock_create_token.return_value = "token_app"
-    mock_sns_service.send_password_reset_email = AsyncMock(return_value=True)
+    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
+    mock_dagster_job.return_value = {"status": "success"}
     mock_detect_app.return_value = "robosystems"
 
     response = client.post(
@@ -324,34 +337,44 @@ class TestPasswordResetEndpoints:
     # Verify app detection
     mock_detect_app.assert_called_once()
 
-    # Verify correct app was passed
-    email_args = mock_sns_service.send_password_reset_email.call_args
-    assert email_args.kwargs["app"] == "robosystems"
+    # Verify correct app was passed to email job config
+    config_args = mock_build_config.call_args
+    assert config_args.kwargs["app"] == "robosystems"
 
   @pytest.mark.asyncio
+  @patch("robosystems.routers.auth.password_reset.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.auth.password_reset.build_email_job_config")
   @patch("robosystems.routers.auth.password_reset.SecurityAuditLogger")
   @patch.object(UserToken, "create_token")
   @patch.object(User, "get_by_email")
   async def test_forgot_password_security_logging(
-    self, mock_get_user, mock_create_token, mock_audit_logger, client, test_db
+    self,
+    mock_get_user,
+    mock_create_token,
+    mock_audit_logger,
+    mock_build_config,
+    mock_dagster_job,
+    client,
+    test_db,
   ):
     """Test that password reset requests are logged for security."""
     # Test with existing user
     mock_user = Mock(spec=User)
     mock_user.id = "user_audit"
+    mock_user.email = "audit@example.com"
+    mock_user.name = "Audit User"
     mock_user.is_active = True
     mock_get_user.return_value = mock_user
 
     mock_create_token.return_value = "token_audit"
+    mock_build_config.return_value = {"ops": {"send_email_op": {"config": {}}}}
+    mock_dagster_job.return_value = {"status": "success"}
 
-    with patch("robosystems.routers.auth.password_reset.sns_service") as mock_sns:
-      mock_sns.send_password_reset_email = AsyncMock(return_value=True)
-
-      response = client.post(
-        "/v1/auth/password/forgot",
-        json={"email": "audit@example.com"},
-        headers={"User-Agent": "Security Test"},
-      )
+    response = client.post(
+      "/v1/auth/password/forgot",
+      json={"email": "audit@example.com"},
+      headers={"User-Agent": "Security Test"},
+    )
 
     assert response.status_code == 200
 
@@ -395,32 +418,3 @@ class TestPasswordResetEndpoints:
     assert log_args.kwargs["event_type"].value == "password_reset_completed"
     assert log_args.kwargs["user_id"] == "user_complete"
     assert log_args.kwargs["risk_level"] == "high"
-
-  @pytest.mark.asyncio
-  @patch("robosystems.routers.auth.password_reset.sns_service")
-  @patch.object(UserToken, "create_token")
-  @patch.object(User, "get_by_email")
-  async def test_forgot_password_sns_failure_handled(
-    self, mock_get_user, mock_create_token, mock_sns_service, client, test_db
-  ):
-    """Test that SNS failures don't expose user existence."""
-    mock_user = Mock(spec=User)
-    mock_user.id = "user_sns_fail"
-    mock_user.is_active = True
-    mock_get_user.return_value = mock_user
-
-    mock_create_token.return_value = "token_fail"
-    mock_sns_service.send_password_reset_email = AsyncMock(return_value=False)
-
-    response = client.post(
-      "/v1/auth/password/forgot",
-      json={"email": "snsfail@example.com"},
-    )
-
-    # Should still return success to prevent enumeration
-    assert response.status_code == 200
-    data = response.json()
-    assert (
-      data["message"]
-      == "If an account exists with this email, a password reset link has been sent."
-    )

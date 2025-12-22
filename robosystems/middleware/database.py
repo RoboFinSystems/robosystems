@@ -1,10 +1,11 @@
 """Database session cleanup middleware."""
 
-from typing import Callable
+from collections.abc import Callable
+
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from ..database import session, activate_request_scope, deactivate_request_scope
+from ..database import activate_request_scope, deactivate_request_scope, session
 from ..logger import logger
 
 

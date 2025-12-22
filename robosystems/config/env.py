@@ -15,8 +15,8 @@ Organization:
 """
 
 import os
-from typing import Any, Dict, Optional, List, Union, TYPE_CHECKING
 from functools import lru_cache
+from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
   from .valkey_registry import ValkeyDatabase
@@ -41,76 +41,71 @@ except ImportError:
 
 
 from .constants import (
-  # Database constants
-  DEFAULT_POOL_SIZE,
-  DEFAULT_MAX_OVERFLOW,
-  DEFAULT_POOL_TIMEOUT,
-  DEFAULT_POOL_RECYCLE,
-  # Performance constants
-  DEFAULT_HTTP_TIMEOUT,
-  DEFAULT_QUERY_TIMEOUT,
-  MAX_QUERY_LENGTH,
-  DEFAULT_RETRY_DELAY,
-  DEFAULT_QUERY_LIMIT,
-  DEFAULT_QUEUE_SIZE,
-  DEFAULT_MAX_CONCURRENT,
-  MAX_CONCURRENT_DOWNLOADS,
-  MAX_DATABASES_PER_NODE,
+  ADMISSION_CHECK_INTERVAL,
+  ADMISSION_CPU_THRESHOLD_DEFAULT,
+  # Task constants
+  ADMISSION_MEMORY_THRESHOLD_DEFAULT,
+  ADMISSION_QUEUE_THRESHOLD_DEFAULT,
+  ARELLE_DOWNLOAD_TIMEOUT,
+  ARELLE_MIN_SCHEMA_COUNT,
+  CACHE_TTL_LONG,
   # Cache constants
   CACHE_TTL_SHORT,
-  CACHE_TTL_LONG,
-  # Task constants
-  TASK_TIME_LIMIT,
-  TASK_SOFT_TIME_LIMIT,
-  # Admission control
-  ADMISSION_MEMORY_THRESHOLD_DEFAULT,
-  ADMISSION_CPU_THRESHOLD_DEFAULT,
-  ADMISSION_QUEUE_THRESHOLD_DEFAULT,
-  ADMISSION_CHECK_INTERVAL,
-  # Fixed technical limits
-  GRAPH_MAX_REQUEST_SIZE,
-  GRAPH_CONNECT_TIMEOUT,
-  GRAPH_READ_TIMEOUT,
-  ARELLE_MIN_SCHEMA_COUNT,
-  ARELLE_DOWNLOAD_TIMEOUT,
-  XBRL_EXTERNALIZATION_THRESHOLD,
-  XBRL_GRAPH_LARGE_NODES,
-  # Resiliency and circuit breaker
-  GRAPH_INSTANCE_CACHE_TTL,
-  GRAPH_CIRCUIT_BREAKER_THRESHOLD,
-  GRAPH_CIRCUIT_BREAKER_TIMEOUT,
-  # Queue configuration
-  QUERY_QUEUE_MAX_PER_USER,
-  QUERY_DEFAULT_PRIORITY,
-  QUERY_PRIORITY_BOOST_PREMIUM,
-  QUERY_QUEUE_TIMEOUT,
-  # Load shedding
-  LOAD_SHED_START_PRESSURE_DEFAULT,
-  LOAD_SHED_STOP_PRESSURE_DEFAULT,
-  # Retry configuration
-  SEC_PIPELINE_MAX_RETRIES,
-  OPENFIGI_RETRY_MIN_WAIT,
-  OPENFIGI_RETRY_MAX_WAIT,
   # Fixed business rules
   CREDIT_ALLOCATION_DAY,
   CREDIT_ALLOCATION_HOUR,
-  SEC_RATE_LIMIT,
-  # Tier-specific memory allocations
-  GRAPH_STANDARD_MAX_MEMORY_MB,
-  GRAPH_LARGE_MAX_MEMORY_MB,
-  GRAPH_XLARGE_MAX_MEMORY_MB,
-  GRAPH_STANDARD_MEMORY_PER_DB_MB,
-  GRAPH_LARGE_MEMORY_PER_DB_MB,
-  GRAPH_XLARGE_MEMORY_PER_DB_MB,
-  # Tier-specific chunk sizes
-  GRAPH_STANDARD_CHUNK_SIZE,
-  GRAPH_LARGE_CHUNK_SIZE,
-  GRAPH_XLARGE_CHUNK_SIZE,
+  # Performance constants
+  DEFAULT_HTTP_TIMEOUT,
+  DEFAULT_MAX_CONCURRENT,
+  DEFAULT_MAX_OVERFLOW,
+  DEFAULT_POOL_RECYCLE,
+  # Database constants
+  DEFAULT_POOL_SIZE,
+  DEFAULT_POOL_TIMEOUT,
+  DEFAULT_QUERY_LIMIT,
+  DEFAULT_QUERY_TIMEOUT,
+  DEFAULT_QUEUE_SIZE,
   # DuckDB configuration
   DUCKDB_MAX_THREADS,
   DUCKDB_MEMORY_LIMIT,
+  GRAPH_CIRCUIT_BREAKER_THRESHOLD,
+  GRAPH_CIRCUIT_BREAKER_TIMEOUT,
+  GRAPH_CONNECT_TIMEOUT,
+  # Resiliency and circuit breaker
+  GRAPH_INSTANCE_CACHE_TTL,
+  GRAPH_LARGE_CHUNK_SIZE,
+  GRAPH_LARGE_MAX_MEMORY_MB,
+  GRAPH_LARGE_MEMORY_PER_DB_MB,
+  # Fixed technical limits
+  GRAPH_MAX_REQUEST_SIZE,
+  GRAPH_READ_TIMEOUT,
+  # Tier-specific chunk sizes
+  GRAPH_STANDARD_CHUNK_SIZE,
+  # Tier-specific memory allocations
+  GRAPH_STANDARD_MAX_MEMORY_MB,
+  GRAPH_STANDARD_MEMORY_PER_DB_MB,
+  GRAPH_XLARGE_CHUNK_SIZE,
+  GRAPH_XLARGE_MAX_MEMORY_MB,
+  GRAPH_XLARGE_MEMORY_PER_DB_MB,
+  # Load shedding
+  LOAD_SHED_START_PRESSURE_DEFAULT,
+  LOAD_SHED_STOP_PRESSURE_DEFAULT,
+  MAX_CONCURRENT_DOWNLOADS,
+  MAX_DATABASES_PER_NODE,
+  MAX_QUERY_LENGTH,
+  OPENFIGI_RETRY_MAX_WAIT,
+  OPENFIGI_RETRY_MIN_WAIT,
+  QUERY_DEFAULT_PRIORITY,
+  QUERY_PRIORITY_BOOST_PREMIUM,
+  # Queue configuration
+  QUERY_QUEUE_MAX_PER_USER,
+  QUERY_QUEUE_TIMEOUT,
+  # Retry configuration
+  SEC_PIPELINE_MAX_RETRIES,
+  SEC_RATE_LIMIT,
+  XBRL_EXTERNALIZATION_THRESHOLD,
+  XBRL_GRAPH_LARGE_NODES,
 )
-
 
 # ==========================================================================
 # HELPER FUNCTIONS FOR TYPE-SAFE ENVIRONMENT VARIABLE ACCESS
@@ -184,7 +179,7 @@ def get_str_env(key: str, default: str = "") -> str:
   return os.getenv(key, default)
 
 
-def get_list_env(key: str, default: str = "", separator: str = ",") -> List[str]:
+def get_list_env(key: str, default: str = "", separator: str = ",") -> list[str]:
   """
   Get a list environment variable (comma-separated by default).
 
@@ -310,6 +305,42 @@ class EnvConfig:
     bool(get_secret_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true"),
   )
 
+  # Shared Replica ALB URL (for read scaling)
+  # When set, reads to shared repositories will route to the replica ALB
+  # instead of the shared master. This allows horizontal scaling of reads.
+  # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
+  SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
+
+  # ==========================================================================
+  # Dagster Schedule Feature Flags
+  # All default to false - enable in AWS Secrets Manager for production.
+  # This ensures forked repos don't accidentally run production schedules.
+  # ==========================================================================
+
+  # Billing schedules: credit allocation, storage billing, usage collection
+  BILLING_SCHEDULES_ENABLED = get_bool_env(
+    "BILLING_SCHEDULES_ENABLED",
+    bool(get_secret_value("BILLING_SCHEDULES_ENABLED", "false").lower() == "true"),
+  )
+
+  # Instance infrastructure schedules: health checks, metrics, registry cleanup
+  INSTANCE_SCHEDULES_ENABLED = get_bool_env(
+    "INSTANCE_SCHEDULES_ENABLED",
+    bool(get_secret_value("INSTANCE_SCHEDULES_ENABLED", "false").lower() == "true"),
+  )
+
+  # SEC pipeline schedules: daily/weekly download
+  SEC_SCHEDULES_ENABLED = get_bool_env(
+    "SEC_SCHEDULES_ENABLED",
+    bool(get_secret_value("SEC_SCHEDULES_ENABLED", "false").lower() == "true"),
+  )
+
+  # Shared repository schedule: weekly snapshot + replica refresh
+  SHARED_REPO_SCHEDULE_ENABLED = get_bool_env(
+    "SHARED_REPO_SCHEDULE_ENABLED",
+    bool(get_secret_value("SHARED_REPO_SCHEDULE_ENABLED", "false").lower() == "true"),
+  )
+
   # Graph backup encryption and compression are always enabled for security and efficiency
 
   # Graph Operations Feature Flags
@@ -373,6 +404,10 @@ class EnvConfig:
   # Graph API Endpoint
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
   GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
+
+  # Dagster Configuration (for job orchestration)
+  DAGSTER_HOST = get_str_env("DAGSTER_HOST", "dagster-webserver")
+  DAGSTER_PORT = get_int_env("DAGSTER_PORT", 3003)
 
   # Shared repository backend selection (dev/local only)
   # In AWS environments, backend is determined by graph.yml tier configuration
@@ -535,47 +570,6 @@ class EnvConfig:
     "VALKEY_AUTH_SECRET_NAME", f"robosystems/{ENVIRONMENT}/valkey/auth"
   )
 
-  # Celery URLs with explicit database numbers (see valkey_registry.py for allocation)
-  # These will be dynamically constructed with auth in prod/staging via get_celery_config()
-  CELERY_BROKER_URL = get_str_env("CELERY_BROKER_URL", "redis://localhost:6379/0")
-  CELERY_RESULT_BACKEND = get_str_env(
-    "CELERY_RESULT_BACKEND", "redis://localhost:6379/1"
-  )
-
-  # Celery task configuration
-  CELERY_TASK_TIME_LIMIT = get_int_env("CELERY_TASK_TIME_LIMIT", TASK_TIME_LIMIT)
-  CELERY_TASK_SOFT_TIME_LIMIT = get_int_env(
-    "CELERY_TASK_SOFT_TIME_LIMIT", TASK_SOFT_TIME_LIMIT
-  )
-  CELERY_WORKER_PREFETCH_MULTIPLIER = get_int_env(
-    "CELERY_WORKER_PREFETCH_MULTIPLIER",
-    0,  # 0 disables prefetching for proper queue-based scaling
-  )
-  CELERY_TASK_RETRY_DELAY = get_int_env("CELERY_TASK_RETRY_DELAY", DEFAULT_RETRY_DELAY)
-  CELERY_TASK_MAX_RETRIES = get_int_env("CELERY_TASK_MAX_RETRIES", 3)
-  CELERY_RESULT_EXPIRES = get_int_env("CELERY_RESULT_EXPIRES", CACHE_TTL_LONG)
-  # Soft shutdown timeout - time to wait during warm shutdown before forcing cold shutdown
-  # This allows tasks to finish gracefully and re-queue ETA tasks
-  CELERY_WORKER_SOFT_SHUTDOWN_TIMEOUT = get_int_env(
-    "CELERY_WORKER_SOFT_SHUTDOWN_TIMEOUT",
-    60,  # 60 seconds default
-  )
-
-  # Worker configuration
-  WORKER_AUTOSCALE = get_int_env("WORKER_AUTOSCALE", 1)
-
-  # Queue names
-  QUEUE_DEFAULT = get_str_env("QUEUE_DEFAULT", "default")
-  QUEUE_CRITICAL = get_str_env("QUEUE_CRITICAL", "critical")
-  QUEUE_SHARED_EXTRACTION = get_str_env("QUEUE_SHARED_EXTRACTION", "shared-extraction")
-  QUEUE_SHARED_PROCESSING = get_str_env("QUEUE_SHARED_PROCESSING", "shared-processing")
-  QUEUE_SHARED_INGESTION = get_str_env("QUEUE_SHARED_INGESTION", "shared-ingestion")
-  QUEUE_DATA_SYNC = get_str_env("QUEUE_DATA_SYNC", "default")  # Future: "data-sync"
-  QUEUE_ANALYTICS = get_str_env("QUEUE_ANALYTICS", "default")  # Future: "analytics"
-
-  # Worker configuration (used by entrypoint.sh and CloudFormation, not in application code)
-  # Specifies which queue(s) a worker process listens to (e.g., "default", "critical", "shared-processing")
-  WORKER_QUEUE = get_str_env("WORKER_QUEUE", QUEUE_DEFAULT)
   # Cache TTLs
   CREDIT_BALANCE_CACHE_TTL = get_int_env("CREDIT_BALANCE_CACHE_TTL", CACHE_TTL_SHORT)
   CREDIT_SUMMARY_CACHE_TTL = get_int_env("CREDIT_SUMMARY_CACHE_TTL", 600)  # 10 minutes
@@ -892,7 +886,7 @@ class EnvConfig:
 
   @classmethod
   @lru_cache(maxsize=1)
-  def validate(cls) -> List[str]:
+  def validate(cls) -> list[str]:
     """
     Validate required environment variables.
 
@@ -905,7 +899,6 @@ class EnvConfig:
     if cls.is_production():
       required_vars = [
         ("DATABASE_URL", cls.DATABASE_URL, None),
-        ("CELERY_BROKER_URL", cls.CELERY_BROKER_URL, None),
         ("JWT_SECRET_KEY", cls.JWT_SECRET_KEY, ""),
         # Note: AWS credentials come from IAM roles, not environment variables
       ]
@@ -924,7 +917,7 @@ class EnvConfig:
     return errors
 
   @classmethod
-  def get_lbug_tier_config(cls) -> Dict[str, Any]:
+  def get_lbug_tier_config(cls) -> dict[str, Any]:
     """
     Get LadybugDB tier-specific configuration, with overrides from graph.yml.
 
@@ -1034,12 +1027,12 @@ class EnvConfig:
     }
 
   @classmethod
-  def get_lbug_memory_config(cls) -> Dict[str, Any]:
+  def get_lbug_memory_config(cls) -> dict[str, Any]:
     """Alias for backward compatibility with existing code."""
     return cls.get_lbug_tier_config()
 
   @classmethod
-  def get_database_url(cls, database_name: Optional[str] = None) -> str:
+  def get_database_url(cls, database_name: str | None = None) -> str:
     """
     Get database URL, optionally with a specific database name.
 
@@ -1096,12 +1089,12 @@ class EnvConfig:
     return config
 
   @classmethod
-  def get_cors_origins(cls) -> List[str]:
+  def get_cors_origins(cls) -> list[str]:
     """Get CORS origins for Main API (backward compatibility)."""
     return cls.get_main_cors_origins()
 
   @classmethod
-  def get_main_cors_origins(cls) -> List[str]:
+  def get_main_cors_origins(cls) -> list[str]:
     """Get CORS origins for Main API (public-facing)."""
     if cls.is_production():
       return [
@@ -1128,7 +1121,7 @@ class EnvConfig:
       ]
 
   @classmethod
-  def get_lbug_cors_origins(cls) -> List[str]:
+  def get_lbug_cors_origins(cls) -> list[str]:
     """Get CORS origins for Graph API (VPC-internal)."""
     if cls.is_production() or cls.is_staging():
       # VPC-internal APIs don't need CORS for browsers
@@ -1138,61 +1131,7 @@ class EnvConfig:
       return ["*"]
 
   @classmethod
-  def get_celery_config(cls) -> dict:
-    """Get Celery configuration as a dict."""
-    # Build authenticated URLs for prod/staging if not explicitly set
-    broker_url = cls.CELERY_BROKER_URL
-    result_backend = cls.CELERY_RESULT_BACKEND
-
-    # Check if we need to build authenticated URLs
-    # Try to get auth token from any source (env var, Secrets Manager, etc.)
-    try:
-      from .valkey_registry import ValkeyDatabase, ValkeyURLBuilder
-
-      # Check if we can get an auth token from any source
-      auth_token = ValkeyURLBuilder.get_auth_token()
-
-      # Build authenticated URLs if we have a token or are in prod/staging
-      if auth_token or cls.ENVIRONMENT in ["prod", "staging"]:
-        # Only build if not explicitly set via environment
-        if not os.getenv("CELERY_BROKER_URL"):
-          try:
-            broker_url = ValkeyURLBuilder.build_authenticated_url(
-              database=ValkeyDatabase.CELERY_BROKER
-            )
-          except Exception:
-            # Keep default if unable to build
-            pass
-
-        if not os.getenv("CELERY_RESULT_BACKEND"):
-          try:
-            result_backend = ValkeyURLBuilder.build_authenticated_url(
-              database=ValkeyDatabase.CELERY_RESULTS
-            )
-          except Exception:
-            # Keep default if unable to build
-            pass
-    except (ImportError, Exception):
-      # If we can't import or get auth token, keep defaults
-      pass
-
-    return {
-      "broker_url": broker_url,
-      "result_backend": result_backend,
-      "task_time_limit": cls.CELERY_TASK_TIME_LIMIT,
-      "task_soft_time_limit": cls.CELERY_TASK_SOFT_TIME_LIMIT,
-      "worker_prefetch_multiplier": cls.CELERY_WORKER_PREFETCH_MULTIPLIER,
-      "task_serializer": "json",
-      "result_serializer": "json",
-      "accept_content": ["json"],
-      "timezone": "UTC",
-      "enable_utc": True,
-    }
-
-  @classmethod
-  def get_valkey_url(
-    cls, database: Optional[Union[int, "ValkeyDatabase"]] = None
-  ) -> str:
+  def get_valkey_url(cls, database: Union[int, "ValkeyDatabase"] | None = None) -> str:
     """
     Get Valkey/Redis URL with optional database number.
 
@@ -1212,7 +1151,7 @@ class EnvConfig:
       return cls.VALKEY_URL
 
     # Import here to avoid circular dependency
-    from .valkey_registry import ValkeyURLBuilder, ValkeyDatabase
+    from .valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 
     # Handle both int and enum
     if isinstance(database, ValkeyDatabase):

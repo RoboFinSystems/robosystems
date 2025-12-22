@@ -1,6 +1,7 @@
 """API models for billing checkout operations."""
 
-from typing import Dict, Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -11,7 +12,7 @@ class CreateCheckoutRequest(BaseModel):
     ..., description="Billing plan name (e.g., 'ladybug-standard')"
   )
   resource_type: str = Field(..., description="Resource type ('graph' or 'repository')")
-  resource_config: Dict[str, Any] = Field(
+  resource_config: dict[str, Any] = Field(
     ...,
     description="Configuration for the resource to be provisioned. "
     "For repositories: {'repository_name': 'graph_id'} where graph_id is the repository slug (e.g., 'sec')",
@@ -21,13 +22,13 @@ class CreateCheckoutRequest(BaseModel):
 class CheckoutResponse(BaseModel):
   """Response from checkout session creation."""
 
-  checkout_url: Optional[str] = Field(
+  checkout_url: str | None = Field(
     None, description="URL to redirect user to for payment"
   )
-  session_id: Optional[str] = Field(
+  session_id: str | None = Field(
     None, description="Checkout session ID for status polling"
   )
-  subscription_id: Optional[str] = Field(None, description="Internal subscription ID")
+  subscription_id: str | None = Field(None, description="Internal subscription ID")
   requires_checkout: bool = Field(
     default=True, description="Whether checkout is required"
   )
@@ -44,12 +45,12 @@ class CheckoutStatusResponse(BaseModel):
     description="Checkout status: 'pending_payment', 'provisioning', 'completed', 'failed'",
   )
   subscription_id: str = Field(..., description="Internal subscription ID")
-  resource_id: Optional[str] = Field(
+  resource_id: str | None = Field(
     None,
     description="Resource ID (graph_id for both graphs and repositories) once provisioned. "
     "For repositories, this is the repository slug (e.g., 'sec')",
   )
-  operation_id: Optional[str] = Field(
+  operation_id: str | None = Field(
     None, description="SSE operation ID for monitoring provisioning progress"
   )
-  error: Optional[str] = Field(None, description="Error message if checkout failed")
+  error: str | None = Field(None, description="Error message if checkout failed")

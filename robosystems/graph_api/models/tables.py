@@ -4,7 +4,8 @@ DuckDB table-related Pydantic models for the Graph API.
 These models are used for staging table operations (create, query, materialize).
 """
 
-from typing import Dict, List, Any, Optional, Union
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -15,9 +16,7 @@ class TableInfo(BaseModel):
   table_name: str = Field(..., description="Table name")
   row_count: int = Field(..., description="Approximate row count")
   size_bytes: int = Field(..., description="Table size in bytes")
-  s3_location: Optional[str] = Field(
-    None, description="S3 location for external tables"
-  )
+  s3_location: str | None = Field(None, description="S3 location for external tables")
 
 
 class TableCreateRequest(BaseModel):
@@ -25,10 +24,10 @@ class TableCreateRequest(BaseModel):
 
   graph_id: str = Field(..., description="Graph database identifier")
   table_name: str = Field(..., description="Table name")
-  s3_pattern: Union[str, List[str]] = Field(
+  s3_pattern: str | list[str] = Field(
     ..., description="S3 glob pattern or list of S3 file paths"
   )
-  file_id_map: Optional[Dict[str, str]] = Field(
+  file_id_map: dict[str, str] | None = Field(
     default=None,
     description="Optional map of s3_key -> file_id for provenance tracking",
   )
@@ -71,7 +70,7 @@ class TableQueryRequest(BaseModel):
 
   graph_id: str = Field(..., description="Graph database identifier")
   sql: str = Field(..., description="SQL query to execute")
-  parameters: Optional[List[Any]] = Field(
+  parameters: list[Any] | None = Field(
     default=None, description="Query parameters for safe value substitution"
   )
 
@@ -82,8 +81,8 @@ class TableQueryRequest(BaseModel):
 class TableQueryResponse(BaseModel):
   """Response from DuckDB table query."""
 
-  columns: List[str] = Field(..., description="Column names")
-  rows: List[List[Any]] = Field(..., description="Query results")
+  columns: list[str] = Field(..., description="Column names")
+  rows: list[list[Any]] = Field(..., description="Query results")
   row_count: int = Field(..., description="Number of rows returned")
   execution_time_ms: float = Field(..., description="Query execution time")
 

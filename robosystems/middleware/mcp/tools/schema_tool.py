@@ -3,11 +3,12 @@ Schema Tool - Retrieves the complete database schema.
 """
 
 import time
-from typing import Any, Dict, List
 from threading import RLock
+from typing import Any
+
+from robosystems.logger import logger
 
 from .base_tool import BaseTool
-from robosystems.logger import logger
 
 
 class SchemaTool(BaseTool):
@@ -27,7 +28,7 @@ class SchemaTool(BaseTool):
     self._cache_hits = 0
     self._cache_misses = 0
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for schema retrieval."""
     return {
       "name": "get-graph-schema",
@@ -73,7 +74,7 @@ Common property types you'll encounter:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
+  async def execute(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
     """Execute the schema tool with caching."""
     self._log_tool_execution("get-graph-schema", arguments)
 
@@ -120,7 +121,7 @@ Common property types you'll encounter:
       self._schema_cache_time = None
     logger.debug("Schema cache cleared")
 
-  def get_cache_stats(self) -> Dict[str, Any]:
+  def get_cache_stats(self) -> dict[str, Any]:
     """Get cache performance statistics."""
     with self._cache_lock:
       total_requests = self._cache_hits + self._cache_misses

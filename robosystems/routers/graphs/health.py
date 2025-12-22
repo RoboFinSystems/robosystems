@@ -5,25 +5,26 @@ This module provides REST API endpoints for database health monitoring.
 """
 
 import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
+from robosystems.graph_api.client import GraphClient
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import User
+from robosystems.middleware.graph import get_universal_repository
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.middleware.graph import get_universal_repository
-from robosystems.models.api.graphs.health import DatabaseHealthResponse
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.graph_api.client import GraphClient
-from robosystems.logger import logger
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.models.api.graphs.health import DatabaseHealthResponse
+from robosystems.models.iam import User
 
 # Create router
 router = APIRouter(tags=["Graph Health"])
@@ -165,7 +166,7 @@ async def get_database_health(
         alerts=[],
       )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
       circuit_breaker.record_failure(graph_id, "database_health")
       raise HTTPException(
         status_code=status.HTTP_408_REQUEST_TIMEOUT,
@@ -189,7 +190,7 @@ async def get_database_health(
     raise
   except Exception as e:
     circuit_breaker.record_failure(graph_id, "database_health")
-    logger.error(f"Unexpected error getting health for graph {graph_id}: {str(e)}")
+    logger.error(f"Unexpected error getting health for graph {graph_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="An unexpected error occurred while retrieving health information",

@@ -5,27 +5,28 @@ This module provides endpoints for restoring LadybugDB databases
 from encrypted backups.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import (
   APIRouter,
   BackgroundTasks,
   Depends,
+  Form,
   HTTPException,
   Path,
-  Form,
   Response,
 )
 from fastapi import status as http_status
 
-from robosystems.graph_api.models.database import RestoreResponse
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.task_manager import restore_task_manager
 from robosystems.graph_api.core.utils import validate_database_name
+from robosystems.graph_api.models.database import RestoreResponse
 from robosystems.logger import logger
 from robosystems.operations.lbug.backup_manager import (
-  create_backup_manager,
-  RestoreJob,
   BackupFormat,
+  RestoreJob,
+  create_backup_manager,
 )
 
 router = APIRouter(prefix="/databases", tags=["Backup"])
@@ -54,7 +55,7 @@ async def perform_restore(
     await restore_task_manager.update_task(
       task_id,
       status="running",
-      metadata={"started_at": datetime.now(timezone.utc).isoformat()},
+      metadata={"started_at": datetime.now(UTC).isoformat()},
     )
 
     logger.info(
@@ -79,8 +80,9 @@ async def perform_restore(
     # If force_overwrite, delete the existing database first
     # This happens in the Graph API so we properly close connections and clean up
     if connection_pool and force_overwrite:
-      from pathlib import Path
       import shutil
+      from pathlib import Path
+
       from robosystems.middleware.graph.utils import MultiTenantUtils
 
       logger.info(f"[Task {task_id}] Deleting existing database for {graph_id}")
@@ -122,14 +124,14 @@ async def perform_restore(
       result={
         "graph_id": graph_id,
         "s3_key": s3_key,
-        "restored_at": datetime.now(timezone.utc).isoformat(),
+        "restored_at": datetime.now(UTC).isoformat(),
       },
     )
 
     logger.info(f"[Task {task_id}] Restore completed successfully")
 
   except Exception as e:
-    logger.error(f"[Task {task_id}] Restore failed: {str(e)}")
+    logger.error(f"[Task {task_id}] Restore failed: {e!s}")
     await restore_task_manager.fail_task(task_id, str(e))
 
 
@@ -248,12 +250,13 @@ async def download_backup(
 
   try:
     # Get database path
-    from robosystems.middleware.graph.utils import MultiTenantUtils
     import os
-    import tempfile
     import shutil
+    import tempfile
     import zipfile
     from pathlib import Path
+
+    from robosystems.middleware.graph.utils import MultiTenantUtils
 
     db_path = MultiTenantUtils.get_database_path_for_graph(graph_id)
 
@@ -309,10 +312,10 @@ async def download_backup(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to create backup for database {graph_id}: {str(e)}")
+    logger.error(f"Failed to create backup for database {graph_id}: {e!s}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to create backup: {str(e)}",
+      detail=f"Failed to create backup: {e!s}",
     )
 
 

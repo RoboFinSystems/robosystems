@@ -5,14 +5,14 @@ This module contains routers for connection operations including options,
 CRUD management, sync, link tokens, and OAuth authentication.
 """
 
-from .options import router as options_router
-from .management import router as management_router
-from .sync import router as sync_router
-from .link_token import router as link_token_router
-from .oauth import router as oauth_router
-
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
+
+from .link_token import router as link_token_router
+from .management import router as management_router
+from .oauth import router as oauth_router
+from .options import router as options_router
+from .sync import router as sync_router
 
 
 def sort_routes_for_docs_and_matching(routes: list[APIRoute]) -> list[APIRoute]:

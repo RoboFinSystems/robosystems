@@ -1,19 +1,20 @@
 """Comprehensive tests for DuckDBConnectionPool."""
 
-import pytest
-import tempfile
 import shutil
+import tempfile
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from robosystems.graph_api.core.duckdb.pool import (
-  DuckDBConnectionPool,
   DuckDBConnectionInfo,
-  initialize_duckdb_pool,
+  DuckDBConnectionPool,
   get_duckdb_pool,
+  initialize_duckdb_pool,
 )
 
 
@@ -24,7 +25,7 @@ class TestDuckDBConnectionInfo:
     """Test DuckDBConnectionInfo creation and attributes."""
     mock_conn = MagicMock()
     mock_path = Path("/tmp/test.duckdb")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     info = DuckDBConnectionInfo(
       connection=mock_conn,
@@ -213,7 +214,7 @@ class TestDuckDBConnectionPool:
     # Manually expire the connection by modifying its created_at time
     db_pool = pool._pools["test_graph"]
     for conn_info in db_pool.values():
-      conn_info.created_at = datetime.now(timezone.utc) - timedelta(minutes=2)
+      conn_info.created_at = datetime.now(UTC) - timedelta(minutes=2)
 
     # Mock new connection for the replacement
     mock_conn_new = MagicMock()
@@ -252,7 +253,7 @@ class TestDuckDBConnectionPool:
 
     # Simulate health check failure by calling directly
     db_pool = pool._pools["test_graph"]
-    conn_info = list(db_pool.values())[0]
+    conn_info = next(iter(db_pool.values()))
     is_healthy = pool._test_connection_health(conn_info)
 
     assert is_healthy is False
@@ -285,7 +286,7 @@ class TestDuckDBConnectionPool:
       connection_ttl_minutes=30,
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     mock_conn = MagicMock()
     mock_path = Path("/tmp/test.duckdb")
 

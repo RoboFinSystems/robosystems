@@ -7,8 +7,10 @@ This module provides utilities for handling errors securely by:
 - Categorizing errors to provide appropriate status codes without revealing internals
 """
 
-from typing import Optional, Dict, Any, NoReturn
+from typing import Any, NoReturn
+
 from fastapi import HTTPException, status
+
 from robosystems.logger import logger
 
 
@@ -77,11 +79,11 @@ ERROR_RESPONSES = {
 
 def raise_secure_error(
   error_type: str,
-  original_error: Optional[Exception] = None,
-  request_id: Optional[str] = None,
-  user_id: Optional[str] = None,
-  additional_context: Optional[Dict[str, Any]] = None,
-  custom_detail: Optional[str] = None,
+  original_error: Exception | None = None,
+  request_id: str | None = None,
+  user_id: str | None = None,
+  additional_context: dict[str, Any] | None = None,
+  custom_detail: str | None = None,
 ) -> NoReturn:
   """
   Raise an HTTPException with generic error message while logging full details.
@@ -116,7 +118,7 @@ def raise_secure_error(
 
   if original_error:
     logger.error(
-      f"Secure error handler - {error_type}: {str(original_error)}",
+      f"Secure error handler - {error_type}: {original_error!s}",
       extra=log_context,
       exc_info=True,
     )
@@ -202,9 +204,9 @@ def classify_exception(exception: Exception) -> str:
 
 def handle_exception_securely(
   exception: Exception,
-  request_id: Optional[str] = None,
-  user_id: Optional[str] = None,
-  additional_context: Optional[Dict[str, Any]] = None,
+  request_id: str | None = None,
+  user_id: str | None = None,
+  additional_context: dict[str, Any] | None = None,
 ) -> NoReturn:
   """
   Handle an exception securely by classifying it and raising appropriate HTTPException.

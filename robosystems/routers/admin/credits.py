@@ -1,33 +1,33 @@
 """Admin API for credit management."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Optional, List
-from fastapi import APIRouter, Request, HTTPException, status, Query
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import func
 
 from ...database import get_db_session
+from ...logger import get_logger
+from ...middleware.auth.admin import require_admin
+from ...models.api.admin import (
+  BonusCreditsRequest,
+  CreditAnalyticsResponse,
+  CreditHealthResponse,
+  CreditPoolResponse,
+  RepositoryCreditPoolResponse,
+)
+from ...models.iam import User
 from ...models.iam.graph_credits import (
+  CreditTransactionType,
   GraphCredits,
   GraphCreditTransaction,
-  CreditTransactionType,
 )
+from ...models.iam.user_repository import UserRepository
 from ...models.iam.user_repository_credits import (
   UserRepositoryCredits,
   UserRepositoryCreditTransaction,
   UserRepositoryCreditTransactionType,
 )
-from ...models.iam import User
-from ...models.iam.user_repository import UserRepository
-from ...models.api.admin import (
-  CreditPoolResponse,
-  BonusCreditsRequest,
-  CreditAnalyticsResponse,
-  CreditHealthResponse,
-  RepositoryCreditPoolResponse,
-)
-from ...middleware.auth.admin import require_admin
-from ...logger import get_logger
 from ...operations.graph.credit_service import CreditService
 
 logger = get_logger(__name__)
@@ -35,12 +35,12 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/admin/v1/credits", tags=["admin-credits"])
 
 
-@router.get("/graphs", response_model=List[CreditPoolResponse])
+@router.get("/graphs", response_model=list[CreditPoolResponse])
 @require_admin(permissions=["credits:read"])
 async def list_graph_credit_pools(
   request: Request,
-  user_email: Optional[str] = Query(None, description="Filter by user email"),
-  tier: Optional[str] = Query(None, description="Filter by graph tier"),
+  user_email: str | None = Query(None, description="Filter by user email"),
+  tier: str | None = Query(None, description="Filter by graph tier"),
   low_balance_only: bool = Query(
     False, description="Only show pools with balance < 10% of allocation"
   ),
@@ -205,12 +205,12 @@ async def add_bonus_credits_to_graph(
     session.close()
 
 
-@router.get("/repositories", response_model=List[RepositoryCreditPoolResponse])
+@router.get("/repositories", response_model=list[RepositoryCreditPoolResponse])
 @require_admin(permissions=["credits:read"])
 async def list_repository_credit_pools(
   request: Request,
-  user_email: Optional[str] = Query(None, description="Filter by user email"),
-  repository_type: Optional[str] = Query(None, description="Filter by repository type"),
+  user_email: str | None = Query(None, description="Filter by user email"),
+  repository_type: str | None = Query(None, description="Filter by repository type"),
   low_balance_only: bool = Query(
     False, description="Only show pools with balance < 10% of allocation"
   ),
@@ -360,7 +360,7 @@ async def add_bonus_credits_to_repository(
     )
 
     pool.current_balance += Decimal(str(data.amount))
-    pool.updated_at = datetime.now(timezone.utc)
+    pool.updated_at = datetime.now(UTC)
 
     UserRepositoryCreditTransaction.create_transaction(
       credit_pool_id=pool.id,
@@ -407,12 +407,12 @@ async def add_bonus_credits_to_repository(
 @require_admin(permissions=["credits:read"])
 async def get_credit_analytics(
   request: Request,
-  tier: Optional[str] = Query(None, description="Filter by tier"),
+  tier: str | None = Query(None, description="Filter by tier"),
 ):
   """Get system-wide credit analytics for both graph and repository credits."""
   session = next(get_db_session())
   try:
-    start_of_month = datetime.now(timezone.utc).replace(
+    start_of_month = datetime.now(UTC).replace(
       day=1, hour=0, minute=0, second=0, microsecond=0
     )
 
@@ -700,7 +700,7 @@ async def check_credit_health(request: Request):
       },
       total_pools=total_pools,
       pools_with_issues=total_issues,
-      last_checked=datetime.now(timezone.utc),
+      last_checked=datetime.now(UTC),
     )
   finally:
     session.close()

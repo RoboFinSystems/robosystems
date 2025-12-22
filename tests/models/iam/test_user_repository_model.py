@@ -1,18 +1,19 @@
 """Test UserRepository model functionality."""
 
-import pytest
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.models.iam import UserRepository, User
+from robosystems.models.iam import User, UserRepository
 from robosystems.models.iam.user_repository import (
-  RepositoryType,
   RepositoryAccessLevel,
   RepositoryPlan,
-  safe_str,
+  RepositoryType,
   safe_bool,
+  safe_str,
 )
 
 
@@ -196,7 +197,7 @@ class TestUserRepository:
 
   def test_create_access_with_expiration(self):
     """Test creating access with expiration date."""
-    expires = datetime.now(timezone.utc) + timedelta(days=30)
+    expires = datetime.now(UTC) + timedelta(days=30)
 
     access = UserRepository.create_access(
       user_id=self.user.id,
@@ -267,7 +268,7 @@ class TestUserRepository:
 
   def test_user_has_access_expired(self):
     """Test access check with expired access."""
-    past = datetime.now(timezone.utc) - timedelta(days=1)
+    past = datetime.now(UTC) - timedelta(days=1)
 
     UserRepository.create_access(
       user_id=self.user.id,
@@ -519,8 +520,8 @@ class TestUserRepository:
 
   def test_is_expired(self):
     """Test checking if access is expired."""
-    past = datetime.now(timezone.utc) - timedelta(days=1)
-    future = datetime.now(timezone.utc) + timedelta(days=1)
+    past = datetime.now(UTC) - timedelta(days=1)
+    future = datetime.now(UTC) + timedelta(days=1)
 
     # Not expired (no expiration)
     access1 = UserRepository(
@@ -580,7 +581,7 @@ class TestUserRepository:
 
     # Expired cannot read
     access.is_active = True
-    access.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    access.expires_at = datetime.now(UTC) - timedelta(days=1)
     assert access.can_read() is False
 
   def test_can_write(self):
@@ -629,8 +630,8 @@ class TestUserRepository:
 
   def test_get_graph_connection_info(self):
     """Test getting graph connection information via Graph relationship."""
-    from robosystems.models.iam.graph import Graph
     from robosystems.config.graph_tier import GraphTier
+    from robosystems.models.iam.graph import Graph
 
     # Create Graph record for SEC repository
     Graph.find_or_create_repository(

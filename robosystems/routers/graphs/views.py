@@ -1,13 +1,11 @@
 import time
 import uuid
 
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from robosystems.middleware.auth.dependencies import get_current_user
-from robosystems.models.iam import User
-from robosystems.models.iam.graph import Graph, GraphTier
+
 from robosystems.database import get_db_session
+from robosystems.middleware.auth.dependencies import get_current_user
 from robosystems.models.api.views import (
   CreateViewRequest,
   SaveViewRequest,
@@ -16,6 +14,8 @@ from robosystems.models.api.views import (
   ViewResponse,
   ViewSourceType,
 )
+from robosystems.models.iam import User
+from robosystems.models.iam.graph import Graph, GraphTier
 from robosystems.operations.views import (
   FactGridBuilder,
   aggregate_trial_balance,
@@ -149,7 +149,7 @@ async def create_view(
   except Exception as e:
     raise HTTPException(
       status_code=500,
-      detail=f"Failed to create view: {str(e)}",
+      detail=f"Failed to create view: {e!s}",
     ) from e
 
 
@@ -199,7 +199,7 @@ async def save_view(
   except Exception as e:
     raise HTTPException(
       status_code=500,
-      detail=f"Failed to save view: {str(e)}",
+      detail=f"Failed to save view: {e!s}",
     ) from e
 
 

@@ -5,14 +5,16 @@ This module provides support for custom schema definitions via JSON/YAML,
 allowing users to define their own graph schemas without modifying code.
 """
 
-from typing import Dict, List, Any, Optional, Union
-from dataclasses import dataclass, field
 import json
-import yaml
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
-from .models import Schema, Node, Relationship, Property
+import yaml
+
 from robosystems.logger import logger
+
+from .models import Node, Property, Relationship, Schema
 
 
 class SchemaFormat(Enum):
@@ -33,11 +35,11 @@ class CustomSchemaDefinition:
 
   name: str
   version: str = "1.0.0"
-  description: Optional[str] = None
-  extends: Optional[str] = None  # Can extend 'base' or be completely custom
-  nodes: List[Dict[str, Any]] = field(default_factory=list)
-  relationships: List[Dict[str, Any]] = field(default_factory=list)
-  metadata: Dict[str, Any] = field(default_factory=dict)
+  description: str | None = None
+  extends: str | None = None  # Can extend 'base' or be completely custom
+  nodes: list[dict[str, Any]] = field(default_factory=list)
+  relationships: list[dict[str, Any]] = field(default_factory=list)
+  metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class CustomSchemaParser:
@@ -103,7 +105,7 @@ class CustomSchemaParser:
 
   def parse(
     self,
-    schema_input: Union[str, Dict[str, Any]],
+    schema_input: str | dict[str, Any],
     format: SchemaFormat = SchemaFormat.JSON,
   ) -> Schema:
     """
@@ -123,7 +125,7 @@ class CustomSchemaParser:
     if format == SchemaFormat.DICT:
       # For DICT format, ensure we have a dictionary
       if isinstance(schema_input, dict):
-        schema_dict: Dict[str, Any] = schema_input
+        schema_dict: dict[str, Any] = schema_input
       else:
         raise ValueError("DICT format requires dictionary input")
     elif format == SchemaFormat.JSON:
@@ -163,7 +165,7 @@ class CustomSchemaParser:
     # Convert to Schema object
     return self._build_schema(definition)
 
-  def _validate_schema_structure(self, schema_dict: Dict[str, Any]):
+  def _validate_schema_structure(self, schema_dict: dict[str, Any]):
     """Validate the basic structure of the schema definition."""
     if not isinstance(schema_dict, dict):
       raise ValueError("Schema must be a dictionary")
@@ -200,7 +202,7 @@ class CustomSchemaParser:
 
     return schema
 
-  def _build_node(self, node_def: Dict[str, Any]) -> Node:
+  def _build_node(self, node_def: dict[str, Any]) -> Node:
     """Build a Node from definition."""
     # Validate required fields
     if "name" not in node_def:
@@ -237,7 +239,7 @@ class CustomSchemaParser:
       description=node_def.get("description"),
     )
 
-  def _build_property(self, prop_def: Dict[str, Any]) -> Property:
+  def _build_property(self, prop_def: dict[str, Any]) -> Property:
     """Build a Property from definition."""
     # Validate required fields
     if "name" not in prop_def:
@@ -261,7 +263,7 @@ class CustomSchemaParser:
     )
 
   def _build_relationship(
-    self, rel_def: Dict[str, Any], schema: Schema
+    self, rel_def: dict[str, Any], schema: Schema
   ) -> Relationship:
     """Build a Relationship from definition."""
     # Validate required fields
@@ -301,13 +303,13 @@ class CustomSchemaParser:
     """Validate the complete schema for consistency."""
     # Check for duplicate node names
     node_names = [node.name for node in schema.nodes]
-    duplicates = set([name for name in node_names if node_names.count(name) > 1])
+    duplicates = {name for name in node_names if node_names.count(name) > 1}
     if duplicates:
       raise ValueError(f"Duplicate node names found: {duplicates}")
 
     # Check for duplicate relationship names
     rel_names = [rel.name for rel in schema.relationships]
-    duplicates = set([name for name in rel_names if rel_names.count(name) > 1])
+    duplicates = {name for name in rel_names if rel_names.count(name) > 1}
     if duplicates:
       raise ValueError(f"Duplicate relationship names found: {duplicates}")
 
@@ -342,7 +344,7 @@ class CustomSchemaManager:
     """Create schema from YAML string."""
     return self.parser.parse(yaml_str, SchemaFormat.YAML)
 
-  def create_from_dict(self, schema_dict: Dict[str, Any]) -> Schema:
+  def create_from_dict(self, schema_dict: dict[str, Any]) -> Schema:
     """Create schema from dictionary."""
     return self.parser.parse(schema_dict, SchemaFormat.DICT)
 
@@ -398,7 +400,7 @@ class CustomSchemaManager:
 
     return merged
 
-  def validate_json_schema(self, json_str: str) -> Dict[str, Any]:
+  def validate_json_schema(self, json_str: str) -> dict[str, Any]:
     """
     Validate a JSON schema definition without creating Schema object.
 

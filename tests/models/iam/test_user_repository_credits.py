@@ -1,24 +1,25 @@
 """Test UserRepositoryCredits and UserRepositoryCreditTransaction models functionality."""
 
-import pytest
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
+
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from robosystems.models.iam import UserRepositoryCredits, UserRepository, User
-from robosystems.models.iam.user_repository_credits import (
-  UserRepositoryCreditTransactionType,
-  UserRepositoryCreditTransaction,
-  safe_float,
-  safe_str,
-  safe_bool,
-)
+from robosystems.models.iam import User, UserRepository, UserRepositoryCredits
 from robosystems.models.iam.user_repository import (
-  RepositoryType,
   RepositoryAccessLevel,
   RepositoryPlan,
+  RepositoryType,
+)
+from robosystems.models.iam.user_repository_credits import (
+  UserRepositoryCreditTransaction,
+  UserRepositoryCreditTransactionType,
+  safe_bool,
+  safe_float,
+  safe_str,
 )
 
 
@@ -289,7 +290,7 @@ class TestUserRepositoryCredits:
 
   def test_allocate_monthly_credits(self):
     """Test monthly credit allocation."""
-    past_date = datetime.now(timezone.utc) - timedelta(days=35)
+    past_date = datetime.now(UTC) - timedelta(days=35)
 
     credits = UserRepositoryCredits(
       user_repository_id=self.repo_access.id,
@@ -310,7 +311,7 @@ class TestUserRepositoryCredits:
     assert credits.credits_consumed_this_month == Decimal("0")  # Reset
     assert credits.rollover_credits == Decimal("0")  # No rollover
     assert credits.last_allocation_date > past_date
-    assert credits.next_allocation_date > datetime.now(timezone.utc)
+    assert credits.next_allocation_date > datetime.now(UTC)
 
     # Check allocation transaction was created
     transaction = (
@@ -326,7 +327,7 @@ class TestUserRepositoryCredits:
 
   def test_allocate_monthly_credits_not_due(self):
     """Test allocation when not due yet."""
-    future_date = datetime.now(timezone.utc) + timedelta(days=15)
+    future_date = datetime.now(UTC) + timedelta(days=15)
 
     credits = UserRepositoryCredits(
       user_repository_id=self.repo_access.id,
@@ -438,7 +439,7 @@ class TestUserRepositoryCredits:
 
   def test_get_summary(self):
     """Test getting credit summary."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     future = now + timedelta(days=30)
 
     credits = UserRepositoryCredits(

@@ -1,5 +1,5 @@
 """External service provider integrations."""
 
-from .payment_provider import get_payment_provider, PaymentProvider
+from .payment_provider import PaymentProvider, get_payment_provider
 
-__all__ = ["get_payment_provider", "PaymentProvider"]
+__all__ = ["PaymentProvider", "get_payment_provider"]

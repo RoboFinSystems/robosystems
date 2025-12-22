@@ -1,26 +1,25 @@
 """Admin API for invoice management."""
 
-from typing import Optional, List
-from fastapi import APIRouter, Request, Query, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ...database import get_db_session
+from ...logger import get_logger
+from ...middleware.auth.admin import require_admin
+from ...models.api.admin import InvoiceLineItemResponse, InvoiceResponse
 from ...models.billing import BillingInvoice, BillingInvoiceLineItem
 from ...models.iam import User
-from ...models.api.admin import InvoiceResponse, InvoiceLineItemResponse
-from ...middleware.auth.admin import require_admin
-from ...logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin/v1/invoices", tags=["admin"])
 
 
-@router.get("", response_model=List[InvoiceResponse])
+@router.get("", response_model=list[InvoiceResponse])
 @require_admin(permissions=["subscription:read"])
 async def list_invoices(
   request: Request,
-  status: Optional[str] = None,
-  user_id: Optional[str] = None,
+  status: str | None = None,
+  user_id: str | None = None,
   limit: int = Query(100, ge=1, le=1000),
   offset: int = Query(0, ge=0),
 ):
@@ -208,7 +207,7 @@ async def mark_invoice_paid(
   request: Request,
   invoice_id: str,
   payment_method: str = Query(...),
-  payment_reference: Optional[str] = Query(None),
+  payment_reference: str | None = Query(None),
 ):
   """Mark an invoice as paid."""
   session = next(get_db_session())

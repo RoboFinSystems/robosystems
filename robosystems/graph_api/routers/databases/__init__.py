@@ -2,15 +2,15 @@
 Database management routers.
 """
 
-from . import management, query, schema, backup, restore, copy, metrics, tables
+from . import backup, copy, management, metrics, query, restore, schema, tables
 
 __all__ = [
-  "management",
-  "query",
-  "schema",
   "backup",
-  "restore",
   "copy",
+  "management",
   "metrics",
+  "query",
+  "restore",
+  "schema",
   "tables",
 ]

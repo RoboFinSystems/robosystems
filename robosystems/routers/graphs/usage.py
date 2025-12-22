@@ -2,42 +2,40 @@
 
 import asyncio
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from sqlalchemy.orm import Session
 
+from robosystems.database import get_db_session
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import User, GraphUsage
-from robosystems.middleware.rate_limits import (
-  subscription_aware_rate_limit_dependency,
-)
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.models.api.graphs.metrics import (
-  GraphMetricsResponse,
-  GraphUsageResponse,
-  StorageSummary,
-  CreditSummary,
-  PerformanceInsights,
+from robosystems.middleware.rate_limits import (
+  subscription_aware_rate_limit_dependency,
 )
-from robosystems.operations.graph.metrics_service import GraphMetricsService
-from robosystems.database import get_db_session
-from sqlalchemy.orm import Session
-from robosystems.logger import logger
-from robosystems.models.api.common import ErrorResponse
-
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
-  TimeoutCoordinator,
-  OperationType,
   OperationStatus,
-  record_operation_metric,
+  OperationType,
+  TimeoutCoordinator,
   get_operation_logger,
+  record_operation_metric,
 )
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
-
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.metrics import (
+  CreditSummary,
+  GraphMetricsResponse,
+  GraphUsageResponse,
+  PerformanceInsights,
+  StorageSummary,
+)
+from robosystems.models.iam import GraphUsage, User
+from robosystems.operations.graph.metrics_service import GraphMetricsService
 
 router = APIRouter(tags=["Usage"])
 
@@ -197,7 +195,7 @@ async def get_graph_metrics(
 
     return GraphMetricsResponse(**metrics)
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     circuit_breaker.record_failure(graph_id, "analytics_metrics")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
@@ -259,10 +257,10 @@ async def get_graph_metrics(
       },
     )
 
-    logger.error(f"Error getting graph metrics for user {current_user.id}: {str(e)}")
+    logger.error(f"Error getting graph metrics for user {current_user.id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve graph metrics: {str(e)}",
+      detail=f"Failed to retrieve graph metrics: {e!s}",
     )
 
 
@@ -397,7 +395,7 @@ async def get_graph_usage_analytics(
       },
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     year, month = _parse_time_range(time_range, now)
 
     storage_summary = None
@@ -521,7 +519,7 @@ async def get_graph_usage_analytics(
       timestamp=now.isoformat(),
     )
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     circuit_breaker.record_failure(graph_id, "analytics_usage")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
 
@@ -586,10 +584,10 @@ async def get_graph_usage_analytics(
       },
     )
 
-    logger.error(f"Error getting usage analytics for graph {graph_id}: {str(e)}")
+    logger.error(f"Error getting usage analytics for graph {graph_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve usage analytics: {str(e)}",
+      detail=f"Failed to retrieve usage analytics: {e!s}",
     )
 
 
@@ -613,10 +611,10 @@ def _get_days_from_time_range(time_range: str) -> int:
   elif time_range == "30d":
     return 30
   elif time_range == "current_month":
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return now.day
   elif time_range == "last_month":
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     last_month = now - timedelta(days=now.day)
     return (now - last_month).days
   else:

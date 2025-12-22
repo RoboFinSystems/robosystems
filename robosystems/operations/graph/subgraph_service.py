@@ -13,25 +13,25 @@ Key features:
 - Access control validation
 """
 
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-  from ...models.iam import Graph, User
   from ...graph_api.client.client import GraphClient
+  from ...models.iam import Graph, User
 
 from ...config import env
+from ...exceptions import GraphAllocationError
+from ...graph_api.client.factory import get_graph_client_for_instance
+from ...logger import logger
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
 from ...middleware.graph.types import GraphTypeRegistry
 from ...middleware.graph.utils import (
   construct_subgraph_id,
   parse_subgraph_id,
-  validate_subgraph_name,
   validate_parent_graph_id,
+  validate_subgraph_name,
 )
-from ...graph_api.client.factory import get_graph_client_for_instance
-from ...exceptions import GraphAllocationError
-from ...logger import logger
 
 
 class SubgraphService:
@@ -52,8 +52,8 @@ class SubgraphService:
     self,
     parent_graph_id: str,
     subgraph_name: str,
-    schema_extensions: Optional[List[str]] = None,
-  ) -> Dict[str, Any]:
+    schema_extensions: list[str] | None = None,
+  ) -> dict[str, Any]:
     """
     Create a new subgraph database on the parent's instance.
 
@@ -95,9 +95,9 @@ class SubgraphService:
       )
 
     # Check subgraph limit for parent's tier
-    from ...models.iam.graph import Graph
-    from ...database import get_db_session
     from ...config.graph_tier import GraphTierConfig
+    from ...database import get_db_session
+    from ...models.iam.graph import Graph
 
     db = next(get_db_session())
     try:
@@ -138,9 +138,9 @@ class SubgraphService:
     try:
       # Get the parent's instance location
       # For local dev graphs, use PostgreSQL instance_id directly
+      from robosystems.config import env
       from robosystems.database import get_db_session
       from robosystems.models.iam.graph import Graph
-      from robosystems.config import env
 
       session = next(get_db_session())
       parent_graph_record = (
@@ -238,12 +238,12 @@ class SubgraphService:
         "parent_graph_id": parent_graph_id,
         "instance_id": parent_location.instance_id,
         "instance_ip": parent_location.private_ip,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
       }
 
     except Exception as e:
       logger.error(f"Failed to create subgraph database {subgraph_id}: {e}")
-      raise GraphAllocationError(f"Failed to create subgraph: {str(e)}")
+      raise GraphAllocationError(f"Failed to create subgraph: {e!s}")
 
   async def create_subgraph(
     self,
@@ -254,8 +254,8 @@ class SubgraphService:
     subgraph_type: str = "static",
     metadata: dict | None = None,
     fork_parent: bool = False,
-    fork_options: Optional[Dict[str, Any]] = None,
-  ) -> Dict[str, Any]:
+    fork_options: dict[str, Any] | None = None,
+  ) -> dict[str, Any]:
     """
     Create a subgraph including both the database and PostgreSQL metadata.
 
@@ -279,9 +279,9 @@ class SubgraphService:
     Returns:
         Dictionary with created subgraph details
     """
+    from ...database import get_db_session
     from ...models.iam.graph import Graph
     from ...models.iam.graph_user import GraphUser
-    from ...database import get_db_session
 
     subgraph_id = construct_subgraph_id(parent_graph.graph_id, name)
 
@@ -315,7 +315,7 @@ class SubgraphService:
         (existing_subgraphs[0].subgraph_index + 1) if existing_subgraphs else 1
       )
 
-      now = datetime.now(timezone.utc)
+      now = datetime.now(UTC)
 
       # Ensure subgraph_type is stored in metadata
       subgraph_metadata = (metadata or {}).copy()
@@ -421,7 +421,7 @@ class SubgraphService:
     subgraph_id: str,
     force: bool = False,
     create_backup: bool = False,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Delete a subgraph database from the parent's instance.
 
@@ -453,9 +453,9 @@ class SubgraphService:
     try:
       # Get the Graph API client
       # In local mode, use direct URL; in production, resolve parent's instance
-      from ...graph_api.client.factory import get_graph_client_for_instance
-      from ...graph_api.client import GraphClient
       from ...config import env
+      from ...graph_api.client import GraphClient
+      from ...graph_api.client.factory import get_graph_client_for_instance
 
       # Local development mode: use GRAPH_API_URL directly
       # Check for localhost or docker container hostnames (graph-api, etc.)
@@ -527,17 +527,17 @@ class SubgraphService:
         "parent_graph_id": parent_graph_id,
         "instance_id": instance_id,
         "backup_location": backup_location,
-        "deleted_at": datetime.now(timezone.utc).isoformat(),
+        "deleted_at": datetime.now(UTC).isoformat(),
       }
 
     except Exception as e:
       logger.error(f"Failed to delete subgraph database {subgraph_id}: {e}")
-      raise GraphAllocationError(f"Failed to delete subgraph: {str(e)}")
+      raise GraphAllocationError(f"Failed to delete subgraph: {e!s}")
 
   async def list_subgraph_databases(
     self,
     parent_graph_id: str,
-  ) -> List[Dict[str, Any]]:
+  ) -> list[dict[str, Any]]:
     """
     List all subgraph databases for a parent graph.
 
@@ -597,7 +597,7 @@ class SubgraphService:
   async def get_subgraph_info(
     self,
     subgraph_id: str,
-  ) -> Optional[Dict[str, Any]]:
+  ) -> dict[str, Any] | None:
     """
     Get detailed information about a specific subgraph.
 
@@ -657,7 +657,7 @@ class SubgraphService:
 
   # Private helper methods
 
-  async def _generate_schema_ddl(self, extensions: List[str]) -> str:
+  async def _generate_schema_ddl(self, extensions: list[str]) -> str:
     """
     Generate DDL from schema extensions using SchemaManager.
 
@@ -693,7 +693,7 @@ class SubgraphService:
     self,
     client: "GraphClient",
     database_name: str,
-    extensions: List[str],
+    extensions: list[str],
   ) -> None:
     """Install schema with specified extensions."""
     try:
@@ -757,7 +757,7 @@ class SubgraphService:
     client: "GraphClient",
     database_name: str,
     instance_id: str,
-  ) -> Optional[str]:
+  ) -> str | None:
     """Create a backup of the database.
 
     Returns:
@@ -767,7 +767,7 @@ class SubgraphService:
         Exception if backup fails unexpectedly.
     """
     try:
-      timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+      timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
       backup_location = f"s3://{env.GRAPH_DATABASES_BUCKET}/{instance_id}/{database_name}_{timestamp}.backup"
 
       # Use the backup endpoint if available
@@ -789,7 +789,7 @@ class SubgraphService:
     self,
     client: "GraphClient",
     database_name: str,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """Get statistics for a database."""
     try:
       # Get node and edge counts
@@ -831,9 +831,9 @@ class SubgraphService:
     self,
     parent_graph_id: str,
     subgraph_id: str,
-    options: Optional[Dict[str, Any]] = None,
-    progress_callback: Optional[Any] = None,
-  ) -> Dict[str, Any]:
+    options: dict[str, Any] | None = None,
+    progress_callback: Any | None = None,
+  ) -> dict[str, Any]:
     """
     Fork data from parent graph to subgraph by calling Graph API fork endpoint.
 
@@ -871,9 +871,9 @@ class SubgraphService:
 
       # Get the Graph API client
       # In local mode, use direct URL; in production, resolve parent's instance
-      from ...graph_api.client.factory import get_graph_client_for_instance
-      from ...graph_api.client import GraphClient
       from ...config import env
+      from ...graph_api.client import GraphClient
+      from ...graph_api.client.factory import get_graph_client_for_instance
 
       if progress_callback:
         progress_callback("Connecting to Graph API", 20)

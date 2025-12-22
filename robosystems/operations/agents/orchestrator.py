@@ -5,21 +5,22 @@ Handles dynamic agent selection, routing strategies, and multi-agent coordinatio
 """
 
 import asyncio
-from enum import Enum
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
-from robosystems.operations.agents.base import (
-  BaseAgent,
-  AgentMode,
-  AgentCapability,
-  AgentResponse,
-)
-from robosystems.operations.agents.registry import AgentRegistry
-from robosystems.operations.agents.context import ContextEnricher
-from robosystems.models.iam import User
 from robosystems.logger import logger
+from robosystems.models.iam import User
+from robosystems.operations.agents.base import (
+  AgentCapability,
+  AgentMode,
+  AgentResponse,
+  BaseAgent,
+)
+from robosystems.operations.agents.context import ContextEnricher
+from robosystems.operations.agents.registry import AgentRegistry
 
 
 class RoutingStrategy(Enum):
@@ -37,10 +38,10 @@ class AgentSelectionCriteria:
   """Criteria for selecting agents."""
 
   min_confidence: float = 0.3
-  required_capabilities: List[AgentCapability] = field(default_factory=list)
-  preferred_mode: Optional[AgentMode] = None
+  required_capabilities: list[AgentCapability] = field(default_factory=list)
+  preferred_mode: AgentMode | None = None
   max_response_time: float = 60.0
-  excluded_agents: List[str] = field(default_factory=list)
+  excluded_agents: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -51,7 +52,7 @@ class OrchestratorConfig:
   enable_rag: bool = False
   enable_caching: bool = False
   enable_fallback: bool = True
-  fallback_agent: Optional[str] = None
+  fallback_agent: str | None = None
   max_retries: int = 2
   timeout: float = 60.0
   ensemble_size: int = 3
@@ -78,7 +79,7 @@ class AgentOrchestrator:
     graph_id: str,
     user: User,
     db_session=None,
-    config: Optional[OrchestratorConfig] = None,
+    config: OrchestratorConfig | None = None,
   ):
     """
     Initialize the orchestrator.
@@ -116,14 +117,14 @@ class AgentOrchestrator:
   async def route_query(
     self,
     query: str,
-    agent_type: Optional[str] = None,
+    agent_type: str | None = None,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict[str, Any]]] = None,
-    context: Optional[Dict[str, Any]] = None,
-    selection_criteria: Optional[AgentSelectionCriteria] = None,
+    history: list[dict[str, Any]] | None = None,
+    context: dict[str, Any] | None = None,
+    selection_criteria: AgentSelectionCriteria | None = None,
     force_extended: bool = False,
-    stream_callback: Optional[Callable] = None,
-    ensemble_size: Optional[int] = None,
+    stream_callback: Callable | None = None,
+    ensemble_size: int | None = None,
   ) -> AgentResponse:
     """
     Route a query to the appropriate agent(s).
@@ -235,11 +236,11 @@ class AgentOrchestrator:
 
     except Exception as e:
       self._metrics["errors"] += 1
-      self.logger.error(f"Orchestrator routing error: {str(e)}")
+      self.logger.error(f"Orchestrator routing error: {e!s}")
 
       # Return error response
       return AgentResponse(
-        content=f"Failed to process query: {str(e)}",
+        content=f"Failed to process query: {e!s}",
         agent_name="orchestrator",
         mode_used=mode,
         error_details={
@@ -254,9 +255,9 @@ class AgentOrchestrator:
     query: str,
     agent_type: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
-    stream_callback: Optional[Callable],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
+    stream_callback: Callable | None,
   ) -> AgentResponse:
     """Route to a specific agent type."""
     agent = self.registry.get_agent(
@@ -274,9 +275,9 @@ class AgentOrchestrator:
     self,
     query: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
-    criteria: Optional[AgentSelectionCriteria],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
+    criteria: AgentSelectionCriteria | None,
   ) -> AgentResponse:
     """Route to the agent with highest confidence."""
     agents = self.registry.get_all_agents(self.graph_id, self.user, self.db_session)
@@ -334,9 +335,9 @@ class AgentOrchestrator:
     self,
     query: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
-    criteria: Optional[AgentSelectionCriteria],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
+    criteria: AgentSelectionCriteria | None,
   ) -> AgentResponse:
     """Route based on required capabilities."""
     criteria = criteria or AgentSelectionCriteria()
@@ -374,8 +375,8 @@ class AgentOrchestrator:
     self,
     query: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
     ensemble_size: int,
   ) -> AgentResponse:
     """Use multiple agents and aggregate responses."""
@@ -429,8 +430,8 @@ class AgentOrchestrator:
     self,
     query: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
   ) -> AgentResponse:
     """Route based on agent load."""
     agents = self.registry.get_all_agents(self.graph_id, self.user, self.db_session)
@@ -456,8 +457,8 @@ class AgentOrchestrator:
     self,
     query: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
   ) -> AgentResponse:
     """Route using round-robin strategy."""
     agents = list(
@@ -477,8 +478,8 @@ class AgentOrchestrator:
     self,
     query: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
   ) -> AgentResponse:
     """Use the configured fallback agent."""
     agent = self.registry.get_agent(
@@ -499,9 +500,9 @@ class AgentOrchestrator:
     agent: BaseAgent,
     query: str,
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
-    stream_callback: Optional[Callable] = None,
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
+    stream_callback: Callable | None = None,
   ) -> AgentResponse:
     """Execute an agent with timeout and error handling."""
     try:
@@ -546,7 +547,7 @@ class AgentOrchestrator:
 
       return response
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
       self.logger.error(f"Agent {agent.metadata.name} timed out")
       response = AgentResponse(
         content="Analysis timed out",
@@ -568,9 +569,9 @@ class AgentOrchestrator:
 
       return response
     except Exception as e:
-      self.logger.error(f"Agent {agent.metadata.name} failed: {str(e)}")
+      self.logger.error(f"Agent {agent.metadata.name} failed: {e!s}")
       response = AgentResponse(
-        content=f"Agent failed: {str(e)}",
+        content=f"Agent failed: {e!s}",
         agent_name=agent.metadata.name,
         mode_used=mode,
         metadata={},
@@ -592,10 +593,10 @@ class AgentOrchestrator:
   async def coordinate_agents(
     self,
     query: str,
-    agent_sequence: List[str],
+    agent_sequence: list[str],
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict[str, Any]]] = None,
-    context: Optional[Dict[str, Any]] = None,
+    history: list[dict[str, Any]] | None = None,
+    context: dict[str, Any] | None = None,
     coordination_type: str = "sequential",
   ) -> AgentResponse:
     """
@@ -624,10 +625,10 @@ class AgentOrchestrator:
   async def _sequential_coordination(
     self,
     query: str,
-    agent_sequence: List[str],
+    agent_sequence: list[str],
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
   ) -> AgentResponse:
     """Execute agents sequentially, passing output forward."""
     accumulated_content = ""
@@ -666,10 +667,10 @@ class AgentOrchestrator:
   async def _parallel_coordination(
     self,
     query: str,
-    agent_sequence: List[str],
+    agent_sequence: list[str],
     mode: AgentMode,
-    history: Optional[List[Dict[str, Any]]],
-    context: Dict[str, Any],
+    history: list[dict[str, Any]] | None,
+    context: dict[str, Any],
   ) -> AgentResponse:
     """Execute agents in parallel."""
     tasks = []
@@ -693,7 +694,7 @@ class AgentOrchestrator:
         response = await task
         results.append((agent_type, response))
       except Exception as e:
-        self.logger.error(f"Agent {agent_type} failed: {str(e)}")
+        self.logger.error(f"Agent {agent_type} failed: {e!s}")
 
     # Combine results
     combined_content = ""
@@ -716,8 +717,8 @@ class AgentOrchestrator:
     )
 
   def get_agent_recommendations(
-    self, query: str, context: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, query: str, context: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """
     Get agent recommendations for a query.
 
@@ -746,7 +747,7 @@ class AgentOrchestrator:
     recommendations.sort(key=lambda x: x["confidence"], reverse=True)
     return recommendations
 
-  def get_metrics(self) -> Dict[str, Any]:
+  def get_metrics(self) -> dict[str, Any]:
     """Get orchestrator metrics."""
     avg_response_time = (
       self._metrics["total_response_time"] / self._metrics["total_queries"]
@@ -765,7 +766,7 @@ class AgentOrchestrator:
 
   async def _check_credits_for_agent(
     self, agent: BaseAgent, mode: AgentMode
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Check if user has sufficient credits for agent execution.
 
@@ -777,8 +778,9 @@ class AgentOrchestrator:
         Dict with credit check results
     """
     from decimal import Decimal
-    from robosystems.operations.graph.credit_service import CreditService
+
     from robosystems.config.billing.ai import AIBillingConfig
+    from robosystems.operations.graph.credit_service import CreditService
 
     try:
       credit_service = CreditService(self.db_session)
@@ -815,16 +817,16 @@ class AgentOrchestrator:
       return credit_check
 
     except Exception as e:
-      self.logger.warning(f"Credit check failed: {str(e)}")
+      self.logger.warning(f"Credit check failed: {e!s}")
       # On error, allow execution but log warning
       return {
         "has_sufficient_credits": True,
         "estimated_credits": 0,
         "available_credits": 0,
-        "warning": f"Credit check failed: {str(e)}",
+        "warning": f"Credit check failed: {e!s}",
       }
 
-  def _estimate_token_usage(self, agent: BaseAgent, mode: AgentMode) -> Dict[str, int]:
+  def _estimate_token_usage(self, agent: BaseAgent, mode: AgentMode) -> dict[str, int]:
     """
     Estimate token usage based on agent type and mode.
 
@@ -849,13 +851,11 @@ class AgentOrchestrator:
 
     return estimate
 
-  def _get_cache_key(
-    self, query: str, agent_type: Optional[str], mode: AgentMode
-  ) -> str:
+  def _get_cache_key(self, query: str, agent_type: str | None, mode: AgentMode) -> str:
     """Generate cache key for a query."""
     return f"{agent_type or 'auto'}:{mode.value}:{hash(query)}"
 
-  def _sum_tokens(self, responses: List[AgentResponse]) -> Dict[str, int]:
+  def _sum_tokens(self, responses: list[AgentResponse]) -> dict[str, int]:
     """Sum token usage across multiple responses."""
     total = {"input": 0, "output": 0}
 

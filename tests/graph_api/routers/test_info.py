@@ -1,6 +1,7 @@
 """Tests for info router endpoints."""
 
 from unittest.mock import MagicMock
+
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient

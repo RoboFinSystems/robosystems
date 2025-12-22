@@ -2,10 +2,11 @@
 Elements Tool - Discovers commonly used Element nodes (financial metrics).
 """
 
-from typing import Any, Dict
+from typing import Any
+
+from robosystems.logger import logger
 
 from .base_tool import BaseTool
-from robosystems.logger import logger
 
 
 class ElementsTool(BaseTool):
@@ -13,7 +14,7 @@ class ElementsTool(BaseTool):
   Tool for discovering commonly used Element nodes in financial graphs.
   """
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for element discovery."""
     return {
       "name": "discover-common-elements",
@@ -69,7 +70,7 @@ Use the discovered qnames in your Fact queries to get actual values.""",
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute the elements discovery tool."""
     self._log_tool_execution("discover-common-elements", arguments)
 
@@ -81,7 +82,7 @@ Use the discovered qnames in your Fact queries to get actual values.""",
 
   async def _discover_common_elements(
     self, limit: int = 20, category: str = "all", include_samples: bool = True
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Discover commonly used Element nodes in the graph.
 
@@ -198,7 +199,7 @@ Use the discovered qnames in your Fact queries to get actual values.""",
 
     except Exception as e:
       logger.error(f"Error discovering elements: {e}")
-      result["error"] = f"Failed to analyze elements: {str(e)}"
+      result["error"] = f"Failed to analyze elements: {e!s}"
       result["tips"].append("Use get-graph-schema first to verify Element nodes exist")
 
     return result

@@ -1,20 +1,23 @@
 """Email verification endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from ...adapters import sns_service
+from robosystems.middleware.sse import (
+  build_email_job_config,
+  run_and_monitor_dagster_job,
+)
+
 from ...config import env
 from ...database import get_async_db_session
 from ...logger import logger
+from ...middleware.auth.jwt import create_jwt_token, verify_jwt_token
 from ...middleware.rate_limits import auth_rate_limit_dependency
 from ...models.api.auth import AuthResponse, EmailVerificationRequest
 from ...models.api.common import ErrorResponse
 from ...models.iam import User, UserToken
 from ...security import SecurityAuditLogger, SecurityEventType
-
 from .utils import detect_app_source
-from ...middleware.auth.jwt import verify_jwt_token, create_jwt_token
 
 # Create router for email verification endpoints
 router = APIRouter()
@@ -93,6 +96,7 @@ async def get_current_user_for_email_verification(
 )
 async def resend_verification_email(
   request: Request,
+  background_tasks: BackgroundTasks,
   current_user: User = Depends(get_current_user_for_email_verification),
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(auth_rate_limit_dependency),
@@ -102,6 +106,7 @@ async def resend_verification_email(
 
   Args:
       request: FastAPI request object
+      background_tasks: FastAPI background tasks for async email
       current_user: Currently authenticated user
       session: Database session
       _rate_limit: Rate limiting dependency
@@ -110,7 +115,7 @@ async def resend_verification_email(
       Success message
 
   Raises:
-      HTTPException: If email is already verified or service unavailable
+      HTTPException: If email is already verified
   """
   # Check if already verified
   if current_user.email_verified:
@@ -136,20 +141,20 @@ async def resend_verification_email(
   # Detect app source from request
   app = detect_app_source(request)
 
-  # Send verification email
-  email_sent = await sns_service.send_verification_email(
-    user_email=current_user.email,
+  # Queue verification email via Dagster (async with retry logic)
+  run_config = build_email_job_config(
+    email_type="email_verification",
+    to_email=current_user.email,
     user_name=current_user.name,
     token=token,
     app=app,
   )
-
-  if not email_sent:
-    logger.error(f"Failed to send verification email to {current_user.email}")
-    raise HTTPException(
-      status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-      detail="Email service is temporarily unavailable. Please try again later.",
-    )
+  background_tasks.add_task(
+    run_and_monitor_dagster_job,
+    job_name="send_email_job",
+    operation_id=None,  # No SSE tracking needed for auth emails
+    run_config=run_config,
+  )
 
   # Log security event
   SecurityAuditLogger.log_security_event(
@@ -165,7 +170,7 @@ async def resend_verification_email(
     risk_level="low",
   )
 
-  logger.info(f"Resent verification email to {current_user.email}")
+  logger.info(f"Queued verification email to {current_user.email}")
   return {"message": "Verification email sent. Please check your inbox."}
 
 
@@ -183,6 +188,7 @@ async def resend_verification_email(
 async def verify_email(
   request: EmailVerificationRequest,
   fastapi_request: Request,
+  background_tasks: BackgroundTasks,
   session: Session = Depends(get_async_db_session),
 ) -> AuthResponse:
   """
@@ -191,6 +197,7 @@ async def verify_email(
   Args:
       request: Email verification request with token
       fastapi_request: FastAPI request object
+      background_tasks: FastAPI background tasks for async email
       session: Database session
 
   Returns:
@@ -230,11 +237,18 @@ async def verify_email(
   # Detect app source
   app = detect_app_source(fastapi_request)
 
-  # Send welcome email
-  await sns_service.send_welcome_email(
-    user_email=user.email,
+  # Queue welcome email via Dagster (async with retry logic)
+  run_config = build_email_job_config(
+    email_type="welcome",
+    to_email=user.email,
     user_name=user.name,
     app=app,
+  )
+  background_tasks.add_task(
+    run_and_monitor_dagster_job,
+    job_name="send_email_job",
+    operation_id=None,  # No SSE tracking needed for auth emails
+    run_config=run_config,
   )
 
   # Log security event

@@ -5,20 +5,20 @@ This module provides endpoints for creating backups and restoring
 LadybugDB databases.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path
 from fastapi import status as http_status
 
-from robosystems.graph_api.models.database import BackupRequest, BackupResponse
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.task_manager import backup_task_manager
+from robosystems.graph_api.models.database import BackupRequest, BackupResponse
 from robosystems.logger import logger
 from robosystems.operations.lbug.backup_manager import (
-  create_backup_manager,
+  BackupFormat,
   BackupJob,
   BackupType,
-  BackupFormat,
+  create_backup_manager,
 )
 
 router = APIRouter(prefix="/databases", tags=["Backup"])
@@ -40,7 +40,7 @@ async def perform_backup(
     await backup_task_manager.update_task(
       task_id,
       status="running",
-      metadata={"started_at": datetime.now(timezone.utc).isoformat()},
+      metadata={"started_at": datetime.now(UTC).isoformat()},
     )
 
     logger.info(f"[Task {task_id}] Starting backup for database '{graph_id}'")
@@ -80,7 +80,7 @@ async def perform_backup(
     logger.info(f"[Task {task_id}] Backup completed successfully")
 
   except Exception as e:
-    logger.error(f"[Task {task_id}] Backup failed: {str(e)}")
+    logger.error(f"[Task {task_id}] Backup failed: {e!s}")
     await backup_task_manager.fail_task(task_id, str(e))
 
 

@@ -6,14 +6,16 @@ based on execution profiles, client capabilities, and system state.
 """
 
 from enum import Enum
-from typing import Dict, Any, Optional, Tuple
+from typing import Any
 
-from robosystems.operations.agents.base import AgentMode, ExecutionProfile
+from robosystems.logger import logger
 from robosystems.middleware.graph.execution_strategies import (
   BaseClientDetector,
+)
+from robosystems.middleware.graph.execution_strategies import (
   ResponseMode as BaseResponseMode,
 )
-from robosystems.logger import logger
+from robosystems.operations.agents.base import AgentMode, ExecutionProfile
 
 
 class AgentExecutionStrategy(Enum):
@@ -21,7 +23,7 @@ class AgentExecutionStrategy(Enum):
 
   SYNC_IMMEDIATE = "sync_immediate"
   SSE_STREAMING = "sse_streaming"
-  CELERY_QUEUE_STREAM = "celery_queue_stream"
+  BACKGROUND_QUEUE = "background_queue"
 
 
 ResponseMode = BaseResponseMode
@@ -31,7 +33,7 @@ class AgentClientDetector(BaseClientDetector):
   """Detect client type and capabilities for agent requests."""
 
   @classmethod
-  def detect_client_type(cls, headers: Dict[str, str]) -> Dict[str, Any]:
+  def detect_client_type(cls, headers: dict[str, str]) -> dict[str, Any]:
     """
     Detect client type and capabilities from request headers.
 
@@ -64,11 +66,11 @@ class AgentStrategySelector:
   @classmethod
   def select_strategy(
     cls,
-    execution_profile: Optional[ExecutionProfile],
-    client_info: Dict[str, Any],
-    mode_override: Optional[ResponseMode] = None,
+    execution_profile: ExecutionProfile | None,
+    client_info: dict[str, Any],
+    mode_override: ResponseMode | None = None,
     force_extended: bool = False,
-  ) -> Tuple[AgentExecutionStrategy, Dict[str, Any]]:
+  ) -> tuple[AgentExecutionStrategy, dict[str, Any]]:
     """
     Select optimal execution strategy for agent.
 
@@ -108,12 +110,12 @@ class AgentStrategySelector:
 
     if mode_override == ResponseMode.ASYNC or client_info.get("prefers_async"):
       metadata["selection_reason"] = "Async mode preferred or forced"
-      return AgentExecutionStrategy.CELERY_QUEUE_STREAM, metadata
+      return AgentExecutionStrategy.BACKGROUND_QUEUE, metadata
 
-    # Extended analysis always goes to Celery
+    # Extended analysis always goes to background queue
     if force_extended:
       metadata["selection_reason"] = "Extended analysis forced"
-      return AgentExecutionStrategy.CELERY_QUEUE_STREAM, metadata
+      return AgentExecutionStrategy.BACKGROUND_QUEUE, metadata
 
     # Testing tools get sync for fast operations
     if client_info["is_testing_tool"]:
@@ -147,32 +149,32 @@ class AgentStrategySelector:
         return AgentExecutionStrategy.SYNC_IMMEDIATE, metadata
 
     else:
-      # Long operations: Celery worker with SSE monitoring
+      # Long operations: background queue with SSE monitoring
       metadata["selection_reason"] = (
-        f"Long operation ({estimated_time}s), queuing to worker"
+        f"Long operation ({estimated_time}s), queuing to background"
       )
-      return AgentExecutionStrategy.CELERY_QUEUE_STREAM, metadata
+      return AgentExecutionStrategy.BACKGROUND_QUEUE, metadata
 
   @classmethod
-  def should_use_celery(
+  def should_use_background(
     cls,
-    execution_profile: Optional[ExecutionProfile],
+    execution_profile: ExecutionProfile | None,
     mode: AgentMode,
   ) -> bool:
     """
-    Quick check if agent should use Celery based on execution profile.
+    Quick check if agent should use background queue based on execution profile.
 
     Args:
         execution_profile: Agent's execution time profile
         mode: Agent execution mode
 
     Returns:
-        True if should use Celery, False for API execution
+        True if should use background queue, False for API execution
     """
     if not execution_profile:
       return False
 
-    # Extended mode always goes to Celery
+    # Extended mode always goes to background queue
     if mode == AgentMode.EXTENDED:
       return True
 

@@ -4,12 +4,13 @@ Test token redaction in logging middleware.
 This test ensures sensitive query parameters like tokens are never logged.
 """
 
-from robosystems.middleware.logging import (
-  redact_sensitive_query_params,
-  get_safe_url_for_logging,
-  SENSITIVE_QUERY_PARAMS,
-)
 from starlette.datastructures import URL
+
+from robosystems.middleware.logging import (
+  SENSITIVE_QUERY_PARAMS,
+  get_safe_url_for_logging,
+  redact_sensitive_query_params,
+)
 
 
 class TestTokenRedaction:
@@ -82,7 +83,7 @@ class TestTokenRedaction:
 
     # Mock request with sensitive query parameters
     class MockRequest:
-      def __init__(self, path: str, query: str = None):
+      def __init__(self, path: str, query: str | None = None):
         self.url = URL(
           f"http://example.com{path}?{query}" if query else f"http://example.com{path}"
         )

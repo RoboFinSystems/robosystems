@@ -1,8 +1,10 @@
 """Tests for the user router."""
 
+from unittest.mock import Mock
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock
+
 from main import app
 from robosystems.middleware.auth.dependencies import get_current_user
 
@@ -57,17 +59,17 @@ def error_user():
 def test_get_current_user_info(mock_user_with_accounts):
   """Test getting current user info."""
   from robosystems.middleware.rate_limits import (
-    auth_rate_limit_dependency,
-    rate_limit_dependency,
-    user_management_rate_limit_dependency,
-    sync_operations_rate_limit_dependency,
-    connection_management_rate_limit_dependency,
     analytics_rate_limit_dependency,
+    auth_rate_limit_dependency,
     backup_operations_rate_limit_dependency,
-    sensitive_auth_rate_limit_dependency,
-    tasks_management_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
     general_api_rate_limit_dependency,
+    rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
     subscription_aware_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    user_management_rate_limit_dependency,
   )
 
   # Override the dependency
@@ -110,17 +112,17 @@ def test_get_current_user_info(mock_user_with_accounts):
 def test_get_current_user_info_no_accounts(mock_user_without_accounts):
   """Test getting current user info without any accounts."""
   from robosystems.middleware.rate_limits import (
-    auth_rate_limit_dependency,
-    rate_limit_dependency,
-    user_management_rate_limit_dependency,
-    sync_operations_rate_limit_dependency,
-    connection_management_rate_limit_dependency,
     analytics_rate_limit_dependency,
+    auth_rate_limit_dependency,
     backup_operations_rate_limit_dependency,
-    sensitive_auth_rate_limit_dependency,
-    tasks_management_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
     general_api_rate_limit_dependency,
+    rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
     subscription_aware_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    user_management_rate_limit_dependency,
   )
 
   # Override the dependency
@@ -161,17 +163,17 @@ def test_get_current_user_info_no_accounts(mock_user_without_accounts):
 def test_get_current_user_info_error_handling(error_user):
   """Test error handling in the user endpoint."""
   from robosystems.middleware.rate_limits import (
-    auth_rate_limit_dependency,
-    rate_limit_dependency,
-    user_management_rate_limit_dependency,
-    sync_operations_rate_limit_dependency,
-    connection_management_rate_limit_dependency,
     analytics_rate_limit_dependency,
+    auth_rate_limit_dependency,
     backup_operations_rate_limit_dependency,
-    sensitive_auth_rate_limit_dependency,
-    tasks_management_rate_limit_dependency,
+    connection_management_rate_limit_dependency,
     general_api_rate_limit_dependency,
+    rate_limit_dependency,
+    sensitive_auth_rate_limit_dependency,
     subscription_aware_rate_limit_dependency,
+    sync_operations_rate_limit_dependency,
+    tasks_management_rate_limit_dependency,
+    user_management_rate_limit_dependency,
   )
 
   # Override the dependency
@@ -212,8 +214,9 @@ class TestUserAPIUnauthorizedAccess:
 
   def test_unauthorized_access(self):
     """Test access without authentication."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     # Save current dependency overrides and clear them
     original_overrides = app.dependency_overrides.copy()
@@ -231,8 +234,9 @@ class TestUserAPIUnauthorizedAccess:
 
   def test_invalid_api_key(self):
     """Test access with invalid API key."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     # Save current dependency overrides and clear them
     original_overrides = app.dependency_overrides.copy()

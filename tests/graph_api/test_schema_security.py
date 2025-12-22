@@ -1,15 +1,16 @@
 """Tests for schema endpoint security validation."""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
-from robosystems.graph_api.routers.databases.schema import (
-  validate_ddl_statement,
-  escape_identifier,
-)
 from robosystems.graph_api.app import create_app
 from robosystems.graph_api.core import init_ladybug_service
+from robosystems.graph_api.routers.databases.schema import (
+  escape_identifier,
+  validate_ddl_statement,
+)
 from robosystems.middleware.graph.types import NodeType, RepositoryType
 
 

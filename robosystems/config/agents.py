@@ -8,12 +8,12 @@ This module defines all configuration for the multi-agent system including:
 - Token cost configurations
 """
 
-from enum import Enum
-from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
+from typing import Any
 
-from robosystems.config import env
+from robosystems.config.env import env
 
 
 class BedrockModel(Enum):
@@ -51,7 +51,7 @@ class ModelConfig:
   """Configuration for AI model selection and parameters."""
 
   default_model: BedrockModel
-  fallback_model: Optional[BedrockModel] = None
+  fallback_model: BedrockModel | None = None
   region: str = "us-east-1"
   temperature: float = 0.7
   max_retries: int = 3
@@ -125,7 +125,7 @@ class AgentConfig:
 
   # Agent-Specific Model Overrides
   # Allows different agents to use different models if needed
-  AGENT_MODEL_OVERRIDES: Dict[str, BedrockModel] = {
+  AGENT_MODEL_OVERRIDES: dict[str, BedrockModel] = {
     # Example: "financial": BedrockModel.SONNET_4_5,
     # Example: "cypher": BedrockModel.SONNET_3_5_V2,
   }
@@ -174,7 +174,7 @@ class AgentConfig:
 
   @classmethod
   def get_bedrock_model_id(
-    cls, model: Optional[BedrockModel] = None, agent_type: Optional[str] = None
+    cls, model: BedrockModel | None = None, agent_type: str | None = None
   ) -> str:
     """
     Get the AWS Bedrock model ID for a given model or agent.
@@ -204,7 +204,7 @@ class AgentConfig:
     )
 
   @classmethod
-  def get_mode_limits(cls, mode: str) -> Dict[str, Any]:
+  def get_mode_limits(cls, mode: str) -> dict[str, Any]:
     """
     Get operational limits for a mode (backward compatible with BaseAgent).
 
@@ -251,7 +251,7 @@ class AgentConfig:
     return input_cost + output_cost
 
   @classmethod
-  def get_agent_capabilities(cls, agent_type: str) -> Dict[str, Any]:
+  def get_agent_capabilities(cls, agent_type: str) -> dict[str, Any]:
     """Get capabilities configuration for an agent type."""
     return cls.AGENT_CAPABILITIES.get(
       agent_type,
@@ -263,7 +263,7 @@ class AgentConfig:
     )
 
   @classmethod
-  def validate_configuration(cls) -> Dict[str, Any]:
+  def validate_configuration(cls) -> dict[str, Any]:
     """
     Validate agent configuration consistency.
 
@@ -294,7 +294,7 @@ class AgentConfig:
         issues.append(f"Missing execution profile for mode: {mode.value}")
 
     # Validate all models have token costs
-    for model in cls.BEDROCK_MODELS.keys():
+    for model in cls.BEDROCK_MODELS:
       if model not in cls.TOKEN_COSTS:
         issues.append(f"Missing token costs for model: {model.value}")
 
@@ -310,7 +310,7 @@ class AgentConfig:
     }
 
   @classmethod
-  def get_all_config(cls) -> Dict[str, Any]:
+  def get_all_config(cls) -> dict[str, Any]:
     """
     Get complete agent configuration.
 
@@ -326,7 +326,7 @@ class AgentConfig:
           else None
         ),
         "region": cls.DEFAULT_MODEL_CONFIG.region,
-        "available_models": [model.value for model in cls.BEDROCK_MODELS.keys()],
+        "available_models": [model.value for model in cls.BEDROCK_MODELS],
       },
       "execution_profiles": {
         mode.value: {

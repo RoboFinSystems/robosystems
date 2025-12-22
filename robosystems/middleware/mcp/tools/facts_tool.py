@@ -2,10 +2,11 @@
 Facts Tool - Discovers fact patterns and dimensional analysis capabilities.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
+
+from robosystems.logger import logger
 
 from .base_tool import BaseTool
-from robosystems.logger import logger
 
 
 class FactsTool(BaseTool):
@@ -13,7 +14,7 @@ class FactsTool(BaseTool):
   Tool for discovering fact patterns and their aspects.
   """
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for facts discovery."""
     return {
       "name": "discover-facts",
@@ -78,7 +79,7 @@ class FactsTool(BaseTool):
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute the facts discovery tool."""
     self._log_tool_execution("discover-facts", arguments)
 
@@ -92,10 +93,10 @@ class FactsTool(BaseTool):
   async def _discover_facts(
     self,
     focus: str = "all",
-    element_filter: Optional[str] = None,
+    element_filter: str | None = None,
     include_samples: bool = True,
     limit: int = 10,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Discover fact patterns with their aspects for complex queries.
 
@@ -288,7 +289,7 @@ LIMIT 10""",
 
     except Exception as e:
       logger.error(f"Error discovering facts: {e}")
-      result["error"] = f"Failed to analyze facts: {str(e)}"
+      result["error"] = f"Failed to analyze facts: {e!s}"
       result["tips"].append("Use get-graph-schema first to understand the structure")
 
     return result

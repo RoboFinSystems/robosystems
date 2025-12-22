@@ -2,8 +2,10 @@
 Unit tests for security improvements (no database required).
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from robosystems.middleware.graph.utils import MultiTenantUtils
 
 
@@ -125,7 +127,7 @@ class TestCypherParameterValidationUnit:
       def mock_validate_parameters(params):
         import re
 
-        for param_name in params.keys():
+        for param_name in params:
           # Check for invalid characters
           if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", param_name):
             raise Exception(f"Invalid parameter name: {param_name}")

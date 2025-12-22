@@ -1,13 +1,14 @@
 import pandas as pd
 import pytest
+
 from robosystems.models.api.views import (
   AggregationMethod,
   ElementAssociation,
   MappingStructure,
 )
 from robosystems.operations.views.element_mapping import (
-  apply_element_mapping,
   _aggregate_values,
+  apply_element_mapping,
 )
 
 

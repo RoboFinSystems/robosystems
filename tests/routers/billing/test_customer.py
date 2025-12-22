@@ -1,11 +1,13 @@
 """Tests for billing customer endpoints."""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi import HTTPException
-from robosystems.routers.billing.customer import get_customer
+
 from robosystems.models.billing import BillingCustomer as BillingCustomerModel
 from robosystems.models.iam import User
+from robosystems.routers.billing.customer import get_customer
 
 
 class TestGetCustomer:

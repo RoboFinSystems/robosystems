@@ -3,6 +3,7 @@
 import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
@@ -10,9 +11,9 @@ from starlette.datastructures import Headers
 
 from robosystems.graph_api.middleware.auth import (
   LadybugAuthMiddleware,
-  get_api_key_from_secrets_manager,
   clear_api_key_cache,
   create_api_key,
+  get_api_key_from_secrets_manager,
 )
 
 

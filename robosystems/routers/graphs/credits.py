@@ -10,35 +10,34 @@ Provides endpoints for:
 
 import logging
 from decimal import Decimal
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_db_session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.models.iam import User, GraphUser
+from robosystems.models.api.billing.credits import (
+  CreditSummaryResponse,
+  DetailedTransactionsResponse,
+  EnhancedCreditTransactionResponse,
+  StorageLimitResponse,
+  TransactionSummaryResponse,
+)
+from robosystems.models.api.common import (
+  ErrorCode,
+  ErrorResponse,
+  create_error_response,
+)
+from robosystems.models.iam import GraphUser, User
 from robosystems.models.iam.graph_credits import CreditTransactionType
 from robosystems.operations.graph.credit_service import (
   CreditService,
   get_operation_cost,
 )
-from robosystems.models.api.common import (
-  ErrorResponse,
-  ErrorCode,
-  create_error_response,
-)
-from robosystems.models.api.billing.credits import (
-  CreditSummaryResponse,
-  StorageLimitResponse,
-  EnhancedCreditTransactionResponse,
-  TransactionSummaryResponse,
-  DetailedTransactionsResponse,
-)
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -229,20 +228,20 @@ async def get_credit_transactions(
   graph_id: str = Path(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
-  transaction_type: Optional[str] = Query(
+  transaction_type: str | None = Query(
     None,
     description="Filter by transaction type (allocation, consumption, bonus, refund)",
     example="consumption",
   ),
-  operation_type: Optional[str] = Query(
+  operation_type: str | None = Query(
     None,
     description="Filter by operation type (e.g., entity_lookup, cypher_query)",
   ),
-  start_date: Optional[str] = Query(
+  start_date: str | None = Query(
     None,
     description="Start date for filtering (ISO format: YYYY-MM-DD)",
   ),
-  end_date: Optional[str] = Query(
+  end_date: str | None = Query(
     None,
     description="End date for filtering (ISO format: YYYY-MM-DD)",
   ),
@@ -271,13 +270,15 @@ async def get_credit_transactions(
   Works for both user graphs and shared repositories.
   """
   from datetime import datetime
+
   from sqlalchemy import func
+
+  from ...middleware.graph.utils import MultiTenantUtils
   from ...models.iam.graph_credits import GraphCreditTransaction
   from ...models.iam.user_repository_credits import (
-    UserRepositoryCreditTransaction,
     UserRepositoryCredits,
+    UserRepositoryCreditTransaction,
   )
-  from ...middleware.graph.utils import MultiTenantUtils
 
   try:
     # Determine if this is a repository or user graph
@@ -526,7 +527,7 @@ async def check_credit_balance(
     ..., description="Graph database identifier", pattern=GRAPH_OR_SUBGRAPH_ID_PATTERN
   ),
   operation_type: str = Query(..., description="Type of operation to check"),
-  base_cost: Optional[Decimal] = Query(
+  base_cost: Decimal | None = Query(
     None, description="Custom base cost (uses default if not provided)"
   ),
   current_user: User = Depends(get_current_user_with_graph),
@@ -658,7 +659,9 @@ async def get_storage_usage(
   """
   try:
     from datetime import datetime, timedelta
+
     from sqlalchemy import func
+
     from ...models.iam.graph_usage import GraphUsage, UsageEventType
 
     # Get storage usage records for the period
@@ -683,8 +686,8 @@ async def get_storage_usage(
     )
 
     # Calculate credit costs
-    from robosystems.operations.graph.credit_service import get_operation_cost
     from robosystems.models.iam import GraphCredits
+    from robosystems.operations.graph.credit_service import get_operation_cost
 
     credits = GraphCredits.get_by_graph_id(graph_id, db)
     base_storage_cost = float(get_operation_cost("storage_daily"))

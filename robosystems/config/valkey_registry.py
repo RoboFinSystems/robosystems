@@ -8,14 +8,15 @@ IMPORTANT: When adding a new Redis connection, always check this registry first
 and use the next available database number.
 """
 
+import logging
 import os
 import ssl
-import yaml
-import logging
-from pathlib import Path
 from enum import IntEnum
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +29,15 @@ class ValkeyDatabase(IntEnum):
   isolation and prevent key collisions.
 
   Current allocation:
-  - 0-1: Celery task queue system
+  - 0-1: Reserved for future use
   - 2-9: Application services (auth, SSE, locks, pipelines, credits, rate limiting, lbug, billing)
   """
 
   # =========================================================================
-  # CELERY DATABASES (0-1)
+  # RESERVED DATABASES (0-1) - Available for future use
   # =========================================================================
-  CELERY_BROKER = 0  # Celery task queue (messages)
-  CELERY_RESULTS = 1  # Celery task results storage
+  RESERVED_0 = 0  # Reserved - available for future use
+  RESERVED_1 = 1  # Reserved - available for future use
 
   # =========================================================================
   # APPLICATION DATABASES (2-9)
@@ -87,13 +88,13 @@ class ValkeyURLBuilder:
   """Helper class to build Valkey/Redis URLs with proper database numbers."""
 
   # Cache for the base Valkey URL and auth token
-  _cached_base_url: Optional[str] = None
-  _cache_environment: Optional[str] = None
-  _cached_auth_token: Optional[str] = None
-  _auth_token_environment: Optional[str] = None
+  _cached_base_url: str | None = None
+  _cache_environment: str | None = None
+  _cached_auth_token: str | None = None
+  _auth_token_environment: str | None = None
 
   @staticmethod
-  def _get_valkey_url_from_cloudformation() -> Optional[str]:
+  def _get_valkey_url_from_cloudformation() -> str | None:
     """
     Get Valkey URL from CloudFormation stack outputs.
 
@@ -113,7 +114,7 @@ class ValkeyURLBuilder:
       for config_path in config_paths:
         if config_path.exists():
           try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
               config = yaml.safe_load(f)
               env_key = os.getenv("ENVIRONMENT", "dev").lower()
               if env_key in config and "valkey" in config[env_key]:
@@ -180,7 +181,7 @@ class ValkeyURLBuilder:
     return url
 
   @staticmethod
-  def get_auth_token() -> Optional[str]:
+  def get_auth_token() -> str | None:
     """
     Get the Valkey auth token for the current environment.
 
@@ -229,11 +230,11 @@ class ValkeyURLBuilder:
 
   @staticmethod
   def build_url(
-    base_url: Optional[str] = None,
-    database: ValkeyDatabase = ValkeyDatabase.CELERY_BROKER,
+    base_url: str | None = None,
+    database: ValkeyDatabase = ValkeyDatabase.AUTH_CACHE,
     use_valkey_prefix: bool = False,
-    auth_token: Optional[str] = None,
-    use_tls: Optional[bool] = None,
+    auth_token: str | None = None,
+    use_tls: bool | None = None,
     include_ssl_params: bool = True,
   ) -> str:
     """
@@ -327,7 +328,7 @@ class ValkeyURLBuilder:
     # Add database number
     url = f"{base_url}/{database.value}"
 
-    # Add SSL parameters for rediss:// URLs (required by Celery/Kombu)
+    # Add SSL parameters for rediss:// URLs
     if use_tls and include_ssl_params:
       url += "?ssl_cert_reqs=CERT_NONE"
 
@@ -335,8 +336,8 @@ class ValkeyURLBuilder:
 
   @staticmethod
   def build_authenticated_url(
-    database: ValkeyDatabase = ValkeyDatabase.CELERY_BROKER,
-    base_url: Optional[str] = None,
+    database: ValkeyDatabase = ValkeyDatabase.AUTH_CACHE,
+    base_url: str | None = None,
     include_ssl_params: bool = True,
   ) -> str:
     """
@@ -374,7 +375,7 @@ class ValkeyURLBuilder:
     )
 
   @staticmethod
-  def parse_url(url: str) -> tuple[str, Optional[int]]:
+  def parse_url(url: str) -> tuple[str, int | None]:
     """
     Parse a Valkey/Redis URL to extract base URL and database number.
 
@@ -414,8 +415,8 @@ def get_database_purpose(database: ValkeyDatabase) -> str:
       Description of the database's purpose
   """
   descriptions = {
-    ValkeyDatabase.CELERY_BROKER: "Celery task queue for async job processing",
-    ValkeyDatabase.CELERY_RESULTS: "Storage for Celery task results and status",
+    ValkeyDatabase.RESERVED_0: "Reserved - available for future use",
+    ValkeyDatabase.RESERVED_1: "Reserved - available for future use",
     ValkeyDatabase.AUTH_CACHE: "Authentication tokens, sessions, and API key cache",
     ValkeyDatabase.SSE_EVENTS: "Server-Sent Events for real-time updates",
     ValkeyDatabase.DISTRIBUTED_LOCKS: "Distributed locks for multi-instance coordination",
@@ -472,7 +473,7 @@ legacy_url = ValkeyURLBuilder.build_url(database=ValkeyDatabase.AUTH_CACHE)
 # =============================================================================
 
 
-def get_redis_connection_params(environment: Optional[str] = None) -> Dict[str, Any]:
+def get_redis_connection_params(environment: str | None = None) -> dict[str, Any]:
   """
   Get Redis connection parameters based on environment.
 

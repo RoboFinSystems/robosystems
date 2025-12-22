@@ -2,29 +2,30 @@
 
 import asyncio
 import time
-from fastapi import APIRouter, Depends, HTTPException, status, Path
+
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from robosystems.logger import logger
-from robosystems.models.iam import User
-from robosystems.models.api.graphs.schema import SchemaInfoResponse
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_async_db_session
+from robosystems.logger import logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_universal_repository
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.robustness import (
-  OperationType,
   OperationStatus,
-  record_operation_metric,
+  OperationType,
   get_operation_logger,
+  record_operation_metric,
 )
+from robosystems.models.api.graphs.schema import SchemaInfoResponse
+from robosystems.models.iam import User
 
-from .utils import get_schema_info, circuit_breaker, timeout_coordinator
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from .utils import circuit_breaker, get_schema_info, timeout_coordinator
 
 router = APIRouter()
 
@@ -206,7 +207,7 @@ async def get_graph_schema_info(
 
     return SchemaInfoResponse(graph_id=graph_id, schema=schema)
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     # Record circuit breaker failure and timeout metrics
     circuit_breaker.record_failure(graph_id, "schema")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
@@ -284,7 +285,7 @@ async def get_graph_schema_info(
       },
       user_id=current_user.id,
     )
-    logger.error(f"Error getting graph schema: {str(e)}")
+    logger.error(f"Error getting graph schema: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to retrieve graph schema",

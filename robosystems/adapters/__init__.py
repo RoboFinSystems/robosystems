@@ -1,9 +1,46 @@
-"""Adapters for external services and schemas."""
+"""Adapters for external data source integrations.
 
-from .ses import SESEmailService, ses_service
+This module provides adapters for integrating with external financial data sources:
+- SEC EDGAR: Financial filings and XBRL data
+- QuickBooks: Small business accounting data
+- Plaid: Banking and transaction data
 
-# Keep the old names for backward compatibility during migration
-sns_service = ses_service
-SNSEmailService = SESEmailService
+Each adapter follows a consistent structure:
+- client/: API connection and authentication
+- processors/: Data transformation for graph ingestion
 
-__all__ = ["SESEmailService", "ses_service", "sns_service", "SNSEmailService"]
+AWS infrastructure services are in robosystems.operations.aws
+"""
+
+# SEC EDGAR adapter
+# Plaid adapter
+from robosystems.adapters.plaid import (
+  PlaidClient,
+  PlaidTransactionsProcessor,
+)
+
+# QuickBooks adapter
+from robosystems.adapters.quickbooks import (
+  QBClient,
+  QBTransactionsProcessor,
+)
+from robosystems.adapters.sec import (
+  ArelleClient,
+  SECClient,
+  XBRLDuckDBGraphProcessor,
+  XBRLGraphProcessor,
+)
+
+__all__ = [
+  "ArelleClient",
+  # Plaid
+  "PlaidClient",
+  "PlaidTransactionsProcessor",
+  # QuickBooks
+  "QBClient",
+  "QBTransactionsProcessor",
+  # SEC
+  "SECClient",
+  "XBRLDuckDBGraphProcessor",
+  "XBRLGraphProcessor",
+]

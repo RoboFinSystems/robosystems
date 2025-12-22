@@ -9,24 +9,24 @@ This service handles all credit-related operations including:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from sqlalchemy.orm import Session
 
+from ...config import BillingConfig
+from ...config.credits import CreditConfig
+from ...config.graph_tier import GraphTier
+from ...middleware.graph.types import parse_graph_id
 from ...models.iam import (
   GraphCredits,
   GraphCreditTransaction,
   GraphUser,
 )
-from ...config.graph_tier import GraphTier
 from ...models.iam.graph_credits import CreditTransactionType
+from ...models.iam.user_repository import RepositoryType, UserRepository
 from ...models.iam.user_repository_credits import UserRepositoryCredits
-from ...models.iam.user_repository import UserRepository, RepositoryType
-from ...config.credits import CreditConfig
-from ...config import BillingConfig
-from ...middleware.graph.types import parse_graph_id
 
 logger = logging.getLogger(__name__)
 
@@ -121,13 +121,13 @@ class CreditService:
     graph_id: str,
     operation_type: str,
     base_cost: Decimal,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
     cached: bool = False,
-    user_id: Optional[str] = None,
-    idempotency_key: Optional[str] = None,
-    request_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    user_id: str | None = None,
+    idempotency_key: str | None = None,
+    request_id: str | None = None,
+    operation_id: str | None = None,
+  ) -> dict[str, Any]:
     """
     Consume credits for a graph operation.
 
@@ -266,8 +266,8 @@ class CreditService:
       }
 
   def get_credit_summary(
-    self, graph_id: str, user_id: Optional[str] = None
-  ) -> Dict[str, Any]:
+    self, graph_id: str, user_id: str | None = None
+  ) -> dict[str, Any]:
     """Get comprehensive credit summary for a graph or shared repository.
 
     For user graphs: Returns credit summary from GraphCredits table (graph-specific).
@@ -341,7 +341,7 @@ class CreditService:
 
     return summary
 
-  def allocate_monthly_credits(self, graph_id: str) -> Dict[str, Any]:
+  def allocate_monthly_credits(self, graph_id: str) -> dict[str, Any]:
     """Allocate monthly credits if due."""
     # For subgraphs, use parent graph ID to access shared credit pool
     parent_graph_id = self._get_parent_graph_id(graph_id)
@@ -377,8 +377,8 @@ class CreditService:
     graph_id: str,
     amount: Decimal,
     description: str,
-    metadata: Optional[Dict[str, Any]] = None,
-  ) -> Dict[str, Any]:
+    metadata: dict[str, Any] | None = None,
+  ) -> dict[str, Any]:
     """Add bonus credits to a graph."""
     # For subgraphs, use parent graph ID to access shared credit pool
     parent_graph_id = self._get_parent_graph_id(graph_id)
@@ -389,7 +389,7 @@ class CreditService:
 
     # Add credits
     credits.current_balance += amount
-    credits.updated_at = datetime.now(timezone.utc)
+    credits.updated_at = datetime.now(UTC)
 
     # Record transaction with idempotency using parent_graph_id
     import uuid
@@ -428,9 +428,9 @@ class CreditService:
   def get_credit_transactions(
     self,
     graph_id: str,
-    transaction_type: Optional[CreditTransactionType] = None,
+    transaction_type: CreditTransactionType | None = None,
     limit: int = 100,
-  ) -> List[Dict[str, Any]]:
+  ) -> list[dict[str, Any]]:
     """Get credit transactions for a graph."""
     # For subgraphs, use parent graph ID to access shared credit pool
     parent_graph_id = self._get_parent_graph_id(graph_id)
@@ -462,9 +462,9 @@ class CreditService:
     self,
     graph_id: str,
     required_credits: Decimal,
-    user_id: Optional[str] = None,
+    user_id: str | None = None,
     operation_type: str = "query",
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """Check if graph has sufficient credits for an operation."""
     # Check if this is a shared repository
     if self._is_shared_repository(graph_id):
@@ -562,7 +562,7 @@ class CreditService:
       "repository_type": "graph",
     }
 
-  def get_subscription_tier_limits(self, subscription_tier: str) -> Dict[str, Any]:
+  def get_subscription_tier_limits(self, subscription_tier: str) -> dict[str, Any]:
     """Get limits and features for a subscription tier."""
     allowed_tiers = {
       "ladybug-standard": [GraphTier.LADYBUG_STANDARD],
@@ -597,7 +597,7 @@ class CreditService:
 
   def upgrade_graph_tier(
     self, graph_id: str, new_tier: GraphTier, user_subscription_tier: str
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Upgrade a graph to a new tier.
 
@@ -613,10 +613,11 @@ class CreditService:
 
   def _get_consumed_this_month(self, graph_id: str) -> Decimal:
     """Get total credits consumed this month for a graph."""
-    from sqlalchemy import func
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    from sqlalchemy import func
+
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     # For subgraphs, use parent graph ID to access shared credit pool
@@ -661,12 +662,12 @@ class CreditService:
     allowed_tiers = tier_restrictions.get(subscription_tier, [])
     return graph_tier in allowed_tiers
 
-  def bulk_allocate_monthly_credits(self) -> Dict[str, Any]:
+  def bulk_allocate_monthly_credits(self) -> dict[str, Any]:
     """Allocate monthly credits for all graphs that are due."""
     # Get all credit records that need allocation
 
     # Find graphs that haven't been allocated in the past 30 days
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff_date = now.replace(day=1)  # First of current month
 
     due_allocations = (
@@ -702,7 +703,7 @@ class CreditService:
       "allocation_date": now.isoformat(),
     }
 
-  def get_all_credit_summaries(self, user_id: str) -> List[Dict[str, Any]]:
+  def get_all_credit_summaries(self, user_id: str) -> list[dict[str, Any]]:
     """Get credit summaries for all graphs owned by a user."""
     # Get all graphs for the user
     user_graphs = (
@@ -724,10 +725,10 @@ class CreditService:
     user_id: str,
     repository_name: str,
     operation_type: str,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
     cached: bool = False,
-    base_cost: Optional[Decimal] = None,
-  ) -> Dict[str, Any]:
+    base_cost: Decimal | None = None,
+  ) -> dict[str, Any]:
     """
     Consume credits for a shared repository operation.
 
@@ -800,7 +801,7 @@ class CreditService:
         "addon_tier": shared_credits.user_repository.repository_plan.value,
       }
 
-  def get_shared_repository_summary(self, user_id: str) -> Dict[str, Any]:
+  def get_shared_repository_summary(self, user_id: str) -> dict[str, Any]:
     """Get summary of all shared repository credits for a user."""
     access_records = UserRepository.get_user_repositories(user_id, self.session)
 
@@ -823,8 +824,8 @@ class CreditService:
     user_id: str,
     repository_name: str,
     operation_type: str,
-    required_credits: Optional[Decimal] = None,
-  ) -> Dict[str, Any]:
+    required_credits: Decimal | None = None,
+  ) -> dict[str, Any]:
     """Check if user has access and sufficient credits for a shared repository operation."""
     # Get shared credits
     shared_credits = UserRepositoryCredits.get_user_repository_credits(
@@ -884,7 +885,7 @@ class CreditService:
     }
     return mapping.get(addon_type, addon_type)
 
-  def _repo_name_to_addon_type(self, repo_name: str) -> Optional[RepositoryType]:
+  def _repo_name_to_addon_type(self, repo_name: str) -> RepositoryType | None:
     """Convert repository name to repository type."""
     mapping = {
       "sec": RepositoryType.SEC,
@@ -894,8 +895,8 @@ class CreditService:
     return mapping.get(repo_name)
 
   def check_storage_limit(
-    self, graph_id: str, current_storage_gb: Optional[Decimal] = None
-  ) -> Dict[str, Any]:
+    self, graph_id: str, current_storage_gb: Decimal | None = None
+  ) -> dict[str, Any]:
     """
     Check storage limits for a graph and provide recommendations.
 
@@ -921,8 +922,9 @@ class CreditService:
     # Get current storage if not provided
     if current_storage_gb is None:
       # Try to get latest storage usage from tracking
-      from ...models.iam.graph_usage import GraphUsage, UsageEventType
       from sqlalchemy import desc
+
+      from ...models.iam.graph_usage import GraphUsage, UsageEventType
 
       latest_usage = (
         self.session.query(GraphUsage)
@@ -968,7 +970,7 @@ class CreditService:
     new_limit_gb: Decimal,
     admin_user_id: str,
     reason: str,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Set storage override limit (admin only).
 
@@ -1005,13 +1007,14 @@ class CreditService:
       "new_limit_gb": float(new_limit_gb),
       "admin_user_id": admin_user_id,
       "reason": reason,
-      "override_set_at": datetime.now(timezone.utc).isoformat(),
+      "override_set_at": datetime.now(UTC).isoformat(),
     }
 
-  def get_storage_limit_violations(self) -> List[Dict[str, Any]]:
+  def get_storage_limit_violations(self) -> list[dict[str, Any]]:
     """Get all graphs that are exceeding their storage limits."""
-    from ...models.iam.graph_usage import GraphUsage, UsageEventType
     from sqlalchemy import func
+
+    from ...models.iam.graph_usage import GraphUsage, UsageEventType
 
     # Get latest storage usage for each graph
     latest_usage_subquery = (
@@ -1071,9 +1074,9 @@ class CreditService:
     output_tokens: int,
     model: str,
     operation_description: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    user_id: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    metadata: dict[str, Any] | None = None,
+    user_id: str | None = None,
+  ) -> dict[str, Any]:
     """
     Consume credits based on actual AI token usage.
 
@@ -1160,8 +1163,8 @@ class CreditService:
     self,
     graph_id: str,
     storage_gb: Decimal,
-    metadata: Optional[Dict[str, Any]] = None,
-  ) -> Dict[str, Any]:
+    metadata: dict[str, Any] | None = None,
+  ) -> dict[str, Any]:
     """
     Consume credits for daily storage overage.
 
@@ -1224,7 +1227,7 @@ class CreditService:
     # Storage charges are always applied, even if it results in negative balance
     old_balance = credits.current_balance
     credits.current_balance -= overage_cost
-    credits.updated_at = datetime.now(timezone.utc)
+    credits.updated_at = datetime.now(UTC)
 
     # Record transaction
     transaction_metadata = {

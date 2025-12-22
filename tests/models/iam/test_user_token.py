@@ -1,8 +1,9 @@
 """Tests for UserToken model."""
 
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
+
 import pytest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock
 from sqlalchemy.exc import SQLAlchemyError
 
 from robosystems.models.iam import UserToken
@@ -39,7 +40,7 @@ class TestUserTokenModel:
     if db_token.expires_at.tzinfo is None:
       assert db_token.expires_at > datetime.utcnow()
     else:
-      assert db_token.expires_at > datetime.now(timezone.utc)
+      assert db_token.expires_at > datetime.now(UTC)
 
   def test_create_password_reset_token(self, db_session):
     """Test creating a password reset token."""
@@ -64,7 +65,7 @@ class TestUserTokenModel:
     if db_token.expires_at.tzinfo is None:
       expected_expiry = datetime.utcnow() + timedelta(hours=1)
     else:
-      expected_expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+      expected_expiry = datetime.now(UTC) + timedelta(hours=1)
     # Allow 1 minute tolerance for test execution time
     assert abs((db_token.expires_at - expected_expiry).total_seconds()) < 60
 
@@ -152,7 +153,7 @@ class TestUserTokenModel:
     if db_token.expires_at.tzinfo is None:
       db_token.expires_at = datetime.utcnow() - timedelta(hours=1)
     else:
-      db_token.expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+      db_token.expires_at = datetime.now(UTC) - timedelta(hours=1)
     db_session.commit()
 
     # Try to verify expired token

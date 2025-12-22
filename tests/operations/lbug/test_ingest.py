@@ -4,19 +4,19 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from robosystems.operations.lbug.ingest import (
-  _get_cached_schema_adapter,
-  ingest_from_s3,
-  ingest_from_local_files,
-  _schema_adapter_cache,
   _categorize_files_schema_driven,
-  _parse_filename_schema_driven,
+  _get_cached_schema_adapter,
   _ingest_node_schema_driven,
   _ingest_relationship_schema_driven,
-  _is_valid_identifier,
-  _sanitize_parameter_name,
-  _is_global_relationship_schema_driven,
   _is_global_entity_schema_driven,
+  _is_global_relationship_schema_driven,
+  _is_valid_identifier,
   _map_arrow_to_lbug_type,
+  _parse_filename_schema_driven,
+  _sanitize_parameter_name,
+  _schema_adapter_cache,
+  ingest_from_local_files,
+  ingest_from_s3,
 )
 
 

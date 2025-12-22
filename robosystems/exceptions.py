@@ -6,8 +6,8 @@ and debugging throughout the application. Each exception type provides specific 
 about the nature of the error and can include additional metadata for debugging.
 """
 
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 
 class RoboSystemsError(Exception):
@@ -24,16 +24,16 @@ class RoboSystemsError(Exception):
   def __init__(
     self,
     message: str,
-    error_code: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None,
+    error_code: str | None = None,
+    details: dict[str, Any] | None = None,
   ):
     super().__init__(message)
     self.message = message
     self.error_code = error_code or self.__class__.__name__
     self.details = details or {}
-    self.timestamp = datetime.now(timezone.utc).isoformat()
+    self.timestamp = datetime.now(UTC).isoformat()
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert exception to dictionary for API responses."""
     return {
       "error": self.error_code,
@@ -57,7 +57,7 @@ class GraphError(RoboSystemsError):
 class GraphNotFoundError(GraphError):
   """Raised when a requested graph database does not exist."""
 
-  def __init__(self, graph_id: str, details: Optional[Dict[str, Any]] = None):
+  def __init__(self, graph_id: str, details: dict[str, Any] | None = None):
     super().__init__(
       f"Graph database '{graph_id}' not found",
       error_code="GRAPH_NOT_FOUND",
@@ -68,7 +68,7 @@ class GraphNotFoundError(GraphError):
 class GraphAllocationError(GraphError):
   """Raised when graph database allocation fails."""
 
-  def __init__(self, reason: str, graph_id: Optional[str] = None, **kwargs):
+  def __init__(self, reason: str, graph_id: str | None = None, **kwargs):
     details = {"reason": reason}
     if graph_id:
       details["graph_id"] = graph_id
@@ -83,7 +83,7 @@ class GraphAllocationError(GraphError):
 class GraphSchemaError(GraphError):
   """Raised when there are schema-related issues."""
 
-  def __init__(self, message: str, schema_type: Optional[str] = None, **kwargs):
+  def __init__(self, message: str, schema_type: str | None = None, **kwargs):
     details = {"schema_type": schema_type} if schema_type else {}
     details.update(kwargs)
     super().__init__(
@@ -99,8 +99,8 @@ class GraphQueryError(GraphError):
   def __init__(
     self,
     message: str,
-    query: Optional[str] = None,
-    graph_id: Optional[str] = None,
+    query: str | None = None,
+    graph_id: str | None = None,
     **kwargs,
   ):
     details = {}
@@ -200,8 +200,8 @@ class InsufficientPermissionsError(AuthError):
   def __init__(
     self,
     required_permission: str,
-    resource: Optional[str] = None,
-    user_id: Optional[str] = None,
+    resource: str | None = None,
+    user_id: str | None = None,
   ):
     details = {"required_permission": required_permission}
     if resource:
@@ -222,7 +222,7 @@ class RateLimitExceededError(AuthError):
     self,
     limit: int,
     window: str,
-    retry_after: Optional[int] = None,
+    retry_after: int | None = None,
   ):
     details = {"limit": limit, "window": window}
     if retry_after:
@@ -253,7 +253,7 @@ class InsufficientCreditsError(CreditError):
     required: int,
     available: int,
     operation: str,
-    graph_id: Optional[str] = None,
+    graph_id: str | None = None,
   ):
     details = {
       "required_credits": required,
@@ -272,7 +272,7 @@ class InsufficientCreditsError(CreditError):
 class CreditAllocationError(CreditError):
   """Raised when credit allocation fails."""
 
-  def __init__(self, reason: str, graph_id: Optional[str] = None):
+  def __init__(self, reason: str, graph_id: str | None = None):
     details = {"reason": reason}
     if graph_id:
       details["graph_id"] = graph_id
@@ -301,7 +301,7 @@ class DataIngestionError(DataProcessingError):
     self,
     source: str,
     reason: str,
-    file_path: Optional[str] = None,
+    file_path: str | None = None,
     **kwargs,
   ):
     details = {"source": source, "reason": reason}
@@ -321,8 +321,8 @@ class DataValidationError(DataProcessingError):
   def __init__(
     self,
     validation_type: str,
-    errors: List[str],
-    data_sample: Optional[Dict[str, Any]] = None,
+    errors: list[str],
+    data_sample: dict[str, Any] | None = None,
   ):
     details = {
       "validation_type": validation_type,
@@ -346,7 +346,7 @@ class PipelineError(DataProcessingError):
     pipeline_name: str,
     stage: str,
     reason: str,
-    pipeline_id: Optional[str] = None,
+    pipeline_id: str | None = None,
   ):
     details = {
       "pipeline_name": pipeline_name,
@@ -374,7 +374,7 @@ class ExternalServiceError(RoboSystemsError):
     self,
     service: str,
     message: str,
-    status_code: Optional[int] = None,
+    status_code: int | None = None,
     **kwargs,
   ):
     details = {"service": service}
@@ -391,7 +391,7 @@ class ExternalServiceError(RoboSystemsError):
 class SECAPIError(ExternalServiceError):
   """Raised when SEC EDGAR API operations fail."""
 
-  def __init__(self, message: str, cik: Optional[str] = None, **kwargs):
+  def __init__(self, message: str, cik: str | None = None, **kwargs):
     details = {}
     if cik:
       details["cik"] = cik
@@ -410,8 +410,8 @@ class S3Error(ExternalServiceError):
     self,
     operation: str,
     bucket: str,
-    key: Optional[str] = None,
-    reason: Optional[str] = None,
+    key: str | None = None,
+    reason: str | None = None,
   ):
     details = {"operation": operation, "bucket": bucket}
     if key:
@@ -465,8 +465,8 @@ class RetryableError(RoboSystemsError):
   def __init__(
     self,
     message: str,
-    retry_after: Optional[int] = None,
-    max_retries: Optional[int] = None,
+    retry_after: int | None = None,
+    max_retries: int | None = None,
     **kwargs,
   ):
     details = {}
@@ -485,7 +485,7 @@ class RetryableError(RoboSystemsError):
 class CircuitBreakerOpenError(RoboSystemsError):
   """Raised when a circuit breaker is open."""
 
-  def __init__(self, service: str, reset_time: Optional[datetime] = None):
+  def __init__(self, service: str, reset_time: datetime | None = None):
     details = {"service": service}
     if reset_time:
       details["reset_time"] = reset_time.isoformat()

@@ -7,8 +7,9 @@ introduced as part of the security hardening initiative.
 """
 
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,

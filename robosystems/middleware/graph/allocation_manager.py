@@ -13,26 +13,26 @@ Key features:
 """
 
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, cast
 from dataclasses import dataclass
-from enum import Enum
+from datetime import UTC, datetime
 from decimal import Decimal
+from enum import Enum
+from typing import Any, cast
 
 import boto3
 from botocore.exceptions import ClientError
 
+from robosystems.config import env
 from robosystems.logger import logger
-from robosystems.security import SecurityAuditLogger, SecurityEventType
 from robosystems.middleware.graph.types import (
-  GraphTypeRegistry,
+  GRAPH_ID_PATTERN,
   GraphTier,
+  GraphTypeRegistry,
   is_subgraph_id,
 )
-from .utils import MultiTenantUtils
-from .utils import parse_subgraph_id
-from robosystems.config import env
-from robosystems.middleware.graph.types import GRAPH_ID_PATTERN
+from robosystems.security import SecurityAuditLogger, SecurityEventType
+
+from .utils import MultiTenantUtils, parse_subgraph_id
 
 # Valid identifier patterns for security with length limits
 VALID_ENTITY_ID_PATTERN = re.compile(
@@ -120,8 +120,8 @@ class LadybugAllocationManager:
   def __init__(
     self,
     environment: str,
-    max_databases_per_instance: Optional[int] = None,
-    asg_name: Optional[str] = None,
+    max_databases_per_instance: int | None = None,
+    asg_name: str | None = None,
   ):
     self.environment = environment
     # Use environment variable if max_databases_per_instance not explicitly provided
@@ -195,7 +195,7 @@ class LadybugAllocationManager:
     dynamodb = cast(Any, get_dynamodb_resource())
 
     # Rate limiting for scale-up triggers (one per 5 minutes per tier)
-    self._scale_up_timestamps: Dict[str, datetime] = {}
+    self._scale_up_timestamps: dict[str, datetime] = {}
 
     # DynamoDB tables - use centralized configuration
     self.graph_table = dynamodb.Table(env.GRAPH_REGISTRY_TABLE)
@@ -223,7 +223,7 @@ class LadybugAllocationManager:
       f"Initialized LadybugAllocationManagerV2 for environment: {environment}"
     )
 
-  def get_tier_config(self, tier: GraphTier) -> Dict[str, Any]:
+  def get_tier_config(self, tier: GraphTier) -> dict[str, Any]:
     """
     Get configuration for a specific tier.
 
@@ -234,9 +234,9 @@ class LadybugAllocationManager:
   async def allocate_database(
     self,
     entity_id: str,
-    graph_id: Optional[str] = None,
-    graph_type: Optional[str] = None,
-    instance_tier: Optional[GraphTier] = None,
+    graph_id: str | None = None,
+    graph_type: str | None = None,
+    instance_tier: GraphTier | None = None,
   ) -> DatabaseLocation:
     """
     Allocate a new database for an entity.
@@ -328,7 +328,7 @@ class LadybugAllocationManager:
         instance_id=parent_location.instance_id,
         private_ip=parent_location.private_ip,
         availability_zone=parent_location.availability_zone,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         status=DatabaseStatus.ACTIVE,
         backend_type=parent_location.backend_type,
       )
@@ -371,7 +371,7 @@ class LadybugAllocationManager:
           )
 
       # Atomic allocation using DynamoDB conditional writes
-      now = datetime.now(timezone.utc)
+      now = datetime.now(UTC)
       max_retries = 3
       retry_count = 0
 
@@ -563,9 +563,9 @@ class LadybugAllocationManager:
       )
 
       logger.error(f"Failed to allocate database: {e}")
-      raise Exception(f"Database allocation failed: {str(e)}")
+      raise Exception(f"Database allocation failed: {e!s}")
 
-  async def find_database_location(self, graph_id: str) -> Optional[DatabaseLocation]:
+  async def find_database_location(self, graph_id: str) -> DatabaseLocation | None:
     """
     Find the location of an existing database.
 
@@ -613,7 +613,7 @@ class LadybugAllocationManager:
       self.graph_table.update_item(
         Key={"graph_id": graph_id},
         UpdateExpression="SET last_accessed = :time",
-        ExpressionAttributeValues={":time": datetime.now(timezone.utc).isoformat()},
+        ExpressionAttributeValues={":time": datetime.now(UTC).isoformat()},
       )
 
       return DatabaseLocation(
@@ -658,7 +658,7 @@ class LadybugAllocationManager:
         logger.info(f"Database {graph_id} already deleted")
         return True
 
-      deallocation_timestamp = datetime.now(timezone.utc).isoformat()
+      deallocation_timestamp = datetime.now(UTC).isoformat()
 
       # STEP 1: Atomically mark database as deleted (only if not already deleted)
       try:
@@ -748,7 +748,7 @@ class LadybugAllocationManager:
           "graph_id": graph_id,
           "instance_id": instance_id,
           "entity_id": item.get("entity_id"),
-          "deallocated_at": datetime.now(timezone.utc).isoformat(),
+          "deallocated_at": datetime.now(UTC).isoformat(),
         },
         risk_level="high",
       )
@@ -806,7 +806,7 @@ class LadybugAllocationManager:
       logger.error(f"Failed to deallocate database: {e}")
       return False
 
-  async def get_instance_databases(self, instance_id: str) -> List[str]:
+  async def get_instance_databases(self, instance_id: str) -> list[str]:
     """
     Get all databases on a specific instance with input validation.
 
@@ -844,7 +844,7 @@ class LadybugAllocationManager:
       logger.error(f"Error getting instance databases: {e}")
       return []
 
-  async def get_all_instances(self) -> List[Dict]:
+  async def get_all_instances(self) -> list[dict]:
     """
     Get all healthy instances with their metadata.
 
@@ -865,7 +865,7 @@ class LadybugAllocationManager:
       logger.error(f"Error getting all instances: {e}")
       return []
 
-  async def get_allocation_metrics(self) -> Dict:
+  async def get_allocation_metrics(self) -> dict:
     """Get current allocation metrics."""
     try:
       # Get all healthy instances
@@ -903,18 +903,18 @@ class LadybugAllocationManager:
         "overall_utilization_percent": overall_utilization,
         "instances": instance_metrics,
         "scale_up_needed": overall_utilization > 80,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
       }
 
     except ClientError as e:
       logger.error(f"Error getting allocation metrics: {e}")
-      return {"error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
+      return {"error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
   async def _find_best_instance(
     self,
-    instance_tier: Optional[GraphTier] = None,
-    exclude_instance: Optional[str] = None,
-  ) -> Optional[InstanceInfo]:
+    instance_tier: GraphTier | None = None,
+    exclude_instance: str | None = None,
+  ) -> InstanceInfo | None:
     """Find the instance with most available capacity for the specified tier."""
     try:
       # Default to standard tier if not specified
@@ -1006,14 +1006,14 @@ class LadybugAllocationManager:
       logger.error(f"Error finding best instance: {e}")
       return None
 
-  async def _trigger_scale_up(self, instance_tier: Optional[GraphTier] = None):
+  async def _trigger_scale_up(self, instance_tier: GraphTier | None = None):
     """Trigger auto scaling group to add an instance for the specified tier."""
     try:
       # Determine ASG name based on tier
       target_tier = instance_tier.value if instance_tier else "ladybug-standard"
 
       # Rate limiting: Check if we've recently triggered scale-up for this tier
-      now = datetime.now(timezone.utc)
+      now = datetime.now(UTC)
       last_trigger = self._scale_up_timestamps.get(target_tier)
       if last_trigger and (now - last_trigger).total_seconds() < 300:  # 5 minutes
         logger.info(
@@ -1067,7 +1067,7 @@ class LadybugAllocationManager:
     except ClientError as e:
       logger.error(f"Error triggering scale up: {e}")
 
-  def _get_stack_name_for_tier(self, tier: str) -> Optional[str]:
+  def _get_stack_name_for_tier(self, tier: str) -> str | None:
     """Get the CloudFormation stack name for a given tier and environment."""
     if self.environment == "prod":
       tier_map = {
@@ -1093,7 +1093,7 @@ class LadybugAllocationManager:
 
     return tier_map.get(tier)
 
-  async def _get_asg_name_for_instance(self, instance_id: str) -> Optional[str]:
+  async def _get_asg_name_for_instance(self, instance_id: str) -> str | None:
     """Get the ASG name for a specific instance from DynamoDB registry."""
     try:
       response = self.instance_table.get_item(Key={"instance_id": instance_id})
@@ -1169,7 +1169,7 @@ class LadybugAllocationManager:
       logger.error(f"Error publishing metrics: {e}")
 
   async def _publish_failure_metric(
-    self, failure_reason: str, entity_id: str, user_id: Optional[str] = None
+    self, failure_reason: str, entity_id: str, user_id: str | None = None
   ):
     """Publish allocation failure metric to CloudWatch (only in prod/staging)."""
     # Skip metrics in dev/test environments

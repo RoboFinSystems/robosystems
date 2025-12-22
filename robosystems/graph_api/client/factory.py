@@ -15,20 +15,22 @@ Routing targets:
 """
 
 import asyncio
-import httpx
-import time
 import json
 import random
 import threading
-from typing import Dict, Any
+import time
 from enum import Enum
+from typing import Any
+
+import httpx
 import redis.asyncio as redis
-from robosystems.graph_api.client import GraphClient
+
 from robosystems.config import env
+from robosystems.config.graph_tier import GraphTier
 from robosystems.config.valkey_registry import ValkeyDatabase
+from robosystems.graph_api.client import GraphClient
 from robosystems.logger import logger
 from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
-from robosystems.config.graph_tier import GraphTier
 from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.middleware.graph.utils import parse_subgraph_id
 
@@ -62,6 +64,7 @@ class RouteTarget(Enum):
 
   USER_GRAPH = "user_graph"
   SHARED_MASTER = "shared_master"
+  SHARED_REPLICA = "shared_replica"  # Read replicas via ALB
 
 
 class CircuitBreaker:
@@ -203,8 +206,8 @@ class GraphClientFactory:
   _read_timeout = env.GRAPH_READ_TIMEOUT
 
   # Connection pools for reuse (HTTP/2 enabled for efficiency)
-  _connection_pools: Dict[str, httpx.AsyncClient] = {}
-  _pool_stats: Dict[str, Dict[str, Any]] = {}  # Track pool statistics
+  _connection_pools: dict[str, httpx.AsyncClient] = {}
+  _pool_stats: dict[str, dict[str, Any]] = {}  # Track pool statistics
 
   # Redis connection pool for caching (thread-local to avoid event loop issues)
   _redis_pool: redis.ConnectionPool | None = None
@@ -242,7 +245,7 @@ class GraphClientFactory:
 
     try:
       # Create a new Redis client for each event loop to avoid "Event loop is closed" errors
-      # This is necessary because Celery tasks create new event loops
+      # This is necessary because background tasks may create new event loops
       # Use async factory method to handle SSL params correctly
       from robosystems.config.valkey_registry import create_async_redis_client
 
@@ -266,7 +269,7 @@ class GraphClientFactory:
         return client
       except AttributeError as ae:
         # Handle '_AsyncRESP2Parser' object has no attribute '_connected' error
-        # This happens when the event loop context changes (e.g., in Celery tasks)
+        # This happens when the event loop context changes (e.g., in background tasks)
         logger.debug(f"Redis connection state issue, skipping cache: {ae}")
         return None
 
@@ -430,21 +433,38 @@ class GraphClientFactory:
     """
     Determine the best target for read operations.
 
+    Priority:
+    1. Shared Replica ALB (if configured) - for horizontal read scaling
+    2. Shared Master (if SHARED_MASTER_READS_ENABLED) - fallback
+    3. Error if no read endpoint available
+
     Returns:
         Tuple of (target, api_url, api_key)
     """
+    # Try replica ALB first (if configured)
+    if env.SHARED_REPLICA_ALB_URL:
+      logger.info(f"Routing {graph_id} READ to shared replica ALB")
+      return (
+        RouteTarget.SHARED_REPLICA,
+        env.SHARED_REPLICA_ALB_URL,
+        env.GRAPH_API_KEY,
+      )
 
+    # Fallback to shared master
     if env.SHARED_MASTER_READS_ENABLED:
-      logger.info(f"Routing {graph_id} READ to shared master")
+      logger.info(
+        f"Routing {graph_id} READ to shared master (no replica ALB configured)"
+      )
       return (
         RouteTarget.SHARED_MASTER,
         await cls._get_shared_master_url(),
         env.GRAPH_API_KEY,
       )
-    else:
-      raise ServiceUnavailableError(
-        f"No read endpoint available for shared repository {graph_id}"
-      )
+
+    raise ServiceUnavailableError(
+      f"No read endpoint available for shared repository {graph_id}. "
+      "Configure SHARED_REPLICA_ALB_URL or enable SHARED_MASTER_READS_ENABLED."
+    )
 
   @classmethod
   @with_retry(max_attempts=3, base_delay=1.0)
@@ -767,7 +787,7 @@ class GraphClientFactory:
         "create_client_sync() cannot be called from an async context. "
         "Use 'await get_graph_client(graph_id)' or "
         "'await GraphClientFactory.create_client(graph_id)' instead. "
-        "If you're in a Celery task, wrap with asyncio.run()."
+        "For sync contexts, wrap with asyncio.run()."
       )
     except RuntimeError as e:
       if "no running event loop" in str(e).lower():
@@ -780,7 +800,7 @@ class GraphClientFactory:
         raise
 
   @classmethod
-  def get_pool_statistics(cls) -> Dict[str, Any]:
+  def get_pool_statistics(cls) -> dict[str, Any]:
     """
     Get connection pool statistics for monitoring.
 

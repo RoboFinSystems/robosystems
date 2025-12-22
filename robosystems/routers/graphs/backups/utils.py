@@ -5,9 +5,8 @@ Shared utilities for backup operations.
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphUser
+from robosystems.models.iam import GraphUser, User
 from robosystems.operations.lbug.backup_manager import create_backup_manager
-
 
 # Lazy initialization of backup manager to avoid S3 connection during import
 _backup_manager = None

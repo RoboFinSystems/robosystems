@@ -1,7 +1,8 @@
 """Shared connection models for all providers."""
 
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator, ValidationInfo
+
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 # Provider types
 ProviderType = Literal["sec", "quickbooks", "plaid"]

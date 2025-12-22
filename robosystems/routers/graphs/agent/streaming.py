@@ -7,28 +7,28 @@ Provides real-time progress updates for medium-duration agent operations
 
 import asyncio
 import json
-from typing import Any, Dict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
 from sse_starlette.sse import EventSourceResponse
 
+from robosystems.logger import logger
+from robosystems.models.iam import User
 from robosystems.operations.agents.base import AgentMode
 from robosystems.operations.agents.registry import AgentRegistry
-from robosystems.models.iam import User
-from robosystems.logger import logger
 
 
 async def stream_agent_execution(
   agent_type: str,
   graph_id: str,
-  request_data: Dict[str, Any],
+  request_data: dict[str, Any],
   current_user: User,
   db_session: Any,
 ) -> EventSourceResponse:
   """
   Stream agent execution with SSE progress updates.
 
-  This function runs the agent on the API (not Celery) but provides
+  This function runs the agent on the API and provides
   real-time progress updates via SSE for operations expected to take 5-30s.
 
   Args:
@@ -52,7 +52,7 @@ async def stream_agent_execution(
           {
             "agent_type": agent_type,
             "graph_id": graph_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
           }
         ),
       }
@@ -105,7 +105,7 @@ async def stream_agent_execution(
             "stage": stage,
             "percentage": percentage,
             "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
           }
         )
 
@@ -137,31 +137,31 @@ async def stream_agent_execution(
               "confidence_score": response.confidence_score,
               "execution_time": response.execution_time,
               "tools_called": response.tools_called,
-              "timestamp": datetime.now(timezone.utc).isoformat(),
+              "timestamp": datetime.now(UTC).isoformat(),
             }
           ),
         }
 
       except Exception as e:
-        logger.error(f"Agent execution error: {str(e)}", exc_info=True)
+        logger.error(f"Agent execution error: {e!s}", exc_info=True)
         yield {
           "event": "error",
           "data": json.dumps(
             {
               "error": str(e),
               "error_type": type(e).__name__,
-              "timestamp": datetime.now(timezone.utc).isoformat(),
+              "timestamp": datetime.now(UTC).isoformat(),
             }
           ),
         }
 
     except Exception as e:
-      logger.error(f"SSE stream error: {str(e)}", exc_info=True)
+      logger.error(f"SSE stream error: {e!s}", exc_info=True)
       yield {
         "event": "error",
         "data": json.dumps(
           {
-            "error": f"Stream error: {str(e)}",
+            "error": f"Stream error: {e!s}",
             "error_type": type(e).__name__,
           }
         ),

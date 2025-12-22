@@ -25,33 +25,35 @@ Use Cases:
 - Recovery from partial ingestion failures
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
+import uuid
+from datetime import UTC
+
+from fastapi import (
+  APIRouter,
+  BackgroundTasks,
+  Body,
+  Depends,
+  HTTPException,
+  Path,
+  status,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import Graph, GraphTable, GraphSchema, User
-from robosystems.models.api.common import ErrorResponse
+from robosystems.database import get_db_session
+from robosystems.logger import api_logger, logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.types import (
   GRAPH_OR_SUBGRAPH_ID_PATTERN,
-  GraphTypeRegistry,
   SHARED_REPO_WRITE_ERROR_MESSAGE,
+  GraphTypeRegistry,
 )
-from robosystems.database import get_db_session
-from robosystems.graph_api.client.factory import get_graph_client
-from robosystems.logger import logger, api_logger
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
 from robosystems.middleware.robustness import CircuitBreakerManager
-from robosystems.middleware.otel.metrics import (
-  endpoint_metrics_decorator,
-  get_endpoint_metrics,
-)
-from robosystems.config import env
-from robosystems.config.valkey_registry import (
-  ValkeyDatabase,
-  create_async_redis_client,
-)
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.iam import Graph, User
 
 router = APIRouter(
   tags=["Materialize"],
@@ -84,18 +86,22 @@ class MaterializeRequest(BaseModel):
 
 
 class MaterializeResponse(BaseModel):
-  status: str = Field(..., description="Materialization status")
+  """Response for queued materialization operation."""
+
+  status: str = Field(default="queued", description="Operation status")
   graph_id: str = Field(..., description="Graph database identifier")
-  was_stale: bool = Field(
-    ..., description="Whether graph was stale before materialization"
-  )
-  stale_reason: str | None = Field(None, description="Reason graph was stale")
-  tables_materialized: list[str] = Field(
-    ..., description="List of tables successfully materialized"
-  )
-  total_rows: int = Field(..., description="Total rows materialized across all tables")
-  execution_time_ms: float = Field(..., description="Total materialization time")
+  operation_id: str = Field(..., description="SSE operation ID for progress tracking")
   message: str = Field(..., description="Human-readable status message")
+
+  class Config:
+    json_schema_extra = {
+      "example": {
+        "status": "queued",
+        "graph_id": "kg_abc123",
+        "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+        "message": "Materialization queued. Monitor via SSE stream.",
+      }
+    }
 
 
 class MaterializeStatusResponse(BaseModel):
@@ -195,7 +201,7 @@ async def get_materialization_status(
 
   Shows staleness, last materialization time, and whether rebuild is recommended.
   """
-  from datetime import datetime, timezone
+  from datetime import datetime
 
   repository = await get_universal_repository(graph_id, "read")
   if not repository:
@@ -225,7 +231,7 @@ async def get_materialization_status(
       from dateutil import parser as date_parser
 
       last_mat_dt = date_parser.isoparse(last_materialized_at)
-      delta = datetime.now(timezone.utc) - last_mat_dt
+      delta = datetime.now(UTC) - last_mat_dt
       hours_since_materialization = delta.total_seconds() / 3600
     except Exception:
       pass
@@ -365,6 +371,7 @@ Materialization is included - no credit consumption""",
   "/v1/graphs/{graph_id}/materialize", business_event_type="graph_materialized"
 )
 async def materialize_graph(
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -378,17 +385,15 @@ async def materialize_graph(
   """
   Materialize complete graph from DuckDB staging tables.
 
+  Submits materialization job to Dagster for execution with SSE progress tracking.
+  Returns immediately with operation_id for monitoring.
+
   Rebuilds entire graph from current DuckDB state, treating graph database as a
   materialized view of the mutable DuckDB data lake.
   """
-  import time
-  from datetime import datetime, timezone
-
-  start_time_dt = datetime.now(timezone.utc)
-  start_time = time.time()
-
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
 
+  # Check for shared repository access
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     logger.warning(
       f"User {current_user.id} attempted materialization on shared repository {graph_id}"
@@ -398,458 +403,67 @@ async def materialize_graph(
       detail=SHARED_REPO_WRITE_ERROR_MESSAGE,
     )
 
-  redis_client = create_async_redis_client(ValkeyDatabase.DISTRIBUTED_LOCKS)
-  lock_key = f"materialization_lock:{graph_id}"
-  lock_ttl = env.INGESTION_LOCK_TTL
-  lock_acquired = False
-  lock_token = f"{current_user.id}:{start_time_dt.isoformat()}"
-
-  try:
-    lock_acquired = await redis_client.set(
-      lock_key,
-      lock_token,
-      nx=True,
-      ex=lock_ttl,
-    )
-
-    if not lock_acquired:
-      lock_info = await redis_client.get(lock_key)
-      lock_timestamp = "unknown"
-      if lock_info and ":" in lock_info:
-        try:
-          lock_timestamp = lock_info.split(":", 1)[1]
-        except (IndexError, ValueError):
-          lock_timestamp = "unknown"
-
-      api_logger.warning(
-        "Materialization already in progress",
-        extra={
-          "component": "materialize_api",
-          "action": "materialization_blocked",
-          "user_id": str(current_user.id),
-          "graph_id": graph_id,
-          "lock_holder": lock_info,
-          "lock_timestamp": lock_timestamp,
-        },
-      )
-
-      raise HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail=f"Another materialization is already in progress for graph {graph_id}. "
-        f"Lock acquired at: {lock_timestamp}. "
-        f"Please wait for it to complete before starting a new one. "
-        f"The lock will automatically expire after {lock_ttl} seconds if the materialization fails.",
-      )
-
-    api_logger.info(
-      "Materialization lock acquired",
-      extra={
-        "component": "materialize_api",
-        "action": "lock_acquired",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "lock_ttl": lock_ttl,
-      },
-    )
-
-    logger.info(
-      f"Graph materialization requested for {graph_id} "
-      f"(force={request.force}, rebuild={request.rebuild}, ignore_errors={request.ignore_errors})"
-    )
-
-    # Verify graph exists
-    repository = await get_universal_repository(graph_id, "write")
-    if not repository:
-      raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Graph {graph_id} not found",
-      )
-
-    graph = Graph.get_by_id(graph_id, db)
-    if not graph:
-      raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=f"Graph {graph_id} not found in database",
-      )
-
-    # Check staleness
-    was_stale = graph.graph_stale or False
-    stale_reason = graph.graph_stale_reason
-
-    if not was_stale and not request.force and not request.rebuild:
-      tables_with_data = GraphTable.get_all_for_graph(graph_id, db)
-      tables_with_rows = [t for t in tables_with_data if (t.row_count or 0) > 0]
-      if tables_with_rows:
-        was_stale = True
-        stale_reason = "new_data_uploaded"
-        logger.info(
-          f"Graph {graph_id} has {len(tables_with_rows)} tables with data that may not be materialized yet"
-        )
-
-    if not was_stale and not request.force and not request.rebuild:
-      logger.info(
-        f"Graph {graph_id} is not stale and force=false, rebuild=false - skipping materialization"
-      )
-      return MaterializeResponse(
-        status="skipped",
-        graph_id=graph_id,
-        was_stale=False,
-        stale_reason=None,
-        tables_materialized=[],
-        total_rows=0,
-        execution_time_ms=0,
-        message="Graph is fresh - no materialization needed. Use force=true to rebuild anyway.",
-      )
-
-    api_logger.info(
-      "Materialization started",
-      extra={
-        "component": "materialize_api",
-        "action": "materialization_started",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "was_stale": was_stale,
-        "stale_reason": stale_reason,
-        "force": request.force,
-        "rebuild": request.rebuild,
-        "ignore_errors": request.ignore_errors,
-      },
-    )
-
-    logger.info(
-      f"Starting full graph materialization for {graph_id} "
-      f"(was_stale={was_stale}, reason={stale_reason}, rebuild={request.rebuild})"
-    )
-
-    # Get Graph API client
-    client = await get_graph_client(graph_id=graph_id, operation_type="write")
-
-    # Handle rebuild if requested
-    if request.rebuild:
-      logger.info(
-        f"Rebuild requested for {graph_id} - regenerating entire graph database from DuckDB"
-      )
-
-      api_logger.info(
-        "Database rebuild initiated",
-        extra={
-          "component": "materialize_api",
-          "action": "rebuild_started",
-          "user_id": str(current_user.id),
-          "graph_id": graph_id,
-        },
-      )
-
-      graph_metadata = {**graph.graph_metadata} if graph.graph_metadata else {}
-      graph_metadata["status"] = "rebuilding"
-      graph_metadata["rebuild_started_at"] = time.time()
-      graph.graph_metadata = graph_metadata
-      db.commit()
-
-      try:
-        logger.info(f"Deleting graph database for {graph_id}")
-        await client.delete_database(graph_id)
-
-        schema = GraphSchema.get_active_schema(graph_id, db)
-        if not schema:
-          raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No schema found for graph {graph_id}",
-          )
-
-        schema_type_for_rebuild = "custom" if schema.schema_ddl else "entity"
-        logger.info(
-          f"Recreating graph database with schema type: {schema_type_for_rebuild} (original: {schema.schema_type})"
-        )
-        await client.create_database(
-          graph_id=graph_id,
-          schema_type=schema_type_for_rebuild,
-          custom_schema_ddl=schema.schema_ddl,
-        )
-
-        api_logger.info(
-          "Database rebuild completed",
-          extra={
-            "component": "materialize_api",
-            "action": "rebuild_completed",
-            "user_id": str(current_user.id),
-            "graph_id": graph_id,
-            "schema_type": schema.schema_type,
-          },
-        )
-
-        logger.info(f"Graph database recreated successfully for {graph_id}")
-
-      except Exception as e:
-        graph_metadata["status"] = "rebuild_failed"
-        graph_metadata["rebuild_failed_at"] = time.time()
-        graph_metadata["rebuild_error"] = str(e)
-        graph.graph_metadata = graph_metadata
-        db.commit()
-
-        api_logger.error(
-          "Database rebuild failed",
-          extra={
-            "component": "materialize_api",
-            "action": "rebuild_failed",
-            "user_id": str(current_user.id),
-            "graph_id": graph_id,
-            "error_type": type(e).__name__,
-            "error_message": str(e),
-          },
-        )
-
-        logger.error(f"Failed to rebuild graph {graph_id}: {e}")
-        raise HTTPException(
-          status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-          detail=f"Failed to rebuild graph database: {str(e)}",
-        )
-
-    # Get all tables for this graph
-    all_tables = GraphTable.get_all_for_graph(graph_id, db)
-
-    if not all_tables:
-      logger.warning(f"No tables found for graph {graph_id}")
-      return MaterializeResponse(
-        status="success",
-        graph_id=graph_id,
-        was_stale=was_stale,
-        stale_reason=stale_reason,
-        tables_materialized=[],
-        total_rows=0,
-        execution_time_ms=(time.time() - start_time) * 1000,
-        message="No tables to materialize",
-      )
-
-    # Sort tables: nodes before relationships
-    # Relationship tables are typically all uppercase (e.g., ENTITY_HAS_FACT)
-    # Node tables are typically PascalCase (e.g., Entity, Fact)
-    table_names = [t.table_name for t in all_tables]
-    node_tables = [t for t in table_names if not t.isupper()]
-    rel_tables = [t for t in table_names if t.isupper()]
-    ordered_tables = node_tables + rel_tables
-
-    logger.info(
-      f"Discovered {len(ordered_tables)} tables to materialize: "
-      f"Node tables ({len(node_tables)}): {node_tables}, "
-      f"Relationship tables ({len(rel_tables)}): {rel_tables}"
-    )
-
-    api_logger.info(
-      "Processing tables for materialization",
-      extra={
-        "component": "materialize_api",
-        "action": "tables_processing",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "total_tables": len(ordered_tables),
-        "node_tables": len(node_tables),
-        "relationship_tables": len(rel_tables),
-      },
-    )
-
-    # Materialize each table
-    tables_materialized = []
-    total_rows = 0
-
-    for table_name in ordered_tables:
-      try:
-        logger.info(f"Materializing table {table_name} from DuckDB to graph")
-
-        result = await client.materialize_table(
-          graph_id=graph_id,
-          table_name=table_name,
-          ignore_errors=request.ignore_errors,
-          file_ids=None,
-        )
-
-        rows_ingested = result.get("rows_ingested", 0)
-        total_rows += rows_ingested
-        tables_materialized.append(table_name)
-
-        logger.info(f"Materialized {table_name}: {rows_ingested:,} rows")
-
-      except Exception as e:
-        logger.error(f"Failed to materialize table {table_name}: {e}")
-        if not request.ignore_errors:
-          raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Materialization failed on table {table_name}: {str(e)}",
-          )
-
-    # Mark graph as fresh
-    graph.mark_fresh(session=db)
-    logger.info(f"Graph {graph_id} marked as fresh after successful materialization")
-
-    # Update graph metadata if rebuild was performed
-    if request.rebuild:
-      graph_metadata = {**graph.graph_metadata} if graph.graph_metadata else {}
-      graph_metadata["status"] = "available"
-      graph_metadata["rebuild_completed_at"] = time.time()
-      if "rebuild_started_at" in graph_metadata:
-        rebuild_duration = (
-          graph_metadata["rebuild_completed_at"] - graph_metadata["rebuild_started_at"]
-        )
-        graph_metadata["last_rebuild_duration_seconds"] = rebuild_duration
-      graph.graph_metadata = graph_metadata
-      db.commit()
-      logger.info(f"Graph {graph_id} marked as available after rebuild")
-
-    execution_time_ms = (time.time() - start_time) * 1000
-
-    logger.info(
-      f"Graph materialization complete: {len(tables_materialized)} tables, "
-      f"{total_rows:,} rows in {execution_time_ms:.2f}ms"
-    )
-
-    circuit_breaker.record_success(graph_id, "graph_materialization")
-
-    metrics_instance = get_endpoint_metrics()
-    metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/materialize",
-      method="POST",
-      event_type="graph_materialized_success",
-      event_data={
-        "graph_id": graph_id,
-        "total_tables": len(ordered_tables),
-        "tables_materialized": len(tables_materialized),
-        "total_rows": total_rows,
-        "execution_time_ms": execution_time_ms,
-        "was_stale": was_stale,
-        "rebuild": request.rebuild,
-      },
-      user_id=current_user.id,
-    )
-
-    api_logger.info(
-      "Materialization completed",
-      extra={
-        "component": "materialize_api",
-        "action": "materialization_completed",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "duration_ms": execution_time_ms,
-        "total_tables": len(ordered_tables),
-        "tables_materialized": len(tables_materialized),
-        "total_rows": total_rows,
-        "was_stale": was_stale,
-        "rebuild": request.rebuild,
-        "success": True,
-      },
-    )
-
-    return MaterializeResponse(
-      status="success",
-      graph_id=graph_id,
-      was_stale=was_stale,
-      stale_reason=stale_reason,
-      tables_materialized=tables_materialized,
-      total_rows=total_rows,
-      execution_time_ms=execution_time_ms,
-      message=f"Graph materialized successfully from {len(tables_materialized)} tables",
-    )
-
-  except HTTPException:
-    circuit_breaker.record_failure(graph_id, "graph_materialization")
-    raise
-
-  except Exception as e:
-    circuit_breaker.record_failure(graph_id, "graph_materialization")
-
-    execution_time = (datetime.now(timezone.utc) - start_time_dt).total_seconds() * 1000
-
-    metrics_instance = get_endpoint_metrics()
-    metrics_instance.record_business_event(
-      endpoint="/v1/graphs/{graph_id}/materialize",
-      method="POST",
-      event_type="graph_materialization_failed",
-      event_data={
-        "graph_id": graph_id,
-        "error_type": type(e).__name__,
-        "error_message": str(e),
-        "execution_time_ms": execution_time,
-      },
-      user_id=current_user.id,
-    )
-
-    api_logger.error(
-      "Materialization failed",
-      extra={
-        "component": "materialize_api",
-        "action": "materialization_failed",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "duration_ms": execution_time,
-        "error_type": type(e).__name__,
-        "error_message": str(e),
-      },
-    )
-
-    logger.error(
-      f"Failed to materialize graph {graph_id}: {e}",
-      extra={
-        "component": "materialize_api",
-        "action": "materialization_failed",
-        "user_id": str(current_user.id),
-        "graph_id": graph_id,
-        "error_type": type(e).__name__,
-      },
-    )
-
+  # Verify graph exists
+  graph = Graph.get_by_id(graph_id, db)
+  if not graph:
     raise HTTPException(
-      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to materialize graph: {str(e)}",
+      status_code=status.HTTP_404_NOT_FOUND,
+      detail=f"Graph {graph_id} not found",
     )
 
-  finally:
-    if lock_acquired:
-      try:
-        lua_script = """
-        if redis.call("get", KEYS[1]) == ARGV[1] then
-            return redis.call("del", KEYS[1])
-        else
-            return 0
-        end
-        """
-        released = await redis_client.eval(lua_script, 1, lock_key, lock_token)
+  # Create SSE operation for progress tracking
+  from robosystems.middleware.sse import (
+    build_graph_job_config,
+    run_and_monitor_dagster_job,
+  )
+  from robosystems.middleware.sse.event_storage import get_event_storage
 
-        if released:
-          api_logger.info(
-            "Materialization lock released",
-            extra={
-              "component": "materialize_api",
-              "action": "lock_released",
-              "user_id": str(current_user.id),
-              "graph_id": graph_id,
-              "duration_ms": (
-                datetime.now(timezone.utc) - start_time_dt
-              ).total_seconds()
-              * 1000,
-            },
-          )
-        else:
-          logger.warning(
-            f"Lock for graph {graph_id} was already released or owned by another process",
-            extra={
-              "component": "materialize_api",
-              "action": "lock_already_released",
-              "user_id": str(current_user.id),
-              "graph_id": graph_id,
-            },
-          )
-      except Exception as lock_error:
-        logger.error(
-          f"Failed to release materialization lock for graph {graph_id}: {lock_error}",
-          extra={
-            "component": "materialize_api",
-            "action": "lock_release_failed",
-            "user_id": str(current_user.id),
-            "graph_id": graph_id,
-            "error_type": type(lock_error).__name__,
-          },
-        )
+  operation_id = str(uuid.uuid4())
+  event_storage = get_event_storage()
+  await event_storage.create_operation(
+    operation_id=operation_id,
+    operation_type="graph_materialization",
+    user_id=current_user.id,
+    graph_id=graph_id,
+  )
 
-    try:
-      await redis_client.close()
-    except Exception as close_error:
-      logger.warning(f"Failed to close Redis client: {close_error}")
+  api_logger.info(
+    "Materialization job queued",
+    extra={
+      "component": "materialize_api",
+      "action": "job_queued",
+      "user_id": str(current_user.id),
+      "graph_id": graph_id,
+      "operation_id": operation_id,
+      "force": request.force,
+      "rebuild": request.rebuild,
+      "ignore_errors": request.ignore_errors,
+    },
+  )
+
+  # Build Dagster job config
+  run_config = build_graph_job_config(
+    "materialize_graph_job",
+    graph_id=graph_id,
+    user_id=str(current_user.id),
+    force=request.force,
+    rebuild=request.rebuild,
+    ignore_errors=request.ignore_errors,
+    operation_id=operation_id,
+  )
+
+  # Submit job to Dagster with SSE monitoring in background
+  background_tasks.add_task(
+    run_and_monitor_dagster_job,
+    job_name="materialize_graph_job",
+    operation_id=operation_id,
+    run_config=run_config,
+  )
+
+  return MaterializeResponse(
+    status="queued",
+    graph_id=graph_id,
+    operation_id=operation_id,
+    message="Materialization queued. Monitor progress via SSE stream at "
+    f"/v1/operations/{operation_id}/stream",
+  )

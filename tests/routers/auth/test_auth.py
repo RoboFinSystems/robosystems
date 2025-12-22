@@ -6,9 +6,11 @@ including registration, login, and error scenarios.
 """
 
 import os
-from fastapi.testclient import TestClient
 from unittest.mock import patch
+
 import bcrypt
+from fastapi.testclient import TestClient
+
 from robosystems.models.iam import User
 
 
@@ -404,9 +406,7 @@ class TestAuthSecurity:
     assert len(user.password_hash) > 50  # bcrypt hashes are long
 
     # Verify password can be checked
-    assert bcrypt.checkpw(
-      "MyS3cr3tP@ssw0rd!123".encode("utf-8"), user.password_hash.encode("utf-8")
-    )
+    assert bcrypt.checkpw(b"MyS3cr3tP@ssw0rd!123", user.password_hash.encode("utf-8"))
 
   @patch.object(
     __import__("robosystems.config", fromlist=["env"]).env,

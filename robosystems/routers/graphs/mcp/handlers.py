@@ -5,27 +5,29 @@ This module provides the core MCPHandler class and related utilities
 for executing MCP tools with proper lifecycle management.
 """
 
-import json
 import asyncio
-from typing import Any, Dict, List, Optional
+import json
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.logger import logger
-
-# Import timeout utilities
-from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
+from robosystems.middleware.graph.utils import MultiTenantUtils
 
 # Import Graph MCP components
 from robosystems.middleware.mcp import (
-  create_graph_mcp_client,
-  GraphMCPTools as AdapterGraphMCPTools,
-  GraphQueryTimeoutError,
-  GraphQueryComplexityError,
   GraphAPIError,
+  GraphQueryComplexityError,
+  GraphQueryTimeoutError,
+  create_graph_mcp_client,
 )
+from robosystems.middleware.mcp import (
+  GraphMCPTools as AdapterGraphMCPTools,
+)
+
+# Import timeout utilities
+from robosystems.middleware.robustness.timeout_coordinator import TimeoutCoordinator
 
 # MCP package is no longer used - always use adapter
 MCP_AVAILABLE = False
@@ -87,12 +89,12 @@ class MCPHandler:
 
     # Initialize client asynchronously with lock to prevent race conditions
     self.graph_client = None
-    self.mcp_tools: Optional[AdapterGraphMCPTools] = None
+    self.mcp_tools: AdapterGraphMCPTools | None = None
     self.database = None
     self._init_lock = asyncio.Lock()
     self._init_task = asyncio.create_task(self._init_async(repository_url))
 
-  async def _init_async(self, repository_url: Optional[str]):
+  async def _init_async(self, repository_url: str | None):
     """Initialize the MCP client asynchronously."""
     try:
       self.graph_client = await create_graph_mcp_client(
@@ -122,7 +124,7 @@ class MCPHandler:
     """Get the backend type being used."""
     return "ladybug"
 
-  async def get_tools(self) -> List[Dict[str, Any]]:
+  async def get_tools(self) -> list[dict[str, Any]]:
     """Get available MCP tools with backend-specific customizations."""
     self._ensure_not_closed()
     await self._ensure_initialized()
@@ -179,7 +181,7 @@ class MCPHandler:
 
     return tools
 
-  async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute an MCP tool call using Graph API backend with comprehensive timeout protection."""
     self._ensure_not_closed()
     await self._ensure_initialized()
@@ -213,7 +215,7 @@ class MCPHandler:
         )
         return {"type": "text", "text": json.dumps(results, indent=2)}
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
       error_msg = f"Tool '{name}' timed out after {tool_timeout} seconds"
       if name == "read-graph-cypher":
         error_msg += ". Consider simplifying your query or adding LIMIT clauses."
@@ -223,7 +225,7 @@ class MCPHandler:
     except (GraphQueryTimeoutError, GraphQueryComplexityError) as e:
       # Handle specific timeout/complexity errors with user-friendly messages
       logger.warning(f"Query constraint violation for {name}: {e}")
-      return {"type": "text", "text": f"Query Error: {str(e)}"}
+      return {"type": "text", "text": f"Query Error: {e!s}"}
 
     except GraphAPIError as e:
       # Handle Graph API errors with their enhanced messages
@@ -233,10 +235,10 @@ class MCPHandler:
 
     except Exception as e:
       logger.error(f"Tool call failed for {name} on {self.backend_type}: {e}")
-      return {"type": "text", "text": f"Error: {str(e)}"}
+      return {"type": "text", "text": f"Error: {e!s}"}
 
   async def execute_query_streaming(
-    self, query: str, parameters: Dict[str, Any] = None, chunk_size: int = 1000
+    self, query: str, parameters: dict[str, Any] | None = None, chunk_size: int = 1000
   ):
     """Execute a query with streaming support."""
     self._ensure_not_closed()
@@ -289,7 +291,7 @@ class MCPHandler:
         logger.error(f"Error in streaming fallback: {e}", exc_info=True)
         yield {"data": [], "columns": [], "error": str(e)}
 
-  async def _get_graph_info(self) -> Dict[str, Any]:
+  async def _get_graph_info(self) -> dict[str, Any]:
     """Get basic graph statistics."""
     try:
       if self.graph_client:
@@ -323,9 +325,9 @@ class MCPHandler:
       return {"type": "text", "text": json.dumps(info, indent=2)}
     except Exception as e:
       logger.error(f"Error getting graph info: {e}")
-      return {"type": "text", "text": f"Error getting graph info: {str(e)}"}
+      return {"type": "text", "text": f"Error getting graph info: {e!s}"}
 
-  async def _get_graph_description(self) -> Dict[str, Any]:
+  async def _get_graph_description(self) -> dict[str, Any]:
     """Get natural language description of graph structure."""
     try:
       # Use describe-graph-structure if available
@@ -366,7 +368,7 @@ class MCPHandler:
       return {"type": "text", "text": description}
     except Exception as e:
       logger.error(f"Error getting graph description: {e}")
-      return {"type": "text", "text": f"Error getting graph description: {str(e)}"}
+      return {"type": "text", "text": f"Error getting graph description: {e!s}"}
 
   async def close(self):
     """Close the MCP tools and database connections."""
@@ -416,9 +418,9 @@ class MCPHandler:
 async def execute_mcp_query_with_timeout(
   mcp_tools: Any,
   tool_name: str,
-  arguments: Dict[str, Any],
+  arguments: dict[str, Any],
   timeout: float = 60.0,
-  tool_timeout: Optional[float] = None,
+  tool_timeout: float | None = None,
 ) -> Any:
   """
   Execute MCP tool with comprehensive timeout protection.
@@ -446,7 +448,7 @@ async def execute_mcp_query_with_timeout(
       mcp_tools.call_tool(tool_name, arguments, return_raw=True), timeout=timeout
     )
     return result
-  except asyncio.TimeoutError:
+  except TimeoutError:
     logger.error(f"MCP tool {tool_name} timed out after {timeout} seconds")
     raise
   except Exception as e:

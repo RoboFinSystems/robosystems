@@ -45,44 +45,53 @@ Performance:
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path as PathLib
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Body, status
+from fastapi import (
+  APIRouter,
+  BackgroundTasks,
+  Body,
+  Depends,
+  HTTPException,
+  Path,
+  status,
+)
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphTable, GraphFile, Graph
-from robosystems.models.api.graphs.tables import (
-  FileUploadRequest,
-  FileUploadResponse,
-  FileStatusUpdate,
-  FileUploadStatus,
-)
-from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph import get_universal_repository
-from robosystems.database import get_db_session
-from robosystems.adapters.s3 import S3Client
 from robosystems.config import env
+from robosystems.config.billing.storage import StorageBillingConfig
 from robosystems.config.constants import (
-  MAX_FILE_SIZE_MB,
-  PRESIGNED_URL_EXPIRY_SECONDS,
-  FALLBACK_BYTES_PER_ROW_PARQUET,
   FALLBACK_BYTES_PER_ROW_CSV,
   FALLBACK_BYTES_PER_ROW_JSON,
+  FALLBACK_BYTES_PER_ROW_PARQUET,
+  MAX_FILE_SIZE_MB,
+  PRESIGNED_URL_EXPIRY_SECONDS,
+  SMALL_FILE_STAGING_THRESHOLD_MB,
 )
-from robosystems.config.billing.storage import StorageBillingConfig
-from robosystems.logger import logger, api_logger
+from robosystems.database import get_db_session
+from robosystems.logger import api_logger, logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_universal_repository
 from robosystems.middleware.graph.types import (
-  GraphTypeRegistry,
-  SHARED_REPO_WRITE_ERROR_MESSAGE,
   GRAPH_OR_SUBGRAPH_ID_PATTERN,
+  SHARED_REPO_WRITE_ERROR_MESSAGE,
+  GraphTypeRegistry,
 )
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.tables import (
+  FileStatusUpdate,
+  FileUploadRequest,
+  FileUploadResponse,
+  FileUploadStatus,
+)
+from robosystems.models.iam import Graph, GraphFile, GraphTable, User
+from robosystems.operations.aws.s3 import S3Client
 
 router = APIRouter()
 
@@ -167,7 +176,7 @@ async def create_file_upload(
   Creates secure upload URL for direct S3 upload. Requires table_name in request body
   to associate file with table.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   table_name = getattr(request, "table_name", None)
   if not table_name:
@@ -297,7 +306,7 @@ async def create_file_upload(
       session=db,
     )
 
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -344,7 +353,7 @@ async def create_file_upload(
     raise
 
   except Exception as e:
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -379,7 +388,7 @@ async def create_file_upload(
     logger.error(f"Failed to generate upload URL for {request.file_name}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to generate upload URL: {str(e)}",
+      detail=f"Failed to generate upload URL: {e!s}",
     )
 
 
@@ -400,7 +409,7 @@ immediate DuckDB staging and optional graph ingestion.
 **What Happens (status='uploaded'):**
 1. File validated in S3
 2. Row count calculated
-3. DuckDB staging triggered immediately (Celery task)
+3. DuckDB staging triggered immediately (background task)
 4. If ingest_to_graph=true, graph ingestion queued
 5. File queryable in DuckDB within seconds
 
@@ -423,7 +432,8 @@ immediate DuckDB staging and optional graph ingestion.
             "file_id": "f123",
             "status": "uploaded",
             "message": "File uploaded and queued for DuckDB staging",
-            "duckdb_task_id": "celery_task_123",
+            "operation_id": "op_abc123",
+            "monitor_url": "/v1/operations/op_abc123/stream",
           }
         }
       },
@@ -446,6 +456,7 @@ immediate DuckDB staging and optional graph ingestion.
   "/v1/graphs/{graph_id}/files/{file_id}", business_event_type="file_updated"
 )
 async def update_file(
+  background_tasks: BackgroundTasks,
   graph_id: str = Path(
     ...,
     description="Graph database identifier",
@@ -460,7 +471,7 @@ async def update_file(
   """
   Update file status and trigger processing.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   if graph_id.lower() in GraphTypeRegistry.SHARED_REPOSITORIES:
     logger.warning(
@@ -520,7 +531,7 @@ async def update_file(
       db.commit()
       db.refresh(graph_file)
 
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+      execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
@@ -548,7 +559,7 @@ async def update_file(
       db.commit()
       db.refresh(graph_file)
 
-      execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+      execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
       metrics_instance = get_endpoint_metrics()
       metrics_instance.record_business_event(
@@ -624,8 +635,9 @@ async def update_file(
 
       file_format = str(graph_file.file_format)
       if file_format == "parquet":
-        import pyarrow.parquet as pq
         from io import BytesIO
+
+        import pyarrow.parquet as pq
 
         parquet_file = pq.read_table(BytesIO(file_content))
         actual_row_count = parquet_file.num_rows
@@ -692,39 +704,152 @@ async def update_file(
       )
 
       if new_file_count > 0:
-        from robosystems.tasks.table_operations.duckdb_staging import (
-          stage_file_in_duckdb,
-        )
+        # Size-based routing: small files use direct staging, large files use Dagster
+        small_file_threshold_bytes = SMALL_FILE_STAGING_THRESHOLD_MB * 1024 * 1024
 
-        operation_id = str(uuid.uuid4())
+        if actual_file_size < small_file_threshold_bytes:
+          # Fast path: Direct staging for small files
+          from robosystems.operations.lbug.direct_staging import stage_file_directly
 
-        try:
-          task = stage_file_in_duckdb.apply_async(  # type: ignore[attr-defined]
-            args=[file_id, graph_id, table.id, operation_id, request.ingest_to_graph],
-            task_id=operation_id,
+          logger.info(
+            f"Small file detected ({actual_file_size / (1024 * 1024):.2f} MB < {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
+            f"Using direct staging for file {file_id}"
           )
 
-          graph_file.celery_task_id = task.id
-
-          db.commit()
-          db.refresh(graph_file)
-
-          if request.ingest_to_graph:
-            logger.info(
-              f"v2 Incremental Ingestion: Async DuckDB staging task {task.id} started for file {file_id} "
-              f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
-            )
-          else:
-            logger.info(
-              f"v2 Incremental Ingestion: Async DuckDB staging task {task.id} started for file {file_id}. "
-              f"Monitor at /v1/operations/{operation_id}/stream"
+          try:
+            staging_result = await stage_file_directly(
+              db=db,
+              file_id=file_id,
+              graph_id=graph_id,
+              table_id=str(table.id),
+              s3_key=graph_file.s3_key,
+              file_size_bytes=actual_file_size,
+              row_count=actual_row_count,
             )
 
-        except Exception as e:
-          logger.warning(
-            f"Failed to start async DuckDB staging task for file {file_id}: {e}. "
-            f"File will be staged on next upload or query attempt."
+            if staging_result.get("status") == "success":
+              graph_file.duckdb_status = "staged"
+              db.commit()
+              db.refresh(graph_file)
+
+              logger.info(
+                f"Direct staging completed for file {file_id} in {staging_result.get('duration_ms', 0):.2f}ms"
+              )
+
+              # If ingest_to_graph requested, trigger Dagster job for that (still async)
+              if request.ingest_to_graph:
+                from robosystems.middleware.sse import (
+                  build_graph_job_config,
+                  run_and_monitor_dagster_job,
+                )
+                from robosystems.middleware.sse.event_storage import get_event_storage
+
+                operation_id = str(uuid.uuid4())
+                event_storage = get_event_storage()
+                await event_storage.create_operation(
+                  operation_type="graph_ingestion",
+                  user_id=str(current_user.id),
+                  graph_id=graph_id,
+                  operation_id=operation_id,
+                )
+
+                run_config = build_graph_job_config(
+                  "materialize_file_job",
+                  file_id=file_id,
+                  graph_id=graph_id,
+                  table_name=table.table_name,
+                )
+
+                background_tasks.add_task(
+                  run_and_monitor_dagster_job,
+                  job_name="materialize_file_job",
+                  operation_id=operation_id,
+                  run_config=run_config,
+                )
+
+                graph_file.operation_id = operation_id
+                db.commit()
+                db.refresh(graph_file)
+
+                logger.info(
+                  f"Direct staging done, graph ingestion job started for file {file_id}. "
+                  f"Monitor at /v1/operations/{operation_id}/stream"
+                )
+            else:
+              logger.warning(
+                f"Direct staging failed for file {file_id}: {staging_result.get('message')}. "
+                f"File will be staged on next upload or query attempt."
+              )
+
+          except Exception as e:
+            logger.warning(
+              f"Direct staging error for file {file_id}: {e}. "
+              f"File will be staged on next upload or query attempt."
+            )
+
+        else:
+          # Standard path: Dagster job for large files
+          from robosystems.middleware.sse import (
+            build_graph_job_config,
+            run_and_monitor_dagster_job,
           )
+          from robosystems.middleware.sse.event_storage import get_event_storage
+
+          operation_id = str(uuid.uuid4())
+
+          logger.info(
+            f"Large file detected ({actual_file_size / (1024 * 1024):.2f} MB >= {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
+            f"Using Dagster job for file {file_id}"
+          )
+
+          try:
+            # Register operation with SSE
+            event_storage = get_event_storage()
+            await event_storage.create_operation(
+              operation_type="duckdb_staging",
+              user_id=str(current_user.id),
+              graph_id=graph_id,
+              operation_id=operation_id,
+            )
+
+            # Build Dagster job config
+            run_config = build_graph_job_config(
+              "stage_file_job",
+              file_id=file_id,
+              graph_id=graph_id,
+              table_id=str(table.id),
+              ingest_to_graph=request.ingest_to_graph,
+            )
+
+            # Run Dagster job with SSE monitoring in background
+            background_tasks.add_task(
+              run_and_monitor_dagster_job,
+              job_name="stage_file_job",
+              operation_id=operation_id,
+              run_config=run_config,
+            )
+
+            graph_file.operation_id = operation_id
+
+            db.commit()
+            db.refresh(graph_file)
+
+            if request.ingest_to_graph:
+              logger.info(
+                f"v2 Incremental Ingestion: Dagster staging job started for file {file_id} "
+                f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
+              )
+            else:
+              logger.info(
+                f"v2 Incremental Ingestion: Dagster staging job started for file {file_id}. "
+                f"Monitor at /v1/operations/{operation_id}/stream"
+              )
+
+          except Exception as e:
+            logger.warning(
+              f"Failed to start Dagster staging job for file {file_id}: {e}. "
+              f"File will be staged on next upload or query attempt."
+            )
 
     logger.info(
       f"File {file_id} marked as uploaded: {graph_file.file_size_bytes or 0:,} bytes, {graph_file.row_count or 0:,} rows"
@@ -739,9 +864,28 @@ async def update_file(
       "message": "File validated and ready for ingestion",
     }
 
-    if graph_file.celery_task_id:
-      response["duckdb_staging_task_id"] = graph_file.celery_task_id
-      response["monitor_url"] = f"/v1/operations/{graph_file.celery_task_id}/stream"
+    # Check if file was staged directly (small file fast path)
+    if graph_file.duckdb_status == "staged":
+      response["duckdb_status"] = "staged"
+      response["staged"] = True
+
+      if graph_file.operation_id:
+        # Operation_id means graph ingestion is in progress
+        response["operation_id"] = graph_file.operation_id
+        response["monitor_url"] = f"/v1/operations/{graph_file.operation_id}/stream"
+        response["message"] = (
+          f"File staged to DuckDB. Graph ingestion in progress. "
+          f"Monitor at {response['monitor_url']}"
+        )
+        response["ingest_to_graph"] = True
+      else:
+        response["message"] = "File validated and staged to DuckDB (fast path)"
+        response["ingest_to_graph"] = False
+    elif graph_file.operation_id:
+      # Large file: Dagster job handling staging (and possibly ingestion)
+      response["operation_id"] = graph_file.operation_id
+      response["monitor_url"] = f"/v1/operations/{graph_file.operation_id}/stream"
+      response["staged"] = False
 
       if request.ingest_to_graph:
         response["message"] = (
@@ -761,7 +905,7 @@ async def update_file(
     raise
 
   except Exception as e:
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     api_logger.error(
       "File status update failed",
@@ -779,5 +923,5 @@ async def update_file(
     logger.error(f"Failed to update file {file_id}: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to update file: {str(e)}",
+      detail=f"Failed to update file: {e!s}",
     )

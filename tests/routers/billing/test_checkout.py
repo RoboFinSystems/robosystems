@@ -1,15 +1,17 @@
 """Tests for billing checkout endpoints."""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi import HTTPException
+
+from robosystems.models.api.billing.checkout import CreateCheckoutRequest
+from robosystems.models.billing import BillingCustomer, BillingSubscription
+from robosystems.models.iam import User
 from robosystems.routers.billing.checkout import (
   create_checkout_session,
   get_checkout_status,
 )
-from robosystems.models.billing import BillingCustomer, BillingSubscription
-from robosystems.models.iam import User
-from robosystems.models.api.billing.checkout import CreateCheckoutRequest
 
 
 class TestCreateCheckoutSession:

@@ -4,17 +4,18 @@ Tests for secure error handling utilities.
 Comprehensive test coverage for error handling, classification, and security features.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 from fastapi import HTTPException, status
 
 from robosystems.security.error_handling import (
-  ErrorType,
   ERROR_RESPONSES,
-  raise_secure_error,
+  ErrorType,
   classify_exception,
   handle_exception_securely,
   is_safe_to_expose,
+  raise_secure_error,
   sanitize_error_detail,
 )
 

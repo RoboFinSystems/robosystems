@@ -1,47 +1,60 @@
 """RoboSystems Service API main application module."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 
 from fastapi import FastAPI, Request, status
-from robosystems.config import env
-from robosystems.config.openapi_tags import MAIN_API_TAGS
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from robosystems.config import env
+from robosystems.config.logging import get_logger
+from robosystems.config.openapi_tags import MAIN_API_TAGS
+from robosystems.config.validation import EnvValidator
+from robosystems.middleware.database import DatabaseSessionMiddleware
+from robosystems.middleware.logging import (
+  SecurityLoggingMiddleware,
+  StructuredLoggingMiddleware,
+)
+from robosystems.middleware.otel import setup_telemetry
+from robosystems.middleware.rate_limits import RateLimitHeaderMiddleware
 from robosystems.routers import (
-  router as v1_router,
-  graph_router,
-  user_router_v1,
-  orgs_router_v1,
   auth_router_v1,
-  status_router_v1,
+  billing_router_v1,
+  graph_router,
   offering_router_v1,
   operations_router_v1,
-  billing_router_v1,
+  orgs_router_v1,
+  status_router_v1,
+  user_router_v1,
+)
+from robosystems.routers import (
+  router as v1_router,
+)
+from robosystems.routers.admin import (
+  credits_router as admin_credits_router,
+)
+from robosystems.routers.admin import (
+  graphs_router as admin_graphs_router,
+)
+from robosystems.routers.admin import (
+  invoice_router as admin_invoice_router,
+)
+from robosystems.routers.admin import (
+  orgs_router as admin_orgs_router,
 )
 from robosystems.routers.admin import (
   subscription_router as admin_subscription_router,
-  invoice_router as admin_invoice_router,
-  webhooks_router as admin_webhooks_router,
-  credits_router as admin_credits_router,
-  graphs_router as admin_graphs_router,
+)
+from robosystems.routers.admin import (
   users_router as admin_users_router,
-  orgs_router as admin_orgs_router,
 )
-from robosystems.middleware.otel import setup_telemetry
-from robosystems.middleware.database import DatabaseSessionMiddleware
-from robosystems.middleware.rate_limits import RateLimitHeaderMiddleware
-from robosystems.middleware.logging import (
-  StructuredLoggingMiddleware,
-  SecurityLoggingMiddleware,
+from robosystems.routers.admin import (
+  webhooks_router as admin_webhooks_router,
 )
-
-from robosystems.config.validation import EnvValidator
-from robosystems.config.logging import get_logger
 
 logger = get_logger("robosystems.api")
 
@@ -76,7 +89,7 @@ def create_app() -> FastAPI:
   setup_telemetry(app)
 
   # Initialize app state
-  app.state.current_time = datetime.now(timezone.utc)
+  app.state.current_time = datetime.now(UTC)
 
   # Mount static files (always mount since we're serving directly from container)
   if Path("static").exists():

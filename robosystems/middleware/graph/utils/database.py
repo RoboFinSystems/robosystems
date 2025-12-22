@@ -5,17 +5,17 @@ Functions for database name resolution, creation, and management.
 """
 
 import asyncio
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 import redis
 from httpx import HTTPStatusError
 
 from robosystems.config import env
-from robosystems.logger import logger
 from robosystems.graph_api.client import GraphClient
 from robosystems.graph_api.client.exceptions import GraphClientError
+from robosystems.logger import logger
 
-from .validation import validate_graph_id, is_shared_repository
+from .validation import is_shared_repository, validate_graph_id
 
 
 def is_multitenant_mode() -> bool:
@@ -30,7 +30,7 @@ def is_multitenant_mode() -> bool:
   return True
 
 
-def get_database_name(graph_id: Optional[str] = None) -> str:
+def get_database_name(graph_id: str | None = None) -> str:
   """
   Get the appropriate database name based on multi-tenant mode and graph_id.
 
@@ -86,7 +86,7 @@ def get_repository_database_name(repository_id: str) -> str:
   return GraphTypeRegistry.SHARED_REPOSITORIES[repository_id]
 
 
-def list_shared_repositories() -> List[str]:
+def list_shared_repositories() -> list[str]:
   """
   Get a list of all known shared repository identifiers.
 
@@ -99,7 +99,7 @@ def list_shared_repositories() -> List[str]:
 
 
 def log_database_operation(
-  operation: str, database_name: str, graph_id: Optional[str] = None
+  operation: str, database_name: str, graph_id: str | None = None
 ) -> None:
   """
   Log database operations for observability.
@@ -145,9 +145,9 @@ async def ensure_database_with_schema(
   graph_url: str,
   db_name: str,
   schema_name: str,
-  api_key: Optional[str] = None,
+  api_key: str | None = None,
   lock_timeout: int = 300,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Ensure database exists with proper schema.
 
@@ -253,9 +253,9 @@ def ensure_database_with_schema_sync(
   graph_url: str,
   db_name: str,
   schema_name: str,
-  api_key: Optional[str] = None,
-  redis_client: Optional[redis.Redis] = None,
-) -> Dict[str, Any]:
+  api_key: str | None = None,
+  redis_client: redis.Redis | None = None,
+) -> dict[str, Any]:
   """
   Synchronous wrapper for ensure_database_with_schema.
 

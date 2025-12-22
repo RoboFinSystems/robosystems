@@ -2,13 +2,14 @@
 Tests for the graph query endpoint.
 """
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
 from robosystems.middleware.auth.jwt import create_jwt_token
-from robosystems.models.iam import User, GraphUser
+from robosystems.models.iam import GraphUser, User
 
 
 @pytest.fixture
@@ -185,10 +186,9 @@ async def test_cypher_query_timeout(
   headers = {"Authorization": f"Bearer {token}"}
 
   # Configure mock to simulate timeout
-  import asyncio
 
   mock_repo = AsyncMock()
-  mock_repo.execute_query = AsyncMock(side_effect=asyncio.TimeoutError("Query timeout"))
+  mock_repo.execute_query = AsyncMock(side_effect=TimeoutError("Query timeout"))
   # Also mock the streaming method to avoid async iteration issues
   mock_repo.execute_query_streaming = None  # Disable streaming to force fallback
   mock_get_repo.return_value = mock_repo
@@ -235,7 +235,8 @@ async def test_cypher_query_timeout(
 async def test_cypher_query_unauthorized(test_user_graph: GraphUser, test_db):
   """Test unauthorized access."""
   # Create a client without auth overrides
-  from httpx import AsyncClient, ASGITransport
+  from httpx import ASGITransport, AsyncClient
+
   from main import app
   from robosystems.database import get_db_session
 
@@ -319,16 +320,17 @@ async def test_cypher_query_sec_repository_with_access(
   ]
 
   # Grant SEC read access
+  import uuid
+  from decimal import Decimal
+
+  from robosystems.models.iam import Graph
   from robosystems.models.iam.user_repository import (
-    UserRepository,
-    RepositoryType,
-    RepositoryPlan,
     RepositoryAccessLevel,
+    RepositoryPlan,
+    RepositoryType,
+    UserRepository,
   )
   from robosystems.models.iam.user_repository_credits import UserRepositoryCredits
-  from robosystems.models.iam import Graph
-  from decimal import Decimal
-  import uuid
 
   # Create SEC repository (required for foreign key)
   Graph.find_or_create_repository(

@@ -5,7 +5,6 @@ Provides coordinated timeout management across multiple layers to prevent
 timeout conflicts and ensure proper error handling.
 """
 
-from typing import Dict, Union, Optional
 from dataclasses import dataclass
 
 from robosystems.logger import logger
@@ -27,7 +26,7 @@ class TimeoutCoordinator:
   def __init__(self):
     """Initialize timeout coordinator with default configurations."""
     # Default timeout configurations by tool type
-    self.timeout_configs: Dict[str, TimeoutConfiguration] = {
+    self.timeout_configs: dict[str, TimeoutConfiguration] = {
       "cypher_query": TimeoutConfiguration(
         endpoint_timeout=30.0,  # 30s API limit
         queue_timeout=28.0,  # 2s buffer for response
@@ -129,7 +128,7 @@ class TimeoutCoordinator:
 
     return hierarchy_valid
 
-  def get_timeout_summary(self, tool_name: str) -> Dict[str, Union[str, float, bool]]:
+  def get_timeout_summary(self, tool_name: str) -> dict[str, str | float | bool]:
     """Get timeout summary for monitoring/debugging."""
     config = self.get_timeout_config(tool_name)
 
@@ -143,7 +142,7 @@ class TimeoutCoordinator:
     }
 
   def calculate_timeout(
-    self, operation_type: str, complexity_factors: Optional[Dict] = None
+    self, operation_type: str, complexity_factors: dict | None = None
   ) -> float:
     """
     Calculate timeout based on operation type and complexity factors.

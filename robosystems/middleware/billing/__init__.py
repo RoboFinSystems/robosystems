@@ -5,7 +5,7 @@ from .enforcement import check_can_provision_graph, check_graph_subscription_act
 
 __all__ = [
   "CreditCache",
-  "credit_cache",
   "check_can_provision_graph",
   "check_graph_subscription_active",
+  "credit_cache",
 ]

@@ -4,11 +4,11 @@ import pytest
 
 from robosystems.graph_api.client.exceptions import (
   GraphAPIError,
-  GraphTransientError,
-  GraphTimeoutError,
   GraphClientError,
-  GraphSyntaxError,
   GraphServerError,
+  GraphSyntaxError,
+  GraphTimeoutError,
+  GraphTransientError,
 )
 
 

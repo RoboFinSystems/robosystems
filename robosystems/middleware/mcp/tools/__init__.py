@@ -6,45 +6,45 @@ together to create the full MCP tools interface.
 """
 
 from .base_tool import BaseTool
-from .example_queries_tool import ExampleQueriesTool
 from .cypher_tool import CypherTool
-from .schema_tool import SchemaTool
-from .properties_tool import PropertiesTool
-from .structure_tool import StructureTool
+from .data_tools import (
+  BuildFactGridTool,
+  IngestFileTool,
+  MapElementsTool,
+  MaterializeGraphTool,
+  QueryStagingTool,
+)
 from .elements_tool import ElementsTool
+from .example_queries_tool import ExampleQueriesTool
 from .facts_tool import FactsTool
+from .manager import GraphMCPTools
+from .properties_tool import PropertiesTool
+from .schema_tool import SchemaTool
+from .structure_tool import StructureTool
 from .workspace import (
   CreateWorkspaceTool,
   DeleteWorkspaceTool,
   ListWorkspacesTool,
   SwitchWorkspaceTool,
 )
-from .data_tools import (
-  BuildFactGridTool,
-  IngestFileTool,
-  MapElementsTool,
-  QueryStagingTool,
-  MaterializeGraphTool,
-)
-from .manager import GraphMCPTools
 
 __all__ = [
   "BaseTool",
-  "ExampleQueriesTool",
-  "CypherTool",
-  "SchemaTool",
-  "PropertiesTool",
-  "StructureTool",
-  "ElementsTool",
-  "FactsTool",
-  "CreateWorkspaceTool",
-  "DeleteWorkspaceTool",
-  "ListWorkspacesTool",
-  "SwitchWorkspaceTool",
   "BuildFactGridTool",
-  "IngestFileTool",
-  "MapElementsTool",
-  "QueryStagingTool",
-  "MaterializeGraphTool",
+  "CreateWorkspaceTool",
+  "CypherTool",
+  "DeleteWorkspaceTool",
+  "ElementsTool",
+  "ExampleQueriesTool",
+  "FactsTool",
   "GraphMCPTools",
+  "IngestFileTool",
+  "ListWorkspacesTool",
+  "MapElementsTool",
+  "MaterializeGraphTool",
+  "PropertiesTool",
+  "QueryStagingTool",
+  "SchemaTool",
+  "StructureTool",
+  "SwitchWorkspaceTool",
 ]

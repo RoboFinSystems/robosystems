@@ -1,19 +1,20 @@
 """SEC provider-specific operations."""
 
+from typing import Any
+
 import httpx
-from typing import Optional, Dict, Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from ...config import env
 from ...logger import logger
 from ...middleware.graph import get_graph_repository
-from ...operations.connection_service import ConnectionService
 from ...middleware.graph.utils import MultiTenantUtils
 from ...models.api.graphs.connections import SECConnectionConfig
-from ...config import env
+from ...operations.connection_service import ConnectionService
 
 
-async def validate_cik_with_sec_api(cik: str) -> Dict[str, Any]:
+async def validate_cik_with_sec_api(cik: str) -> dict[str, Any]:
   """
   Validate CIK with SEC EDGAR API and get entity information.
 
@@ -94,7 +95,7 @@ async def validate_cik_with_sec_api(cik: str) -> Dict[str, Any]:
     raise Exception(f"CIK validation failed: {e}")
 
 
-async def get_sec_filing_count(cik: str, graph_id: Optional[str] = None) -> int:
+async def get_sec_filing_count(cik: str, graph_id: str | None = None) -> int:
   """
   Get the count of SEC filings for a CIK.
 
@@ -214,7 +215,7 @@ async def create_sec_connection(
 
 
 async def sync_sec_connection(
-  connection: Dict[str, Any], sync_options: Optional[Dict[str, Any]], graph_id: str
+  connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
   """Trigger SEC filing sync."""
 
@@ -236,7 +237,7 @@ async def sync_sec_connection(
   )
 
 
-async def cleanup_sec_connection(connection: Dict[str, Any], graph_id: str) -> None:
+async def cleanup_sec_connection(connection: dict[str, Any], graph_id: str) -> None:
   """Clean up SEC-specific data when connection is deleted."""
   # Remove CIK from entity record
   repository = await get_graph_repository(graph_id, operation_type="write")

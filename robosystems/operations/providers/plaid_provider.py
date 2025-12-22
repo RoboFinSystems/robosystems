@@ -1,16 +1,15 @@
 """Plaid provider-specific operations."""
 
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from ...logger import logger
-from ...operations.connection_service import ConnectionService
-from ...tasks.data_sync.plaid import sync_plaid_data
-from ...celery import QUEUE_DEFAULT
-from ...models.api.graphs.connections import PlaidConnectionConfig
 from ...config import env
+from ...logger import logger
+from ...models.api.graphs.connections import PlaidConnectionConfig
+from ...operations.connection_service import ConnectionService
 
 
 class PlaidProvider:
@@ -24,10 +23,10 @@ class PlaidProvider:
   def _get_plaid_client(self):
     """Initialize Plaid client based on environment."""
     try:
-      from plaid.api import plaid_api
-      from plaid.configuration import Configuration
-      from plaid.api_client import ApiClient
       from plaid import Environment
+      from plaid.api import plaid_api
+      from plaid.api_client import ApiClient
+      from plaid.configuration import Configuration
 
       if self.environment == "sandbox":
         host = Environment.sandbox
@@ -50,7 +49,7 @@ class PlaidProvider:
       logger.warning("plaid-python not available, using mock client")
       return None
 
-  async def create_link_token(self, entity_id: str, user_id: str) -> Tuple[str, str]:
+  async def create_link_token(self, entity_id: str, user_id: str) -> tuple[str, str]:
     """
     Create a Plaid Link token.
 
@@ -65,11 +64,11 @@ class PlaidProvider:
 
     if plaid_client:
       try:
+        from plaid.model.country_code import CountryCode
         from plaid.model.link_token_create_request import LinkTokenCreateRequest
         from plaid.model.link_token_create_request_user import (
           LinkTokenCreateRequestUser,
         )
-        from plaid.model.country_code import CountryCode
         from plaid.model.products import Products
 
         link_request = LinkTokenCreateRequest(
@@ -88,12 +87,12 @@ class PlaidProvider:
 
     # Fallback to mock for development
     link_token = f"link-{self.environment}-{entity_id}-{user_id}"
-    expiration = datetime.now(timezone.utc).isoformat()
+    expiration = datetime.now(UTC).isoformat()
     return link_token, expiration
 
   async def exchange_public_token(
     self, public_token: str
-  ) -> Tuple[str, str, List[Dict[str, Any]]]:
+  ) -> tuple[str, str, list[dict[str, Any]]]:
     """
     Exchange public token for access token.
 
@@ -107,10 +106,10 @@ class PlaidProvider:
 
     if plaid_client:
       try:
+        from plaid.model.accounts_get_request import AccountsGetRequest
         from plaid.model.item_public_token_exchange_request import (
           ItemPublicTokenExchangeRequest,
         )
-        from plaid.model.accounts_get_request import AccountsGetRequest
 
         # Exchange public token
         exchange_request = ItemPublicTokenExchangeRequest(public_token=public_token)
@@ -209,11 +208,17 @@ class PlaidProvider:
 
   async def sync_connection(
     self,
-    connection: Dict[str, Any],
-    sync_options: Optional[Dict[str, Any]],
+    connection: dict[str, Any],
+    sync_options: dict[str, Any] | None,
     graph_id: str,
   ) -> str:
-    """Trigger Plaid sync."""
+    """Trigger Plaid sync.
+
+    TODO: Refactor to use Dagster pipeline.
+    The Plaid sync has been migrated to Dagster assets:
+    - See: robosystems/dagster/assets/plaid.py
+    - Assets: plaid_accounts, plaid_transactions, plaid_graph_data
+    """
     entity_id = connection["entity_id"]
     item_id = connection["metadata"].get("item_id")
 
@@ -223,14 +228,15 @@ class PlaidProvider:
         detail="Plaid connection not properly configured. Missing item_id.",
       )
 
-    # Queue Plaid sync task
-    task_result = sync_plaid_data.apply_async(  # type: ignore[attr-defined]
-      args=[entity_id, item_id], queue=QUEUE_DEFAULT, priority=10
+    # TODO: Trigger Dagster pipeline
+    # For now, return a placeholder - provider refactoring needed
+    logger.warning(
+      f"Plaid sync requested for entity {entity_id}, item {item_id} - "
+      "provider needs refactoring to use Dagster pipeline"
     )
+    return f"dagster-pending-{entity_id}"
 
-    return task_result.id
-
-  async def cleanup_connection(self, connection: Dict[str, Any], graph_id: str) -> None:
+  async def cleanup_connection(self, connection: dict[str, Any], graph_id: str) -> None:
     """Clean up Plaid connection."""
     # Try to remove item from Plaid if we have credentials
     if connection.get("credentials", {}).get("access_token"):

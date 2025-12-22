@@ -14,11 +14,9 @@ Performance comparison:
 """
 
 from uuid6 import uuid7
-from typing import Dict, Optional
-
 
 # Cache for deterministic ID generation
-_id_cache: Dict[str, str] = {}
+_id_cache: dict[str, str] = {}
 
 
 def generate_uuid7() -> str:
@@ -56,7 +54,7 @@ def generate_prefixed_uuid7(prefix: str) -> str:
   return f"{prefix}_{uuid7()}"
 
 
-def generate_deterministic_uuid7(content: str, namespace: Optional[str] = None) -> str:
+def generate_deterministic_uuid7(content: str, namespace: str | None = None) -> str:
   """
   Generate a deterministic UUID v7 based on content.
 
@@ -83,7 +81,7 @@ def generate_deterministic_uuid7(content: str, namespace: Optional[str] = None) 
   return new_id
 
 
-def parse_uuid7(uuid_str: str) -> Optional[str]:
+def parse_uuid7(uuid_str: str) -> str | None:
   """
   Parse and validate a UUID v7 string.
 
@@ -116,7 +114,7 @@ def parse_uuid7(uuid_str: str) -> Optional[str]:
   return None
 
 
-def get_timestamp_from_uuid7(uuid_str: str) -> Optional[int]:
+def get_timestamp_from_uuid7(uuid_str: str) -> int | None:
   """
   Extract the timestamp from a UUID v7 string.
 

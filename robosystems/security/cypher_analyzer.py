@@ -5,10 +5,9 @@ This module provides secure, AST-based analysis of Cypher queries to accurately
 detect write operations without the vulnerabilities of regex-based approaches.
 """
 
-import re
-from typing import Set
-from enum import Enum
 import logging
+import re
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +318,7 @@ class CypherSecurityAnalyzer:
 
     return cleaned
 
-  def _find_write_operations(self, query: str) -> Set[str]:
+  def _find_write_operations(self, query: str) -> set[str]:
     """
     Find write operation keywords in the cleaned query.
 
@@ -344,7 +343,7 @@ class CypherSecurityAnalyzer:
 
     return found_operations
 
-  def _find_read_operations(self, query: str) -> Set[str]:
+  def _find_read_operations(self, query: str) -> set[str]:
     """
     Find read operation keywords in the cleaned query.
 
@@ -368,7 +367,7 @@ class CypherSecurityAnalyzer:
 
     return found_operations
 
-  def _find_bulk_operations(self, query: str) -> Set[str]:
+  def _find_bulk_operations(self, query: str) -> set[str]:
     """
     Find bulk operation keywords in the cleaned query.
 
@@ -393,7 +392,7 @@ class CypherSecurityAnalyzer:
 
     return found_operations
 
-  def _find_admin_operations(self, query: str) -> Set[str]:
+  def _find_admin_operations(self, query: str) -> set[str]:
     """
     Find administrative operation keywords in the cleaned query.
 
@@ -426,7 +425,7 @@ class CypherSecurityAnalyzer:
 
     return found_operations
 
-  def _find_system_calls(self, query: str) -> Set[str]:
+  def _find_system_calls(self, query: str) -> set[str]:
     """
     Find system procedure calls in the cleaned query.
 
@@ -448,7 +447,7 @@ class CypherSecurityAnalyzer:
 
     return found_calls
 
-  def _find_schema_ddl(self, query: str) -> Set[str]:
+  def _find_schema_ddl(self, query: str) -> set[str]:
     """
     Find schema DDL keywords in the cleaned query.
 

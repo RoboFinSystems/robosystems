@@ -1,11 +1,12 @@
 """Comprehensive tests for LadybugDatabaseManager."""
 
-import pytest
-import tempfile
 import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from datetime import datetime
+
+import pytest
 
 from robosystems.graph_api.core.ladybug.manager import (
   LadybugDatabaseManager,
@@ -742,9 +743,9 @@ class TestLadybugDatabaseManagerIntegration:
 
   def test_concurrent_database_operations(self):
     """Test concurrent database creation and deletion with mocked LadybugDB."""
-    import time
     import concurrent.futures
-    from unittest.mock import patch, MagicMock
+    import time
+    from unittest.mock import MagicMock, patch
 
     # Mock LadybugDB to avoid segmentation faults while testing concurrency logic
     with (
@@ -781,8 +782,8 @@ class TestLadybugDatabaseManagerIntegration:
           results["created"].append(db_name)
           return f"Created {db_name}"
         except Exception as e:
-          results["errors"].append(f"Create {db_name}: {str(e)}")
-          return f"Error creating {db_name}: {str(e)}"
+          results["errors"].append(f"Create {db_name}: {e!s}")
+          return f"Error creating {db_name}: {e!s}"
 
       def delete_database(db_name):
         """Delete a database in a thread."""
@@ -793,8 +794,8 @@ class TestLadybugDatabaseManagerIntegration:
           results["deleted"].append(db_name)
           return f"Deleted {db_name}"
         except Exception as e:
-          results["errors"].append(f"Delete {db_name}: {str(e)}")
-          return f"Error deleting {db_name}: {str(e)}"
+          results["errors"].append(f"Delete {db_name}: {e!s}")
+          return f"Error deleting {db_name}: {e!s}"
 
       # Test 1: Concurrent creation
       db_names = [f"concurrent_db_{i}" for i in range(5)]

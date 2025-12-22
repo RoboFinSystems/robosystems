@@ -5,27 +5,28 @@ This module provides endpoints for monitoring all non-immediate operations
 through a unified SSE interface, replacing the fragmented task monitoring system.
 """
 
-from typing import Dict, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi import status as http_status
 from sse_starlette.sse import EventSourceResponse
 
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import (
   get_current_user,
   get_current_user_sse,
 )
-from robosystems.models.iam import User
-from robosystems.middleware.rate_limits import (
-  subscription_aware_rate_limit_dependency,
-  sse_connection_rate_limit_dependency,
-)
-from robosystems.middleware.sse.event_storage import get_event_storage, OperationStatus
-from robosystems.middleware.sse.streaming import create_sse_response_starlette
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.logger import logger
+from robosystems.middleware.rate_limits import (
+  sse_connection_rate_limit_dependency,
+  subscription_aware_rate_limit_dependency,
+)
+from robosystems.middleware.sse.event_storage import OperationStatus, get_event_storage
+from robosystems.middleware.sse.streaming import create_sse_response_starlette
+from robosystems.models.iam import User
 
 # Create router
 router = APIRouter()
@@ -287,7 +288,7 @@ async def get_operation_status(
   ),
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Get current status of an operation.
 
@@ -463,7 +464,7 @@ async def cancel_operation(
   ),
   current_user: User = Depends(get_current_user),
   _rate_limit: None = Depends(subscription_aware_rate_limit_dependency),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Cancel a pending or running operation.
 

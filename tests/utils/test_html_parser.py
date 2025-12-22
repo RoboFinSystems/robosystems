@@ -1,8 +1,9 @@
 """Tests for HTML parsing utilities."""
 
 import os
-import tempfile
 import shutil
+import tempfile
+
 import pytest
 
 from robosystems.utils.html_parser import (
@@ -378,7 +379,7 @@ class TestSaveStructuredContent:
     output_path, structured_text, _ = save_structured_content(html, url, self.temp_dir)
 
     # Read the file and verify content
-    with open(output_path, "r", encoding="utf-8") as f:
+    with open(output_path, encoding="utf-8") as f:
       file_content = f.read()
 
     assert file_content == structured_text
@@ -408,7 +409,7 @@ class TestSaveStructuredContent:
     assert "€£¥ñ" in structured_text
 
     # Verify file can be read back with unicode
-    with open(output_path, "r", encoding="utf-8") as f:
+    with open(output_path, encoding="utf-8") as f:
       file_content = f.read()
     assert "测试" in file_content
 
@@ -457,14 +458,14 @@ class TestSaveStructuredContent:
 
     # Write first version
     path1, _, _ = save_structured_content(html1, url, self.temp_dir)
-    with open(path1, "r") as f:
+    with open(path1) as f:
       content1 = f.read()
     assert "First version" in content1
 
     # Write second version to same location
     path2, _, _ = save_structured_content(html2, url, self.temp_dir)
     assert path1 == path2
-    with open(path2, "r") as f:
+    with open(path2) as f:
       content2 = f.read()
     assert "Second version" in content2
     assert "First version" not in content2

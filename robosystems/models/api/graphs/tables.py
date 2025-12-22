@@ -1,5 +1,6 @@
-from typing import List, Any, Optional
 from enum import Enum
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -32,13 +33,11 @@ class TableInfo(BaseModel):
   row_count: int = Field(..., description="Approximate row count")
   file_count: int = Field(0, description="Number of files")
   total_size_bytes: int = Field(0, description="Total size in bytes")
-  s3_location: Optional[str] = Field(
-    None, description="S3 location for external tables"
-  )
+  s3_location: str | None = Field(None, description="S3 location for external tables")
 
 
 class TableListResponse(BaseModel):
-  tables: List[TableInfo] = Field(..., description="List of tables")
+  tables: list[TableInfo] = Field(..., description="List of tables")
   total_count: int = Field(..., description="Total number of tables")
 
 
@@ -52,7 +51,7 @@ class TableQueryRequest(BaseModel):
       "SELECT * FROM Entity LIMIT 10",
     ],
   )
-  parameters: Optional[List[Any]] = Field(
+  parameters: list[Any] | None = Field(
     default=None,
     description="Query parameters for safe value substitution. ALWAYS use parameters instead of string concatenation.",
     examples=[
@@ -83,8 +82,8 @@ class TableQueryRequest(BaseModel):
 
 
 class TableQueryResponse(BaseModel):
-  columns: List[str] = Field(..., description="Column names")
-  rows: List[List[Any]] = Field(..., description="Query results")
+  columns: list[str] = Field(..., description="Column names")
+  rows: list[list[Any]] = Field(..., description="Query results")
   row_count: int = Field(..., description="Number of rows returned")
   execution_time_ms: float = Field(..., description="Query execution time")
 
@@ -131,7 +130,7 @@ class FileUploadRequest(BaseModel):
     description="File MIME type",
     examples=["application/x-parquet", "text/csv", "application/json"],
   )
-  table_name: Optional[str] = Field(
+  table_name: str | None = Field(
     default=None,
     description="Table name to associate file with (required for first-class /files endpoint)",
     examples=["Entity", "Fact", "PERSON_WORKS_FOR_COMPANY"],
@@ -212,7 +211,7 @@ class TableIngestResult(BaseModel):
   status: str = Field(..., description="Ingestion status (success/failed/skipped)")
   rows_ingested: int = Field(0, description="Number of rows ingested")
   execution_time_ms: float = Field(0, description="Ingestion time in milliseconds")
-  error: Optional[str] = Field(None, description="Error message if failed")
+  error: str | None = Field(None, description="Error message if failed")
 
 
 class BulkIngestResponse(BaseModel):
@@ -230,7 +229,7 @@ class BulkIngestResponse(BaseModel):
   total_execution_time_ms: float = Field(
     ..., description="Total execution time in milliseconds"
   )
-  results: List[TableIngestResult] = Field(
+  results: list[TableIngestResult] = Field(
     ..., description="Per-table ingestion results"
   )
 
@@ -240,31 +239,29 @@ class FileInfo(BaseModel):
   file_name: str = Field(..., description="Original file name")
   file_format: str = Field(..., description="File format (parquet, csv, etc.)")
   size_bytes: int = Field(..., description="File size in bytes")
-  row_count: Optional[int] = Field(None, description="Estimated row count")
+  row_count: int | None = Field(None, description="Estimated row count")
   upload_status: str = Field(..., description="Current upload status")
   upload_method: str = Field(..., description="Upload method used")
-  created_at: Optional[str] = Field(None, description="File creation timestamp")
-  uploaded_at: Optional[str] = Field(
-    None, description="File upload completion timestamp"
-  )
+  created_at: str | None = Field(None, description="File creation timestamp")
+  uploaded_at: str | None = Field(None, description="File upload completion timestamp")
   s3_key: str = Field(..., description="S3 object key")
 
 
 class ListTableFilesResponse(BaseModel):
   graph_id: str = Field(..., description="Graph database identifier")
-  table_name: Optional[str] = Field(
+  table_name: str | None = Field(
     None, description="Table name (null if listing all files in graph)"
   )
-  files: List[FileInfo] = Field(..., description="List of files in the table")
+  files: list[FileInfo] = Field(..., description="List of files in the table")
   total_files: int = Field(..., description="Total number of files")
   total_size_bytes: int = Field(..., description="Total size of all files in bytes")
 
 
 class FileLayerStatus(BaseModel):
   status: str = Field(..., description="Layer status")
-  timestamp: Optional[str] = Field(None, description="Status timestamp")
-  row_count: Optional[int] = Field(None, description="Row count (if available)")
-  size_bytes: Optional[int] = Field(None, description="Size in bytes (S3 layer only)")
+  timestamp: str | None = Field(None, description="Status timestamp")
+  row_count: int | None = Field(None, description="Row count (if available)")
+  size_bytes: int | None = Field(None, description="Size in bytes (S3 layer only)")
 
 
 class EnhancedFileStatusLayers(BaseModel):
@@ -281,19 +278,17 @@ class GetFileInfoResponse(BaseModel):
   file_id: str = Field(..., description="Unique file identifier")
   graph_id: str = Field(..., description="Graph database identifier")
   table_id: str = Field(..., description="Table identifier")
-  table_name: Optional[str] = Field(None, description="Table name")
+  table_name: str | None = Field(None, description="Table name")
   file_name: str = Field(..., description="Original file name")
   file_format: str = Field(..., description="File format (parquet, csv, etc.)")
   size_bytes: int = Field(..., description="File size in bytes")
-  row_count: Optional[int] = Field(None, description="Estimated row count")
+  row_count: int | None = Field(None, description="Estimated row count")
   upload_status: str = Field(..., description="Current upload status")
   upload_method: str = Field(..., description="Upload method used")
-  created_at: Optional[str] = Field(None, description="File creation timestamp")
-  uploaded_at: Optional[str] = Field(
-    None, description="File upload completion timestamp"
-  )
+  created_at: str | None = Field(None, description="File creation timestamp")
+  uploaded_at: str | None = Field(None, description="File upload completion timestamp")
   s3_key: str = Field(..., description="S3 object key")
-  layers: Optional[EnhancedFileStatusLayers] = Field(
+  layers: EnhancedFileStatusLayers | None = Field(
     default=None,
     description="Multi-layer pipeline status (S3 → DuckDB → Graph). Shows status, timestamps, and row counts for each layer independently.",
   )
@@ -307,7 +302,7 @@ class DeleteFileResponse(BaseModel):
   cascade_deleted: bool = Field(
     default=False, description="Whether cascade deletion was performed"
   )
-  tables_affected: Optional[List[str]] = Field(
+  tables_affected: list[str] | None = Field(
     None, description="Tables from which file data was deleted (if cascade=true)"
   )
   graph_marked_stale: bool = Field(

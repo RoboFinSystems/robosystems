@@ -1,19 +1,22 @@
-from typing import Dict, Any, List, Optional
 import json
+from typing import Any
+
 import boto3
-from neo4j import AsyncGraphDatabase, AsyncDriver
-from robosystems.logger import logger
+from neo4j import AsyncDriver, AsyncGraphDatabase
+
 from robosystems.config import env
-from .base import GraphBackend, DatabaseInfo, ClusterTopology, S3IngestionError
+from robosystems.logger import logger
+
+from .base import ClusterTopology, DatabaseInfo, GraphBackend, S3IngestionError
 
 
 class Neo4jBackend(GraphBackend):
   def __init__(self, enterprise: bool = False):
     self.enterprise = enterprise
     self.bolt_url = env.NEO4J_URI
-    self.driver: Optional[AsyncDriver] = None
-    self._cluster_topology: Optional[Dict] = None
-    self._password: Optional[str] = None
+    self.driver: AsyncDriver | None = None
+    self._cluster_topology: dict | None = None
+    self._password: str | None = None
     self._username = env.NEO4J_USERNAME
 
   async def _ensure_connected(self):
@@ -40,7 +43,7 @@ class Neo4jBackend(GraphBackend):
     )
     logger.info(f"Connected to Neo4j at {self.bolt_url} (enterprise={self.enterprise})")
 
-  def _get_database_name(self, graph_id: str, database: Optional[str] = None) -> str:
+  def _get_database_name(self, graph_id: str, database: str | None = None) -> str:
     if database:
       return database
     elif self.enterprise:
@@ -52,9 +55,9 @@ class Neo4jBackend(GraphBackend):
     self,
     graph_id: str,
     cypher: str,
-    parameters: Optional[Dict[str, Any]] = None,
-    database: Optional[str] = None,
-  ) -> List[Dict[str, Any]]:
+    parameters: dict[str, Any] | None = None,
+    database: str | None = None,
+  ) -> list[dict[str, Any]]:
     await self._ensure_connected()
 
     db_name = self._get_database_name(graph_id, database)
@@ -70,9 +73,9 @@ class Neo4jBackend(GraphBackend):
     self,
     graph_id: str,
     cypher: str,
-    parameters: Optional[Dict[str, Any]] = None,
-    database: Optional[str] = None,
-  ) -> List[Dict[str, Any]]:
+    parameters: dict[str, Any] | None = None,
+    database: str | None = None,
+  ) -> list[dict[str, Any]]:
     await self._ensure_connected()
 
     db_name = self._get_database_name(graph_id, database)
@@ -113,7 +116,7 @@ class Neo4jBackend(GraphBackend):
     logger.info(f"Deleted Neo4j database: {database_name}")
     return True
 
-  async def list_databases(self) -> List[str]:
+  async def list_databases(self) -> list[str]:
     await self._ensure_connected()
 
     if not self.enterprise:
@@ -218,14 +221,15 @@ class Neo4jBackend(GraphBackend):
     graph_id: str,
     table_name: str,
     s3_pattern: str,
-    s3_credentials: Optional[Dict[str, Any]] = None,
+    s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
-    database: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    database: str | None = None,
+  ) -> dict[str, Any]:
+    import io
     import time
+
     import boto3
     import pyarrow.parquet as pq
-    import io
     from botocore.exceptions import ClientError
 
     await self._ensure_connected()

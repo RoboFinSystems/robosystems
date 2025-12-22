@@ -1,12 +1,12 @@
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 from robosystems.middleware.graph import get_universal_repository
 from robosystems.models.api.views.save_view import (
+  FactDetail,
   SaveViewRequest,
   SaveViewResponse,
-  FactDetail,
   StructureDetail,
 )
 
@@ -18,7 +18,7 @@ def generate_report_id(entity_id: str, period_end: str, report_type: str) -> str
   return f"{entity_slug}-{type_slug}-{period_slug}"
 
 
-async def get_entity_info(graph_id: str) -> Dict[str, Any]:
+async def get_entity_info(graph_id: str) -> dict[str, Any]:
   query = """
     MATCH (e:Entity)
     WHERE e.is_parent = true
@@ -38,7 +38,7 @@ async def get_entity_info(graph_id: str) -> Dict[str, Any]:
   }
 
 
-async def query_view_facts(graph_id: str) -> List[Dict[str, Any]]:
+async def query_view_facts(graph_id: str) -> list[dict[str, Any]]:
   income_query = """
     MATCH (usGaap:Element)--(a:Association)--(coaElement:Element)
     WHERE usGaap.uri CONTAINS 'us-gaap'
@@ -118,7 +118,7 @@ async def check_report_exists(graph_id: str, report_id: str) -> bool:
   return results is not None and len(results) > 0
 
 
-async def delete_report_data(graph_id: str, report_id: str) -> Dict[str, int]:
+async def delete_report_data(graph_id: str, report_id: str) -> dict[str, int]:
   """Delete all facts, structures, and relationships associated with a report"""
   delete_facts_query = """
     MATCH (r:Report {identifier: $report_id})-[:REPORT_HAS_FACT]->(f:Fact)
@@ -211,12 +211,12 @@ async def update_report_metadata(
 async def create_fact_nodes(
   graph_id: str,
   report_id: str,
-  facts: List[Dict[str, Any]],
+  facts: list[dict[str, Any]],
   entity_id: str,
   period_start: str,
   period_end: str,
   unit: str = "USD",
-) -> List[FactDetail]:
+) -> list[FactDetail]:
   created_facts = []
   repository = await get_universal_repository(graph_id)
 
@@ -276,8 +276,8 @@ async def create_presentation_structure(
   report_id: str,
   structure_name: str,
   role_uri: str,
-  facts: List[Dict[str, Any]],
-) -> Optional[StructureDetail]:
+  facts: list[dict[str, Any]],
+) -> StructureDetail | None:
   structure_id = str(uuid.uuid4())
   repository = await get_universal_repository(graph_id)
 
@@ -318,8 +318,8 @@ async def create_calculation_structure(
   report_id: str,
   structure_name: str,
   parent_element: str,
-  children: List[Dict[str, Any]],
-) -> Optional[StructureDetail]:
+  children: list[dict[str, Any]],
+) -> StructureDetail | None:
   structure_id = str(uuid.uuid4())
   repository = await get_universal_repository(graph_id)
 

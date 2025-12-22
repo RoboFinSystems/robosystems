@@ -5,9 +5,9 @@ import hashlib
 from fastapi import HTTPException, status
 
 from ...config import env
+from ...config.logging import get_logger
 from ...config.valkey_registry import ValkeyDatabase, ValkeyURLBuilder
 from ...security.password import PasswordSecurity
-from ...config.logging import get_logger
 
 # Import JWT functions from middleware to avoid duplication
 

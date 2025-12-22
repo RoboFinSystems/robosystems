@@ -7,10 +7,10 @@ enabling event replay for late connections and reliable operation monitoring.
 
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, cast
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from enum import Enum
+from typing import Any, cast
 
 import redis.asyncio as redis_async
 from redis import Redis
@@ -56,7 +56,7 @@ class SSEEvent:
   event_type: EventType
   operation_id: str
   timestamp: str
-  data: Dict[str, Any]
+  data: dict[str, Any]
   sequence_number: int = 0
 
   def to_sse_format(self) -> str:
@@ -84,12 +84,12 @@ class SSEEvent:
     # SSE format requires double newline to terminate event
     return "\n".join(lines) + "\n\n"
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for JSON serialization."""
     return asdict(self)
 
   @classmethod
-  def from_dict(cls, data: Dict[str, Any]) -> "SSEEvent":
+  def from_dict(cls, data: dict[str, Any]) -> "SSEEvent":
     """Create SSEEvent from dictionary."""
     return cls(**data)
 
@@ -103,14 +103,14 @@ class OperationMetadata:
   operation_id: str
   operation_type: str
   user_id: str
-  graph_id: Optional[str]
+  graph_id: str | None
   status: OperationStatus
   created_at: str
   updated_at: str
-  error_message: Optional[str] = None
-  result_data: Optional[Dict[str, Any]] = None
+  error_message: str | None = None
+  result_data: dict[str, Any] | None = None
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for JSON serialization."""
     return asdict(self)
 
@@ -124,7 +124,7 @@ class SSEEventStorage:
   """
 
   def __init__(
-    self, redis_client: Optional[redis_async.Redis] = None, default_ttl: int = 3600
+    self, redis_client: redis_async.Redis | None = None, default_ttl: int = 3600
   ):
     """
     Initialize event storage.
@@ -135,7 +135,7 @@ class SSEEventStorage:
     """
     self._redis_client = redis_client
     self._async_redis = None
-    self._sync_redis = None  # For sync methods (Celery workers)
+    self._sync_redis = None  # For sync methods (background tasks)
     self.default_ttl = default_ttl
 
     # Redis key prefixes
@@ -154,8 +154,10 @@ class SSEEventStorage:
 
   async def _get_default_async_redis(self) -> redis_async.Redis:
     """Get default async Redis client from environment."""
-    from robosystems.config.valkey_registry import ValkeyDatabase
-    from robosystems.config.valkey_registry import create_async_redis_client
+    from robosystems.config.valkey_registry import (
+      ValkeyDatabase,
+      create_async_redis_client,
+    )
 
     # Use SSE events database from registry with proper ElastiCache support
     client = create_async_redis_client(ValkeyDatabase.SSE_EVENTS)
@@ -164,10 +166,9 @@ class SSEEventStorage:
     return client
 
   def _get_sync_redis(self) -> Redis:
-    """Get synchronous Redis client for Celery workers."""
+    """Get synchronous Redis client for background tasks."""
     if self._sync_redis is None:
-      from robosystems.config.valkey_registry import ValkeyDatabase
-      from robosystems.config.valkey_registry import create_redis_client
+      from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
 
       # Use SSE events database from registry with proper ElastiCache support
       self._sync_redis = create_redis_client(ValkeyDatabase.SSE_EVENTS)
@@ -183,9 +184,9 @@ class SSEEventStorage:
     self,
     operation_type: str,
     user_id: str,
-    graph_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
-    ttl: Optional[int] = None,
+    graph_id: str | None = None,
+    operation_id: str | None = None,
+    ttl: int | None = None,
   ) -> str:
     """
     Create a new operation and return its ID.
@@ -204,7 +205,7 @@ class SSEEventStorage:
       operation_id = self.generate_operation_id()
 
     ttl = ttl or self.default_ttl
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Create operation metadata
     metadata = OperationMetadata(
@@ -236,8 +237,8 @@ class SSEEventStorage:
     self,
     operation_id: str,
     event_type: EventType,
-    data: Dict[str, Any],
-    ttl: Optional[int] = None,
+    data: dict[str, Any],
+    ttl: int | None = None,
   ) -> SSEEvent:
     """
     Store an event for an operation.
@@ -270,7 +271,7 @@ class SSEEventStorage:
     event = SSEEvent(
       event_type=event_type,
       operation_id=operation_id,
-      timestamp=datetime.now(timezone.utc).isoformat(),
+      timestamp=datetime.now(UTC).isoformat(),
       data=data,
       sequence_number=sequence_number,
     )
@@ -300,11 +301,11 @@ class SSEEventStorage:
     self,
     operation_id: str,
     event_type: EventType,
-    data: Dict[str, Any],
-    ttl: Optional[int] = None,
+    data: dict[str, Any],
+    ttl: int | None = None,
   ) -> SSEEvent:
     """
-    Synchronous version of store_event for use in Celery workers.
+    Synchronous version of store_event for use in background tasks.
 
     Args:
         operation_id: Operation identifier
@@ -338,7 +339,7 @@ class SSEEventStorage:
     event = SSEEvent(
       event_type=event_type,
       operation_id=operation_id,
-      timestamp=datetime.now(timezone.utc).isoformat(),
+      timestamp=datetime.now(UTC).isoformat(),
       data=data,
       sequence_number=sequence_number,
     )
@@ -364,7 +365,7 @@ class SSEEventStorage:
     return event
 
   def _update_operation_metadata_sync(
-    self, operation_id: str, event_type: EventType, data: Dict[str, Any]
+    self, operation_id: str, event_type: EventType, data: dict[str, Any]
   ):
     """Synchronous version to update operation metadata based on event type."""
     redis = self._get_sync_redis()
@@ -379,8 +380,8 @@ class SSEEventStorage:
         user_id=data.get("user_id", "unknown"),
         graph_id=data.get("graph_id"),
         status=OperationStatus.RUNNING,
-        created_at=datetime.now(timezone.utc).isoformat(),
-        updated_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
+        updated_at=datetime.now(UTC).isoformat(),
       )
       metadata_dict = metadata.to_dict()
     else:
@@ -388,11 +389,15 @@ class SSEEventStorage:
       metadata = OperationMetadata(**metadata_dict)
 
     # Update metadata based on event type
-    metadata.updated_at = datetime.now(timezone.utc).isoformat()
+    metadata.updated_at = datetime.now(UTC).isoformat()
 
     if event_type == EventType.OPERATION_COMPLETED:
       metadata.status = OperationStatus.COMPLETED
-      metadata.result_data = data
+      # Merge new data with existing result_data (preserves graph_id from Dagster job)
+      if metadata.result_data:
+        metadata.result_data.update(data)
+      else:
+        metadata.result_data = data
     elif event_type == EventType.OPERATION_ERROR:
       metadata.status = OperationStatus.FAILED
       metadata.error_message = data.get("error")
@@ -408,8 +413,85 @@ class SSEEventStorage:
       json.dumps(metadata.to_dict()),
     )
 
+  def update_operation_result_sync(
+    self, operation_id: str, result: dict[str, Any]
+  ) -> None:
+    """
+    Update operation metadata with result data (sync version).
+
+    This is used by Dagster jobs to store the graph_id and other result data
+    in the operation metadata before the job completes. When the monitor later
+    emits the OPERATION_COMPLETED event, it will include this result data.
+
+    Args:
+        operation_id: Operation identifier
+        result: Result data to merge into metadata (e.g., {"graph_id": "kg123"})
+    """
+    redis = self._get_sync_redis()
+    metadata_key = f"{self.metadata_prefix}{operation_id}"
+    metadata_json = redis.get(metadata_key)
+
+    if not metadata_json:
+      logger.warning(f"Operation {operation_id} not found, cannot update result")
+      return
+
+    metadata_dict = json.loads(str(metadata_json))
+    metadata = OperationMetadata(**metadata_dict)
+
+    # Update timestamp and merge result data
+    metadata.updated_at = datetime.now(UTC).isoformat()
+
+    # Merge new result with existing result_data (if any)
+    if metadata.result_data:
+      metadata.result_data.update(result)
+    else:
+      metadata.result_data = result
+
+    # Update graph_id if provided
+    if "graph_id" in result:
+      metadata.graph_id = result["graph_id"]
+
+    # Store updated metadata
+    redis.setex(
+      metadata_key,
+      self.default_ttl,
+      json.dumps(metadata.to_dict()),
+    )
+
+    logger.debug(
+      f"Updated operation {operation_id} result data with keys: {list(result.keys())}"
+    )
+
+  def get_operation_result_sync(self, operation_id: str) -> dict[str, Any] | None:
+    """
+    Get operation result data (sync version).
+
+    This is used by the Dagster monitor to retrieve stored result data
+    when emitting the OPERATION_COMPLETED event.
+
+    Args:
+        operation_id: Operation ID to get result for
+
+    Returns:
+        Result data dictionary if found, None otherwise
+    """
+    redis = self._get_sync_redis()
+    metadata_key = f"{self.metadata_prefix}{operation_id}"
+    metadata_json = redis.get(metadata_key)
+
+    if not metadata_json:
+      return None
+
+    try:
+      metadata_dict = json.loads(str(metadata_json))
+      metadata = OperationMetadata(**metadata_dict)
+      return metadata.result_data
+    except Exception as e:
+      logger.warning(f"Failed to get operation result for {operation_id}: {e}")
+      return None
+
   async def _update_operation_metadata(
-    self, operation_id: str, event_type: EventType, data: Dict[str, Any]
+    self, operation_id: str, event_type: EventType, data: dict[str, Any]
   ):
     """Update operation metadata based on event type."""
     redis = await self._get_redis()
@@ -423,14 +505,19 @@ class SSEEventStorage:
     metadata = OperationMetadata(**metadata_dict)
 
     # Update timestamp
-    metadata.updated_at = datetime.now(timezone.utc).isoformat()
+    metadata.updated_at = datetime.now(UTC).isoformat()
 
     # Update status based on event type
     if event_type == EventType.OPERATION_STARTED:
       metadata.status = OperationStatus.RUNNING
     elif event_type == EventType.OPERATION_COMPLETED:
       metadata.status = OperationStatus.COMPLETED
-      metadata.result_data = data.get("result")
+      # Merge new result with existing result_data (preserves graph_id from Dagster job)
+      new_result = data.get("result") or {}
+      if metadata.result_data:
+        metadata.result_data.update(new_result)
+      else:
+        metadata.result_data = new_result
     elif event_type == EventType.OPERATION_ERROR:
       metadata.status = OperationStatus.FAILED
       metadata.error_message = data.get("error", "Unknown error")
@@ -443,8 +530,8 @@ class SSEEventStorage:
       await redis.setex(metadata_key, ttl, json.dumps(metadata.to_dict()))
 
   async def get_events(
-    self, operation_id: str, from_sequence: int = 0, limit: Optional[int] = None
-  ) -> List[SSEEvent]:
+    self, operation_id: str, from_sequence: int = 0, limit: int | None = None
+  ) -> list[SSEEvent]:
     """
     Retrieve events for an operation.
 
@@ -479,9 +566,7 @@ class SSEEventStorage:
 
     return events
 
-  async def get_operation_metadata(
-    self, operation_id: str
-  ) -> Optional[OperationMetadata]:
+  async def get_operation_metadata(self, operation_id: str) -> OperationMetadata | None:
     """
     Get operation metadata.
 
@@ -547,7 +632,7 @@ class SSEEventStorage:
 
 
 # Global instance (initialized lazily)
-_event_storage: Optional[SSEEventStorage] = None
+_event_storage: SSEEventStorage | None = None
 
 
 def get_event_storage() -> SSEEventStorage:

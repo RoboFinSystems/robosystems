@@ -1,6 +1,7 @@
 """Graph query API models."""
 
-from typing import Optional, Dict, Any, List
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -8,17 +9,17 @@ class GraphMetricsResponse(BaseModel):
   """Response model for graph metrics."""
 
   graph_id: str = Field(..., description="Graph database identifier")
-  graph_name: Optional[str] = Field(None, description="Display name for the graph")
-  user_role: Optional[str] = Field(None, description="User's role in this graph")
+  graph_name: str | None = Field(None, description="Display name for the graph")
+  user_role: str | None = Field(None, description="User's role in this graph")
   timestamp: str = Field(..., description="Metrics collection timestamp")
   total_nodes: int = Field(..., description="Total number of nodes")
   total_relationships: int = Field(..., description="Total number of relationships")
-  node_counts: Dict[str, int] = Field(..., description="Node counts by label")
-  relationship_counts: Dict[str, int] = Field(
+  node_counts: dict[str, int] = Field(..., description="Node counts by label")
+  relationship_counts: dict[str, int] = Field(
     ..., description="Relationship counts by type"
   )
-  estimated_size: Dict[str, Any] = Field(..., description="Database size estimates")
-  health_status: Dict[str, Any] = Field(..., description="Database health information")
+  estimated_size: dict[str, Any] = Field(..., description="Database size estimates")
+  health_status: dict[str, Any] = Field(..., description="Database health information")
 
 
 class StorageSummary(BaseModel):
@@ -38,7 +39,7 @@ class CreditSummary(BaseModel):
   graph_tier: str = Field(..., description="Subscription tier")
   total_credits_consumed: float = Field(..., description="Total credits consumed")
   total_base_cost: float = Field(..., description="Total base cost before multipliers")
-  operation_breakdown: Dict[str, Any] = Field(
+  operation_breakdown: dict[str, Any] = Field(
     ..., description="Credit usage by operation type"
   )
   cached_operations: int = Field(..., description="Number of cached operations")
@@ -51,10 +52,10 @@ class PerformanceInsights(BaseModel):
 
   analysis_period_days: int = Field(..., description="Analysis period in days")
   total_operations: int = Field(..., description="Total operations analyzed")
-  operation_stats: Dict[str, Any] = Field(
+  operation_stats: dict[str, Any] = Field(
     ..., description="Performance stats by operation type"
   )
-  slow_queries: List[Dict[str, Any]] = Field(
+  slow_queries: list[dict[str, Any]] = Field(
     ..., description="Top slow queries (over 5 seconds)"
   )
   performance_score: int = Field(..., description="Performance score (0-100)")
@@ -65,16 +66,16 @@ class GraphUsageResponse(BaseModel):
 
   graph_id: str = Field(..., description="Graph database identifier")
   time_range: str = Field(..., description="Time range for usage data")
-  storage_summary: Optional[StorageSummary] = Field(
+  storage_summary: StorageSummary | None = Field(
     None, description="Storage usage summary"
   )
-  credit_summary: Optional[CreditSummary] = Field(
+  credit_summary: CreditSummary | None = Field(
     None, description="Credit consumption summary"
   )
-  performance_insights: Optional[PerformanceInsights] = Field(
+  performance_insights: PerformanceInsights | None = Field(
     None, description="Performance analytics"
   )
-  recent_events: List[Dict[str, Any]] = Field(
+  recent_events: list[dict[str, Any]] = Field(
     default_factory=list, description="Recent usage events"
   )
   timestamp: str = Field(..., description="Usage collection timestamp")

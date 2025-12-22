@@ -32,23 +32,24 @@ Security:
 - Full audit logging
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User, GraphTable
-from robosystems.models.api.graphs.tables import TableInfo, TableListResponse
-from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.middleware.graph import get_universal_repository
 from robosystems.database import get_db_session
-from robosystems.logger import logger, api_logger
+from robosystems.logger import api_logger, logger
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph import get_universal_repository
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.tables import TableInfo, TableListResponse
+from robosystems.models.iam import GraphTable, User
 
 router = APIRouter()
 
@@ -139,7 +140,7 @@ async def list_tables(
   Returns comprehensive information about all tables including file counts,
   storage sizes, and S3 locations for monitoring the data pipeline.
   """
-  start_time = datetime.now(timezone.utc)
+  start_time = datetime.now(UTC)
 
   try:
     # Verify graph access
@@ -168,8 +169,8 @@ async def list_tables(
     # Get all tables for graph
     db_tables = GraphTable.get_all_for_graph(graph_id, db)
 
-    from robosystems.operations.graph.table_service import TableService
     from robosystems.models.iam import GraphUser
+    from robosystems.operations.graph.table_service import TableService
 
     table_service = TableService(db)
     user_graph = db.query(GraphUser).filter(GraphUser.graph_id == graph_id).first()
@@ -191,7 +192,7 @@ async def list_tables(
     ]
 
     # Calculate execution time
-    execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+    execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
     # Record business event
     metrics_instance = get_endpoint_metrics()
@@ -256,5 +257,5 @@ async def list_tables(
 
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to list tables: {str(e)}",
+      detail=f"Failed to list tables: {e!s}",
     )

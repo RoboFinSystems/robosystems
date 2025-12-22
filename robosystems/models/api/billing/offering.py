@@ -4,7 +4,7 @@ This module contains Pydantic models for service offering responses including
 graph subscriptions, repository subscriptions, and operation costs.
 """
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GraphSubscriptionTier(BaseModel):

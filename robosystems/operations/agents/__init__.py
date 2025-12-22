@@ -4,63 +4,61 @@ Agent operations module.
 Provides multiagent system with dynamic routing, RAG, and specialized agents.
 """
 
+# Import concrete agents to register them
+from . import cypher_agent, financial
+from .ai_client import AIClient
 from .base import (
-  BaseAgent,
   AgentCapability,
-  AgentMode,
   AgentMetadata,
+  AgentMode,
   AgentResponse,
-)
-from .orchestrator import (
-  AgentOrchestrator,
-  RoutingStrategy,
-  AgentSelectionCriteria,
-  OrchestratorConfig,
-)
-from .registry import (
-  AgentRegistry,
-  AgentRegistrationError,
-  DuplicateAgentError,
-  AgentNotFoundError,
+  BaseAgent,
 )
 from .context import (
   ContextEnricher,
-  RAGConfig,
-  EmbeddingProvider,
   DocumentChunk,
+  EmbeddingProvider,
+  RAGConfig,
   SearchResult,
 )
-from .ai_client import AIClient
-
-# Import concrete agents to register them
-from . import cypher_agent
-from . import financial
+from .orchestrator import (
+  AgentOrchestrator,
+  AgentSelectionCriteria,
+  OrchestratorConfig,
+  RoutingStrategy,
+)
+from .registry import (
+  AgentNotFoundError,
+  AgentRegistrationError,
+  AgentRegistry,
+  DuplicateAgentError,
+)
 
 __all__ = [
-  # Base
-  "BaseAgent",
-  "AgentCapability",
-  "AgentMode",
-  "AgentMetadata",
-  "AgentResponse",
-  # Orchestrator
-  "AgentOrchestrator",
-  "RoutingStrategy",
-  "AgentSelectionCriteria",
-  "OrchestratorConfig",
-  # Registry
-  "AgentRegistry",
-  "AgentRegistrationError",
-  "DuplicateAgentError",
-  "AgentNotFoundError",
-  # Context
-  "ContextEnricher",
-  "RAGConfig",
-  "EmbeddingProvider",
-  "DocumentChunk",
-  "SearchResult",
   # AI Client
   "AIClient",
+  "AgentCapability",
+  "AgentMetadata",
+  "AgentMode",
+  "AgentNotFoundError",
+  # Orchestrator
+  "AgentOrchestrator",
+  "AgentRegistrationError",
+  # Registry
+  "AgentRegistry",
+  "AgentResponse",
+  "AgentSelectionCriteria",
+  # Base
+  "BaseAgent",
+  # Context
+  "ContextEnricher",
+  "DocumentChunk",
+  "DuplicateAgentError",
+  "EmbeddingProvider",
+  "OrchestratorConfig",
+  "RAGConfig",
+  "RoutingStrategy",
+  "SearchResult",
   # Modules (for registration)
   "cypher_agent",
   "financial",

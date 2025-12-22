@@ -3,8 +3,8 @@ Base interface for graph database engines.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -12,8 +12,8 @@ class GraphOperation:
   """Represents a single graph operation (reused from repository.py)."""
 
   cypher: str
-  params: Dict[str, Any]
-  description: Optional[str] = None
+  params: dict[str, Any]
+  description: str | None = None
 
 
 class GraphEngineInterface(ABC):
@@ -26,8 +26,8 @@ class GraphEngineInterface(ABC):
 
   @abstractmethod
   def execute_query(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> List[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> list[dict[str, Any]]:
     """
     Execute a single Cypher query and return results.
 
@@ -45,8 +45,8 @@ class GraphEngineInterface(ABC):
 
   @abstractmethod
   def execute_single(
-    self, cypher: str, params: Optional[Dict[str, Any]] = None
-  ) -> Optional[Dict[str, Any]]:
+    self, cypher: str, params: dict[str, Any] | None = None
+  ) -> dict[str, Any] | None:
     """
     Execute a query expecting a single result.
 
@@ -64,8 +64,8 @@ class GraphEngineInterface(ABC):
 
   @abstractmethod
   def execute_transaction(
-    self, operations: List[GraphOperation]
-  ) -> List[List[Dict[str, Any]]]:
+    self, operations: list[GraphOperation]
+  ) -> list[list[dict[str, Any]]]:
     """
     Execute multiple operations in a single transaction.
 
@@ -81,7 +81,7 @@ class GraphEngineInterface(ABC):
     raise NotImplementedError("Subclasses must implement execute_transaction")
 
   @abstractmethod
-  def health_check(self) -> Dict[str, Any]:
+  def health_check(self) -> dict[str, Any]:
     """
     Perform a health check on the database connection.
 

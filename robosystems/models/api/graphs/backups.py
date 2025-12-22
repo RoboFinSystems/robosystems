@@ -1,7 +1,6 @@
 """Graph query API models."""
 
-from typing import Optional, Dict, List
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BackupCreateRequest(BaseModel):
@@ -24,7 +23,7 @@ class BackupCreateRequest(BaseModel):
   encryption: bool = Field(
     False, description="Enable encryption (encrypted backups cannot be downloaded)"
   )
-  schedule: Optional[str] = Field(
+  schedule: str | None = Field(
     None, description="Optional cron schedule for automated backups"
   )
 
@@ -56,14 +55,14 @@ class BackupResponse(BaseModel):
   compression_enabled: bool
   allow_export: bool
   created_at: str
-  completed_at: Optional[str]
-  expires_at: Optional[str]
+  completed_at: str | None
+  expires_at: str | None
 
 
 class BackupListResponse(BaseModel):
   """Response model for backup list."""
 
-  backups: List[BackupResponse]
+  backups: list[BackupResponse]
   total_count: int
   graph_id: str
 
@@ -80,8 +79,8 @@ class BackupStatsResponse(BaseModel):
   total_compressed_size_bytes: int
   storage_saved_bytes: int
   average_compression_ratio: float
-  latest_backup_date: Optional[str]
-  backup_formats: Dict[str, int]
+  latest_backup_date: str | None
+  backup_formats: dict[str, int]
 
 
 class BackupExportRequest(BaseModel):

@@ -2,16 +2,17 @@
 Tests for connection feature flags.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import User
-from robosystems.operations.providers.registry import ProviderRegistry
 from robosystems.models.api.graphs.connections import (
   SECConnectionConfig,
 )
+from robosystems.models.iam import User
+from robosystems.operations.providers.registry import ProviderRegistry
 
 
 class TestConnectionFeatureFlags:
@@ -506,8 +507,8 @@ class TestGraphOperationFeatureFlags:
   def test_subgraph_creation_disabled(self, client: TestClient, mock_user, mock_db):
     """Test subgraph creation endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -542,8 +543,8 @@ class TestGraphOperationFeatureFlags:
   def test_backup_creation_disabled(self, client: TestClient, mock_user, mock_db):
     """Test backup creation endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -576,8 +577,8 @@ class TestGraphOperationFeatureFlags:
   def test_subgraph_creation_enabled(self, client: TestClient, mock_user, mock_db):
     """Test subgraph creation endpoint when feature flag is enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -642,8 +643,8 @@ class TestGraphOperationFeatureFlags:
   def test_backup_creation_enabled(self, client: TestClient, mock_user, mock_db):
     """Test backup creation endpoint when feature flag is enabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_async_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -673,6 +674,15 @@ class TestGraphOperationFeatureFlags:
             patch("os.path.exists", return_value=True),
             patch("os.walk", return_value=[("/tmp/test/path", [], ["file1.lbug"])]),
             patch("os.path.getsize", return_value=1024),
+            patch(
+              "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.submit_job",
+              return_value="test-run-123",
+            ),
+            patch(
+              "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
+              new_callable=AsyncMock,
+              return_value={"status": "completed", "run_id": "test-run-123"},
+            ),
           ):
             # Mock request data
             request_data = {
@@ -729,8 +739,8 @@ class TestAgentPostFeatureFlags:
   def test_agent_auto_disabled(self, client: TestClient, mock_user, mock_db):
     """Test auto agent endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -760,8 +770,8 @@ class TestAgentPostFeatureFlags:
   def test_agent_specific_disabled(self, client: TestClient, mock_user, mock_db):
     """Test specific agent endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -793,8 +803,8 @@ class TestAgentPostFeatureFlags:
   def test_agent_batch_disabled(self, client: TestClient, mock_user, mock_db):
     """Test batch agent endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -840,15 +850,15 @@ class TestAgentPostFeatureFlags:
         else:
           print(f"Unexpected response status: {response.status_code}")
           print(f"Response data: {response.json()}")
-          assert False, f"Expected 403 or 422, got {response.status_code}"
+          raise AssertionError(f"Expected 403 or 422, got {response.status_code}")
     finally:
       app.dependency_overrides.clear()
 
   def test_agent_recommend_disabled(self, client: TestClient, mock_user, mock_db):
     """Test agent recommendation endpoint when feature flag is disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user
@@ -875,8 +885,8 @@ class TestAgentPostFeatureFlags:
   def test_agent_get_endpoints_still_work(self, client: TestClient, mock_user, mock_db):
     """Test that GET endpoints still work when POST endpoints are disabled."""
     from main import app
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import get_db_session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Override dependencies
     app.dependency_overrides[get_current_user_with_graph] = lambda: mock_user

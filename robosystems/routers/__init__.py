@@ -4,49 +4,67 @@ API v1 routers.
 
 from fastapi import APIRouter
 
+from .admin import (
+  credits_router as admin_credits_router,
+)
+from .admin import (
+  graphs_router as admin_graphs_router,
+)
+from .admin import (
+  invoice_router as admin_invoice_router,
+)
+from .admin import (
+  orgs_router as admin_orgs_router,
+)
+from .admin import (
+  subscription_router as admin_subscription_router,
+)
+from .admin import (
+  users_router as admin_users_router,
+)
+from .admin import (
+  webhooks_router as admin_webhooks_router,
+)
 from .auth import router as auth_router
-
-# Removed entity router - using query endpoint for all Entity operations
-from .user import router as user_router
-from .orgs import router as orgs_router
-from .graphs.agent import router as agent_router  # Agent module with modular structure
-from .graphs.connections import router as connections_router
-from .status import router as status_router
-from .graphs import (
-  main_router as graph_router,
-  backups_router,
-  usage_router,
-  query_router,
-  schema_router,
-  credits_router,
-  health_router,
-  info_router,
-  limits_router,
-  subgraphs_router,
-  subscriptions_router as graph_subscriptions_router,
-  tables_router,
-  views_router,
-  materialize_router,
-  files_router,
-)  # Removed allocation_router - too dangerous for public API
-from .graphs.mcp import router as mcp_router
-from .offering import offering_router
-from .operations import router as operations_router
 from .billing import (
   checkout_router,
   customer_router,
   invoices_router,
+)
+from .billing import (
   subscriptions_router as billing_subscriptions_router,
 )
-from .admin import (
-  subscription_router as admin_subscription_router,
-  invoice_router as admin_invoice_router,
-  webhooks_router as admin_webhooks_router,
-  credits_router as admin_credits_router,
-  graphs_router as admin_graphs_router,
-  users_router as admin_users_router,
-  orgs_router as admin_orgs_router,
+from .graphs import (
+  backups_router,
+  credits_router,
+  files_router,
+  health_router,
+  info_router,
+  limits_router,
+  materialize_router,
+  query_router,
+  schema_router,
+  subgraphs_router,
+  tables_router,
+  usage_router,
+  views_router,
 )
+from .graphs import (
+  main_router as graph_router,
+)  # Removed allocation_router - too dangerous for public API
+from .graphs import (
+  subscriptions_router as graph_subscriptions_router,
+)
+from .graphs.agent import router as agent_router  # Agent module with modular structure
+from .graphs.connections import router as connections_router
+from .graphs.mcp import router as mcp_router
+from .offering import offering_router
+from .operations import router as operations_router
+from .orgs import router as orgs_router
+from .status import router as status_router
+
+# Removed entity router - using query endpoint for all Entity operations
+from .user import router as user_router
 
 # Graph-scoped routes that require an existing graph_id
 router = APIRouter(prefix="/v1/graphs/{graph_id}", tags=[])
@@ -117,14 +135,14 @@ admin_router_v1.include_router(admin_orgs_router)
 
 # Export routers for main application
 __all__ = [
-  "router",
-  "user_router_v1",
-  "orgs_router_v1",
+  "admin_router_v1",
   "auth_router_v1",
-  "status_router_v1",
+  "billing_router_v1",
   "graph_router",
   "offering_router_v1",
   "operations_router_v1",
-  "billing_router_v1",
-  "admin_router_v1",
+  "orgs_router_v1",
+  "router",
+  "status_router_v1",
+  "user_router_v1",
 ]

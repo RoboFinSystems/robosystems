@@ -12,6 +12,7 @@ Usage:
 import argparse
 import sys
 from pathlib import Path
+
 import duckdb
 
 from robosystems.utils.query_output import (

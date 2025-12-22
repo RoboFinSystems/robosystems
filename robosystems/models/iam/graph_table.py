@@ -1,17 +1,18 @@
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Any, Optional
 
 from sqlalchemy import (
   Column,
-  String,
   DateTime,
   ForeignKey,
-  Integer,
   Index,
+  Integer,
+  String,
   UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
@@ -45,13 +46,13 @@ class GraphTable(Base):
 
   created_at = Column(
     DateTime(timezone=True),
-    default=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
     nullable=False,
   )
   updated_at = Column(
     DateTime(timezone=True),
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
   )
 
   graph = relationship("Graph", backref="tables")
@@ -68,9 +69,9 @@ class GraphTable(Base):
     graph_id: str,
     table_name: str,
     table_type: str,
-    schema_json: Dict[str, Any],
+    schema_json: dict[str, Any],
     session: Session,
-    target_node_type: Optional[str] = None,
+    target_node_type: str | None = None,
     commit: bool = True,
   ) -> "GraphTable":
     table = cls(
@@ -113,9 +114,9 @@ class GraphTable(Base):
   def update_stats(
     self,
     session: Session,
-    row_count: Optional[int] = None,
-    file_count: Optional[int] = None,
-    total_size_bytes: Optional[int] = None,
+    row_count: int | None = None,
+    file_count: int | None = None,
+    total_size_bytes: int | None = None,
   ) -> None:
     if row_count is not None:
       self.row_count = row_count
@@ -124,6 +125,6 @@ class GraphTable(Base):
     if total_size_bytes is not None:
       self.total_size_bytes = total_size_bytes
 
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)

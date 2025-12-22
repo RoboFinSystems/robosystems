@@ -1,16 +1,19 @@
-import pytest
+from datetime import UTC
 from decimal import Decimal
+
+import pytest
 from sqlalchemy.orm import Session
 
-from robosystems.operations.graph.credit_service import CreditService
-from robosystems.models.iam import User, Graph, GraphCredits
 from robosystems.config.graph_tier import GraphTier
+from robosystems.models.iam import Graph, GraphCredits, User
+from robosystems.operations.graph.credit_service import CreditService
 
 
 @pytest.fixture
 def parent_graph_setup(db_session: Session) -> tuple[Graph, GraphCredits, User]:
-  from robosystems.utils.ulid import generate_prefixed_ulid
   import uuid
+
+  from robosystems.utils.ulid import generate_prefixed_ulid
 
   user = User(
     id=generate_prefixed_ulid("user"),
@@ -245,14 +248,14 @@ class TestSubgraphCacheSharing:
     parent_graph_setup: tuple[Graph, GraphCredits, User],
   ):
     """Cache should be invalidated after monthly credit allocation"""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     parent_graph, parent_credits, user = parent_graph_setup
     subgraph_id = f"{parent_graph.graph_id}_alloc"
 
     credit_service = CreditService(db_session)
 
-    parent_credits.last_allocation_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    parent_credits.last_allocation_date = datetime(2024, 1, 1, tzinfo=UTC)
     parent_credits.current_balance = Decimal("100")
     db_session.commit()
 

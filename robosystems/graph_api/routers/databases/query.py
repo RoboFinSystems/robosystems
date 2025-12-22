@@ -5,21 +5,22 @@ This module provides endpoints for executing Cypher queries against
 specific LadybugDB graph databases with admission control.
 """
 
-from fastapi import APIRouter, Depends, Path, HTTPException, status
-from fastapi.responses import StreamingResponse
 import json
 from contextlib import contextmanager
+
+from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from robosystems.graph_api.models.database import QueryRequest
-from robosystems.graph_api.core.ladybug import get_ladybug_service
-from robosystems.graph_api.core.admission_control import (
-  get_admission_controller,
-  AdmissionDecision,
-)
-from robosystems.logger import logger
 from robosystems.config import env
 from robosystems.database import get_db_session
+from robosystems.graph_api.core.admission_control import (
+  AdmissionDecision,
+  get_admission_controller,
+)
+from robosystems.graph_api.core.ladybug import get_ladybug_service
+from robosystems.graph_api.models.database import QueryRequest
+from robosystems.logger import logger
 from robosystems.models.iam import Graph
 
 router = APIRouter(prefix="/databases", tags=["Graph Query"])
@@ -49,7 +50,7 @@ async def execute_query(
   request: QueryRequest,
   graph_id: str = Path(..., description="Graph database identifier"),
   streaming: bool = False,
-  database: str = None,
+  database: str | None = None,
   service=Depends(_get_service_for_request),
   db: Session = Depends(get_db_session),
 ):

@@ -5,13 +5,15 @@ Provides semantic search, document retrieval, and context augmentation.
 """
 
 import asyncio
-from enum import Enum
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
 import hashlib
 import json
-import numpy as np
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+from typing import Any
+
+import numpy as np
 
 from robosystems.logger import logger
 
@@ -40,7 +42,7 @@ class RAGConfig:
   chunk_overlap: int = 50
   enable_caching: bool = False
   cache_ttl: int = 3600  # seconds
-  custom_embedding_fn: Optional[Callable] = None
+  custom_embedding_fn: Callable | None = None
 
 
 @dataclass
@@ -48,9 +50,9 @@ class DocumentChunk:
   """Represents a chunk of document for indexing."""
 
   content: str
-  metadata: Dict[str, Any] = field(default_factory=dict)
-  embedding: Optional[List[float]] = None
-  chunk_id: Optional[str] = None
+  metadata: dict[str, Any] = field(default_factory=dict)
+  embedding: list[float] | None = None
+  chunk_id: str | None = None
   timestamp: datetime = field(default_factory=datetime.utcnow)
 
   def similarity(self, other: "DocumentChunk") -> float:
@@ -74,23 +76,23 @@ class SearchResult:
   chunk: DocumentChunk
   score: float
   relevance: str = "medium"
-  explanation: Optional[str] = None
+  explanation: str | None = None
 
 
 class VectorStore:
   """Abstract base for vector stores."""
 
-  async def add_documents(self, chunks: List[DocumentChunk]):
+  async def add_documents(self, chunks: list[DocumentChunk]):
     """Add document chunks to the store."""
     raise NotImplementedError
 
   async def search(
-    self, query_embedding: List[float], k: int = 5
-  ) -> List[SearchResult]:
+    self, query_embedding: list[float], k: int = 5
+  ) -> list[SearchResult]:
     """Search for similar documents."""
     raise NotImplementedError
 
-  async def delete_documents(self, chunk_ids: List[str]):
+  async def delete_documents(self, chunk_ids: list[str]):
     """Delete documents by chunk IDs."""
     raise NotImplementedError
 
@@ -99,9 +101,9 @@ class MemoryVectorStore(VectorStore):
   """In-memory vector store implementation."""
 
   def __init__(self):
-    self.documents: List[DocumentChunk] = []
+    self.documents: list[DocumentChunk] = []
 
-  async def add_documents(self, chunks: List[DocumentChunk]):
+  async def add_documents(self, chunks: list[DocumentChunk]):
     """Add documents to memory store."""
     for chunk in chunks:
       if chunk.chunk_id is None:
@@ -109,8 +111,8 @@ class MemoryVectorStore(VectorStore):
     self.documents.extend(chunks)
 
   async def search(
-    self, query_embedding: List[float], k: int = 5
-  ) -> List[SearchResult]:
+    self, query_embedding: list[float], k: int = 5
+  ) -> list[SearchResult]:
     """Search for similar documents in memory."""
     if not self.documents:
       return []
@@ -142,7 +144,7 @@ class MemoryVectorStore(VectorStore):
 
     return results
 
-  async def delete_documents(self, chunk_ids: List[str]):
+  async def delete_documents(self, chunk_ids: list[str]):
     """Delete documents from memory store."""
     self.documents = [doc for doc in self.documents if doc.chunk_id not in chunk_ids]
 
@@ -158,7 +160,7 @@ class EmbeddingService:
     self.provider = provider
     self.config = kwargs
 
-  async def embed_text(self, text: str) -> List[float]:
+  async def embed_text(self, text: str) -> list[float]:
     """Generate embedding for text."""
     if self.provider == EmbeddingProvider.LOCAL:
       return await self._local_embedding(text)
@@ -170,12 +172,12 @@ class EmbeddingService:
       # Placeholder for other providers
       return await self._local_embedding(text)
 
-  async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+  async def embed_batch(self, texts: list[str]) -> list[list[float]]:
     """Generate embeddings for multiple texts."""
     tasks = [self.embed_text(text) for text in texts]
     return await asyncio.gather(*tasks)
 
-  async def _local_embedding(self, text: str) -> List[float]:
+  async def _local_embedding(self, text: str) -> list[float]:
     """Generate embeddings using a hybrid approach.
 
     Uses TF-IDF-like features combined with semantic features
@@ -269,7 +271,7 @@ class EmbeddingService:
 class EntityExtractor:
   """Extract entities from text."""
 
-  async def extract(self, text: str) -> List[Dict[str, Any]]:
+  async def extract(self, text: str) -> list[dict[str, Any]]:
     """Extract named entities from text."""
     # Simplified entity extraction
     entities = []
@@ -323,8 +325,8 @@ class PatternMatcher:
   """Find patterns in historical data."""
 
   async def find_patterns(
-    self, query: str, historical_data: Optional[List[Dict]] = None
-  ) -> List[Dict[str, Any]]:
+    self, query: str, historical_data: list[dict] | None = None
+  ) -> list[dict[str, Any]]:
     """Find patterns related to the query."""
     patterns = []
 
@@ -364,7 +366,7 @@ class ContextEnricher:
   def __init__(
     self,
     graph_id: str,
-    config: Optional[RAGConfig] = None,
+    config: RAGConfig | None = None,
   ):
     """
     Initialize context enricher.
@@ -405,8 +407,8 @@ class ContextEnricher:
   async def enrich(
     self,
     query: str,
-    context: Optional[Dict[str, Any]] = None,
-  ) -> Dict[str, Any]:
+    context: dict[str, Any] | None = None,
+  ) -> dict[str, Any]:
     """
     Enrich context with relevant information.
 
@@ -460,9 +462,9 @@ class ContextEnricher:
     if tasks:
       results = await asyncio.gather(*tasks, return_exceptions=True)
 
-      for task_name, result in zip(task_names, results):
+      for task_name, result in zip(task_names, results, strict=False):
         if isinstance(result, Exception):
-          self.logger.error(f"Enrichment task '{task_name}' failed: {str(result)}")
+          self.logger.error(f"Enrichment task '{task_name}' failed: {result!s}")
           enriched["enrichment_errors"][task_name] = str(result)
         else:
           if task_name == "semantic_search":
@@ -489,7 +491,7 @@ class ContextEnricher:
 
     return enriched
 
-  async def semantic_search(self, query: str, k: int = 5) -> List[SearchResult]:
+  async def semantic_search(self, query: str, k: int = 5) -> list[SearchResult]:
     """
     Perform semantic search for relevant documents.
 
@@ -517,12 +519,12 @@ class ContextEnricher:
       return filtered
 
     except Exception as e:
-      self.logger.error(f"Semantic search failed: {str(e)}")
+      self.logger.error(f"Semantic search failed: {e!s}")
       raise  # Re-raise to be caught by gather
 
   async def load_graph_documents(
     self,
-    node_types: List[str] = None,
+    node_types: list[str] | None = None,
     limit: int = 1000,
   ):
     """
@@ -561,25 +563,25 @@ class ContextEnricher:
       self.logger.info(f"Loaded {len(chunks)} documents from graph")
 
     except Exception as e:
-      self.logger.error(f"Failed to load graph documents: {str(e)}")
+      self.logger.error(f"Failed to load graph documents: {e!s}")
 
-  async def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
+  async def _extract_entities(self, text: str) -> list[dict[str, Any]]:
     """Extract entities from text."""
     try:
       return await self.entity_extractor.extract(text)
     except Exception as e:
-      self.logger.error(f"Entity extraction failed: {str(e)}")
+      self.logger.error(f"Entity extraction failed: {e!s}")
       return []
 
-  async def _find_patterns(self, query: str) -> List[Dict[str, Any]]:
+  async def _find_patterns(self, query: str) -> list[dict[str, Any]]:
     """Find patterns in historical data."""
     try:
       return await self.pattern_matcher.find_patterns(query)
     except Exception as e:
-      self.logger.error(f"Pattern matching failed: {str(e)}")
+      self.logger.error(f"Pattern matching failed: {e!s}")
       return []
 
-  async def _get_graph_metadata(self) -> Dict[str, Any]:
+  async def _get_graph_metadata(self) -> dict[str, Any]:
     """Get metadata about the graph."""
     try:
       from robosystems.middleware.mcp import create_graph_mcp_client
@@ -598,15 +600,15 @@ class ContextEnricher:
         "graph_id": self.graph_id,
       }
     except Exception as e:
-      self.logger.error(f"Failed to get graph metadata: {str(e)}")
+      self.logger.error(f"Failed to get graph metadata: {e!s}")
       return {}
 
-  async def _embed_text(self, text: str) -> List[float]:
+  async def _embed_text(self, text: str) -> list[float]:
     """Generate embedding for text."""
     return await self.embedding_service.embed_text(text)
 
   async def _create_chunk(
-    self, content: str, metadata: Dict[str, Any] = None
+    self, content: str, metadata: dict[str, Any] | None = None
   ) -> DocumentChunk:
     """Create a document chunk with embedding."""
     embedding = await self._embed_text(content)
@@ -617,8 +619,8 @@ class ContextEnricher:
     )
 
   def _chunk_text(
-    self, text: str, chunk_size: int = None, chunk_overlap: int = None
-  ) -> List[DocumentChunk]:
+    self, text: str, chunk_size: int | None = None, chunk_overlap: int | None = None
+  ) -> list[DocumentChunk]:
     """Split text into chunks."""
     chunk_size = chunk_size or self.config.chunk_size
     chunk_overlap = chunk_overlap or self.config.chunk_overlap
@@ -646,10 +648,10 @@ class ContextEnricher:
 
   def _rerank_results(
     self,
-    results: List[SearchResult],
+    results: list[SearchResult],
     query: str,
     strategy: str = "score",
-  ) -> List[SearchResult]:
+  ) -> list[SearchResult]:
     """Rerank search results."""
     if strategy == "score":
       # Already sorted by score

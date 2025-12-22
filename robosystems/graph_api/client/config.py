@@ -5,8 +5,8 @@ Centralized configuration for Graph API clients with multi-backend support.
 """
 
 import os
-from typing import Dict, Any
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -30,7 +30,7 @@ class GraphClientConfig:
   circuit_breaker_timeout: int = 60
 
   # Request settings
-  headers: Dict[str, str] = field(default_factory=dict)
+  headers: dict[str, str] = field(default_factory=dict)
   verify_ssl: bool = True
 
   @classmethod
@@ -87,7 +87,7 @@ class GraphClientConfig:
     Returns:
         New GraphClientConfig instance
     """
-    config_dict: Dict[str, Any] = {
+    config_dict: dict[str, Any] = {
       "base_url": self.base_url,
       "timeout": self.timeout,
       "max_retries": self.max_retries,

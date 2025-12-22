@@ -1,6 +1,7 @@
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from robosystems.graph_api.backends.neo4j import Neo4jBackend
 

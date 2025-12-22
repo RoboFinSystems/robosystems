@@ -1,8 +1,9 @@
 """Authentication maintenance and cleanup functions."""
 
-from datetime import datetime, timezone
-from sqlalchemy.orm import Session
+from datetime import UTC, datetime
+
 from sqlalchemy import and_
+from sqlalchemy.orm import Session
 
 from ...models.iam import UserAPIKey
 
@@ -32,7 +33,7 @@ def cleanup_expired_api_keys(session: Session) -> dict:
     logger.debug("Skipping session cleanup - system uses API key + JWT authentication")
     expired_sessions = 0
 
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
 
     # Clean up API keys that have reached their expiration date
     logger.debug("Cleaning up expired API keys (past expires_at date)")

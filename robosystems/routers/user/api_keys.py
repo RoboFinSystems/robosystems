@@ -1,31 +1,32 @@
 """User API key management endpoints."""
 
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, status, HTTPException
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from ...database import get_db_session
+from ...logger import logger
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from ...models.iam import User, UserAPIKey
-from ...models.api.user import (
-  CreateAPIKeyRequest,
-  APIKeyInfo,
-  CreateAPIKeyResponse,
-  APIKeysResponse,
-  UpdateAPIKeyRequest,
-)
+from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...models.api.common import (
-  SuccessResponse,
-  ErrorResponse,
   ErrorCode,
+  ErrorResponse,
+  SuccessResponse,
   create_error_response,
 )
-from ...database import get_db_session
-from ...logger import logger
+from ...models.api.user import (
+  APIKeyInfo,
+  APIKeysResponse,
+  CreateAPIKeyRequest,
+  CreateAPIKeyResponse,
+  UpdateAPIKeyRequest,
+)
+from ...models.iam import User, UserAPIKey
 from ...security.input_validation import sanitize_string
 
 router = APIRouter(tags=["User"])
@@ -108,7 +109,7 @@ async def list_api_keys(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error retrieving API keys: {str(e)}")
+    logger.error(f"Error retrieving API keys: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error retrieving API keys",
@@ -160,7 +161,7 @@ async def create_api_key(
     if request.expires_at:
       try:
         expires_at = datetime.fromisoformat(request.expires_at.replace("Z", "+00:00"))
-        if expires_at <= datetime.now(timezone.utc):
+        if expires_at <= datetime.now(UTC):
           raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Expiration date must be in the future",
@@ -209,7 +210,7 @@ async def create_api_key(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error creating API key: {str(e)}")
+    logger.error(f"Error creating API key: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error creating API key",
@@ -312,7 +313,7 @@ async def update_api_key(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error updating API key: {str(e)}")
+    logger.error(f"Error updating API key: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error updating API key",
@@ -406,7 +407,7 @@ async def revoke_api_key(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Error revoking API key: {str(e)}")
+    logger.error(f"Error revoking API key: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error revoking API key",

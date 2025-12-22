@@ -1,7 +1,7 @@
 """Shared utilities for schema endpoints."""
 
-from typing import Dict, Any
 import asyncio
+from typing import Any
 
 from robosystems.logger import logger
 from robosystems.middleware.robustness import (
@@ -31,7 +31,7 @@ circuit_breaker = CircuitBreakerManager()
 timeout_coordinator = TimeoutCoordinator()
 
 
-async def get_schema_info(repository: Any) -> Dict[str, Any]:
+async def get_schema_info(repository: Any) -> dict[str, Any]:
   """
   Retrieve schema information from the graph database.
 
@@ -92,7 +92,7 @@ async def get_schema_info(repository: Any) -> Dict[str, Any]:
         continue
 
   except Exception as e:
-    logger.warning(f"Failed to get complete schema info: {str(e)}")
+    logger.warning(f"Failed to get complete schema info: {e!s}")
     # Try fallback with simple queries
     try:
       # Fallback to just getting table names

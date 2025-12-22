@@ -5,19 +5,19 @@ Specializes in financial analysis, SEC filings, and accounting data.
 """
 
 import json
-from typing import Dict, List, Optional, Any
+from typing import Any
 
+from robosystems.logger import logger
+from robosystems.operations.agents.ai_client import AIClient, AIMessage
 from robosystems.operations.agents.base import (
-  BaseAgent,
-  AgentMode,
   AgentCapability,
   AgentMetadata,
+  AgentMode,
   AgentResponse,
+  BaseAgent,
   ExecutionProfile,
 )
 from robosystems.operations.agents.registry import AgentRegistry
-from robosystems.operations.agents.ai_client import AIClient, AIMessage
-from robosystems.logger import logger
 
 
 @AgentRegistry.register("financial")
@@ -71,9 +71,9 @@ class FinancialAgent(BaseAgent):
     self,
     query: str,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict[str, Any]]] = None,
-    context: Optional[Dict[str, Any]] = None,
-    callback: Optional[Any] = None,
+    history: list[dict[str, Any]] | None = None,
+    context: dict[str, Any] | None = None,
+    callback: Any | None = None,
   ) -> AgentResponse:
     """
     Perform financial analysis.
@@ -140,9 +140,9 @@ class FinancialAgent(BaseAgent):
       )
 
     except Exception as e:
-      logger.error(f"Financial agent error: {str(e)}")
+      logger.error(f"Financial agent error: {e!s}")
       return AgentResponse(
-        content=f"Financial analysis failed: {str(e)}",
+        content=f"Financial analysis failed: {e!s}",
         agent_name=self.metadata.name,
         mode_used=mode,
         tokens_used=self.total_tokens_used,
@@ -152,7 +152,7 @@ class FinancialAgent(BaseAgent):
         },
       )
 
-  def can_handle(self, query: str, context: Optional[Dict[str, Any]] = None) -> float:
+  def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
     """
     Calculate confidence for handling financial queries.
 
@@ -228,9 +228,9 @@ class FinancialAgent(BaseAgent):
   async def _quick_analysis(
     self,
     query: str,
-    history: Optional[List[Dict]],
-    context: Dict[str, Any],
-    limits: Dict[str, Any],
+    history: list[dict] | None,
+    context: dict[str, Any],
+    limits: dict[str, Any],
   ) -> str:
     """Perform quick financial analysis with limited tool calls."""
     # Quick analysis with 1-2 tool calls
@@ -249,7 +249,7 @@ class FinancialAgent(BaseAgent):
         )
         results.append(result)
       except Exception as e:
-        logger.error(f"Tool call failed: {str(e)}")
+        logger.error(f"Tool call failed: {e!s}")
 
     # Format response
     if results:
@@ -260,9 +260,9 @@ class FinancialAgent(BaseAgent):
   async def _standard_analysis(
     self,
     query: str,
-    history: Optional[List[Dict]],
-    context: Dict[str, Any],
-    limits: Dict[str, Any],
+    history: list[dict] | None,
+    context: dict[str, Any],
+    limits: dict[str, Any],
   ) -> str:
     """Perform standard financial analysis."""
     # Standard analysis with 3-5 tool calls
@@ -283,7 +283,7 @@ class FinancialAgent(BaseAgent):
           )
           results.append(result)
         except Exception as e:
-          logger.error(f"Query failed: {str(e)}")
+          logger.error(f"Query failed: {e!s}")
 
     # Use AI for analysis
     if results:
@@ -294,10 +294,10 @@ class FinancialAgent(BaseAgent):
   async def _extended_analysis(
     self,
     query: str,
-    history: Optional[List[Dict]],
-    context: Dict[str, Any],
-    limits: Dict[str, Any],
-    callback: Optional[Any] = None,
+    history: list[dict] | None,
+    context: dict[str, Any],
+    limits: dict[str, Any],
+    callback: Any | None = None,
   ) -> str:
     """Perform extended financial analysis with deep research."""
     results = []
@@ -326,7 +326,7 @@ class FinancialAgent(BaseAgent):
           )
           results.append(result)
         except Exception as e:
-          logger.error(f"Query {i + 1} failed: {str(e)}")
+          logger.error(f"Query {i + 1} failed: {e!s}")
 
     if callback:
       callback("analysis", 80, "Analyzing financial data...")
@@ -368,7 +368,7 @@ class FinancialAgent(BaseAgent):
             LIMIT 20
             """
 
-  def _generate_financial_queries(self, user_query: str, schema: Any) -> List[str]:
+  def _generate_financial_queries(self, user_query: str, schema: Any) -> list[str]:
     """Generate multiple queries for financial analysis."""
     queries = []
 
@@ -394,7 +394,7 @@ class FinancialAgent(BaseAgent):
 
     return queries
 
-  def _generate_comprehensive_queries(self, user_query: str) -> List[str]:
+  def _generate_comprehensive_queries(self, user_query: str) -> list[str]:
     """Generate comprehensive queries for extended analysis."""
     queries = [
       # Get entity overview
@@ -419,7 +419,7 @@ class FinancialAgent(BaseAgent):
     return queries
 
   def _format_financial_response(
-    self, query: str, results: List[Any], mode: str
+    self, query: str, results: list[Any], mode: str
   ) -> str:
     """Format financial results into a response."""
     if not results:
@@ -438,7 +438,7 @@ class FinancialAgent(BaseAgent):
     return response
 
   async def _ai_financial_analysis(
-    self, query: str, data: List[Any], history: Optional[List[Dict]]
+    self, query: str, data: list[Any], history: list[dict] | None
   ) -> str:
     """Use AI to analyze financial data."""
     try:
@@ -484,11 +484,11 @@ class FinancialAgent(BaseAgent):
       return response.content
 
     except Exception as e:
-      logger.error(f"AI analysis failed: {str(e)}")
+      logger.error(f"AI analysis failed: {e!s}")
       return self._format_financial_response(query, data, "standard")
 
   async def _ai_deep_financial_analysis(
-    self, query: str, data: List[Any], history: Optional[List[Dict]]
+    self, query: str, data: list[Any], history: list[dict] | None
   ) -> str:
     """Perform deep AI analysis of financial data."""
     try:
@@ -546,7 +546,7 @@ class FinancialAgent(BaseAgent):
       return response.content
 
     except Exception as e:
-      logger.error(f"Deep AI analysis failed: {str(e)}")
+      logger.error(f"Deep AI analysis failed: {e!s}")
       return self._format_financial_response(query, data, "extended")
 
   def _calculate_confidence(self, query: str, response: str) -> float:

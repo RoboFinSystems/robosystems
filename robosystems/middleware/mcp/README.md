@@ -5,6 +5,7 @@ This middleware provides Model Context Protocol (MCP) integration for AI-powered
 ## Overview
 
 The MCP middleware:
+
 - Provides MCP client implementation for graph database access
 - Manages connection pooling for efficient resource usage
 - Implements specialized MCP tools for graph operations
@@ -45,6 +46,7 @@ mcp/
 Main MCP client for interacting with graph databases through the RoboSystems API.
 
 **Features:**
+
 - HTTP-based communication with Graph API
 - Automatic timeout and retry handling
 - Query complexity validation
@@ -52,6 +54,7 @@ Main MCP client for interacting with graph databases through the RoboSystems API
 - Schema caching for performance
 
 **Usage:**
+
 ```python
 from robosystems.middleware.mcp import create_graph_mcp_client
 
@@ -72,6 +75,7 @@ schema = await client.get_schema()
 Efficient connection pooling to reduce initialization overhead and improve performance.
 
 **Features:**
+
 - Per-graph connection pools
 - Configurable pool sizes and lifetimes
 - Automatic cleanup of idle connections
@@ -79,6 +83,7 @@ Efficient connection pooling to reduce initialization overhead and improve perfo
 - Thread-safe pool management
 
 **Configuration:**
+
 ```python
 # Default pool settings
 max_connections_per_graph: 10
@@ -87,6 +92,7 @@ max_lifetime: 3600 seconds (1 hour)
 ```
 
 **Usage:**
+
 ```python
 from robosystems.middleware.mcp import acquire_graph_mcp_client
 
@@ -103,6 +109,7 @@ Specialized tools for different graph database operations.
 **Available Tools:**
 
 #### Cypher Tool (`cypher_tool.py`)
+
 Execute Cypher queries with validation and result processing.
 
 ```python
@@ -115,6 +122,7 @@ result = await tool.execute({
 ```
 
 #### Schema Tool (`schema_tool.py`)
+
 Introspect graph schema and structure.
 
 ```python
@@ -126,6 +134,7 @@ schema = await tool.get_schema()
 ```
 
 #### Structure Tool (`structure_tool.py`)
+
 Explore graph structure and relationships.
 
 ```python
@@ -139,6 +148,7 @@ structure = await tool.get_structure({
 ```
 
 #### Facts Tool (`facts_tool.py`)
+
 Query financial facts from SEC XBRL data.
 
 ```python
@@ -153,6 +163,7 @@ facts = await tool.query({
 ```
 
 #### Properties Tool (`properties_tool.py`)
+
 Discover available properties on nodes.
 
 ```python
@@ -165,6 +176,7 @@ properties = await tool.discover({
 ```
 
 #### Example Queries Tool (`example_queries_tool.py`)
+
 Provide query templates and examples.
 
 ```python
@@ -177,9 +189,11 @@ examples = await tool.get_examples({
 ```
 
 #### Workspace Tools (`workspace.py`)
+
 Manage workspaces (subgraphs) for isolated development and testing environments.
 
 **Available Operations:**
+
 - `create-workspace` - Create new workspace/subgraph
 - `delete-workspace` - Delete existing workspace
 - `list-workspaces` - List all workspaces for parent graph
@@ -197,9 +211,11 @@ result = await tool.execute({
 ```
 
 #### Data Operation Tools (`data_tools.py`)
+
 Tools for data ingestion, staging, and graph materialization workflows.
 
 ##### Build Fact Grid Tool
+
 Construct multidimensional fact grids from graph data for analysis.
 
 ```python
@@ -216,6 +232,7 @@ result = await tool.execute({
 ```
 
 ##### Ingest File Tool
+
 Upload and stage files in DuckDB for immediate querying before graph materialization.
 
 ```python
@@ -230,6 +247,7 @@ result = await tool.execute({
 ```
 
 ##### Map Elements Tool
+
 Map Chart of Accounts elements to XBRL taxonomy elements (US-GAAP).
 
 ```python
@@ -244,6 +262,7 @@ result = await tool.execute({
 ```
 
 ##### Query Staging Tool
+
 Execute SQL queries against DuckDB staging tables before materialization.
 
 ```python
@@ -257,6 +276,7 @@ result = await tool.execute({
 ```
 
 ##### Materialize Graph Tool
+
 Trigger materialization from DuckDB staging to LadybugDB graph database.
 
 ```python
@@ -274,6 +294,7 @@ result = await tool.execute({
 Validates query complexity and enforces limits to prevent resource exhaustion.
 
 **Features:**
+
 - Query length validation (max 50KB)
 - Complexity scoring based on query patterns
 - Timeout enforcement (30 seconds default)
@@ -281,6 +302,7 @@ Validates query complexity and enforces limits to prevent resource exhaustion.
 - Protection against expensive operations
 
 **Configuration:**
+
 ```bash
 GRAPH_MAX_QUERY_LENGTH=50000      # Maximum query size (bytes)
 GRAPH_QUERY_TIMEOUT=30            # Query timeout (seconds)
@@ -292,6 +314,7 @@ MCP_MAX_COMPLEXITY_SCORE=100      # Complexity threshold
 Comprehensive exception hierarchy for MCP operations.
 
 **Exception Classes:**
+
 - `GraphAPIError` - Base exception for all MCP errors
 - `GraphQueryTimeoutError` - Query exceeded timeout
 - `GraphQueryComplexityError` - Query too complex
@@ -304,6 +327,7 @@ Comprehensive exception hierarchy for MCP operations.
 - `LadybugDBSchemaError` - Schema validation failed
 
 **Usage:**
+
 ```python
 from robosystems.middleware.mcp import (
     GraphQueryTimeoutError,
@@ -380,24 +404,6 @@ response = await agent.execute({
 })
 ```
 
-### With Celery Tasks
-
-```python
-from celery import shared_task
-from robosystems.middleware.mcp import create_graph_mcp_client
-
-@shared_task
-async def analyze_financials(graph_id: str, company: str):
-    client = await create_graph_mcp_client(graph_id)
-    try:
-        result = await client.execute_query(
-            f"MATCH (c:Company {{ticker: '{company}'}}) RETURN c"
-        )
-        return process_results(result)
-    finally:
-        await client.close()
-```
-
 ## Performance Optimization
 
 ### Connection Pooling Benefits
@@ -439,21 +445,25 @@ print(f"Latency: {health['latency_ms']}ms")
 ### Common Issues
 
 **1. Query Timeouts**
+
 - Increase `GRAPH_QUERY_TIMEOUT` for complex queries
 - Optimize query patterns (use LIMIT clauses)
 - Check Graph API instance health
 
 **2. Connection Pool Exhausted**
+
 - Increase `MCP_POOL_MAX_CONNECTIONS`
 - Check for connection leaks (missing context manager exits)
 - Review pool lifetime settings
 
 **3. Validation Errors**
+
 - Check query syntax (must be valid Cypher)
 - Verify query length is within limits
 - Review complexity score (simplify query if needed)
 
 **4. Authentication Failures**
+
 - Verify graph access permissions
 - Check API key validity
 - Ensure user has access to graph
@@ -489,6 +499,7 @@ logging.getLogger("robosystems.middleware.mcp").setLevel(logging.DEBUG)
 ## Support
 
 For MCP-specific issues:
+
 - Check Graph API health and connectivity
 - Review query validation errors for syntax issues
 - Monitor connection pool metrics

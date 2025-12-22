@@ -8,8 +8,8 @@ the status of any long-running background operation.
 import json
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import redis.asyncio as redis_async
 
@@ -46,8 +46,8 @@ class GenericTaskManager:
   async def create_task(
     self,
     task_type: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    estimated_size: Optional[float] = None,
+    metadata: dict[str, Any] | None = None,
+    estimated_size: float | None = None,
   ) -> str:
     """
     Create a new task.
@@ -66,7 +66,7 @@ class GenericTaskManager:
       "task_id": task_id,
       "task_type": task_type,
       "status": TaskStatus.PENDING.value,
-      "created_at": datetime.now(timezone.utc).isoformat(),
+      "created_at": datetime.now(UTC).isoformat(),
       "started_at": None,
       "completed_at": None,
       "progress_percent": 0,
@@ -115,7 +115,7 @@ class GenericTaskManager:
       json.dumps(task_data),
     )
 
-  async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+  async def get_task(self, task_id: str) -> dict[str, Any] | None:
     """
     Get task status.
 
@@ -133,7 +133,7 @@ class GenericTaskManager:
     return None
 
   async def complete_task(
-    self, task_id: str, result: Optional[Dict[str, Any]] = None
+    self, task_id: str, result: dict[str, Any] | None = None
   ) -> None:
     """
     Mark task as completed.
@@ -145,7 +145,7 @@ class GenericTaskManager:
     await self.update_task(
       task_id,
       status=TaskStatus.COMPLETED.value,
-      completed_at=datetime.now(timezone.utc).isoformat(),
+      completed_at=datetime.now(UTC).isoformat(),
       progress_percent=100,
       result=result or {},
     )
@@ -161,7 +161,7 @@ class GenericTaskManager:
     await self.update_task(
       task_id,
       status=TaskStatus.FAILED.value,
-      completed_at=datetime.now(timezone.utc).isoformat(),
+      completed_at=datetime.now(UTC).isoformat(),
       error=error,
     )
 

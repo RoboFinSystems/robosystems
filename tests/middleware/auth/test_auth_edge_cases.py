@@ -1,9 +1,10 @@
 """Comprehensive tests for authentication edge cases and failure scenarios."""
 
+import secrets
 import time
 from unittest.mock import MagicMock, patch
+
 import pytest
-import secrets
 
 from robosystems.middleware.auth.cache import APIKeyCache
 
@@ -49,11 +50,13 @@ class TestKeyRotationEdgeCases:
     cache = APIKeyCache()
 
     # Mock encryption to fail validation
-    with patch.object(
-      cache, "_encrypt_cache_data", side_effect=Exception("Encryption failed")
+    with (
+      patch.object(
+        cache, "_encrypt_cache_data", side_effect=Exception("Encryption failed")
+      ),
+      pytest.raises(Exception, match="Encryption failed"),
     ):
-      with pytest.raises(Exception, match="Encryption failed"):
-        cache._rotate_encryption_key()
+      cache._rotate_encryption_key()
 
     # Verify rollback occurred
     setex_calls = mock_redis_client.setex.call_args_list

@@ -43,7 +43,6 @@ potentially storage overages need credit-based billing.
 
 from decimal import Decimal
 
-
 # SINGLE SOURCE OF TRUTH: Tier Credit Allocations
 # These are the monthly AI credit allocations for each subscription tier
 # Updated 2025-11-09: Reduced to sustainable levels (99% reduction from original)

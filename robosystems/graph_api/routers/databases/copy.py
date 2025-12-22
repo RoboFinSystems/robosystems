@@ -16,25 +16,28 @@ import json
 import os
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
+import redis.asyncio as redis_async
 from fastapi import (
   APIRouter,
   BackgroundTasks,
   Depends,
   HTTPException,
+)
+from fastapi import (
   Path as PathParam,
+)
+from fastapi import (
   status as http_status,
 )
-import redis.asyncio as redis_async
 
-from robosystems.graph_api.core.ladybug import get_ladybug_service, get_connection_pool
-from robosystems.graph_api.models.tasks import TaskStatus, BackgroundIngestRequest
-from robosystems.logger import logger
-from robosystems.config.valkey_registry import ValkeyDatabase
 from robosystems.config import env
-
+from robosystems.config.valkey_registry import ValkeyDatabase
+from robosystems.graph_api.core.ladybug import get_connection_pool, get_ladybug_service
+from robosystems.graph_api.models.tasks import BackgroundIngestRequest, TaskStatus
+from robosystems.logger import logger
 
 # Tables that require aggressive memory cleanup after ingestion
 # This is configurable via environment variable to support different use cases
@@ -54,7 +57,7 @@ class IngestionTaskManager:
   """Manages background ingestion tasks and their status."""
 
   def __init__(self):
-    self.tasks: Dict[str, Dict[str, Any]] = {}
+    self.tasks: dict[str, dict[str, Any]] = {}
     self._redis_client = None
     self._redis_url = None
 
@@ -87,7 +90,7 @@ class IngestionTaskManager:
       "table_name": table_name,
       "s3_pattern": s3_pattern,
       "status": TaskStatus.PENDING,
-      "created_at": datetime.now(timezone.utc).isoformat(),
+      "created_at": datetime.now(UTC).isoformat(),
       "started_at": None,
       "completed_at": None,
       "progress_percent": 0,
@@ -131,7 +134,7 @@ class IngestionTaskManager:
       json.dumps(task_data),
     )
 
-  async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+  async def get_task(self, task_id: str) -> dict[str, Any] | None:
     """Get task status."""
     redis_client = await self.get_redis()
     task_json = await redis_client.get(f"lbug:task:{task_id}")
@@ -150,7 +153,7 @@ async def perform_ingestion(
   graph_id: str,
   table_name: str,
   s3_pattern: str,
-  s3_credentials: Optional[dict],
+  s3_credentials: dict | None,
   ignore_errors: bool,
   backend,
 ) -> None:
@@ -164,7 +167,7 @@ async def perform_ingestion(
     await task_manager.update_task(
       task_id,
       status=TaskStatus.RUNNING,
-      started_at=datetime.now(timezone.utc).isoformat(),
+      started_at=datetime.now(UTC).isoformat(),
     )
 
     # Use backend-specific ingestion method
@@ -196,8 +199,9 @@ async def perform_ingestion(
       )
       try:
         import asyncio
-        import psutil
         import gc
+
+        import psutil
 
         # Force Python garbage collection
         gc.collect()
@@ -243,7 +247,7 @@ async def perform_ingestion(
     await task_manager.update_task(
       task_id,
       status=TaskStatus.COMPLETED,
-      completed_at=datetime.now(timezone.utc).isoformat(),
+      completed_at=datetime.now(UTC).isoformat(),
       progress_percent=100,
       records_processed=records_loaded,
       result={
@@ -288,7 +292,7 @@ async def perform_ingestion(
     await task_manager.update_task(
       task_id,
       status=TaskStatus.FAILED,
-      completed_at=datetime.now(timezone.utc).isoformat(),
+      completed_at=datetime.now(UTC).isoformat(),
       error=str(e),
     )
 
@@ -300,7 +304,7 @@ async def start_background_copy(
   graph_id: str = PathParam(..., description="Graph database identifier"),
   ladybug_service=Depends(get_ladybug_service),
   connection_pool=Depends(get_connection_pool),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Start a background copy operation with SSE monitoring support.
 
@@ -347,7 +351,7 @@ async def start_background_copy(
     "task_id": task_id,
     "table_name": request.table_name,
     "graph_id": graph_id,
-    "started_at": datetime.now(timezone.utc).isoformat(),
+    "started_at": datetime.now(UTC).isoformat(),
     "is_large_table": request.table_name.lower() in ["fact", "factdimension", "report"],
   }
   await redis_client.setex(ingestion_key, 3600, json.dumps(ingestion_data))

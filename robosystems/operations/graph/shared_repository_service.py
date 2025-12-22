@@ -20,11 +20,11 @@ Key differences from user graphs:
 - Multiple users subscribe individually
 """
 
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
-from ...logger import logger
 from ...config.graph_tier import GraphTier
+from ...logger import logger
 
 
 class SharedRepositoryService:
@@ -60,9 +60,9 @@ class SharedRepositoryService:
   async def create_shared_repository(
     self,
     repository_name: str,
-    created_by: Optional[str] = None,
+    created_by: str | None = None,
     instance_id: str = "ladybug-shared-prod",
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Create a shared repository following the same pattern as user graphs.
 
@@ -204,7 +204,7 @@ class SharedRepositoryService:
         "graph_id": graph_id,
         "instance_id": instance_id,
         "status": "created",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "created_by": created_by or "system",
         "database_info": db_info,
         "config": config,
@@ -236,9 +236,9 @@ class SharedRepositoryService:
 
 async def ensure_shared_repository_exists(
   repository_name: str,
-  created_by: Optional[str] = None,
+  created_by: str | None = None,
   instance_id: str = "ladybug-shared-prod",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Ensure a shared repository exists, creating it if necessary.
 
@@ -253,6 +253,32 @@ async def ensure_shared_repository_exists(
   Returns:
       Dictionary with repository status
   """
+  # Check if PostgreSQL records exist (Graph and GraphSchema)
+  postgres_exists = False
+  try:
+    from ...database import get_db_session
+    from ...models.iam import Graph, GraphSchema
+
+    db_gen = get_db_session()
+    db = next(db_gen)
+    try:
+      graph = db.query(Graph).filter(Graph.graph_id == repository_name).first()
+      schema = GraphSchema.get_active_schema(repository_name, db) if graph else None
+      postgres_exists = graph is not None and schema is not None
+      if graph and not schema:
+        logger.info(
+          f"Repository {repository_name} has Graph record but missing GraphSchema"
+        )
+    finally:
+      try:
+        next(db_gen)
+      except StopIteration:
+        pass
+  except Exception as e:
+    logger.warning(f"Could not check PostgreSQL records for {repository_name}: {e}")
+
+  # Check if LadybugDB database exists
+  ladybug_exists = False
   try:
     from ...graph_api.client.factory import GraphClientFactory
 
@@ -262,23 +288,28 @@ async def ensure_shared_repository_exists(
 
     try:
       db_info = await client.get_database_info(repository_name)
-      if db_info.get("is_healthy", False):
-        logger.info(f"Repository {repository_name} already exists")
-        return {
-          "status": "exists",
-          "repository_name": repository_name,
-          "graph_id": repository_name,
-          "database_info": db_info,
-        }
+      ladybug_exists = db_info.get("is_healthy", False)
     finally:
       await client.close()
   except (ConnectionError, TimeoutError) as e:
     logger.warning(f"Could not connect to check repository {repository_name}: {e}")
   except Exception as e:
-    logger.info(
-      f"Repository {repository_name} not found or inaccessible, will create: {e}"
-    )
+    logger.info(f"Repository {repository_name} not found in LadybugDB: {e}")
 
+  # If both exist, we're done
+  if postgres_exists and ladybug_exists:
+    logger.info(f"Repository {repository_name} fully exists (LadybugDB + PostgreSQL)")
+    return {
+      "status": "exists",
+      "repository_name": repository_name,
+      "graph_id": repository_name,
+    }
+
+  # Otherwise, create/ensure everything exists
+  logger.info(
+    f"Repository {repository_name} needs setup "
+    f"(postgres={postgres_exists}, ladybug={ladybug_exists})"
+  )
   service = SharedRepositoryService()
   return await service.create_shared_repository(
     repository_name, created_by=created_by, instance_id=instance_id

@@ -7,11 +7,11 @@ import time
 # Import robustness middleware
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
-  TimeoutCoordinator,
-  OperationType,
   OperationStatus,
-  record_operation_metric,
+  OperationType,
+  TimeoutCoordinator,
   get_operation_logger,
+  record_operation_metric,
 )
 
 # Import provider registry
@@ -32,7 +32,11 @@ def create_robustness_components():
 
 
 def record_operation_start(
-  operation_name: str, endpoint: str, graph_id: str, user_id: str, metadata: dict = None
+  operation_name: str,
+  endpoint: str,
+  graph_id: str,
+  user_id: str,
+  metadata: dict | None = None,
 ):
   """Record the start of an operation for metrics."""
   return record_operation_metric(
@@ -53,7 +57,7 @@ def record_operation_success(
   endpoint: str,
   graph_id: str,
   user_id: str,
-  metadata: dict = None,
+  metadata: dict | None = None,
 ):
   """Record successful operation completion."""
   operation_duration_ms = (time.time() - components["operation_start_time"]) * 1000
@@ -77,9 +81,9 @@ def record_operation_failure(
   endpoint: str,
   graph_id: str,
   user_id: str,
-  error_type: str = None,
-  error_message: str = None,
-  timeout_seconds: float = None,
+  error_type: str | None = None,
+  error_message: str | None = None,
+  timeout_seconds: float | None = None,
 ):
   """Record operation failure."""
   operation_duration_ms = (time.time() - components["operation_start_time"]) * 1000

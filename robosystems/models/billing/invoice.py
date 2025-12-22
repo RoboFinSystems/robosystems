@@ -1,10 +1,11 @@
 """Billing invoice models - consolidated invoicing for all resources."""
 
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from sqlalchemy import Column, String, Integer, DateTime, JSON, ForeignKey, Index
-from sqlalchemy.orm import relationship, Session
+from typing import Optional
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...logger import get_logger
@@ -58,13 +59,11 @@ class BillingInvoice(Base):
 
   notes = Column(String, nullable=True)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -92,7 +91,7 @@ class BillingInvoice(Base):
     payment_terms: str = "net_30",
   ) -> "BillingInvoice":
     """Create a new invoice for a billing period."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     invoice_number = cls._generate_invoice_number(session)
 
@@ -128,7 +127,7 @@ class BillingInvoice(Base):
   @classmethod
   def _generate_invoice_number(cls, session: Session) -> str:
     """Generate unique invoice number."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     year = now.year
     month = now.month
 
@@ -150,7 +149,7 @@ class BillingInvoice(Base):
     amount_cents: int,
     session: Session,
     quantity: int = 1,
-    line_metadata: Optional[dict] = None,
+    line_metadata: dict | None = None,
   ) -> "BillingInvoiceLineItem":
     """Add a line item to the invoice."""
     line_item = BillingInvoiceLineItem(
@@ -181,14 +180,14 @@ class BillingInvoice(Base):
     total = sum(item.amount_cents for item in self.line_items)
     self.subtotal_cents = total
     self.total_cents = total + (self.tax_cents or 0) - (self.discount_cents or 0)
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
 
   def finalize(self, session: Session) -> None:
     """Finalize the invoice and mark as open."""
     self.status = InvoiceStatus.OPEN.value
-    self.sent_at = datetime.now(timezone.utc)
-    self.updated_at = datetime.now(timezone.utc)
+    self.sent_at = datetime.now(UTC)
+    self.updated_at = datetime.now(UTC)
 
     session.commit()
     session.refresh(self)
@@ -196,14 +195,14 @@ class BillingInvoice(Base):
     logger.info(f"Finalized invoice {self.invoice_number}")
 
   def mark_paid(
-    self, session: Session, payment_method: str, payment_reference: Optional[str] = None
+    self, session: Session, payment_method: str, payment_reference: str | None = None
   ) -> None:
     """Mark invoice as paid."""
     self.status = InvoiceStatus.PAID.value
-    self.paid_at = datetime.now(timezone.utc)
+    self.paid_at = datetime.now(UTC)
     self.payment_method = payment_method
     self.payment_reference = payment_reference
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     session.commit()
     session.refresh(self)
@@ -280,9 +279,7 @@ class BillingInvoiceLineItem(Base):
 
   line_metadata = Column(JSON, nullable=True)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
   invoice = relationship("BillingInvoice", back_populates="line_items")
 

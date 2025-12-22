@@ -2,7 +2,8 @@
 Database-related Pydantic models for the Graph API.
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -13,7 +14,7 @@ class QueryRequest(BaseModel):
     ..., description="Target database name", pattern=r"^[a-zA-Z0-9_-]+$", max_length=64
   )
   cypher: str = Field(..., description="Cypher query to execute", max_length=10000)
-  parameters: Optional[Dict[str, Any]] = Field(
+  parameters: dict[str, Any] | None = Field(
     default=None, description="Query parameters"
   )
 
@@ -25,8 +26,8 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
   """Response model for query results."""
 
-  data: List[Dict[str, Any]] = Field(..., description="Query result rows")
-  columns: List[str] = Field(..., description="Column names")
+  data: list[dict[str, Any]] = Field(..., description="Query result rows")
+  columns: list[str] = Field(..., description="Column names")
   execution_time_ms: float = Field(
     ..., description="Query execution time in milliseconds"
   )
@@ -38,8 +39,8 @@ class SchemaInstallRequest(BaseModel):
   """Request to install schema on existing database."""
 
   type: str = Field(..., description="Schema type (custom, ddl)")
-  ddl: Optional[str] = Field(None, description="DDL commands to execute")
-  metadata: Optional[Dict[str, Any]] = Field(
+  ddl: str | None = Field(None, description="DDL commands to execute")
+  metadata: dict[str, Any] | None = Field(
     None, description="Schema metadata (name, version, etc)"
   )
 
@@ -81,10 +82,10 @@ class BackupResponse(BaseModel):
   message: str = Field(..., description="Backup initiation message")
   database: str = Field(..., description="Database being backed up")
   backup_format: str = Field(..., description="Backup format requested")
-  monitor_url: Optional[str] = Field(
+  monitor_url: str | None = Field(
     None, description="SSE endpoint URL for monitoring backup progress"
   )
-  estimated_completion_time: Optional[str] = Field(
+  estimated_completion_time: str | None = Field(
     None, description="Estimated completion time (ISO format)"
   )
 
@@ -98,7 +99,7 @@ class DatabaseInfo(BaseModel):
   size_bytes: int = Field(..., description="Database size in bytes")
   read_only: bool = Field(..., description="Whether database is read-only")
   is_healthy: bool = Field(..., description="Database health status")
-  last_accessed: Optional[str] = Field(None, description="Last access timestamp")
+  last_accessed: str | None = Field(None, description="Last access timestamp")
 
 
 class DatabaseCreateRequest(BaseModel):
@@ -115,11 +116,11 @@ class DatabaseCreateRequest(BaseModel):
     description="Schema type (entity, shared, custom)",
     pattern=r"^(entity|shared|custom)$",
   )
-  repository_name: Optional[str] = Field(
+  repository_name: str | None = Field(
     None,
     description="Repository name for shared schemas (e.g., 'sec', 'industry')",
   )
-  custom_schema_ddl: Optional[str] = Field(
+  custom_schema_ddl: str | None = Field(
     None,
     description="Custom DDL commands for custom schema type",
   )
@@ -147,10 +148,10 @@ class DatabaseCreateResponse(BaseModel):
 class DatabaseListResponse(BaseModel):
   """Response listing all databases."""
 
-  databases: List[DatabaseInfo] = Field(..., description="List of databases")
+  databases: list[DatabaseInfo] = Field(..., description="List of databases")
   total_databases: int = Field(..., description="Total number of databases")
   total_size_bytes: int = Field(..., description="Total size of all databases")
-  node_capacity: Dict[str, Any] = Field(..., description="Node capacity information")
+  node_capacity: dict[str, Any] = Field(..., description="Node capacity information")
 
 
 class NodeDatabasesHealthResponse(BaseModel):
@@ -158,7 +159,7 @@ class NodeDatabasesHealthResponse(BaseModel):
 
   healthy_databases: int = Field(..., description="Number of healthy databases")
   unhealthy_databases: int = Field(..., description="Number of unhealthy databases")
-  databases: List[DatabaseInfo] = Field(..., description="Database health details")
+  databases: list[DatabaseInfo] = Field(..., description="Database health details")
 
 
 class RestoreResponse(BaseModel):
@@ -170,7 +171,7 @@ class RestoreResponse(BaseModel):
   status: str = Field(..., description="Initial restore status")
   message: str = Field(..., description="Restore initiation message")
   database: str = Field(..., description="Database being restored")
-  monitor_url: Optional[str] = Field(
+  monitor_url: str | None = Field(
     None, description="SSE endpoint URL for monitoring restore progress"
   )
   system_backup_created: bool = Field(

@@ -6,17 +6,18 @@ their entire lifecycle, from creation to completion or failure.
 """
 
 import asyncio
-from typing import Dict, Any, Optional, Callable, Awaitable, List
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
+from robosystems.logger import logger
 from robosystems.middleware.sse.event_storage import (
-  get_event_storage,
   EventType,
   OperationStatus,
   SSEEventStorage,
+  get_event_storage,
 )
 from robosystems.middleware.sse.streaming import emit_event_to_operation
-from robosystems.logger import logger
 
 
 class OperationManager:
@@ -27,16 +28,16 @@ class OperationManager:
   making it easy for endpoints to create and track operations.
   """
 
-  def __init__(self, event_storage: Optional[SSEEventStorage] = None):
+  def __init__(self, event_storage: SSEEventStorage | None = None):
     self.event_storage = event_storage or get_event_storage()
 
   async def start_operation(
     self,
     operation_type: str,
     user_id: str,
-    graph_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
-    initial_data: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    operation_id: str | None = None,
+    initial_data: dict[str, Any] | None = None,
   ) -> str:
     """
     Start a new operation and emit the started event.
@@ -77,8 +78,8 @@ class OperationManager:
     self,
     operation_id: str,
     message: str,
-    progress_percent: Optional[float] = None,
-    details: Optional[Dict[str, Any]] = None,
+    progress_percent: float | None = None,
+    details: dict[str, Any] | None = None,
   ):
     """
     Emit a progress update for an operation.
@@ -102,7 +103,7 @@ class OperationManager:
   async def complete_operation(
     self,
     operation_id: str,
-    result: Optional[Dict[str, Any]] = None,
+    result: dict[str, Any] | None = None,
     message: str = "Operation completed successfully",
   ):
     """
@@ -122,7 +123,7 @@ class OperationManager:
     logger.info(f"Completed operation {operation_id}")
 
   async def fail_operation(
-    self, operation_id: str, error: str, error_details: Optional[Dict[str, Any]] = None
+    self, operation_id: str, error: str, error_details: dict[str, Any] | None = None
   ):
     """
     Mark an operation as failed.
@@ -151,7 +152,7 @@ class OperationManager:
     await self.event_storage.cancel_operation(operation_id, reason)
     logger.info(f"Cancelled operation {operation_id}: {reason}")
 
-  async def get_operation_status(self, operation_id: str) -> Optional[OperationStatus]:
+  async def get_operation_status(self, operation_id: str) -> OperationStatus | None:
     """Get current status of an operation."""
     metadata = await self.event_storage.get_operation_metadata(operation_id)
     return metadata.status if metadata else None
@@ -161,9 +162,9 @@ class OperationManager:
     self,
     operation_type: str,
     user_id: str,
-    graph_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
-    initial_data: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    operation_id: str | None = None,
+    initial_data: dict[str, Any] | None = None,
   ):
     """
     Context manager for operation lifecycle management.
@@ -223,9 +224,9 @@ class OperationManager:
     operation_type: str,
     user_id: str,
     operation_func: Callable[[str], Awaitable[Any]],
-    graph_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
-    initial_data: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    operation_id: str | None = None,
+    initial_data: dict[str, Any] | None = None,
   ) -> str:
     """
     Run an operation function with automatic lifecycle management.
@@ -272,9 +273,9 @@ class OperationManager:
     self,
     operation_type: str,
     user_id: str,
-    operations: List[Callable[[str, int], Awaitable[Any]]],
-    graph_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
+    operations: list[Callable[[str, int], Awaitable[Any]]],
+    graph_id: str | None = None,
+    operation_id: str | None = None,
   ) -> str:
     """
     Run a batch of operations with combined progress tracking.
@@ -315,7 +316,7 @@ class OperationManager:
 
 
 # Global instance
-_operation_manager: Optional[OperationManager] = None
+_operation_manager: OperationManager | None = None
 
 
 def get_operation_manager() -> OperationManager:
@@ -329,9 +330,9 @@ def get_operation_manager() -> OperationManager:
 def emit_sse_event(
   operation_id: str,
   status: OperationStatus,
-  data: Optional[Dict[str, Any]] = None,
-  message: Optional[str] = None,
-  progress_percentage: Optional[float] = None,
+  data: dict[str, Any] | None = None,
+  message: str | None = None,
+  progress_percentage: float | None = None,
 ):
   """
   Compatibility wrapper for emitting SSE events.
@@ -395,9 +396,9 @@ def emit_sse_event(
 async def create_operation_response(
   operation_type: str,
   user_id: str,
-  graph_id: Optional[str] = None,
-  operation_id: Optional[str] = None,
-) -> Dict[str, Any]:
+  graph_id: str | None = None,
+  operation_id: str | None = None,
+) -> dict[str, Any]:
   """
   Create a new operation and return the standardized response.
 

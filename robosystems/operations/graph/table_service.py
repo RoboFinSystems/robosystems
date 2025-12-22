@@ -1,10 +1,11 @@
-from typing import List, Literal
+from typing import Literal
+
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam import GraphTable
-from robosystems.schemas.parser import parse_cypher_schema
 from robosystems.config import env
 from robosystems.logger import logger
+from robosystems.models.iam import GraphTable
+from robosystems.schemas.parser import parse_cypher_schema
 
 
 def infer_table_type(table_name: str) -> Literal["node", "relationship"]:
@@ -39,7 +40,7 @@ class TableService:
 
   def create_tables_from_schema(
     self, graph_id: str, user_id: str, schema_ddl: str
-  ) -> List[GraphTable]:
+  ) -> list[GraphTable]:
     """
     Automatically create DuckDB staging tables from graph schema.
 
@@ -64,7 +65,7 @@ class TableService:
       relationship_types = parse_relationship_types(schema_ddl)
     except Exception as e:
       logger.error(f"Failed to parse schema DDL for graph {graph_id}: {e}")
-      raise ValueError(f"Invalid schema DDL: {str(e)}") from e
+      raise ValueError(f"Invalid schema DDL: {e!s}") from e
 
     if not node_types and not relationship_types:
       logger.warning(

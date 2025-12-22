@@ -9,12 +9,12 @@ Provides comprehensive metrics collection for all API operations including:
 - Queue performance statistics
 """
 
+import threading
 import time
-from typing import Dict, Optional, Any
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from enum import Enum
-from collections import defaultdict, deque
-import threading
+from typing import Any
 
 from robosystems.logger import logger
 
@@ -60,11 +60,11 @@ class OperationMetric:
   status: OperationStatus
   duration_ms: float
   endpoint: str
-  graph_id: Optional[str] = None
-  user_id: Optional[str] = None
-  operation_name: Optional[str] = None
-  error_details: Optional[str] = None
-  metadata: Dict[str, Any] = field(default_factory=dict)
+  graph_id: str | None = None
+  user_id: str | None = None
+  operation_name: str | None = None
+  error_details: str | None = None
+  metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -84,7 +84,7 @@ class OperationMetricsSummary:
   error_rate: float = 0.0
   throughput_per_minute: float = 0.0
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert summary to dictionary for JSON serialization."""
     return {
       "total_operations": self.total_operations,
@@ -133,13 +133,13 @@ class OperationMetricsCollector:
     self._metrics: deque[OperationMetric] = deque(maxlen=max_metrics)
 
     # Aggregated summaries by endpoint and time window
-    self._summaries: Dict[str, Dict[str, OperationMetricsSummary]] = defaultdict(dict)
+    self._summaries: dict[str, dict[str, OperationMetricsSummary]] = defaultdict(dict)
 
     # Circuit breaker status tracking
-    self._circuit_status: Dict[str, Dict[str, Any]] = defaultdict(dict)
+    self._circuit_status: dict[str, dict[str, Any]] = defaultdict(dict)
 
     # Resource metrics (handler pools, queues, etc.)
-    self._resource_metrics: Dict[str, Any] = {}
+    self._resource_metrics: dict[str, Any] = {}
 
     logger.info(
       f"Initialized OperationMetricsCollector with max_metrics={max_metrics}, "
@@ -152,11 +152,11 @@ class OperationMetricsCollector:
     status: OperationStatus,
     duration_ms: float,
     endpoint: str,
-    graph_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    operation_name: Optional[str] = None,
-    error_details: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    user_id: str | None = None,
+    operation_name: str | None = None,
+    error_details: str | None = None,
+    metadata: dict[str, Any] | None = None,
   ):
     """
     Record a new operation metric.
@@ -254,8 +254,8 @@ class OperationMetricsCollector:
     operation: str,
     state: str,
     failure_count: int = 0,
-    last_failure_time: Optional[float] = None,
-    recovery_time: Optional[float] = None,
+    last_failure_time: float | None = None,
+    recovery_time: float | None = None,
   ):
     """Update circuit breaker status for monitoring."""
     with self._lock:
@@ -267,7 +267,7 @@ class OperationMetricsCollector:
         "updated_at": time.time(),
       }
 
-  def update_resource_metrics(self, resource_type: str, metrics: Dict[str, Any]):
+  def update_resource_metrics(self, resource_type: str, metrics: dict[str, Any]):
     """Update resource utilization metrics (handler pools, queues, etc.)."""
     with self._lock:
       self._resource_metrics[resource_type] = {
@@ -277,10 +277,10 @@ class OperationMetricsCollector:
 
   def get_metrics_summary(
     self,
-    endpoint: Optional[str] = None,
-    graph_id: Optional[str] = None,
+    endpoint: str | None = None,
+    graph_id: str | None = None,
     time_range_minutes: int = 60,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """
     Get aggregated metrics summary.
 
@@ -378,10 +378,10 @@ class OperationMetricsCollector:
 
   def get_operation_performance_breakdown(
     self,
-    endpoint: Optional[str] = None,
-    graph_id: Optional[str] = None,
+    endpoint: str | None = None,
+    graph_id: str | None = None,
     time_range_minutes: int = 60,
-  ) -> Dict[str, Dict[str, Any]]:
+  ) -> dict[str, dict[str, Any]]:
     """Get performance breakdown by operation type and name."""
     with self._lock:
       current_time = time.time()
@@ -447,7 +447,7 @@ class OperationMetricsCollector:
 
 
 # Global metrics collector instance
-_metrics_collector: Optional[OperationMetricsCollector] = None
+_metrics_collector: OperationMetricsCollector | None = None
 
 
 def get_operation_metrics_collector() -> OperationMetricsCollector:
@@ -465,11 +465,11 @@ def record_operation_metric(
   status: OperationStatus,
   duration_ms: float,
   endpoint: str,
-  graph_id: Optional[str] = None,
-  user_id: Optional[str] = None,
-  operation_name: Optional[str] = None,
-  error_details: Optional[str] = None,
-  metadata: Optional[Dict[str, Any]] = None,
+  graph_id: str | None = None,
+  user_id: str | None = None,
+  operation_name: str | None = None,
+  error_details: str | None = None,
+  metadata: dict[str, Any] | None = None,
 ):
   """Convenience function to record operation metrics."""
   collector = get_operation_metrics_collector()

@@ -7,7 +7,7 @@ These tools use SubgraphService just like the API routers do, maintaining parall
 at the service layer while the client handles context switching.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from robosystems.logger import logger
 from robosystems.operations.graph.subgraph_service import SubgraphService
@@ -19,7 +19,7 @@ class CreateWorkspaceTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "create-workspace",
       "description": "Create an isolated workspace (subgraph) for experimentation. Data and queries are isolated from the main graph. Returns workspace_id for the client to track.",
@@ -44,7 +44,7 @@ class CreateWorkspaceTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute workspace creation using SubgraphService.
 
@@ -144,7 +144,7 @@ class DeleteWorkspaceTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "delete-workspace",
       "description": "Delete a workspace and all its data. Cannot delete the primary graph.",
@@ -165,7 +165,7 @@ class DeleteWorkspaceTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute workspace deletion using SubgraphService.
 
@@ -299,14 +299,14 @@ class ListWorkspacesTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "list-workspaces",
       "description": "List all workspaces for the current graph. Shows workspace IDs that can be used with switch-workspace.",
       "inputSchema": {"type": "object", "properties": {}},
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute workspace listing from PostgreSQL.
 
@@ -388,7 +388,7 @@ class SwitchWorkspaceTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "switch-workspace",
       "description": "Switch to a different workspace. This is a client-side operation - the client manages which workspace is active.",
@@ -404,7 +404,7 @@ class SwitchWorkspaceTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     This should never be called server-side.
     The client intercepts switch-workspace before sending to server.

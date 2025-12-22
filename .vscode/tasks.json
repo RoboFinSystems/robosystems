@@ -270,7 +270,7 @@
         "robosystems-worker",
         "robosystems-graph-api",
         "robosystems-graph-api-neo4j",
-        "robosystems-pg-iam",
+        "robosystems-pg",
         "robosystems-valkey",
         "robosystems-grafana",
         "robosystems-prometheus",

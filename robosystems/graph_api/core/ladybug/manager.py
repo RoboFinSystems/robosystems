@@ -12,25 +12,26 @@ Key features:
 - Schema management and validation
 """
 
+import re
 import shutil
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-import re
+from typing import Any
 
 import real_ladybug as lbug
 from fastapi import HTTPException, status
 
 from robosystems.config import env
-from robosystems.logger import logger
 from robosystems.graph_api.models.database import (
-  DatabaseInfo,
   DatabaseCreateRequest,
   DatabaseCreateResponse,
+  DatabaseInfo,
   DatabaseListResponse,
   NodeDatabasesHealthResponse,
 )
+from robosystems.logger import logger
+
 from .pool import initialize_connection_pool
 
 
@@ -242,10 +243,10 @@ class LadybugDatabaseManager:
 
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Database creation failed: {str(e)}",
+        detail=f"Database creation failed: {e!s}",
       )
 
-  def delete_database(self, graph_id: str) -> Dict[str, Any]:
+  def delete_database(self, graph_id: str) -> dict[str, Any]:
     """
     Delete a database and cleanup resources.
 
@@ -300,7 +301,7 @@ class LadybugDatabaseManager:
       logger.error(f"Failed to delete database {graph_id}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Database deletion failed: {str(e)}",
+        detail=f"Database deletion failed: {e!s}",
       )
 
   def get_connection(self, graph_id: str, read_only: bool = False):
@@ -316,7 +317,7 @@ class LadybugDatabaseManager:
     """
     return self.connection_pool.get_connection(graph_id, read_only=read_only)
 
-  def list_databases(self) -> List[str]:
+  def list_databases(self) -> list[str]:
     """
     List all databases on this node.
 
@@ -397,7 +398,7 @@ class LadybugDatabaseManager:
       logger.error(f"Failed to get database info for {graph_id}: {e}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to get database info: {str(e)}",
+        detail=f"Failed to get database info: {e!s}",
       )
 
   def get_all_databases_info(self) -> DatabaseListResponse:
@@ -462,8 +463,8 @@ class LadybugDatabaseManager:
     self,
     conn: lbug.Connection,
     schema_type: str,
-    repository_name: Optional[str] = None,
-    custom_ddl: Optional[str] = None,
+    repository_name: str | None = None,
+    custom_ddl: str | None = None,
   ) -> bool:
     """
     Apply schema to a new database based on type.
@@ -641,9 +642,7 @@ class LadybugDatabaseManager:
 
     return type_mapping.get(schema_type.upper(), "STRING")
 
-  def _apply_custom_schema(
-    self, conn: lbug.Connection, custom_ddl: Optional[str]
-  ) -> bool:
+  def _apply_custom_schema(self, conn: lbug.Connection, custom_ddl: str | None) -> bool:
     """Apply custom schema DDL to database."""
     if not custom_ddl:
       logger.error("Custom DDL is required for custom schema type")
@@ -674,13 +673,13 @@ class LadybugDatabaseManager:
       return False
 
   def _apply_shared_schema(
-    self, conn: lbug.Connection, repository_name: Optional[str]
+    self, conn: lbug.Connection, repository_name: str | None
   ) -> bool:
     """Apply shared repository schema using appropriate extensions."""
     try:
       from robosystems.schemas.loader import (
-        get_sec_schema_loader,
         get_schema_loader,
+        get_sec_schema_loader,
       )
 
       # Use repository-specific schema loaders
@@ -887,12 +886,13 @@ class LadybugDatabaseManager:
   def _register_shared_repository(self, graph_id: str):
     """Register a shared repository in DynamoDB instance registry."""
     try:
+      import re
+      from datetime import datetime
+
       import boto3
-      from datetime import datetime, timezone
 
       # Get instance ID from EC2 metadata or hostname
       from robosystems.config import env as config_env
-      import re
 
       instance_id = config_env.EC2_INSTANCE_ID
 
@@ -955,7 +955,7 @@ class LadybugDatabaseManager:
           UpdateExpression="SET allocated_databases = :dbs, last_allocation_time = :time",
           ExpressionAttributeValues={
             ":dbs": {"SS": current_dbs},
-            ":time": {"S": datetime.now(timezone.utc).isoformat()},
+            ":time": {"S": datetime.now(UTC).isoformat()},
           },
         )
       else:
@@ -966,7 +966,7 @@ class LadybugDatabaseManager:
             "instance_id": {"S": instance_id},
             "allocated_databases": {"SS": [graph_id]},
             "status": {"S": "healthy"},
-            "last_allocation_time": {"S": datetime.now(timezone.utc).isoformat()},
+            "last_allocation_time": {"S": datetime.now(UTC).isoformat()},
           },
         )
 

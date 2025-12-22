@@ -5,18 +5,19 @@ Tests the encryption module which provides secure encryption/decryption
 for sensitive data using Fernet symmetric encryption.
 """
 
-import pytest
-from unittest.mock import patch
 import base64
+from unittest.mock import patch
+
+import pytest
 from cryptography.fernet import Fernet
 
 from robosystems.security.encryption import (
-  encrypt_data,
-  decrypt_data,
-  generate_encryption_key,
-  encrypt,
-  decrypt,
   _get_encryption_key,
+  decrypt,
+  decrypt_data,
+  encrypt,
+  encrypt_data,
+  generate_encryption_key,
 )
 
 

@@ -1,16 +1,17 @@
 """Simple working tests for allocation manager."""
 
-import pytest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.middleware.graph.allocation_manager import (
-  LadybugAllocationManager,
-  DatabaseStatus,
-  InstanceStatus,
   DatabaseLocation,
-  InstanceInfo,
+  DatabaseStatus,
   GraphTier,
+  InstanceInfo,
+  InstanceStatus,
+  LadybugAllocationManager,
 )
 
 
@@ -68,7 +69,7 @@ class TestAllocationManagerBasic:
       instance_id="i-1234567890",
       private_ip="10.0.1.100",
       availability_zone="us-east-1a",
-      created_at=datetime.now(timezone.utc),
+      created_at=datetime.now(UTC),
       status=DatabaseStatus.ACTIVE,
     )
 
@@ -85,7 +86,7 @@ class TestAllocationManagerBasic:
       status=InstanceStatus.HEALTHY,
       database_count=5,
       max_databases=10,
-      created_at=datetime.now(timezone.utc),
+      created_at=datetime.now(UTC),
     )
 
     assert info.instance_id == "i-1234567890"
@@ -249,7 +250,7 @@ class TestAllocationManagerRegression:
       / "allocation_manager.py"
     )
 
-    with open(allocation_manager_path, "r") as f:
+    with open(allocation_manager_path) as f:
       content = f.read()
 
     pattern = r"GraphTypeRegistry\.identify_graph\(\s*graph_id\s*,\s*graph_tier\s*="

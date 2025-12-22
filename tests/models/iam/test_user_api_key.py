@@ -1,11 +1,12 @@
 """Comprehensive tests for the UserAPIKey model."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-from sqlalchemy.exc import SQLAlchemyError
-import bcrypt
+from unittest.mock import MagicMock, patch
 
-from robosystems.models.iam import UserAPIKey, User
+import bcrypt
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
+from robosystems.models.iam import User, UserAPIKey
 
 
 class TestUserAPIKeyModel:

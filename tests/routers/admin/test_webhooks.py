@@ -1,16 +1,23 @@
-"""Comprehensive tests for Stripe webhook handlers."""
+"""Comprehensive tests for Stripe webhook handlers.
+
+The webhook endpoint queues events for Dagster processing.
+Handler logic is tested in tests/dagster/jobs/test_billing.py.
+"""
+
+from unittest.mock import Mock, patch
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from main import app
-from robosystems.models.billing import BillingCustomer, BillingSubscription
 
 
 class TestStripeWebhookEndpoint:
-  """Tests for Stripe webhook endpoint."""
+  """Tests for Stripe webhook endpoint.
+
+  The endpoint validates webhooks and queues them for Dagster processing.
+  """
 
   @pytest.fixture
   def client(self):
@@ -51,13 +58,13 @@ class TestStripeWebhookEndpoint:
     assert response.status_code == 400
     assert "Invalid webhook signature" in response.json()["detail"]
 
+  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  @patch("robosystems.routers.admin.webhooks.handle_checkout_completed")
-  def test_webhook_checkout_completed_event(
-    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
+  def test_webhook_queues_dagster_job(
+    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
   ):
-    """Test handling checkout.session.completed event."""
+    """Test that valid webhook events are queued for Dagster processing."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_test123",
@@ -66,7 +73,6 @@ class TestStripeWebhookEndpoint:
     }
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
-    mock_handle.return_value = AsyncMock()
     mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
@@ -76,18 +82,52 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success"}
-    mock_handle.assert_called_once()
+    assert response.json() == {
+      "status": "success",
+      "message": "Webhook queued for processing",
+    }
+    # Verify idempotency check was called with correct event_id and source
     mock_audit_log.is_webhook_processed.assert_called_once()
-    mock_audit_log.mark_webhook_processed.assert_called_once()
+    call_args = mock_audit_log.is_webhook_processed.call_args[0]
+    assert call_args[0] == "evt_test123"
+    assert call_args[1] == "stripe"
 
+  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  @patch("robosystems.routers.admin.webhooks.handle_payment_succeeded")
-  def test_webhook_payment_succeeded_event(
-    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
+  def test_webhook_idempotency_check(
+    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
   ):
-    """Test handling invoice.payment_succeeded event."""
+    """Test that already-processed webhooks are skipped."""
+    mock_provider = Mock()
+    mock_event = {
+      "id": "evt_already_processed",
+      "type": "checkout.session.completed",
+      "data": {"object": {"id": "cs_test", "customer": "cus_123"}},
+    }
+    mock_provider.verify_webhook.return_value = mock_event
+    mock_get_provider.return_value = mock_provider
+    mock_audit_log.is_webhook_processed.return_value = True  # Already processed
+
+    response = client.post(
+      "/admin/v1/webhooks/stripe",
+      json=mock_event,
+      headers={"stripe-signature": "valid_signature"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+      "status": "success",
+      "message": "Event already processed",
+    }
+
+  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
+  @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
+  @patch("robosystems.routers.admin.webhooks.get_payment_provider")
+  def test_webhook_payment_succeeded_queued(
+    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
+  ):
+    """Test that invoice.payment_succeeded events are queued."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_test456",
@@ -96,7 +136,6 @@ class TestStripeWebhookEndpoint:
     }
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
-    mock_handle.return_value = AsyncMock()
     mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
@@ -106,15 +145,15 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    mock_handle.assert_called_once()
+    assert "queued" in response.json()["message"]
 
+  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  @patch("robosystems.routers.admin.webhooks.handle_payment_failed")
-  def test_webhook_payment_failed_event(
-    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
+  def test_webhook_payment_failed_queued(
+    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
   ):
-    """Test handling invoice.payment_failed event."""
+    """Test that invoice.payment_failed events are queued."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_test789",
@@ -123,7 +162,6 @@ class TestStripeWebhookEndpoint:
     }
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
-    mock_handle.return_value = AsyncMock()
     mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
@@ -133,15 +171,15 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    mock_handle.assert_called_once()
+    assert "queued" in response.json()["message"]
 
+  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  @patch("robosystems.routers.admin.webhooks.handle_subscription_updated")
-  def test_webhook_subscription_updated_event(
-    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
+  def test_webhook_subscription_updated_queued(
+    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
   ):
-    """Test handling customer.subscription.updated event."""
+    """Test that customer.subscription.updated events are queued."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_sub_update",
@@ -150,7 +188,6 @@ class TestStripeWebhookEndpoint:
     }
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
-    mock_handle.return_value = AsyncMock()
     mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
@@ -160,15 +197,15 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    mock_handle.assert_called_once()
+    assert "queued" in response.json()["message"]
 
+  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  @patch("robosystems.routers.admin.webhooks.handle_subscription_deleted")
-  def test_webhook_subscription_deleted_event(
-    self, mock_handle, mock_get_provider, mock_audit_log, client, mock_db_session
+  def test_webhook_subscription_deleted_queued(
+    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
   ):
-    """Test handling customer.subscription.deleted event."""
+    """Test that customer.subscription.deleted events are queued."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_sub_delete",
@@ -177,7 +214,6 @@ class TestStripeWebhookEndpoint:
     }
     mock_provider.verify_webhook.return_value = mock_event
     mock_get_provider.return_value = mock_provider
-    mock_handle.return_value = AsyncMock()
     mock_audit_log.is_webhook_processed.return_value = False
 
     response = client.post(
@@ -187,14 +223,15 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    mock_handle.assert_called_once()
+    assert "queued" in response.json()["message"]
 
+  @patch("robosystems.routers.admin.webhooks.run_and_monitor_dagster_job")
   @patch("robosystems.routers.admin.webhooks.BillingAuditLog")
   @patch("robosystems.routers.admin.webhooks.get_payment_provider")
-  def test_webhook_unhandled_event_type(
-    self, mock_get_provider, mock_audit_log, client, mock_db_session
+  def test_webhook_unhandled_event_type_still_queued(
+    self, mock_get_provider, mock_audit_log, mock_dagster_job, client, mock_db_session
   ):
-    """Test handling unknown event type."""
+    """Test that unknown event types are still queued (Dagster handles filtering)."""
     mock_provider = Mock()
     mock_event = {
       "id": "evt_unknown",
@@ -212,421 +249,56 @@ class TestStripeWebhookEndpoint:
     )
 
     assert response.status_code == 200
-    assert response.json() == {"status": "success"}
+    assert "queued" in response.json()["message"]
 
 
-class TestCheckoutCompletedHandler:
-  """Tests for checkout.session.completed handler."""
+class TestBuildStripeWebhookJobConfig:
+  """Tests for build_stripe_webhook_job_config function."""
 
-  @pytest.fixture
-  def mock_db(self):
-    """Create mock database session."""
-    return Mock(spec=Session)
+  def test_build_config_basic(self):
+    """Test basic job config building."""
+    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
 
-  @pytest.fixture
-  def session_data(self):
-    """Create test checkout session data."""
-    return {
-      "id": "cs_test123",
-      "customer": "cus_test456",
-      "subscription": "sub_test789",
-      "payment_status": "paid",
-      "metadata": {
-        "user_id": "user_123",
-        "resource_type": "graph",
-        "resource_id": "kg_456",
-        "plan_name": "standard",
-      },
-    }
-
-  @pytest.mark.asyncio
-  @patch("robosystems.tasks.graph_operations.provision_graph.provision_graph_task")
-  async def test_checkout_completed_triggers_graph_provisioning(
-    self, mock_task, mock_db, session_data
-  ):
-    """Test that checkout completion triggers graph provisioning."""
-    from robosystems.routers.admin.webhooks import handle_checkout_completed
-    from robosystems.models.iam import OrgUser
-
-    mock_customer = Mock()
-    mock_customer.org_id = "org_123"
-    mock_customer.has_payment_method = False
-    mock_customer.stripe_customer_id = None
-
-    mock_subscription = Mock()
-    mock_subscription.id = "bsub_123"
-    mock_subscription.org_id = "org_123"
-    mock_subscription.resource_type = "graph"
-    mock_subscription.subscription_metadata = {"resource_config": {}}
-    mock_subscription.status = "pending_payment"
-    mock_subscription.plan_name = "ladybug-standard"
-
-    mock_org_user = Mock()
-    mock_org_user.user_id = "user_123"
-
-    def query_side_effect(model):
-      if model == BillingSubscription:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_subscription
-        return result
-      elif model == BillingCustomer:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_customer
-        return result
-      elif model == OrgUser:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_org_user
-        return result
-      return Mock()
-
-    mock_db.query.side_effect = query_side_effect
-
-    await handle_checkout_completed(session_data, mock_db)
-
-    mock_task.delay.assert_called_once()
-    call_args = mock_task.delay.call_args
-    assert call_args[1]["user_id"] == "user_123"
-    assert call_args[1]["subscription_id"] == "bsub_123"
-    assert mock_customer.has_payment_method is True
-    assert mock_subscription.status == "provisioning"
-
-  @pytest.mark.asyncio
-  @patch(
-    "robosystems.tasks.billing.provision_repository.provision_repository_access_task"
-  )
-  async def test_checkout_completed_triggers_repository_provisioning(
-    self, mock_task, mock_db
-  ):
-    """Test that checkout completion triggers repository provisioning."""
-    from robosystems.routers.admin.webhooks import handle_checkout_completed
-    from robosystems.models.iam import OrgUser
-
-    session_data = {
-      "id": "cs_test123",
-      "customer": "cus_test456",
-      "subscription": "sub_test789",
-      "payment_status": "paid",
-      "metadata": {
-        "user_id": "user_123",
-        "resource_type": "repository",
-        "resource_id": "sec",
-        "plan_name": "starter",
-      },
-    }
-
-    mock_customer = Mock()
-    mock_customer.org_id = "org_123"
-    mock_customer.has_payment_method = False
-    mock_customer.stripe_customer_id = None
-
-    mock_subscription = Mock()
-    mock_subscription.id = "bsub_456"
-    mock_subscription.org_id = "org_123"
-    mock_subscription.resource_type = "repository"
-    mock_subscription.subscription_metadata = {
-      "resource_config": {"repository_name": "sec"}
-    }
-    mock_subscription.status = "pending_payment"
-
-    mock_org_user = Mock()
-    mock_org_user.user_id = "user_123"
-
-    def query_side_effect(model):
-      if model == BillingSubscription:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_subscription
-        return result
-      elif model == BillingCustomer:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_customer
-        return result
-      elif model == OrgUser:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_org_user
-        return result
-      return Mock()
-
-    mock_db.query.side_effect = query_side_effect
-
-    await handle_checkout_completed(session_data, mock_db)
-
-    mock_task.delay.assert_called_once()
-    call_args = mock_task.delay.call_args
-    assert call_args[1]["user_id"] == "user_123"
-    assert call_args[1]["repository_name"] == "sec"
-    assert mock_subscription.status == "active"
-
-  @pytest.mark.asyncio
-  async def test_checkout_completed_subscription_not_found(self, mock_db, session_data):
-    """Test handling when subscription is not found."""
-    from robosystems.routers.admin.webhooks import handle_checkout_completed
-
-    mock_db.query.return_value.filter.return_value.first.return_value = None
-
-    await handle_checkout_completed(session_data, mock_db)
-
-
-class TestPaymentSucceededHandler:
-  """Tests for invoice.payment_succeeded handler."""
-
-  @pytest.fixture
-  def mock_db(self):
-    """Create mock database session."""
-    return Mock(spec=Session)
-
-  @pytest.fixture
-  def invoice_data(self):
-    """Create test invoice data."""
-    return {
-      "id": "in_test123",
-      "subscription": "sub_test456",
-      "amount_paid": 2999,
-      "status": "paid",
-    }
-
-  @pytest.mark.asyncio
-  @patch("robosystems.tasks.graph_operations.provision_graph.provision_graph_task")
-  async def test_payment_succeeded_activates_subscription(
-    self, mock_task, mock_db, invoice_data
-  ):
-    """Test that payment success activates subscription."""
-    from robosystems.routers.admin.webhooks import handle_payment_succeeded
-    from robosystems.models.iam import OrgUser
-
-    invoice_data["customer"] = "cus_test123"
-
-    mock_customer = Mock()
-    mock_customer.has_payment_method = False
-
-    mock_subscription = Mock()
-    mock_subscription.id = "bsub_123"
-    mock_subscription.org_id = "org_123"
-    mock_subscription.status = "pending_payment"
-    mock_subscription.resource_type = "graph"
-    mock_subscription.subscription_metadata = {"resource_config": {}}
-    mock_subscription.stripe_subscription_id = "sub_test456"
-    mock_subscription.plan_name = "ladybug-standard"
-
-    mock_org_user = Mock()
-    mock_org_user.user_id = "user_123"
-
-    def query_side_effect(model):
-      if model == BillingSubscription:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_subscription
-        return result
-      elif model == BillingCustomer:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_customer
-        return result
-      elif model == OrgUser:
-        result = Mock()
-        result.filter.return_value.first.return_value = mock_org_user
-        return result
-      return Mock()
-
-    mock_db.query.side_effect = query_side_effect
-
-    await handle_payment_succeeded(invoice_data, mock_db)
-
-    mock_task.delay.assert_called_once()
-    assert mock_customer.has_payment_method is True
-    mock_db.commit.assert_called()
-
-  @pytest.mark.asyncio
-  async def test_payment_succeeded_subscription_not_found(self, mock_db, invoice_data):
-    """Test handling when subscription is not found."""
-    from robosystems.routers.admin.webhooks import handle_payment_succeeded
-
-    mock_db.query.return_value.filter.return_value.first.return_value = None
-
-    await handle_payment_succeeded(invoice_data, mock_db)
-
-
-class TestPaymentFailedHandler:
-  """Tests for invoice.payment_failed handler."""
-
-  @pytest.fixture
-  def mock_db(self):
-    """Create mock database session."""
-    return Mock(spec=Session)
-
-  @pytest.fixture
-  def invoice_data(self):
-    """Create test invoice data."""
-    return {
-      "id": "in_test789",
-      "subscription": "sub_test012",
-      "amount_due": 4999,
-      "status": "uncollectible",
-    }
-
-  @pytest.mark.asyncio
-  async def test_payment_failed_updates_subscription_status(
-    self, mock_db, invoice_data
-  ):
-    """Test that payment failure updates subscription status."""
-    from robosystems.routers.admin.webhooks import handle_payment_failed
-
-    mock_subscription = Mock()
-    mock_subscription.status = "pending_payment"
-    mock_subscription.stripe_subscription_id = "sub_test012"
-    mock_subscription.subscription_metadata = {}
-    mock_db.query.return_value.filter.return_value.first.return_value = (
-      mock_subscription
+    config = build_stripe_webhook_job_config(
+      event_id="evt_123",
+      event_type="checkout.session.completed",
+      event_data={"id": "cs_test"},
     )
 
-    await handle_payment_failed(invoice_data, mock_db)
+    assert "ops" in config
+    assert "process_stripe_webhook_event" in config["ops"]
+    op_config = config["ops"]["process_stripe_webhook_event"]["config"]
+    assert op_config["event_id"] == "evt_123"
+    assert op_config["event_type"] == "checkout.session.completed"
+    assert op_config["event_data"] == {"id": "cs_test"}
 
-    assert mock_subscription.status == "unpaid"
-    mock_db.commit.assert_called()
+  def test_build_config_with_operation_id(self):
+    """Test job config with operation_id for SSE tracking."""
+    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
 
-  @pytest.mark.asyncio
-  async def test_payment_failed_adds_error_to_metadata(self, mock_db, invoice_data):
-    """Test that payment failure adds error to subscription metadata."""
-    from robosystems.routers.admin.webhooks import handle_payment_failed
-
-    mock_subscription = Mock()
-    mock_subscription.status = "pending_payment"
-    mock_subscription.stripe_subscription_id = "sub_test012"
-    mock_subscription.subscription_metadata = {}
-    mock_db.query.return_value.filter.return_value.first.return_value = (
-      mock_subscription
+    config = build_stripe_webhook_job_config(
+      event_id="evt_456",
+      event_type="invoice.payment_succeeded",
+      event_data={"id": "in_test"},
+      operation_id="op_tracking_123",
     )
 
-    await handle_payment_failed(invoice_data, mock_db)
+    op_config = config["ops"]["process_stripe_webhook_event"]["config"]
+    assert op_config["operation_id"] == "op_tracking_123"
 
-    assert "error" in mock_subscription.subscription_metadata
+  def test_build_config_no_operation_id(self):
+    """Test job config without operation_id."""
+    from robosystems.dagster.jobs.billing import build_stripe_webhook_job_config
 
-  @pytest.mark.asyncio
-  async def test_payment_failed_subscription_not_found(self, mock_db, invoice_data):
-    """Test handling when subscription is not found."""
-    from robosystems.routers.admin.webhooks import handle_payment_failed
-
-    mock_db.query.return_value.filter.return_value.first.return_value = None
-
-    await handle_payment_failed(invoice_data, mock_db)
-
-
-class TestSubscriptionUpdatedHandler:
-  """Tests for customer.subscription.updated handler."""
-
-  @pytest.fixture
-  def mock_db(self):
-    """Create mock database session."""
-    return Mock(spec=Session)
-
-  @pytest.fixture
-  def subscription_data(self):
-    """Create test subscription data."""
-    return {
-      "id": "sub_test123",
-      "status": "active",
-      "items": {"data": [{"price": {"id": "price_456"}}]},
-    }
-
-  @pytest.mark.asyncio
-  async def test_subscription_updated_syncs_status(self, mock_db, subscription_data):
-    """Test that subscription update syncs status."""
-    from robosystems.routers.admin.webhooks import handle_subscription_updated
-
-    mock_subscription = Mock()
-    mock_subscription.status = "trialing"
-    mock_subscription.stripe_subscription_id = "sub_test123"
-    mock_db.query.return_value.filter.return_value.first.return_value = (
-      mock_subscription
+    config = build_stripe_webhook_job_config(
+      event_id="evt_789",
+      event_type="invoice.payment_failed",
+      event_data={"id": "in_fail"},
     )
 
-    await handle_subscription_updated(subscription_data, mock_db)
-
-    assert mock_subscription.status == "active"
-    mock_db.commit.assert_called()
-
-  @pytest.mark.asyncio
-  async def test_subscription_updated_handles_all_statuses(self, mock_db):
-    """Test that subscription update handles all Stripe statuses."""
-    from robosystems.routers.admin.webhooks import handle_subscription_updated
-
-    status_mapping = {
-      "active": "active",
-      "trialing": "active",
-      "past_due": "past_due",
-      "canceled": "canceled",
-      "unpaid": "unpaid",
-    }
-
-    for stripe_status, expected_status in status_mapping.items():
-      mock_subscription = Mock()
-      mock_subscription.status = "old_status"
-      mock_subscription.stripe_subscription_id = "sub_test"
-      mock_db.query.return_value.filter.return_value.first.return_value = (
-        mock_subscription
-      )
-
-      subscription_data = {
-        "id": "sub_test",
-        "status": stripe_status,
-        "items": {"data": [{"price": {"id": "price_123"}}]},
-      }
-
-      await handle_subscription_updated(subscription_data, mock_db)
-
-      assert mock_subscription.status == expected_status
-
-  @pytest.mark.asyncio
-  async def test_subscription_updated_not_found(self, mock_db, subscription_data):
-    """Test handling when subscription is not found."""
-    from robosystems.routers.admin.webhooks import handle_subscription_updated
-
-    mock_db.query.return_value.filter.return_value.first.return_value = None
-
-    await handle_subscription_updated(subscription_data, mock_db)
+    op_config = config["ops"]["process_stripe_webhook_event"]["config"]
+    assert "operation_id" not in op_config
 
 
-class TestSubscriptionDeletedHandler:
-  """Tests for customer.subscription.deleted handler."""
-
-  @pytest.fixture
-  def mock_db(self):
-    """Create mock database session."""
-    return Mock(spec=Session)
-
-  @pytest.fixture
-  def subscription_data(self):
-    """Create test subscription data."""
-    return {
-      "id": "sub_test789",
-      "status": "canceled",
-      "canceled_at": 1234567890,
-    }
-
-  @pytest.mark.asyncio
-  async def test_subscription_deleted_marks_canceled(self, mock_db, subscription_data):
-    """Test that subscription deletion marks as canceled."""
-    from robosystems.routers.admin.webhooks import handle_subscription_deleted
-
-    mock_subscription = Mock()
-    mock_subscription.status = "active"
-    mock_subscription.stripe_subscription_id = "sub_test789"
-
-    def cancel_subscription(db, immediate=False):
-      mock_subscription.status = "canceled"
-
-    mock_subscription.cancel = cancel_subscription
-
-    mock_db.query.return_value.filter.return_value.first.return_value = (
-      mock_subscription
-    )
-
-    await handle_subscription_deleted(subscription_data, mock_db)
-
-    assert mock_subscription.status == "canceled"
-
-  @pytest.mark.asyncio
-  async def test_subscription_deleted_not_found(self, mock_db, subscription_data):
-    """Test handling when subscription is not found."""
-    from robosystems.routers.admin.webhooks import handle_subscription_deleted
-
-    mock_db.query.return_value.filter.return_value.first.return_value = None
-
-    await handle_subscription_deleted(subscription_data, mock_db)
+# NOTE: Stripe webhook event handler tests have been moved to tests/dagster/jobs/test_billing.py
+# The handlers are now part of the Dagster job and tested there with proper Dagster test utilities.

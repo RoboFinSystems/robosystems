@@ -17,8 +17,8 @@
   },
   "python.testing.pytestArgs": [
     "tests",
-    "--ignore=robosystems/arelle/EDGAR",
-    "--ignore=robosystems/arelle"
+    "--ignore=robosystems/adapters/sec/arelle/EDGAR",
+    "--ignore=robosystems/adapters/sec/arelle"
   ],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
@@ -32,14 +32,13 @@
     "**.egg-info/**": true,
     "**/.git/**": true,
     "__mocks__/**": true,
-    ".coverage/**": true,
-    "celerybeat-schedule.db": true
+    ".coverage/**": true
   },
   "search.exclude": {
-    "robosystems/arelle/EDGAR/**": true,
-    "robosystems/arelle/**": true,
+    "robosystems/adapters/sec/arelle/EDGAR/**": true,
+    "robosystems/adapters/sec/arelle/**": true,
     ".venv/**": true,
     "node_modules/**": true
   },
-  "ruff.exclude": ["robosystems/arelle/EDGAR/**", "robosystems/arelle/**"]
+  "ruff.exclude": ["robosystems/adapters/sec/arelle/EDGAR/**", "robosystems/adapters/sec/arelle/**"]
 }

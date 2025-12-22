@@ -3,7 +3,6 @@
 import json
 import subprocess
 import time
-from typing import Optional, Tuple
 
 from rich.console import Console
 
@@ -32,7 +31,7 @@ class SSMExecutor:
     self.aws_profile = aws_profile
     self.region = region
     self.timeout = timeout
-    self.instance_id: Optional[str] = None
+    self.instance_id: str | None = None
 
   def _get_bastion_instance(self) -> str:
     """Get bastion instance ID for the environment.
@@ -135,7 +134,7 @@ class SSMExecutor:
       console.print("[green]✓ Bastion instance started[/green]")
       time.sleep(10)
 
-  def execute(self, command: str, stream_output: bool = True) -> Tuple[str, str, int]:
+  def execute(self, command: str, stream_output: bool = True) -> tuple[str, str, int]:
     """Execute command on bastion via SSM.
 
     Args:

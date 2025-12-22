@@ -4,8 +4,6 @@ Helper dependency functions.
 Common FastAPI dependencies for entity and graph requirements.
 """
 
-from typing import Optional
-
 from fastapi import Depends, HTTPException, status
 
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -40,7 +38,7 @@ def require_entity(
 
 def optional_entity(
   current_user: User = Depends(get_current_user_with_graph),
-) -> Optional[str]:
+) -> str | None:
   """
   Optionally get the user's selected entity.
 
@@ -87,7 +85,7 @@ def require_user_graph(
 
 def optional_user_graph(
   current_user: User = Depends(get_current_user_with_graph),
-) -> Optional[str]:
+) -> str | None:
   """
   Optionally get the user's selected graph if it's a user graph.
 

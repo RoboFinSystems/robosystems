@@ -5,12 +5,13 @@ Tests all aspects of the APIKeyCache class including encryption,
 signature verification, rate limiting, and security features.
 """
 
-import pytest
-from unittest.mock import Mock, patch
-from datetime import datetime, timezone, timedelta
-import json
 import base64
+import json
 import secrets
+from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock, patch
+
+import pytest
 from cryptography.fernet import InvalidToken
 
 from robosystems.middleware.auth.cache import APIKeyCache
@@ -186,7 +187,7 @@ class TestEncryptionDecryption:
     wrong_version_data = {
       "data": {"test": "value"},
       "version": "v1.0",  # Wrong version
-      "encrypted_at": datetime.now(timezone.utc).isoformat(),
+      "encrypted_at": datetime.now(UTC).isoformat(),
       "nonce": secrets.token_hex(16),
     }
 
@@ -200,9 +201,7 @@ class TestEncryptionDecryption:
   def test_decrypt_expired_data(self, cache):
     """Test decryption with expired data."""
     # Create data that's too old
-    old_time = datetime.now(timezone.utc) - timedelta(
-      seconds=cache.MAX_CACHE_AGE_SECONDS + 100
-    )
+    old_time = datetime.now(UTC) - timedelta(seconds=cache.MAX_CACHE_AGE_SECONDS + 100)
     old_data = {
       "data": {"test": "value"},
       "version": cache.CACHE_VERSION,
@@ -225,17 +224,17 @@ class TestEncryptionDecryption:
 
   def test_encryption_failure(self, cache):
     """Test encryption failure handling."""
-    with patch.object(
-      cache.cipher, "encrypt", side_effect=Exception("Encryption failed")
+    with (
+      patch.object(cache.cipher, "encrypt", side_effect=Exception("Encryption failed")),
+      patch("robosystems.middleware.auth.cache.SecurityAuditLogger") as mock_audit,
     ):
-      with patch("robosystems.middleware.auth.cache.SecurityAuditLogger") as mock_audit:
-        with pytest.raises(Exception, match="Encryption failed"):
-          cache._encrypt_cache_data({"test": "data"})
+      with pytest.raises(Exception, match="Encryption failed"):
+        cache._encrypt_cache_data({"test": "data"})
 
-        # Verify security event logged
-        mock_audit.log_security_event.assert_called()
-        call_args = mock_audit.log_security_event.call_args
-        assert call_args[1]["details"]["action"] == "cache_encryption_unexpected_error"
+      # Verify security event logged
+      mock_audit.log_security_event.assert_called()
+      call_args = mock_audit.log_security_event.call_args
+      assert call_args[1]["details"]["action"] == "cache_encryption_unexpected_error"
 
 
 class TestUserDataValidation:
@@ -510,7 +509,7 @@ class TestAPIKeyCaching:
     cache_data = {
       "user_data": user_data,
       "is_active": True,
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
       "cache_version": cache.CACHE_VERSION,
     }
 
@@ -565,7 +564,7 @@ class TestAPIKeyCaching:
     cache_data = {
       "user_data": user_data,
       "is_active": True,
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
       "cache_version": cache.CACHE_VERSION,
     }
 
@@ -594,7 +593,7 @@ class TestAPIKeyCaching:
     cache_data = {
       "user_data": invalid_user_data,
       "is_active": True,
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
       "cache_version": cache.CACHE_VERSION,
     }
 
@@ -616,9 +615,7 @@ class TestAPIKeyCaching:
     api_key_hash = "test_hash_123"
     user_data = {"id": "user_123", "email": "test@example.com", "is_active": True}
     # Create expired cache data
-    old_time = datetime.now(timezone.utc) - timedelta(
-      seconds=cache.MAX_CACHE_AGE_SECONDS + 100
-    )
+    old_time = datetime.now(UTC) - timedelta(seconds=cache.MAX_CACHE_AGE_SECONDS + 100)
     cache_data = {
       "user_data": user_data,
       "is_active": True,
@@ -773,7 +770,7 @@ class TestCacheIntegration:
     cache_data = {
       "user_data": user_data,
       "is_active": True,
-      "cached_at": datetime.now(timezone.utc).isoformat(),
+      "cached_at": datetime.now(UTC).isoformat(),
       "cache_version": cache.CACHE_VERSION,
     }
     encrypted_data = cache._encrypt_cache_data(cache_data)

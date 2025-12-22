@@ -1,17 +1,17 @@
-import pytest
-import tempfile
 import shutil
+import tempfile
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi import HTTPException
 
 from robosystems.graph_api.core.duckdb.manager import (
   DuckDBTableManager,
   TableCreateRequest,
   TableCreateResponse,
+  TableInfo,
   TableQueryRequest,
   TableQueryResponse,
-  TableInfo,
   validate_table_name,
 )
 

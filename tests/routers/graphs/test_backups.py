@@ -5,12 +5,13 @@ This test suite validates REST API endpoints for backup management
 including authentication, request validation, and response formatting.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from tests.conftest import VALID_TEST_GRAPH_ID
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
 
 from main import app
+from tests.conftest import VALID_TEST_GRAPH_ID
 
 
 class TestBackupEndpoints:
@@ -20,19 +21,19 @@ class TestBackupEndpoints:
   def client(self):
     """Create test client with rate limiting disabled."""
     from robosystems.middleware.rate_limits import (
-      auth_rate_limit_dependency,
-      user_management_rate_limit_dependency,
-      sync_operations_rate_limit_dependency,
-      connection_management_rate_limit_dependency,
       analytics_rate_limit_dependency,
-      backup_operations_rate_limit_dependency,
-      sensitive_auth_rate_limit_dependency,
-      tasks_management_rate_limit_dependency,
-      general_api_rate_limit_dependency,
-      subscription_aware_rate_limit_dependency,
+      auth_rate_limit_dependency,
       auth_status_rate_limit_dependency,
-      sso_rate_limit_dependency,
+      backup_operations_rate_limit_dependency,
+      connection_management_rate_limit_dependency,
+      general_api_rate_limit_dependency,
       graph_scoped_rate_limit_dependency,
+      sensitive_auth_rate_limit_dependency,
+      sso_rate_limit_dependency,
+      subscription_aware_rate_limit_dependency,
+      sync_operations_rate_limit_dependency,
+      tasks_management_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
 
     # Save original overrides
@@ -97,7 +98,15 @@ class TestBackupEndpoints:
       )
 
   @patch("robosystems.models.iam.graph_credits.GraphCredits.get_by_graph_id")
-  @patch("robosystems.tasks.graph_operations.backup.create_graph_backup")
+  @patch(
+    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.monitor_run",
+    new_callable=AsyncMock,
+    return_value={"status": "completed", "run_id": "test-run-123"},
+  )
+  @patch(
+    "robosystems.middleware.sse.dagster_monitor.DagsterRunMonitor.submit_job",
+    return_value="test-run-123",
+  )
   @patch("os.path.exists")
   @patch(
     "robosystems.middleware.graph.utils.MultiTenantUtils.get_database_path_for_graph"
@@ -110,14 +119,15 @@ class TestBackupEndpoints:
     mock_is_shared,
     mock_get_database_path,
     mock_path_exists,
-    mock_task,
+    mock_dagster_submit,
+    mock_dagster_monitor,
     mock_get_graph_credits,
     client,
     mock_auth_user,
   ):
     """Test backup creation endpoint."""
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Create mock session
     mock_session = MagicMock()
@@ -154,11 +164,6 @@ class TestBackupEndpoints:
       # Set mock user ID
       mock_auth_user.id = "test-user-123"
 
-      # Mock task response
-      mock_task_result = MagicMock()
-      mock_task_result.id = "task-123"
-      mock_task.apply_async.return_value = mock_task_result
-
       graph_id = VALID_TEST_GRAPH_ID  # Use valid test graph ID
       response = client.post(
         f"/v1/graphs/{graph_id}/backups",
@@ -180,7 +185,7 @@ class TestBackupEndpoints:
       assert data["status"] == "accepted"
       assert "Backup creation started" in data["message"]
 
-      # Note: This endpoint uses background tasks, not the mocked Celery task
+      # Note: This endpoint uses background tasks, not the mocked background task
       # The actual backup is executed as a background FastAPI task
 
       # Verify authorization checks were called
@@ -198,8 +203,8 @@ class TestBackupEndpoints:
     self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
   ):
     """Test backup listing endpoint."""
-    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
     from robosystems.database import session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 
     # Create mock session
     mock_session = MagicMock()
@@ -254,7 +259,7 @@ class TestBackupEndpoints:
     paths = schema.get("paths", {})
 
     # Check for backup endpoints
-    backup_paths = [p for p in paths.keys() if "/backups" in p]
+    backup_paths = [p for p in paths if "/backups" in p]
     assert len(backup_paths) > 0, "No backup endpoints found in OpenAPI schema"
 
     # Verify operation IDs exist

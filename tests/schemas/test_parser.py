@@ -1,9 +1,9 @@
 import pytest
 
 from robosystems.schemas.parser import (
+  NodeType,
   parse_cypher_schema,
   parse_relationship_types,
-  NodeType,
 )
 
 

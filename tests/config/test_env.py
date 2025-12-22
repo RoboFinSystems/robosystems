@@ -274,64 +274,6 @@ def test_get_lbug_cors_origins(monkeypatch):
   assert EnvConfig.get_lbug_cors_origins() == ["*"]
 
 
-def test_get_celery_config_without_auth_token(monkeypatch):
-  monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "dev", raising=False)
-  monkeypatch.setattr(EnvConfig, "CELERY_BROKER_URL", "redis://broker", raising=False)
-  monkeypatch.setattr(
-    EnvConfig, "CELERY_RESULT_BACKEND", "redis://results", raising=False
-  )
-  monkeypatch.setattr(EnvConfig, "CELERY_TASK_TIME_LIMIT", 120, raising=False)
-  monkeypatch.setattr(EnvConfig, "CELERY_TASK_SOFT_TIME_LIMIT", 90, raising=False)
-  monkeypatch.setattr(EnvConfig, "CELERY_WORKER_PREFETCH_MULTIPLIER", 4, raising=False)
-  monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
-  monkeypatch.delenv("CELERY_RESULT_BACKEND", raising=False)
-
-  monkeypatch.setattr(
-    "robosystems.config.valkey_registry.ValkeyURLBuilder.get_auth_token",
-    staticmethod(lambda: None),
-  )
-
-  config = EnvConfig.get_celery_config()
-  assert config["broker_url"] == "redis://broker"
-  assert config["result_backend"] == "redis://results"
-  assert config["task_time_limit"] == 120
-  assert config["task_soft_time_limit"] == 90
-  assert config["worker_prefetch_multiplier"] == 4
-
-
-def test_get_celery_config_builds_authenticated_urls(monkeypatch):
-  monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
-  monkeypatch.setattr(EnvConfig, "CELERY_BROKER_URL", "redis://default", raising=False)
-  monkeypatch.setattr(
-    EnvConfig, "CELERY_RESULT_BACKEND", "redis://default-results", raising=False
-  )
-  monkeypatch.setattr(EnvConfig, "CELERY_TASK_TIME_LIMIT", 60, raising=False)
-  monkeypatch.setattr(EnvConfig, "CELERY_TASK_SOFT_TIME_LIMIT", 55, raising=False)
-  monkeypatch.setattr(EnvConfig, "CELERY_WORKER_PREFETCH_MULTIPLIER", 1, raising=False)
-  monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
-  monkeypatch.delenv("CELERY_RESULT_BACKEND", raising=False)
-
-  monkeypatch.setattr(
-    "robosystems.config.valkey_registry.ValkeyURLBuilder.get_auth_token",
-    staticmethod(lambda: "token"),
-  )
-
-  def fake_build_authenticated_url(database, base_url=None, include_ssl_params=True):
-    return f"auth://{database.name}"
-
-  monkeypatch.setattr(
-    "robosystems.config.valkey_registry.ValkeyURLBuilder.build_authenticated_url",
-    staticmethod(fake_build_authenticated_url),
-  )
-
-  config = EnvConfig.get_celery_config()
-  assert config["broker_url"] == "auth://CELERY_BROKER"
-  assert config["result_backend"] == "auth://CELERY_RESULTS"
-  assert config["task_time_limit"] == 60
-  assert config["task_soft_time_limit"] == 55
-  assert config["worker_prefetch_multiplier"] == 1
-
-
 def test_get_valkey_url_with_enum(monkeypatch):
   from robosystems.config.valkey_registry import ValkeyDatabase
 
@@ -342,8 +284,8 @@ def test_get_valkey_url_with_enum(monkeypatch):
     staticmethod(lambda base_url, database, **_: f"{base_url}-{database.name}"),
   )
 
-  result = EnvConfig.get_valkey_url(ValkeyDatabase.CELERY_BROKER)
-  assert result == "redis://base-CELERY_BROKER"
+  result = EnvConfig.get_valkey_url(ValkeyDatabase.AUTH_CACHE)
+  assert result == "redis://base-AUTH_CACHE"
 
 
 def test_get_valkey_url_with_integer(monkeypatch):

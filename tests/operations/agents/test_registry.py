@@ -4,24 +4,25 @@ Test suite for agent registry and discovery system.
 Tests agent registration, discovery, and lifecycle management.
 """
 
-import pytest
+from typing import Any
 from unittest.mock import Mock
-from typing import Dict, List, Optional, Any
 
-from robosystems.operations.agents.registry import (
-  AgentRegistry,
-  AgentRegistrationError,
-  DuplicateAgentError,
-  AgentNotFoundError,
-)
-from robosystems.operations.agents.base import (
-  BaseAgent,
-  AgentCapability,
-  AgentMode,
-  AgentMetadata,
-  AgentResponse,
-)
+import pytest
+
 from robosystems.models.iam import User
+from robosystems.operations.agents.base import (
+  AgentCapability,
+  AgentMetadata,
+  AgentMode,
+  AgentResponse,
+  BaseAgent,
+)
+from robosystems.operations.agents.registry import (
+  AgentNotFoundError,
+  AgentRegistrationError,
+  AgentRegistry,
+  DuplicateAgentError,
+)
 
 
 class MockFinancialAgent(BaseAgent):
@@ -40,9 +41,9 @@ class MockFinancialAgent(BaseAgent):
     self,
     query: str,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict]] = None,
-    context: Optional[Dict] = None,
-    callback: Optional[Any] = None,
+    history: list[dict] | None = None,
+    context: dict | None = None,
+    callback: Any | None = None,
   ) -> AgentResponse:
     return AgentResponse(
       content=f"Financial analysis: {query}",
@@ -73,9 +74,9 @@ class MockResearchAgent(BaseAgent):
     self,
     query: str,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict]] = None,
-    context: Optional[Dict] = None,
-    callback: Optional[Any] = None,
+    history: list[dict] | None = None,
+    context: dict | None = None,
+    callback: Any | None = None,
   ) -> AgentResponse:
     return AgentResponse(
       content=f"Research results: {query}",
@@ -131,9 +132,9 @@ class TestAgentRegistry:
         self,
         query: str,
         mode: AgentMode = AgentMode.STANDARD,
-        history: Optional[List[Dict]] = None,
-        context: Optional[Dict] = None,
-        callback: Optional[Any] = None,
+        history: list[dict] | None = None,
+        context: dict | None = None,
+        callback: Any | None = None,
       ):
         return AgentResponse(
           content="test",
@@ -356,9 +357,9 @@ class TestAgentRegistry:
         self,
         query: str,
         mode: AgentMode = AgentMode.STANDARD,
-        history: Optional[List[Dict]] = None,
-        context: Optional[Dict] = None,
-        callback: Optional[Any] = None,
+        history: list[dict] | None = None,
+        context: dict | None = None,
+        callback: Any | None = None,
       ) -> AgentResponse:
         raise NotImplementedError("Failing agent analyze")
 
@@ -409,9 +410,9 @@ class TestAgentRegistry:
         self,
         query: str,
         mode: AgentMode = AgentMode.STANDARD,
-        history: Optional[List[Dict]] = None,
-        context: Optional[Dict] = None,
-        callback: Optional[Any] = None,
+        history: list[dict] | None = None,
+        context: dict | None = None,
+        callback: Any | None = None,
       ):
         return AgentResponse(
           content="composite",

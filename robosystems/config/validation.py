@@ -5,9 +5,9 @@ This module provides validation functions to ensure all required
 environment variables are properly configured at application startup.
 """
 
-from typing import List, Dict, Any
 import logging
 import os
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class EnvValidator:
       required_prod_vars = {
         "DATABASE_URL": "PostgreSQL connection string",
         "JWT_SECRET_KEY": "JWT signing key (must not be default)",
-        "VALKEY_URL": "Valkey/Redis base URL",  # Changed from CELERY_BROKER_URL
+        "VALKEY_URL": "Valkey/Redis base URL",
         "AWS_REGION": "AWS region",
         "CONNECTION_CREDENTIALS_KEY": "Encryption key for credentials",
       }
@@ -150,11 +150,9 @@ class EnvValidator:
     logger.info("Configuration validation passed")
 
   @staticmethod
-  def _validate_numeric_ranges(env_config, errors: List[str]) -> None:
+  def _validate_numeric_ranges(env_config, errors: list[str]) -> None:
     """Validate numeric configuration values are within reasonable ranges."""
     validations = [
-      ("WORKER_AUTOSCALE", 1, 100, "Worker autoscale"),
-      ("CELERY_TASK_TIME_LIMIT", 60, 7200, "Task time limit"),
       ("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1, 1440, "JWT access token expiry"),
       ("RATE_LIMIT_API_KEY", 100, 1000000, "API key rate limit"),
       ("LBUG_MAX_DATABASES_PER_NODE", 1, 1000, "Max databases per node"),
@@ -169,17 +167,13 @@ class EnvValidator:
           )
 
   @staticmethod
-  def _validate_urls(env_config, errors: List[str]) -> None:
+  def _validate_urls(env_config, errors: list[str]) -> None:
     """Validate URL format for various endpoints."""
     url_vars = [
       "DATABASE_URL",
-      "VALKEY_URL",  # CELERY_BROKER_URL is now auto-constructed
+      "VALKEY_URL",
       "GRAPH_API_URL",
     ]
-
-    # Also validate CELERY_BROKER_URL if it's explicitly set
-    if getattr(env_config, "CELERY_BROKER_URL", None):
-      url_vars.append("CELERY_BROKER_URL")
 
     for var_name in url_vars:
       value = getattr(env_config, var_name, None)
@@ -212,7 +206,7 @@ class EnvValidator:
           )
 
   @staticmethod
-  def _validate_paths(env_config, warnings: List[str]) -> None:
+  def _validate_paths(env_config, warnings: list[str]) -> None:
     """Validate file paths exist or can be created."""
     import os
 
@@ -252,7 +246,7 @@ class EnvValidator:
       return False
 
   @staticmethod
-  def get_config_summary(env_config) -> Dict[str, Any]:
+  def get_config_summary(env_config) -> dict[str, Any]:
     """
     Get a summary of the current configuration for logging.
 
@@ -286,9 +280,6 @@ class EnvValidator:
       "security": {
         "rate_limiting": env_config.RATE_LIMIT_ENABLED,
         "audit_logging": env_config.SECURITY_AUDIT_ENABLED,
-      },
-      "workers": {
-        "autoscale": env_config.WORKER_AUTOSCALE,
       },
       "agents": {
         "config_valid": agent_validation["valid"],

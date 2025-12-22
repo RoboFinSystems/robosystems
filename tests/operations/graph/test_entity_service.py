@@ -1,6 +1,7 @@
 """Tests for EntityGraphService business logic."""
 
 import pytest
+
 from robosystems.operations.graph.entity_graph_service import EntityGraphService
 
 
@@ -126,7 +127,7 @@ class TestEntityGraphService:
     # Mock S3 client for file upload (imported locally in the method)
     mock_s3_client = mocker.MagicMock()
     mocker.patch(
-      "robosystems.adapters.s3.S3Client",
+      "robosystems.operations.aws.s3.S3Client",
       return_value=mock_s3_client,
     )
 

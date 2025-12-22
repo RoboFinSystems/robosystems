@@ -8,12 +8,12 @@ Provides structured, detailed logging for all API operations to support:
 - Operational visibility and monitoring
 """
 
-import time
 import threading
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, asdict
-from enum import Enum
+import time
 from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from enum import Enum
+from typing import Any
 
 from robosystems.logger import logger
 
@@ -59,17 +59,17 @@ class OperationLogEntry:
   event_type: OperationLogEventType
   level: LogLevel
   endpoint: str
-  graph_id: Optional[str] = None
-  user_id: Optional[str] = None
-  operation: Optional[str] = None
-  operation_name: Optional[str] = None
-  duration_ms: Optional[float] = None
-  status: Optional[str] = None
-  error_message: Optional[str] = None
-  metadata: Optional[Dict[str, Any]] = None
-  trace_id: Optional[str] = None
+  graph_id: str | None = None
+  user_id: str | None = None
+  operation: str | None = None
+  operation_name: str | None = None
+  duration_ms: float | None = None
+  status: str | None = None
+  error_message: str | None = None
+  metadata: dict[str, Any] | None = None
+  trace_id: str | None = None
 
-  def to_dict(self) -> Dict[str, Any]:
+  def to_dict(self) -> dict[str, Any]:
     """Convert log entry to dictionary for JSON serialization."""
     data = asdict(self)
     # Convert enums to strings
@@ -109,10 +109,10 @@ class OperationLogger:
 
     # Thread-safe storage for structured logs
     self._lock = threading.RLock()
-    self._log_entries: List[OperationLogEntry] = []
+    self._log_entries: list[OperationLogEntry] = []
 
     # Operation context tracking
-    self._operation_contexts: Dict[str, Dict[str, Any]] = {}
+    self._operation_contexts: dict[str, dict[str, Any]] = {}
 
     logger.info(
       f"Initialized OperationLogger with performance_logging={enable_performance_logging}, "
@@ -123,11 +123,11 @@ class OperationLogger:
     self,
     operation: str,
     endpoint: str,
-    graph_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    operation_name: Optional[str] = None,
-    trace_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    user_id: str | None = None,
+    operation_name: str | None = None,
+    trace_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
   ) -> str:
     """
     Log the start of an API operation.
@@ -186,7 +186,7 @@ class OperationLogger:
   def log_operation_success(
     self,
     operation_id: str,
-    result_metadata: Optional[Dict[str, Any]] = None,
+    result_metadata: dict[str, Any] | None = None,
   ) -> None:
     """
     Log successful completion of an API operation.
@@ -244,7 +244,7 @@ class OperationLogger:
     self,
     operation_id: str,
     error: Exception,
-    error_metadata: Optional[Dict[str, Any]] = None,
+    error_metadata: dict[str, Any] | None = None,
   ) -> None:
     """
     Log failed completion of an API operation.
@@ -305,7 +305,7 @@ class OperationLogger:
     graph_id: str,
     operation: str,
     failure_count: int = 0,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
   ) -> None:
     """Log circuit breaker state changes."""
     log_entry = OperationLogEntry(
@@ -332,10 +332,10 @@ class OperationLogger:
     self,
     event_type: OperationLogEventType,
     endpoint: str,
-    graph_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    resource_type: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    user_id: str | None = None,
+    resource_type: str | None = None,
+    metadata: dict[str, Any] | None = None,
   ) -> None:
     """Log resource lifecycle events (handlers, connections, etc.)."""
     log_entry = OperationLogEntry(
@@ -366,9 +366,9 @@ class OperationLogger:
     operation: str,
     duration_ms: float,
     status: str,
-    graph_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
   ) -> None:
     """Log external service calls (QuickBooks, AI services, etc.)."""
     log_entry = OperationLogEntry(
@@ -402,7 +402,7 @@ class OperationLogger:
     operation_type: str,
     cost: float,
     status: str,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
   ) -> None:
     """Log credit-related operations for audit trail."""
     log_entry = OperationLogEntry(
@@ -429,7 +429,7 @@ class OperationLogger:
 
   def _log_slow_operation(
     self,
-    context: Dict[str, Any],
+    context: dict[str, Any],
     duration_ms: float,
     operation_id: str,
   ) -> None:
@@ -470,12 +470,12 @@ class OperationLogger:
 
   def get_recent_logs(
     self,
-    endpoint: Optional[str] = None,
-    graph_id: Optional[str] = None,
-    event_type: Optional[OperationLogEventType] = None,
+    endpoint: str | None = None,
+    graph_id: str | None = None,
+    event_type: OperationLogEventType | None = None,
     time_range_minutes: int = 60,
     limit: int = 100,
-  ) -> List[Dict[str, Any]]:
+  ) -> list[dict[str, Any]]:
     """
     Get recent log entries matching criteria.
 
@@ -519,10 +519,10 @@ class OperationLogger:
     self,
     operation: str,
     endpoint: str,
-    graph_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    operation_name: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    graph_id: str | None = None,
+    user_id: str | None = None,
+    operation_name: str | None = None,
+    metadata: dict[str, Any] | None = None,
   ):
     """
     Context manager for automatic operation logging.
@@ -551,7 +551,7 @@ class OperationLogger:
 
 
 # Global operation logger instance
-_operation_logger: Optional[OperationLogger] = None
+_operation_logger: OperationLogger | None = None
 
 
 def get_operation_logger() -> OperationLogger:

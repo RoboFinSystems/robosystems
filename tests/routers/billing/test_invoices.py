@@ -1,14 +1,16 @@
 """Tests for billing invoices endpoints."""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi import HTTPException
-from robosystems.routers.billing.invoices import (
-  list_invoices,
-  get_upcoming_invoice,
-)
+
 from robosystems.models.billing import BillingCustomer
 from robosystems.models.iam import User
+from robosystems.routers.billing.invoices import (
+  get_upcoming_invoice,
+  list_invoices,
+)
 
 
 class TestListInvoices:

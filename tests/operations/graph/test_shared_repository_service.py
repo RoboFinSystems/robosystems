@@ -5,8 +5,9 @@ Tests the shared repository service that manages shared graph repositories
 like SEC, industry, and economic data accessible across multiple users.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 
 from robosystems.operations.graph.shared_repository_service import (
   SharedRepositoryService,
@@ -142,16 +143,31 @@ class TestEnsureSharedRepositoryExists:
       "relationship_count": 500,
     }
 
-    with patch(
-      "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
-    ) as mock_factory:
+    # Mock PostgreSQL check - both Graph and GraphSchema must exist
+    mock_graph = MagicMock()
+    mock_schema = MagicMock()
+
+    with (
+      patch(
+        "robosystems.graph_api.client.factory.GraphClientFactory.create_client"
+      ) as mock_factory,
+      patch("robosystems.database.get_db_session") as mock_db_session,
+      patch("robosystems.models.iam.Graph"),
+      patch("robosystems.models.iam.GraphSchema") as mock_schema_model,
+    ):
       mock_factory.return_value = mock_client
+
+      # Setup PostgreSQL mocks
+      mock_db = MagicMock()
+      mock_db_session.return_value = iter([mock_db])
+      mock_db.query.return_value.filter.return_value.first.return_value = mock_graph
+      mock_schema_model.get_active_schema.return_value = mock_schema
 
       result = await ensure_shared_repository_exists("sec")
 
       assert result["status"] == "exists"
       assert result["repository_name"] == "sec"
-      assert "database_info" in result
+      assert result["graph_id"] == "sec"
 
       mock_factory.assert_called_once_with(graph_id="sec", operation_type="read")
       mock_client.close.assert_called_once()

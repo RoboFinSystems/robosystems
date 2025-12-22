@@ -1,18 +1,19 @@
 """Schema export endpoint."""
 
+from datetime import UTC, datetime
+
 import yaml
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from sqlalchemy.orm import Session
 
+from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.models.iam import User
-from robosystems.models.api.graphs.schema import SchemaExportResponse
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.database import get_db_session
+from robosystems.models.api.graphs.schema import SchemaExportResponse
+from robosystems.models.iam import User
 
 router = APIRouter()
 
@@ -277,8 +278,9 @@ async def export_graph_schema(
     if include_data_stats:
       # Get runtime statistics from the graph
       try:
-        from .utils import get_schema_info
         from robosystems.middleware.graph.router import get_universal_repository
+
+        from .utils import get_schema_info
 
         # Use existing session parameter for repository auth
         repository = await get_universal_repository(graph_id, "read")
@@ -327,7 +329,7 @@ async def export_graph_schema(
       graph_id=graph_id,
       schema_definition=schema_output,
       format=format,
-      exported_at=datetime.now(timezone.utc).isoformat(),
+      exported_at=datetime.now(UTC).isoformat(),
       data_stats=data_stats,
     )
 
@@ -337,5 +339,5 @@ async def export_graph_schema(
     logger.error(f"Schema export error: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to export schema: {str(e)}",
+      detail=f"Failed to export schema: {e!s}",
     )

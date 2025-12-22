@@ -1,6 +1,7 @@
 """Tests for environment variable validation."""
 
 from unittest.mock import patch
+
 import pytest
 
 from robosystems.config.validation import (
@@ -16,7 +17,6 @@ class MockEnvConfig:
     self.ENVIRONMENT = "dev"
     self.DATABASE_URL = "postgresql://localhost/test"
     self.JWT_SECRET_KEY = "test-secret-key-that-is-long-enough-for-security"
-    self.CELERY_BROKER_URL = "redis://localhost:6379"
     self.AWS_REGION = "us-east-1"
     self.CONNECTION_CREDENTIALS_KEY = "test-encryption-key"
     self.AWS_S3_ACCESS_KEY_ID = None
@@ -31,8 +31,6 @@ class MockEnvConfig:
     self.LBUG_DATABASE_PATH = "/tmp/lbug-dbs"
     self.GRAPH_API_URL = "http://localhost:8001"
     self.GRAPH_API_KEY = None
-    self.WORKER_AUTOSCALE = 10
-    self.CELERY_TASK_TIME_LIMIT = 3600
     self.JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30
     self.RATE_LIMIT_API_KEY = 10000
     self.LBUG_MAX_DATABASES_PER_NODE = 100
@@ -165,18 +163,6 @@ class TestEnvValidator:
     EnvValidator._validate_numeric_ranges(env_config, errors)
 
     assert len(errors) == 0
-
-  def test_validate_numeric_ranges_invalid_worker_autoscale(self):
-    """Test validation fails for invalid worker autoscale value."""
-    env_config = MockEnvConfig()
-    env_config.WORKER_AUTOSCALE = 200  # Exceeds max
-    errors = []
-
-    EnvValidator._validate_numeric_ranges(env_config, errors)
-
-    assert len(errors) == 1
-    assert "WORKER_AUTOSCALE" in errors[0]
-    assert "between 1 and 100" in errors[0]
 
   def test_validate_numeric_ranges_invalid_jwt_expiry(self):
     """Test validation fails for invalid JWT expiry."""
@@ -321,7 +307,6 @@ class TestEnvValidator:
     assert summary["ladybug"]["api_key_configured"] is True
     assert summary["security"]["rate_limiting"] is True
     assert summary["security"]["audit_logging"] is True
-    assert summary["workers"]["autoscale"] == 10
 
 
 class TestIntegrationScenarios:

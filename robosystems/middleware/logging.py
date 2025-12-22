@@ -7,7 +7,7 @@ logging that's optimized for CloudWatch searching and cost management.
 
 import time
 import uuid
-from typing import Callable, Optional
+from collections.abc import Callable
 from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request, Response
@@ -15,10 +15,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from robosystems.logger import (
   api_logger,
-  security_logger,
   log_api,
   log_app_error,
   log_auth_event,
+  security_logger,
 )
 
 logger = api_logger
@@ -97,7 +97,7 @@ class StructuredLoggingMiddleware(BaseHTTPMiddleware):
   - Cost-optimized log levels
   """
 
-  def __init__(self, app, exclude_paths: Optional[list] = None):
+  def __init__(self, app, exclude_paths: list | None = None):
     super().__init__(app)
     self.exclude_paths = exclude_paths or [
       "/health",

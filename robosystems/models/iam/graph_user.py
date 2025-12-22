@@ -7,20 +7,21 @@ Access Control Model:
 - Roles: admin (full control), member (read/write), viewer (read-only)
 """
 
-from datetime import datetime, timezone
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Optional
 
 from sqlalchemy import (
+  Boolean,
   Column,
-  String,
   DateTime,
   ForeignKey,
-  Boolean,
-  UniqueConstraint,
   Index,
+  String,
+  UniqueConstraint,
 )
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
@@ -43,13 +44,11 @@ class GraphUser(Model):
   )  # References graphs table
   role = Column(String, nullable=False, default="member")  # admin, member, viewer
   is_selected = Column(Boolean, default=False, nullable=False)  # Currently active graph
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -68,7 +67,7 @@ class GraphUser(Model):
     graph_id: str,
     role: str = "member",
     is_selected: bool = False,
-    session: Optional[Session] = None,
+    session: Session | None = None,
   ) -> "GraphUser":
     """Create a new graph-user access relationship."""
     if session is None:
@@ -136,7 +135,7 @@ class GraphUser(Model):
 
       # Then select the specific graph
       graph_user.is_selected = True
-      graph_user.updated_at = datetime.now(timezone.utc)
+      graph_user.updated_at = datetime.now(UTC)
 
       session.commit()
       session.refresh(graph_user)
@@ -191,7 +190,7 @@ class GraphUser(Model):
   def update_role(self, role: str, session: Session) -> None:
     """Update the user's role for this graph."""
     self.role = role
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)

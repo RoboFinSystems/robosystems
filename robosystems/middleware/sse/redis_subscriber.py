@@ -7,12 +7,12 @@ and the API process that streams them to clients via SSE.
 
 import asyncio
 import json
-from typing import Optional, Dict, Any
+from typing import Any
+
 import redis.asyncio as redis
 
+from robosystems.config.valkey_registry import ValkeyDatabase, create_async_redis_client
 from robosystems.logger import logger
-from robosystems.config.valkey_registry import ValkeyDatabase
-from robosystems.config.valkey_registry import create_async_redis_client
 
 from .event_storage import SSEEvent
 from .streaming import get_connection_manager
@@ -26,11 +26,11 @@ class RedisEventSubscriber:
 
   def __init__(self):
     """Initialize the Redis subscriber."""
-    self.redis_client: Optional[redis.Redis] = None
-    self.pubsub: Optional[Any] = None
-    self.subscriptions: Dict[str, bool] = {}
+    self.redis_client: redis.Redis | None = None
+    self.pubsub: Any | None = None
+    self.subscriptions: dict[str, bool] = {}
     self._running = False
-    self._task: Optional[asyncio.Task] = None
+    self._task: asyncio.Task | None = None
 
   async def start(self):
     """Start the Redis subscriber."""
@@ -164,7 +164,7 @@ class RedisEventSubscriber:
         except Exception as e:
           logger.error(f"Error processing event: {e}")
 
-      except asyncio.TimeoutError:
+      except TimeoutError:
         # Normal timeout, continue listening
         continue
       except asyncio.CancelledError:
@@ -176,7 +176,7 @@ class RedisEventSubscriber:
 
 
 # Global subscriber instance
-_redis_subscriber: Optional[RedisEventSubscriber] = None
+_redis_subscriber: RedisEventSubscriber | None = None
 
 
 def get_redis_subscriber() -> RedisEventSubscriber:

@@ -51,7 +51,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -65,8 +65,8 @@ class SecretsManager:
 
   def __init__(
     self,
-    environment: Optional[str] = None,
-    region: Optional[str] = None,
+    environment: str | None = None,
+    region: str | None = None,
     cache_ttl_seconds: int = 3600,
   ):
     """
@@ -86,9 +86,9 @@ class SecretsManager:
 
     # Cache for retrieved secrets with timestamps
     # Format: {cache_key: (secret_data, timestamp)}
-    self._cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+    self._cache: dict[str, tuple[dict[str, Any], float]] = {}
 
-  def get_secret(self, secret_type: Optional[str] = None) -> Dict[str, Any]:
+  def get_secret(self, secret_type: str | None = None) -> dict[str, Any]:
     """
     Retrieve a secret from AWS Secrets Manager with TTL-based caching.
 
@@ -169,7 +169,7 @@ class SecretsManager:
         raise
       return {}
 
-  def get_s3_buckets(self) -> Dict[str, str]:
+  def get_s3_buckets(self) -> dict[str, str]:
     """
     Get all S3 bucket names from secrets.
 
@@ -239,7 +239,7 @@ class SecretsManager:
     secrets = self.get_secret("admin")
     return secrets.get("ADMIN_API_KEY", "")
 
-  def get_s3_credentials(self) -> Dict[str, str]:
+  def get_s3_credentials(self) -> dict[str, str]:
     """
     Get S3 access credentials from secrets.
 
@@ -258,7 +258,7 @@ class SecretsManager:
       "secret_access_key": secrets.get("AWS_S3_SECRET_ACCESS_KEY", ""),
     }
 
-  def refresh(self, secret_type: Optional[str] = None):
+  def refresh(self, secret_type: str | None = None):
     """
     Refresh cached secrets.
 
@@ -274,7 +274,7 @@ class SecretsManager:
 
 
 # Global instance for easy access
-_secrets_manager: Optional[SecretsManager] = None
+_secrets_manager: SecretsManager | None = None
 
 
 def get_secrets_manager() -> SecretsManager:
@@ -378,6 +378,11 @@ SECRET_MAPPINGS = {
   "SSE_ENABLED": (None, "SSE_ENABLED"),
   "SUBGRAPH_CREATION_ENABLED": (None, "SUBGRAPH_CREATION_ENABLED"),
   "USER_REGISTRATION_ENABLED": (None, "USER_REGISTRATION_ENABLED"),
+  # Dagster schedule feature flags (all default to false - enable in prod secrets)
+  "BILLING_SCHEDULES_ENABLED": (None, "BILLING_SCHEDULES_ENABLED"),
+  "INSTANCE_SCHEDULES_ENABLED": (None, "INSTANCE_SCHEDULES_ENABLED"),
+  "SEC_SCHEDULES_ENABLED": (None, "SEC_SCHEDULES_ENABLED"),
+  "SHARED_REPO_SCHEDULE_ENABLED": (None, "SHARED_REPO_SCHEDULE_ENABLED"),
   # Default configuration
   "ORG_GRAPHS_DEFAULT_LIMIT": (None, "ORG_GRAPHS_DEFAULT_LIMIT"),
 }

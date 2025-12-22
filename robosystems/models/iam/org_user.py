@@ -1,19 +1,22 @@
 """Organization-user junction table for managing user roles within organizations."""
 
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Optional, Sequence
+from typing import Optional
 
 from sqlalchemy import (
   Column,
-  String,
   DateTime,
   ForeignKey,
-  Enum as SQLEnum,
+  String,
   UniqueConstraint,
 )
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy import (
+  Enum as SQLEnum,
+)
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Model
 from ...utils.ulid import generate_prefixed_ulid
@@ -40,13 +43,11 @@ class OrgUser(Model):
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
   role = Column(SQLEnum(OrgRole), nullable=False, default=OrgRole.MEMBER)
 
-  joined_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-  )
+  joined_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -103,7 +104,7 @@ class OrgUser(Model):
   def update_role(self, new_role: OrgRole, session: Session) -> None:
     """Update user's role in the organization."""
     self.role = new_role
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     try:
       session.commit()

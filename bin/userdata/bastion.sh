@@ -383,7 +383,7 @@ AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
 
 # Database configuration (populated at runtime)
 # DATABASE_URL will be set by infrastructure scripts when needed
-# CELERY_BROKER_URL will be set by infrastructure scripts when needed
+# VALKEY_URL will be set by infrastructure scripts when needed
 ENV_EOF
 
 chmod 600 /etc/robosystems/.env
@@ -538,30 +538,23 @@ main() {
     case "$operation" in
         ## SEC Operations ##
         sec-load)
-            run_in_docker "uv run python -m robosystems.scripts.sec_local load $parameters"
+            run_in_docker "uv run python -m robosystems.scripts.sec_pipeline run --tickers $parameters"
             ;;
         sec-health)
-            run_in_docker "uv run python -m robosystems.scripts.sec_local_health $parameters"
+            run_in_docker "uv run python -m robosystems.scripts.graph_health sec $parameters"
             ;;
         sec-reset)
             print_warning "WARNING: This will reset the SEC database!"
             read -p "Type 'CONFIRM' to proceed: " confirmation
             if [ "$confirmation" == "CONFIRM" ]; then
-                run_in_docker "uv run python -m robosystems.scripts.sec_local reset --confirm"
+                run_in_docker "uv run python -m robosystems.scripts.sec_pipeline reset"
             else
                 print_error "Operation cancelled"
                 exit 1
             fi
             ;;
-        sec-plan)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator plan $parameters"
-            ;;
-        sec-phase)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator start-phase $parameters"
-            ;;
-        sec-status)
-            run_in_docker "uv run python -m robosystems.scripts.sec_orchestrator status"
-            ;;
+        # SEC orchestration commands removed - pipeline migrated to Dagster
+        # For production: Use Dagster UI at dagster.robosystems.app
 
         ## Valkey/Queue Management ##
         valkey-clear-queue)
@@ -628,11 +621,8 @@ bastion sec-load --ticker NVDA --year 2024
 # Check SEC database health
 bastion sec-health --verbose
 
-# Force credit allocation (DANGEROUS)
+# List DLQ stats
 bastion dlq-stats
-
-# Add bonus credits to repository
-bastion valkey-list-queue celery
 
 # Run custom script
 bastion run python -m robosystems.scripts.custom_script --help

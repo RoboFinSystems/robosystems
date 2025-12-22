@@ -21,7 +21,6 @@ import time
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Tuple
 
 # Configure logging
 logging.basicConfig(
@@ -267,7 +266,7 @@ class ArelleCacheManager:
     ),
   ]
 
-  def __init__(self, project_root: Optional[Path] = None):
+  def __init__(self, project_root: Path | None = None):
     """Initialize the cache manager."""
     if project_root:
       self.project_root = Path(project_root)
@@ -282,9 +281,15 @@ class ArelleCacheManager:
       else:
         self.project_root = Path.cwd()
 
-    self.cache_dir = self.project_root / "robosystems" / "arelle" / "cache"
-    self.edgar_dir = self.project_root / "robosystems" / "arelle" / "EDGAR"
-    self.bundles_dir = self.project_root / "robosystems" / "arelle" / "bundles"
+    self.cache_dir = (
+      self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "cache"
+    )
+    self.edgar_dir = (
+      self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "EDGAR"
+    )
+    self.bundles_dir = (
+      self.project_root / "robosystems" / "adapters" / "sec" / "arelle" / "bundles"
+    )
 
   def download_schema(self, url: str, cache_path: Path, retries: int = 3) -> bool:
     """Download a single schema file."""
@@ -401,7 +406,7 @@ class ArelleCacheManager:
       logger.error(f"Failed to fetch EDGAR plugin: {e}")
       return False
 
-  def create_bundles(self) -> Tuple[Optional[Path], Optional[Path]]:
+  def create_bundles(self) -> tuple[Path | None, Path | None]:
     """Create tar.gz bundles for schemas and EDGAR plugin."""
     logger.info("Creating cache bundles...")
 
@@ -555,7 +560,9 @@ class ArelleCacheManager:
 
     logger.info("\nCache update complete!")
     logger.info("\nNext steps:")
-    logger.info("  1. Commit the bundles: git add robosystems/arelle/bundles/*.tar.gz")
+    logger.info(
+      "  1. Commit the bundles: git add robosystems/adapters/sec/arelle/bundles/*.tar.gz"
+    )
     logger.info("  2. Docker build will use these bundles automatically")
 
 

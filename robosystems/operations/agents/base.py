@@ -5,13 +5,13 @@ Provides the foundation for all agent implementations in the multiagent system.
 """
 
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+from typing import Any
 
-from robosystems.models.iam import User
 from robosystems.logger import logger
+from robosystems.models.iam import User
 
 
 class AgentCapability(Enum):
@@ -51,22 +51,22 @@ class AgentMetadata:
 
   name: str
   description: str
-  capabilities: List[AgentCapability]
+  capabilities: list[AgentCapability]
   version: str = "1.0.0"
-  supported_modes: List[AgentMode] = field(
+  supported_modes: list[AgentMode] = field(
     default_factory=lambda: [
       AgentMode.QUICK,
       AgentMode.STANDARD,
       AgentMode.EXTENDED,
     ]
   )
-  max_tokens: Dict[str, int] = field(
+  max_tokens: dict[str, int] = field(
     default_factory=lambda: {"input": 150000, "output": 8000}
   )
   requires_credits: bool = True
-  author: Optional[str] = None
-  tags: List[str] = field(default_factory=list)
-  execution_profile: Dict[AgentMode, ExecutionProfile] = field(
+  author: str | None = None
+  tags: list[str] = field(default_factory=list)
+  execution_profile: dict[AgentMode, ExecutionProfile] = field(
     default_factory=lambda: {
       AgentMode.QUICK: ExecutionProfile(
         min_time=2, max_time=5, avg_time=3, tool_calls=2
@@ -88,13 +88,13 @@ class AgentResponse:
   content: str
   agent_name: str
   mode_used: AgentMode
-  metadata: Optional[Dict[str, Any]] = None
-  tokens_used: Optional[Dict[str, int]] = None
-  tools_called: List[str] = field(default_factory=list)
-  confidence_score: Optional[float] = None
+  metadata: dict[str, Any] | None = None
+  tokens_used: dict[str, int] | None = None
+  tools_called: list[str] = field(default_factory=list)
+  confidence_score: float | None = None
   requires_followup: bool = False
-  error_details: Optional[Dict[str, Any]] = None
-  execution_time: Optional[float] = None
+  error_details: dict[str, Any] | None = None
+  execution_time: float | None = None
   timestamp: datetime = field(default_factory=datetime.utcnow)
 
 
@@ -138,9 +138,9 @@ class BaseAgent(ABC):
     self,
     query: str,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict[str, Any]]] = None,
-    context: Optional[Dict[str, Any]] = None,
-    callback: Optional[Any] = None,
+    history: list[dict[str, Any]] | None = None,
+    context: dict[str, Any] | None = None,
+    callback: Any | None = None,
   ) -> AgentResponse:
     """
     Perform analysis on the query.
@@ -158,7 +158,7 @@ class BaseAgent(ABC):
     pass
 
   @abstractmethod
-  def can_handle(self, query: str, context: Optional[Dict[str, Any]] = None) -> float:
+  def can_handle(self, query: str, context: dict[str, Any] | None = None) -> float:
     """
     Return confidence score (0-1) for handling this query.
 
@@ -183,15 +183,15 @@ class BaseAgent(ABC):
     """Initialize MCP tools for the agent."""
     try:
       from robosystems.middleware.mcp import (
-        create_graph_mcp_client,
         GraphMCPTools,
+        create_graph_mcp_client,
       )
 
       self.graph_client = await create_graph_mcp_client(graph_id=self.graph_id)
       self.mcp_tools = GraphMCPTools(self.graph_client)
       self.logger.info(f"Initialized MCP tools for agent in graph {self.graph_id}")
     except Exception as e:
-      self.logger.error(f"Failed to initialize MCP tools: {str(e)}")
+      self.logger.error(f"Failed to initialize MCP tools: {e!s}")
       raise
 
   async def close(self):
@@ -201,7 +201,7 @@ class BaseAgent(ABC):
         await self.graph_client.close()
         self.logger.debug("Closed Graph client connection")
       except Exception as e:
-        self.logger.error(f"Error closing Graph client: {str(e)}")
+        self.logger.error(f"Error closing Graph client: {e!s}")
 
   def track_tokens(self, input_tokens: int, output_tokens: int):
     """Track token usage for the agent."""
@@ -214,7 +214,7 @@ class BaseAgent(ABC):
     output_tokens: int,
     model: str = "claude-3-sonnet",
     operation_description: str = "Agent analysis",
-  ) -> Optional[Dict[str, Any]]:
+  ) -> dict[str, Any] | None:
     """
     Consume credits based on token usage.
 
@@ -259,7 +259,7 @@ class BaseAgent(ABC):
       return result
 
     except Exception as e:
-      self.logger.error(f"Error consuming credits: {str(e)}")
+      self.logger.error(f"Error consuming credits: {e!s}")
       return None
 
   def validate_mode(self, mode: AgentMode) -> None:
@@ -279,7 +279,7 @@ class BaseAgent(ABC):
         f"Supported modes: {supported}"
       )
 
-  def get_mode_limits(self, mode: AgentMode) -> Dict[str, Any]:
+  def get_mode_limits(self, mode: AgentMode) -> dict[str, Any]:
     """
     Get operational limits for the specified mode.
 
@@ -296,8 +296,8 @@ class BaseAgent(ABC):
   async def prepare_context(
     self,
     query: str,
-    context: Optional[Dict[str, Any]] = None,
-  ) -> Dict[str, Any]:
+    context: dict[str, Any] | None = None,
+  ) -> dict[str, Any]:
     """
     Prepare and enhance context for analysis.
 

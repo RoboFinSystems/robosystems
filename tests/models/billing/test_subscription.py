@@ -1,13 +1,14 @@
 """Comprehensive tests for BillingSubscription model."""
 
-import pytest
 import uuid
+
+import pytest
 from sqlalchemy.orm import Session
 
 from robosystems.models.billing import (
+  BillingInterval,
   BillingSubscription,
   SubscriptionStatus,
-  BillingInterval,
 )
 from robosystems.models.iam import User
 
@@ -15,7 +16,7 @@ from robosystems.models.iam import User
 @pytest.fixture
 def test_user(db_session: Session):
   """Create a test user with org."""
-  from robosystems.models.iam import Org, OrgUser, OrgRole, OrgType
+  from robosystems.models.iam import Org, OrgRole, OrgType, OrgUser
 
   unique_id = str(uuid.uuid4())[:8]
 

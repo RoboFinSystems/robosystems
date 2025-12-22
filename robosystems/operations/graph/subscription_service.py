@@ -1,18 +1,18 @@
 """Service for managing graph database subscriptions."""
 
 import logging
-from typing import List
+
 from sqlalchemy.orm import Session
 
+from ...config import BillingConfig, env
+from ...config.graph_tier import GraphTier
 from ...models.billing import (
-  BillingCustomer,
-  BillingSubscription,
-  BillingInvoice,
   BillingAuditLog,
+  BillingCustomer,
+  BillingInvoice,
+  BillingSubscription,
 )
 from ...models.billing.audit_log import BillingEventType
-from ...config.graph_tier import GraphTier
-from ...config import BillingConfig, env
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ BILLING_ENABLED = env.BILLING_ENABLED
 ENVIRONMENT = env.ENVIRONMENT
 
 
-def get_available_plans() -> List[str]:
+def get_available_plans() -> list[str]:
   """Get list of available billing plans from centralized config."""
   from ...config.billing.core import DEFAULT_GRAPH_BILLING_PLANS
 

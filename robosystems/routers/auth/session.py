@@ -1,6 +1,7 @@
 """Session management endpoints (me, refresh)."""
 
-from sqlalchemy.orm import Session
+from datetime import UTC
+
 from fastapi import (
   APIRouter,
   Depends,
@@ -8,25 +9,25 @@ from fastapi import (
   Request,
   status,
 )
+from sqlalchemy.orm import Session
 
-from ...models.api.auth import AuthResponse
-from ...models.api.common import ErrorResponse
-from ...models.iam import User
+from ...config import env
 from ...database import get_async_db_session
 from ...logger import logger
+from ...middleware.auth.cache import api_key_cache
+from ...middleware.auth.jwt import (
+  create_jwt_token,
+  revoke_jwt_token,
+  verify_jwt_token,
+)
 from ...middleware.rate_limits import (
   auth_status_rate_limit_dependency,
 )
 from ...middleware.rate_limits.rate_limiting import jwt_refresh_rate_limit_dependency
-from ...middleware.auth.cache import api_key_cache
-
-from ...middleware.auth.jwt import (
-  verify_jwt_token,
-  create_jwt_token,
-  revoke_jwt_token,
-)
+from ...models.api.auth import AuthResponse
+from ...models.api.common import ErrorResponse
+from ...models.iam import User
 from ...security.device_fingerprinting import extract_device_fingerprint
-from ...config import env
 
 # Create router for session endpoints
 router = APIRouter()
@@ -105,7 +106,7 @@ async def get_me(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Get current user error: {str(e)}")
+    logger.error(f"Get current user error: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to get user information",
@@ -137,8 +138,10 @@ async def refresh_session(
       HTTPException: If not authenticated or token is invalid
   """
   # Import jwt at function level to avoid circular imports
+  from datetime import datetime, timedelta
+
   import jwt
-  from datetime import datetime, timedelta, timezone
+
   from ...middleware.auth.jwt import JWTConfig
 
   # Initialize payload variable
@@ -174,11 +177,11 @@ async def refresh_session(
         # Check if token expired recently (within reduced grace period)
         exp = payload.get("exp")
         if exp:
-          exp_time = datetime.fromtimestamp(exp, tz=timezone.utc)
+          exp_time = datetime.fromtimestamp(exp, tz=UTC)
           grace_period = timedelta(
             minutes=env.TOKEN_GRACE_PERIOD_MINUTES
           )  # Reduced grace period for security
-          time_since_expiry = datetime.now(timezone.utc) - exp_time
+          time_since_expiry = datetime.now(UTC) - exp_time
 
           if time_since_expiry > grace_period:
             raise HTTPException(
@@ -294,7 +297,7 @@ async def refresh_session(
     raise
   except Exception as e:
     client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
-    logger.error(f"Session refresh error from IP {client_ip}: {str(e)}")
+    logger.error(f"Session refresh error from IP {client_ip}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Session refresh failed"
     )

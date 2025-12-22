@@ -8,11 +8,11 @@ Note: Extension listing is available at the global level via GET /v1/graphs/exte
 and is not duplicated at the per-graph level.
 """
 
+from fastapi import APIRouter
+
+from .export import router as export_router
 from .info import router as info_router
 from .validate import router as validate_router
-from .export import router as export_router
-
-from fastapi import APIRouter
 
 # Create main schema router
 router = APIRouter(tags=["Schema"])

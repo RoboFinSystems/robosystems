@@ -1,38 +1,39 @@
 """Schema validation endpoint."""
 
-import yaml
-import json
 import asyncio
+import json
 import time
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Path
+
+import yaml
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
+from robosystems.database import get_db_session
 from robosystems.logger import logger
-from robosystems.models.iam import User
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.rate_limits import (
+  subscription_aware_rate_limit_dependency,
+)
+from robosystems.middleware.robustness import (
+  OperationStatus,
+  OperationType,
+  get_operation_logger,
+  record_operation_metric,
+)
+from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.schema import (
   SchemaValidationRequest,
   SchemaValidationResponse,
 )
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import (
-  subscription_aware_rate_limit_dependency,
-)
+from robosystems.models.iam import User
 from robosystems.schemas.custom import (
   CustomSchemaManager,
   SchemaFormat,
 )
 from robosystems.schemas.manager import SchemaManager
-from robosystems.database import get_db_session
-from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.robustness import (
-  OperationType,
-  OperationStatus,
-  record_operation_metric,
-  get_operation_logger,
-)
 
 from .utils import circuit_breaker, timeout_coordinator
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
 
 router = APIRouter()
 
@@ -391,7 +392,7 @@ relationships:
           warnings.extend(compat_result.conflicts)
 
       except Exception as e:
-        warnings.append(f"Compatibility check failed: {str(e)}")
+        warnings.append(f"Compatibility check failed: {e!s}")
 
     message = "Schema is valid" if valid else "Schema validation failed"
     if warnings and valid:
@@ -426,7 +427,7 @@ relationships:
       compatibility=compatibility,
     )
 
-  except asyncio.TimeoutError:
+  except TimeoutError:
     # Record circuit breaker failure and timeout metrics
     circuit_breaker.record_failure(graph_id, "schema_validation")
     operation_duration_ms = (time.time() - operation_start_time) * 1000
@@ -497,5 +498,5 @@ relationships:
     logger.error(f"Schema validation error: {e}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to validate schema: {str(e)}",
+      detail=f"Failed to validate schema: {e!s}",
     )

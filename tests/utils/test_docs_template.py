@@ -1,22 +1,23 @@
 """Tests for documentation template utilities."""
 
-import json
 import html
+import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from robosystems.utils.docs_template import (
   REDOC_DARK_THEME,
-  _sanitize_input,
-  _load_template_safely,
-  generate_swagger_docs,
-  generate_robosystems_docs,
-  generate_lbug_docs,
-  generate_redoc_docs,
-  generate_robosystems_redoc,
   _get_fallback_template,
   _get_redoc_fallback_template,
+  _load_template_safely,
+  _sanitize_input,
+  generate_lbug_docs,
+  generate_redoc_docs,
+  generate_robosystems_docs,
+  generate_robosystems_redoc,
+  generate_swagger_docs,
 )
 
 
@@ -94,7 +95,7 @@ class TestLoadTemplateSafely:
     mock_path = MagicMock(spec=Path)
     mock_path.exists.return_value = True
     mock_path.is_file.return_value = True
-    mock_path.read_text.side_effect = IOError("Permission denied")
+    mock_path.read_text.side_effect = OSError("Permission denied")
 
     fallback_func = MagicMock(return_value="fallback content")
 
@@ -227,7 +228,7 @@ class TestGenerateRedocDocs:
     mock_path_instance = MagicMock()
     mock_path_instance.exists.return_value = True
     mock_path_instance.is_file.return_value = True
-    mock_path_instance.read_text.side_effect = IOError("Permission denied")
+    mock_path_instance.read_text.side_effect = OSError("Permission denied")
 
     # Set up the chain of calls
     mock_path = MagicMock()

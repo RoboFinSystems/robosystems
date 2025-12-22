@@ -6,15 +6,16 @@ Schema is created only once when the database is first initialized,
 eliminating redundant schema compilation during data ingestion.
 """
 
-from typing import Dict, Any, Optional, Set, Union
 from pathlib import Path
+from typing import Any
 
-from ...logger import logger
-from robosystems.graph_api.core.ladybug import Engine
-from ...processors.xbrl.schema_config_generator import (
+from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaConfigGenerator,
   create_roboledger_ingestion_processor,
 )
+from robosystems.graph_api.core.ladybug import Engine
+
+from ...logger import logger
 
 
 class LadybugSchemaManager:
@@ -48,7 +49,7 @@ class LadybugSchemaManager:
       # Assume schema doesn't exist if we can't check
       return False
 
-  def get_existing_tables(self) -> Dict[str, Set[str]]:
+  def get_existing_tables(self) -> dict[str, set[str]]:
     """
     Get existing node and relationship tables in the database.
 
@@ -80,7 +81,7 @@ class LadybugSchemaManager:
     return existing
 
   def initialize_schema(
-    self, schema_config: Optional[Dict[str, Any]] = None, force: bool = False
+    self, schema_config: dict[str, Any] | None = None, force: bool = False
   ) -> bool:
     """
     Initialize database schema if it doesn't exist.
@@ -244,8 +245,8 @@ class LadybugSchemaManager:
 
 
 def ensure_schema(
-  db_path: Union[str, Path],
-  schema_config: Optional[Dict[str, Any]] = None,
+  db_path: str | Path,
+  schema_config: dict[str, Any] | None = None,
   force: bool = False,
 ) -> bool:
   """

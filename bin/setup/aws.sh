@@ -97,7 +97,11 @@ function create_production_secret() {
         "SSE_ENABLED": "true",
         "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
         "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
-        "USER_REGISTRATION_ENABLED": "true"
+        "USER_REGISTRATION_ENABLED": "true",
+        "BILLING_SCHEDULES_ENABLED": "true",
+        "INSTANCE_SCHEDULES_ENABLED": "true",
+        "SEC_SCHEDULES_ENABLED": "false",
+        "SHARED_REPO_SCHEDULE_ENABLED": "false"
     }'
 
     echo "Production secret created successfully!"
@@ -151,7 +155,11 @@ function create_staging_secret() {
         "SSE_ENABLED": "true",
         "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
         "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
-        "USER_REGISTRATION_ENABLED": "true"
+        "USER_REGISTRATION_ENABLED": "true",
+        "BILLING_SCHEDULES_ENABLED": "true",
+        "INSTANCE_SCHEDULES_ENABLED": "true",
+        "SEC_SCHEDULES_ENABLED": "false",
+        "SHARED_REPO_SCHEDULE_ENABLED": "false"
     }'
 
     echo "Staging secret created successfully!"

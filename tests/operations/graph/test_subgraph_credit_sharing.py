@@ -1,12 +1,13 @@
-import pytest
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
+
+import pytest
 from sqlalchemy.orm import Session
 
-from robosystems.operations.graph.credit_service import CreditService
-from robosystems.models.iam import User, Graph, GraphCredits
 from robosystems.config.graph_tier import GraphTier
-from robosystems.middleware.graph.types import parse_graph_id, is_subgraph_id
+from robosystems.middleware.graph.types import is_subgraph_id, parse_graph_id
+from robosystems.models.iam import Graph, GraphCredits, User
+from robosystems.operations.graph.credit_service import CreditService
 
 
 @pytest.fixture
@@ -182,7 +183,7 @@ class TestSubgraphCreditSharing:
   ):
     subgraph_id = f"{parent_graph.graph_id}_dev3"
 
-    parent_credits.last_allocation_date = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    parent_credits.last_allocation_date = datetime(2024, 1, 1, tzinfo=UTC)
     initial_balance = parent_credits.current_balance
     db_session.commit()
 

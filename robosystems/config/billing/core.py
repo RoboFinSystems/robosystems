@@ -5,10 +5,11 @@ This module defines the primary subscription tiers for graph databases
 and core billing functionality.
 """
 
-from typing import Dict, Any, Optional, List
-from decimal import Decimal
-from ..credits import CreditConfig, TIER_CREDIT_ALLOCATIONS
 import logging
+from decimal import Decimal
+from typing import Any
+
+from ..credits import TIER_CREDIT_ALLOCATIONS, CreditConfig
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Unified billing plans configuration (aligned with GraphTier infrastructure)
 # NOTE: Stripe prices are auto-created from this config on first checkout
 # NOTE: monthly_credit_allocation comes from TIER_CREDIT_ALLOCATIONS (single source of truth)
-DEFAULT_GRAPH_BILLING_PLANS: List[Dict[str, Any]] = [
+DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",
     "display_name": "LadybugDB Standard",
@@ -69,7 +70,7 @@ class BillingConfig:
   """
 
   @classmethod
-  def get_subscription_plan(cls, tier: str) -> Optional[Dict[str, Any]]:
+  def get_subscription_plan(cls, tier: str) -> dict[str, Any] | None:
     """
     Get complete subscription plan information for a tier.
 
@@ -105,7 +106,7 @@ class BillingConfig:
 
   @classmethod
   def get_operation_cost(
-    cls, operation_type: str, context: Optional[Dict[str, Any]] = None
+    cls, operation_type: str, context: dict[str, Any] | None = None
   ) -> Decimal:
     """
     Get the cost for an operation.
@@ -124,7 +125,7 @@ class BillingConfig:
     return CreditConfig.get_operation_cost(operation_type)
 
   @classmethod
-  def get_repository_pricing(cls, repository_id: str) -> Optional[Dict[str, Any]]:
+  def get_repository_pricing(cls, repository_id: str) -> dict[str, Any] | None:
     """
     Get complete pricing information for a shared repository.
 
@@ -143,7 +144,7 @@ class BillingConfig:
   @classmethod
   def get_repository_plan(
     cls, repository_id: str, plan_name: str
-  ) -> Optional[Dict[str, Any]]:
+  ) -> dict[str, Any] | None:
     """
     Get plan details for a specific repository subscription.
 
@@ -181,7 +182,7 @@ class BillingConfig:
     }
 
   @classmethod
-  def validate_configuration(cls) -> Dict[str, Any]:
+  def validate_configuration(cls) -> dict[str, Any]:
     """
     Validate that all billing configuration is consistent.
 
@@ -225,7 +226,7 @@ class BillingConfig:
     }
 
   @classmethod
-  def get_all_pricing_info(cls) -> Dict[str, Any]:
+  def get_all_pricing_info(cls) -> dict[str, Any]:
     """
     Get complete pricing information for all offerings.
 

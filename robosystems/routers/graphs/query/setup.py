@@ -6,12 +6,12 @@ that processes queued queries.
 """
 
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Any
 
+from robosystems.logger import logger
+from robosystems.middleware.graph.query_queue import get_query_queue
 from robosystems.middleware.graph.router import GraphRouter
 from robosystems.middleware.graph.utils import MultiTenantUtils
-from robosystems.middleware.graph.query_queue import get_query_queue
-from robosystems.logger import logger
 
 
 def _get_query_operation_type(graph_id: str) -> str:
@@ -39,8 +39,8 @@ def setup_query_executor():
   queue_manager = get_query_queue()
 
   async def executor(
-    cypher: str, parameters: Optional[Dict[str, Any]], graph_id: str
-  ) -> Dict[str, Any]:
+    cypher: str, parameters: dict[str, Any] | None, graph_id: str
+  ) -> dict[str, Any]:
     """
     Execute a queued query.
 

@@ -1,26 +1,27 @@
 """User password management endpoints."""
 
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, status, HTTPException
-from sqlalchemy.orm import Session
-import bcrypt
+from datetime import UTC, datetime
 
+import bcrypt
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from ...database import get_db_session
+from ...logger import logger
 from ...middleware.auth.dependencies import get_current_user
-from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from ...models.iam import User
-from ...models.api.user import UpdatePasswordRequest
+from ...middleware.rate_limits import user_management_rate_limit_dependency
 from ...models.api.common import (
-  SuccessResponse,
-  ErrorResponse,
   ErrorCode,
+  ErrorResponse,
+  SuccessResponse,
   create_error_response,
 )
-from ...database import get_db_session
-from ...logger import logger
+from ...models.api.user import UpdatePasswordRequest
+from ...models.iam import User
 from ...security.input_validation import validate_password_strength
 
 router = APIRouter(tags=["User"])
@@ -138,7 +139,7 @@ async def update_user_password(
       )
 
     user_in_session.password_hash = new_password_hash
-    user_in_session.updated_at = datetime.now(timezone.utc)
+    user_in_session.updated_at = datetime.now(UTC)
 
     db.commit()
     db.refresh(user_in_session)
@@ -160,7 +161,7 @@ async def update_user_password(
     raise
   except Exception as e:
     db.rollback()
-    logger.error(f"Error updating password: {str(e)}")
+    logger.error(f"Error updating password: {e!s}")
     raise create_error_response(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Error updating password",

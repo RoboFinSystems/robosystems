@@ -1,17 +1,18 @@
 """Comprehensive tests for BillingAuditLog model."""
 
-import pytest
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+import pytest
 from sqlalchemy.orm import Session
 
 from robosystems.models.billing import (
   BillingAuditLog,
   BillingEventType,
-  BillingSubscription,
   BillingInvoice,
+  BillingSubscription,
 )
-from robosystems.models.iam import User, Org, OrgType
+from robosystems.models.iam import Org, OrgType, User
 
 
 @pytest.fixture
@@ -279,8 +280,8 @@ class TestBillingAuditLogQueries:
     """Test retrieving invoice audit history."""
     from datetime import timedelta
 
-    period_start = datetime.now(timezone.utc) - timedelta(days=30)
-    period_end = datetime.now(timezone.utc)
+    period_start = datetime.now(UTC) - timedelta(days=30)
+    period_end = datetime.now(UTC)
 
     invoice = BillingInvoice.create_invoice(
       org_id=test_org.id,
@@ -357,8 +358,8 @@ class TestBillingEventTypes:
     """Test logging all invoice-related events."""
     from datetime import timedelta
 
-    period_start = datetime.now(timezone.utc) - timedelta(days=30)
-    period_end = datetime.now(timezone.utc)
+    period_start = datetime.now(UTC) - timedelta(days=30)
+    period_end = datetime.now(UTC)
 
     invoice = BillingInvoice.create_invoice(
       org_id=test_org.id,
@@ -509,7 +510,7 @@ class TestBillingAuditLogCompliance:
 
     original_timestamp = log_entry.event_timestamp
 
-    log_entry.event_timestamp = datetime.now(timezone.utc)
+    log_entry.event_timestamp = datetime.now(UTC)
     db_session.commit()
     db_session.refresh(log_entry)
 

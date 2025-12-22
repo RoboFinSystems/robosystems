@@ -5,15 +5,18 @@ Tests use pure mocked authentication pattern for reliability and consistency.
 These tests focus on endpoint behavior rather than full integration testing.
 """
 
+from datetime import UTC
+from unittest.mock import MagicMock, Mock, patch
+
+import bcrypt
 import pytest
+from fastapi.testclient import TestClient
+
 from tests.conftest import (
   VALID_TEST_GRAPH_ID,
   VALID_TEST_GRAPH_ID_2,
   VALID_TEST_GRAPH_ID_3,
 )
-from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock, Mock
-import bcrypt
 
 
 class TestUserProfile:
@@ -37,17 +40,17 @@ class TestUserProfile:
     from main import app
     from robosystems.middleware.auth.dependencies import get_current_user
     from robosystems.middleware.rate_limits import (
-      auth_rate_limit_dependency,
-      rate_limit_dependency,
-      user_management_rate_limit_dependency,
-      sync_operations_rate_limit_dependency,
-      connection_management_rate_limit_dependency,
       analytics_rate_limit_dependency,
+      auth_rate_limit_dependency,
       backup_operations_rate_limit_dependency,
-      sensitive_auth_rate_limit_dependency,
-      tasks_management_rate_limit_dependency,
+      connection_management_rate_limit_dependency,
       general_api_rate_limit_dependency,
+      rate_limit_dependency,
+      sensitive_auth_rate_limit_dependency,
       subscription_aware_rate_limit_dependency,
+      sync_operations_rate_limit_dependency,
+      tasks_management_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
 
     # Mock the authentication dependency
@@ -95,8 +98,9 @@ class TestUserProfile:
 
   def test_get_current_user_info_unauthorized(self):
     """Test user info retrieval without authentication."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     # Save current dependency overrides and clear them
     original_overrides = app.dependency_overrides.copy()
@@ -113,8 +117,9 @@ class TestUserProfile:
 
   def test_get_current_user_info_invalid_token(self):
     """Test user info retrieval with invalid token."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     # Save current dependency overrides and clear them
     original_overrides = app.dependency_overrides.copy()
@@ -134,12 +139,12 @@ class TestUserProfile:
   def client_with_real_user(self, test_db, test_user):
     """Create test client with real test user authentication."""
     from main import app
+    from robosystems.database import get_db_session
     from robosystems.middleware.auth.dependencies import get_current_user
     from robosystems.middleware.rate_limits import (
-      user_management_rate_limit_dependency,
       subscription_aware_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
-    from robosystems.database import get_db_session
 
     # Use the real test_user
     mock_user = Mock()
@@ -261,7 +266,7 @@ class TestUserGraphs:
     mock_user.name = "Graph Test User"
 
     # Mock user graphs with proper datetime objects and Graph relationships
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     # Create mock Graph objects for each UserGraph
     mock_graph1 = Mock()
@@ -294,7 +299,7 @@ class TestUserGraphs:
         graph_id=VALID_TEST_GRAPH_ID,
         role="admin",
         is_selected=True,
-        created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC),
         graph=mock_graph1,  # Relationship to Graph object
       ),
       Mock(
@@ -302,7 +307,7 @@ class TestUserGraphs:
         graph_id=VALID_TEST_GRAPH_ID_2,
         role="member",
         is_selected=False,
-        created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC),
         graph=mock_graph2,  # Relationship to Graph object
       ),
       Mock(
@@ -310,7 +315,7 @@ class TestUserGraphs:
         graph_id=VALID_TEST_GRAPH_ID_3,
         role="admin",
         is_selected=False,
-        created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC),
         graph=mock_graph3,  # Relationship to Graph object
       ),
     ]
@@ -327,17 +332,17 @@ class TestUserGraphs:
       get_current_user_with_graph,
     )
     from robosystems.middleware.rate_limits import (
-      auth_rate_limit_dependency,
-      rate_limit_dependency,
-      user_management_rate_limit_dependency,
-      sync_operations_rate_limit_dependency,
-      connection_management_rate_limit_dependency,
       analytics_rate_limit_dependency,
+      auth_rate_limit_dependency,
       backup_operations_rate_limit_dependency,
-      sensitive_auth_rate_limit_dependency,
-      tasks_management_rate_limit_dependency,
+      connection_management_rate_limit_dependency,
       general_api_rate_limit_dependency,
+      rate_limit_dependency,
+      sensitive_auth_rate_limit_dependency,
       subscription_aware_rate_limit_dependency,
+      sync_operations_rate_limit_dependency,
+      tasks_management_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
 
     # Mock the authentication dependency
@@ -468,7 +473,7 @@ class TestUserAPIKeys:
     mock_user.name = "API Test User"
 
     # Mock API keys with proper datetime objects
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     mock_key1 = Mock()
     mock_key1.id = "key1"
@@ -476,7 +481,7 @@ class TestUserAPIKeys:
     mock_key1.description = "For authentication"
     mock_key1.prefix = "rfs123"
     mock_key1.is_active = True
-    mock_key1.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    mock_key1.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_key1.last_used_at = None
     mock_key1.expires_at = None
 
@@ -486,7 +491,7 @@ class TestUserAPIKeys:
     mock_key2.description = "Test key 1"
     mock_key2.prefix = "rfs456"
     mock_key2.is_active = True
-    mock_key2.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    mock_key2.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_key2.last_used_at = None
     mock_key2.expires_at = None
 
@@ -496,7 +501,7 @@ class TestUserAPIKeys:
     mock_key3.description = "Test key 2"
     mock_key3.prefix = "rfs789"
     mock_key3.is_active = True
-    mock_key3.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    mock_key3.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_key3.last_used_at = None
     mock_key3.expires_at = None
 
@@ -511,17 +516,17 @@ class TestUserAPIKeys:
     from main import app
     from robosystems.middleware.auth.dependencies import get_current_user
     from robosystems.middleware.rate_limits import (
-      auth_rate_limit_dependency,
-      rate_limit_dependency,
-      user_management_rate_limit_dependency,
-      sync_operations_rate_limit_dependency,
-      connection_management_rate_limit_dependency,
       analytics_rate_limit_dependency,
+      auth_rate_limit_dependency,
       backup_operations_rate_limit_dependency,
-      sensitive_auth_rate_limit_dependency,
-      tasks_management_rate_limit_dependency,
+      connection_management_rate_limit_dependency,
       general_api_rate_limit_dependency,
+      rate_limit_dependency,
+      sensitive_auth_rate_limit_dependency,
       subscription_aware_rate_limit_dependency,
+      sync_operations_rate_limit_dependency,
+      tasks_management_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
 
     # Mock the authentication dependency
@@ -579,7 +584,7 @@ class TestUserAPIKeys:
   def test_create_api_key_success(self, mock_create, client_with_api_keys: TestClient):
     """Test successful API key creation."""
     # Mock API key creation
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     mock_api_key = Mock()
     mock_api_key.id = "new-key-id"
@@ -587,7 +592,7 @@ class TestUserAPIKeys:
     mock_api_key.description = "Newly created test key"
     mock_api_key.prefix = "rfs999"
     mock_api_key.is_active = True
-    mock_api_key.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    mock_api_key.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_api_key.last_used_at = None
     mock_api_key.expires_at = None
 
@@ -633,6 +638,7 @@ class TestUserAPIKeys:
   ):
     """Test successful API key update."""
     from unittest.mock import MagicMock
+
     from main import app
     from robosystems.database import get_db_session
 
@@ -740,9 +746,9 @@ class TestUserPasswordUpdate:
 
     # Create a real password hash for testing
     salt = bcrypt.gensalt()
-    mock_user.password_hash = bcrypt.hashpw(
-      "originalPassword123".encode("utf-8"), salt
-    ).decode("utf-8")
+    mock_user.password_hash = bcrypt.hashpw(b"originalPassword123", salt).decode(
+      "utf-8"
+    )
 
     return mock_user
 
@@ -752,17 +758,17 @@ class TestUserPasswordUpdate:
     from main import app
     from robosystems.middleware.auth.dependencies import get_current_user
     from robosystems.middleware.rate_limits import (
-      auth_rate_limit_dependency,
-      rate_limit_dependency,
-      user_management_rate_limit_dependency,
-      sync_operations_rate_limit_dependency,
-      connection_management_rate_limit_dependency,
       analytics_rate_limit_dependency,
+      auth_rate_limit_dependency,
       backup_operations_rate_limit_dependency,
-      sensitive_auth_rate_limit_dependency,
-      tasks_management_rate_limit_dependency,
+      connection_management_rate_limit_dependency,
       general_api_rate_limit_dependency,
+      rate_limit_dependency,
+      sensitive_auth_rate_limit_dependency,
       subscription_aware_rate_limit_dependency,
+      sync_operations_rate_limit_dependency,
+      tasks_management_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
 
     # Mock the authentication dependency
@@ -795,6 +801,7 @@ class TestUserPasswordUpdate:
   ):
     """Test successful password update."""
     from unittest.mock import MagicMock
+
     from main import app
     from robosystems.database import get_db_session
 
@@ -931,17 +938,17 @@ class TestUserEndpointsMetrics:
     from main import app
     from robosystems.middleware.auth.dependencies import get_current_user
     from robosystems.middleware.rate_limits import (
-      auth_rate_limit_dependency,
-      rate_limit_dependency,
-      user_management_rate_limit_dependency,
-      sync_operations_rate_limit_dependency,
-      connection_management_rate_limit_dependency,
       analytics_rate_limit_dependency,
+      auth_rate_limit_dependency,
       backup_operations_rate_limit_dependency,
-      sensitive_auth_rate_limit_dependency,
-      tasks_management_rate_limit_dependency,
+      connection_management_rate_limit_dependency,
       general_api_rate_limit_dependency,
+      rate_limit_dependency,
+      sensitive_auth_rate_limit_dependency,
       subscription_aware_rate_limit_dependency,
+      sync_operations_rate_limit_dependency,
+      tasks_management_rate_limit_dependency,
+      user_management_rate_limit_dependency,
     )
 
     # Mock the authentication dependency
@@ -994,7 +1001,7 @@ class TestUserEndpointsMetrics:
     mock_get_metrics.return_value = mock_metrics_instance
 
     # Mock API key creation
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     mock_api_key = Mock()
     mock_api_key.id = "metrics-key-id"
@@ -1002,7 +1009,7 @@ class TestUserEndpointsMetrics:
     mock_api_key.description = "Test key for metrics"
     mock_api_key.prefix = "rfs999"
     mock_api_key.is_active = True
-    mock_api_key.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    mock_api_key.created_at = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     mock_api_key.last_used_at = None
     mock_api_key.expires_at = None
 

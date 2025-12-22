@@ -1,18 +1,17 @@
 """Tests for subscription-based rate limiting."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
 from starlette.datastructures import Headers
 
-from robosystems.middleware.rate_limits import (
-  subscription_aware_rate_limit_dependency,
-)
 from robosystems.middleware.rate_limits import (
   EndpointCategory,
   get_endpoint_category,
   get_subscription_rate_limit,
   should_use_subscription_limits,
+  subscription_aware_rate_limit_dependency,
 )
 
 

@@ -6,12 +6,13 @@ Supports base schema + extensions architecture.
 """
 
 import importlib
-from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
+from robosystems.logger import logger
 
 from .models import Schema
-from robosystems.logger import logger
 
 
 class SchemaType(Enum):
@@ -35,7 +36,7 @@ class SchemaConfiguration:
   description: str
   version: str
   base_schema: str  # "base"
-  extensions: List[str]  # ["roboledger", "roboinvestor"]
+  extensions: list[str]  # ["roboledger", "roboinvestor"]
 
 
 @dataclass
@@ -43,9 +44,9 @@ class SchemaCompatibility:
   """Schema compatibility information."""
 
   compatible: bool
-  conflicts: List[str]
-  shared_nodes: List[str]
-  shared_relationships: List[str]
+  conflicts: list[str]
+  shared_nodes: list[str]
+  shared_relationships: list[str]
 
 
 class SchemaManager:
@@ -56,16 +57,16 @@ class SchemaManager:
   """
 
   def __init__(self):
-    self._schema_cache: Dict[str, Schema] = {}
-    self._module_cache: Dict[str, Any] = {}
-    self._compatibility_cache: Dict[Tuple[str, ...], SchemaCompatibility] = {}
+    self._schema_cache: dict[str, Schema] = {}
+    self._module_cache: dict[str, Any] = {}
+    self._compatibility_cache: dict[tuple[str, ...], SchemaCompatibility] = {}
 
   def create_schema_configuration(
     self,
     name: str,
     description: str,
     version: str = "1.0.0",
-    extensions: Optional[List[str]] = None,
+    extensions: list[str] | None = None,
   ) -> SchemaConfiguration:
     """Create a schema configuration."""
     return SchemaConfiguration(
@@ -165,13 +166,13 @@ class SchemaManager:
     """Validate schema for consistency and conflicts."""
     # Check for duplicate node names
     node_names = [node.name for node in schema.nodes]
-    duplicates = set([name for name in node_names if node_names.count(name) > 1])
+    duplicates = {name for name in node_names if node_names.count(name) > 1}
     if duplicates:
       raise ValueError(f"Duplicate node names found: {duplicates}")
 
     # Check for duplicate relationship names
     rel_names = [rel.name for rel in schema.relationships]
-    duplicates = set([name for name in rel_names if rel_names.count(name) > 1])
+    duplicates = {name for name in rel_names if rel_names.count(name) > 1}
     if duplicates:
       raise ValueError(f"Duplicate relationship names found: {duplicates}")
 
@@ -189,7 +190,7 @@ class SchemaManager:
 
     logger.debug("Schema consistency validation passed")
 
-  def check_schema_compatibility(self, extensions: List[str]) -> SchemaCompatibility:
+  def check_schema_compatibility(self, extensions: list[str]) -> SchemaCompatibility:
     """
     Check compatibility between multiple schema extensions.
 
@@ -206,8 +207,8 @@ class SchemaManager:
 
     logger.debug(f"Checking compatibility for extensions: {extensions}")
 
-    all_nodes: Dict[str, str] = {}  # name -> extension
-    all_relationships: Dict[str, str] = {}  # name -> extension
+    all_nodes: dict[str, str] = {}  # name -> extension
+    all_relationships: dict[str, str] = {}  # name -> extension
     conflicts = []
 
     # Collect all nodes and relationships from extensions
@@ -256,7 +257,7 @@ class SchemaManager:
     self._compatibility_cache[cache_key] = compatibility
     return compatibility
 
-  def get_optimal_schema_groups(self) -> Dict[str, List[str]]:
+  def get_optimal_schema_groups(self) -> dict[str, list[str]]:
     """
     Get predefined optimal schema groupings for instance placement.
 
@@ -285,7 +286,7 @@ class SchemaManager:
     """
     return schema.to_cypher()
 
-  def get_schema_statistics(self, schema: Schema) -> Dict[str, Any]:
+  def get_schema_statistics(self, schema: Schema) -> dict[str, Any]:
     """
     Get statistics about a compiled schema.
 
@@ -305,7 +306,7 @@ class SchemaManager:
       "estimated_ddl_size": len(schema.to_cypher()),
     }
 
-  def list_available_extensions(self) -> List[Dict[str, str]]:
+  def list_available_extensions(self) -> list[dict[str, str]]:
     """
     List all available schema extensions.
 
@@ -340,7 +341,7 @@ class SchemaManager:
           {
             "name": schema_type.value,
             "type": schema_type.name,
-            "description": f"Failed to load schema: {str(e)}",
+            "description": f"Failed to load schema: {e!s}",
             "available": False,
           }
         )
@@ -378,7 +379,7 @@ def create_accounting_schema() -> Schema:
   return manager.load_and_compile_schema(config)
 
 
-def create_multi_app_schema(extensions: List[str]) -> Schema:
+def create_multi_app_schema(extensions: list[str]) -> Schema:
   """Create multi-application schema with specified extensions."""
   manager = SchemaManager()
 
@@ -395,7 +396,7 @@ def create_multi_app_schema(extensions: List[str]) -> Schema:
   return manager.load_and_compile_schema(config)
 
 
-def get_recommended_schema_groups() -> Dict[str, List[str]]:
+def get_recommended_schema_groups() -> dict[str, list[str]]:
   """Get recommended schema groupings for optimal performance."""
   manager = SchemaManager()
   return manager.get_optimal_schema_groups()

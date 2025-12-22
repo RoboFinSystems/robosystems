@@ -5,8 +5,9 @@ This middleware provides comprehensive observability through distributed tracing
 ## Overview
 
 The OpenTelemetry middleware:
+
 - Collects and exports metrics and traces to Amazon Managed Prometheus and AWS X-Ray
-- Provides automatic instrumentation for FastAPI, Celery, and database operations
+- Provides automatic instrumentation for FastAPI, and database operations
 - Enables custom business metrics and event tracking
 - Supports both local development and production environments
 - Integrates with Amazon Managed Grafana for visualization
@@ -34,12 +35,14 @@ otel/
 Initializes OpenTelemetry providers and auto-instrumentation.
 
 **Features:**
+
 - **Environment-Aware**: Automatically enables in staging/prod
 - **OTLP Exporters**: Sends metrics and traces to collectors
-- **Auto-Instrumentation**: FastAPI, requests, psycopg2, Celery
+- **Auto-Instrumentation**: FastAPI, requests, psycopg2
 - **Graceful Degradation**: Continues if collectors unavailable
 
 **Usage:**
+
 ```python
 from robosystems.middleware.otel.setup import setup_opentelemetry
 
@@ -55,11 +58,13 @@ setup_opentelemetry(
 Provides utilities for consistent metrics collection.
 
 **Core Classes:**
+
 - `EndpointMetrics`: Singleton managing metric instruments
 - `endpoint_metrics_decorator`: Automatic metrics decorator
 - `endpoint_metrics_context`: Context manager for metrics
 
 **Key Functions:**
+
 - `record_request_metrics()`: HTTP request metrics
 - `record_auth_metrics()`: Authentication metrics
 - `record_error_metrics()`: Error tracking
@@ -68,6 +73,7 @@ Provides utilities for consistent metrics collection.
 ## Metrics Reference
 
 ### Request Metrics
+
 ```
 robosystems_api_requests_total{endpoint, method, status_code, status_class, user_authenticated}
   - Type: Counter
@@ -80,6 +86,7 @@ robosystems_api_request_duration_seconds{endpoint, method, status_code, status_c
 ```
 
 ### Authentication Metrics
+
 ```
 robosystems_auth_attempts_total{endpoint, method, auth_type}
   - Type: Counter
@@ -91,6 +98,7 @@ robosystems_auth_failures_total{endpoint, method, auth_type, failure_reason}
 ```
 
 ### Error Metrics
+
 ```
 robosystems_api_errors_total{endpoint, method, error_type, error_code, user_authenticated}
   - Type: Counter
@@ -98,6 +106,7 @@ robosystems_api_errors_total{endpoint, method, error_type, error_code, user_auth
 ```
 
 ### Business Event Metrics
+
 ```
 robosystems_business_events_total{endpoint, method, event_type, event_*, user_authenticated}
   - Type: Counter
@@ -105,6 +114,7 @@ robosystems_business_events_total{endpoint, method, event_type, event_*, user_au
 ```
 
 ### Query Queue Metrics
+
 ```
 robosystems_query_queue_size{priority}
   - Type: Gauge
@@ -118,14 +128,6 @@ robosystems_query_wait_time_seconds{graph_id, user_id, priority}
 robosystems_query_execution_time_seconds{graph_id, user_id, status, error_type}
   - Type: Histogram
   - Description: Query execution time
-```
-
-### Celery Task Metrics (Auto-instrumented)
-```
-celery_task_sent_total{task_name, queue}
-celery_task_succeeded_total{task_name, queue}
-celery_task_failed_total{task_name, queue}
-celery_task_runtime_seconds{task_name, queue}
 ```
 
 ## Usage Patterns
@@ -293,9 +295,9 @@ processors:
     send_batch_size: 50
   resource:
     attributes:
-    - key: service.name
-      value: ${OTEL_SERVICE_NAME}
-      action: upsert
+      - key: service.name
+        value: ${OTEL_SERVICE_NAME}
+        action: upsert
 
 exporters:
   prometheusremotewrite:
@@ -338,6 +340,7 @@ export OTEL_SERVICE_NAME=robosystems-api-dev
 ### Production Deployment
 
 1. **Infrastructure**: Deploy via CloudFormation
+
    ```bash
    gh workflow run deploy-observability.yml
    ```
@@ -351,18 +354,21 @@ export OTEL_SERVICE_NAME=robosystems-api-dev
 ### Key Metrics to Monitor
 
 1. **API Health**
+
    - Request rate by endpoint
    - Error rate (4xx and 5xx)
    - P50/P90/P99 latency
    - Authentication success rate
 
 2. **Business Metrics**
+
    - User registrations per hour
    - Active users
    - API key usage
    - Resource creation rates
 
 3. **Infrastructure**
+
    - ECS task CPU/memory
    - Database connections
    - Cache hit rates
@@ -435,15 +441,18 @@ groups:
 ### Common Issues
 
 1. **Metrics Not Appearing**
+
    - Check ENVIRONMENT is staging/prod
    - Verify collector connectivity
    - Review logs for errors
 
 2. **Missing Labels**
+
    - Ensure all parameters passed
    - Check user context included
 
 3. **High Memory Usage**
+
    - Adjust batch processor settings
    - Reduce queue sizes
 

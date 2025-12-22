@@ -1,18 +1,19 @@
 """Integration tests for the credit-based system."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-from robosystems.operations.graph.credit_service import CreditService
+import pytest
+
+from robosystems.config.graph_tier import GraphTier
 from robosystems.models.iam import (
-  User,
   GraphCredits,
   GraphCreditTransaction,
+  User,
 )
-from robosystems.config.graph_tier import GraphTier
 from robosystems.models.iam.graph_credits import CreditTransactionType
+from robosystems.operations.graph.credit_service import CreditService
 
 
 class TestCreditSystemIntegration:
@@ -156,7 +157,7 @@ class TestCreditSystemIntegration:
       credit.current_balance = Decimal("100.0")  # Low balance
       credit.monthly_allocation = Decimal("1000.0")
       credit.is_active = True
-      credit.last_allocation_date = datetime.now(timezone.utc) - timedelta(days=35)
+      credit.last_allocation_date = datetime.now(UTC) - timedelta(days=35)
       credit.allocate_monthly_credits = Mock(return_value=True)
       mock_credits.append(credit)
 
@@ -225,7 +226,7 @@ class TestCreditSystemIntegration:
       transaction.description = desc
       transaction.metadata = {}
       transaction.get_metadata = Mock(return_value={})
-      transaction.created_at = datetime.now(timezone.utc)
+      transaction.created_at = datetime.now(UTC)
       mock_transactions.append(transaction)
 
     # Mock GraphCredits
@@ -262,7 +263,7 @@ class TestCreditSystemIntegration:
     mock_credits.current_balance = Decimal("750.0")
     mock_credits.monthly_allocation = Decimal("1000.0")
     mock_credits.graph_tier = GraphTier.LADYBUG_STANDARD.value
-    mock_credits.last_allocation_date = datetime.now(timezone.utc).date()
+    mock_credits.last_allocation_date = datetime.now(UTC).date()
 
     # Mock cache miss then hit
     with patch("robosystems.middleware.billing.cache.credit_cache") as mock_cache:

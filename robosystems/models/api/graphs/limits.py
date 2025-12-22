@@ -1,13 +1,12 @@
 """Graph query API models."""
 
-from typing import Optional, List
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StorageLimits(BaseModel):
   """Storage limits information."""
 
-  current_usage_gb: Optional[float] = Field(
+  current_usage_gb: float | None = Field(
     None, description="Current storage usage in GB"
   )
   max_storage_gb: float = Field(..., description="Maximum storage limit in GB")
@@ -33,7 +32,7 @@ class CopyOperationLimits(BaseModel):
   concurrent_operations: int = Field(..., description="Maximum concurrent operations")
   max_files_per_operation: int = Field(..., description="Maximum files per operation")
   daily_copy_operations: int = Field(..., description="Daily operation limit")
-  supported_formats: List[str] = Field(..., description="Supported file formats")
+  supported_formats: list[str] = Field(..., description="Supported file formats")
 
 
 class BackupLimits(BaseModel):
@@ -217,6 +216,6 @@ class GraphLimitsResponse(BaseModel):
   )
   backups: BackupLimits = Field(..., description="Backup operation limits")
   rate_limits: RateLimits = Field(..., description="API rate limits")
-  credits: Optional[CreditLimits] = Field(
+  credits: CreditLimits | None = Field(
     None, description="AI credit limits (if applicable)"
   )

@@ -1,0 +1,718 @@
+Description: RoboSystems Dagster Orchestration - ECS Fargate Only (Lightweight Orchestration)
+# Revised December 18, 2025: Removed EC2 capacity provider
+# Heavy compute (DuckDB + LadybugDB) delegated to shared master via Graph API
+
+Parameters:
+  # Environment
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+      - staging
+    Description: Environment name (prod or staging)
+    ConstraintDescription: Must be prod or staging
+
+  # Infrastructure & Networking
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for ECS tasks
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for ECS tasks (comma-separated)
+
+  # Container & Application Configuration
+  ECRRepositoryUrl:
+    Type: String
+    Description: Full ECR repository URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com/robosystems)
+  ECRImageTag:
+    Type: String
+    Description: Docker image tag
+    Default: latest
+
+  # Fargate Configuration
+  DaemonCpu:
+    Type: String
+    Default: "512"
+    Description: CPU units for Dagster daemon (512 = 0.5 vCPU)
+    AllowedValues: ["256", "512", "1024"]
+  DaemonMemory:
+    Type: String
+    Default: "1024"
+    Description: Memory in MiB for Dagster daemon
+    AllowedValues: ["512", "1024", "2048"]
+  WebserverCpu:
+    Type: String
+    Default: "512"
+    Description: CPU units for Dagster webserver (512 = 0.5 vCPU)
+    AllowedValues: ["256", "512", "1024", "2048"]
+  WebserverMemory:
+    Type: String
+    Default: "1024"
+    Description: Memory in MiB for Dagster webserver
+    AllowedValues: ["512", "1024", "2048", "4096"]
+  WebserverDesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: Desired number of webserver tasks
+  WebserverMinCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: Minimum webserver tasks for auto scaling
+  WebserverMaxCapacity:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 10
+    Description: Maximum webserver tasks for auto scaling
+
+  # Run Job Configuration (Fargate)
+  RunJobCpu:
+    Type: String
+    Default: "1024"
+    Description: CPU units for Dagster run jobs (1024 = 1 vCPU)
+    AllowedValues: ["512", "1024", "2048", "4096"]
+  RunJobMemory:
+    Type: String
+    Default: "4096"
+    Description: Memory in MiB for Dagster run jobs
+    AllowedValues: ["1024", "2048", "4096", "8192", "16384"]
+
+  # Cache Configuration
+  ValkeyUrl:
+    Type: String
+    Description: Valkey ElastiCache endpoint URL
+    AllowedPattern: ^rediss?://.*:[0-9]+$
+  ValkeyClientSecurityGroupId:
+    Type: String
+    Description: Security group ID for applications connecting to Valkey
+    AllowedPattern: ^sg-[0-9a-f]+$
+
+  # Database Configuration (uses existing RDS)
+  DatabaseSecurityGroupId:
+    Type: String
+    Description: Security group ID for PostgreSQL access
+    AllowedPattern: ^sg-[0-9a-f]+$
+
+  # Bastion Access (for port forwarding)
+  BastionSecurityGroupId:
+    Type: String
+    Description: Security group ID for bastion host access
+    AllowedPattern: ^(sg-[0-9a-f]+)?$
+    Default: ""
+
+  # Monitoring
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+    MaxValue: 365
+    Description: CloudWatch log retention in days
+  ContainerInsightsEnabled:
+    Type: String
+    Default: disabled
+    AllowedValues: ["enabled", "disabled"]
+    Description: Enable/disable ECS Container Insights
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Default: RoboSystems
+    Description: Service tag for resource identification and billing
+  ComponentTag:
+    Type: String
+    Default: Dagster
+    Description: Component tag for resource identification and billing
+
+Conditions:
+  HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
+
+Resources:
+  # ========================================
+  # SERVICE DISCOVERY (Internal DNS)
+  # ========================================
+  DagsterNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: !Sub dagster.${Environment}.robosystems.local
+      Vpc: !Ref VpcId
+      Description: !Sub Private DNS namespace for Dagster services (${Environment})
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  WebserverServiceDiscovery:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: webserver
+      NamespaceId: !Ref DagsterNamespace
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+        RoutingPolicy: MULTIVALUE
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Description: Dagster webserver service discovery
+
+  # ========================================
+  # ECS CLUSTER (Fargate Only)
+  # ========================================
+  DagsterCluster:
+    Type: AWS::ECS::Cluster
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      ClusterName: !Sub robosystems-dagster-${Environment}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: !Ref ContainerInsightsEnabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 80
+        - CapacityProvider: FARGATE
+          Weight: 20
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # ========================================
+  # SECURITY GROUPS
+  # ========================================
+  DagsterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Dagster ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub sg-robosystems-dagster-${Environment}
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # Allow internal communication between Dagster components
+  DagsterInternalIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DagsterSecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref DagsterSecurityGroup
+      Description: Allow internal Dagster component communication
+
+  # Allow bastion to access webserver (for port forwarding)
+  BastionToDagsterIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasBastionAccess
+    Properties:
+      GroupId: !Ref DagsterSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      SourceSecurityGroupId: !Ref BastionSecurityGroupId
+      Description: Allow bastion host to access Dagster webserver
+
+  # ========================================
+  # LOG GROUPS
+  # ========================================
+  DagsterLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /robosystems/${Environment}/dagster
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # ========================================
+  # IAM ROLES
+  # ========================================
+  DagsterTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-dagster-task-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DagsterTaskPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Secrets Manager
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # KMS for secrets
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+              # S3 for SEC data and deployments
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-raw-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-raw-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
+              # DynamoDB for graph registries (needed for shared master discovery)
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:DescribeTable
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*/index/*"
+              # EC2 for snapshot management (shared repository jobs)
+              - Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:DescribeSnapshots
+                  - ec2:CreateTags
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeInstances
+                Resource: "*"
+              # EC2 Launch Template management (for replica updates)
+              - Effect: Allow
+                Action:
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:ModifyLaunchTemplate
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*"
+              # Auto Scaling for replica refresh
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:UpdateAutoScalingGroup
+                  - autoscaling:StartInstanceRefresh
+                  - autoscaling:DescribeInstanceRefreshes
+                Resource: "*"
+              # ECS for run launcher
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                  - ecs:StopTask
+                  - ecs:ListTasks
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DeregisterTaskDefinition
+                  - ecs:DescribeServices
+                Resource: "*"
+              # IAM pass role for task execution
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt DagsterTaskExecutionRole.Arn
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/robosystems-dagster-task-role-${Environment}"
+                Condition:
+                  StringEquals:
+                    "iam:PassedToService": "ecs-tasks.amazonaws.com"
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/dagster:*"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  DagsterTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub robosystems-dagster-execution-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ExecutionRoleSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
+                  - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/secretsmanager"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ========================================
+  # TASK DEFINITIONS
+  # ========================================
+  DaemonTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub robosystems-dagster-daemon-${Environment}
+      Cpu: !Ref DaemonCpu
+      Memory: !Ref DaemonMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      ContainerDefinitions:
+        - Name: dagster-daemon
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          Essential: true
+          Command: ["/app/bin/entrypoint.sh"]
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DagsterLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: daemon
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: DOCKER_PROFILE
+              Value: dagster-daemon
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: "5432"
+            - Name: DAGSTER_POSTGRES_USER
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            # Run database migrations on daemon startup (singleton pattern)
+            - Name: RUN_MIGRATIONS
+              Value: "true"
+            # EcsRunLauncher configuration - Fargate only
+            - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
+              Value: !Ref RunJobTaskDefinition
+            - Name: DAGSTER_ECS_CLUSTER
+              Value: !Ref DagsterCluster
+            - Name: DAGSTER_ECS_LAUNCH_TYPE
+              Value: FARGATE
+
+  WebserverTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub robosystems-dagster-webserver-${Environment}
+      Cpu: !Ref WebserverCpu
+      Memory: !Ref WebserverMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      ContainerDefinitions:
+        - Name: dagster-webserver
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          Essential: true
+          Command: ["/app/bin/entrypoint.sh"]
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DagsterLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: webserver
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: DOCKER_PROFILE
+              Value: dagster
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_PORT
+              Value: "3000"
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: "5432"
+            - Name: DAGSTER_POSTGRES_USER
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+          HealthCheck:
+            Command:
+              [
+                "CMD-SHELL",
+                "curl -f http://localhost:3000/server_info || exit 1",
+              ]
+            Interval: 30
+            Timeout: 10
+            Retries: 3
+            StartPeriod: 60
+
+  # Task definition for Dagster run jobs (launched by EcsRunLauncher)
+  RunJobTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub robosystems-dagster-run-${Environment}
+      Cpu: !Ref RunJobCpu
+      Memory: !Ref RunJobMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      # Fargate ephemeral storage (default 20GB, can increase to 200GB)
+      EphemeralStorage:
+        SizeInGiB: 100
+      ContainerDefinitions:
+        - Name: dagster-run
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DagsterLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: run
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: "5432"
+            - Name: DAGSTER_POSTGRES_USER
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+
+  # ========================================
+  # ECS SERVICES
+  # ========================================
+  DaemonService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub robosystems-dagster-daemon-${Environment}
+      Cluster: !Ref DagsterCluster
+      DesiredCount: 1
+      CapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 80
+        - CapacityProvider: FARGATE
+          Weight: 20
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref DagsterSecurityGroup
+            - !Ref ValkeyClientSecurityGroupId
+            - !Ref DatabaseSecurityGroupId
+      TaskDefinition: !Ref DaemonTaskDefinition
+      EnableExecuteCommand: true
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  WebserverService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub robosystems-dagster-webserver-${Environment}
+      Cluster: !Ref DagsterCluster
+      DesiredCount: !Ref WebserverDesiredCount
+      CapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 80
+        - CapacityProvider: FARGATE
+          Weight: 20
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !Ref DagsterSecurityGroup
+            - !Ref ValkeyClientSecurityGroupId
+            - !Ref DatabaseSecurityGroupId
+      TaskDefinition: !Ref WebserverTaskDefinition
+      # Service Discovery registration
+      ServiceRegistries:
+        - RegistryArn: !GetAtt WebserverServiceDiscovery.Arn
+      EnableExecuteCommand: true
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Auto Scaling for Webserver
+  WebserverScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: WebserverService
+    Properties:
+      ServiceNamespace: ecs
+      ResourceId: !Sub service/${DagsterCluster}/robosystems-dagster-webserver-${Environment}
+      ScalableDimension: ecs:service:DesiredCount
+      MinCapacity: !Ref WebserverMinCapacity
+      MaxCapacity: !Ref WebserverMaxCapacity
+      RoleARN: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+
+  WebserverCPUScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-webserver-cpu-scaling
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref WebserverScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 180
+
+Outputs:
+  ClusterName:
+    Description: Name of the ECS Cluster
+    Value: !Ref DagsterCluster
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterName
+
+  ClusterArn:
+    Description: ARN of the ECS Cluster
+    Value: !GetAtt DagsterCluster.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ClusterArn
+
+  # Internal access endpoint (use with bastion port forwarding)
+  DagsterInternalEndpoint:
+    Description: Internal DNS endpoint for Dagster webserver (use with bastion tunnel)
+    Value: !Sub webserver.dagster.${Environment}.robosystems.local
+    Export:
+      Name: !Sub ${AWS::StackName}-InternalEndpoint
+
+  DagsterSecurityGroupId:
+    Description: Security group ID for Dagster services
+    Value: !Ref DagsterSecurityGroup
+    Export:
+      Name: !Sub ${AWS::StackName}-SecurityGroupId
+
+  RunJobTaskDefinitionArn:
+    Description: ARN of the run job task definition (for EcsRunLauncher)
+    Value: !Ref RunJobTaskDefinition
+    Export:
+      Name: !Sub ${AWS::StackName}-RunJobTaskDefinition
+
+  TunnelCommand:
+    Description: Command to access Dagster UI via bastion tunnel
+    Value: !Sub "./bin/tools/tunnels.sh ${Environment} dagster"

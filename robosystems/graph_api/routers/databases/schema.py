@@ -6,17 +6,18 @@ database schemas.
 """
 
 import re
-from typing import Dict, Any
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi import status as http_status
 
-from robosystems.graph_api.models.database import (
-  SchemaInstallRequest,
-  SchemaInstallResponse,
-  QueryRequest,
-)
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.core.utils import validate_database_name
+from robosystems.graph_api.models.database import (
+  QueryRequest,
+  SchemaInstallRequest,
+  SchemaInstallResponse,
+)
 from robosystems.logger import logger
 
 router = APIRouter(prefix="/databases", tags=["Graph Schema"])
@@ -178,7 +179,7 @@ async def install_schema(
             except Exception:
               pass  # Rollback might fail if connection is broken
 
-            error_msg = f"Failed to execute DDL statement {i + 1}: {str(e)}"
+            error_msg = f"Failed to execute DDL statement {i + 1}: {e!s}"
             logger.error(error_msg)
             return SchemaInstallResponse(
               success=False,
@@ -211,7 +212,7 @@ async def install_schema(
     logger.error(f"Schema installation failed for {graph_id}: {e}")
     return SchemaInstallResponse(
       success=False,
-      message=f"Schema installation failed: {str(e)}",
+      message=f"Schema installation failed: {e!s}",
       statements_executed=0,
     )
 
@@ -220,7 +221,7 @@ async def install_schema(
 async def get_schema(
   graph_id: str = Path(..., description="Graph database identifier"),
   ladybug_service=Depends(get_ladybug_service),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """
   Get database schema information.
 
@@ -295,7 +296,7 @@ async def get_schema(
           # [index, name, type, default, isPrimaryKey]
           if isinstance(prop_row, dict) and len(prop_row) > 0:
             # When using RETURN *, the result is a dict with a single key
-            values = list(prop_row.values())[0] if len(prop_row) == 1 else prop_row
+            values = next(iter(prop_row.values())) if len(prop_row) == 1 else prop_row
             if isinstance(values, list) and len(values) >= 3:
               properties.append(
                 {
@@ -328,5 +329,5 @@ async def get_schema(
     logger.error(f"Failed to get schema for database {validated_graph_id}: {e}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to retrieve schema: {str(e)}",
+      detail=f"Failed to retrieve schema: {e!s}",
     )

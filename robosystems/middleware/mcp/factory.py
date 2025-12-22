@@ -5,17 +5,17 @@ This module provides factory functions for creating GraphMCPClient instances
 with proper configuration and environment discovery.
 """
 
-from typing import Optional
 from contextlib import asynccontextmanager
 
-from robosystems.logger import logger
 from robosystems.config import env
+from robosystems.logger import logger
+
 from .client import GraphMCPClient
 from .pool import get_connection_pool
 
 
 async def create_graph_mcp_client(
-  graph_id: str = "sec", api_base_url: Optional[str] = None
+  graph_id: str = "sec", api_base_url: str | None = None
 ) -> GraphMCPClient:
   """
   Create a Graph MCP client with environment-based configuration and timeout controls.
@@ -83,7 +83,7 @@ async def create_graph_mcp_client(
 
 @asynccontextmanager
 async def acquire_graph_mcp_client(
-  graph_id: str = "sec", api_base_url: Optional[str] = None, use_pool: bool = True
+  graph_id: str = "sec", api_base_url: str | None = None, use_pool: bool = True
 ):
   """
   Acquire a Graph MCP client from the connection pool.

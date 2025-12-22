@@ -16,10 +16,10 @@ import json
 import logging
 import logging.config
 import time
-from datetime import datetime
-from typing import Any, Dict, Optional, Union
 import traceback
+from datetime import datetime
 from functools import wraps
+from typing import Any
 
 from robosystems.config.env import EnvConfig
 
@@ -46,21 +46,21 @@ class StructuredFormatter(logging.Formatter):
 
     # Add action if specified (for searching specific operations)
     if hasattr(record, "action"):
-      log_entry["action"] = getattr(record, "action")
+      log_entry["action"] = record.action
 
     # Add user context if available
     if hasattr(record, "user_id"):
-      log_entry["user_id"] = getattr(record, "user_id")
+      log_entry["user_id"] = record.user_id
     if hasattr(record, "entity_id"):
-      log_entry["entity_id"] = getattr(record, "entity_id")
+      log_entry["entity_id"] = record.entity_id
     if hasattr(record, "database"):
-      log_entry["database"] = getattr(record, "database")
+      log_entry["database"] = record.database
 
     # Add performance metrics if available
     if hasattr(record, "duration_ms"):
-      log_entry["duration_ms"] = getattr(record, "duration_ms")
+      log_entry["duration_ms"] = record.duration_ms
     if hasattr(record, "status_code"):
-      log_entry["status_code"] = getattr(record, "status_code")
+      log_entry["status_code"] = record.status_code
 
     # Add error details for ERROR/CRITICAL logs
     if record.levelno >= logging.ERROR:
@@ -73,15 +73,15 @@ class StructuredFormatter(logging.Formatter):
 
       # Add error category for easier searching
       if hasattr(record, "error_category"):
-        log_entry["error_category"] = getattr(record, "error_category")
+        log_entry["error_category"] = record.error_category
 
     # Add any additional metadata
     if hasattr(record, "metadata"):
-      log_entry["metadata"] = getattr(record, "metadata")
+      log_entry["metadata"] = record.metadata
 
     # Add request ID for tracing
     if hasattr(record, "request_id"):
-      log_entry["request_id"] = getattr(record, "request_id")
+      log_entry["request_id"] = record.request_id
 
     return json.dumps(log_entry, default=str, separators=(",", ":"))
 
@@ -108,7 +108,7 @@ class TieredLogFilter:
     return True
 
 
-def get_logging_config(environment: Optional[str] = None) -> Dict[str, Any]:
+def get_logging_config(environment: str | None = None) -> dict[str, Any]:
   """
   Generate logging configuration based on environment.
 
@@ -255,7 +255,7 @@ def get_logging_config(environment: Optional[str] = None) -> Dict[str, Any]:
   return config
 
 
-def setup_logging(environment: Optional[str] = None) -> None:
+def setup_logging(environment: str | None = None) -> None:
   """Initialize structured logging configuration."""
   config = get_logging_config(environment)
   logging.config.dictConfig(config)
@@ -273,9 +273,9 @@ def log_api_request(
   path: str,
   status_code: int,
   duration_ms: float,
-  user_id: Optional[str] = None,
-  entity_id: Optional[str] = None,
-  request_id: Optional[str] = None,
+  user_id: str | None = None,
+  entity_id: str | None = None,
+  request_id: str | None = None,
 ) -> None:
   """Log API request with structured data for CloudWatch searching."""
   logger.info(
@@ -299,9 +299,9 @@ def log_database_query(
   database: str,
   query_type: str,
   duration_ms: float,
-  row_count: Optional[int] = None,
-  user_id: Optional[str] = None,
-  entity_id: Optional[str] = None,
+  row_count: int | None = None,
+  user_id: str | None = None,
+  entity_id: str | None = None,
 ) -> None:
   """Log database query with performance metrics."""
   extra = {
@@ -331,13 +331,13 @@ def log_error(
   component: str,
   action: str,
   error_category: str = "application",
-  user_id: Optional[str] = None,
-  entity_id: Optional[str] = None,
-  metadata: Optional[Dict[str, Any]] = None,
+  user_id: str | None = None,
+  entity_id: str | None = None,
+  metadata: dict[str, Any] | None = None,
 ) -> None:
   """Log error with structured data for easy searching."""
   logger.error(
-    f"Error in {component}.{action}: {str(error)}",
+    f"Error in {component}.{action}: {error!s}",
     exc_info=True,
     extra={
       "component": component,
@@ -353,10 +353,10 @@ def log_error(
 def log_security_event(
   logger: logging.Logger,
   event_type: str,
-  user_id: Optional[str] = None,
-  ip_address: Optional[str] = None,
+  user_id: str | None = None,
+  ip_address: str | None = None,
   success: bool = True,
-  metadata: Optional[Dict[str, Any]] = None,
+  metadata: dict[str, Any] | None = None,
 ) -> None:
   """Log security events for monitoring and alerting."""
   level = logging.INFO if success else logging.WARNING
@@ -378,10 +378,10 @@ def log_security_event(
 def log_performance_metric(
   logger: logging.Logger,
   metric_name: str,
-  value: Union[int, float],
+  value: int | float,
   unit: str = "count",
   component: str = "system",
-  metadata: Optional[Dict[str, Any]] = None,
+  metadata: dict[str, Any] | None = None,
 ) -> None:
   """Log performance metrics for monitoring."""
   logger.info(
@@ -402,8 +402,8 @@ def performance_timer(
   logger: logging.Logger,
   component: str,
   action: str,
-  user_id: Optional[str] = None,
-  entity_id: Optional[str] = None,
+  user_id: str | None = None,
+  entity_id: str | None = None,
 ):
   """Decorator to automatically log function execution time."""
 

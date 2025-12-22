@@ -9,7 +9,7 @@ Provides tools for:
 - Graph materialization
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from robosystems.logger import logger
 
@@ -23,7 +23,7 @@ class BuildFactGridTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "build-fact-grid",
       "description": "Construct multidimensional fact grid from graph data. Retrieves facts based on elements, periods, and optional dimensions. Returns structured data with element names, values, and periods. Use include_summary=true to add aggregated statistics (count, total, avg, min, max) by element.",
@@ -65,7 +65,7 @@ class BuildFactGridTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute fact grid construction using FactGridBuilder.
 
@@ -147,8 +147,8 @@ class BuildFactGridTool:
         fact_data = pd.DataFrame(result)
 
       # Build fact grid using existing FactGridBuilder
+      from robosystems.models.api.views import ViewAxisConfig, ViewConfig
       from robosystems.operations.views.fact_grid_builder import FactGridBuilder
-      from robosystems.models.api.views import ViewConfig, ViewAxisConfig
 
       # Create view config
       row_configs = [ViewAxisConfig(**r) for r in rows] if rows else []
@@ -226,7 +226,7 @@ class IngestFileTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "ingest-file",
       "description": "Upload financial data file and immediately stage it in DuckDB for querying. Returns operation_id for monitoring progress via SSE.",
@@ -251,7 +251,7 @@ class IngestFileTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute file ingestion with DuckDB staging.
 
@@ -303,7 +303,7 @@ class MapElementsTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "map-elements",
       "description": "Map source elements (Chart of Accounts) to target taxonomy elements (US-GAAP). Retrieves existing mapping structure or creates new associations.",
@@ -328,7 +328,7 @@ class MapElementsTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute element mapping retrieval or creation.
 
@@ -347,8 +347,8 @@ class MapElementsTool:
 
       # If structure_id provided, retrieve existing mapping
       if structure_id:
-        from robosystems.operations.views.element_mapping import get_mapping_structure
         from robosystems.models.iam.graph import GraphTier
+        from robosystems.operations.views.element_mapping import get_mapping_structure
 
         # Get tier from client if available
         tier = getattr(self.client, "tier", GraphTier.LADYBUG_STANDARD)
@@ -415,7 +415,7 @@ class QueryStagingTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "query-staging",
       "description": "Execute SQL query against DuckDB staging tables before materialization to graph. Useful for data validation and preview.",
@@ -436,7 +436,7 @@ class QueryStagingTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute SQL query against DuckDB staging.
 
@@ -499,7 +499,7 @@ class MaterializeGraphTool:
   def __init__(self, graph_client):
     self.client = graph_client
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     return {
       "name": "materialize-graph",
       "description": "Trigger materialization of DuckDB staging tables to LadybugDB graph database. Converts tabular data to graph nodes and relationships.",
@@ -519,7 +519,7 @@ class MaterializeGraphTool:
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
     """
     Execute graph materialization.
 
@@ -549,7 +549,7 @@ class MaterializeGraphTool:
 
       # Get table info from database
       from robosystems.database import get_db_session
-      from robosystems.models.iam import GraphTable, GraphFile
+      from robosystems.models.iam import GraphFile, GraphTable
 
       db_gen = get_db_session()
       db = next(db_gen)
@@ -572,20 +572,25 @@ class MaterializeGraphTool:
           if not file:
             return {"error": "file_not_found", "message": f"File '{file_id}' not found"}
 
-          # Queue materialization task
-          from robosystems.tasks.table_operations.graph_materialization import (
-            materialize_file_to_graph,
+          # Queue materialization via Dagster
+          from robosystems.middleware.sse import (
+            build_graph_job_config,
+            submit_dagster_job_sync,
           )
 
-          task = materialize_file_to_graph.delay(  # type: ignore[attr-defined]
-            file_id=file_id, graph_id=graph_id, table_name=table_name
+          run_config = build_graph_job_config(
+            "materialize_file_job",
+            file_id=file_id,
+            graph_id=graph_id,
+            table_name=table_name,
           )
+          run_id = submit_dagster_job_sync("materialize_file_job", run_config)
 
-          logger.info(f"Queued materialization task {task.id} for file {file_id}")
+          logger.info(f"Queued Dagster materialization job {run_id} for file {file_id}")
 
           return {
             "success": True,
-            "task_id": task.id,
+            "run_id": run_id,
             "file_id": file_id,
             "table_name": table_name,
             "message": f"Queued materialization for file {file_id}",
@@ -605,25 +610,30 @@ class MaterializeGraphTool:
             "message": f"No staged files found for table '{table_name}'",
           }
 
-        # Queue materialization for each file
-        from robosystems.tasks.table_operations.graph_materialization import (
-          materialize_file_to_graph,
+        # Queue materialization for each file via Dagster
+        from robosystems.middleware.sse import (
+          build_graph_job_config,
+          submit_dagster_job_sync,
         )
 
-        task_ids = []
+        run_ids = []
         for file in staged_files:
-          task = materialize_file_to_graph.delay(  # type: ignore[attr-defined]
-            file_id=file.id, graph_id=graph_id, table_name=table_name
+          run_config = build_graph_job_config(
+            "materialize_file_job",
+            file_id=file.id,
+            graph_id=graph_id,
+            table_name=table_name,
           )
-          task_ids.append(task.id)
+          run_id = submit_dagster_job_sync("materialize_file_job", run_config)
+          run_ids.append(run_id)
 
         logger.info(
-          f"Queued {len(task_ids)} materialization tasks for table '{table_name}'"
+          f"Queued {len(run_ids)} Dagster materialization jobs for table '{table_name}'"
         )
 
         return {
           "success": True,
-          "task_ids": task_ids,
+          "run_ids": run_ids,
           "file_count": len(staged_files),
           "table_name": table_name,
           "message": f"Queued materialization for {len(staged_files)} files",

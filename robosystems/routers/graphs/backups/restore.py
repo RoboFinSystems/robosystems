@@ -4,9 +4,9 @@ Backup restore endpoint.
 
 from fastapi import (
   APIRouter,
+  BackgroundTasks,
   Depends,
   HTTPException,
-  BackgroundTasks,
   Path,
   Request,
   status,
@@ -14,19 +14,19 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
-from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
-from robosystems.models.iam import User
-from robosystems.models.api.graphs.backups import BackupRestoreRequest
-from robosystems.models.api.common import ErrorResponse
-from robosystems.middleware.otel.metrics import (
-  get_endpoint_metrics,
-  endpoint_metrics_decorator,
-)
-from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.logger import logger
-from robosystems.security import SecurityAuditLogger, SecurityEventType
+from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils import MultiTenantUtils
+from robosystems.middleware.otel.metrics import (
+  endpoint_metrics_decorator,
+  get_endpoint_metrics,
+)
+from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.models.api.common import ErrorResponse
+from robosystems.models.api.graphs.backups import BackupRestoreRequest
+from robosystems.models.iam import User
+from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import verify_admin_access
 
@@ -194,26 +194,34 @@ async def restore_backup(
       operation_type="backup_restore", user_id=current_user.id, graph_id=graph_id
     )
 
-    # Import the SSE-enabled Celery task
-    from robosystems.tasks.graph_operations.backup import restore_graph_backup_sse
-
-    # Execute restore as SSE-enabled Celery task
-    task = restore_graph_backup_sse.apply_async(  # type: ignore[attr-defined]
-      args=[],
-      kwargs={
-        "graph_id": graph_id,
-        "backup_id": backup_id,
-        "user_id": current_user.id,
-        "create_system_backup": request.create_system_backup,
-        "verify_after_restore": request.verify_after_restore,
-        "operation_id": sse_response["operation_id"],  # Pass SSE operation ID
-      },
-      queue="default",
+    # Execute restore via Dagster with SSE monitoring
+    from robosystems.middleware.sse import (
+      build_graph_job_config,
+      run_and_monitor_dagster_job,
     )
 
-    task_id = task.id
+    operation_id = sse_response["operation_id"]
+
+    # Build Dagster job config
+    run_config = build_graph_job_config(
+      "restore_graph_job",
+      graph_id=graph_id,
+      backup_id=backup_id,
+      user_id=str(current_user.id),
+      create_system_backup=request.create_system_backup,
+      verify_after_restore=request.verify_after_restore,
+    )
+
+    # Run Dagster job with SSE monitoring in background
+    background_tasks.add_task(
+      run_and_monitor_dagster_job,
+      job_name="restore_graph_job",
+      operation_id=operation_id,
+      run_config=run_config,
+    )
+
     logger.info(
-      f"Scheduled SSE Celery restore task {task_id} for graph {graph_id} with operation {sse_response['operation_id']}"
+      f"Scheduled Dagster restore job for graph {graph_id} with operation {operation_id}"
     )
 
     # Record business event
@@ -254,7 +262,6 @@ async def restore_backup(
     # Return SSE response directly
     return {
       **sse_response,
-      "task_id": task_id,
       "status": "pending",
       "message": f"graph database restore scheduled for graph '{graph_id}' from encrypted backup",
     }
@@ -262,7 +269,7 @@ async def restore_backup(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"Failed to restore backup for graph {graph_id}: {str(e)}")
+    logger.error(f"Failed to restore backup for graph {graph_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="Failed to schedule restore",

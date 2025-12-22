@@ -1,17 +1,17 @@
-from fastapi import APIRouter, HTTPException, Depends, Body, Path
+from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from fastapi import status as http_status
 
+from robosystems.config import env
 from robosystems.graph_api.core.ladybug import get_ladybug_service
-from robosystems.graph_api.models.tables import (
-  TableMaterializationRequest,
-  TableMaterializationResponse,
-)
 from robosystems.graph_api.models.fork import (
   ForkFromParentRequest,
   ForkFromParentResponse,
 )
+from robosystems.graph_api.models.tables import (
+  TableMaterializationRequest,
+  TableMaterializationResponse,
+)
 from robosystems.logger import logger
-from robosystems.config import env
 
 router = APIRouter(prefix="/databases/{graph_id}/tables")
 
@@ -70,7 +70,7 @@ async def materialize_table(
               )
               raise HTTPException(
                 status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to checkpoint DuckDB after {max_retries} attempts: {str(e)}",
+                detail=f"Failed to checkpoint DuckDB after {max_retries} attempts: {e!s}",
               )
             logger.warning(
               f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
@@ -215,7 +215,7 @@ async def materialize_table(
       logger.error(f"Failed to materialize table {table_name}: {e}")
       raise HTTPException(
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to materialize table: {str(e)}",
+        detail=f"Failed to materialize table: {e!s}",
       )
 
     finally:
@@ -234,7 +234,7 @@ async def materialize_table(
     logger.error(f"Failed during table preparation or materialization: {outer_err}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to materialize table: {str(outer_err)}",
+      detail=f"Failed to materialize table: {outer_err!s}",
     )
 
 
@@ -313,7 +313,7 @@ async def fork_from_parent_duckdb(
             )
             raise HTTPException(
               status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-              detail=f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {str(e)}",
+              detail=f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {e!s}",
             )
           logger.warning(
             f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
@@ -464,7 +464,7 @@ async def fork_from_parent_duckdb(
       logger.error(f"Failed to fork from {parent_graph_id} to {subgraph_id}: {e}")
       raise HTTPException(
         status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=f"Failed to fork data: {str(e)}",
+        detail=f"Failed to fork data: {e!s}",
       )
 
     finally:
@@ -482,5 +482,5 @@ async def fork_from_parent_duckdb(
     logger.error(f"Failed during fork preparation: {outer_err}")
     raise HTTPException(
       status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-      detail=f"Failed to fork data: {str(outer_err)}",
+      detail=f"Failed to fork data: {outer_err!s}",
     )

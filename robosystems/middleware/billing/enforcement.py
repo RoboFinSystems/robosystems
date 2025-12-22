@@ -1,13 +1,12 @@
 """Subscription enforcement middleware for graph operations."""
 
-from typing import Optional, Tuple
 from sqlalchemy.orm import Session
 
+from ...config import env
+from ...config.graph_tier import GraphTier
+from ...logger import get_logger
 from ...models.billing import BillingCustomer, BillingSubscription, SubscriptionStatus
 from ...models.iam import OrgUser
-from ...config.graph_tier import GraphTier
-from ...config import env
-from ...logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -16,7 +15,7 @@ def check_can_provision_graph(
   user_id: str,
   requested_tier: GraphTier,
   session: Session,
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
   """Check if a user can provision a new graph.
 
   Args:
@@ -69,7 +68,7 @@ def check_can_provision_graph(
 def check_graph_subscription_active(
   graph_id: str,
   session: Session,
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, str | None]:
   """Check if a graph has an active subscription.
 
   Args:

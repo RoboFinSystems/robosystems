@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
 from sqlalchemy.orm import Session
 
 from robosystems.operations.graph.entity_graph_service import EntityGraphService

@@ -15,13 +15,14 @@ Supports both:
 - Neo4j credentials (NEO4J_PASSWORD for graph-neo4j)
 """
 
-import boto3
 import json
 import logging
 import secrets
 import string
-from datetime import datetime, timezone
-from typing import Dict, Any
+from datetime import UTC, datetime
+from typing import Any
+
+import boto3
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -63,7 +64,7 @@ def generate_password(length: int = 32) -> str:
   return password
 
 
-def is_neo4j_secret(secret_dict: Dict[str, Any]) -> bool:
+def is_neo4j_secret(secret_dict: dict[str, Any]) -> bool:
   """
   Determine if this is a Neo4j secret based on its structure.
 
@@ -78,7 +79,7 @@ def is_neo4j_secret(secret_dict: Dict[str, Any]) -> bool:
   return "NEO4J_PASSWORD" in secret_dict or "TIER" in secret_dict
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> None:
+def lambda_handler(event: dict[str, Any], context: Any) -> None:
   """
   AWS Lambda handler for Secrets Manager rotation.
 
@@ -150,7 +151,7 @@ def create_secret(arn: str, token: str) -> None:
       "NEO4J_PASSWORD": generate_password(),
       "TIER": tier,
       "ENVIRONMENT": environment,
-      "GENERATED_AT": datetime.now(timezone.utc).isoformat(),
+      "GENERATED_AT": datetime.now(UTC).isoformat(),
     }
     logger.info(f"createSecret: Generating new Neo4j password for tier {tier}")
   else:
@@ -159,7 +160,7 @@ def create_secret(arn: str, token: str) -> None:
     new_secret = {
       "GRAPH_API_KEY": generate_api_key(f"graph_{environment}", 64),
       "ENVIRONMENT": environment,
-      "GENERATED_AT": datetime.now(timezone.utc).isoformat(),
+      "GENERATED_AT": datetime.now(UTC).isoformat(),
       "rotation_version": token,
     }
     logger.info("createSecret: Generating new Graph API key")
@@ -313,4 +314,4 @@ def finish_secret(arn: str, token: str) -> None:
       f"{secret_type} rotation completed successfully. Generated at: {secret_dict.get('GENERATED_AT', 'unknown')}"
     )
   except Exception as e:
-    logger.warning(f"Could not log rotation completion details: {str(e)}")
+    logger.warning(f"Could not log rotation completion details: {e!s}")

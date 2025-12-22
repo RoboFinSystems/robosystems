@@ -2,23 +2,24 @@
 Shared utilities for subgraph operations.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from robosystems.models.iam.graph import Graph
-from robosystems.models.iam.user import User
-from robosystems.models.iam.graph_user import GraphUser
-from robosystems.middleware.graph.utils import (
-  construct_subgraph_id,
-  validate_subgraph_name,
-  parse_subgraph_id,
-  generate_unique_subgraph_name,
-)
-from robosystems.middleware.graph.types import GraphTypeRegistry
 from robosystems.config.graph_tier import get_tier_max_subgraphs
 from robosystems.logger import log_metric
+from robosystems.middleware.graph.types import GraphTypeRegistry
+from robosystems.middleware.graph.utils import (
+  construct_subgraph_id,
+  generate_unique_subgraph_name,
+  parse_subgraph_id,
+  validate_subgraph_name,
+)
 from robosystems.middleware.robustness import CircuitBreakerManager
+from robosystems.models.iam.graph import Graph
+from robosystems.models.iam.graph_user import GraphUser
+from robosystems.models.iam.user import User
 from robosystems.operations.graph.subgraph_service import SubgraphService
 
 # Initialize shared circuit breaker for subgraph operations
@@ -97,8 +98,8 @@ def verify_subgraph_tier_support(parent_graph: Graph):
   Raises:
       HTTPException: If tier doesn't support subgraphs
   """
-  from robosystems.logger import logger
   from robosystems.config import env
+  from robosystems.logger import logger
 
   max_subgraphs = get_tier_max_subgraphs(parent_graph.graph_tier)
 
@@ -236,7 +237,7 @@ def get_subgraph_by_name(
 
 def record_operation_start() -> datetime:
   """Record operation start time for metrics."""
-  return datetime.now(timezone.utc)
+  return datetime.now(UTC)
 
 
 def record_operation_metrics(
@@ -254,7 +255,7 @@ def record_operation_metrics(
       parent_graph_id: Parent graph ID
       additional_tags: Additional metric tags
   """
-  end_time = datetime.now(timezone.utc)
+  end_time = datetime.now(UTC)
   duration_ms = (end_time - start_time).total_seconds() * 1000
 
   tags = {"parent_graph": parent_graph_id}

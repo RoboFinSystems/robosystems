@@ -336,7 +336,7 @@ Explore public company financials with `just graph-query sec "<query>"` or build
 
 - **[Examples README](../README.md)** - Overview of all demos
 - **[Main README](../../README.md)** - Platform documentation
-- **[Processors README](../../robosystems/processors/README.md)** - XBRL processing details
+- **[SEC Adapter](../../robosystems/adapters/sec/)** - SEC XBRL processing
 - **[SEC XBRL Pipeline Wiki](https://github.com/RoboFinSystems/robosystems/wiki/SEC-XBRL-Pipeline)** - Detailed SEC integration guide
 
 ## Support

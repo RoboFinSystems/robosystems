@@ -4,9 +4,8 @@ Enhanced authentication protection including progressive delays and IP monitorin
 Provides additional security layers beyond basic rate limiting.
 """
 
-import time
 import hashlib
-from typing import Dict, Optional, Tuple
+import time
 from dataclasses import dataclass
 from enum import Enum
 
@@ -30,8 +29,8 @@ class AuthAttempt:
   timestamp: float
   success: bool
   ip_address: str
-  user_agent: Optional[str] = None
-  email: Optional[str] = None
+  user_agent: str | None = None
+  email: str | None = None
 
 
 @dataclass
@@ -44,7 +43,7 @@ class IPThreatAssessment:
   first_seen: float
   last_attempt: float
   is_blocked: bool
-  block_expires: Optional[float]
+  block_expires: float | None
 
 
 class AdvancedAuthProtection:
@@ -104,8 +103,8 @@ class AdvancedAuthProtection:
     cls,
     ip_address: str,
     success: bool,
-    email: Optional[str] = None,
-    user_agent: Optional[str] = None,
+    email: str | None = None,
+    user_agent: str | None = None,
   ) -> None:
     """
     Record an authentication attempt for analysis.
@@ -277,7 +276,7 @@ class AdvancedAuthProtection:
     )
 
   @classmethod
-  def check_ip_blocked(cls, ip_address: str) -> Tuple[bool, Optional[int]]:
+  def check_ip_blocked(cls, ip_address: str) -> tuple[bool, int | None]:
     """
     Check if an IP address is currently blocked.
 
@@ -354,7 +353,7 @@ class AdvancedAuthProtection:
       pass
 
   @classmethod
-  def get_security_headers(cls, ip_address: str) -> Dict[str, str]:
+  def get_security_headers(cls, ip_address: str) -> dict[str, str]:
     """
     Get security headers to include in auth responses.
 

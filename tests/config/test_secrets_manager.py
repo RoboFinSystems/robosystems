@@ -5,13 +5,14 @@ Tests for the improved secrets manager with TTL caching and better error handlin
 import json
 import time
 from unittest.mock import MagicMock, patch
+
 import pytest
 from botocore.exceptions import ClientError
 
 from robosystems.config.secrets_manager import (
+  SECRET_MAPPINGS,
   SecretsManager,
   get_secret_value,
-  SECRET_MAPPINGS,
 )
 
 

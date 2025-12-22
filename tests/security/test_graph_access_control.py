@@ -5,13 +5,14 @@ Tests that users cannot access graphs they don't own, validating the
 graph-scoped authorization system across all endpoint patterns.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi import status
-from unittest.mock import patch, MagicMock
 
+from robosystems.database import session
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.models.iam import GraphUser
-from robosystems.database import session
 
 
 @pytest.fixture
@@ -54,20 +55,18 @@ class TestGraphAccessControlDependency:
     mock_request.headers = {"authorization": "Bearer valid_token"}
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
-    with patch(
-      "robosystems.middleware.auth.dependencies.verify_jwt_token"
-    ) as mock_verify:
-      with patch(
-        "robosystems.middleware.auth.dependencies.User.get_by_id"
-      ) as mock_get_user:
-        mock_verify.return_value = test_user.id
-        mock_get_user.return_value = test_user
+    with (
+      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch("robosystems.middleware.auth.dependencies.User.get_by_id") as mock_get_user,
+    ):
+      mock_verify.return_value = test_user.id
+      mock_get_user.return_value = test_user
 
-        # Should succeed - user has access
-        user = await get_current_user_with_graph(
-          mock_request, sample_graph.graph_id, None
-        )
-        assert user.id == test_user.id
+      # Should succeed - user has access
+      user = await get_current_user_with_graph(
+        mock_request, sample_graph.graph_id, None
+      )
+      assert user.id == test_user.id
 
   async def test_valid_jwt_without_graph_access_raises_403(
     self, mock_request, test_user, sample_graph
@@ -77,19 +76,17 @@ class TestGraphAccessControlDependency:
     mock_request.headers = {"authorization": "Bearer valid_token"}
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
-    with patch(
-      "robosystems.middleware.auth.dependencies.verify_jwt_token"
-    ) as mock_verify:
-      with patch(
-        "robosystems.middleware.auth.dependencies.User.get_by_id"
-      ) as mock_get_user:
-        mock_verify.return_value = test_user.id
-        mock_get_user.return_value = test_user
+    with (
+      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch("robosystems.middleware.auth.dependencies.User.get_by_id") as mock_get_user,
+    ):
+      mock_verify.return_value = test_user.id
+      mock_get_user.return_value = test_user
 
-        # Should raise 403 - user lacks access
-        with pytest.raises(Exception) as exc_info:
-          await get_current_user_with_graph(mock_request, sample_graph.graph_id, None)
-        assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+      # Should raise 403 - user lacks access
+      with pytest.raises(Exception) as exc_info:
+        await get_current_user_with_graph(mock_request, sample_graph.graph_id, None)
+      assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
 
   async def test_api_key_with_graph_access(
     self, mock_request, test_user, sample_graph, test_api_key

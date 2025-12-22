@@ -6,9 +6,9 @@ Provides user profile management and security functionality.
 
 from fastapi import APIRouter
 
+from .api_keys import router as api_keys_router
 from .main import router as main_router
 from .password import router as password_router
-from .api_keys import router as api_keys_router
 
 router = APIRouter()
 

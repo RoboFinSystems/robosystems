@@ -3,12 +3,10 @@
 import json
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import redis
-from sqlalchemy.orm import Session
 from fastapi import (
   APIRouter,
   Cookie,
@@ -18,35 +16,34 @@ from fastapi import (
   Response,
   status,
 )
+from sqlalchemy.orm import Session
 
-from ...models.iam import User
-from ...models.api.auth import (
-  AuthResponse,
-  SSOTokenResponse,
-  SSOExchangeRequest,
-  SSOExchangeResponse,
-  SSOCompleteRequest,
-)
-from ...models.api.common import ErrorResponse
+from ...config import env
 from ...database import get_async_db_session
 from ...logger import logger
-from ...middleware.rate_limits import sso_rate_limit_dependency
 from ...middleware.auth.distributed_lock import get_sso_lock_manager
-from ...config import env
-
-from ...security import SecurityAuditLogger, SecurityEventType
-
-from .utils import (
-  Config,
-  SSO_TOKEN_EXPIRY_SECONDS,
-  SSO_SESSION_EXPIRY_SECONDS,
-  AVAILABLE_APPS,
-)
 from ...middleware.auth.jwt import (
   create_jwt_token,
   create_sso_token,
-  verify_jwt_token,
   get_async_redis_client,
+  verify_jwt_token,
+)
+from ...middleware.rate_limits import sso_rate_limit_dependency
+from ...models.api.auth import (
+  AuthResponse,
+  SSOCompleteRequest,
+  SSOExchangeRequest,
+  SSOExchangeResponse,
+  SSOTokenResponse,
+)
+from ...models.api.common import ErrorResponse
+from ...models.iam import User
+from ...security import SecurityAuditLogger, SecurityEventType
+from .utils import (
+  AVAILABLE_APPS,
+  SSO_SESSION_EXPIRY_SECONDS,
+  SSO_TOKEN_EXPIRY_SECONDS,
+  Config,
 )
 
 # Create router for SSO endpoints
@@ -66,9 +63,7 @@ router = APIRouter()
 )
 async def generate_sso_token(
   request: Request,
-  auth_token: Optional[str] = Cookie(
-    None, alias="auth-token"
-  ),  # Backward compatibility
+  auth_token: str | None = Cookie(None, alias="auth-token"),  # Backward compatibility
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> SSOTokenResponse:
@@ -118,9 +113,7 @@ async def generate_sso_token(
 
     # Create temporary SSO token
     sso_token, token_id = create_sso_token(user.id)
-    expires_at = datetime.now(timezone.utc) + timedelta(
-      seconds=SSO_TOKEN_EXPIRY_SECONDS
-    )
+    expires_at = datetime.now(UTC) + timedelta(seconds=SSO_TOKEN_EXPIRY_SECONDS)
 
     # Store token ID in Valkey for single-use tracking with distributed locking
     try:
@@ -165,7 +158,7 @@ async def generate_sso_token(
         )
 
     except redis.RedisError as e:
-      logger.error(f"Failed to store SSO token in Redis: {str(e)}")
+      logger.error(f"Failed to store SSO token in Redis: {e!s}")
       SecurityAuditLogger.log_security_event(
         event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
         details={
@@ -192,7 +185,7 @@ async def generate_sso_token(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"SSO token generation error: {str(e)}")
+    logger.error(f"SSO token generation error: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="SSO token generation failed",
@@ -357,7 +350,7 @@ async def sso_token_exchange(
           )
 
       except redis.RedisError as e:
-        logger.error(f"Redis error during SSO token exchange: {str(e)}")
+        logger.error(f"Redis error during SSO token exchange: {e!s}")
         raise HTTPException(
           status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
           detail="SSO token validation failed",
@@ -381,7 +374,7 @@ async def sso_token_exchange(
 
     # Create temporary session ID for secure handoff
     session_id = str(uuid.uuid4())
-    expires_at = datetime.now(timezone.utc) + timedelta(
+    expires_at = datetime.now(UTC) + timedelta(
       seconds=SSO_SESSION_EXPIRY_SECONDS
     )  # Very short
 
@@ -414,7 +407,7 @@ async def sso_token_exchange(
             "token_id": token_id,  # Reference to original SSO token
             "target_app": request.target_app,
             "return_url": request.return_url,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
           }
 
           # Atomically store session data
@@ -452,7 +445,7 @@ async def sso_token_exchange(
         )
 
     except redis.RedisError as e:
-      logger.error(f"Failed to store SSO session in Redis: {str(e)}")
+      logger.error(f"Failed to store SSO session in Redis: {e!s}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Session creation failed",
@@ -479,7 +472,7 @@ async def sso_token_exchange(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"SSO token exchange error: {str(e)}")
+    logger.error(f"SSO token exchange error: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="SSO exchange failed"
     )
@@ -606,13 +599,13 @@ async def sso_complete(
         await redis_client.delete(f"sso_token_exchange:{token_id}")
 
     except redis.RedisError as e:
-      logger.error(f"Redis error during SSO completion: {str(e)}")
+      logger.error(f"Redis error during SSO completion: {e!s}")
       raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Session validation failed",
       )
     except json.JSONDecodeError as e:
-      logger.error(f"Invalid session data format: {str(e)}")
+      logger.error(f"Invalid session data format: {e!s}")
       raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session data"
       )
@@ -648,7 +641,7 @@ async def sso_complete(
   except HTTPException:
     raise
   except Exception as e:
-    logger.error(f"SSO completion error: {str(e)}")
+    logger.error(f"SSO completion error: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="SSO completion failed"
     )

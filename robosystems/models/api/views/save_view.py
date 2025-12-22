@@ -1,9 +1,8 @@
-from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
 class SaveViewRequest(BaseModel):
-  report_id: Optional[str] = Field(
+  report_id: str | None = Field(
     default=None,
     description="Existing report ID to update (if provided, deletes existing facts/structures and creates new ones)",
     max_length=100,
@@ -21,7 +20,7 @@ class SaveViewRequest(BaseModel):
     description="Period end date (YYYY-MM-DD)",
     pattern=r"^\d{4}-\d{2}-\d{2}$",
   )
-  entity_id: Optional[str] = Field(
+  entity_id: str | None = Field(
     default=None,
     description="Entity identifier (defaults to primary entity)",
     max_length=100,
@@ -84,7 +83,7 @@ class SaveViewResponse(BaseModel):
   fact_count: int
   presentation_count: int
   calculation_count: int
-  facts: List[FactDetail]
-  structures: List[StructureDetail]
+  facts: list[FactDetail]
+  structures: list[StructureDetail]
   created_at: str
   parquet_export_prefix: str = Field(..., description="Prefix for parquet file exports")

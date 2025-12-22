@@ -5,18 +5,20 @@ Tests verify that the metrics decorator and context manager correctly
 record business events, request metrics, and authentication metrics.
 """
 
-import pytest
 import os
-from fastapi import FastAPI, APIRouter, HTTPException
+from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+
+from robosystems.middleware.otel import record_auth_metrics
 from robosystems.middleware.otel.metrics import (
-  endpoint_metrics_decorator,
-  endpoint_metrics_context,
   EndpointMetrics,
+  endpoint_metrics_context,
+  endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.middleware.otel import record_auth_metrics
 
 
 class TestEndpointMetricsDecorator:
@@ -420,28 +422,30 @@ class TestMetricsIntegration:
   @pytest.fixture
   def authenticated_user(self, client: TestClient):
     """Create authenticated user for integration tests."""
-    from robosystems.models.iam import UserAPIKey
     from robosystems.database import session
+    from robosystems.models.iam import UserAPIKey
 
     # Patch environment to ensure CAPTCHA is disabled and registration is enabled
-    with patch.dict(os.environ, {"ENVIRONMENT": "dev"}):
-      with patch.object(
+    with (
+      patch.dict(os.environ, {"ENVIRONMENT": "dev"}),
+      patch.object(
         __import__("robosystems.config", fromlist=["env"]).env,
         "USER_REGISTRATION_ENABLED",
         True,
-      ):
-        registration_data = {
-          "name": "Metrics Integration User",
-          "email": "integration@example.com",
-          "password": "S3cur3P@ssw0rd!2024",
-        }
-        response = client.post("/v1/auth/register", json=registration_data)
-        if response.status_code != 201:
-          raise ValueError(
-            f"Failed to register user: {response.status_code} - {response.json()}"
-          )
-        user_data = response.json()["user"]
-        user_id = user_data["id"]
+      ),
+    ):
+      registration_data = {
+        "name": "Metrics Integration User",
+        "email": "integration@example.com",
+        "password": "S3cur3P@ssw0rd!2024",
+      }
+      response = client.post("/v1/auth/register", json=registration_data)
+      if response.status_code != 201:
+        raise ValueError(
+          f"Failed to register user: {response.status_code} - {response.json()}"
+        )
+      user_data = response.json()["user"]
+      user_id = user_data["id"]
 
     api_key, plain_key = UserAPIKey.create(
       user_id=user_id, name="Integration Test API Key", session=session

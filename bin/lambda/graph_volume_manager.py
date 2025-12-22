@@ -10,12 +10,13 @@ Key improvements:
 - Prevents data loss during instance replacement
 """
 
-import boto3
-import os
-import logging
 import json
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional, List
+import logging
+import os
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import boto3
 
 # Configure logging
 logger = logging.getLogger()
@@ -42,7 +43,7 @@ RETENTION_DAYS = int(os.environ.get("SNAPSHOT_RETENTION_DAYS", "7"))
 table = dynamodb.Table(TABLE_NAME)
 
 
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
   """Main Lambda handler"""
   action = event.get("action")
 
@@ -76,12 +77,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     else:
       return {"statusCode": 400, "error": f"Unknown action: {action}"}
   except Exception as e:
-    logger.error(f"Error in {action}: {str(e)}", exc_info=True)
-    send_alert("Volume Manager Error", f"Action: {action}\nError: {str(e)}")
+    logger.error(f"Error in {action}: {e!s}", exc_info=True)
+    send_alert("Volume Manager Error", f"Action: {action}\nError: {e!s}")
     return {"statusCode": 500, "error": "Internal server error"}
 
 
-def handle_instance_launch(event: Dict[str, Any]) -> Dict[str, Any]:
+def handle_instance_launch(event: dict[str, Any]) -> dict[str, Any]:
   """
   Handle new instance launch - reattach existing volumes or create new ones.
   This is the critical fix for volume persistence.
@@ -224,7 +225,7 @@ def handle_instance_launch(event: Dict[str, Any]) -> Dict[str, Any]:
   return create_and_attach_volume(instance_id, tier, az, databases, node_type)
 
 
-def find_volume_with_database(database: str, az: str, tier: str) -> Optional[Dict]:
+def find_volume_with_database(database: str, az: str, tier: str) -> dict | None:
   """Find a volume that contains a specific database"""
   response = table.scan(
     FilterExpression="contains(databases, :db) AND availability_zone = :az AND tier = :tier AND #status = :status",
@@ -244,7 +245,7 @@ def find_volume_with_database(database: str, az: str, tier: str) -> Optional[Dic
 
 def attach_and_register_volume(
   volume_id: str, instance_id: str, databases: Any
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """Attach a volume to an instance and update registry"""
   device = "/dev/xvdf"
 
@@ -255,7 +256,7 @@ def attach_and_register_volume(
     waiter.wait(InstanceIds=[instance_id], WaiterConfig={"Delay": 5, "MaxAttempts": 60})
   except Exception as e:
     logger.error(f"Instance {instance_id} did not reach running state: {e}")
-    return {"statusCode": 500, "error": f"Instance not ready: {str(e)}"}
+    return {"statusCode": 500, "error": f"Instance not ready: {e!s}"}
 
   # Attach the volume with retry logic
   max_retries = 3
@@ -295,7 +296,7 @@ def attach_and_register_volume(
     ExpressionAttributeValues={
       ":instance_id": instance_id,
       ":status": "attached",
-      ":timestamp": datetime.now(timezone.utc).isoformat(),
+      ":timestamp": datetime.now(UTC).isoformat(),
       ":databases": databases if isinstance(databases, list) else [databases],
     },
   )
@@ -326,8 +327,8 @@ def attach_and_register_volume(
 
 
 def create_and_attach_volume(
-  instance_id: str, tier: str, az: str, databases: List[str], node_type: str
-) -> Dict[str, Any]:
+  instance_id: str, tier: str, az: str, databases: list[str], node_type: str
+) -> dict[str, Any]:
   """Create a new volume and attach it to the instance"""
   # Tier configurations (updated to match .github/configs/graph.yml)
   tier_config = {
@@ -367,7 +368,7 @@ def create_and_attach_volume(
           {"Key": "Component", "Value": "GraphWriter"},
           {"Key": "VolumeType", "Value": "GraphData"},
           {"Key": "ManagedBy", "Value": "GraphVolumeManager"},
-          {"Key": "CreatedAt", "Value": datetime.now(timezone.utc).isoformat()},
+          {"Key": "CreatedAt", "Value": datetime.now(UTC).isoformat()},
           {"Key": "DatabaseId", "Value": databases[0] if databases else "unassigned"},
           {"Key": "InstanceId", "Value": instance_id},
           {"Key": "DLMManaged", "Value": "true"},
@@ -388,7 +389,7 @@ def create_and_attach_volume(
       "tier": tier,
       "status": "attaching",
       "databases": databases,
-      "created_at": datetime.now(timezone.utc).isoformat(),
+      "created_at": datetime.now(UTC).isoformat(),
       "node_type": node_type,
     }
   )
@@ -401,13 +402,13 @@ def create_and_attach_volume(
   return attach_and_register_volume(volume_id, instance_id, databases)
 
 
-def get_or_create_volume(event: Dict[str, Any]) -> Dict[str, Any]:
+def get_or_create_volume(event: dict[str, Any]) -> dict[str, Any]:
   """Legacy function - redirects to handle_instance_launch"""
   logger.warning("get_or_create_volume called - redirecting to handle_instance_launch")
   return handle_instance_launch(event)
 
 
-def attach_volume(event: Dict[str, Any]) -> Dict[str, Any]:
+def attach_volume(event: dict[str, Any]) -> dict[str, Any]:
   """Attach a volume to an instance"""
   volume_id = event["volume_id"]
   instance_id = event["instance_id"]
@@ -426,14 +427,14 @@ def attach_volume(event: Dict[str, Any]) -> Dict[str, Any]:
     ExpressionAttributeValues={
       ":instance_id": instance_id,
       ":status": "attached",
-      ":timestamp": datetime.now(timezone.utc).isoformat(),
+      ":timestamp": datetime.now(UTC).isoformat(),
     },
   )
 
   return {"statusCode": 200, "attachment_state": response["State"]}
 
 
-def detach_volume(event: Dict[str, Any]) -> Dict[str, Any]:
+def detach_volume(event: dict[str, Any]) -> dict[str, Any]:
   """Safely detach a volume"""
   volume_id = event["volume_id"]
   force = event.get("force", False)
@@ -458,7 +459,7 @@ def detach_volume(event: Dict[str, Any]) -> Dict[str, Any]:
     ExpressionAttributeValues={
       ":instance_id": "unattached",
       ":status": "available",
-      ":timestamp": datetime.now(timezone.utc).isoformat(),
+      ":timestamp": datetime.now(UTC).isoformat(),
       ":databases": databases,  # Preserve the databases list
     },
   )
@@ -468,7 +469,7 @@ def detach_volume(event: Dict[str, Any]) -> Dict[str, Any]:
   return {"statusCode": 200, "volume_id": volume_id, "databases": databases}
 
 
-def expand_volume(event: Dict[str, Any]) -> Dict[str, Any]:
+def expand_volume(event: dict[str, Any]) -> dict[str, Any]:
   """Expand a volume size"""
   volume_id = event["volume_id"]
   new_size = event["new_size"]
@@ -482,7 +483,7 @@ def expand_volume(event: Dict[str, Any]) -> Dict[str, Any]:
     UpdateExpression="SET size = :size, last_modified = :timestamp",
     ExpressionAttributeValues={
       ":size": new_size,
-      ":timestamp": datetime.now(timezone.utc).isoformat(),
+      ":timestamp": datetime.now(UTC).isoformat(),
     },
   )
 
@@ -492,10 +493,10 @@ def expand_volume(event: Dict[str, Any]) -> Dict[str, Any]:
   }
 
 
-def cleanup_orphaned_volumes() -> Dict[str, Any]:
+def cleanup_orphaned_volumes() -> dict[str, Any]:
   """Clean up orphaned volumes"""
   # Find volumes that have been detached for more than 24 hours
-  cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
+  cutoff_time = datetime.now(UTC) - timedelta(hours=24)
 
   response = table.scan(
     FilterExpression="#status = :status AND last_detached < :cutoff",
@@ -560,7 +561,7 @@ def cleanup_orphaned_volumes() -> Dict[str, Any]:
   return {"statusCode": 200, "orphaned_volumes": orphaned}
 
 
-def snapshot_volume(event: Dict[str, Any]) -> Dict[str, Any]:
+def snapshot_volume(event: dict[str, Any]) -> dict[str, Any]:
   """Create a snapshot of a volume"""
   volume_id = event["volume_id"]
   description = event.get("description", f"Manual snapshot of {volume_id}")
@@ -601,7 +602,7 @@ def snapshot_volume(event: Dict[str, Any]) -> Dict[str, Any]:
           {"Key": "Environment", "Value": ENVIRONMENT},
           {"Key": "VolumeId", "Value": volume_id},
           {"Key": "Databases", "Value": json.dumps(databases)},
-          {"Key": "CreatedAt", "Value": datetime.now(timezone.utc).isoformat()},
+          {"Key": "CreatedAt", "Value": datetime.now(UTC).isoformat()},
         ],
       }
     ],
@@ -610,7 +611,7 @@ def snapshot_volume(event: Dict[str, Any]) -> Dict[str, Any]:
   return {"statusCode": 200, "snapshot_id": snapshot_response["SnapshotId"]}
 
 
-def create_scheduled_snapshots(event: Dict[str, Any]) -> Dict[str, Any]:
+def create_scheduled_snapshots(event: dict[str, Any]) -> dict[str, Any]:
   """Create scheduled snapshots for all attached volumes"""
   # Find all attached volumes
   response = table.scan(
@@ -676,9 +677,9 @@ def create_scheduled_snapshots(event: Dict[str, Any]) -> Dict[str, Any]:
   }
 
 
-def cleanup_old_snapshots(event: Dict[str, Any]) -> Dict[str, Any]:
+def cleanup_old_snapshots(event: dict[str, Any]) -> dict[str, Any]:
   """Clean up snapshots older than retention period"""
-  cutoff_time = datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)
+  cutoff_time = datetime.now(UTC) - timedelta(days=RETENTION_DAYS)
 
   # Find snapshots to delete
   response = ec2.describe_snapshots(
@@ -691,7 +692,7 @@ def cleanup_old_snapshots(event: Dict[str, Any]) -> Dict[str, Any]:
 
   deleted = []
   for snapshot in response["Snapshots"]:
-    if snapshot["StartTime"].replace(tzinfo=timezone.utc) < cutoff_time:
+    if snapshot["StartTime"].replace(tzinfo=UTC) < cutoff_time:
       try:
         ec2.delete_snapshot(SnapshotId=snapshot["SnapshotId"])
         deleted.append(snapshot["SnapshotId"])
@@ -702,7 +703,7 @@ def cleanup_old_snapshots(event: Dict[str, Any]) -> Dict[str, Any]:
   return {"statusCode": 200, "deleted_snapshots": deleted}
 
 
-def restore_from_snapshot(event: Dict[str, Any]) -> Dict[str, Any]:
+def restore_from_snapshot(event: dict[str, Any]) -> dict[str, Any]:
   """Restore a volume from a snapshot"""
   snapshot_id = event["snapshot_id"]
   az = event["availability_zone"]
@@ -749,7 +750,7 @@ def restore_from_snapshot(event: Dict[str, Any]) -> Dict[str, Any]:
       "tier": "ladybug-standard",  # Default tier
       "status": "available",
       "databases": databases,
-      "created_at": datetime.now(timezone.utc).isoformat(),
+      "created_at": datetime.now(UTC).isoformat(),
       "restored_from": snapshot_id,
     }
   )
@@ -757,7 +758,7 @@ def restore_from_snapshot(event: Dict[str, Any]) -> Dict[str, Any]:
   return {"statusCode": 200, "volume_id": volume_id, "databases": databases}
 
 
-def register_volume(event: Dict[str, Any]) -> Dict[str, Any]:
+def register_volume(event: dict[str, Any]) -> dict[str, Any]:
   """Register an existing volume in the registry"""
   volume_id = event["volume_id"]
   databases = event.get("databases", [])
@@ -778,7 +779,7 @@ def register_volume(event: Dict[str, Any]) -> Dict[str, Any]:
       "tier": tier,
       "status": "attached" if volume["Attachments"] else "available",
       "databases": databases,
-      "created_at": datetime.now(timezone.utc).isoformat(),
+      "created_at": datetime.now(UTC).isoformat(),
       "size": volume["Size"],
     }
   )
@@ -786,7 +787,7 @@ def register_volume(event: Dict[str, Any]) -> Dict[str, Any]:
   return {"statusCode": 200, "volume_id": volume_id, "registered": True}
 
 
-def sync_registry_with_ec2(event: Dict[str, Any]) -> Dict[str, Any]:
+def sync_registry_with_ec2(event: dict[str, Any]) -> dict[str, Any]:
   """Synchronize DynamoDB registry with actual EC2 volumes"""
   logger.info("Starting registry synchronization with EC2")
 
@@ -922,7 +923,7 @@ def sync_registry_with_ec2(event: Dict[str, Any]) -> Dict[str, Any]:
         ExpressionAttributeValues={
           ":status": update["actual_status"],
           ":instance_id": update["instance_id"],
-          ":timestamp": datetime.now(timezone.utc).isoformat(),
+          ":timestamp": datetime.now(UTC).isoformat(),
         },
       )
       corrections_applied["updated"].append(update["volume_id"])
@@ -991,6 +992,6 @@ def send_alert(subject: str, message: str) -> None:
     logger.error(f"Failed to send alert: {e}")
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
   """AWS Lambda entry point"""
   return handler(event, context)

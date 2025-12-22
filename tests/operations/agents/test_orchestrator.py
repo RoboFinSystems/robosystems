@@ -4,26 +4,27 @@ Test suite for agent orchestrator and routing logic.
 Tests dynamic agent selection, routing, and multi-agent coordination.
 """
 
-import pytest
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, List, Optional, Any
 import asyncio
+from typing import Any
+from unittest.mock import AsyncMock, Mock, patch
 
-from robosystems.operations.agents.orchestrator import (
-  AgentOrchestrator,
-  RoutingStrategy,
-  AgentSelectionCriteria,
-  OrchestratorConfig,
-)
+import pytest
+
+from robosystems.models.iam import User
 from robosystems.operations.agents.base import (
-  BaseAgent,
   AgentCapability,
+  AgentMetadata,
   AgentMode,
   AgentResponse,
-  AgentMetadata,
+  BaseAgent,
+)
+from robosystems.operations.agents.orchestrator import (
+  AgentOrchestrator,
+  AgentSelectionCriteria,
+  OrchestratorConfig,
+  RoutingStrategy,
 )
 from robosystems.operations.agents.registry import AgentRegistry
-from robosystems.models.iam import User
 
 
 class TestRoutingStrategy:
@@ -100,7 +101,7 @@ class MockAgent(BaseAgent):
   def __init__(
     self,
     name: str,
-    capabilities: List[AgentCapability],
+    capabilities: list[AgentCapability],
     confidence_score: float = 0.5,
   ):
     self.name = name
@@ -120,9 +121,9 @@ class MockAgent(BaseAgent):
     self,
     query: str,
     mode: AgentMode = AgentMode.STANDARD,
-    history: Optional[List[Dict]] = None,
-    context: Optional[Dict] = None,
-    callback: Optional[Any] = None,
+    history: list[dict] | None = None,
+    context: dict | None = None,
+    callback: Any | None = None,
   ) -> AgentResponse:
     return AgentResponse(
       content=f"{self.name} response: {query}",
@@ -133,7 +134,7 @@ class MockAgent(BaseAgent):
       tokens_used={"input": 0, "output": 0},
     )
 
-  def can_handle(self, query: str, context: Optional[Dict] = None) -> float:
+  def can_handle(self, query: str, context: dict | None = None) -> float:
     return self.confidence_score
 
 

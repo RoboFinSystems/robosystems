@@ -5,7 +5,6 @@ This module defines the billing model for shared repositories (SEC, industry, ec
 Repository queries don't consume credits but are rate-limited by subscription tier.
 """
 
-from typing import Dict, Optional
 from enum import Enum
 
 
@@ -201,17 +200,17 @@ class RepositoryBillingConfig:
   ]
 
   @classmethod
-  def get_repository_metadata(cls, repository: SharedRepository) -> Optional[Dict]:
+  def get_repository_metadata(cls, repository: SharedRepository) -> dict | None:
     """Get metadata for a shared repository."""
     return cls.REPOSITORY_METADATA.get(repository)
 
   @classmethod
-  def get_plan_details(cls, plan: RepositoryPlan) -> Optional[Dict]:
+  def get_plan_details(cls, plan: RepositoryPlan) -> dict | None:
     """Get details for a repository plan."""
     return cls.REPOSITORY_PLANS.get(plan)
 
   @classmethod
-  def get_all_repository_configs(cls) -> Dict:
+  def get_all_repository_configs(cls) -> dict:
     """
     Get all repository configurations including enabled status and plans.
 
@@ -251,7 +250,7 @@ class RepositoryBillingConfig:
   @classmethod
   def get_rate_limits(
     cls, repository: SharedRepository, plan: RepositoryPlan
-  ) -> Optional[Dict]:
+  ) -> dict | None:
     """Get rate limits for a repository and plan combination."""
     repo_limits = cls.RATE_LIMITS.get(repository, {})
     return repo_limits.get(plan)
@@ -270,7 +269,7 @@ class RepositoryBillingConfig:
     return any(allowed in endpoint_lower for allowed in cls.ALLOWED_ENDPOINTS)
 
   @classmethod
-  def get_all_repository_pricing(cls) -> Dict:
+  def get_all_repository_pricing(cls) -> dict:
     """Get complete pricing information for all repository plans."""
     return {
       "plans": cls.REPOSITORY_PLANS,

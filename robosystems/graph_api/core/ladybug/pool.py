@@ -14,14 +14,15 @@ Key features:
 """
 
 import threading
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, Any
-from dataclasses import dataclass
-from contextlib import contextmanager
-from pathlib import Path
 import weakref
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import real_ladybug as lbug
+
 from robosystems.logger import logger
 
 
@@ -75,13 +76,13 @@ class LadybugConnectionPool:
     self.cleanup_interval = timedelta(minutes=cleanup_interval_minutes)
 
     # Thread-safe storage
-    self._pools: Dict[str, Dict[str, ConnectionInfo]] = {}
-    self._locks: Dict[str, threading.RLock] = {}
+    self._pools: dict[str, dict[str, ConnectionInfo]] = {}
+    self._locks: dict[str, threading.RLock] = {}
     self._global_lock = threading.RLock()
 
     # Store Database objects to ensure all connections use the same one
     # This is critical for transaction visibility in LadybugDB
-    self._databases: Dict[str, lbug.Database] = {}
+    self._databases: dict[str, lbug.Database] = {}
 
     # Monitoring
     self._stats = {
@@ -93,8 +94,8 @@ class LadybugConnectionPool:
     }
 
     # Cleanup tracking
-    self._last_cleanup = datetime.now(timezone.utc)
-    self._last_health_check = datetime.now(timezone.utc)
+    self._last_cleanup = datetime.now(UTC)
+    self._last_health_check = datetime.now(UTC)
 
     # Register cleanup on process exit
     weakref.finalize(self, self._cleanup_all_connections)
@@ -138,7 +139,7 @@ class LadybugConnectionPool:
 
       if connection_info and self._is_connection_valid(connection_info):
         # Reuse existing connection
-        connection_info.last_used = datetime.now(timezone.utc)
+        connection_info.last_used = datetime.now(UTC)
         connection_info.use_count += 1
         self._stats["connections_reused"] += 1
         logger.debug(
@@ -199,7 +200,7 @@ class LadybugConnectionPool:
 
   def _get_existing_connection(
     self, database_name: str, read_only: bool
-  ) -> Optional[ConnectionInfo]:
+  ) -> ConnectionInfo | None:
     """Get an existing connection for a database if available."""
     if database_name not in self._pools:
       return None
@@ -208,7 +209,7 @@ class LadybugConnectionPool:
 
     # Find the least recently used healthy connection with matching read_only status
     best_connection = None
-    oldest_time = datetime.now(timezone.utc)
+    oldest_time = datetime.now(UTC)
 
     for conn_id, conn_info in pool.items():
       if (
@@ -364,7 +365,7 @@ class LadybugConnectionPool:
         is_healthy = False
 
       # Create connection info
-      now = datetime.now(timezone.utc)
+      now = datetime.now(UTC)
       connection_info = ConnectionInfo(
         connection=conn,
         database=db,
@@ -396,14 +397,11 @@ class LadybugConnectionPool:
   def _is_connection_valid(self, connection_info: ConnectionInfo) -> bool:
     """Check if a connection is still valid."""
     # Check TTL
-    if datetime.now(timezone.utc) - connection_info.created_at > self.connection_ttl:
+    if datetime.now(UTC) - connection_info.created_at > self.connection_ttl:
       return False
 
     # Check health status
-    if not connection_info.is_healthy:
-      return False
-
-    return True
+    return connection_info.is_healthy
 
   def _remove_oldest_connection(self, database_name: str):
     """Remove the oldest connection from a database pool."""
@@ -414,7 +412,7 @@ class LadybugConnectionPool:
 
     # Find oldest connection
     oldest_conn_id = None
-    oldest_time = datetime.now(timezone.utc)
+    oldest_time = datetime.now(UTC)
 
     for conn_id, conn_info in pool.items():
       if conn_info.created_at < oldest_time:
@@ -448,7 +446,7 @@ class LadybugConnectionPool:
 
   def _maybe_run_maintenance(self):
     """Run maintenance tasks if needed."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Run cleanup
     if now - self._last_cleanup > self.cleanup_interval:
@@ -590,8 +588,8 @@ class LadybugConnectionPool:
 
         if aggressive:
           # Aggressive memory cleanup for large operations
-          import gc
           import ctypes
+          import gc
 
           # Clear any references to the database object
           db = None
@@ -631,7 +629,7 @@ class LadybugConnectionPool:
           gc.collect()
           logger.info(f"Triggered garbage collection after cleanup of: {database_name}")
 
-  def get_stats(self) -> Dict[str, Any]:
+  def get_stats(self) -> dict[str, Any]:
     """Get connection pool statistics."""
     with self._global_lock:
       pool_stats = {}
@@ -689,7 +687,7 @@ class LadybugConnectionPool:
 
 
 # Global connection pool instance (initialized by the application)
-_connection_pool: Optional[LadybugConnectionPool] = None
+_connection_pool: LadybugConnectionPool | None = None
 
 
 def initialize_connection_pool(

@@ -1,7 +1,8 @@
 """Graph API models for admin endpoints."""
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -12,14 +13,14 @@ class GraphResponse(BaseModel):
   user_id: str
   org_id: str
   name: str
-  description: Optional[str]
+  description: str | None
   graph_tier: str
   backend: str
   status: str
-  storage_gb: Optional[float]
-  storage_limit_gb: Optional[float]
-  subgraph_count: Optional[int]
-  subgraph_limit: Optional[int]
+  storage_gb: float | None
+  storage_limit_gb: float | None
+  subgraph_count: int | None
+  subgraph_limit: int | None
   created_at: datetime
   updated_at: datetime
 
@@ -33,15 +34,15 @@ class GraphStorageResponse(BaseModel):
   usage_percentage: float
   within_limit: bool
   approaching_limit: bool
-  recent_growth_gb: Optional[float]
-  estimated_days_to_limit: Optional[int]
+  recent_growth_gb: float | None
+  estimated_days_to_limit: int | None
 
 
 class GraphBackupResponse(BaseModel):
   """Response with graph backup status."""
 
   graph_id: str
-  last_backup_at: Optional[datetime]
+  last_backup_at: datetime | None
   backup_count: int
   total_backup_size_gb: float
   backup_enabled: bool
@@ -53,10 +54,10 @@ class GraphInfrastructureResponse(BaseModel):
 
   graph_id: str
   tier: str
-  instance_type: Optional[str]
-  cluster_type: Optional[str]
-  writer_endpoint: Optional[str]
-  reader_endpoint: Optional[str]
+  instance_type: str | None
+  cluster_type: str | None
+  writer_endpoint: str | None
+  reader_endpoint: str | None
   connection_status: str
   health_status: str
 
@@ -65,9 +66,9 @@ class GraphAnalyticsResponse(BaseModel):
   """Response with cross-graph analytics."""
 
   total_graphs: int
-  by_tier: Dict[str, int]
-  by_backend: Dict[str, int]
-  by_status: Dict[str, int]
+  by_tier: dict[str, int]
+  by_backend: dict[str, int]
+  by_status: dict[str, int]
   total_storage_gb: float
-  largest_graphs: list[Dict[str, Any]]
-  most_active_graphs: list[Dict[str, Any]]
+  largest_graphs: list[dict[str, Any]]
+  most_active_graphs: list[dict[str, Any]]

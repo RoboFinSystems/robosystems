@@ -1,15 +1,17 @@
 """Integration test for query timeout functionality using ThreadPoolExecutor."""
 
-import pytest
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi import HTTPException
 
 from robosystems.graph_api.core.ladybug import LadybugService
 from robosystems.graph_api.models.database import QueryRequest
 from robosystems.middleware.graph.types import NodeType, RepositoryType
-from fastapi import HTTPException
 
 
 class TestQueryTimeout:
@@ -46,7 +48,7 @@ class TestQueryTimeout:
       # Verify the future is cancelled or still running
       assert future.cancelled() or future.running()
 
-  @patch("robosystems.graph_api.core.cluster_manager.LadybugDatabaseManager")
+  @patch("robosystems.graph_api.core.ladybug.service.LadybugDatabaseManager")
   def test_query_timeout_with_slow_query(self, mock_db_manager):
     """Test actual query timeout with simulated slow query."""
     from robosystems.config import env

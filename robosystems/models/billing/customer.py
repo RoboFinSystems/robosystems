@@ -1,8 +1,9 @@
 """Billing customer model - stores payment information for organizations."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String
 from sqlalchemy.orm import Session
 
 from ...database import Base
@@ -31,13 +32,11 @@ class BillingCustomer(Base):
   billing_contact_name = Column(String, nullable=True)
   payment_terms = Column(String, default="net_30", nullable=False)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
-    default=lambda: datetime.now(timezone.utc),
-    onupdate=lambda: datetime.now(timezone.utc),
+    default=lambda: datetime.now(UTC),
+    onupdate=lambda: datetime.now(UTC),
     nullable=False,
   )
 
@@ -88,7 +87,7 @@ class BillingCustomer(Base):
 
   def can_provision_resources(
     self, environment: str, billing_enabled: bool
-  ) -> tuple[bool, Optional[str]]:
+  ) -> tuple[bool, str | None]:
     """Check if customer can provision new resources.
 
     If billing is disabled, allows all provisioning (testing mode).
@@ -117,7 +116,7 @@ class BillingCustomer(Base):
     """Update default payment method."""
     self.default_payment_method_id = stripe_payment_method_id
     self.has_payment_method = True
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
     logger.info(f"Updated payment method for billing customer {self.org_id}")
@@ -134,7 +133,7 @@ class BillingCustomer(Base):
     self.billing_email = billing_email
     self.billing_contact_name = billing_contact_name
     self.payment_terms = payment_terms
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     session.commit()
     session.refresh(self)
     logger.info(f"Enabled invoice billing for customer {self.org_id}")

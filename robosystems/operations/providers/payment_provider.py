@@ -4,12 +4,13 @@ This module provides an abstract interface for payment providers, making it easy
 to support multiple processors without changing business logic.
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
 import time
+from abc import ABC, abstractmethod
+from typing import Any
+
 from ...config import env
-from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...config.billing import BillingConfig
+from ...config.valkey_registry import ValkeyDatabase, create_redis_client
 from ...logger import get_logger
 
 logger = get_logger(__name__)
@@ -33,8 +34,8 @@ class PaymentProvider(ABC):
 
   @abstractmethod
   def create_checkout_session(
-    self, customer_id: str, price_id: str, metadata: Dict[str, Any]
-  ) -> Dict[str, Any]:
+    self, customer_id: str, price_id: str, metadata: dict[str, Any]
+  ) -> dict[str, Any]:
     """Create checkout session for collecting payment method.
 
     Args:
@@ -52,8 +53,8 @@ class PaymentProvider(ABC):
     self,
     customer_id: str,
     price_id: str,
-    metadata: Dict[str, Any],
-    payment_method_id: Optional[str] = None,
+    metadata: dict[str, Any],
+    payment_method_id: str | None = None,
   ) -> str:
     """Create subscription (for customers with payment method on file).
 
@@ -69,7 +70,7 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
-  def verify_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
+  def verify_webhook(self, payload: bytes, signature: str) -> dict[str, Any]:
     """Verify and parse webhook event.
 
     Args:
@@ -85,7 +86,7 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
-  def list_payment_methods(self, customer_id: str) -> List[Dict[str, Any]]:
+  def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
     """List payment methods for a customer.
 
     Args:
@@ -97,7 +98,7 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
-  def list_invoices(self, customer_id: str, limit: int = 10) -> Dict[str, Any]:
+  def list_invoices(self, customer_id: str, limit: int = 10) -> dict[str, Any]:
     """List invoices for a customer.
 
     Args:
@@ -110,7 +111,7 @@ class PaymentProvider(ABC):
     pass
 
   @abstractmethod
-  def get_upcoming_invoice(self, customer_id: str) -> Optional[Dict[str, Any]]:
+  def get_upcoming_invoice(self, customer_id: str) -> dict[str, Any] | None:
     """Get the upcoming invoice for a customer.
 
     Args:
@@ -169,8 +170,8 @@ class StripePaymentProvider(PaymentProvider):
     return customer.id
 
   def create_checkout_session(
-    self, customer_id: str, price_id: str, metadata: Dict[str, Any]
-  ) -> Dict[str, Any]:
+    self, customer_id: str, price_id: str, metadata: dict[str, Any]
+  ) -> dict[str, Any]:
     """Create Stripe Checkout session."""
     session = self.stripe.checkout.Session.create(
       customer=customer_id,
@@ -198,8 +199,8 @@ class StripePaymentProvider(PaymentProvider):
     self,
     customer_id: str,
     price_id: str,
-    metadata: Dict[str, Any],
-    payment_method_id: Optional[str] = None,
+    metadata: dict[str, Any],
+    payment_method_id: str | None = None,
   ) -> str:
     """Create Stripe subscription (customer has payment method)."""
     if not payment_method_id:
@@ -234,7 +235,7 @@ class StripePaymentProvider(PaymentProvider):
 
     return subscription.id
 
-  def verify_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
+  def verify_webhook(self, payload: bytes, signature: str) -> dict[str, Any]:
     """Verify Stripe webhook signature and parse event."""
     try:
       event = self.stripe.Webhook.construct_event(
@@ -379,7 +380,7 @@ class StripePaymentProvider(PaymentProvider):
       if lock_acquired:
         self.redis_client.delete(lock_key)
 
-  def list_payment_methods(self, customer_id: str) -> List[Dict[str, Any]]:
+  def list_payment_methods(self, customer_id: str) -> list[dict[str, Any]]:
     """List payment methods for a Stripe customer."""
     try:
       payment_methods = self.stripe.PaymentMethod.list(
@@ -409,7 +410,7 @@ class StripePaymentProvider(PaymentProvider):
       logger.error(f"Failed to list payment methods: {e}", exc_info=True)
       raise
 
-  def list_invoices(self, customer_id: str, limit: int = 10) -> Dict[str, Any]:
+  def list_invoices(self, customer_id: str, limit: int = 10) -> dict[str, Any]:
     """List invoices for a Stripe customer."""
     try:
       invoices = self.stripe.Invoice.list(customer=customer_id, limit=limit)
@@ -456,7 +457,7 @@ class StripePaymentProvider(PaymentProvider):
       logger.error(f"Failed to list invoices: {e}", exc_info=True)
       raise
 
-  def get_upcoming_invoice(self, customer_id: str) -> Optional[Dict[str, Any]]:
+  def get_upcoming_invoice(self, customer_id: str) -> dict[str, Any] | None:
     """Get the upcoming invoice for a Stripe customer."""
     try:
       invoice = self.stripe.Invoice.upcoming(customer=customer_id)

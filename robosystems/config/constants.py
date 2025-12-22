@@ -83,6 +83,11 @@ MAX_FILES_PER_TASK = 1000
 MAX_FILE_SIZE_MB = 100
 PRESIGNED_URL_EXPIRY_SECONDS = 3600  # 1 hour
 
+# Small file threshold for direct staging (bypasses Dagster for speed)
+# Files below this size are staged directly in the HTTP request
+# Files above this size use Dagster for async processing with progress tracking
+SMALL_FILE_STAGING_THRESHOLD_MB = 50  # 50MB
+
 # Row Count Estimation Fallback (bytes per row for different formats)
 FALLBACK_BYTES_PER_ROW_PARQUET = 50  # Compressed format
 FALLBACK_BYTES_PER_ROW_CSV = 200  # Text format with moderate row size

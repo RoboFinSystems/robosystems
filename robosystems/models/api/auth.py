@@ -1,7 +1,8 @@
 """Authentication API models."""
 
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, field_validator, ValidationInfo
+
+from pydantic import BaseModel, EmailStr, Field, ValidationInfo, field_validator
 
 from ...security.password import PasswordSecurity
 

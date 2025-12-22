@@ -1,14 +1,14 @@
 """Graph metrics collection service for usage monitoring."""
 
 import logging
-from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
+from ...database import session
 from ...middleware.graph.router import get_universal_repository
 from ...middleware.graph.utils import MultiTenantUtils
-from ...models.iam import GraphUser
 from ...middleware.otel.metrics import get_endpoint_metrics
-from ...database import session
+from ...models.iam import GraphUser
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class GraphMetricsService:
   def __init__(self):
     self.metrics_instance = get_endpoint_metrics()
 
-  async def collect_metrics_for_graph(self, graph_id: str) -> Dict[str, Any]:
+  async def collect_metrics_for_graph(self, graph_id: str) -> dict[str, Any]:
     """
     Collect comprehensive metrics for a specific graph database.
 
@@ -42,7 +42,7 @@ class GraphMetricsService:
       # Collect basic metrics
       metrics = {
         "graph_id": graph_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "node_counts": await self._get_node_counts_by_label(repository),
         "relationship_counts": await self._get_relationship_counts_by_type(repository),
         "total_nodes": 0,
@@ -67,16 +67,16 @@ class GraphMetricsService:
       return metrics
 
     except Exception as e:
-      logger.error(f"Error collecting metrics for graph {graph_id}: {str(e)}")
+      logger.error(f"Error collecting metrics for graph {graph_id}: {e!s}")
       return {
         "graph_id": graph_id,
         "error": str(e),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
       }
 
   async def collect_metrics_for_user_graphs(
     self, user_id: str
-  ) -> Dict[str, Dict[str, Any]]:
+  ) -> dict[str, dict[str, Any]]:
     """
     Collect metrics for all graphs accessible to a user.
 
@@ -114,22 +114,22 @@ class GraphMetricsService:
         "total_graphs": len(user_graphs),
         "total_nodes_across_graphs": total_nodes,
         "total_relationships_across_graphs": total_relationships,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
       }
 
       return metrics_by_graph
 
     except Exception as e:
-      logger.error(f"Error collecting metrics for user {user_id}: {str(e)}")
+      logger.error(f"Error collecting metrics for user {user_id}: {e!s}")
       return {
         "_error": {
           "user_id": user_id,
           "error": str(e),
-          "timestamp": datetime.now(timezone.utc).isoformat(),
+          "timestamp": datetime.now(UTC).isoformat(),
         }
       }
 
-  async def get_usage_summary(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+  async def get_usage_summary(self, user_id: str | None = None) -> dict[str, Any]:
     """
     Get usage summary for monitoring dashboards.
 
@@ -171,7 +171,7 @@ class GraphMetricsService:
           "graph_count": graph_count,
           "total_nodes": total_nodes,
           "total_relationships": total_relationships,
-          "timestamp": datetime.now(timezone.utc).isoformat(),
+          "timestamp": datetime.now(UTC).isoformat(),
         }
       else:
         # System-wide summary (admin only)
@@ -179,17 +179,17 @@ class GraphMetricsService:
         return {
           "system_wide": True,
           "total_graphs": total_graphs,
-          "timestamp": datetime.now(timezone.utc).isoformat(),
+          "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
-      logger.error(f"Error generating usage summary: {str(e)}")
+      logger.error(f"Error generating usage summary: {e!s}")
       return {
         "error": str(e),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
       }
 
-  async def collect_metrics_for_graph_async(self, graph_id: str) -> Dict[str, Any]:
+  async def collect_metrics_for_graph_async(self, graph_id: str) -> dict[str, Any]:
     """
     Async version of collect_metrics_for_graph for use in async contexts.
     This is now just an alias since the main method is async.
@@ -202,9 +202,7 @@ class GraphMetricsService:
     """
     return await self.collect_metrics_for_graph(graph_id)
 
-  async def get_usage_summary_async(
-    self, user_id: Optional[str] = None
-  ) -> Dict[str, Any]:
+  async def get_usage_summary_async(self, user_id: str | None = None) -> dict[str, Any]:
     """
     Async version of get_usage_summary for use in async contexts.
     This is now just an alias since the main method is async.
@@ -219,7 +217,7 @@ class GraphMetricsService:
 
   async def collect_metrics_for_user_graphs_async(
     self, user_id: str
-  ) -> Dict[str, Dict[str, Any]]:
+  ) -> dict[str, dict[str, Any]]:
     """
     Async version of collect_metrics_for_user_graphs for use in async contexts.
     This is now just an alias since the main method is async.
@@ -232,7 +230,7 @@ class GraphMetricsService:
     """
     return await self.collect_metrics_for_user_graphs(user_id)
 
-  async def _get_node_counts_by_label(self, repository) -> Dict[str, int]:
+  async def _get_node_counts_by_label(self, repository) -> dict[str, int]:
     """Get node counts grouped by label."""
     try:
       # Get all unique node labels using LadybugDB-compatible query
@@ -268,7 +266,7 @@ class GraphMetricsService:
         logger.warning(f"Fallback node count also failed: {fallback_e}")
         return {"_total": 0}  # Return 0 instead of string to avoid type issues
 
-  async def _get_relationship_counts_by_type(self, repository) -> Dict[str, int]:
+  async def _get_relationship_counts_by_type(self, repository) -> dict[str, int]:
     """Get relationship counts grouped by type."""
     try:
       # First get all relationship types
@@ -299,13 +297,13 @@ class GraphMetricsService:
       try:
         query = "MATCH ()-[r]->() RETURN count(r) as total"
         result = await repository.execute_query(query)
-        total = list(result)[0]["total"] if result else 0
+        total = next(iter(result))["total"] if result else 0
         return {"_total": total}
       except Exception as fallback_e:
         logger.warning(f"Fallback relationship count also failed: {fallback_e}")
         return {"_total": 0}  # Return 0 instead of string to avoid type issues
 
-  async def _estimate_database_size(self, repository) -> Dict[str, Any]:
+  async def _estimate_database_size(self, repository) -> dict[str, Any]:
     """Estimate database storage usage."""
     try:
       # Try to get database size information with fallback strategies
@@ -349,7 +347,7 @@ class GraphMetricsService:
       logger.warning(f"Failed to estimate database size: {e}")
       return {"error": "Unable to estimate size", "method": "failed"}
 
-  async def _check_graph_health(self, repository) -> Dict[str, Any]:
+  async def _check_graph_health(self, repository) -> dict[str, Any]:
     """Check graph database health status."""
     try:
       health_info = await repository.health_check()
@@ -360,7 +358,7 @@ class GraphMetricsService:
     except Exception as e:
       return {"status": "unhealthy", "error": str(e)}
 
-  def _record_otel_metrics(self, graph_id: str, metrics: Dict[str, Any]):
+  def _record_otel_metrics(self, graph_id: str, metrics: dict[str, Any]):
     """Record metrics to OpenTelemetry."""
     try:
       # Record node and relationship counts as gauges

@@ -1,14 +1,14 @@
 """User API Key model for programmatic access."""
 
 import secrets
-from datetime import datetime, timezone
-from typing import Optional, Tuple, Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from typing import Optional
 
 import bcrypt
-
-from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, Text, Index
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
 from ...database import Model
 from ...logger import logger
@@ -34,11 +34,11 @@ class UserAPIKey(Model):
   description = Column(Text, nullable=True)  # Optional description
   last_used_at = Column(DateTime, nullable=True)
   expires_at = Column(DateTime, nullable=True)  # Optional expiration date
-  created_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
+  created_at = Column(DateTime, default=datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
-    default=datetime.now(timezone.utc),
-    onupdate=datetime.now(timezone.utc),
+    default=datetime.now(UTC),
+    onupdate=datetime.now(UTC),
     nullable=False,
   )
 
@@ -61,10 +61,10 @@ class UserAPIKey(Model):
     cls,
     user_id: str,
     name: str,
-    description: Optional[str] = None,
-    expires_at: Optional[datetime] = None,
-    session: Optional[Session] = None,
-  ) -> Tuple["UserAPIKey", str]:
+    description: str | None = None,
+    expires_at: datetime | None = None,
+    session: Session | None = None,
+  ) -> tuple["UserAPIKey", str]:
     """
     Create a new API key for a user with secure bcrypt hashing.
 
@@ -147,7 +147,7 @@ class UserAPIKey(Model):
       try:
         if cls._verify_api_key(plain_key, str(api_key.key_hash)):
           # Check if API key is expired
-          if api_key.expires_at and datetime.now(timezone.utc) > api_key.expires_at:
+          if api_key.expires_at and datetime.now(UTC) > api_key.expires_at:
             logger.warning(f"API key {api_key.id} is expired")
             SecurityAuditLogger.log_security_event(
               event_type=SecurityEventType.AUTHORIZATION_DENIED,
@@ -227,8 +227,8 @@ class UserAPIKey(Model):
         session: Database session
         auto_commit: Whether to automatically commit the transaction (default: True)
     """
-    self.last_used_at = datetime.now(timezone.utc)
-    self.updated_at = datetime.now(timezone.utc)
+    self.last_used_at = datetime.now(UTC)
+    self.updated_at = datetime.now(UTC)
 
     if auto_commit:
       try:
@@ -241,7 +241,7 @@ class UserAPIKey(Model):
   def deactivate(self, session: Session) -> None:
     """Deactivate the API key and invalidate cache."""
     self.is_active = False
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)
@@ -255,7 +255,7 @@ class UserAPIKey(Model):
   def activate(self, session: Session) -> None:
     """Activate the API key and invalidate cache."""
     self.is_active = True
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
     try:
       session.commit()
       session.refresh(self)

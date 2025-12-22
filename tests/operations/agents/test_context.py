@@ -4,18 +4,18 @@ Test suite for context enricher and RAG functionality.
 Tests semantic search, document retrieval, and context augmentation.
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
-from typing import List
+
 import numpy as np
+import pytest
 
 from robosystems.operations.agents.context import (
   ContextEnricher,
-  RAGConfig,
-  EmbeddingProvider,
-  VectorStore,
   DocumentChunk,
+  EmbeddingProvider,
+  RAGConfig,
   SearchResult,
+  VectorStore,
 )
 
 
@@ -134,12 +134,12 @@ class MockVectorStore(VectorStore):
   def __init__(self):
     self.documents = []
 
-  async def add_documents(self, chunks: List[DocumentChunk]):
+  async def add_documents(self, chunks: list[DocumentChunk]):
     self.documents.extend(chunks)
 
   async def search(
-    self, query_embedding: List[float], k: int = 5
-  ) -> List[SearchResult]:
+    self, query_embedding: list[float], k: int = 5
+  ) -> list[SearchResult]:
     # Simple mock search - return top k documents
     results = []
     for doc in self.documents[:k]:
@@ -152,7 +152,7 @@ class MockVectorStore(VectorStore):
       )
     return results
 
-  async def delete_documents(self, chunk_ids: List[str]):
+  async def delete_documents(self, chunk_ids: list[str]):
     self.documents = [d for d in self.documents if d.chunk_id not in chunk_ids]
 
 
@@ -470,7 +470,7 @@ class TestContextEnricher:
   async def test_custom_embedding_function(self):
     """Test using custom embedding function."""
 
-    async def custom_embed(text: str) -> List[float]:
+    async def custom_embed(text: str) -> list[float]:
       # Simple custom embedding based on text length
       return [len(text) / 100.0] * 5
 

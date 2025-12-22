@@ -4,24 +4,24 @@ OpenTelemetry centralized metrics and tracing utilities for RoboSystems.
 This module provides consistent observability patterns for all API endpoints.
 """
 
-from .setup import setup_telemetry, get_tracer, shutdown_telemetry
 from .metrics import (
+  endpoint_metrics_context,
+  endpoint_metrics_decorator,
   get_endpoint_metrics,
-  record_request_metrics,
   record_auth_metrics,
   record_error_metrics,
-  endpoint_metrics_decorator,
-  endpoint_metrics_context,
+  record_request_metrics,
 )
+from .setup import get_tracer, setup_telemetry, shutdown_telemetry
 
 __all__ = [
-  "setup_telemetry",
-  "get_tracer",
-  "shutdown_telemetry",
+  "endpoint_metrics_context",
+  "endpoint_metrics_decorator",
   "get_endpoint_metrics",
-  "record_request_metrics",
+  "get_tracer",
   "record_auth_metrics",
   "record_error_metrics",
-  "endpoint_metrics_decorator",
-  "endpoint_metrics_context",
+  "record_request_metrics",
+  "setup_telemetry",
+  "shutdown_telemetry",
 ]

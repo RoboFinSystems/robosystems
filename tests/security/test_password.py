@@ -5,9 +5,10 @@ These tests cover password validation, strength assessment, hashing, verificatio
 and secure password generation with enterprise-grade security requirements.
 """
 
-import pytest
-from unittest.mock import patch
 import re
+from unittest.mock import patch
+
+import pytest
 
 from robosystems.security.password import (
   PasswordSecurity,
@@ -605,8 +606,8 @@ class TestPerformanceAndReliability:
 
   def test_concurrent_operations(self):
     """Test concurrent password operations."""
-    import threading
     import queue
+    import threading
 
     def worker(q):
       password = "ConcurrentTest123!"

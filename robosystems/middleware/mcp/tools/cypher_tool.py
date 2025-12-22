@@ -2,11 +2,12 @@
 Cypher Tool - Executes read-only Cypher queries against the graph database.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-from .base_tool import BaseTool
 from robosystems.logger import logger
+
 from ..exceptions import GraphAPIError
+from .base_tool import BaseTool
 
 
 class CypherTool(BaseTool):
@@ -14,7 +15,7 @@ class CypherTool(BaseTool):
   Tool for executing read-only Cypher queries.
   """
 
-  def get_tool_definition(self) -> Dict[str, Any]:
+  def get_tool_definition(self) -> dict[str, Any]:
     """Get the tool definition for Cypher queries."""
     return {
       "name": "read-graph-cypher",
@@ -88,7 +89,7 @@ LIMIT 20
       },
     }
 
-  async def execute(self, arguments: Dict[str, Any]) -> List[Dict[str, Any]]:
+  async def execute(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
     """Execute the Cypher tool."""
     self._log_tool_execution("read-graph-cypher", arguments)
 

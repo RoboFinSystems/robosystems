@@ -40,7 +40,8 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 
 - Graph database (LadybugDB by default, Neo4j optional)
 - PostgreSQL with automatic migrations
-- Valkey message broker
+- Dagster for data pipeline orchestration
+- Valkey for caching and SSE messaging
 - All development services
 
 ### Local Development
@@ -55,7 +56,7 @@ just init
 See RoboSystems in action with runnable demos that create graphs, load data, and execute queries with the `robosystems-client`:
 
 ```bash
-just demo-sec NVDA          # Loads and queries NVIDIA's SEC XBRL financial data
+just sec-load NVDA 2025     # Loads NVIDIA's SEC XBRL data via Dagster pipeline
 just demo-accounting        # Creates chart of accounts with 6 months of transactions
 just demo-custom-graph      # Builds custom graph schema with relationship networks
 ```
@@ -79,9 +80,10 @@ just test-all               # Tests with code quality
 ### Log Monitoring
 
 ```bash
-just logs worker 200                 # View worker logs
+just logs api 200                    # View API logs
+just logs dagster-webserver 200      # View Dagster logs
 just logs-grep api "pipeline" 500    # Search API logs
-just logs-follow worker              # Tail worker logs
+just logs-follow dagster-webserver   # Tail Dagster logs
 ```
 
 **See [justfile](justfile) for 50+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
@@ -113,7 +115,7 @@ RoboSystems is built on a modern, scalable architecture with:
 
 - FastAPI REST API with versioned endpoints (`/v1/`)
 - MCP Server for AI-powered financial analytics
-- Celery workers with priority queues
+- Dagster for data pipeline orchestration and background jobs
 
 **Graph Database System:**
 
@@ -125,7 +127,7 @@ RoboSystems is built on a modern, scalable architecture with:
 **Data Layer:**
 
 - PostgreSQL for IAM and graph metadata
-- Valkey for caching and message broker
+- Valkey for caching
 - AWS S3 for data lake storage and static assets
 - DynamoDB for instance/graph/volume registry
 
@@ -214,12 +216,12 @@ pip install robosystems-client
 **Core Services:**
 
 - **[Operations](/robosystems/operations/README.md)** - Business workflow orchestration
-- **[Processors](/robosystems/processors/README.md)** - Data transformation pipeline
+- **[Adapters](/robosystems/adapters/README.md)** - External service integrations (SEC, QuickBooks)
 - **[Schemas](/robosystems/schemas/README.md)** - Graph schema definitions
 - **[IAM Models](/robosystems/models/iam/README.md)** - Database models and migrations
 - **[API Models](/robosystems/models/api/README.md)** - API request/response models
 - **[Configuration](/robosystems/config/README.md)** - Configuration management
-- **[Tasks](/robosystems/tasks/README.md)** - Celery task organization
+- **[Dagster](/robosystems/dagster/README.md)** - Data pipeline and task orchestration
 
 **Graph Database System:**
 
@@ -263,6 +265,6 @@ pip install robosystems-client
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-MIT © 2025 RFS LLC
+Apache-2.0 © 2025 RFS LLC

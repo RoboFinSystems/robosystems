@@ -223,14 +223,6 @@ api env=_local_env:
 graph-api backend="ladybug" type="writer" port="8001" env=_local_env:
     UV_ENV_FILE={{env}} GRAPH_BACKEND_TYPE={{backend}} LBUG_NODE_TYPE={{type}} uv run python -m robosystems.graph_api --port {{port}}
 
-# Start worker
-worker num_workers="1" queue="robosystems" env=_local_env:
-    UV_ENV_FILE={{env}} uv run celery -A robosystems worker -B -n rsworkerbeat --concurrency={{num_workers}} -Q {{queue}} -l info -Ofair --prefetch-multiplier=0
-
-# Start beat worker (Celery scheduler)
-beat env=_local_env:
-    UV_ENV_FILE={{env}} uv run celery -A robosystems beat -l info
-
 stripe-webhook url="http://localhost:8000" env=_local_env:
     UV_ENV_FILE={{env}} uv run stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe
 
@@ -306,74 +298,44 @@ duckdb-query-i graph_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb
 
 
-## SEC Local Pipeline - Testing and Development ##
+## SEC Pipeline - XBRL Data Processing ##
 
-# SEC Local supports two ingestion approaches:
-#   - "duckdb" (default): DuckDB staging → Direct ingestion (fast, many small files, S3 as source of truth)
-#   - "copy": Consolidation → COPY-based ingestion (emulates production pipeline, uses consolidated files)
+# SEC Pipeline commands (all use robosystems.scripts.sec_pipeline)
 # Examples:
-#   just sec-load NVDA 2025                              # Load NVIDIA 2025 data using defaults (duckdb, ladybug)
-#   just sec-load NVDA 2025 [duckdb|copy] [ladybug|neo4j]   # Specify ingestion method and/or backend
+#   just sec-load NVDA 2024              # Single company, single year
+#   just sec-load NVDA "2023 2024 2025"  # Single company, multiple years
+#   just sec-pipeline                    # Top 5 companies, all years (2019-2025)
+#   just sec-pipeline 10                 # Top 10 companies, all years
+#   just sec-pipeline 5 2024             # Top 5 companies, single year
+#   just sec-pipeline 10 "2023 2024"     # Top 10 companies, multiple years
+#   just sec-reset                       # Reset SEC database
+#   just sec-reset --clear-s3            # Reset and clear S3 buckets
+#   just sec-health                      # SEC database health check
+#   just sec-health verbose              # Detailed health report
 
-# SEC Local - Load single company by ticker and year(s)
-sec-load ticker year="" ingest_method="duckdb" backend="ladybug" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local load --ticker {{ticker}} {{ if year != "" { "--year " + year } else { "" } }} --backend {{backend}} {{ if ingest_method == "copy" { "--use-copy-pipeline" } else { "" } }}
+# SEC - Load single company (wrapper for sec-pipeline run --tickers)
+sec-load ticker years="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --tickers {{ticker}} {{ if years != "" { "--years " + years } else { "" } }}
 
-# SEC Local - Health check (use --verbose for detailed report, --json for JSON output)
-sec-health verbose="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local_health {{ if verbose == "v" { "--verbose" } else { "" } }}
+# SEC - Health check (comprehensive validation of SEC repository)
+sec-health verbose="" json="" api_url="http://localhost:8001" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_health sec --api-url {{api_url}} {{ if verbose != "" { "--verbose" } else { "" } }} {{ if json != "" { "--json" } else { "" } }}
 
-# SEC Local - Reset database with proper schema
-sec-reset backend="ladybug" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_local reset --backend {{backend}}
+# SEC - Reset database
+sec-reset clear_s3="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline reset {{ if clear_s3 != "" { "--clear-s3" } else { "" } }}
 
+# SEC Pipeline - Multi-company processing (top N by market cap)
+sec-pipeline count="5" years="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --count {{count}} {{ if years != "" { "--years " + years } else { "" } }}
 
-## SEC Production Pipeline - Large-scale orchestrated processing ##
+# SEC Pipeline - Quick test (2 companies, 2024 only)
+sec-pipeline-quick env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --count 2 --year 2024
 
-# Uses proven consolidation + COPY approach for large-scale data processing.
-# Pipeline phases: download → process → consolidate → ingest (COPY-based)
-# Examples:
-#   just sec-plan 2020 2025 100                                 # Plan processing for 100 companies
-#   just sec-phase [download|process|consolidate|ingest]        # Start a specific phase
-
-# SEC Production - Plan processing with optional company limit for testing
-sec-plan start_year="2020" end_year="2025" max_companies="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator plan --start-year {{start_year}} --end-year {{end_year}} --max-companies {{max_companies}}
-
-# SEC Production - Start a specific phase: download, process, consolidate, ingest
-sec-phase phase env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}}
-
-# SEC Production - Resume a phase from last checkpoint
-sec-phase-resume phase env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --resume
-
-# SEC Production - Retry failed companies in a phase
-sec-phase-retry phase env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator start-phase --phase {{phase}} --retry-failed
-
-# SEC Production - Get status of all phases
-sec-status env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator status
-
-# SEC Production - Reset database (requires confirmation)
-sec-reset-remote confirm="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_orchestrator reset {{ if confirm == "yes" { "--confirm" } else { "" } }}
-
-
-## Valkey/Redis ##
-
-# Clear Valkey/Redis queues
-valkey-clear-queue queue env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues {{queue}}
-
-# Clear Valkey/Redis queues including unacknowledged messages
-valkey-clear-queue-all queue env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --clear-unacked {{queue}}
-
-# List Valkey/Redis queue contents without clearing
-valkey-list-queue queue env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.clear_valkey_queues --list-only {{queue}}
+# SEC Pipeline - Materialize only (skip download)
+sec-pipeline-materialize count="5" years="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize --count {{count}} {{ if years != "" { "--years " + years } else { "" } }}
 
 
 ## Setup ##

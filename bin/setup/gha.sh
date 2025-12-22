@@ -196,9 +196,29 @@ function setup_minimum_config() {
     gh variable set API_ASG_REFRESH_PROD --body "true"
     gh variable set API_ASG_REFRESH_STAGING --body "true"
 
-    # Worker Configuration
-    gh variable set WORKER_ASG_REFRESH_PROD --body "true"
-    gh variable set WORKER_ASG_REFRESH_STAGING --body "true"
+    # Dagster Configuration
+    gh variable set DAGSTER_CPU_PROD --body "512"
+    gh variable set DAGSTER_CPU_STAGING --body "512"
+    gh variable set DAGSTER_MEMORY_PROD --body "1024"
+    gh variable set DAGSTER_MEMORY_STAGING --body "1024"
+    gh variable set DAGSTER_DAEMON_CPU_PROD --body "512"
+    gh variable set DAGSTER_DAEMON_CPU_STAGING --body "512"
+    gh variable set DAGSTER_DAEMON_MEMORY_PROD --body "1024"
+    gh variable set DAGSTER_DAEMON_MEMORY_STAGING --body "1024"
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_PROD --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_STAGING --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_PROD --body "500"
+    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_STAGING --body "500"
+    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_PROD --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_STAGING --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_PROD --body "5"
+    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_STAGING --body "2"
+    gh variable set DAGSTER_MIN_CAPACITY_PROD --body "1"
+    gh variable set DAGSTER_MIN_CAPACITY_STAGING --body "1"
+    gh variable set DAGSTER_MAX_CAPACITY_PROD --body "3"
+    gh variable set DAGSTER_MAX_CAPACITY_STAGING --body "2"
+    gh variable set DAGSTER_ASG_REFRESH_PROD --body "true"
+    gh variable set DAGSTER_ASG_REFRESH_STAGING --body "true"
     gh variable set RUN_MIGRATIONS_PROD --body "false"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
@@ -310,16 +330,6 @@ function setup_minimum_config() {
     gh variable set WAF_GEO_BLOCKING_ENABLED --body "false"
     gh variable set WAF_AWS_MANAGED_RULES_ENABLED --body "true"
 
-    # Worker Configuration
-    gh variable set WORKER_CRITICAL_ENABLED_PROD --body "false"
-    gh variable set WORKER_CRITICAL_ENABLED_STAGING --body "false"
-    gh variable set WORKER_EXTRACTION_ENABLED_PROD --body "true"
-    gh variable set WORKER_EXTRACTION_ENABLED_STAGING --body "false"
-    gh variable set WORKER_INGESTION_ENABLED_PROD --body "true"
-    gh variable set WORKER_INGESTION_ENABLED_STAGING --body "false"
-    gh variable set WORKER_SHARED_ENABLED_PROD --body "true"
-    gh variable set WORKER_SHARED_ENABLED_STAGING --body "false"
-
     # Infrastructure Configuration
     gh variable set MAX_AVAILABILITY_ZONES --body "5"
 
@@ -417,9 +427,29 @@ function setup_full_config() {
     gh variable set API_ASG_REFRESH_PROD --body "true"
     gh variable set API_ASG_REFRESH_STAGING --body "true"
 
-    # Worker Configuration
-    gh variable set WORKER_ASG_REFRESH_PROD --body "true"
-    gh variable set WORKER_ASG_REFRESH_STAGING --body "true"
+    # Dagster Configuration
+    gh variable set DAGSTER_CPU_PROD --body "512"
+    gh variable set DAGSTER_CPU_STAGING --body "512"
+    gh variable set DAGSTER_MEMORY_PROD --body "1024"
+    gh variable set DAGSTER_MEMORY_STAGING --body "1024"
+    gh variable set DAGSTER_DAEMON_CPU_PROD --body "512"
+    gh variable set DAGSTER_DAEMON_CPU_STAGING --body "512"
+    gh variable set DAGSTER_DAEMON_MEMORY_PROD --body "1024"
+    gh variable set DAGSTER_DAEMON_MEMORY_STAGING --body "1024"
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_PROD --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_STAGING --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_PROD --body "500"
+    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_STAGING --body "500"
+    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_PROD --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_STAGING --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_PROD --body "5"
+    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_STAGING --body "2"
+    gh variable set DAGSTER_MIN_CAPACITY_PROD --body "1"
+    gh variable set DAGSTER_MIN_CAPACITY_STAGING --body "1"
+    gh variable set DAGSTER_MAX_CAPACITY_PROD --body "3"
+    gh variable set DAGSTER_MAX_CAPACITY_STAGING --body "2"
+    gh variable set DAGSTER_ASG_REFRESH_PROD --body "true"
+    gh variable set DAGSTER_ASG_REFRESH_STAGING --body "true"
     gh variable set RUN_MIGRATIONS_PROD --body "false"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
@@ -524,16 +554,6 @@ function setup_full_config() {
     gh variable set WAF_RATE_LIMIT_PER_IP --body "10000"
     gh variable set WAF_GEO_BLOCKING_ENABLED --body "false"
     gh variable set WAF_AWS_MANAGED_RULES_ENABLED --body "true"
-
-    # Worker Configuration
-    gh variable set WORKER_CRITICAL_ENABLED_PROD --body "false"
-    gh variable set WORKER_CRITICAL_ENABLED_STAGING --body "false"
-    gh variable set WORKER_EXTRACTION_ENABLED_PROD --body "true"
-    gh variable set WORKER_EXTRACTION_ENABLED_STAGING --body "false"
-    gh variable set WORKER_INGESTION_ENABLED_PROD --body "true"
-    gh variable set WORKER_INGESTION_ENABLED_STAGING --body "false"
-    gh variable set WORKER_SHARED_ENABLED_PROD --body "true"
-    gh variable set WORKER_SHARED_ENABLED_STAGING --body "false"
 
     # Infrastructure Configuration
     gh variable set MAX_AVAILABILITY_ZONES --body "5"

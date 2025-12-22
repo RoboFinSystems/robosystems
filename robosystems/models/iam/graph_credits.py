@@ -9,27 +9,28 @@ This module implements the simplified credit system where:
 """
 
 import logging
-from datetime import datetime, timezone
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Optional, Dict, Any, Sequence
 from enum import Enum
+from typing import Any, Optional
 
 from sqlalchemy import (
+  Boolean,
   Column,
-  String,
   DateTime,
   ForeignKey,
-  Numeric,
-  Text,
   Index,
-  Boolean,
+  Numeric,
+  String,
+  Text,
 )
-from sqlalchemy.orm import relationship, Session
+from sqlalchemy.orm import Session, relationship
 
+from ...config.billing.storage import StorageBillingConfig
+from ...config.graph_tier import GraphTier
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
-from ...config.graph_tier import GraphTier
-from ...config.billing.storage import StorageBillingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -92,13 +93,13 @@ class GraphCredits(Base):
 
   # Tracking
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc)
+    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
   )
   updated_at = Column(
     DateTime(timezone=True),
     nullable=False,
-    default=datetime.now(timezone.utc),
-    onupdate=datetime.now(timezone.utc),
+    default=datetime.now(UTC),
+    onupdate=datetime.now(UTC),
   )
 
   # Relationships
@@ -164,7 +165,7 @@ class GraphCredits(Base):
       storage_limit_gb=Decimal(str(storage_limit_gb)),
       monthly_allocation=monthly_allocation,
       current_balance=monthly_allocation,  # Start with full allocation
-      last_allocation_date=datetime.now(timezone.utc),
+      last_allocation_date=datetime.now(UTC),
     )
 
     session.add(credits)
@@ -196,9 +197,9 @@ class GraphCredits(Base):
     operation_type: str,
     operation_description: str,
     session: Session,
-    request_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-  ) -> Dict[str, Any]:
+    request_id: str | None = None,
+    user_id: str | None = None,
+  ) -> dict[str, Any]:
     """
     Atomically consume credits for AI operations.
 
@@ -217,6 +218,7 @@ class GraphCredits(Base):
         Dict with consumption results
     """
     from sqlalchemy import text
+
     from ...utils import generate_prefixed_ulid
 
     transaction_id = generate_prefixed_ulid("tx")
@@ -237,7 +239,7 @@ class GraphCredits(Base):
         """),
         {
           "actual_cost": actual_cost,
-          "updated_at": datetime.now(timezone.utc),
+          "updated_at": datetime.now(UTC),
           "credits_id": self.id,
         },
       )
@@ -281,7 +283,7 @@ class GraphCredits(Base):
 
       # Update the local object
       self.current_balance = consumption_result.new_balance
-      self.updated_at = datetime.now(timezone.utc)
+      self.updated_at = datetime.now(UTC)
 
       session.commit()
 
@@ -299,12 +301,12 @@ class GraphCredits(Base):
       session.rollback()
       return {
         "success": False,
-        "error": f"Credit consumption failed: {str(e)}",
+        "error": f"Credit consumption failed: {e!s}",
       }
 
   def allocate_monthly_credits(self, session: Session) -> bool:
     """Allocate monthly credits if due."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Check if allocation is due (monthly)
     if self.last_allocation_date is not None:
@@ -347,12 +349,12 @@ class GraphCredits(Base):
 
     return True
 
-  def get_usage_summary(self, session: Session) -> Dict[str, Any]:
+  def get_usage_summary(self, session: Session) -> dict[str, Any]:
     """Get usage summary for this graph."""
     from sqlalchemy import func
 
     # Get usage for current month
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     transactions = (
@@ -409,7 +411,7 @@ class GraphCredits(Base):
       else self.storage_limit_gb
     )
 
-  def check_storage_limit(self, current_storage_gb: Decimal) -> Dict[str, Any]:
+  def check_storage_limit(self, current_storage_gb: Decimal) -> dict[str, Any]:
     """Check if current storage is within limits."""
     effective_limit = self.get_effective_storage_limit()
     usage_percentage = (
@@ -427,7 +429,7 @@ class GraphCredits(Base):
       >= safe_float(self.storage_warning_threshold) * 100
       and (
         self.last_storage_warning_at is None
-        or (datetime.now(timezone.utc) - self.last_storage_warning_at).days >= 1
+        or (datetime.now(UTC) - self.last_storage_warning_at).days >= 1
       ),
       "has_override": self.storage_override_gb is not None,
     }
@@ -438,7 +440,7 @@ class GraphCredits(Base):
     """Set storage override limit (admin only)."""
     old_limit = self.get_effective_storage_limit()
     self.storage_override_gb = new_limit_gb
-    self.updated_at = datetime.now(timezone.utc)
+    self.updated_at = datetime.now(UTC)
 
     # Record transaction for audit trail
     GraphCreditTransaction.create_transaction(
@@ -458,7 +460,7 @@ class GraphCredits(Base):
 
   def update_storage_warning(self, session: Session) -> None:
     """Update last storage warning timestamp."""
-    self.last_storage_warning_at = datetime.now(timezone.utc)
+    self.last_storage_warning_at = datetime.now(UTC)
     session.commit()
 
 
@@ -498,7 +500,7 @@ class GraphCreditTransaction(Base):
 
   # Tracking
   created_at = Column(
-    DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc)
+    DateTime(timezone=True), nullable=False, default=datetime.now(UTC)
   )
 
   # Relationships
@@ -535,13 +537,13 @@ class GraphCreditTransaction(Base):
     transaction_type: CreditTransactionType,
     amount: Decimal,
     description: str,
-    metadata: Optional[Dict[str, Any]] = None,
-    session: Optional[Session] = None,
-    idempotency_key: Optional[str] = None,
-    request_id: Optional[str] = None,
-    operation_id: Optional[str] = None,
-    graph_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    metadata: dict[str, Any] | None = None,
+    session: Session | None = None,
+    idempotency_key: str | None = None,
+    request_id: str | None = None,
+    operation_id: str | None = None,
+    graph_id: str | None = None,
+    user_id: str | None = None,
   ) -> "GraphCreditTransaction":
     """
     Create a new credit transaction with idempotency support.
@@ -563,6 +565,7 @@ class GraphCreditTransaction(Base):
         Created transaction or existing transaction if idempotency key exists
     """
     import json
+
     from sqlalchemy.exc import IntegrityError
 
     # If idempotency key provided, check for existing transaction
@@ -622,9 +625,9 @@ class GraphCreditTransaction(Base):
   def get_transactions_for_graph(
     cls,
     graph_credits_id: str,
-    transaction_type: Optional[CreditTransactionType] = None,
+    transaction_type: CreditTransactionType | None = None,
     limit: int = 100,
-    session: Optional[Session] = None,
+    session: Session | None = None,
   ) -> Sequence["GraphCreditTransaction"]:
     """Get transactions for a graph."""
     if not session:
@@ -636,7 +639,7 @@ class GraphCreditTransaction(Base):
 
     return query.order_by(cls.created_at.desc()).limit(limit).all()
 
-  def get_metadata(self) -> Dict[str, Any]:
+  def get_metadata(self) -> dict[str, Any]:
     """Parse metadata JSON."""
     if self.transaction_metadata is None:
       return {}
@@ -648,7 +651,7 @@ class GraphCreditTransaction(Base):
     except Exception:
       return {}
 
-  def set_metadata(self, metadata: Dict[str, Any]) -> None:
+  def set_metadata(self, metadata: dict[str, Any]) -> None:
     """Set metadata as JSON string."""
     try:
       import json

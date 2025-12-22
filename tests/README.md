@@ -43,6 +43,7 @@ These examples validate the entire stack (authentication, graph creation, data u
 The test suite is organized by component, mirroring the application structure:
 
 ### Core Components
+
 - **`adapters/`** - External service integrations (Arelle/XBRL, OpenFIGI, QuickBooks, S3, SEC)
 - **`config/`** - Configuration validation and billing plan tests
 - **`middleware/`** - Request/response middleware layers
@@ -65,28 +66,27 @@ The test suite is organized by component, mirroring the application structure:
   - `pipeline/` - Data processing pipelines
   - `providers/` - External provider integrations
 
-### Data Processing
-- **`processors/`** - Data transformation and processing
-  - XBRL processing (SEC filings, taxonomies)
-  - QuickBooks transaction processing
-  - Trial balance generation
-  - Schedule processing (balance sheet, income statement)
+### Adapters
+
+- **`adapters/`** - External service integrations
+  - SEC adapter (XBRL processing, filings, taxonomies)
+  - QuickBooks adapter (transaction processing)
 
 ### API Layer
+
 - **`routers/`** - HTTP endpoint tests
   - `auth/` - Authentication and authorization endpoints
   - `graphs/` - Graph database CRUD operations
   - `user/` - User management and subscription endpoints
 
 ### Background Tasks
-- **`tasks/`** - Celery async task tests
-  - `billing/` - Storage billing, usage collection, credit allocation
-  - `data_sync/` - Plaid and QuickBooks synchronization
-  - `graph_operations/` - Backup and graph database operations
-  - `infrastructure/` - Authentication cleanup, system maintenance
-  - `sec_xbrl/` - SEC filing ingestion and processing
+
+- **`dagster/`** - Dagster pipeline tests
+  - `assets/` - Asset tests (SEC, Plaid, etc.)
+  - `jobs/` - Job tests (billing, infrastructure)
 
 ### Infrastructure
+
 - **`graph_api/`** - Graph API cluster services (multi-backend support)
   - `client/` - Graph API client functionality
   - `routers/` - Graph API HTTP endpoints
@@ -95,6 +95,7 @@ The test suite is organized by component, mirroring the application structure:
 - **`utils/`** - Utility functions and helpers
 
 ### Test Types
+
 - **`integration/`** - Cross-component integration tests
 - **`unit/`** - Isolated unit tests for specific components
 
@@ -106,7 +107,6 @@ Tests are marked with pytest markers to categorize them. Use these markers to ru
 
 - **`@pytest.mark.unit`** - Fast, isolated unit tests (no external dependencies)
 - **`@pytest.mark.integration`** - Integration tests (may use databases, create LadybugDB instances)
-- **`@pytest.mark.celery`** - Celery task tests
 - **`@pytest.mark.slow`** - Long-running tests (XBRL processing, large datasets)
 - **`@pytest.mark.security`** - Security-focused tests
 - **`@pytest.mark.asyncio`** - Async operation tests (handled automatically)
@@ -120,17 +120,11 @@ uv run pytest -m unit
 # Only integration tests
 uv run pytest -m integration
 
-# Only Celery task tests
-uv run pytest -m celery
-
 # Only security tests
 uv run pytest -m security
 
 # Exclude slow tests
 uv run pytest -m "not slow"
-
-# Run unit AND celery tests
-uv run pytest -m "unit and celery"
 
 # Exclude slow tests (default)
 uv run pytest -m "not slow"
@@ -155,8 +149,8 @@ uv run pytest tests/operations/
 uv run pytest tests/middleware/auth/
 uv run pytest tests/middleware/credits/
 
-# Data processors
-uv run pytest tests/processors/
+# Adapters
+uv run pytest tests/adapters/
 
 # API endpoints
 uv run pytest tests/routers/
@@ -226,12 +220,6 @@ Common test fixtures provide reusable test components. Fixtures are defined at m
 - **`test_graph_with_credits`** (function scope) - Graph with credit allocation
 - **`db_session`** (function scope) - Database session for direct queries
 
-### Task-Specific Fixtures (`tests/tasks/conftest.py`)
-
-- Task-specific fixtures for Celery testing
-- Mock external services (SEC API, QuickBooks, Plaid)
-- Sample data for different task types
-
 ### Model Fixtures (`tests/models/conftest.py`)
 
 - Database model factories
@@ -282,6 +270,7 @@ Tests run in an isolated environment with specific configuration:
 ### Mock Services
 
 Tests mock external services by default:
+
 - SEC EDGAR API
 - QuickBooks API
 - Plaid API
@@ -319,8 +308,7 @@ OPENFIGI_API_KEY=test-openfigi-key
 2. **Integration tests** can use databases but should clean up after themselves
 3. **E2E tests** require full Docker stack and test complete user workflows
 4. **Async tests** use `@pytest.mark.asyncio` (auto-detected)
-5. **Celery tests** mock external services and database operations
-6. **Slow tests** should be marked `@pytest.mark.slow` for selective exclusion
+5. **Slow tests** should be marked `@pytest.mark.slow` for selective exclusion
 
 ### Test File Organization
 
@@ -397,105 +385,10 @@ def test_authentication():
     assert response
 ```
 
-## Celery Task Testing Guide
-
-Testing Celery tasks can be challenging due to their asynchronous nature and dependency on external resources. This guide shows you how to effectively mock dependencies and test task behavior.
-
-### Quick Reference
-
-For working examples, see:
-- `tests/tasks/infrastructure/test_auth_cleanup.py` - Session management with `sessionmaker()`
-- `tests/tasks/billing/test_usage_collector.py` - Tasks with internal session imports
-- `tests/tasks/billing/test_storage_billing.py` - Daily/monthly billing tasks
-- `tests/tasks/data_sync/test_plaid.py` - External API integration tasks
-
-### Core Pattern: Mock the Database Session
-
-The key insight is that `sessionmaker()()` creates a call chain, so you need to mock it correctly:
-
-```python
-from unittest.mock import MagicMock, patch
-import pytest
-
-@patch("path.to.task.cleanup_function")
-@patch("path.to.task.sessionmaker")
-@patch("path.to.task.engine")
-def test_task_success(self, mock_engine, mock_sessionmaker, mock_cleanup_func):
-    # Create a mock session
-    mock_session = MagicMock()
-
-    # Mock the session context manager chain: sessionmaker()().__enter__()
-    mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
-    mock_sessionmaker.return_value.return_value.__exit__.return_value = False
-
-    # Setup your expected results
-    mock_cleanup_func.return_value = {"status": "success"}
-
-    # Run the task
-    result = your_task()  # type: ignore[call-arg]
-
-    # Assert expectations
-    assert result["status"] == "success"
-    mock_cleanup_func.assert_called_once_with(mock_session)
-    mock_session.commit.assert_called_once()
-```
-
-**Why this pattern?**
-- `sessionmaker(bind=engine)` returns a session class → first `.return_value`
-- `SessionLocal()` instantiates that class → second `.return_value`
-- `with SessionLocal() as session:` uses the context manager → `__enter__` returns the actual session
-
-### Pattern 1: Tasks with Module-Level Session Imports
-
-For tasks that import `sessionmaker` at the module level:
-
-```python
-@patch("robosystems.tasks.infrastructure.auth_cleanup.cleanup_expired_api_keys")
-@patch("robosystems.tasks.infrastructure.auth_cleanup.sessionmaker")
-@patch("robosystems.tasks.infrastructure.auth_cleanup.engine")
-def test_successful_cleanup(self, mock_engine, mock_sessionmaker, mock_cleanup_func):
-    mock_session = MagicMock()
-    mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_session
-    mock_sessionmaker.return_value.return_value.__exit__.return_value = False
-
-    mock_cleanup_result = {
-        "expired_user_keys_deactivated": 3,
-    }
-    mock_cleanup_func.return_value = mock_cleanup_result
-
-    result = cleanup_expired_api_keys_task()  # type: ignore[call-arg]
-
-    assert result["expired_user_keys_deactivated"] == 3
-    mock_sessionmaker.assert_called_once_with(bind=mock_engine)
-    mock_cleanup_func.assert_called_once_with(mock_session)
-```
-
-### Pattern 2: Tasks with Internal Session Imports
-
-Some tasks import `session` inside the function instead of at module level. For these tasks, patch the session at the database module level:
-
-```python
-# Task code imports session inside function:
-#   from ...database import session as SessionLocal
-#   db_session = SessionLocal()
-
-# Patch at the database module level, not task module:
-@patch("robosystems.database.session")
-def test_task_with_internal_import(mock_session):
-    mock_db = MagicMock()
-    mock_session.return_value = mock_db
-
-    result = your_task()  # type: ignore[call-arg]
-
-    mock_db.commit.assert_called_once()
-    mock_db.close.assert_called_once()
-```
-
-**Why?** The `from ... import` statement inside the function looks up the name in the original module, so you must patch it there.
-
 ### Common Testing Scenarios
 
 #### Testing Error Handling
+
 ```python
 def test_error_handling(self, mock_engine, mock_sessionmaker, mock_func):
     mock_session = MagicMock()
@@ -511,6 +404,7 @@ def test_error_handling(self, mock_engine, mock_sessionmaker, mock_func):
 ```
 
 #### Testing Database Connection Failures
+
 ```python
 def test_database_connection_failure(self, mock_engine, mock_sessionmaker, mock_func):
     mock_session = MagicMock()
@@ -525,6 +419,7 @@ def test_database_connection_failure(self, mock_engine, mock_sessionmaker, mock_
 ```
 
 #### Testing Logging
+
 ```python
 def test_logging_on_success(self, mock_engine, mock_sessionmaker, mock_func):
     mock_session = MagicMock()
@@ -541,6 +436,7 @@ def test_logging_on_success(self, mock_engine, mock_sessionmaker, mock_func):
 ```
 
 #### Testing Retry Behavior
+
 ```python
 def test_retry_behavior(self, mock_engine, mock_sessionmaker, mock_func):
     mock_session = MagicMock()
@@ -593,28 +489,6 @@ mock_sessionmaker.return_value.return_value.__enter__.return_value = mock_sessio
 mock_sessionmaker.return_value.return_value.__exit__.return_value = False
 ```
 
-### Type Checking with Celery Tasks
-
-When testing Celery tasks, you may encounter type checking errors from basedpyright. Use type ignore comments to suppress false positives:
-
-```python
-# For direct task calls (missing 'self' parameter)
-result = your_task()  # type: ignore[call-arg]
-
-# For Celery's .apply() method
-your_task.apply(kwargs={}).get()  # type: ignore[attr-defined]
-```
-
-### Celery Testing Best Practices
-
-1. **Test one thing at a time**: Each test should verify one specific behavior
-2. **Use descriptive test names**: Name tests after what they verify, not what they do
-3. **Mock at the right level**: Mock external dependencies (DB, APIs), not internal logic
-4. **Verify the important things**: Focus on return values, state changes, and critical calls
-5. **Don't over-mock**: Only mock what you need to isolate the task logic
-6. **Test error paths**: Don't just test the happy path
-7. **Use fixtures for common setup**: Put repeated setup in conftest.py
-
 ## Coverage and Quality
 
 ### Running with Coverage
@@ -649,11 +523,13 @@ just typecheck      # Pyright type checking
 ## Continuous Integration
 
 Tests run automatically in GitHub Actions on:
+
 - Every pull request
 - Every push to `main` or `staging`
 - Manual workflow dispatch
 
 CI runs:
+
 1. Linting and formatting checks
 2. Type checking
 3. Unit tests (fast)
@@ -667,6 +543,7 @@ E2E tests run separately as they require the full Docker stack.
 ### Common Issues
 
 #### Import Errors
+
 ```bash
 # Ensure you're using uv run
 uv run pytest  # ✓ Correct
@@ -674,6 +551,7 @@ pytest         # ✗ Wrong - may use system Python
 ```
 
 #### Database Connection Errors
+
 ```bash
 # Check PostgreSQL is running
 docker ps | grep postgres
@@ -683,6 +561,7 @@ psql -h localhost -U postgres -l | grep robosystems_test
 ```
 
 #### Fixture Not Found
+
 ```python
 # Check fixture scope and location
 # Fixtures must be in conftest.py or imported
@@ -750,6 +629,6 @@ When adding new tests:
 
 - [pytest documentation](https://docs.pytest.org/)
 - [pytest-asyncio documentation](https://pytest-asyncio.readthedocs.io/)
-- [Celery testing guide](https://docs.celeryq.dev/en/stable/userguide/testing.html)
+- [Dagster testing guide](https://docs.dagster.io/concepts/testing)
 - [FastAPI testing guide](https://fastapi.tiangolo.com/tutorial/testing/)
 - [Coverage.py documentation](https://coverage.readthedocs.io/)

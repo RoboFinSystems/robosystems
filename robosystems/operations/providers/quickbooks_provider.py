@@ -1,14 +1,14 @@
 """QuickBooks provider-specific operations."""
 
-from typing import Dict, Any, Optional
-from sqlalchemy.orm import Session
-import httpx
+from typing import Any
 
-from ...logger import logger
-from ...operations.connection_service import ConnectionService
-from ...celery import QUEUE_DEFAULT
-from ...models.api.graphs.connections import QuickBooksConnectionConfig
+import httpx
+from sqlalchemy.orm import Session
+
 from ...config import env
+from ...logger import logger
+from ...models.api.graphs.connections import QuickBooksConnectionConfig
+from ...operations.connection_service import ConnectionService
 from .oauth_handler import OAuthHandler
 
 
@@ -48,19 +48,19 @@ class QuickBooksOAuthProvider:
   def scopes(self) -> list[str]:
     return ["com.intuit.quickbooks.accounting"]
 
-  def get_additional_auth_params(self) -> Dict[str, str]:
+  def get_additional_auth_params(self) -> dict[str, str]:
     """QuickBooks-specific auth parameters."""
     return {
       "access_type": "offline",  # To get refresh token
     }
 
-  def extract_provider_data(self, callback_data: Dict[str, Any]) -> Dict[str, Any]:
+  def extract_provider_data(self, callback_data: dict[str, Any]) -> dict[str, Any]:
     """Extract QuickBooks-specific data from callback."""
     return {
       "realm_id": callback_data.get("realmId", ""),
     }
 
-  async def get_entity_info(self, access_token: str, realm_id: str) -> Dict[str, Any]:
+  async def get_entity_info(self, access_token: str, realm_id: str) -> dict[str, Any]:
     """Get QuickBooks entity information."""
     url = f"{self._base_url}/v3/entity/{realm_id}/entityinfo/{realm_id}"
 
@@ -122,24 +122,28 @@ async def create_quickbooks_connection(
 
 
 async def sync_quickbooks_connection(
-  connection: Dict[str, Any], sync_options: Optional[Dict[str, Any]], graph_id: str
+  connection: dict[str, Any], sync_options: dict[str, Any] | None, graph_id: str
 ) -> str:
-  """Trigger QuickBooks sync."""
-  # Delayed import to avoid circular dependency
-  from ...tasks.data_sync.qb import sync_task as qb_sync_task
+  """Trigger QuickBooks sync.
 
+  TODO: Refactor to use Dagster pipeline.
+  The QuickBooks sync has been migrated to Dagster assets:
+  - See: robosystems/dagster/assets/quickbooks.py
+  - Assets: qb_accounts, qb_transactions, qb_graph_data
+  """
   entity_id = connection["entity_id"]
 
-  # Queue QuickBooks sync task
-  task_result = qb_sync_task.apply_async(  # type: ignore[attr-defined]
-    args=[entity_id, graph_id], queue=QUEUE_DEFAULT, priority=10
+  # TODO: Trigger Dagster pipeline
+  # For now, return a placeholder - provider refactoring needed
+  logger.warning(
+    f"QuickBooks sync requested for entity {entity_id}, graph {graph_id} - "
+    "provider needs refactoring to use Dagster pipeline"
   )
-
-  return task_result.id
+  return f"dagster-pending-{entity_id}"
 
 
 async def cleanup_quickbooks_connection(
-  connection: Dict[str, Any], graph_id: str
+  connection: dict[str, Any], graph_id: str
 ) -> None:
   """Clean up QuickBooks connection."""
   # QuickBooks cleanup would involve revoking OAuth tokens

@@ -2,18 +2,18 @@
 
 import asyncio
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock, patch
 
 import pytest
 
+from robosystems.middleware.graph.admission_control import AdmissionDecision
 from robosystems.middleware.graph.query_queue import (
   QueryQueueManager,
-  QueuedQuery,
   QueryStatus,
+  QueuedQuery,
   get_query_queue,
 )
-from robosystems.middleware.graph.admission_control import AdmissionDecision
 
 
 class TestQueryStatus:
@@ -62,26 +62,26 @@ class TestQueuedQuery:
   def test_wait_time_seconds_not_started(self, sample_query):
     """Test wait time calculation when query hasn't started."""
     # Mock the current time
-    sample_query.created_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+    sample_query.created_at = datetime.now(UTC) - timedelta(seconds=5)
     wait_time = sample_query.wait_time_seconds
     assert 4.9 < wait_time < 5.1  # Allow for small timing variations
 
   def test_wait_time_seconds_started(self, sample_query):
     """Test wait time calculation when query has started."""
-    sample_query.created_at = datetime.now(timezone.utc) - timedelta(seconds=10)
-    sample_query.started_at = datetime.now(timezone.utc) - timedelta(seconds=3)
+    sample_query.created_at = datetime.now(UTC) - timedelta(seconds=10)
+    sample_query.started_at = datetime.now(UTC) - timedelta(seconds=3)
     wait_time = sample_query.wait_time_seconds
     assert 6.9 < wait_time < 7.1  # 10 - 3 seconds
 
   def test_execution_time_seconds_not_completed(self, sample_query):
     """Test execution time when query hasn't completed."""
-    sample_query.started_at = datetime.now(timezone.utc)
+    sample_query.started_at = datetime.now(UTC)
     assert sample_query.execution_time_seconds is None
 
   def test_execution_time_seconds_completed(self, sample_query):
     """Test execution time calculation when query has completed."""
-    sample_query.started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
-    sample_query.completed_at = datetime.now(timezone.utc)
+    sample_query.started_at = datetime.now(UTC) - timedelta(seconds=5)
+    sample_query.completed_at = datetime.now(UTC)
     exec_time = sample_query.execution_time_seconds
     assert 4.9 < exec_time < 5.1  # Allow for small timing variations
 
@@ -341,7 +341,7 @@ class TestQueryQueueManager:
       priority=5,
     )
     query.status = QueryStatus.RUNNING
-    query.started_at = datetime.now(timezone.utc)
+    query.started_at = datetime.now(UTC)
 
     queue_manager._queries["test_query"] = query
     queue_manager._running_queries["test_query"] = Mock()  # Mock task
@@ -366,8 +366,8 @@ class TestQueryQueueManager:
       priority=5,
     )
     query.status = QueryStatus.COMPLETED
-    query.started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
-    query.completed_at = datetime.now(timezone.utc)
+    query.started_at = datetime.now(UTC) - timedelta(seconds=5)
+    query.completed_at = datetime.now(UTC)
     query.result = {"nodes": []}
 
     queue_manager._completed_queries["test_query"] = query
@@ -399,8 +399,8 @@ class TestQueryQueueManager:
       priority=5,
     )
     query.status = QueryStatus.COMPLETED
-    query.started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
-    query.completed_at = datetime.now(timezone.utc)
+    query.started_at = datetime.now(UTC) - timedelta(seconds=5)
+    query.completed_at = datetime.now(UTC)
     query.result = {"nodes": [1, 2, 3]}
 
     queue_manager._completed_queries["test_query"] = query
@@ -548,7 +548,7 @@ class TestQueryQueueManager:
       credits_reserved=5.0,
       priority=5,
     )
-    query.started_at = datetime.now(timezone.utc)
+    query.started_at = datetime.now(UTC)
 
     await queue_manager._execute_query(query)
 
@@ -577,7 +577,7 @@ class TestQueryQueueManager:
       credits_reserved=5.0,
       priority=5,
     )
-    query.started_at = datetime.now(timezone.utc)
+    query.started_at = datetime.now(UTC)
 
     await queue_manager._execute_query(query)
 
@@ -604,7 +604,7 @@ class TestQueryQueueManager:
       credits_reserved=5.0,
       priority=5,
     )
-    query.started_at = datetime.now(timezone.utc)
+    query.started_at = datetime.now(UTC)
 
     await queue_manager._execute_query(query)
 
@@ -623,7 +623,7 @@ class TestQueryQueueManager:
       credits_reserved=5.0,
       priority=5,
     )
-    query.started_at = datetime.now(timezone.utc)
+    query.started_at = datetime.now(UTC)
 
     await queue_manager._execute_query(query)
 

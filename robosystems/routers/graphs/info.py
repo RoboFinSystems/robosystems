@@ -5,25 +5,26 @@ This module provides REST API endpoints for database information and statistics.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from robosystems.database import get_async_db_session
+from robosystems.graph_api.client import GraphClient
+from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
-from robosystems.models.iam import User
+from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
   subscription_aware_rate_limit_dependency,
 )
-from robosystems.models.api.graphs.health import DatabaseInfoResponse
-from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
-from robosystems.graph_api.client import GraphClient
-from robosystems.logger import logger
 from robosystems.middleware.robustness import (
   CircuitBreakerManager,
   TimeoutCoordinator,
 )
-from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.models.api.graphs.health import DatabaseInfoResponse
+from robosystems.models.iam import User
 
 # Create router
 router = APIRouter(tags=["Graph Info"])
@@ -163,19 +164,15 @@ async def get_database_info(
         relationship_count=info_result.get("relationship_count", 0),
         node_labels=info_result.get("node_labels", []),
         relationship_types=info_result.get("relationship_types", []),
-        created_at=info_result.get(
-          "created_at", datetime.now(timezone.utc).isoformat()
-        ),
-        last_modified=info_result.get(
-          "last_modified", datetime.now(timezone.utc).isoformat()
-        ),
+        created_at=info_result.get("created_at", datetime.now(UTC).isoformat()),
+        last_modified=info_result.get("last_modified", datetime.now(UTC).isoformat()),
         schema_version=info_result.get("schema_version"),
         read_only=info_result.get("read_only", False),
         backup_count=info_result.get("backup_count", 0),
         last_backup_date=info_result.get("last_backup_date"),
       )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
       circuit_breaker.record_failure(graph_id, "database_info")
       raise HTTPException(
         status_code=status.HTTP_408_REQUEST_TIMEOUT,
@@ -199,7 +196,7 @@ async def get_database_info(
     raise
   except Exception as e:
     circuit_breaker.record_failure(graph_id, "database_info")
-    logger.error(f"Unexpected error getting info for graph {graph_id}: {str(e)}")
+    logger.error(f"Unexpected error getting info for graph {graph_id}: {e!s}")
     raise HTTPException(
       status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
       detail="An unexpected error occurred while retrieving database information",

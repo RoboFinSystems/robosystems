@@ -1,6 +1,6 @@
 """Comprehensive tests for the GraphBackup model."""
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 from robosystems.models.iam import GraphBackup, User
@@ -224,7 +224,7 @@ class TestGraphBackupModel:
         checksum=f"checksum_{i}",
       )
       # Manually adjust completed_at for testing
-      backup.completed_at = datetime.now(timezone.utc) - timedelta(days=3 - i)
+      backup.completed_at = datetime.now(UTC) - timedelta(days=3 - i)
       db_session.commit()
 
     # Create a failed backup (should not be returned)
@@ -290,8 +290,8 @@ class TestGraphBackupModel:
   def test_get_expired_backups(self, db_session):
     """Test getting all expired backups."""
     # Create backups with different expiry times
-    future_expiry = datetime.now(timezone.utc) + timedelta(days=1)
-    past_expiry = datetime.now(timezone.utc) - timedelta(days=1)
+    future_expiry = datetime.now(UTC) + timedelta(days=1)
+    past_expiry = datetime.now(UTC) - timedelta(days=1)
 
     # Not expired (future)
     GraphBackup.create(
@@ -547,7 +547,7 @@ class TestGraphBackupModel:
       session=db_session,
     )
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    expires_at = datetime.now(UTC) + timedelta(days=30)
 
     backup = GraphBackup.create(
       graph_id="kg_dict",
@@ -634,11 +634,11 @@ class TestGraphBackupModel:
     assert backup.is_expired is False
 
     # Future expiry
-    backup.expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    backup.expires_at = datetime.now(UTC) + timedelta(days=1)
     assert backup.is_expired is False
 
     # Past expiry
-    backup.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    backup.expires_at = datetime.now(UTC) - timedelta(days=1)
     assert backup.is_expired is True
 
   def test_storage_efficiency_property(self):
