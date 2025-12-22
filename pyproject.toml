@@ -6,7 +6,7 @@ requires-python = ">=3.13"
 authors = [
     {name = "RFS LLC"},
 ]
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 keywords = ["robosystems", "financial", "graph", "knowledge graph", "ladybugdb"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -14,7 +14,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Financial and Insurance Industry",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
