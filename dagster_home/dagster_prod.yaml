@@ -52,8 +52,9 @@ schedule_storage:
       db_name:
         env: DAGSTER_POSTGRES_DB
 
-# Run launcher - ECS for production
-# Runs are launched on EC2 instances with large EBS volumes for DuckDB processing
+# Run launcher - ECS Fargate for production
+# Runs are launched on Fargate tasks. Heavy compute (DuckDB + LadybugDB)
+# is delegated to the shared master via Graph API.
 # Note: Network configuration (subnets, security groups) is inherited from the
 # ECS cluster configuration. The EcsRunLauncher will use the same network
 # settings as the daemon/webserver services.
@@ -66,15 +67,15 @@ run_launcher:
       env: DAGSTER_ECS_RUN_TASK_DEFINITION
     # Container name in the task definition
     container_name: dagster-run
-    # Run on EC2 capacity provider for large storage
+    # Run on Fargate capacity provider (matches CloudFormation: Fargate-only)
     run_task_kwargs:
       cluster:
         env: DAGSTER_ECS_CLUSTER
-      launchType: EC2
+      launchType: FARGATE
     # Resource overrides for different job types (optional)
     run_resources:
       cpu: "1024"
-      memory: "8192"
+      memory: "4096"
 
 # Telemetry - disable for privacy
 telemetry:

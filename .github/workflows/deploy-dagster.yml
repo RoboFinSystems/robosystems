@@ -81,28 +81,6 @@ on:
         type: string
         default: "3"
 
-      # EC2 Run Worker Configuration
-      run_worker_instance_type:
-        description: "EC2 instance type for run workers"
-        required: false
-        type: string
-        default: "r7g.large"
-      run_worker_min_instances:
-        description: "Minimum EC2 instances for run workers (0 = scale to zero)"
-        required: false
-        type: string
-        default: "0"
-      run_worker_max_instances:
-        description: "Maximum EC2 instances for run workers"
-        required: false
-        type: string
-        default: "5"
-      run_worker_ebs_volume_size:
-        description: "EBS volume size in GiB for run worker data"
-        required: false
-        type: string
-        default: "500"
-
       # Cache Configuration
       valkey_url:
         description: "Valkey ElastiCache endpoint URL"
@@ -145,6 +123,9 @@ jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -159,25 +140,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ inputs.aws_region }}
-
-      - name: Lookup ECS-Optimized AMI
-        id: ami
-        run: |
-          echo "Looking up latest ECS-optimized Amazon Linux 2023 ARM64 AMI..."
-
-          # Use SSM Parameter Store to get the recommended ECS-optimized AMI
-          AMI_ID=$(aws ssm get-parameter \
-            --name "/aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended/image_id" \
-            --query "Parameter.Value" \
-            --output text)
-
-          if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
-            echo "ERROR: Could not retrieve ECS-optimized AMI ID from SSM Parameter Store"
-            exit 1
-          fi
-
-          echo "Latest ECS-optimized AMI ID: $AMI_ID"
-          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
 
       - name: Deploy Dagster CloudFormation Stack
         id: deploy-stack
@@ -204,11 +166,6 @@ jobs:
                 ParameterKey=WebserverDesiredCount,ParameterValue=${{ inputs.webserver_desired_count }} \
                 ParameterKey=WebserverMinCapacity,ParameterValue=${{ inputs.webserver_min_capacity }} \
                 ParameterKey=WebserverMaxCapacity,ParameterValue=${{ inputs.webserver_max_capacity }} \
-                ParameterKey=RunWorkerAmiId,ParameterValue=${{ steps.ami.outputs.ami_id }} \
-                ParameterKey=RunWorkerInstanceType,ParameterValue=${{ inputs.run_worker_instance_type }} \
-                ParameterKey=RunWorkerMinInstances,ParameterValue=${{ inputs.run_worker_min_instances }} \
-                ParameterKey=RunWorkerMaxInstances,ParameterValue=${{ inputs.run_worker_max_instances }} \
-                ParameterKey=RunWorkerEbsVolumeSize,ParameterValue=${{ inputs.run_worker_ebs_volume_size }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
