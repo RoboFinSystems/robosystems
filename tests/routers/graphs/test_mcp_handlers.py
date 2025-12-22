@@ -32,12 +32,14 @@ async def mcp_handler(mock_repository):
   mock_user.email = "test@example.com"
 
   # Create a completed future to mock the init task
-  loop = asyncio.get_event_loop()
+  loop = asyncio.get_running_loop()
   completed_task = loop.create_future()
   completed_task.set_result(None)
 
-  # Patch the asyncio.create_task to return our completed task
-  with patch("asyncio.create_task", return_value=completed_task):
+  # Patch _init_async to return immediately, avoiding the unawaited coroutine warning
+  with patch.object(
+    MCPHandler, "_init_async", new_callable=AsyncMock, return_value=None
+  ):
     handler = MCPHandler(mock_repository, graph_id="test_graph", user=mock_user)
     # Mock the necessary attributes to avoid initialization issues
     handler.lbug_client = Mock()
@@ -48,7 +50,9 @@ async def mcp_handler(mock_repository):
     mock_mcp_tools.call_tool = AsyncMock(return_value={"results": []})
     handler.mcp_tools = mock_mcp_tools
 
-    handler._init_task = completed_task  # Ensure init_task is set to completed
+    # Await the init task to ensure clean state
+    if handler._init_task:
+      await handler._init_task
     return handler
 
 
@@ -267,12 +271,27 @@ class TestMCPAccessValidation:
     """Test access validation for shared repositories."""
     import uuid
 
+    from robosystems.models.iam.graph import Graph
     from robosystems.models.iam.user_repository import (
       RepositoryAccessLevel,
       RepositoryPlan,
       RepositoryType,
       UserRepository,
     )
+
+    # First create the SEC graph (required by foreign key constraint)
+    # Check if it already exists from another test
+    existing_graph = db_session.query(Graph).filter_by(graph_id="sec").first()
+    if not existing_graph:
+      sec_graph = Graph(
+        graph_id="sec",
+        graph_name="SEC Repository",
+        graph_type="repository",
+        is_repository=True,
+        repository_type="SEC",
+      )
+      db_session.add(sec_graph)
+      db_session.flush()
 
     # Grant SEC repository access
     access_record = UserRepository(

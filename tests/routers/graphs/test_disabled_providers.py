@@ -1,6 +1,6 @@
 """Test error handling for disabled providers."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import status
@@ -183,9 +183,10 @@ class TestDisabledProviderHandling:
 
   def test_delete_connection_disabled_provider(self, client: TestClient, auth_headers):
     """Test deleting a connection for disabled provider returns 403."""
-    # Mock the connection service
+    # Mock the connection service (async methods need AsyncMock)
     with patch(
-      "robosystems.operations.connection_service.ConnectionService.get_connection"
+      "robosystems.operations.connection_service.ConnectionService.get_connection",
+      new_callable=AsyncMock,
     ) as mock_get:
       mock_get.return_value = {
         "connection_id": "conn_123",
@@ -197,7 +198,8 @@ class TestDisabledProviderHandling:
       }
 
       with patch(
-        "robosystems.operations.connection_service.ConnectionService.delete_connection"
+        "robosystems.operations.connection_service.ConnectionService.delete_connection",
+        new_callable=AsyncMock,
       ) as mock_delete:
         mock_delete.return_value = True
 

@@ -489,7 +489,7 @@ async def delete_connection(
       )
 
     # Delete the connection
-    success = ConnectionService.delete_connection(
+    success = await ConnectionService.delete_connection(
       connection_id, current_user.id, graph_id
     )
 
