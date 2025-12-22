@@ -192,7 +192,9 @@ class XBRLDuckDBGraphProcessor:
         "duration_seconds": time.time() - start_time,
       }
 
-  async def _discover_processed_files(self, year: int | None = None) -> dict[str, list[str]]:
+  async def _discover_processed_files(
+    self, year: int | None = None
+  ) -> dict[str, list[str]]:
     """
     Discover processed Parquet files from S3.
 

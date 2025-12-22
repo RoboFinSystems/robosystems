@@ -143,9 +143,7 @@ async def query_tables(
               chunk_index += 1
 
             # Send completion event
-            execution_time_ms = (
-              datetime.now(UTC) - start_time
-            ).total_seconds() * 1000
+            execution_time_ms = (datetime.now(UTC) - start_time).total_seconds() * 1000
             yield {
               "event": "completed",
               "data": json.dumps(

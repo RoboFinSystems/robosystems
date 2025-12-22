@@ -35,9 +35,7 @@ class SelectionCriteria(BaseModel):
   required_capabilities: list[str] = Field(
     default_factory=list, description="Required agent capabilities"
   )
-  preferred_mode: AgentMode | None = Field(
-    None, description="Preferred execution mode"
-  )
+  preferred_mode: AgentMode | None = Field(None, description="Preferred execution mode")
   max_response_time: float = Field(60.0, description="Maximum response time in seconds")
   excluded_agents: list[str] = Field(
     default_factory=list, description="Agents to exclude from selection"
@@ -180,19 +178,13 @@ class AgentResponse(BaseModel):
   metadata: dict[str, Any] | None = Field(
     None, description="Response metadata including routing info"
   )
-  tokens_used: dict[str, int] | None = Field(
-    None, description="Token usage statistics"
-  )
+  tokens_used: dict[str, int] | None = Field(None, description="Token usage statistics")
   confidence_score: float | None = Field(
     None, description="Confidence score of the response (0.0-1.0 scale)"
   )
-  operation_id: str | None = Field(
-    None, description="Operation ID for SSE monitoring"
-  )
+  operation_id: str | None = Field(None, description="Operation ID for SSE monitoring")
   is_partial: bool = Field(False, description="Whether this is a partial response")
-  error_details: dict[str, Any] | None = Field(
-    None, description="Error details if any"
-  )
+  error_details: dict[str, Any] | None = Field(None, description="Error details if any")
   execution_time: float | None = Field(None, description="Execution time in seconds")
   timestamp: datetime = Field(
     default_factory=datetime.utcnow, description="Response timestamp"

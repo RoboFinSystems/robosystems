@@ -41,9 +41,7 @@ class ConnectionCredentials(Model):
   # Metadata
   expires_at = Column(DateTime, nullable=True)  # When credentials expire
   is_active = Column(Boolean, default=True, nullable=False)
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

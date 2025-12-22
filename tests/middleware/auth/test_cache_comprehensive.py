@@ -201,9 +201,7 @@ class TestEncryptionDecryption:
   def test_decrypt_expired_data(self, cache):
     """Test decryption with expired data."""
     # Create data that's too old
-    old_time = datetime.now(UTC) - timedelta(
-      seconds=cache.MAX_CACHE_AGE_SECONDS + 100
-    )
+    old_time = datetime.now(UTC) - timedelta(seconds=cache.MAX_CACHE_AGE_SECONDS + 100)
     old_data = {
       "data": {"test": "value"},
       "version": cache.CACHE_VERSION,
@@ -226,9 +224,10 @@ class TestEncryptionDecryption:
 
   def test_encryption_failure(self, cache):
     """Test encryption failure handling."""
-    with patch.object(
-      cache.cipher, "encrypt", side_effect=Exception("Encryption failed")
-    ), patch("robosystems.middleware.auth.cache.SecurityAuditLogger") as mock_audit:
+    with (
+      patch.object(cache.cipher, "encrypt", side_effect=Exception("Encryption failed")),
+      patch("robosystems.middleware.auth.cache.SecurityAuditLogger") as mock_audit,
+    ):
       with pytest.raises(Exception, match="Encryption failed"):
         cache._encrypt_cache_data({"test": "data"})
 
@@ -616,9 +615,7 @@ class TestAPIKeyCaching:
     api_key_hash = "test_hash_123"
     user_data = {"id": "user_123", "email": "test@example.com", "is_active": True}
     # Create expired cache data
-    old_time = datetime.now(UTC) - timedelta(
-      seconds=cache.MAX_CACHE_AGE_SECONDS + 100
-    )
+    old_time = datetime.now(UTC) - timedelta(seconds=cache.MAX_CACHE_AGE_SECONDS + 100)
     cache_data = {
       "user_data": user_data,
       "is_active": True,

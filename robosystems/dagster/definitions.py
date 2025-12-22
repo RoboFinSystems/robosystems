@@ -38,6 +38,8 @@ from robosystems.dagster.assets import (
   sec_graph_materialized,
   sec_process_filing,
   sec_raw_filings,
+  # Direct staging observable source
+  staged_files_source,
 )
 
 # Import jobs
@@ -200,6 +202,8 @@ all_sensors = [
 # ============================================================================
 
 all_assets = [
+  # Direct staging (observable source for API direct staging)
+  staged_files_source,
   # SEC pipeline - download phase
   sec_companies_list,
   sec_raw_filings,

@@ -200,8 +200,7 @@ def create_sso_token(user_id: str) -> tuple[str, str]:
     "user_id": user_id,
     "sso": True,
     "token_id": token_id,
-    "exp": datetime.now(UTC)
-    + timedelta(seconds=300),  # 5 minutes for better UX
+    "exp": datetime.now(UTC) + timedelta(seconds=300),  # 5 minutes for better UX
     "iat": datetime.now(UTC),
     "iss": "api.robosystems.ai",  # Issuer claim
     "aud": ["robosystems.ai", "roboledger.ai", "roboinvestor.ai"],  # Audience claim

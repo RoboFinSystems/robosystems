@@ -67,6 +67,7 @@ from robosystems.config.constants import (
   FALLBACK_BYTES_PER_ROW_PARQUET,
   MAX_FILE_SIZE_MB,
   PRESIGNED_URL_EXPIRY_SECONDS,
+  SMALL_FILE_STAGING_THRESHOLD_MB,
 )
 from robosystems.database import get_db_session
 from robosystems.logger import api_logger, logger
@@ -703,62 +704,152 @@ async def update_file(
       )
 
       if new_file_count > 0:
-        from robosystems.middleware.sse import (
-          build_graph_job_config,
-          run_and_monitor_dagster_job,
-        )
-        from robosystems.middleware.sse.event_storage import get_event_storage
+        # Size-based routing: small files use direct staging, large files use Dagster
+        small_file_threshold_bytes = SMALL_FILE_STAGING_THRESHOLD_MB * 1024 * 1024
 
-        operation_id = str(uuid.uuid4())
+        if actual_file_size < small_file_threshold_bytes:
+          # Fast path: Direct staging for small files
+          from robosystems.operations.lbug.direct_staging import stage_file_directly
 
-        try:
-          # Register operation with SSE
-          event_storage = get_event_storage()
-          await event_storage.create_operation(
-            operation_type="duckdb_staging",
-            user_id=str(current_user.id),
-            graph_id=graph_id,
-            operation_id=operation_id,
+          logger.info(
+            f"Small file detected ({actual_file_size / (1024 * 1024):.2f} MB < {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
+            f"Using direct staging for file {file_id}"
           )
 
-          # Build Dagster job config
-          run_config = build_graph_job_config(
-            "stage_file_job",
-            file_id=file_id,
-            graph_id=graph_id,
-            table_id=str(table.id),
-            ingest_to_graph=request.ingest_to_graph,
-          )
+          try:
+            staging_result = await stage_file_directly(
+              db=db,
+              file_id=file_id,
+              graph_id=graph_id,
+              table_id=str(table.id),
+              s3_key=graph_file.s3_key,
+              file_size_bytes=actual_file_size,
+              row_count=actual_row_count,
+            )
 
-          # Run Dagster job with SSE monitoring in background
-          background_tasks.add_task(
+            if staging_result.get("status") == "success":
+              graph_file.duckdb_status = "staged"
+              db.commit()
+              db.refresh(graph_file)
+
+              logger.info(
+                f"Direct staging completed for file {file_id} in {staging_result.get('duration_ms', 0):.2f}ms"
+              )
+
+              # If ingest_to_graph requested, trigger Dagster job for that (still async)
+              if request.ingest_to_graph:
+                from robosystems.middleware.sse import (
+                  build_graph_job_config,
+                  run_and_monitor_dagster_job,
+                )
+                from robosystems.middleware.sse.event_storage import get_event_storage
+
+                operation_id = str(uuid.uuid4())
+                event_storage = get_event_storage()
+                await event_storage.create_operation(
+                  operation_type="graph_ingestion",
+                  user_id=str(current_user.id),
+                  graph_id=graph_id,
+                  operation_id=operation_id,
+                )
+
+                run_config = build_graph_job_config(
+                  "materialize_file_job",
+                  file_id=file_id,
+                  graph_id=graph_id,
+                  table_name=table.table_name,
+                )
+
+                background_tasks.add_task(
+                  run_and_monitor_dagster_job,
+                  job_name="materialize_file_job",
+                  operation_id=operation_id,
+                  run_config=run_config,
+                )
+
+                graph_file.operation_id = operation_id
+                db.commit()
+                db.refresh(graph_file)
+
+                logger.info(
+                  f"Direct staging done, graph ingestion job started for file {file_id}. "
+                  f"Monitor at /v1/operations/{operation_id}/stream"
+                )
+            else:
+              logger.warning(
+                f"Direct staging failed for file {file_id}: {staging_result.get('message')}. "
+                f"File will be staged on next upload or query attempt."
+              )
+
+          except Exception as e:
+            logger.warning(
+              f"Direct staging error for file {file_id}: {e}. "
+              f"File will be staged on next upload or query attempt."
+            )
+
+        else:
+          # Standard path: Dagster job for large files
+          from robosystems.middleware.sse import (
+            build_graph_job_config,
             run_and_monitor_dagster_job,
-            job_name="stage_file_job",
-            operation_id=operation_id,
-            run_config=run_config,
+          )
+          from robosystems.middleware.sse.event_storage import get_event_storage
+
+          operation_id = str(uuid.uuid4())
+
+          logger.info(
+            f"Large file detected ({actual_file_size / (1024 * 1024):.2f} MB >= {SMALL_FILE_STAGING_THRESHOLD_MB} MB). "
+            f"Using Dagster job for file {file_id}"
           )
 
-          graph_file.operation_id = operation_id
-
-          db.commit()
-          db.refresh(graph_file)
-
-          if request.ingest_to_graph:
-            logger.info(
-              f"v2 Incremental Ingestion: Dagster staging job started for file {file_id} "
-              f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
-            )
-          else:
-            logger.info(
-              f"v2 Incremental Ingestion: Dagster staging job started for file {file_id}. "
-              f"Monitor at /v1/operations/{operation_id}/stream"
+          try:
+            # Register operation with SSE
+            event_storage = get_event_storage()
+            await event_storage.create_operation(
+              operation_type="duckdb_staging",
+              user_id=str(current_user.id),
+              graph_id=graph_id,
+              operation_id=operation_id,
             )
 
-        except Exception as e:
-          logger.warning(
-            f"Failed to start Dagster staging job for file {file_id}: {e}. "
-            f"File will be staged on next upload or query attempt."
-          )
+            # Build Dagster job config
+            run_config = build_graph_job_config(
+              "stage_file_job",
+              file_id=file_id,
+              graph_id=graph_id,
+              table_id=str(table.id),
+              ingest_to_graph=request.ingest_to_graph,
+            )
+
+            # Run Dagster job with SSE monitoring in background
+            background_tasks.add_task(
+              run_and_monitor_dagster_job,
+              job_name="stage_file_job",
+              operation_id=operation_id,
+              run_config=run_config,
+            )
+
+            graph_file.operation_id = operation_id
+
+            db.commit()
+            db.refresh(graph_file)
+
+            if request.ingest_to_graph:
+              logger.info(
+                f"v2 Incremental Ingestion: Dagster staging job started for file {file_id} "
+                f"with auto-ingest to graph enabled. Monitor at /v1/operations/{operation_id}/stream"
+              )
+            else:
+              logger.info(
+                f"v2 Incremental Ingestion: Dagster staging job started for file {file_id}. "
+                f"Monitor at /v1/operations/{operation_id}/stream"
+              )
+
+          except Exception as e:
+            logger.warning(
+              f"Failed to start Dagster staging job for file {file_id}: {e}. "
+              f"File will be staged on next upload or query attempt."
+            )
 
     logger.info(
       f"File {file_id} marked as uploaded: {graph_file.file_size_bytes or 0:,} bytes, {graph_file.row_count or 0:,} rows"
@@ -773,9 +864,28 @@ async def update_file(
       "message": "File validated and ready for ingestion",
     }
 
-    if graph_file.operation_id:
+    # Check if file was staged directly (small file fast path)
+    if graph_file.duckdb_status == "staged":
+      response["duckdb_status"] = "staged"
+      response["staged"] = True
+
+      if graph_file.operation_id:
+        # Operation_id means graph ingestion is in progress
+        response["operation_id"] = graph_file.operation_id
+        response["monitor_url"] = f"/v1/operations/{graph_file.operation_id}/stream"
+        response["message"] = (
+          f"File staged to DuckDB. Graph ingestion in progress. "
+          f"Monitor at {response['monitor_url']}"
+        )
+        response["ingest_to_graph"] = True
+      else:
+        response["message"] = "File validated and staged to DuckDB (fast path)"
+        response["ingest_to_graph"] = False
+    elif graph_file.operation_id:
+      # Large file: Dagster job handling staging (and possibly ingestion)
       response["operation_id"] = graph_file.operation_id
       response["monitor_url"] = f"/v1/operations/{graph_file.operation_id}/stream"
+      response["staged"] = False
 
       if request.ingest_to_graph:
         response["message"] = (

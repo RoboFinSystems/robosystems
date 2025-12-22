@@ -22,6 +22,7 @@ Architecture Notes:
 - Graph materialization rebuilds the entire graph from staged data
 """
 
+from datetime import UTC
 from typing import Any
 
 from dagster import (
@@ -37,6 +38,179 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.resources import S3Resource
+
+# In-memory cache for SEC submissions during a single run
+_sec_submissions_cache: dict[str, dict] = {}
+
+
+def _store_entity_submissions_snapshot(
+  s3_client, bucket: str, cik: str, submissions_data: dict
+) -> str | None:
+  """Store entity submissions snapshot to S3.
+
+  Submissions are stored at the CIK level (not year-partitioned) since they
+  contain cumulative data spanning all years.
+
+  Args:
+      s3_client: boto3 S3 client
+      bucket: S3 bucket name
+      cik: Company CIK
+      submissions_data: Complete submissions data from SEC API
+
+  Returns:
+      S3 key where data was stored, or None on failure
+  """
+  import json
+  from datetime import datetime
+
+  try:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    submissions_json = json.dumps(submissions_data, default=str)
+
+    # Store as latest (primary location for quick retrieval)
+    latest_s3_key = f"submissions/{cik}/latest.json"
+    s3_client.put_object(
+      Bucket=bucket,
+      Key=latest_s3_key,
+      Body=submissions_json.encode("utf-8"),
+      ContentType="application/json",
+    )
+
+    # Store versioned copy for history/audit
+    version_s3_key = f"submissions/{cik}/versions/v{timestamp}.json"
+    s3_client.put_object(
+      Bucket=bucket,
+      Key=version_s3_key,
+      Body=submissions_json.encode("utf-8"),
+      ContentType="application/json",
+    )
+
+    return latest_s3_key
+
+  except Exception as e:
+    # Don't fail the pipeline if snapshot storage fails
+    import logging
+
+    logging.getLogger(__name__).warning(
+      f"Failed to store submissions snapshot for {cik}: {e}"
+    )
+    return None
+
+
+def _load_entity_submissions_snapshot(s3_client, bucket: str, cik: str) -> dict | None:
+  """Load entity submissions snapshot from S3.
+
+  Args:
+      s3_client: boto3 S3 client
+      bucket: S3 bucket name
+      cik: Company CIK
+
+  Returns:
+      Submissions data dict, or None if not found
+  """
+  import json
+
+  try:
+    s3_key = f"submissions/{cik}/latest.json"
+    response = s3_client.get_object(Bucket=bucket, Key=s3_key)
+    return json.loads(response["Body"].read().decode("utf-8"))
+  except Exception:
+    return None
+
+
+def _get_sec_metadata(
+  cik: str, accession: str, s3_client=None, bucket: str | None = None
+) -> tuple[dict, dict]:
+  """Fetch SEC filer and report metadata for a given CIK and accession number.
+
+  Attempts to load from S3 snapshot first (stored during download phase),
+  falling back to SEC API only if no snapshot exists.
+
+  Args:
+      cik: Company CIK
+      accession: Accession number (with dashes)
+      s3_client: Optional boto3 S3 client for loading snapshots
+      bucket: Optional S3 bucket name for snapshots
+
+  Returns:
+      Tuple of (sec_filer dict, sec_report dict) with full metadata.
+  """
+  from robosystems.adapters.sec import SECClient
+
+  submissions = None
+
+  # Check in-memory cache first
+  if cik in _sec_submissions_cache:
+    submissions = _sec_submissions_cache[cik]
+
+  # Try loading from S3 snapshot
+  if submissions is None and s3_client is not None and bucket is not None:
+    submissions = _load_entity_submissions_snapshot(s3_client, bucket, cik)
+    if submissions:
+      _sec_submissions_cache[cik] = submissions
+
+  # Fallback to SEC API if no snapshot
+  if submissions is None:
+    import logging
+
+    logging.getLogger(__name__).warning(
+      f"No S3 snapshot for CIK {cik}, falling back to SEC API"
+    )
+    client = SECClient(cik=cik)
+    submissions = client.get_submissions()
+    _sec_submissions_cache[cik] = submissions
+
+  # Build sec_filer from company-level data
+  sec_filer = {
+    "cik": cik,
+    "name": submissions.get("name"),
+    "entity_name": submissions.get("name"),  # Alternative key used by processor
+    "ticker": submissions.get("tickers", [None])[0]
+    if submissions.get("tickers")
+    else None,
+    "exchange": submissions.get("exchanges", [None])[0]
+    if submissions.get("exchanges")
+    else None,
+    "sic": submissions.get("sic"),
+    "sicDescription": submissions.get("sicDescription"),
+    "stateOfIncorporation": submissions.get("stateOfIncorporation"),
+    "fiscalYearEnd": submissions.get("fiscalYearEnd"),
+    "ein": submissions.get("ein"),
+    "entityType": submissions.get("entityType"),
+    "category": submissions.get("category"),
+    "website": submissions.get("website") or submissions.get("investorWebsite"),
+    "phone": submissions.get("phone"),
+  }
+
+  # Find the specific filing in recent filings
+  sec_report: dict = {"accessionNumber": accession}
+  filings = submissions.get("filings", {}).get("recent", {})
+
+  def safe_get(field: str, idx: int, default=None):
+    """Safely get value from filings list with bounds checking."""
+    lst = filings.get(field, [])
+    return lst[idx] if idx < len(lst) else default
+
+  if filings and "accessionNumber" in filings:
+    accession_numbers = filings["accessionNumber"]
+    for i, acc_num in enumerate(accession_numbers):
+      if acc_num == accession:
+        # Found the filing - extract all metadata
+        sec_report = {
+          "accessionNumber": accession,
+          "form": safe_get("form", i),
+          "filingDate": safe_get("filingDate", i),
+          "reportDate": safe_get("reportDate", i),
+          "acceptanceDateTime": safe_get("acceptanceDateTime", i),
+          "primaryDocument": safe_get("primaryDocument", i),
+          "periodOfReport": safe_get("periodOfReport", i),
+          "isXBRL": bool(safe_get("isXBRL", i, False)),
+          "isInlineXBRL": bool(safe_get("isInlineXBRL", i, False)),
+        }
+        break
+
+  return sec_filer, sec_report
+
 
 # Year partitions for SEC data (2019-2025)
 SEC_YEARS = [str(y) for y in range(2019, 2026)]
@@ -228,7 +402,9 @@ def sec_raw_filings(
     for _, company in companies_raw.items():
       ticker = company.get("ticker", "")
       cik = str(company.get("cik_str", company.get("cik", "")))
-      if (config.tickers and ticker in config.tickers) or (config.ciks and cik in config.ciks):
+      if (config.tickers and ticker in config.tickers) or (
+        config.ciks and cik in config.ciks
+      ):
         companies.append({"cik": cik, "ticker": ticker})
   else:
     # Full mode - get all companies
@@ -246,6 +422,12 @@ def sec_raw_filings(
 
     try:
       client = SECClient(cik=cik)
+
+      # Fetch full submissions and store snapshot in S3 for later processing
+      submissions_raw = client.get_submissions()
+      _store_entity_submissions_snapshot(s3.client, bucket, cik, submissions_raw)
+
+      # Get DataFrame for filtering
       submissions = client.submissions_df()
 
       # Filter to target year and form types
@@ -461,11 +643,19 @@ def sec_batch_process(
             "extensions": ["roboledger"],
           }
 
+          # Fetch full SEC metadata from S3 snapshot (stored during download)
+          sec_filer, sec_report = _get_sec_metadata(
+            cik, accession, s3_client=s3.client, bucket=raw_bucket
+          )
+          # Ensure primaryDocument is set from local files if not in API response
+          if not sec_report.get("primaryDocument"):
+            sec_report["primaryDocument"] = xbrl_files[0]
+
           processor = XBRLGraphProcessor(
             report_uri=report_url,
             entityId=cik,
-            sec_filer={"cik": cik},
-            sec_report={"accessionNumber": accession, "primaryDocument": xbrl_files[0]},
+            sec_filer=sec_filer,
+            sec_report=sec_report,
             output_dir=tmpdir,
             local_file_path=os.path.join(tmpdir, xbrl_files[0]),
             schema_config=schema_config,
@@ -705,12 +895,20 @@ def sec_process_filing(
         "extensions": ["roboledger"],
       }
 
+      # Fetch full SEC metadata from S3 snapshot (stored during download)
+      sec_filer, sec_report = _get_sec_metadata(
+        cik, accession, s3_client=s3.client, bucket=raw_bucket
+      )
+      # Ensure primaryDocument is set from local files if not in API response
+      if not sec_report.get("primaryDocument"):
+        sec_report["primaryDocument"] = xbrl_files[0]
+
       # Process with XBRLGraphProcessor
       processor = XBRLGraphProcessor(
         report_uri=report_url,
         entityId=cik,
-        sec_filer={"cik": cik},
-        sec_report={"accessionNumber": accession, "primaryDocument": xbrl_files[0]},
+        sec_filer=sec_filer,
+        sec_report=sec_report,
         output_dir=tmpdir,
         local_file_path=os.path.join(tmpdir, xbrl_files[0]),
         schema_config=schema_config,
@@ -861,6 +1059,9 @@ def sec_graph_materialized(
   import asyncio
 
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+  from robosystems.operations.graph.shared_repository_service import (
+    ensure_shared_repository_exists,
+  )
 
   context.log.info(f"Materializing to graph: {config.graph_id}")
 
@@ -870,6 +1071,16 @@ def sec_graph_materialized(
   )
 
   async def run_materialization():
+    # Ensure the SEC repository metadata exists in PostgreSQL
+    # This creates the Graph record, GraphSchema, and DuckDB staging tables
+    context.log.info("Ensuring SEC repository metadata exists...")
+    repo_result = await ensure_shared_repository_exists(
+      repository_name="sec",
+      created_by="system",
+      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+    )
+    context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
+
     # Use the high-level process_files method which handles everything
     result = await processor.process_files(
       rebuild=config.rebuild,

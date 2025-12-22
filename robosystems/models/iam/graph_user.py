@@ -44,9 +44,7 @@ class GraphUser(Model):
   )  # References graphs table
   role = Column(String, nullable=False, default="member")  # admin, member, viewer
   is_selected = Column(Boolean, default=False, nullable=False)  # Currently active graph
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

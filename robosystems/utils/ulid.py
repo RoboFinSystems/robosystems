@@ -11,7 +11,6 @@ Benefits over UUIDs:
 - Still globally unique
 """
 
-
 from ulid import ULID
 
 

@@ -13,7 +13,6 @@ Performance comparison:
 - UUID v7: Time-ordered, sequential, optimal for indexes
 """
 
-
 from uuid6 import uuid7
 
 # Cache for deterministic ID generation

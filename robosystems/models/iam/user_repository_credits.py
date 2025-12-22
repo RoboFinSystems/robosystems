@@ -575,9 +575,7 @@ class UserRepositoryCredits(Base):
 
       reservation_transaction.description = f"{operation_type} operation (confirmed)"
       reservation_transaction.transaction_metadata = json.dumps(updated_metadata)
-      reservation_transaction.created_at = datetime.now(
-        UTC
-      )  # Update timestamp
+      reservation_transaction.created_at = datetime.now(UTC)  # Update timestamp
 
       session.commit()
 

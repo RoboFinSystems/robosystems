@@ -4,6 +4,7 @@ Assets represent data artifacts that are produced and consumed:
 - SEC pipeline assets (extraction, processing, staging, materialization)
 - QuickBooks pipeline assets (sync, transform, materialize)
 - Plaid pipeline assets (sync, transform, materialize)
+- Staged files (observable source for direct API staging)
 """
 
 from robosystems.dagster.assets.plaid import (
@@ -40,6 +41,7 @@ from robosystems.dagster.assets.sec import (
   # Partitions
   sec_year_partitions,
 )
+from robosystems.dagster.assets.staged_files import staged_files_source
 
 __all__ = [
   "SECBatchProcessConfig",
@@ -72,4 +74,6 @@ __all__ = [
   "sec_raw_filings",
   # SEC partitions
   "sec_year_partitions",
+  # Direct staging observable source
+  "staged_files_source",
 ]

@@ -5,7 +5,6 @@ Custom exceptions for graph databases MCP client error handling with enhanced hi
 """
 
 
-
 class GraphAPIError(Exception):
   """Base exception for Graph API errors."""
 
@@ -77,9 +76,7 @@ class GraphAuthorizationError(GraphAPIError):
 class GraphConnectionError(GraphAPIError):
   """Exception raised when connection to Graph API fails."""
 
-  def __init__(
-    self, message: str = "Connection failed", endpoint: str | None = None
-  ):
+  def __init__(self, message: str = "Connection failed", endpoint: str | None = None):
     super().__init__(message, error_code="CONNECTION_FAILED")
     if endpoint:
       self.details["endpoint"] = endpoint

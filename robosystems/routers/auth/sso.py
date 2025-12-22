@@ -63,9 +63,7 @@ router = APIRouter()
 )
 async def generate_sso_token(
   request: Request,
-  auth_token: str | None = Cookie(
-    None, alias="auth-token"
-  ),  # Backward compatibility
+  auth_token: str | None = Cookie(None, alias="auth-token"),  # Backward compatibility
   session: Session = Depends(get_async_db_session),
   _rate_limit: None = Depends(sso_rate_limit_dependency),
 ) -> SSOTokenResponse:
@@ -115,9 +113,7 @@ async def generate_sso_token(
 
     # Create temporary SSO token
     sso_token, token_id = create_sso_token(user.id)
-    expires_at = datetime.now(UTC) + timedelta(
-      seconds=SSO_TOKEN_EXPIRY_SECONDS
-    )
+    expires_at = datetime.now(UTC) + timedelta(seconds=SSO_TOKEN_EXPIRY_SECONDS)
 
     # Store token ID in Valkey for single-use tracking with distributed locking
     try:

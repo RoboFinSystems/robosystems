@@ -566,9 +566,7 @@ class SSEEventStorage:
 
     return events
 
-  async def get_operation_metadata(
-    self, operation_id: str
-  ) -> OperationMetadata | None:
+  async def get_operation_metadata(self, operation_id: str) -> OperationMetadata | None:
     """
     Get operation metadata.
 

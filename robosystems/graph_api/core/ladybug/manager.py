@@ -642,9 +642,7 @@ class LadybugDatabaseManager:
 
     return type_mapping.get(schema_type.upper(), "STRING")
 
-  def _apply_custom_schema(
-    self, conn: lbug.Connection, custom_ddl: str | None
-  ) -> bool:
+  def _apply_custom_schema(self, conn: lbug.Connection, custom_ddl: str | None) -> bool:
     """Apply custom schema DDL to database."""
     if not custom_ddl:
       logger.error("Custom DDL is required for custom schema type")

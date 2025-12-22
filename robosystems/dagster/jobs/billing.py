@@ -639,9 +639,7 @@ def process_overage_invoices(
               "invoice_type": "overage",
               "overage_credits": str(overage_credits),
               "amount_usd": str(usd_amount),
-              "billing_period_end": datetime.now(UTC)
-              .replace(day=1)
-              .isoformat(),
+              "billing_period_end": datetime.now(UTC).replace(day=1).isoformat(),
               "graph_tier": str(graph_info["graph_tier"]),
             },
             session=session,

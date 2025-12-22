@@ -142,10 +142,13 @@ class TestDisabledProviderHandling:
       }
       return mock_repo
 
-    with patch(
-      "robosystems.routers.graphs.connections.link_token.get_graph_repository",
-      new=mock_get_repo,
-    ), patch("robosystems.operations.providers.registry.env") as mock_env:
+    with (
+      patch(
+        "robosystems.routers.graphs.connections.link_token.get_graph_repository",
+        new=mock_get_repo,
+      ),
+      patch("robosystems.operations.providers.registry.env") as mock_env,
+    ):
       # Configure mock env with Plaid disabled
       mock_env.CONNECTION_SEC_ENABLED = True
       mock_env.CONNECTION_QUICKBOOKS_ENABLED = True

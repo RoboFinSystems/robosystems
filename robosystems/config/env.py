@@ -1131,9 +1131,7 @@ class EnvConfig:
       return ["*"]
 
   @classmethod
-  def get_valkey_url(
-    cls, database: Union[int, "ValkeyDatabase"] | None = None
-  ) -> str:
+  def get_valkey_url(cls, database: Union[int, "ValkeyDatabase"] | None = None) -> str:
     """
     Get Valkey/Redis URL with optional database number.
 

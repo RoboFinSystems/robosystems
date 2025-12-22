@@ -428,12 +428,14 @@ class TestCreditService:
       }
     )
 
-    with patch(
-      "robosystems.middleware.billing.cache.credit_cache.get_cached_credit_summary",
-      return_value=None,
-    ), patch(
-      "robosystems.middleware.billing.cache.credit_cache.cache_credit_summary"
-    ), patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits):
+    with (
+      patch(
+        "robosystems.middleware.billing.cache.credit_cache.get_cached_credit_summary",
+        return_value=None,
+      ),
+      patch("robosystems.middleware.billing.cache.credit_cache.cache_credit_summary"),
+      patch.object(GraphCredits, "get_by_graph_id", return_value=mock_credits),
+    ):
       result = credit_service.get_credit_summary("graph123")
 
     assert result["current_balance"] == 750.0

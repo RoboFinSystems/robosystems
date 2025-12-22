@@ -874,9 +874,7 @@ class TestConnectionPoolIntegration:
             except Exception as e:
               with results_lock:
                 results["errors"] += 1
-                results["exceptions"].append(
-                  f"Worker {worker_id}, Op {op_num}: {e!s}"
-                )
+                results["exceptions"].append(f"Worker {worker_id}, Op {op_num}: {e!s}")
 
               # Don't fail the test on individual operation errors
               # as some concurrency conflicts are expected

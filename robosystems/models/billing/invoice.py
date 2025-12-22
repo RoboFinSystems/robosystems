@@ -59,9 +59,7 @@ class BillingInvoice(Base):
 
   notes = Column(String, nullable=True)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),
@@ -281,9 +279,7 @@ class BillingInvoiceLineItem(Base):
 
   line_metadata = Column(JSON, nullable=True)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
   invoice = relationship("BillingInvoice", back_populates="line_items")
 

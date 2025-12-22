@@ -360,6 +360,8 @@ class SECPipeline:
 
   def _reset_database(self, clear_s3: bool = False) -> bool:
     """Reset SEC database."""
+    import asyncio
+
     import requests
 
     graph_api_url = "http://localhost:8001"
@@ -397,6 +399,26 @@ class SECPipeline:
           return False
       except Exception as e:
         logger.error(f"  Create request failed: {e}")
+        return False
+
+      # Ensure PostgreSQL repository metadata exists (Graph + GraphSchema records)
+      # This is required for user subscriptions to work
+      logger.info("  Ensuring repository metadata exists...")
+      try:
+        from robosystems.operations.graph.shared_repository_service import (
+          ensure_shared_repository_exists,
+        )
+
+        result = asyncio.run(
+          ensure_shared_repository_exists(
+            repository_name="sec",
+            created_by="system",
+            instance_id="local-dev",
+          )
+        )
+        logger.info(f"  Repository metadata: {result.get('status', 'unknown')}")
+      except Exception as e:
+        logger.error(f"  Repository metadata creation failed: {e}")
         return False
 
       # Clear S3 if requested

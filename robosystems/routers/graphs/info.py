@@ -164,12 +164,8 @@ async def get_database_info(
         relationship_count=info_result.get("relationship_count", 0),
         node_labels=info_result.get("node_labels", []),
         relationship_types=info_result.get("relationship_types", []),
-        created_at=info_result.get(
-          "created_at", datetime.now(UTC).isoformat()
-        ),
-        last_modified=info_result.get(
-          "last_modified", datetime.now(UTC).isoformat()
-        ),
+        created_at=info_result.get("created_at", datetime.now(UTC).isoformat()),
+        last_modified=info_result.get("last_modified", datetime.now(UTC).isoformat()),
         schema_version=info_result.get("schema_version"),
         read_only=info_result.get("read_only", False),
         backup_count=info_result.get("backup_count", 0),

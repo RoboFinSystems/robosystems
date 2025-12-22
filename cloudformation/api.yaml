@@ -624,6 +624,19 @@ Resources:
             # Email Configuration
             - Name: EMAIL_FROM_ADDRESS
               Value: !Ref EmailFromAddress
+            # Dagster Configuration (for reporting AssetMaterializations from direct staging)
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: "5432"
+            - Name: DAGSTER_POSTGRES_USER
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
           # Secrets are fetched directly by the application using secrets_manager.py
           # The container has IAM permissions to access robosystems/{env}/* secrets
         # ADOT Collector Sidecar (only if observability stack is configured)

@@ -96,9 +96,7 @@ class GraphBackup(Model):
   started_at = Column(DateTime, nullable=True)
   completed_at = Column(DateTime, nullable=True)
   expires_at = Column(DateTime, nullable=True)  # For retention management
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

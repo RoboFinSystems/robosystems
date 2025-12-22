@@ -62,9 +62,7 @@ class BillingAuditLog(Base):
   id = Column(String, primary_key=True, default=lambda: generate_prefixed_ulid("baud"))
 
   event_type = Column(String, nullable=False)
-  event_timestamp = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  event_timestamp = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
   org_id = Column(String, ForeignKey("orgs.id"), nullable=True)
 
@@ -81,9 +79,7 @@ class BillingAuditLog(Base):
   actor_type = Column(String, nullable=False)
   actor_ip = Column(String, nullable=True)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
   __table_args__ = (
     Index("idx_billing_audit_org", "org_id"),

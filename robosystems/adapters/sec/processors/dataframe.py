@@ -139,7 +139,12 @@ class DataFrameManager:
             logger.warning(
               f"Could not create schema-based DataFrame for {df_name}, trying empty with proper columns"
             )
-            if "fact_has_dimension_rel" in df_name or "axis_element" in df_name or "member_element" in df_name or "fact_set_contains" in df_name:
+            if (
+              "fact_has_dimension_rel" in df_name
+              or "axis_element" in df_name
+              or "member_element" in df_name
+              or "fact_set_contains" in df_name
+            ):
               df = pd.DataFrame(columns=["from", "to"])
             else:
               df = pd.DataFrame(columns=["from", "to"])

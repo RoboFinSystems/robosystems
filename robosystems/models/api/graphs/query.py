@@ -223,9 +223,7 @@ class CypherQueryResponse(BaseModel):
   )
   graph_id: str = Field(..., description="Graph database identifier")
   timestamp: str = Field(..., description="Query execution timestamp")
-  error: str | None = Field(
-    default=None, description="Error message if query failed"
-  )
+  error: str | None = Field(default=None, description="Error message if query failed")
 
   class Config:
     json_schema_extra = {

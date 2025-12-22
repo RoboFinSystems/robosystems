@@ -830,9 +830,7 @@ class GraphClient(BaseGraphClient):
     if not await self.database_exists(graph_id):
       await self.create_database(graph_id, schema_type)
 
-  async def execute_ddl(
-    self, ddl: str, graph_id: str | None = None
-  ) -> dict[str, Any]:
+  async def execute_ddl(self, ddl: str, graph_id: str | None = None) -> dict[str, Any]:
     """
     Execute DDL (Data Definition Language) statements.
 

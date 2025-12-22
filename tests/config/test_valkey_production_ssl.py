@@ -50,9 +50,12 @@ class TestProductionSSLHandling:
 
   def test_create_redis_client_production_no_ssl_in_url(self):
     """Test that create_redis_client doesn't include SSL params in URL."""
-    with patch.dict(
-      os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
-    ), patch("redis.Redis.from_url") as mock_from_url:
+    with (
+      patch.dict(
+        os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
+      ),
+      patch("redis.Redis.from_url") as mock_from_url,
+    ):
       mock_client = MagicMock()
       mock_from_url.return_value = mock_client
 
@@ -73,9 +76,12 @@ class TestProductionSSLHandling:
 
   def test_create_async_redis_client_production_no_ssl_in_url(self):
     """Test that create_async_redis_client doesn't include SSL params in URL."""
-    with patch.dict(
-      os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
-    ), patch("redis.asyncio.from_url") as mock_from_url:
+    with (
+      patch.dict(
+        os.environ, {"ENVIRONMENT": "prod", "VALKEY_AUTH_TOKEN": "test_token"}
+      ),
+      patch("redis.asyncio.from_url") as mock_from_url,
+    ):
       mock_client = MagicMock()
       mock_from_url.return_value = mock_client
 

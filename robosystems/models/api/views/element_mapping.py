@@ -22,9 +22,7 @@ class ElementAssociation(BaseModel):
   weight: float = Field(
     1.0, description="Weight for aggregation (used in weighted averages)"
   )
-  formula: str | None = Field(
-    None, description="Formula for calculated aggregations"
-  )
+  formula: str | None = Field(None, description="Formula for calculated aggregations")
   order_value: float = Field(1.0, description="Order within mapping structure")
 
 
@@ -59,9 +57,7 @@ class CreateAssociationRequest(BaseModel):
     AggregationMethod.SUM, description="Aggregation method"
   )
   weight: float = Field(1.0, description="Weight for aggregation")
-  formula: str | None = Field(
-    None, description="Formula for calculated aggregations"
-  )
+  formula: str | None = Field(None, description="Formula for calculated aggregations")
   order_value: float = Field(1.0, description="Order within structure")
 
 
@@ -70,9 +66,7 @@ class UpdateAssociationRequest(BaseModel):
     None, description="Aggregation method"
   )
   weight: float | None = Field(None, description="Weight for aggregation")
-  formula: str | None = Field(
-    None, description="Formula for calculated aggregations"
-  )
+  formula: str | None = Field(None, description="Formula for calculated aggregations")
   order_value: float | None = Field(None, description="Order within structure")
 
 

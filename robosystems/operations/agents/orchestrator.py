@@ -851,9 +851,7 @@ class AgentOrchestrator:
 
     return estimate
 
-  def _get_cache_key(
-    self, query: str, agent_type: str | None, mode: AgentMode
-  ) -> str:
+  def _get_cache_key(self, query: str, agent_type: str | None, mode: AgentMode) -> str:
     """Generate cache key for a query."""
     return f"{agent_type or 'auto'}:{mode.value}:{hash(query)}"
 

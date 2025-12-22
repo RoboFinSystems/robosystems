@@ -1,6 +1,5 @@
 """Graph query API models."""
 
-
 from pydantic import BaseModel, ConfigDict, Field
 
 

@@ -140,7 +140,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/build/.venv/bin:$PATH" \
     ARELLE_CACHE_DIR="/app/robosystems/adapters/sec/arelle/cache" \
-    LADYBUG_HOME="/app/data/.ladybug"
+    LADYBUG_HOME="/app/data/.ladybug" \
+    DAGSTER_HOME="/app/dagster_home"
 
 # Install runtime dependencies and uv
 RUN apt-get update && apt-get install -y --no-install-recommends \

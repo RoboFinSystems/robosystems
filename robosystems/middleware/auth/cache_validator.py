@@ -232,9 +232,7 @@ class CacheValidator:
                 events += 1
 
             except Exception as e:
-              issues.append(
-                f"Cache validation error for {api_key_hash[:8]}...: {e!s}"
-              )
+              issues.append(f"Cache validation error for {api_key_hash[:8]}...: {e!s}")
               await redis.delete(cache_key, signature_key)
               actions.append(f"Removed problematic cache entry: {api_key_hash[:8]}...")
               events += 1
@@ -310,9 +308,7 @@ class CacheValidator:
                 events += 1
 
             except Exception as e:
-              issues.append(
-                f"JWT cache validation error for {jwt_hash[:8]}...: {e!s}"
-              )
+              issues.append(f"JWT cache validation error for {jwt_hash[:8]}...: {e!s}")
               await redis.delete(cache_key, signature_key)
               actions.append(f"Removed problematic JWT cache: {jwt_hash[:8]}...")
               events += 1

@@ -135,9 +135,7 @@ class Graph(Model):
   )  # Last error message if sync_status is "error"
 
   # Timestamps
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

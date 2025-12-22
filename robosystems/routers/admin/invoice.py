@@ -1,6 +1,5 @@
 """Admin API for invoice management."""
 
-
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ...database import get_db_session

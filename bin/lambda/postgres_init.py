@@ -137,6 +137,7 @@ def lambda_handler(event, context):
     postgres_vars = {
       "DATABASE_URL": postgres_url,
       "POSTGRES_PASSWORD": db_password,
+      "password": db_password,  # Alias for CloudFormation dynamic references
       "host": db_endpoint,
       "port": str(db_port),
       "username": db_username,

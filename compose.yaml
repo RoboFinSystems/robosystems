@@ -11,6 +11,12 @@ services:
       - ENVIRONMENT=dev
       - OTEL_FORCE_ENABLE=true
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      # Dagster environment for reporting AssetMaterializations from direct staging
+      - DAGSTER_POSTGRES_HOST=pg
+      - DAGSTER_POSTGRES_PORT=5432
+      - DAGSTER_POSTGRES_USER=postgres
+      - DAGSTER_POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - DAGSTER_POSTGRES_DB=dagster
     env_file:
       - .env
     ports:

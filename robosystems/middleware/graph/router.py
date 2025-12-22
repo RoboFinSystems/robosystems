@@ -20,7 +20,6 @@ from typing import Any
 
 from robosystems.config import env
 from robosystems.graph_api.client import GraphClient
-from robosystems.graph_api.client.factory import GraphClientFactory
 from robosystems.graph_api.core.ladybug import Repository
 from robosystems.logger import logger
 
@@ -74,6 +73,9 @@ class GraphRouter:
       return Repository(database_path)
     else:
       # Use the new enhanced client factory for all routing
+      # Lazy import to avoid circular dependency
+      from robosystems.graph_api.client.factory import GraphClientFactory
+
       from .streaming_wrapper import add_streaming_support
 
       logger.debug(f"Using enhanced client factory for {graph_id}")

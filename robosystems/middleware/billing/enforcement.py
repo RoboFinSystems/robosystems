@@ -1,6 +1,5 @@
 """Subscription enforcement middleware for graph operations."""
 
-
 from sqlalchemy.orm import Session
 
 from ...config import env

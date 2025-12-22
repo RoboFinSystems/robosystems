@@ -426,10 +426,13 @@ class TestMetricsIntegration:
     from robosystems.models.iam import UserAPIKey
 
     # Patch environment to ensure CAPTCHA is disabled and registration is enabled
-    with patch.dict(os.environ, {"ENVIRONMENT": "dev"}), patch.object(
-      __import__("robosystems.config", fromlist=["env"]).env,
-      "USER_REGISTRATION_ENABLED",
-      True,
+    with (
+      patch.dict(os.environ, {"ENVIRONMENT": "dev"}),
+      patch.object(
+        __import__("robosystems.config", fromlist=["env"]).env,
+        "USER_REGISTRATION_ENABLED",
+        True,
+      ),
     ):
       registration_data = {
         "name": "Metrics Integration User",

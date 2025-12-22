@@ -50,9 +50,12 @@ class TestKeyRotationEdgeCases:
     cache = APIKeyCache()
 
     # Mock encryption to fail validation
-    with patch.object(
-      cache, "_encrypt_cache_data", side_effect=Exception("Encryption failed")
-    ), pytest.raises(Exception, match="Encryption failed"):
+    with (
+      patch.object(
+        cache, "_encrypt_cache_data", side_effect=Exception("Encryption failed")
+      ),
+      pytest.raises(Exception, match="Encryption failed"),
+    ):
       cache._rotate_encryption_key()
 
     # Verify rollback occurred

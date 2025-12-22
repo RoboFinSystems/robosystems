@@ -265,15 +265,11 @@ class TestIntegrationScenarios:
 
     # Setup mock API keys with various states
     active_key = MagicMock(spec=UserAPIKey)
-    active_key.expires_at = datetime.now(UTC) + timedelta(
-      days=30
-    )  # Future expiry
+    active_key.expires_at = datetime.now(UTC) + timedelta(days=30)  # Future expiry
 
     expired_key = MagicMock(spec=UserAPIKey)
     expired_key.id = "expired-key"
-    expired_key.expires_at = datetime.now(UTC) - timedelta(
-      days=1
-    )  # Past expiry
+    expired_key.expires_at = datetime.now(UTC) - timedelta(days=1)  # Past expiry
 
     no_expiry_key = MagicMock(spec=UserAPIKey)
     no_expiry_key.expires_at = None  # No expiry set

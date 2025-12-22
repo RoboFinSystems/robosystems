@@ -33,9 +33,7 @@ class TableInfo(BaseModel):
   row_count: int = Field(..., description="Approximate row count")
   file_count: int = Field(0, description="Number of files")
   total_size_bytes: int = Field(0, description="Total size in bytes")
-  s3_location: str | None = Field(
-    None, description="S3 location for external tables"
-  )
+  s3_location: str | None = Field(None, description="S3 location for external tables")
 
 
 class TableListResponse(BaseModel):
@@ -245,9 +243,7 @@ class FileInfo(BaseModel):
   upload_status: str = Field(..., description="Current upload status")
   upload_method: str = Field(..., description="Upload method used")
   created_at: str | None = Field(None, description="File creation timestamp")
-  uploaded_at: str | None = Field(
-    None, description="File upload completion timestamp"
-  )
+  uploaded_at: str | None = Field(None, description="File upload completion timestamp")
   s3_key: str = Field(..., description="S3 object key")
 
 
@@ -290,9 +286,7 @@ class GetFileInfoResponse(BaseModel):
   upload_status: str = Field(..., description="Current upload status")
   upload_method: str = Field(..., description="Upload method used")
   created_at: str | None = Field(None, description="File creation timestamp")
-  uploaded_at: str | None = Field(
-    None, description="File upload completion timestamp"
-  )
+  uploaded_at: str | None = Field(None, description="File upload completion timestamp")
   s3_key: str = Field(..., description="S3 object key")
   layers: EnhancedFileStatusLayers | None = Field(
     default=None,

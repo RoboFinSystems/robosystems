@@ -746,9 +746,9 @@ class TestUserPasswordUpdate:
 
     # Create a real password hash for testing
     salt = bcrypt.gensalt()
-    mock_user.password_hash = bcrypt.hashpw(
-      b"originalPassword123", salt
-    ).decode("utf-8")
+    mock_user.password_hash = bcrypt.hashpw(b"originalPassword123", salt).decode(
+      "utf-8"
+    )
 
     return mock_user
 

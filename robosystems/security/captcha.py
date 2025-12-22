@@ -81,9 +81,12 @@ class CaptchaService:
       data["idempotency_key"] = idempotency_key
 
     try:
-      async with aiohttp.ClientSession() as session, session.post(
-        TURNSTILE_VERIFY_URL, data=data, timeout=aiohttp.ClientTimeout(total=10)
-      ) as response:
+      async with (
+        aiohttp.ClientSession() as session,
+        session.post(
+          TURNSTILE_VERIFY_URL, data=data, timeout=aiohttp.ClientTimeout(total=10)
+        ) as response,
+      ):
         if response.status != 200:
           logger.error(f"Turnstile API returned status {response.status}")
           return CaptchaVerificationResult(success=False, error_codes=["api-error"])

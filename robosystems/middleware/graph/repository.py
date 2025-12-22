@@ -190,9 +190,7 @@ class UniversalRepository:
     """Execute multiple operations in a transaction."""
     return await self._call_method("execute_transaction", operations)
 
-  async def count_nodes(
-    self, label: str, filters: dict[str, Any] | None = None
-  ) -> int:
+  async def count_nodes(self, label: str, filters: dict[str, Any] | None = None) -> int:
     """Count nodes with optional filters."""
     return await self._call_method("count_nodes", label, filters)
 
@@ -234,9 +232,7 @@ class UniversalRepository:
     """Execute multiple operations in a transaction (sync)."""
     return self._call_method_sync("execute_transaction", operations)
 
-  def count_nodes_sync(
-    self, label: str, filters: dict[str, Any] | None = None
-  ) -> int:
+  def count_nodes_sync(self, label: str, filters: dict[str, Any] | None = None) -> int:
     """Count nodes with optional filters (sync)."""
     return self._call_method_sync("count_nodes", label, filters)
 

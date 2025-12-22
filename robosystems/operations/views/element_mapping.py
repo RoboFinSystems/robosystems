@@ -9,7 +9,6 @@ For new implementations, use client-side extensions:
 - robosystems-python-client/robosystems_client/extensions/subgraph_workspace_client.py
 """
 
-
 import pandas as pd
 
 from robosystems.middleware.graph import get_universal_repository

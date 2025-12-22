@@ -1,6 +1,5 @@
 """Subscription-based rate limiting configuration and utilities."""
 
-
 from ...config.rate_limits import EndpointCategory, RateLimitConfig
 
 # Re-export subscription rate limits from centralized config
@@ -61,4 +60,9 @@ def should_use_subscription_limits(path: str) -> bool:
       return True
 
   # Also use subscription limits for certain non-graph endpoints
-  return bool(any(path.startswith(prefix) for prefix in ["/v1/user/subscription", "/v1/user/limits", "/v1/operations"]))
+  return bool(
+    any(
+      path.startswith(prefix)
+      for prefix in ["/v1/user/subscription", "/v1/user/limits", "/v1/operations"]
+    )
+  )

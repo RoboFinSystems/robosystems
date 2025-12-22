@@ -16,9 +16,7 @@ class TableInfo(BaseModel):
   table_name: str = Field(..., description="Table name")
   row_count: int = Field(..., description="Approximate row count")
   size_bytes: int = Field(..., description="Table size in bytes")
-  s3_location: str | None = Field(
-    None, description="S3 location for external tables"
-  )
+  s3_location: str | None = Field(None, description="S3 location for external tables")
 
 
 class TableCreateRequest(BaseModel):

@@ -4,7 +4,6 @@ Graph access authorization dependencies.
 FastAPI dependency functions for validating user access to graphs.
 """
 
-
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 

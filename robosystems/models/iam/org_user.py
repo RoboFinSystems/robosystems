@@ -43,9 +43,7 @@ class OrgUser(Model):
   user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
   role = Column(SQLEnum(OrgRole), nullable=False, default=OrgRole.MEMBER)
 
-  joined_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  joined_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

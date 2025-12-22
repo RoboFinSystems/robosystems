@@ -79,9 +79,7 @@ class BillingSubscription(Base):
   canceled_at = Column(DateTime, nullable=True)
   ends_at = Column(DateTime, nullable=True)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

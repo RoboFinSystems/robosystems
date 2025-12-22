@@ -1,6 +1,5 @@
 """User management API models."""
 
-
 from pydantic import BaseModel, EmailStr, Field
 
 

@@ -55,11 +55,10 @@ class TestGraphAccessControlDependency:
     mock_request.headers = {"authorization": "Bearer valid_token"}
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
-    with patch(
-      "robosystems.middleware.auth.dependencies.verify_jwt_token"
-    ) as mock_verify, patch(
-      "robosystems.middleware.auth.dependencies.User.get_by_id"
-    ) as mock_get_user:
+    with (
+      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch("robosystems.middleware.auth.dependencies.User.get_by_id") as mock_get_user,
+    ):
       mock_verify.return_value = test_user.id
       mock_get_user.return_value = test_user
 
@@ -77,11 +76,10 @@ class TestGraphAccessControlDependency:
     mock_request.headers = {"authorization": "Bearer valid_token"}
     mock_request.url.path = f"/v1/graphs/{sample_graph.graph_id}/info"
 
-    with patch(
-      "robosystems.middleware.auth.dependencies.verify_jwt_token"
-    ) as mock_verify, patch(
-      "robosystems.middleware.auth.dependencies.User.get_by_id"
-    ) as mock_get_user:
+    with (
+      patch("robosystems.middleware.auth.dependencies.verify_jwt_token") as mock_verify,
+      patch("robosystems.middleware.auth.dependencies.User.get_by_id") as mock_get_user,
+    ):
       mock_verify.return_value = test_user.id
       mock_get_user.return_value = test_user
 

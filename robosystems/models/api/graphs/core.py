@@ -1,6 +1,5 @@
 """Graph core API models - graph creation and metadata."""
 
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from .schema import CustomSchemaDefinition
@@ -82,9 +81,7 @@ class InitialEntityData(BaseModel):
   sic: str | None = Field(None, description="SIC code")
   sic_description: str | None = Field(None, description="SIC description")
   category: str | None = Field(None, description="Business category")
-  state_of_incorporation: str | None = Field(
-    None, description="State of incorporation"
-  )
+  state_of_incorporation: str | None = Field(None, description="State of incorporation")
   fiscal_year_end: str | None = Field(None, description="Fiscal year end (MMDD)")
   ein: str | None = Field(None, description="Employer Identification Number")
 

@@ -32,7 +32,6 @@ For direct context control, use:
   loader = get_contextual_schema_loader("application", "roboledger")
 """
 
-
 from ..models import Node, Property, Relationship
 
 # ============================================================================

@@ -77,9 +77,7 @@ class GraphTierConfig:
       return cls._config_cache
 
   @classmethod
-  def get_tier_config(
-    cls, tier: str, environment: str | None = None
-  ) -> dict[str, Any]:
+  def get_tier_config(cls, tier: str, environment: str | None = None) -> dict[str, Any]:
     """Get configuration for a specific tier.
 
     Args:
@@ -109,9 +107,7 @@ class GraphTierConfig:
     return {}
 
   @classmethod
-  def get_max_subgraphs(
-    cls, tier: str, environment: str | None = None
-  ) -> int | None:
+  def get_max_subgraphs(cls, tier: str, environment: str | None = None) -> int | None:
     """Get maximum subgraphs allowed for a tier.
 
     Args:
@@ -201,9 +197,7 @@ class GraphTierConfig:
     return tier_config.get("instance", {})
 
   @classmethod
-  def get_api_rate_multiplier(
-    cls, tier: str, environment: str | None = None
-  ) -> float:
+  def get_api_rate_multiplier(cls, tier: str, environment: str | None = None) -> float:
     """Get rate limit multiplier for a tier.
 
     Args:
@@ -451,9 +445,7 @@ class GraphTierConfig:
     cls._config_cache = None
 
 
-def get_tier_max_subgraphs(
-  tier: str, environment: str | None = None
-) -> int | None:
+def get_tier_max_subgraphs(tier: str, environment: str | None = None) -> int | None:
   """Get max subgraphs for a tier.
 
   Args:
@@ -497,9 +489,7 @@ def get_tier_copy_operation_limits(
 
 
 @lru_cache(maxsize=32)
-def get_tier_backup_limits(
-  tier: str, environment: str | None = None
-) -> dict[str, Any]:
+def get_tier_backup_limits(tier: str, environment: str | None = None) -> dict[str, Any]:
   """Cached function to get backup limits for a tier.
 
   Args:

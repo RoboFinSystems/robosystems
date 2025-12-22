@@ -23,9 +23,7 @@ def _safe_cache_call(func_name: str, *args, **kwargs):
     return None
 
 
-def validate_api_key(
-  api_key: str, db_session: Session | None = None
-) -> User | None:
+def validate_api_key(api_key: str, db_session: Session | None = None) -> User | None:
   """
   Validate an API key and return the associated user if valid.
   Uses secure bcrypt verification with encrypted cache.

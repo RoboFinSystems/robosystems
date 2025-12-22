@@ -7,7 +7,6 @@ Security Note:
 - Never log full request URLs; always use request.url.path for logging
 """
 
-
 from fastapi import Header, HTTPException, Query, Request, Security, status
 from fastapi.security import APIKeyHeader
 

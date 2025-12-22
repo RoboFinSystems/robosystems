@@ -381,9 +381,7 @@ class XBRLGraphProcessor:
       report_data["form"] = self.sec_report.get("form")
 
       # Add acceptance_date if available
-      if (
-        self.sec_report.get("acceptanceDateTime")
-      ):
+      if self.sec_report.get("acceptanceDateTime"):
         try:
           report_data["acceptance_date"] = datetime.strptime(
             self.sec_report["acceptanceDateTime"][:10],

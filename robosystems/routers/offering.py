@@ -63,9 +63,19 @@ class OfferingFeatureGenerator:
     if plan_type == "basic":
       return base_features
     elif plan_type == "advanced":
-      return [*base_features, "Priority query processing", "Advanced analytics endpoints"]
+      return [
+        *base_features,
+        "Priority query processing",
+        "Advanced analytics endpoints",
+      ]
     elif plan_type == "unlimited":
-      return [*base_features, "Priority query processing", "Advanced analytics endpoints", "Bulk export capabilities", "Dedicated support"]
+      return [
+        *base_features,
+        "Priority query processing",
+        "Advanced analytics endpoints",
+        "Bulk export capabilities",
+        "Dedicated support",
+      ]
     else:
       return base_features
 

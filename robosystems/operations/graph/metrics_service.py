@@ -202,9 +202,7 @@ class GraphMetricsService:
     """
     return await self.collect_metrics_for_graph(graph_id)
 
-  async def get_usage_summary_async(
-    self, user_id: str | None = None
-  ) -> dict[str, Any]:
+  async def get_usage_summary_async(self, user_id: str | None = None) -> dict[str, Any]:
     """
     Async version of get_usage_summary for use in async contexts.
     This is now just an alias since the main method is async.

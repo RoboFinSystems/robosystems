@@ -598,9 +598,7 @@ class APIKeyCache:
         risk_level="medium",
       )
 
-  def get_cached_api_key_validation(
-    self, api_key_hash: str
-  ) -> dict[str, Any] | None:
+  def get_cached_api_key_validation(self, api_key_hash: str) -> dict[str, Any] | None:
     """
     Get cached API key validation result with comprehensive security validation.
 

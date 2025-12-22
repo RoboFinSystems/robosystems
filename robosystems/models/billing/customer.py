@@ -32,9 +32,7 @@ class BillingCustomer(Base):
   billing_contact_name = Column(String, nullable=True)
   payment_terms = Column(String, default="net_30", nullable=False)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

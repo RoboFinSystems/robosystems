@@ -720,18 +720,17 @@ class TestSubgraphServiceIntegration:
     ) as mock_find:
       mock_find.return_value = mock_location
 
-      with patch(
-        "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
-      ) as mock_get_client, patch(
-        "robosystems.graph_api.client.GraphClient"
-      ) as mock_graph_client_class:
+      with (
+        patch(
+          "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
+        ) as mock_get_client,
+        patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class,
+      ):
         mock_graph_client_class.return_value = mock_client
         mock_get_client.return_value = mock_client
 
         # Create
-        create_result = await service.create_subgraph_database(
-          parent_graph_id, "test"
-        )
+        create_result = await service.create_subgraph_database(parent_graph_id, "test")
         assert create_result["status"] == "created"
 
         # List

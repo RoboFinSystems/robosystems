@@ -180,7 +180,9 @@ class TestCreditCache:
     assert mock_redis.setex.call_count == len(costs)
 
     # Check each call
-    for call, (op_type, cost) in zip(mock_redis.setex.call_args_list, costs.items(), strict=False):
+    for call, (op_type, cost) in zip(
+      mock_redis.setex.call_args_list, costs.items(), strict=False
+    ):
       assert call[0][0] == f"op_cost:{op_type}"
       assert call[0][2] == str(cost)
 

@@ -519,9 +519,7 @@ async def execute_cypher_query(
         )
 
         # Calculate execution time
-        execution_time = (
-          datetime.now(UTC) - start_time
-        ).total_seconds() * 1000
+        execution_time = (datetime.now(UTC) - start_time).total_seconds() * 1000
 
         # Extract columns
         columns = list(result[0].keys()) if result else []

@@ -294,11 +294,14 @@ class TestLadybugSchemaManagerAdditional:
         }
 
         # Mock _create_node_table and _create_relationship_table to track calls
-        with patch.object(
-          manager, "_create_node_table", return_value=True
-        ) as mock_create_node, patch.object(
-          manager, "_create_relationship_table", return_value=True
-        ) as mock_create_rel:
+        with (
+          patch.object(
+            manager, "_create_node_table", return_value=True
+          ) as mock_create_node,
+          patch.object(
+            manager, "_create_relationship_table", return_value=True
+          ) as mock_create_rel,
+        ):
           # Initialize schema
           manager.initialize_schema()
 

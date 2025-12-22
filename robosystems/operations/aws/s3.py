@@ -27,9 +27,7 @@ class S3Client:
   for general use cases like storing XBRL textblocks, temporary files, etc.
   """
 
-  def __init__(
-    self, region_name: str | None = None, endpoint_url: str | None = None
-  ):
+  def __init__(self, region_name: str | None = None, endpoint_url: str | None = None):
     """
     Initialize S3 client.
 
@@ -226,9 +224,7 @@ class S3Client:
 
     return False
 
-  def download_string(
-    self, bucket: str, key: str, max_retries: int = 3
-  ) -> str | None:
+  def download_string(self, bucket: str, key: str, max_retries: int = 3) -> str | None:
     """
     Download an S3 object as a string with retry logic.
 
@@ -1072,9 +1068,7 @@ class S3BackupAdapter:
     """
     try:
       # Parse backup_id as timestamp
-      timestamp = datetime.strptime(backup_id, "%Y%m%d_%H%M%S").replace(
-        tzinfo=UTC
-      )
+      timestamp = datetime.strptime(backup_id, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
       metadata_path = self._generate_metadata_path(graph_id, timestamp)
 
       # Download metadata from S3
@@ -1123,9 +1117,7 @@ class S3BackupAdapter:
       timestamp_str = timestamp_with_ext.split(".")[0]
 
       # Parse timestamp
-      timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S").replace(
-        tzinfo=UTC
-      )
+      timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
 
       # Generate metadata path
       metadata_path = self._generate_metadata_path(graph_id, timestamp)

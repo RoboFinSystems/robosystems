@@ -2,7 +2,6 @@
 Cluster-related Pydantic models for the Graph API.
 """
 
-
 from pydantic import BaseModel, Field
 
 

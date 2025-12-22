@@ -28,9 +28,7 @@ class OrgLimits(Model):
 
   max_graphs = Column(Integer, nullable=False, default=env.ORG_GRAPHS_DEFAULT_LIMIT)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

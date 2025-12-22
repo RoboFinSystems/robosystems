@@ -32,7 +32,11 @@ def create_robustness_components():
 
 
 def record_operation_start(
-  operation_name: str, endpoint: str, graph_id: str, user_id: str, metadata: dict | None = None
+  operation_name: str,
+  endpoint: str,
+  graph_id: str,
+  user_id: str,
+  metadata: dict | None = None,
 ):
   """Record the start of an operation for metrics."""
   return record_operation_metric(

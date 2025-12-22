@@ -29,9 +29,7 @@ class Org(Model):
   name = Column(String, nullable=False)
   org_type = Column(SQLEnum(OrgType), nullable=False, default=OrgType.PERSONAL)
 
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

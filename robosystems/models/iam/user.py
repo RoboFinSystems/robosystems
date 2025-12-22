@@ -23,9 +23,7 @@ class User(Model):
   password_hash = Column(String, nullable=False)
   is_active = Column(Boolean, default=True, nullable=False)
   email_verified = Column(Boolean, default=False, nullable=False)
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   updated_at = Column(
     DateTime,
     default=lambda: datetime.now(UTC),

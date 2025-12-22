@@ -25,9 +25,7 @@ class UserToken(Model):
   token_type = Column(String(50), nullable=False)  # email_verification, password_reset
   expires_at = Column(DateTime, nullable=False)
   used_at = Column(DateTime, nullable=True)
-  created_at = Column(
-    DateTime, default=lambda: datetime.now(UTC), nullable=False
-  )
+  created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
   ip_address = Column(String(45), nullable=True)
   user_agent = Column(Text, nullable=True)
 

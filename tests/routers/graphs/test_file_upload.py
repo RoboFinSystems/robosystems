@@ -33,18 +33,19 @@ class TestUploadRouterAutoTableCreation:
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
 
-      with patch(
-        "robosystems.models.iam.graph_table.GraphTable.get_by_name",
-        return_value=None,
-      ), patch(
-        "robosystems.models.iam.graph_table.GraphTable.create",
-        return_value=mock_created_table,
-      ) as mock_create:
+      with (
+        patch(
+          "robosystems.models.iam.graph_table.GraphTable.get_by_name",
+          return_value=None,
+        ),
+        patch(
+          "robosystems.models.iam.graph_table.GraphTable.create",
+          return_value=mock_created_table,
+        ) as mock_create,
+      ):
         with patch("robosystems.operations.aws.s3.S3Client") as mock_s3_client_class:
           mock_s3 = Mock()
-          mock_s3.s3_client.generate_presigned_url = Mock(
-            return_value="https://s3.url"
-          )
+          mock_s3.s3_client.generate_presigned_url = Mock(return_value="https://s3.url")
           mock_s3_client_class.return_value = mock_s3
 
           with patch(
@@ -91,18 +92,19 @@ class TestUploadRouterAutoTableCreation:
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
 
-      with patch(
-        "robosystems.models.iam.graph_table.GraphTable.get_by_name",
-        return_value=None,
-      ), patch(
-        "robosystems.models.iam.graph_table.GraphTable.create",
-        return_value=mock_created_table,
-      ) as mock_create:
+      with (
+        patch(
+          "robosystems.models.iam.graph_table.GraphTable.get_by_name",
+          return_value=None,
+        ),
+        patch(
+          "robosystems.models.iam.graph_table.GraphTable.create",
+          return_value=mock_created_table,
+        ) as mock_create,
+      ):
         with patch("robosystems.operations.aws.s3.S3Client") as mock_s3_client_class:
           mock_s3 = Mock()
-          mock_s3.s3_client.generate_presigned_url = Mock(
-            return_value="https://s3.url"
-          )
+          mock_s3.s3_client.generate_presigned_url = Mock(return_value="https://s3.url")
           mock_s3_client_class.return_value = mock_s3
 
           with patch(
@@ -149,17 +151,16 @@ class TestUploadRouterAutoTableCreation:
     ) as mock_get_repo:
       mock_get_repo.return_value = Mock()
 
-      with patch(
-        "robosystems.models.iam.graph_table.GraphTable.get_by_name",
-        return_value=existing_table,
-      ), patch(
-        "robosystems.models.iam.graph_table.GraphTable.create"
-      ) as mock_create:
+      with (
+        patch(
+          "robosystems.models.iam.graph_table.GraphTable.get_by_name",
+          return_value=existing_table,
+        ),
+        patch("robosystems.models.iam.graph_table.GraphTable.create") as mock_create,
+      ):
         with patch("robosystems.operations.aws.s3.S3Client") as mock_s3_client_class:
           mock_s3 = Mock()
-          mock_s3.s3_client.generate_presigned_url = Mock(
-            return_value="https://s3.url"
-          )
+          mock_s3.s3_client.generate_presigned_url = Mock(return_value="https://s3.url")
           mock_s3_client_class.return_value = mock_s3
 
           with patch(

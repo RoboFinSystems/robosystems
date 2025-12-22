@@ -132,9 +132,7 @@ class GraphFile(Base):
     session.commit()
     session.refresh(self)
 
-  def mark_duckdb_staged(
-    self, session: Session, row_count: int | None = None
-  ) -> None:
+  def mark_duckdb_staged(self, session: Session, row_count: int | None = None) -> None:
     """Mark file as successfully staged in DuckDB."""
     self.duckdb_status = "staged"
     self.duckdb_staged_at = datetime.now(UTC)

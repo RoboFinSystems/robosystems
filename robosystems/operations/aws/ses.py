@@ -290,9 +290,7 @@ The {app_name} Team""",
       return False
 
     except Exception as e:
-      logger.error(
-        f"Unexpected error sending {email_type} email to {to_email}: {e!s}"
-      )
+      logger.error(f"Unexpected error sending {email_type} email to {to_email}: {e!s}")
       return False
 
   async def send_verification_email(

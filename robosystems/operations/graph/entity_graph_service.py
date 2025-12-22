@@ -51,9 +51,7 @@ class EntityGraphService:
   entity-specific workflows and optimizations.
   """
 
-  def __init__(
-    self, session: Session | scoped_session[Session] | None = None
-  ) -> None:
+  def __init__(self, session: Session | scoped_session[Session] | None = None) -> None:
     if session is None:
       # For backward compatibility, create a new session if not provided
       from ...database import session as global_session
@@ -801,9 +799,7 @@ class EntityGraphServiceSync:
   by wrapping async operations in asyncio.run().
   """
 
-  def __init__(
-    self, session: Session | scoped_session[Session] | None = None
-  ) -> None:
+  def __init__(self, session: Session | scoped_session[Session] | None = None) -> None:
     self._async_service = EntityGraphService(session=session)
 
   def create_entity_with_new_graph(

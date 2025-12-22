@@ -55,7 +55,9 @@ class TestSECClient:
 
     # Verify
     expected_url = "https://www.sec.gov/files/company_tickers.json"
-    mock_get.assert_called_once_with(expected_url, headers=client._headers, timeout=SEC_REQUEST_TIMEOUT)
+    mock_get.assert_called_once_with(
+      expected_url, headers=client._headers, timeout=SEC_REQUEST_TIMEOUT
+    )
     assert result == mock_response.json.return_value
 
   @patch("robosystems.adapters.sec.client.edgar.requests.get")
@@ -142,7 +144,9 @@ class TestSECClient:
 
     # Verify
     expected_url = "https://data.sec.gov/submissions/CIK0000320193.json"
-    mock_get.assert_called_once_with(expected_url, headers=client_with_cik._headers, timeout=SEC_REQUEST_TIMEOUT)
+    mock_get.assert_called_once_with(
+      expected_url, headers=client_with_cik._headers, timeout=SEC_REQUEST_TIMEOUT
+    )
     assert result == mock_response.json.return_value
 
   def test_get_submissions_no_cik(self, client):
@@ -359,7 +363,9 @@ class TestSECClient:
 
     # Verify
     assert isinstance(result, ZipFile)
-    mock_get.assert_called_once_with(zip_url, headers=client._headers, timeout=SEC_REQUEST_TIMEOUT)
+    mock_get.assert_called_once_with(
+      zip_url, headers=client._headers, timeout=SEC_REQUEST_TIMEOUT
+    )
 
   @patch("robosystems.adapters.sec.client.edgar.requests.get")
   def test_download_xbrlzip_empty_response(self, mock_get, client):
