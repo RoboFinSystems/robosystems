@@ -66,7 +66,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return {"statusCode": 200, "body": f"Successfully completed {step}"}
 
   except Exception as e:
-    logger.error(f"Error in {step}: {e!s}")
+    # Log only error type to avoid exposing sensitive data in exceptions
+    error_type = type(e).__name__
+    logger.error(f"Error in {step}: {error_type}")
     raise
 
 
@@ -114,7 +116,8 @@ def create_secret(secret_arn: str, token: str) -> None:
     logger.info("Successfully created new auth token in AWSPENDING version")
 
   except Exception as e:
-    logger.error(f"Failed to create secret: {e!s}")
+    error_type = type(e).__name__
+    logger.error(f"Failed to create secret: {error_type}")
     raise
 
 
@@ -162,7 +165,8 @@ def set_secret(secret_arn: str, token: str) -> None:
     logger.info("Auth token rotation completed successfully")
 
   except Exception as e:
-    logger.error(f"Failed to set secret in Valkey: {e!s}")
+    error_type = type(e).__name__
+    logger.error(f"Failed to set secret in Valkey: {error_type}")
     raise
 
 
@@ -250,7 +254,8 @@ def test_secret(secret_arn: str, token: str) -> None:
     )
 
   except Exception as e:
-    logger.error(f"Failed to test secret: {e!s}")
+    error_type = type(e).__name__
+    logger.error(f"Failed to test secret: {error_type}")
     raise
 
 
@@ -299,7 +304,8 @@ def finish_secret(secret_arn: str, token: str) -> None:
     logger.info("Successfully removed AWSPENDING stage")
 
   except Exception as e:
-    logger.error(f"Failed to finish secret rotation: {e!s}")
+    error_type = type(e).__name__
+    logger.error(f"Failed to finish secret rotation: {error_type}")
     raise
 
 

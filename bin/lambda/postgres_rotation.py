@@ -238,7 +238,8 @@ def set_secret(arn: str, token: str, environment: str) -> None:
     )
 
   except Exception as e:
-    logger.error(f"setSecret: Unable to set password: {e!s}")
+    error_type = type(e).__name__
+    logger.error(f"setSecret: Unable to set password: {error_type}")
     raise
   finally:
     if conn:
@@ -283,7 +284,8 @@ def test_secret(arn: str, token: str, environment: str) -> None:
     )
 
   except Exception as e:
-    logger.error(f"testSecret: Unable to connect with pending secret: {e!s}")
+    error_type = type(e).__name__
+    logger.error(f"testSecret: Unable to connect with pending secret: {error_type}")
     raise
   finally:
     if conn:

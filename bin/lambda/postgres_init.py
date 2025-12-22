@@ -56,7 +56,9 @@ def update_or_create_secret(secret_name, secret_value, description=None, tags=No
       response = secrets_client.create_secret(**create_args)
       return {"status": "created", "arn": response["ARN"]}
   except Exception as e:
-    print(f"Error managing secret {secret_name}: {e!s}")
+    # Avoid logging full exception which may contain sensitive data
+    error_type = type(e).__name__
+    print(f"Error managing secret {secret_name}: {error_type}")
     raise
 
 
@@ -94,11 +96,14 @@ def create_database_if_not_exists(host, port, username, password, db_name):
         return {"status": "exists", "database": db_name}
 
   except psycopg2.Error as e:
-    print(f"PostgreSQL error creating database '{db_name}': {e!s}")
-    return {"status": "error", "database": db_name, "error": str(e)}
+    # Log only error type to avoid exposing connection details
+    error_type = type(e).__name__
+    print(f"PostgreSQL error creating database '{db_name}': {error_type}")
+    return {"status": "error", "database": db_name, "error": error_type}
   except Exception as e:
-    print(f"Error creating database '{db_name}': {e!s}")
-    return {"status": "error", "database": db_name, "error": str(e)}
+    error_type = type(e).__name__
+    print(f"Error creating database '{db_name}': {error_type}")
+    return {"status": "error", "database": db_name, "error": error_type}
   finally:
     if "conn" in locals():
       conn.close()
@@ -159,8 +164,9 @@ def lambda_handler(event, context):
       )
       secrets_results.append({"secret_name": secret_name, "result": secret_result})
     except Exception as e:
-      print(f"Error creating/updating PostgreSQL secret: {e!s}")
-      secrets_results.append({"secret_name": secret_name, "error": str(e)})
+      error_type = type(e).__name__
+      print(f"Error creating/updating PostgreSQL secret: {error_type}")
+      secrets_results.append({"secret_name": secret_name, "error": error_type})
 
     # Create additional databases if configured
     # These are databases that share the same RDS instance but need separate schemas
@@ -190,10 +196,11 @@ def lambda_handler(event, context):
     }
 
   except Exception as e:
-    print(f"Error: {e!s}")
+    error_type = type(e).__name__
+    print(f"Error: {error_type}")
     return {
       "statusCode": 500,
       "body": json.dumps(
-        {"message": "Error updating PostgreSQL configs", "error": str(e)}
+        {"message": "Error updating PostgreSQL configs", "error": error_type}
       ),
     }

@@ -37,7 +37,7 @@ def pending_subscription_sensor(context: SensorEvaluationContext):
     return
 
   from robosystems.database import session as SessionLocal
-  from robosystems.models.iam import BillingSubscription
+  from robosystems.models.billing import BillingSubscription
 
   session = SessionLocal()
   try:
@@ -46,7 +46,7 @@ def pending_subscription_sensor(context: SensorEvaluationContext):
       session.query(BillingSubscription)
       .filter(
         BillingSubscription.status == "provisioning",
-        BillingSubscription.product_type == "graph",
+        BillingSubscription.resource_type == "graph",
       )
       .all()
     )
@@ -59,7 +59,7 @@ def pending_subscription_sensor(context: SensorEvaluationContext):
       run_key = f"provision-graph-{sub.id}"
 
       context.log.info(
-        f"Found pending graph subscription {sub.id} for user {sub.user_id}"
+        f"Found pending graph subscription {sub.id} for org {sub.org_id}"
       )
 
       yield RunRequest(
@@ -69,7 +69,7 @@ def pending_subscription_sensor(context: SensorEvaluationContext):
             "get_subscription_details": {
               "config": {
                 "subscription_id": str(sub.id),
-                "user_id": str(sub.user_id),
+                "org_id": str(sub.org_id),
                 "tier": sub.plan_name,
               }
             }
@@ -78,7 +78,9 @@ def pending_subscription_sensor(context: SensorEvaluationContext):
       )
 
   except Exception as e:
-    context.log.error(f"Error checking pending subscriptions: {e}")
+    context.log.error(f"Error checking pending subscriptions: {type(e).__name__}")
+    # Re-raise to mark sensor run as failed - Dagster will retry
+    raise
   finally:
     session.close()
 
@@ -99,7 +101,7 @@ def pending_repository_sensor(context: SensorEvaluationContext):
     return
 
   from robosystems.database import session as SessionLocal
-  from robosystems.models.iam import BillingSubscription
+  from robosystems.models.billing import BillingSubscription
 
   session = SessionLocal()
   try:
@@ -108,7 +110,7 @@ def pending_repository_sensor(context: SensorEvaluationContext):
       session.query(BillingSubscription)
       .filter(
         BillingSubscription.status == "provisioning",
-        BillingSubscription.product_type == "repository",
+        BillingSubscription.resource_type == "repository",
       )
       .all()
     )
@@ -125,7 +127,7 @@ def pending_repository_sensor(context: SensorEvaluationContext):
 
       context.log.info(
         f"Found pending repository subscription {sub.id} "
-        f"for user {sub.user_id}, repository {repository_name}"
+        f"for org {sub.org_id}, repository {repository_name}"
       )
 
       yield RunRequest(
@@ -135,7 +137,7 @@ def pending_repository_sensor(context: SensorEvaluationContext):
             "get_repository_subscription": {
               "config": {
                 "subscription_id": str(sub.id),
-                "user_id": str(sub.user_id),
+                "org_id": str(sub.org_id),
                 "repository_name": repository_name,
               }
             }
@@ -144,6 +146,10 @@ def pending_repository_sensor(context: SensorEvaluationContext):
       )
 
   except Exception as e:
-    context.log.error(f"Error checking pending repository subscriptions: {e}")
+    context.log.error(
+      f"Error checking pending repository subscriptions: {type(e).__name__}"
+    )
+    # Re-raise to mark sensor run as failed - Dagster will retry
+    raise
   finally:
     session.close()
