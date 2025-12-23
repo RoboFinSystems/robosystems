@@ -2,7 +2,7 @@
 
 Pipeline stages (run independently via separate jobs):
 
-1. DOWNLOAD (sec_download_only job):
+1. DOWNLOAD (sec_download job):
    - sec_companies_list - Fetch company list from SEC EDGAR
    - sec_raw_filings - Download XBRL ZIPs (year-partitioned)
 

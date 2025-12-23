@@ -1,5 +1,5 @@
 """
-UUID v7 Utilities for Optimal Database Performance
+UUID Utilities for Optimal Database Performance
 
 UUIDv7 provides time-ordered UUIDs that solve the performance problems
 with random UUIDs or MD5 hashes as primary keys. They maintain:
@@ -7,16 +7,23 @@ with random UUIDs or MD5 hashes as primary keys. They maintain:
 - Better cache locality (fewer cache misses)
 - Efficient B-tree insertions (no random page splits)
 
+UUID5 provides truly deterministic UUIDs based on namespace + content hashing.
+Used for entities that need consistent IDs across pipeline runs and workers.
+
 Performance comparison:
 - MD5 hash: Random 32-char hex strings, worst performance
 - UUID v4: Random 128-bit values, poor locality
+- UUID v5: Deterministic, hash-based, consistent across runs
 - UUID v7: Time-ordered, sequential, optimal for indexes
 """
 
+import uuid
+
 from uuid6 import uuid7
 
-# Cache for deterministic ID generation
-_id_cache: dict[str, str] = {}
+# Custom namespace UUID for RoboSystems deterministic ID generation
+# This ensures our UUIDs don't collide with other systems using UUID5
+ROBOSYSTEMS_NAMESPACE = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 
 def generate_uuid7() -> str:
@@ -56,29 +63,27 @@ def generate_prefixed_uuid7(prefix: str) -> str:
 
 def generate_deterministic_uuid7(content: str, namespace: str | None = None) -> str:
   """
-  Generate a deterministic UUID v7 based on content.
+  Generate a truly deterministic UUID based on content using UUID5.
 
-  For global entities that need consistent IDs across runs,
-  we use a cache to maintain the same UUID for the same content.
-  This ensures deduplication while using performant UUIDs.
+  Uses SHA-1 hashing of a namespace UUID + content to produce the same
+  UUID every time for the same input, regardless of process, worker,
+  or pipeline run. This ensures consistent entity identification across
+  parallel processing and multiple pipeline executions.
 
   Args:
       content: String to generate ID from
-      namespace: Optional namespace to prevent collisions
+      namespace: Optional namespace to prevent collisions between entity types
 
   Returns:
-      str: Cached or new UUID v7 string
+      str: Deterministic UUID5 string (always the same for same inputs)
   """
-  # Add namespace if provided
-  cache_key = f"{namespace}:{content}" if namespace else content
+  # Combine namespace with content to prevent collisions between entity types
+  # e.g., "entity:https://sec.gov/..." vs "element:https://sec.gov/..."
+  full_content = f"{namespace}:{content}" if namespace else content
 
-  if cache_key in _id_cache:
-    return _id_cache[cache_key]
-
-  # For new content, generate a UUID v7
-  new_id = generate_uuid7()
-  _id_cache[cache_key] = new_id
-  return new_id
+  # Generate UUID5 using our custom namespace - truly deterministic
+  deterministic_id = uuid.uuid5(ROBOSYSTEMS_NAMESPACE, full_content)
+  return str(deterministic_id)
 
 
 def parse_uuid7(uuid_str: str) -> str | None:

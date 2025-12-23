@@ -34,7 +34,7 @@ class TestDefinitionsLoad:
       "provision_graph_job",
       "create_graph_job",
       "backup_graph_job",
-      "sec_download_only",
+      "sec_download",
       "sec_process",
       "sec_materialize",
     ]

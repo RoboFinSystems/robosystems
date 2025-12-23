@@ -303,6 +303,7 @@ duckdb-query-i graph_id env=_local_env:
 #   just sec-load NVDA 2024
 #   just sec-download 50 2024
 #   just sec-process 2024
+#   just sec-pipeline 50 2024
 
 # Load single ticker end-to-end (download + process + materialize)
 sec-load ticker year="" env=_local_env:
@@ -322,6 +323,12 @@ sec-process year="" limit="" concurrency="2" env=_local_env:
 # Materialize processed parquet files to graph (ingests all available data)
 sec-materialize env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize
+
+# Full pipeline: download → process → materialize (top N companies by market cap)
+sec-pipeline count="10" year="2025" limit="":
+    @just sec-download {{count}} {{year}}
+    @just sec-process {{year}} {{limit}}
+    @just sec-materialize
 
 # Reset SEC database and optionally S3 data
 sec-reset clear_s3="" env=_local_env:

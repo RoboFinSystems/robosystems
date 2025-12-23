@@ -3,7 +3,7 @@
 Pipeline Architecture (3 phases, run independently):
 
   Phase 1 - Download:
-    sec_download_only_job: sec_companies_list → sec_raw_filings
+    sec_download_job: sec_companies_list → sec_raw_filings
     Downloads raw XBRL ZIPs to S3.
 
   Phase 2 - Process (sensor-triggered or manual):
@@ -52,8 +52,8 @@ from robosystems.dagster.assets import (
 # Phase 1: Download (year-partitioned)
 # Downloads raw XBRL ZIPs to S3.
 # Use with sec_processing_sensor to trigger parallel processing.
-sec_download_only_job = define_asset_job(
-  name="sec_download_only",
+sec_download_job = define_asset_job(
+  name="sec_download",
   description="Download SEC XBRL filings to S3. Use sensor or just sec-process for parallel processing.",
   selection=AssetSelection.assets(
     sec_companies_list,
@@ -114,7 +114,7 @@ SEC_MATERIALIZE_SCHEDULE_STATUS = (
 sec_daily_download_schedule = ScheduleDefinition(
   name="sec_daily_download",
   description="Daily SEC download at 6 AM UTC. Sensor triggers parallel processing.",
-  job=sec_download_only_job,
+  job=sec_download_job,
   cron_schedule="0 6 * * *",
   default_status=SEC_DOWNLOAD_SCHEDULE_STATUS,
   run_config=RunConfig(

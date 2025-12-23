@@ -5,7 +5,7 @@ SEC Pipeline - XBRL Data Processing via Dagster.
 
 This script manages SEC XBRL data processing through 3 independent phases:
 
-  Phase 1 - Download: sec_download_only job
+  Phase 1 - Download: sec_download job
     Downloads raw XBRL ZIPs to S3 (year-partitioned).
 
   Phase 2 - Process: sec_process job (parallel)
@@ -166,7 +166,7 @@ class SECPipeline:
         }
       }
     else:
-      # sec_download_only job: download raw ZIPs only (no processing)
+      # sec_download job: download raw ZIPs only (no processing)
       config = {
         "ops": {
           "sec_companies_list": {"config": {"ticker_filter": tickers}},
@@ -286,7 +286,7 @@ class SECPipeline:
         )
 
         result = self.run_stage(
-          job_name="sec_download_only",
+          job_name="sec_download",
           config_path=config_path,
           year=year,
           timeout=self.download_timeout,
@@ -720,7 +720,7 @@ def cmd_download(args):
     )
 
     result = pipeline.run_stage(
-      job_name="sec_download_only",
+      job_name="sec_download",
       config_path=config_path,
       year=year,
       timeout=args.timeout,

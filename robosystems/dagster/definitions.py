@@ -86,7 +86,7 @@ from robosystems.dagster.jobs.provisioning import (
 )
 from robosystems.dagster.jobs.sec import (
   sec_daily_download_schedule,
-  sec_download_only_job,
+  sec_download_job,
   sec_materialize_job,
   sec_nightly_materialize_schedule,
   sec_process_job,
@@ -155,7 +155,7 @@ all_jobs = [
   materialize_file_job,
   materialize_graph_job,
   # SEC pipeline jobs
-  sec_download_only_job,  # Download raw filings to S3
+  sec_download_job,  # Download raw filings to S3
   sec_process_job,  # Per-filing processing (sensor-triggered)
   sec_materialize_job,  # Staging + materialization to graph
   # Notification jobs
