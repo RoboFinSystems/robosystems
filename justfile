@@ -349,10 +349,6 @@ setup-aws:
 setup-gha:
     @bin/setup/gha.sh
 
-# GitHub Actions Runner bootstrap infrastructure
-bootstrap branch="main":
-    gh workflow run gha-runner.yml --ref {{branch}}
-
 # Generate secure random key for secrets
 generate-key:
     @echo "Generated secure 32-byte base64 key:"

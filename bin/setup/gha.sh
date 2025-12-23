@@ -219,6 +219,10 @@ function setup_minimum_config() {
     gh variable set DAGSTER_MAX_CAPACITY_STAGING --body "2"
     gh variable set DAGSTER_ASG_REFRESH_PROD --body "true"
     gh variable set DAGSTER_ASG_REFRESH_STAGING --body "true"
+    gh variable set DAGSTER_RUN_JOB_CPU_PROD --body "1024"
+    gh variable set DAGSTER_RUN_JOB_CPU_STAGING --body "1024"
+    gh variable set DAGSTER_RUN_JOB_MEMORY_PROD --body "4096"
+    gh variable set DAGSTER_RUN_JOB_MEMORY_STAGING --body "4096"
     gh variable set RUN_MIGRATIONS_PROD --body "false"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
@@ -301,14 +305,6 @@ function setup_minimum_config() {
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
     gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
     gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
-
-    # GHA Runner Configuration
-    gh variable set RUNNER_STORAGE_SIZE --body "20"
-    gh variable set RUNNER_MIN_INSTANCES --body "1"
-    gh variable set RUNNER_MAX_INSTANCES --body "6"
-    gh variable set RUNNER_DESIRED_INSTANCES --body "1"
-    gh variable set RUNNER_ENVIRONMENT --body "ci"
-    gh variable set RUNNER_GITHUB_ORG --body "$GITHUB_ORG"
 
     # Notification Configuration
     gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
@@ -450,6 +446,10 @@ function setup_full_config() {
     gh variable set DAGSTER_MAX_CAPACITY_STAGING --body "2"
     gh variable set DAGSTER_ASG_REFRESH_PROD --body "true"
     gh variable set DAGSTER_ASG_REFRESH_STAGING --body "true"
+    gh variable set DAGSTER_RUN_JOB_CPU_PROD --body "1024"
+    gh variable set DAGSTER_RUN_JOB_CPU_STAGING --body "1024"
+    gh variable set DAGSTER_RUN_JOB_MEMORY_PROD --body "4096"
+    gh variable set DAGSTER_RUN_JOB_MEMORY_STAGING --body "4096"
     gh variable set RUN_MIGRATIONS_PROD --body "false"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
@@ -532,14 +532,6 @@ function setup_full_config() {
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
     gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
     gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
-
-    # GHA Runner Configuration
-    gh variable set RUNNER_STORAGE_SIZE --body "20"
-    gh variable set RUNNER_MIN_INSTANCES --body "1"
-    gh variable set RUNNER_MAX_INSTANCES --body "6"
-    gh variable set RUNNER_DESIRED_INSTANCES --body "1"
-    gh variable set RUNNER_ENVIRONMENT --body "ci"
-    gh variable set RUNNER_GITHUB_ORG --body "$GITHUB_ORG"
 
     # Notification Configuration
     gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
