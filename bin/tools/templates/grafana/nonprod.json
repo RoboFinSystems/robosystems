@@ -2771,7 +2771,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-staging"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",
@@ -2881,7 +2881,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-staging"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",
@@ -3025,7 +3025,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-staging"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",
@@ -3165,7 +3165,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-staging"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",

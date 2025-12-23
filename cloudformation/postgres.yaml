@@ -62,7 +62,7 @@ Parameters:
   DBInstanceName:
     Type: String
     Description: RDS instance identifier
-    Default: robosystems-iam
+    Default: robosystems
     AllowedPattern: ^[a-z][a-z0-9-]*$
     ConstraintDescription: Must begin with a letter and contain only lowercase
       letters, numbers, and hyphens
@@ -349,7 +349,7 @@ Resources:
     Properties:
       AlarmName: !Sub robosystems-postgres-${Environment}-health-composite
       AlarmDescription: Overall PostgreSQL health including rotation status
-      AlarmRule: !Sub 'ALARM("${PostgresRotationFailureAlarm}") OR ALARM("${CloudWatchAlarmRoboSystemsPostgresAlarm}")'
+      AlarmRule: !Sub 'ALARM("${PostgresRotationFailureAlarm}") OR ALARM("${RDSStorageLowAlarm}")'
       ActionsEnabled: true
       AlarmActions:
         - !Ref PostgresAlertTopic
@@ -628,7 +628,7 @@ Resources:
           Value: CloudFormation
 
   # CloudWatch alarm for low storage space (RDS only - Aurora storage is serverless)
-  CloudWatchAlarmRoboSystemsPostgresAlarm:
+  RDSStorageLowAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: IsRDS
     DeletionPolicy: Delete

@@ -280,13 +280,13 @@ print_info "Retrieving database connection details..."
 # Get RDS endpoint from CloudFormation
 if [ "\$ENVIRONMENT" = "prod" ]; then
   RDS_ENDPOINT=\$(aws cloudformation describe-stacks \
-    --stack-name RoboSystemsPostgresIAMProd \
+    --stack-name RoboSystemsPostgresProd \
     --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue" \
     --output text 2>/dev/null)
   SECRET_ID="robosystems/prod/postgres"
 else
   RDS_ENDPOINT=\$(aws cloudformation describe-stacks \
-    --stack-name RoboSystemsPostgresIAMStaging \
+    --stack-name RoboSystemsPostgresStaging \
     --query "Stacks[0].Outputs[?OutputKey=='DatabaseEndpoint'].OutputValue" \
     --output text 2>/dev/null)
   SECRET_ID="robosystems/staging/postgres"
@@ -295,7 +295,7 @@ fi
 # Validate RDS endpoint was retrieved
 if [[ -z "\$RDS_ENDPOINT" || "\$RDS_ENDPOINT" == "None" ]]; then
   print_error "Failed to retrieve RDS endpoint from CloudFormation"
-  print_error "Stack: RoboSystemsPostgresIAM\${ENVIRONMENT^}"
+  print_error "Stack: RoboSystemsPostgres\${ENVIRONMENT^}"
   exit 1
 fi
 

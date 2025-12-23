@@ -186,7 +186,7 @@ Resources:
                 Action:
                   - cloudformation:DescribeStacks
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/RoboSystemsPostgresIAM*/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/RoboSystemsPostgres*/*"
               - Effect: Allow
                 Action:
                   - ecr:GetAuthorizationToken
