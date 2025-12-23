@@ -165,3 +165,7 @@ def complete_lifecycle(asg_name, hook_name, instance_id, result):
     InstanceId=instance_id,
   )
   return {"statusCode": 200, "body": json.dumps(f"Lifecycle completed: {result}")}
+
+
+# Alias for Lambda container deployment (CloudFormation ImageConfig.Command)
+lambda_handler = handler

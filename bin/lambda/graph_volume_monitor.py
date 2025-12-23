@@ -1223,3 +1223,7 @@ def sync_volume_registry():
   except Exception as e:
     logger.error(f"Failed to sync volume registry: {e}")
     raise
+
+
+# Alias for Lambda container deployment (CloudFormation ImageConfig.Command)
+lambda_handler = handler
