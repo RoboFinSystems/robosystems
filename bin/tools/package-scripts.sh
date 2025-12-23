@@ -62,9 +62,9 @@ package_lambda() {
 
 # postgres-init: Updates secrets AND creates additional databases (dagster, etc.)
 # psycopg2-binary needed for database creation
-package_lambda "postgres-init" "postgres_init.py" "psycopg2-binary==2.9.10"
+package_lambda "postgres-init" "postgres_init.py" "psycopg2-binary==2.9.11"
 
-package_lambda "postgres-rotation" "postgres_rotation.py" "psycopg2-binary==2.9.10"
+package_lambda "postgres-rotation" "postgres_rotation.py" "psycopg2-binary==2.9.11"
 
 package_lambda "valkey-rotation" "valkey_rotation.py" "redis==5.0.1"
 
