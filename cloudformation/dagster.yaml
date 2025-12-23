@@ -532,6 +532,13 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            # EcsRunLauncher configuration - needed for webserver to understand run launcher
+            - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
+              Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
+            - Name: DAGSTER_ECS_CLUSTER
+              Value: !Ref DagsterCluster
+            - Name: DAGSTER_ECS_LAUNCH_TYPE
+              Value: FARGATE
           HealthCheck:
             Command:
               [
