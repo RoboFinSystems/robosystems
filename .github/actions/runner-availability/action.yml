@@ -1,17 +1,21 @@
 name: 'Check Runner Availability'
-description: 'Check if self-hosted GitHub Actions runners are available and set outputs for conditional runner selection'
+description: 'Check if self-hosted GitHub Actions runners are available and set outputs for conditional runner selection. Supports both organization and repository-level runners for fork compatibility.'
 
 inputs:
   runner_labels:
-    description: 'Comma-separated list of required runner labels'
+    description: 'Comma-separated list of required runner labels (e.g., "self-hosted,Linux,X64")'
     required: false
-    default: 'self-hosted,Linux,X64,AL2023,ci'
+    default: 'self-hosted,Linux,X64'
+  runner_scope:
+    description: 'Where to check for runners: "org" (organization), "repo" (repository), or "both" (check repo first, fallback to org)'
+    required: false
+    default: 'both'
   timeout_minutes:
     description: 'Timeout for the check in minutes'
     required: false
     default: '2'
   github_token:
-    description: 'GitHub token for API access'
+    description: 'GitHub token for API access (needs admin:org for org runners, or repo scope for repo runners)'
     required: true
 
 outputs:
@@ -32,106 +36,133 @@ runs:
       id: check-runners
       shell: bash
       run: |
+        RUNNER_LABELS="${{ inputs.runner_labels }}"
+
+        # If no labels or "github-hosted", use GitHub-hosted runners (skip API check)
+        if [ -z "$RUNNER_LABELS" ] || [ "$RUNNER_LABELS" = "github-hosted" ]; then
+          echo "✅ Using GitHub-hosted runners (ubuntu-latest)"
+          echo ""
+          echo "runners_available=false" >> $GITHUB_OUTPUT
+          echo "runner_type=github-hosted" >> $GITHUB_OUTPUT
+          echo 'runner_config=["ubuntu-latest"]' >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
         echo "🔍 Checking if self-hosted GitHub Actions runners are available..."
         echo "Repository: ${{ github.repository }}"
         echo "Required labels: ${{ inputs.runner_labels }}"
-        echo "Timeout: ${{ inputs.timeout_minutes }} minute(s)"
+        echo "Runner scope: ${{ inputs.runner_scope }}"
         echo ""
-        
+
         # Convert comma-separated labels to array
         IFS=',' read -ra REQUIRED_LABELS <<< "${{ inputs.runner_labels }}"
-        
-        # Extract organization from repository name
+
+        # Build the runner_config JSON array from the input labels
+        RUNNER_CONFIG_JSON=$(printf '%s\n' "${REQUIRED_LABELS[@]}" | jq -R . | jq -s .)
+
+        # Extract org and repo from repository name
         ORG_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f1)
-        echo "🔍 Checking organization: ${ORG_NAME}"
-        
-        # Get runner status from GitHub API (check organization-level runners)
-        echo "📡 Calling GitHub API: https://api.github.com/orgs/${ORG_NAME}/actions/runners"
-        RUNNERS_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" -H "Authorization: token ${{ inputs.github_token }}" \
-          "https://api.github.com/orgs/${ORG_NAME}/actions/runners")
-        
-        # Extract HTTP status code
-        HTTP_CODE=$(echo "$RUNNERS_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
-        RUNNERS_RESPONSE=$(echo "$RUNNERS_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
-        
-        echo "📊 HTTP Status: ${HTTP_CODE}"
-        echo "📋 API Response length: ${#RUNNERS_RESPONSE} characters"
-        
-        if [ "$HTTP_CODE" != "200" ]; then
-          echo "❌ GitHub API returned status ${HTTP_CODE}"
-          echo "Response: ${RUNNERS_RESPONSE}"
-          echo "❌ Cannot verify runner availability - defaulting to GitHub-hosted runners"
-          
-          # Set outputs for GitHub-hosted fallback
-          echo "runners_available=false" >> $GITHUB_OUTPUT
-          echo "runner_type=github-hosted" >> $GITHUB_OUTPUT
-          echo 'runner_config=["ubuntu-latest"]' >> $GITHUB_OUTPUT
-          exit 0
-        fi
-        
-        # Check if response is valid JSON
-        if ! echo "$RUNNERS_RESPONSE" | jq . >/dev/null 2>&1; then
-          echo "❌ Invalid JSON response from GitHub API"
-          echo "Response: ${RUNNERS_RESPONSE}"
-          echo "❌ Cannot parse runner data - defaulting to GitHub-hosted runners"
-          
-          # Set outputs for GitHub-hosted fallback
-          echo "runners_available=false" >> $GITHUB_OUTPUT
-          echo "runner_type=github-hosted" >> $GITHUB_OUTPUT
-          echo 'runner_config=["ubuntu-latest"]' >> $GITHUB_OUTPUT
-          exit 0
-        fi
-        
-        # Show all available runners for debugging
-        echo "🔍 All available runners:"
-        echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | "  - \(.name): \(.status) (labels: \(.labels | map(.name) | join(", ")))"' || echo "No runners found or jq parsing failed"
-        
-        # Check if we have any online self-hosted runners with required labels
-        echo "🎯 Looking for runners with labels: $(IFS=,; echo "${REQUIRED_LABELS[*]}")"
-        MATCHING_RUNNERS=$(echo "$RUNNERS_RESPONSE" | jq -r --argjson required_labels "$(printf '%s\n' "${REQUIRED_LABELS[@]}" | jq -R . | jq -s .)" '
-          .runners[] | 
-          select(.status == "online") |
-          select(.labels | map(.name) | sort as $runner_labels | 
-                 $required_labels | all(. as $req | $runner_labels | index($req))) |
-          .name
-        ' 2>/dev/null || echo "")
-        
-        RUNNER_COUNT=$(echo "$MATCHING_RUNNERS" | grep -v '^$' | wc -l || echo "0")
-        RUNNER_NAMES=$(echo "$MATCHING_RUNNERS" | grep -v '^$' | tr '\n' ',' | sed 's/,$//' || echo "")
-        
-        echo "✅ Found $RUNNER_COUNT matching runners: $RUNNER_NAMES"
-        
-        if [ "$RUNNER_COUNT" -gt 0 ]; then
-          echo "✅ Found $RUNNER_COUNT online self-hosted runner(s) with required labels:"
-          echo "$MATCHING_RUNNERS" | while IFS= read -r runner; do
-            [ -n "$runner" ] && echo "  - $runner"
-          done
-          echo ""
+        REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+
+        # Function to check runners from a given API endpoint
+        check_runners_at_endpoint() {
+          local endpoint="$1"
+          local scope_name="$2"
+
+          echo "📡 Checking ${scope_name} runners: ${endpoint}"
+          local response=$(curl -s -w "HTTP_CODE:%{http_code}" -H "Authorization: token ${{ inputs.github_token }}" "${endpoint}")
+
+          local http_code=$(echo "$response" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+          response=$(echo "$response" | sed 's/HTTP_CODE:[0-9]*$//')
+
+          if [ "$http_code" != "200" ]; then
+            echo "  ⚠️ ${scope_name} API returned status ${http_code} (may not have permission or no runners configured)"
+            echo ""
+            return 1
+          fi
+
+          if ! echo "$response" | jq . >/dev/null 2>&1; then
+            echo "  ⚠️ Invalid JSON response from ${scope_name} API"
+            return 1
+          fi
+
+          # Check for matching online runners
+          local matching=$(echo "$response" | jq -r --argjson required_labels "$(printf '%s\n' "${REQUIRED_LABELS[@]}" | jq -R . | jq -s .)" '
+            .runners[] |
+            select(.status == "online") |
+            select(.labels | map(.name) | sort as $runner_labels |
+                   $required_labels | all(. as $req | $runner_labels | index($req))) |
+            .name
+          ' 2>/dev/null || echo "")
+
+          local count=$(echo "$matching" | grep -v '^$' | wc -l | tr -d ' ')
+
+          if [ "$count" -gt 0 ]; then
+            echo "  ✅ Found $count online runner(s) in ${scope_name}:"
+            echo "$matching" | while IFS= read -r runner; do
+              [ -n "$runner" ] && echo "    - $runner"
+            done
+            return 0
+          else
+            echo "  ℹ️ No matching online runners in ${scope_name}"
+            # Show what's available for debugging
+            local all_runners=$(echo "$response" | jq -r '.runners[] | "    - \(.name): \(.status)"' 2>/dev/null || echo "    (none)")
+            if [ -n "$all_runners" ] && [ "$all_runners" != "    (none)" ]; then
+              echo "  Available runners:"
+              echo "$all_runners"
+            fi
+            return 1
+          fi
+        }
+
+        FOUND_RUNNERS=false
+
+        # Check based on scope setting
+        case "${{ inputs.runner_scope }}" in
+          repo)
+            echo "🔍 Checking repository-level runners only..."
+            if check_runners_at_endpoint "https://api.github.com/repos/${{ github.repository }}/actions/runners" "repository"; then
+              FOUND_RUNNERS=true
+            fi
+            ;;
+          org)
+            echo "🔍 Checking organization-level runners only..."
+            if check_runners_at_endpoint "https://api.github.com/orgs/${ORG_NAME}/actions/runners" "organization"; then
+              FOUND_RUNNERS=true
+            fi
+            ;;
+          both|*)
+            echo "🔍 Checking repository-level runners first, then organization..."
+            echo ""
+            if check_runners_at_endpoint "https://api.github.com/repos/${{ github.repository }}/actions/runners" "repository"; then
+              FOUND_RUNNERS=true
+            elif check_runners_at_endpoint "https://api.github.com/orgs/${ORG_NAME}/actions/runners" "organization"; then
+              FOUND_RUNNERS=true
+            fi
+            ;;
+        esac
+
+        echo ""
+
+        if [ "$FOUND_RUNNERS" = true ]; then
           echo "✅ Self-hosted runners are available and ready!"
-          
-          # Set outputs for available runners
+          echo ""
+
+          # Set outputs for available runners (use the input labels dynamically)
           echo "runners_available=true" >> $GITHUB_OUTPUT
           echo "runner_type=self-hosted" >> $GITHUB_OUTPUT
-          echo 'runner_config=["self-hosted", "Linux", "X64", "AL2023", "ci"]' >> $GITHUB_OUTPUT
-          
-          # Exit successfully with self-hosted configuration
-          exit 0
+          echo "runner_config=${RUNNER_CONFIG_JSON}" >> $GITHUB_OUTPUT
         else
-          echo "❌ No online self-hosted runners found with required labels"
+          echo "⚠️ No suitable self-hosted runners available"
+          echo "🔄 Falling back to GitHub-hosted runners (ubuntu-latest)"
           echo ""
-          echo "📋 All available runners:"
-          echo "$RUNNERS_RESPONSE" | jq -r '.runners[] | "  - \(.name): \(.status) (labels: \(.labels | map(.name) | join(", ")))"'
+          echo "💡 To use self-hosted runners:"
+          echo "   - For forks: Add a self-hosted runner to your repository"
+          echo "   - Labels needed: ${{ inputs.runner_labels }}"
           echo ""
-          echo "🔍 Required labels: ${{ inputs.runner_labels }}"
-          echo "🚀 Runner deployment may still be in progress."
-          echo ""
-          echo "⚠️ No suitable self-hosted runners available - will recommend GitHub-hosted runners"
-          
+
           # Set outputs for fallback to GitHub-hosted runners
           echo "runners_available=false" >> $GITHUB_OUTPUT
           echo "runner_type=github-hosted" >> $GITHUB_OUTPUT
           echo 'runner_config=["ubuntu-latest"]' >> $GITHUB_OUTPUT
-          
-          # Exit successfully with fallback configuration
-          exit 0
         fi

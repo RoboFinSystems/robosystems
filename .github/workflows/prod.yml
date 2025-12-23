@@ -31,7 +31,8 @@ jobs:
         id: check
         uses: ./.github/actions/runner-availability
         with:
-          runner_labels: "self-hosted,Linux,X64,AL2023,ci"
+          runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
+          runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
           timeout_minutes: "2"
           github_token: ${{ secrets.ACTIONS_TOKEN }}
 
@@ -607,11 +608,9 @@ jobs:
       webserver_desired_count: ${{ vars.DAGSTER_WEBSERVER_DESIRED_COUNT_PROD || '1' }}
       webserver_min_capacity: ${{ vars.DAGSTER_WEBSERVER_MIN_CAPACITY_PROD || '1' }}
       webserver_max_capacity: ${{ vars.DAGSTER_WEBSERVER_MAX_CAPACITY_PROD || '3' }}
-      # EC2 Run Worker Configuration
-      run_worker_instance_type: ${{ vars.DAGSTER_RUN_WORKER_INSTANCE_TYPE_PROD || 'r7g.large' }}
-      run_worker_min_instances: ${{ vars.DAGSTER_RUN_WORKER_MIN_INSTANCES_PROD || '0' }}
-      run_worker_max_instances: ${{ vars.DAGSTER_RUN_WORKER_MAX_INSTANCES_PROD || '5' }}
-      run_worker_ebs_volume_size: ${{ vars.DAGSTER_RUN_WORKER_EBS_SIZE_PROD || '500' }}
+      # Run Job Configuration (for EcsRunLauncher)
+      run_job_cpu: ${{ vars.DAGSTER_RUN_JOB_CPU_PROD || '1024' }}
+      run_job_memory: ${{ vars.DAGSTER_RUN_JOB_MEMORY_PROD || '4096' }}
       # Cache Configuration
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}

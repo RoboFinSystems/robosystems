@@ -81,6 +81,18 @@ on:
         type: string
         default: "3"
 
+      # Run Job Configuration (for EcsRunLauncher)
+      run_job_cpu:
+        description: "CPU units for Dagster run jobs"
+        required: false
+        type: string
+        default: "1024"
+      run_job_memory:
+        description: "Memory in MiB for Dagster run jobs"
+        required: false
+        type: string
+        default: "4096"
+
       # Cache Configuration
       valkey_url:
         description: "Valkey ElastiCache endpoint URL"
@@ -166,6 +178,8 @@ jobs:
                 ParameterKey=WebserverDesiredCount,ParameterValue=${{ inputs.webserver_desired_count }} \
                 ParameterKey=WebserverMinCapacity,ParameterValue=${{ inputs.webserver_min_capacity }} \
                 ParameterKey=WebserverMaxCapacity,ParameterValue=${{ inputs.webserver_max_capacity }} \
+                ParameterKey=RunJobCpu,ParameterValue=${{ inputs.run_job_cpu }} \
+                ParameterKey=RunJobMemory,ParameterValue=${{ inputs.run_job_memory }} \
                 ParameterKey=ValkeyUrl,ParameterValue=${{ inputs.valkey_url }} \
                 ParameterKey=ValkeyClientSecurityGroupId,ParameterValue=${{ inputs.valkey_sg_id }} \
                 ParameterKey=DatabaseSecurityGroupId,ParameterValue=${{ inputs.database_sg_id }} \
@@ -272,5 +286,5 @@ jobs:
             echo "  ./bin/tools/tunnels.sh ${{ inputs.environment }} dagster"
           fi
           echo ""
-          echo "Then open: http://localhost:3000"
+          echo "Then open: http://localhost:4003"
           echo "=========================================="
