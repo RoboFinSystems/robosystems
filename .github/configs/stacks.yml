@@ -27,8 +27,8 @@ production:
       endpoint: ValkeyEndpoint
       security_group: ValkeySecurityGroupId
   
-  postgres_iam:
-    stack_name: RoboSystemsPostgresIAMProd
+  postgres:
+    stack_name: RoboSystemsPostgresIAMProd  # Legacy name kept for backward compatibility
     outputs:
       database_url: DatabaseUrl
       database_endpoint: DatabaseEndpoint
@@ -175,8 +175,8 @@ staging:
       endpoint: ValkeyEndpoint
       security_group: ValkeySecurityGroupId
   
-  postgres_iam:
-    stack_name: RoboSystemsPostgresIAMStaging
+  postgres:
+    stack_name: RoboSystemsPostgresIAMStaging  # Legacy name kept for backward compatibility
     outputs:
       database_url: DatabaseUrl
       database_endpoint: DatabaseEndpoint

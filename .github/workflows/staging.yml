@@ -50,7 +50,7 @@ jobs:
     outputs:
       vpc_stack: ${{ steps.load.outputs.vpc_stack }}
       s3_stack: ${{ steps.load.outputs.s3_stack }}
-      postgres_iam_stack: ${{ steps.load.outputs.postgres_iam_stack }}
+      postgres_stack: ${{ steps.load.outputs.postgres_stack }}
       valkey_stack: ${{ steps.load.outputs.valkey_stack }}
       api_stack: ${{ steps.load.outputs.api_stack }}
       graph_infra_stack: ${{ steps.load.outputs.graph_infra_stack }}
@@ -87,7 +87,7 @@ jobs:
           # Load all stack names from config
           echo "vpc_stack=$(./bin/tools/stack-config.sh $ENV vpc)" >> $GITHUB_OUTPUT
           echo "s3_stack=$(./bin/tools/stack-config.sh $ENV s3)" >> $GITHUB_OUTPUT
-          echo "postgres_iam_stack=$(./bin/tools/stack-config.sh $ENV postgres_iam)" >> $GITHUB_OUTPUT
+          echo "postgres_stack=$(./bin/tools/stack-config.sh $ENV postgres)" >> $GITHUB_OUTPUT
           echo "valkey_stack=$(./bin/tools/stack-config.sh $ENV valkey)" >> $GITHUB_OUTPUT
           echo "api_stack=$(./bin/tools/stack-config.sh $ENV api)" >> $GITHUB_OUTPUT
           echo "graph_infra_stack=$(./bin/tools/stack-config.sh $ENV graph.infra)" >> $GITHUB_OUTPUT
@@ -209,7 +209,7 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
-  package-lambda-functions:
+  package-scripts:
     needs: [runner, deploy-s3]
     runs-on: ${{ fromJSON(needs.runner.outputs.runner_config) }}
     steps:
@@ -227,25 +227,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-      - name: Package and upload Lambda functions
+      - name: Package and upload scripts
         run: |
-          echo "📦 Packaging Lambda functions for staging..."
+          echo "📦 Packaging UserData scripts and CloudFormation templates..."
           ./bin/tools/package-scripts.sh ${{ vars.ENVIRONMENT_STAGING || 'staging' }}
-          echo "✅ Lambda functions packaged and uploaded successfully"
+          echo "✅ Scripts packaged and uploaded successfully"
 
-  deploy-postgres-iam:
+  deploy-postgres:
     needs:
       [
         runner,
         create-deployment,
         stack-config,
-        package-lambda-functions,
+        build,
         deploy-vpc,
       ]
-    uses: ./.github/workflows/deploy-postgres-iam.yml
+    uses: ./.github/workflows/deploy-postgres.yml
     with:
       # Stack & Repository Configuration
-      stack_name: ${{ needs.stack-config.outputs.postgres_iam_stack }}
+      stack_name: ${{ needs.stack-config.outputs.postgres_stack }}
       environment: ${{ vars.ENVIRONMENT_STAGING || 'staging' }}
       # GHA Runner Configuration
       runner_config: ${{ needs.runner.outputs.runner_config }}
@@ -263,8 +263,8 @@ jobs:
       multi_az_enabled: ${{ vars.DATABASE_MULTI_AZ_ENABLED_STAGING || 'false' }}
       # Secret Rotation Configuration
       secrets_rotation_days: ${{ vars.DATABASE_SECRETS_ROTATION_DAYS || '90' }}
-      # Lambda Configuration
-      lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
+      # Lambda Configuration (container-based)
+      lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
@@ -278,7 +278,7 @@ jobs:
         runner,
         create-deployment,
         stack-config,
-        package-lambda-functions,
+        build,
         deploy-vpc,
       ]
     uses: ./.github/workflows/deploy-valkey.yml
@@ -301,8 +301,8 @@ jobs:
       rotation_schedule_days: ${{ vars.VALKEY_ROTATION_SCHEDULE_DAYS_STAGING || '90' }}
       # Backup Configuration
       snapshot_retention_days: ${{ vars.VALKEY_SNAPSHOT_RETENTION_DAYS_STAGING || '0' }}
-      # Lambda Configuration
-      lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
+      # Lambda Configuration (container-based)
+      lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
@@ -351,7 +351,7 @@ jobs:
         create-deployment,
         stack-config,
         deploy-vpc,
-        deploy-postgres-iam,
+        deploy-postgres,
         deploy-valkey,
       ]
     uses: ./.github/workflows/deploy-bastion.yml
@@ -381,7 +381,7 @@ jobs:
         runner,
         create-deployment,
         stack-config,
-        package-lambda-functions,
+        build,
         deploy-vpc,
         deploy-s3,
       ]
@@ -396,8 +396,8 @@ jobs:
       aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
       # Alert Configuration
       rotation_schedule_days: ${{ vars.GRAPH_API_KEY_ROTATION_DAYS || '90' }}
-      # Lambda Configuration
-      lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
+      # Lambda Configuration (container-based)
+      lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
@@ -407,7 +407,7 @@ jobs:
 
   # Graph Infrastructure - Step 2: Deploy EBS volume management
   deploy-graph-volumes:
-    needs: [runner, stack-config, deploy-vpc, deploy-graph-infra]
+    needs: [runner, stack-config, build, deploy-vpc, deploy-graph-infra]
     uses: ./.github/workflows/deploy-graph-volumes.yml
     with:
       # Stack & Repository Configuration
@@ -421,8 +421,8 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       # Registry Configuration
       volume_registry_table: ${{ needs.deploy-graph-infra.outputs.volume_registry_table }}
-      # Lambda Configuration
-      lambda_code_bucket: robosystems-${{ vars.ENVIRONMENT_STAGING || 'staging' }}-deployment
+      # Lambda Configuration (container-based)
+      lambda_image_uri: ${{ needs.build.outputs.lambda_image }}
       # Secrets Configuration
       graph_api_secret_arn: ${{ needs.deploy-graph-infra.outputs.secret_arn }}
       # Other Configuration
@@ -439,10 +439,9 @@ jobs:
         create-deployment,
         build,
         deploy-vpc,
-        deploy-postgres-iam,
+        deploy-postgres,
         deploy-valkey,
         deploy-s3,
-        package-lambda-functions,
         deploy-graph-infra,
         deploy-graph-volumes,
       ]
@@ -512,7 +511,7 @@ jobs:
         deploy-vpc,
         deploy-graph,
         deploy-valkey,
-        deploy-postgres-iam,
+        deploy-postgres,
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
@@ -579,7 +578,7 @@ jobs:
         deploy-vpc,
         deploy-graph,
         deploy-valkey,
-        deploy-postgres-iam,
+        deploy-postgres,
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
@@ -615,7 +614,7 @@ jobs:
       valkey_url: ${{ needs.deploy-valkey.outputs.valkey_url }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
       # Database Configuration
-      database_sg_id: ${{ needs.deploy-postgres-iam.outputs.database_sg_id }}
+      database_sg_id: ${{ needs.deploy-postgres.outputs.database_sg_id }}
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Other Configuration
@@ -633,7 +632,7 @@ jobs:
         deploy-vpc,
         deploy-graph,
         deploy-valkey,
-        deploy-postgres-iam,
+        deploy-postgres,
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,
@@ -649,7 +648,7 @@ jobs:
       needs.deploy-vpc.result == 'success' &&
       needs.deploy-graph.result == 'success' &&
       needs.deploy-valkey.result == 'success' &&
-      needs.deploy-postgres-iam.result == 'success' &&
+      needs.deploy-postgres.result == 'success' &&
       needs.deploy-s3.result == 'success' &&
       (needs.deploy-grafana.result == 'success' || needs.deploy-grafana.result == 'skipped') &&
       (needs.deploy-prometheus.result == 'success' || needs.deploy-prometheus.result == 'skipped') &&
@@ -684,7 +683,7 @@ jobs:
         deploy-vpc,
         deploy-graph,
         deploy-valkey,
-        deploy-postgres-iam,
+        deploy-postgres,
         deploy-s3,
         deploy-grafana,
         deploy-prometheus,

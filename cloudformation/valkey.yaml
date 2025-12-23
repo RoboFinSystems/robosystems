@@ -89,15 +89,10 @@ Parameters:
     ConstraintDescription: Must be in format hh:mm-hh:mm (e.g., 02:00-03:00)
 
   # Lambda Configuration
-  LambdaCodeBucket:
+  LambdaImageUri:
     Type: String
-    Description: S3 bucket containing Lambda deployment packages
-    ConstraintDescription: Must be a valid S3 bucket name
-  ValkeyRotationCodeKey:
-    Type: String
-    Description: S3 key for Valkey Auth Token Rotation Lambda deployment package
-    Default: "lambdas/valkey_rotation.zip"
-    ConstraintDescription: Must be a valid S3 object key
+    Description: ECR image URI for Lambda functions (container-based deployment)
+    ConstraintDescription: Must be a valid ECR image URI
   LambdaRotationTimeout:
     Type: Number
     Default: 300
@@ -286,9 +281,8 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
 
-  # Secret Rotation Lambda Function
-  # NOTE: Requires Lambda code to be deployed to S3 bucket/key specified in parameters
-  # The deployment pipeline automatically uploads the Lambda code during package-lambda-functions step
+  # Secret Rotation Lambda Function (Container-based deployment)
+  # Uses ECR image with handler specified via ImageConfig.Command
   ValkeySecretRotationLambda:
     Type: AWS::Lambda::Function
     Condition: EnableRotation
@@ -296,11 +290,12 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Sub ${AWS::StackName}-valkey-rotation
-      Description: "Rotates Valkey auth tokens - auto-updates via S3 key hash"
-      Runtime: python3.13
-      Handler: index.lambda_handler
+      Description: "Rotates Valkey auth tokens - container-based deployment"
+      PackageType: Image
       Role: !GetAtt ValkeySecretRotationRole.Arn
       Timeout: !Ref LambdaRotationTimeout
+      Architectures:
+        - arm64
       VpcConfig:
         SecurityGroupIds:
           - !Ref ValkeyLambdaSecurityGroup
@@ -323,8 +318,10 @@ Resources:
         - Key: CreatedBy
           Value: CloudFormation
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref ValkeyRotationCodeKey
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - valkey_rotation.lambda_handler
 
   # Lambda Execution Role for Secret Rotation
   ValkeySecretRotationRole:
@@ -375,6 +372,20 @@ Resources:
                   - elasticache:DescribeReplicationGroups
                   - elasticache:ModifyReplicationGroup
                 Resource: "*"
+        # ECR permissions for container-based Lambda
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-valkey-rotation-role

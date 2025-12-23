@@ -1,4 +1,4 @@
-name: Deploy Postgres IAM
+name: Deploy Postgres
 
 on:
   workflow_call:
@@ -72,21 +72,10 @@ on:
         default: "90"
 
       # Lambda Configuration
-      lambda_code_bucket:
-        description: "S3 bucket containing Lambda deployment packages"
-        required: false
+      lambda_image_uri:
+        description: "ECR image URI for Lambda functions (container-based deployment)"
+        required: true
         type: string
-        default: ""
-      secrets_code_key:
-        description: "S3 key for Postgres Secrets Lambda deployment package"
-        required: false
-        type: string
-        default: ""
-      rotation_code_key:
-        description: "S3 key for Postgres Rotation Lambda deployment package"
-        required: false
-        type: string
-        default: ""
 
       # Notification Configuration
       aws_sns_alert_email:
@@ -156,29 +145,8 @@ jobs:
                 ParameterKey=SubnetId1,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f1) \
                 ParameterKey=SubnetId2,ParameterValue=$(echo ${{ inputs.subnet_ids }} | cut -d ',' -f2) \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
-                ParameterKey=PostgresRotationDays,ParameterValue=${{ inputs.secrets_rotation_days }}"
-
-          # Add Lambda bucket and fetch S3 keys from manifest if provided
-          if [ -n "${{ inputs.lambda_code_bucket }}" ] && [ "${{ inputs.lambda_code_bucket }}" != "" ]; then
-            POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=LambdaCodeBucket,ParameterValue=${{ inputs.lambda_code_bucket }}"
-            echo "Adding Lambda code bucket: ${{ inputs.lambda_code_bucket }}"
-            
-            # Fetch S3 keys from manifest (which includes hashes in filenames)
-            MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
-            
-            INIT_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."postgres-init".s3_key // empty')
-            ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."postgres-rotation".s3_key // empty')
-
-            if [ -n "$INIT_KEY" ]; then
-              POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=PostgresInitCodeKey,ParameterValue=$INIT_KEY"
-              echo "Adding Postgres Init Lambda code key: $INIT_KEY"
-            fi
-            
-            if [ -n "$ROTATION_KEY" ]; then
-              POSTGRES_STACK_PARAMS="$POSTGRES_STACK_PARAMS ParameterKey=PostgresRotationCodeKey,ParameterValue=$ROTATION_KEY"
-              echo "Adding Postgres Rotation Lambda code key: $ROTATION_KEY"
-            fi
-          fi
+                ParameterKey=PostgresRotationDays,ParameterValue=${{ inputs.secrets_rotation_days }} \
+                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

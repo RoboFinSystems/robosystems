@@ -71,8 +71,8 @@ on:
         default: "0"
 
       # Lambda Configuration
-      lambda_code_bucket:
-        description: "S3 bucket containing Lambda deployment packages"
+      lambda_image_uri:
+        description: "ECR image URI for Lambda functions (container-based deployment)"
         required: true
         type: string
 
@@ -149,20 +149,7 @@ jobs:
                 ParameterKey=EnableSecretRotation,ParameterValue=${{ inputs.secret_rotation_enabled }} \
                 ParameterKey=RotationScheduleDays,ParameterValue=${{ inputs.rotation_schedule_days }} \
                 ParameterKey=SnapshotRetentionDays,ParameterValue=${{ inputs.snapshot_retention_days }} \
-                ParameterKey=LambdaCodeBucket,ParameterValue=${{ inputs.lambda_code_bucket }}"
-
-          # Get Lambda deployment keys from manifest (similar to postgres-iam)
-          echo "Retrieving Lambda deployment manifest..."
-          MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
-
-          VALKEY_ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."valkey-rotation".s3_key // empty')
-
-          if [ -n "$VALKEY_ROTATION_KEY" ]; then
-            VALKEY_STACK_PARAMS="$VALKEY_STACK_PARAMS ParameterKey=ValkeyRotationCodeKey,ParameterValue=$VALKEY_ROTATION_KEY"
-            echo "Adding Valkey Rotation Lambda code key: $VALKEY_ROTATION_KEY"
-          else
-            echo "Warning: Valkey rotation Lambda code key not found in manifest, using default"
-          fi
+                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then
