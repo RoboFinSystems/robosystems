@@ -237,9 +237,11 @@ jobs:
           echo "🐑 Building Lambda container image: $LAMBDA_TAG"
 
           # Build Lambda image (ARM64 only)
+          # --provenance=false prevents OCI image index creation which Lambda doesn't support
           docker buildx build \
             --platform linux/arm64 \
             --push \
+            --provenance=false \
             --cache-from type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:lambda-cache \
             --cache-to type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:lambda-cache,mode=max \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$LAMBDA_TAG \
@@ -249,6 +251,8 @@ jobs:
           # Verify the image was pushed
           aws ecr describe-images --repository-name $ECR_REPOSITORY --image-ids imageTag=$LAMBDA_TAG || exit 1
 
-          LAMBDA_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$LAMBDA_TAG"
+          # Use version tag (not static environment tag) so CloudFormation detects changes
+          # Static tags like :lambda-prod don't change between deploys, causing CFN to skip updates
+          LAMBDA_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$LAMBDA_VERSION_TAG"
           echo "lambda_image=$LAMBDA_IMAGE" >> $GITHUB_OUTPUT
-          echo "✅ Lambda image pushed: $LAMBDA_IMAGE"
+          echo "✅ Lambda image pushed: $LAMBDA_IMAGE (versioned: $LAMBDA_VERSION_TAG)"

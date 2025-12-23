@@ -102,7 +102,7 @@ on:
 jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
-    timeout-minutes: 15
+    timeout-minutes: 25  # RDS instance creation can take 10-15 min
     outputs:
       postgres_secret_arn: ${{ steps.stack-outputs.outputs.postgres_secret_arn }}
       database_sg_id: ${{ steps.stack-outputs.outputs.database_sg_id }}

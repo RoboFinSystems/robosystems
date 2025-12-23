@@ -104,7 +104,7 @@ on:
 jobs:
   action:
     runs-on: ${{ fromJSON(inputs.runner_config) }}
-    timeout-minutes: 15
+    timeout-minutes: 25  # ElastiCache cluster creation takes ~15 min
     outputs:
       valkey_url: ${{ steps.stack-outputs.outputs.valkey_url }}
       valkey_endpoint: ${{ steps.stack-outputs.outputs.valkey_endpoint }}
