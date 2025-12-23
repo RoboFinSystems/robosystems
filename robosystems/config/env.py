@@ -757,6 +757,8 @@ class EnvConfig:
   SEC_PIPELINE_MAX_RETRIES = get_int_env(
     "SEC_PIPELINE_MAX_RETRIES", SEC_PIPELINE_MAX_RETRIES
   )
+  # Parallel processing concurrency (for local sec-process-parallel command)
+  SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")

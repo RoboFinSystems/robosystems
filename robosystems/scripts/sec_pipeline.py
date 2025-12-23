@@ -40,6 +40,7 @@ from typing import Any
 
 import yaml
 
+from robosystems.config import env
 from robosystems.logger import logger
 
 # Top companies by market cap (as of 2024)
@@ -237,7 +238,14 @@ class SECPipeline:
 
     error = None
     if not success:
-      error = stderr[-500:] if stderr else "Unknown error"
+      if stderr:
+        # Include first 250 + last 250 chars to preserve context from both ends
+        if len(stderr) <= 500:
+          error = stderr
+        else:
+          error = f"{stderr[:250]}...{stderr[-250:]}"
+      else:
+        error = "Unknown error"
 
     return StageResult(
       stage=job_name,
@@ -564,8 +572,8 @@ print(f"Registered {{len(partitions)}} partitions")
 
     logger.info(f"  {result.stdout.strip()}")
 
-    # Trigger parallel jobs (2 at a time locally to avoid overwhelming daemon)
-    concurrency = 2
+    # Trigger parallel jobs (configurable via env var, default 2)
+    concurrency = env.SEC_PARALLEL_CONCURRENCY
     triggered = 0
     failed = 0
 
@@ -605,6 +613,7 @@ print(f"Registered {{len(partitions)}} partitions")
             logger.warning(f"    [FAIL] {partition_key}")
         except subprocess.TimeoutExpired:
           proc.kill()
+          proc.communicate()  # Clean up to prevent zombie processes
           failed += 1
           logger.warning(f"    [TIMEOUT] {partition_key}")
 
@@ -977,13 +986,19 @@ print(f"Registered {{len(partitions)}} partitions")
 
     # Wait for batch to complete
     for partition_key, proc in processes:
-      stdout, stderr = proc.communicate(timeout=600)
-      if proc.returncode == 0 or "RUN_SUCCESS" in stdout.decode():
-        triggered += 1
-        logger.info(f"  [OK] {partition_key}")
-      else:
+      try:
+        stdout, stderr = proc.communicate(timeout=600)
+        if proc.returncode == 0 or "RUN_SUCCESS" in stdout.decode():
+          triggered += 1
+          logger.info(f"  [OK] {partition_key}")
+        else:
+          failed += 1
+          logger.warning(f"  [FAIL] {partition_key}: {stderr.decode()[:100]}")
+      except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()  # Clean up to prevent zombie processes
         failed += 1
-        logger.warning(f"  [FAIL] {partition_key}: {stderr.decode()[:100]}")
+        logger.warning(f"  [TIMEOUT] {partition_key}")
 
   # Summary
   logger.info(f"\n{'=' * 60}")

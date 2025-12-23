@@ -13,6 +13,7 @@ parquet output, registers dynamic partitions, and triggers parallel processing.
 """
 
 import boto3
+from botocore.exceptions import ClientError
 from dagster import (
   DefaultSensorStatus,
   RunRequest,
@@ -111,8 +112,15 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     )
     return
 
-  raw_bucket = env.SEC_RAW_BUCKET or "robosystems-sec-raw"
-  processed_bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
+  raw_bucket = env.SEC_RAW_BUCKET
+  processed_bucket = env.SEC_PROCESSED_BUCKET
+
+  # Validate required S3 bucket configuration
+  if not raw_bucket or not processed_bucket:
+    yield SkipReason(
+      "Missing required S3 bucket configuration (SEC_RAW_BUCKET or SEC_PROCESSED_BUCKET)"
+    )
+    return
 
   s3_client = _get_s3_client()
 
@@ -174,6 +182,16 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     context.log.info(f"Triggering {len(run_requests)} processing jobs")
     yield from run_requests
 
+  except ClientError as e:
+    error_code = e.response.get("Error", {}).get("Code", "Unknown")
+    if error_code == "NoSuchBucket":
+      context.log.error(f"S3 bucket does not exist: {raw_bucket}")
+    elif error_code == "AccessDenied":
+      context.log.error(f"Access denied to S3 bucket: {raw_bucket}")
+    else:
+      context.log.error(f"S3 error ({error_code}): {e}")
+    # Re-raise to mark sensor run as failed - Dagster will retry
+    raise
   except Exception as e:
     context.log.error(f"Error in SEC processing sensor: {type(e).__name__}: {e}")
     # Re-raise to mark sensor run as failed - Dagster will retry

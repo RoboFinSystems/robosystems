@@ -100,7 +100,9 @@ function create_production_secret() {
         "USER_REGISTRATION_ENABLED": "true",
         "BILLING_SCHEDULES_ENABLED": "true",
         "INSTANCE_SCHEDULES_ENABLED": "true",
-        "SEC_SCHEDULES_ENABLED": "false",
+        "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
+        "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
+        "SEC_PARALLEL_SENSOR_ENABLED": "false",
         "SHARED_REPO_SCHEDULE_ENABLED": "false"
     }'
 
@@ -158,7 +160,9 @@ function create_staging_secret() {
         "USER_REGISTRATION_ENABLED": "true",
         "BILLING_SCHEDULES_ENABLED": "true",
         "INSTANCE_SCHEDULES_ENABLED": "true",
-        "SEC_SCHEDULES_ENABLED": "false",
+        "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
+        "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
+        "SEC_PARALLEL_SENSOR_ENABLED": "false",
         "SHARED_REPO_SCHEDULE_ENABLED": "false"
     }'
 
