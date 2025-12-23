@@ -14,32 +14,32 @@
 production:
   # Core Infrastructure (Shared VPC)
   vpc:
-    stack_name: RoboSystemsVPC  # Shared between prod and staging
+    stack_name: RoboSystemsVPC # Shared between prod and staging
     outputs:
       vpc_id: VpcId
       private_subnets: PrivateSubnetIds
       public_subnets: PublicSubnetIds
-  
+
   valkey:
     stack_name: RoboSystemsValkeyProd
     outputs:
       url: ValkeyUrl
       endpoint: ValkeyEndpoint
       security_group: ValkeySecurityGroupId
-  
+
   postgres:
-    stack_name: RoboSystemsPostgresIAMProd  # Legacy name kept for backward compatibility
+    stack_name: RoboSystemsPostgresProd
     outputs:
       database_url: DatabaseUrl
       database_endpoint: DatabaseEndpoint
       security_group: DatabaseSecurityGroupId
-  
+
   s3:
     stack_name: RoboSystemsS3Prod
     outputs:
       bucket_name: BucketName
       bucket_arn: BucketArn
-  
+
   # API Service
   api:
     stack_name: RoboSystemsAPIProd
@@ -62,7 +62,7 @@ production:
       outputs:
         volume_manager_lambda: VolumeManagerFunctionArn
         detachment_topic: VolumeDetachmentTopicArn
-    
+
     writers:
       ladybug_standard:
         stack_name: RoboSystemsGraphLadybugStandardProd
@@ -99,23 +99,21 @@ production:
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
-      
-    
-  
+
   # Monitoring & Observability
   monitoring:
     prometheus:
-      stack_name: RoboSystemsPrometheusProduction  # Note: "Production" not "Prod"
+      stack_name: RoboSystemsPrometheusProduction # Note: "Production" not "Prod"
       outputs:
         workspace_endpoint: PrometheusWorkspaceEndpoint
         workspace_id: PrometheusWorkspaceId
-    
+
     grafana:
-      stack_name: RoboSystemsGrafana  # Shared between environments
+      stack_name: RoboSystemsGrafana # Shared between environments
       outputs:
         workspace_url: GrafanaWorkspaceUrl
         workspace_id: GrafanaWorkspaceId
-  
+
   # Bastion Host
   bastion:
     stack_name: RoboSystemsBastionProd
@@ -132,19 +130,19 @@ production:
 
   # GitHub Actions Runner
   gha_runner:
-    stack_name: RoboSystemsGHARunner  # Shared between environments
+    stack_name: RoboSystemsGHARunner # Shared between environments
     outputs:
       instance_id: RunnerInstanceId
-  
+
   # Cost and Usage Reports
   cur:
-    stack_name: RoboSystemsCUR  # Shared between environments
+    stack_name: RoboSystemsCUR # Shared between environments
     outputs:
       bucket_name: CURBucketName
 
   # CloudTrail (Audit Logging)
   cloudtrail:
-    stack_name: RoboSystemsCloudTrail  # Shared between environments
+    stack_name: RoboSystemsCloudTrail # Shared between environments
     outputs:
       trail_arn: CloudTrailArn
       bucket_name: CloudTrailBucketName
@@ -162,32 +160,32 @@ production:
 staging:
   # Core Infrastructure (Uses shared VPC)
   vpc:
-    stack_name: RoboSystemsVPC  # Shared between prod and staging
+    stack_name: RoboSystemsVPC # Shared between prod and staging
     outputs:
       vpc_id: VpcId
       private_subnets: PrivateSubnetIds
       public_subnets: PublicSubnetIds
-  
+
   valkey:
     stack_name: RoboSystemsValkeyStaging
     outputs:
       url: ValkeyUrl
       endpoint: ValkeyEndpoint
       security_group: ValkeySecurityGroupId
-  
+
   postgres:
-    stack_name: RoboSystemsPostgresIAMStaging  # Legacy name kept for backward compatibility
+    stack_name: RoboSystemsPostgresStaging
     outputs:
       database_url: DatabaseUrl
       database_endpoint: DatabaseEndpoint
       security_group: DatabaseSecurityGroupId
-  
+
   s3:
     stack_name: RoboSystemsS3Staging
     outputs:
       bucket_name: BucketName
       bucket_arn: BucketArn
-  
+
   # API Service
   api:
     stack_name: RoboSystemsAPIStaging
@@ -210,7 +208,7 @@ staging:
       outputs:
         volume_manager_lambda: VolumeManagerFunctionArn
         detachment_topic: VolumeDetachmentTopicArn
-    
+
     writers:
       ladybug_standard:
         stack_name: RoboSystemsGraphLadybugStandardStaging
@@ -247,8 +245,7 @@ staging:
         outputs:
           asg_name: WriterAutoScalingGroupName
           instance_ids: InstanceIds
-      
-  
+
   # Monitoring & Observability
   monitoring:
     prometheus:
@@ -256,13 +253,13 @@ staging:
       outputs:
         workspace_endpoint: PrometheusWorkspaceEndpoint
         workspace_id: PrometheusWorkspaceId
-    
+
     grafana:
-      stack_name: RoboSystemsGrafana  # Shared between environments
+      stack_name: RoboSystemsGrafana # Shared between environments
       outputs:
         workspace_url: GrafanaWorkspaceUrl
         workspace_id: GrafanaWorkspaceId
-  
+
   # Bastion Host
   bastion:
     stack_name: RoboSystemsBastionStaging
@@ -279,18 +276,18 @@ staging:
 
   # Shared Resources (reference same as prod)
   gha_runner:
-    stack_name: RoboSystemsGHARunner  # Shared between environments
+    stack_name: RoboSystemsGHARunner # Shared between environments
     outputs:
       instance_id: RunnerInstanceId
 
   cur:
-    stack_name: RoboSystemsCUR  # Shared between environments
+    stack_name: RoboSystemsCUR # Shared between environments
     outputs:
       bucket_name: CURBucketName
 
   # CloudTrail (Audit Logging)
   cloudtrail:
-    stack_name: RoboSystemsCloudTrail  # Shared between environments
+    stack_name: RoboSystemsCloudTrail # Shared between environments
     outputs:
       trail_arn: CloudTrailArn
       bucket_name: CloudTrailBucketName

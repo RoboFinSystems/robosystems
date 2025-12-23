@@ -146,9 +146,9 @@ discover_infrastructure() {
     # Discover PostgreSQL endpoint
     local postgres_stack=""
     if [[ "$environment" == "prod" ]]; then
-        postgres_stack="RoboSystemsPostgresIAMProd"
+        postgres_stack="RoboSystemsPostgresProd"
     elif [[ "$environment" == "staging" ]]; then
-        postgres_stack="RoboSystemsPostgresIAMStaging"
+        postgres_stack="RoboSystemsPostgresStaging"
     else
         echo -e "${YELLOW}Skipping postgres discovery for dev environment${NC}"
         POSTGRES_ENDPOINT="NOT_FOUND"

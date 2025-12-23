@@ -189,9 +189,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -365,9 +363,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -433,9 +429,7 @@
         },
         "pieType": "pie",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -607,9 +601,7 @@
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+          "calcs": ["lastNotNull"],
           "fields": "",
           "values": false
         },
@@ -3953,7 +3945,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-prod"
+            "DBInstanceIdentifier": "robosystems-prod"
           },
           "expression": "",
           "id": "",
@@ -4062,7 +4054,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-prod"
+            "DBInstanceIdentifier": "robosystems-prod"
           },
           "expression": "",
           "id": "",
@@ -4171,7 +4163,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-prod"
+            "DBInstanceIdentifier": "robosystems-prod"
           },
           "expression": "",
           "id": "",
@@ -4279,7 +4271,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-iam-prod"
+            "DBInstanceIdentifier": "robosystems-prod"
           },
           "expression": "",
           "id": "",
@@ -4304,11 +4296,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": [
-    "${SYSTEM_NAME_LOWER}",
-    "prod",
-    "infrastructure"
-  ],
+  "tags": ["${SYSTEM_NAME_LOWER}", "prod", "infrastructure"],
   "templating": {
     "list": [
       {
