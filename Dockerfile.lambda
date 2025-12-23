@@ -1,0 +1,35 @@
+# Lambda Container Image
+# Single image containing all Lambda function handlers
+# Each Lambda specifies its handler via ImageConfig.Command in CloudFormation
+
+# Use AWS Lambda Python base image (ARM64 for Graviton cost savings)
+FROM public.ecr.aws/lambda/python:3.13-arm64
+
+# Install uv for dependency export
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Set working directory to Lambda task root
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+# Copy dependency files for uv export
+COPY pyproject.toml uv.lock ./
+
+# Export and install Lambda dependencies from pyproject.toml [dependency-groups].lambda
+# This ensures version pins are managed in pyproject.toml, not hardcoded here
+RUN uv export --only-group lambda --no-hashes --frozen > requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt && \
+    rm -f requirements.txt pyproject.toml uv.lock
+
+# Copy all Lambda function code
+# Each function has a lambda_handler entry point
+COPY bin/lambda/graph_api_rotation.py ./
+COPY bin/lambda/graph_volume_detachment.py ./
+COPY bin/lambda/graph_volume_manager.py ./
+COPY bin/lambda/graph_volume_monitor.py ./
+COPY bin/lambda/postgres_init.py ./
+COPY bin/lambda/postgres_rotation.py ./
+COPY bin/lambda/valkey_rotation.py ./
+
+# Default handler (overridden per function in CloudFormation via ImageConfig.Command)
+# Format: "module_name.handler_function"
+CMD ["graph_volume_manager.lambda_handler"]

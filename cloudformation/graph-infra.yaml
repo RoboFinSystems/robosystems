@@ -28,15 +28,10 @@ Parameters:
     Description: Number of days between automatic API key rotations (when rotation is enabled)
     ConstraintDescription: Must be between 1 and 365 days
 
-  # Lambda Configuration - Rotation only
-  LambdaCodeBucket:
+  # Lambda Configuration
+  LambdaImageUri:
     Type: String
-    Description: S3 bucket containing Lambda deployment packages
-    ConstraintDescription: Must be a valid S3 bucket name
-  GraphApiRotationCodeKey:
-    Type: String
-    Description: S3 key for Graph API Rotation Lambda deployment package
-    ConstraintDescription: Must be a valid S3 object key
+    Description: ECR image URI for Lambda functions (container-based deployment)
 
   # Monitoring & Alerting
   SNSAlertEmail:
@@ -390,9 +385,10 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       FunctionName: !Sub "${AWS::StackName}-api-secret-rotation"
-      Description: "Graph API Rotation Lambda - auto-updates via S3 key hash"
-      Runtime: python3.13
-      Handler: index.lambda_handler
+      Description: "Graph API Rotation Lambda - container-based deployment"
+      PackageType: Image
+      Architectures:
+        - arm64
       Role: !GetAtt SecretRotationRole.Arn
       Timeout: 60
       MemorySize: 128
@@ -400,8 +396,10 @@ Resources:
         Variables:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref GraphApiRotationCodeKey
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - graph_api_rotation.lambda_handler
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-api-secret-rotation"
@@ -455,6 +453,16 @@ Resources:
                   StringEquals:
                     "kms:ViaService":
                       - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+              # ECR permissions for container-based Lambda
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
       Tags:
         - Key: Name
           Value: !Sub "robosystems-graph-${Environment}-secret-rotation-role"

@@ -21,6 +21,9 @@ on:
       image:
         description: "Built image reference"
         value: ${{ jobs.action.outputs.image }}
+      lambda_image:
+        description: "Lambda container image reference"
+        value: ${{ jobs.lambda.outputs.lambda_image }}
       ecr_repository_url:
         description: "ECR repository URL"
         value: ${{ jobs.action.outputs.ecr_repository_url }}
@@ -174,3 +177,78 @@ jobs:
           # Log the tags that were created
           echo "📋 Image tags created:"
           echo "$TAGS" | tr ' ' '\n' | grep -E '^-t' | sed 's/-t /  - /'
+
+  # Build Lambda container image (runs in parallel with main build)
+  lambda:
+    runs-on: ubuntu-latest
+    outputs:
+      lambda_image: ${{ steps.build-lambda.outputs.lambda_image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          mask-password: "true"
+
+      - name: Build and push Lambda container image
+        id: build-lambda
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ inputs.ecr_repository }}
+        run: |
+          # Determine version tag (same logic as main build)
+          if [[ "$GITHUB_REF" == refs/tags/v*.*.* ]]; then
+            VERSION_TAG=${GITHUB_REF#refs/tags/}
+          elif [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            BRANCH_VERSION=${GITHUB_REF#refs/heads/release/}
+            VERSION_TAG="v${BRANCH_VERSION}-hotfix.${GITHUB_SHA:0:8}"
+          else
+            VERSION_TAG="git-${GITHUB_SHA:0:8}"
+          fi
+
+          # Lambda image tags (ARM64 only - for Graviton cost savings)
+          LAMBDA_TAG="lambda-${{ inputs.environment }}"
+          LAMBDA_VERSION_TAG="lambda-$VERSION_TAG"
+
+          echo "🐑 Building Lambda container image: $LAMBDA_TAG"
+
+          # Build Lambda image (ARM64 only)
+          docker buildx build \
+            --platform linux/arm64 \
+            --push \
+            --cache-from type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:lambda-cache \
+            --cache-to type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:lambda-cache,mode=max \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$LAMBDA_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$LAMBDA_VERSION_TAG \
+            -f Dockerfile.lambda .
+
+          # Verify the image was pushed
+          aws ecr describe-images --repository-name $ECR_REPOSITORY --image-ids imageTag=$LAMBDA_TAG || exit 1
+
+          LAMBDA_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$LAMBDA_TAG"
+          echo "lambda_image=$LAMBDA_IMAGE" >> $GITHUB_OUTPUT
+          echo "✅ Lambda image pushed: $LAMBDA_IMAGE"

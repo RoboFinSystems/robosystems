@@ -86,15 +86,9 @@ Parameters:
       letters, numbers, and underscores
 
   # Lambda Configuration
-  LambdaCodeBucket:
+  LambdaImageUri:
     Type: String
-    Description: S3 bucket containing Lambda deployment packages
-  PostgresInitCodeKey:
-    Type: String
-    Description: S3 key for Postgres Init Lambda deployment package (secrets + database creation)
-  PostgresRotationCodeKey:
-    Type: String
-    Description: S3 key for Postgres Rotation Lambda deployment package
+    Description: ECR image URI for Lambda functions (container-based deployment)
 
   # High Availability Configuration
   EnableMultiAZ:
@@ -193,9 +187,10 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub ${AWS::StackName}-postgres-rotation
-      Description: "Rotates PostgreSQL database passwords - auto-updates via S3 key hash"
-      Runtime: python3.13
-      Handler: index.lambda_handler
+      Description: "Rotates PostgreSQL database passwords - container-based deployment"
+      PackageType: Image
+      Architectures:
+        - arm64
       Role: !GetAtt PostgresSecretRotationRole.Arn
       Timeout: 300
       VpcConfig:
@@ -207,6 +202,11 @@ Resources:
       Environment:
         Variables:
           SECRETS_MANAGER_ENDPOINT: !Sub https://secretsmanager.${AWS::Region}.amazonaws.com
+      Code:
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - postgres_rotation.lambda_handler
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-postgres-rotation-lambda
@@ -218,9 +218,6 @@ Resources:
           Value: !Ref ComponentTag
         - Key: CreatedBy
           Value: CloudFormation
-      Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref PostgresRotationCodeKey
 
   # Lambda Execution Role for Secret Rotation
   PostgresSecretRotationRole:
@@ -268,6 +265,16 @@ Resources:
                   - rds:DescribeDBInstances
                   - rds:DescribeDBClusters
                 Resource: "*"
+              # ECR permissions for container-based Lambda
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-postgres-rotation-role
@@ -767,10 +774,11 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       FunctionName: !Sub ${AWS::StackName}-init-lambda
-      Description: "Initializes PostgreSQL: updates secrets and creates additional databases (e.g., dagster)"
-      Handler: index.lambda_handler
+      Description: "Initializes PostgreSQL: updates secrets and creates additional databases - container-based deployment"
+      PackageType: Image
+      Architectures:
+        - arm64
       Role: !GetAtt PostgresInitLambdaRole.Arn
-      Runtime: python3.13
       Timeout: 300
       # VPC configuration for RDS access (database creation)
       VpcConfig:
@@ -789,6 +797,11 @@ Resources:
           POSTGRES_DB_NAME: !Ref DBName
           # Comma-separated list of additional databases to create
           ADDITIONAL_DATABASES: "dagster"
+      Code:
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - postgres_init.lambda_handler
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-postgres-init-lambda
@@ -800,9 +813,6 @@ Resources:
           Value: !Ref ComponentTag
         - Key: CreatedBy
           Value: CloudFormation
-      Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref PostgresInitCodeKey
   PostgresInitLambdaRole:
     Type: AWS::IAM::Role
     DeletionPolicy: Delete
@@ -859,6 +869,20 @@ Resources:
                   StringEquals:
                     "kms:ViaService":
                       - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+        # ECR permissions for container-based Lambda
+        - PolicyName: ECRAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-postgres-init-lambda-role

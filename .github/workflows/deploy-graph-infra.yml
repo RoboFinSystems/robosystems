@@ -37,21 +37,10 @@ on:
         required: false
         type: string
         default: "90"
-      lambda_code_bucket:
-        description: "S3 bucket containing Lambda deployment packages"
-        required: false
+      lambda_image_uri:
+        description: "ECR image URI for Lambda functions (container-based deployment)"
+        required: true
         type: string
-        default: ""
-      graph_api_rotation_code_key:
-        description: "S3 key for Graph API Rotation Lambda deployment package"
-        required: false
-        type: string
-        default: ""
-      instance_monitor_code_key:
-        description: "S3 key for Instance Monitor Lambda deployment package"
-        required: false
-        type: string
-        default: ""
 
       # Notification Configuration
       aws_sns_alert_email:
@@ -129,23 +118,8 @@ jobs:
           INFRA_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
                 ParameterKey=EnableSecretRotation,ParameterValue=${{ inputs.enable_secret_rotation }} \
-                ParameterKey=RotationScheduleDays,ParameterValue=${{ inputs.rotation_schedule_days }}"
-          
-          # Add Lambda bucket and fetch S3 keys from manifest if provided
-          if [ -n "${{ inputs.lambda_code_bucket }}" ]; then
-            INFRA_STACK_PARAMS="$INFRA_STACK_PARAMS \
-                  ParameterKey=LambdaCodeBucket,ParameterValue=${{ inputs.lambda_code_bucket }}"
-            
-            # Fetch S3 keys from manifest (which includes hashes in filenames)
-            MANIFEST=$(aws s3 cp s3://${{ inputs.lambda_code_bucket }}/lambda/manifest-${{ inputs.environment }}.json - 2>/dev/null || echo "{}")
-
-            ROTATION_KEY=$(echo "$MANIFEST" | jq -r '.Lambdas."graph-api-rotation".s3_key // empty')
-
-            if [ -n "$ROTATION_KEY" ]; then
-              INFRA_STACK_PARAMS="$INFRA_STACK_PARAMS \
-                    ParameterKey=GraphApiRotationCodeKey,ParameterValue=$ROTATION_KEY"
-            fi
-          fi
+                ParameterKey=RotationScheduleDays,ParameterValue=${{ inputs.rotation_schedule_days }} \
+                ParameterKey=LambdaImageUri,ParameterValue=${{ inputs.lambda_image_uri }}"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

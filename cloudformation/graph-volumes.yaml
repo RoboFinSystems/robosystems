@@ -32,22 +32,9 @@ Parameters:
     Default: ""
 
   # Lambda Configuration
-  LambdaCodeBucket:
+  LambdaImageUri:
     Type: String
-    Description: S3 bucket containing Lambda deployment packages
-    MinLength: 3
-    MaxLength: 63
-    AllowedPattern: ^[a-z0-9][a-z0-9-]*[a-z0-9]$
-    ConstraintDescription: Must be a valid S3 bucket name
-  VolumeManagerCodeKey:
-    Type: String
-    Description: S3 key for Volume Manager Lambda deployment package (includes hash)
-  VolumeMonitorCodeKey:
-    Type: String
-    Description: S3 key for Volume Monitor Lambda deployment package (includes hash)
-  VolumeDetachmentCodeKey:
-    Type: String
-    Description: S3 key for Volume Detachment Lambda deployment package (includes hash)
+    Description: ECR image URI for Lambda functions (container-based deployment)
 
   # Monitoring & Alerting
   SNSAlertEmail:
@@ -190,6 +177,16 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*"
+              # ECR permissions for container-based Lambda
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -209,9 +206,10 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-manager"
-      Description: "Volume manager Lambda - auto-updates via S3 key hash"
-      Runtime: python3.13
-      Handler: index.handler
+      Description: "Volume manager Lambda - container-based deployment"
+      PackageType: Image
+      Architectures:
+        - arm64
       Timeout: 300
       MemorySize: 256
       ReservedConcurrentExecutions: 10
@@ -234,8 +232,10 @@ Resources:
             !FindInMap [VolumeDefaults, !Ref Environment, Throughput]
           SNAPSHOT_RETENTION_DAYS: "7"
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref VolumeManagerCodeKey
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - graph_volume_manager.lambda_handler
       VpcConfig:
         SecurityGroupIds:
           - !Ref VolumeManagerSecurityGroup
@@ -363,6 +363,16 @@ Resources:
                       "kms:ViaService":
                         - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
                 - !Ref AWS::NoValue
+              # ECR permissions for container-based Lambda
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -376,9 +386,10 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-monitor"
-      Description: "Volume monitor Lambda - auto-updates via S3 key hash"
-      Runtime: python3.13
-      Handler: index.handler
+      Description: "Volume monitor Lambda - container-based deployment"
+      PackageType: Image
+      Architectures:
+        - arm64
       Role: !GetAtt VolumeMonitorLambdaRole.Arn
       Timeout: 300
       MemorySize: 512
@@ -401,8 +412,10 @@ Resources:
             - !Sub "{{resolve:secretsmanager:${GraphApiSecretArn}:SecretString:GRAPH_API_KEY}}"
             - ""
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref VolumeMonitorCodeKey
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - graph_volume_monitor.lambda_handler
       VpcConfig:
         SecurityGroupIds:
           - !Ref VolumeMonitorSecurityGroup
@@ -812,17 +825,20 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "${AWS::StackName}-volume-detachment"
-      Description: "Volume detachment Lambda - auto-updates via S3 key hash"
-      Runtime: python3.13
-      Handler: index.handler
+      Description: "Volume detachment Lambda - container-based deployment"
+      PackageType: Image
+      Architectures:
+        - arm64
       Timeout: 300
       Role: !GetAtt VolumeDetachmentRole.Arn
       Environment:
         Variables:
           VOLUME_MANAGER_FUNCTION_ARN: !GetAtt VolumeManagerFunction.Arn
       Code:
-        S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Ref VolumeDetachmentCodeKey
+        ImageUri: !Ref LambdaImageUri
+      ImageConfig:
+        Command:
+          - graph_volume_detachment.lambda_handler
 
   # Lambda Permission for SNS
   VolumeDetachmentPermission:
@@ -870,6 +886,16 @@ Resources:
                   - ssm:SendCommand
                   - ssm:GetCommandInvocation
                 Resource: "*"
+              # ECR permissions for container-based Lambda
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/robosystems"
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-volume-detachment-role"

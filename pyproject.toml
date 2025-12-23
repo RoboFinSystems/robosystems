@@ -139,6 +139,16 @@ dev = [
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+# PEP 735 dependency groups - isolated from main project dependencies
+# Use: uv export --only-group lambda --no-hashes --frozen
+[dependency-groups]
+lambda = [
+    "boto3>=1.39.0,<2.0",           # AWS SDK (all Lambdas)
+    "psycopg2-binary>=2.9.0,<3.0",  # PostgreSQL (postgres-init, postgres-rotation)
+    "redis>=6.2.0,<7.0",            # Valkey/Redis (valkey-rotation)
+    "urllib3>=2.0.0,<3.0",          # HTTP client (graph-volume-monitor)
+]
+
 [tool.setuptools]
 packages = ["robosystems"]
 

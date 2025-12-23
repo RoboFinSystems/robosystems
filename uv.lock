@@ -3528,6 +3528,14 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+lambda = [
+    { name = "boto3" },
+    { name = "psycopg2-binary" },
+    { name = "redis" },
+    { name = "urllib3" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.0" },
@@ -3594,6 +3602,14 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.35.0,<1.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+lambda = [
+    { name = "boto3", specifier = ">=1.39.0,<2.0" },
+    { name = "psycopg2-binary", specifier = ">=2.9.0,<3.0" },
+    { name = "redis", specifier = ">=6.2.0,<7.0" },
+    { name = "urllib3", specifier = ">=2.0.0,<3.0" },
+]
 
 [[package]]
 name = "robosystems-client"
