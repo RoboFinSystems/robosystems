@@ -298,44 +298,38 @@ duckdb-query-i graph_id env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.duckdb_query --db-path ./data/staging/{{graph_id}}.duckdb
 
 
-## SEC Pipeline - XBRL Data Processing ##
-
-# SEC Pipeline commands (all use robosystems.scripts.sec_pipeline)
+## SEC Pipeline ##
 # Examples:
-#   just sec-load NVDA 2024              # Single company, single year
-#   just sec-load NVDA "2023 2024 2025"  # Single company, multiple years
-#   just sec-pipeline                    # Top 5 companies, all years (2019-2025)
-#   just sec-pipeline 10                 # Top 10 companies, all years
-#   just sec-pipeline 5 2024             # Top 5 companies, single year
-#   just sec-pipeline 10 "2023 2024"     # Top 10 companies, multiple years
-#   just sec-reset                       # Reset SEC database
-#   just sec-reset --clear-s3            # Reset and clear S3 buckets
-#   just sec-health                      # SEC database health check
-#   just sec-health verbose              # Detailed health report
+#   just sec-load NVDA 2024
+#   just sec-download 50 2024
+#   just sec-process 2024
 
-# SEC - Load single company (wrapper for sec-pipeline run --tickers)
-sec-load ticker years="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --tickers {{ticker}} {{ if years != "" { "--years " + years } else { "" } }}
+# Load single ticker end-to-end (download + process + materialize)
+sec-load ticker year="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --tickers {{ticker}} {{ if year != "" { "--year " + year } else { "" } }}
 
-# SEC - Health check (comprehensive validation of SEC repository)
-sec-health verbose="" json="" api_url="http://localhost:8001" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_health sec --api-url {{api_url}} {{ if verbose != "" { "--verbose" } else { "" } }} {{ if json != "" { "--json" } else { "" } }}
+# Download raw XBRL ZIPs to S3 (top N companies by market cap)
+sec-download count="10" year="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline download --count {{count}} {{ if year != "" { "--year " + year } else { "" } }}
 
-# SEC - Reset database
+# Process downloaded filings to parquet (parallel)
+sec-process year="" limit="" concurrency="2" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline process-parallel \
+        {{ if year != "" { "--year " + year } else { "" } }} \
+        {{ if limit != "" { "--limit " + limit } else { "" } }} \
+        --concurrency {{concurrency}}
+
+# Materialize processed parquet files to graph (ingests all available data)
+sec-materialize env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize
+
+# Reset SEC database and optionally S3 data
 sec-reset clear_s3="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline reset {{ if clear_s3 != "" { "--clear-s3" } else { "" } }}
 
-# SEC Pipeline - Multi-company processing (top N by market cap)
-sec-pipeline count="5" years="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --count {{count}} {{ if years != "" { "--years " + years } else { "" } }}
-
-# SEC Pipeline - Quick test (2 companies, 2024 only)
-sec-pipeline-quick env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run --count 2 --year 2024
-
-# SEC Pipeline - Materialize only (skip download)
-sec-pipeline-materialize count="5" years="" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize --count {{count}} {{ if years != "" { "--years " + years } else { "" } }}
+# Validate SEC repository integrity
+sec-health verbose="" json="" api_url="http://localhost:8001" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.graph_health sec --api-url {{api_url}} {{ if verbose != "" { "--verbose" } else { "" } }} {{ if json != "" { "--json" } else { "" } }}
 
 
 ## Setup ##

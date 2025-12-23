@@ -30,10 +30,10 @@ from robosystems.dagster.jobs.provisioning import (
 )
 from robosystems.dagster.jobs.sec import (
   sec_daily_download_schedule,
-  sec_download_job,
+  sec_download_only_job,
   sec_materialize_job,
+  sec_nightly_materialize_schedule,
   sec_process_job,
-  sec_weekly_download_schedule,
 )
 from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
@@ -58,10 +58,10 @@ __all__ = [
   "provision_repository_job",
   "sec_daily_download_schedule",
   # SEC Pipeline
-  "sec_download_job",
+  "sec_download_only_job",
   "sec_materialize_job",
+  "sec_nightly_materialize_schedule",
   "sec_process_job",
-  "sec_weekly_download_schedule",
   # Notifications
   "send_email_job",
   "shared_repository_refresh_replicas_job",

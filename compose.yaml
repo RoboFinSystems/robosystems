@@ -112,14 +112,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 4g
           cpus: "2"
         reservations:
           memory: 1g
           cpus: "0.5"
     profiles: ["dagster", "robosystems", "all"]
 
-  # Dagster Daemon - Schedules, Sensors, and Job Execution
+  # Dagster Daemon - Schedules, Sensors, and Run Coordination
   dagster-daemon:
     container_name: robosystems-dagster-daemon
     build:
@@ -148,7 +148,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3g
+          memory: 4g
           cpus: "2"
         reservations:
           memory: 1g

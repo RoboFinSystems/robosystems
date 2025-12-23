@@ -12,7 +12,7 @@ from robosystems.config import env
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.logger import logger
 
-router = APIRouter(tags=["Health"])
+router = APIRouter(tags=["Cluster Health"])
 
 
 def _get_service_for_health():

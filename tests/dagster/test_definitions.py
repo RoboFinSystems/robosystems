@@ -34,7 +34,9 @@ class TestDefinitionsLoad:
       "provision_graph_job",
       "create_graph_job",
       "backup_graph_job",
-      "sec_download_and_process",
+      "sec_download_only",
+      "sec_process",
+      "sec_materialize",
     ]
     for expected in expected_jobs:
       assert expected in job_names, f"Missing job: {expected}"
