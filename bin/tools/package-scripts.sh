@@ -172,7 +172,7 @@ for lambda_name in postgres-init postgres-rotation valkey-rotation graph-api-rot
 done
 echo "  Lambda packages uploaded: $LAMBDA_COUNT functions"
 echo "  Lambda manifest uploaded"
-echo "  UserData scripts uploaded: 4 scripts (bastion, gha-runner, ladybug-writer, neo4j-writer)"
+echo "  UserData scripts uploaded: 3 scripts (bastion, ladybug-writer, neo4j-writer)"
 echo "  Shared userdata scripts uploaded: 5 scripts (graph-lifecycle, graph-health-check, register-graph-instance, run-graph-container, setup-cloudwatch-graph)"
 echo ""
 echo "📋 CloudFormation Parameters:"
