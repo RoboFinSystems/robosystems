@@ -237,9 +237,11 @@ jobs:
           echo "🐑 Building Lambda container image: $LAMBDA_TAG"
 
           # Build Lambda image (ARM64 only)
+          # --provenance=false prevents OCI image index creation which Lambda doesn't support
           docker buildx build \
             --platform linux/arm64 \
             --push \
+            --provenance=false \
             --cache-from type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:lambda-cache \
             --cache-to type=registry,ref=$ECR_REGISTRY/$ECR_REPOSITORY:lambda-cache,mode=max \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$LAMBDA_TAG \
