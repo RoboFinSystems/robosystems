@@ -83,28 +83,17 @@ print_usage() {
     echo "  dev      - Development environment"
     echo ""
     echo -e "${GREEN}======================================================================"
-    echo "Bastion Operations - Run infrastructure commands via bastion host"
-    echo "======================================================================${NC}"
-    echo "  <operation> [args...]"
-    echo ""
-    echo -e "${YELLOW}Common examples:${NC}"
-    echo "  $0 prod sec-load --ticker NVDA --year 2024"
-    echo "  $0 prod sec-health"
-    echo "  $0 prod graph-query --graph-id kg123 --query 'MATCH (e) RETURN e LIMIT 5'"
-    echo "  $0 prod dlq-stats"
-    echo "  $0 prod help                # Show all available bastion commands"
-    echo ""
-    echo -e "${GREEN}======================================================================"
-    echo "INFRASTRUCTURE: Port Forwarding & Direct Access"
+    echo "SSH Tunnels - Access internal services via bastion host"
     echo "======================================================================${NC}"
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
     echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
-    echo "  dagster       - Dagster webserver tunnel (localhost:3000)"
-    echo "  migrate       - Run database migrations via bastion"
-    echo "  help          - Show bastion operation examples"
-    echo "  all           - All services (default)"
+    echo "  dagster       - Dagster webserver tunnel (localhost:4003)"
+    echo "  all           - All database tunnels (postgres + valkey)"
     echo ""
-    echo "  <operation>   - Run bastion operation (sec-load, graph-query, etc.)"
+    echo -e "${GREEN}======================================================================"
+    echo "Database Operations"
+    echo "======================================================================${NC}"
+    echo "  migrate       - Run database migrations via bastion"
     echo ""
     echo -e "${YELLOW}SSH Key Options:${NC}"
     echo "  --key, -k <path>  - Path to SSH private key"
@@ -352,15 +341,15 @@ setup_dagster_tunnel() {
     fi
 
     echo -e "${GREEN}Setting up Dagster webserver tunnel...${NC}"
-    echo -e "${BLUE}Local: localhost:3000 -> Remote: $DAGSTER_ENDPOINT:3000${NC}"
+    echo -e "${BLUE}Local: localhost:4003 -> Remote: $DAGSTER_ENDPOINT:3000${NC}"
     echo ""
     echo -e "${YELLOW}Access Dagster UI:${NC}"
-    echo "Open http://localhost:3000 in your browser"
+    echo "Open http://localhost:4003 in your browser"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    ssh -i $SSH_KEY -N -L 3000:$DAGSTER_ENDPOINT:3000 ec2-user@$BASTION_HOST
+    ssh -i $SSH_KEY -N -L 4003:$DAGSTER_ENDPOINT:3000 ec2-user@$BASTION_HOST
 }
 
 run_database_migration() {
@@ -450,78 +439,6 @@ run_database_migration() {
     fi
 }
 
-run_bastion_operation() {
-    local environment=$1
-    shift  # Remove environment from arguments
-    local operation_args="$@"
-
-    echo -e "${GREEN}Running bastion operation on $environment environment...${NC}"
-    echo ""
-
-    # If no arguments provided, show help
-    if [[ -z "$operation_args" ]]; then
-        operation_args="help"
-    fi
-
-    echo -e "${BLUE}Executing bastion operation: $operation_args${NC}"
-    echo "----------------------------------------"
-
-    # Execute the operation via SSH to bastion
-    ssh -i "$SSH_KEY" \
-        -o "StrictHostKeyChecking=no" \
-        -o "UserKnownHostsFile=/dev/null" \
-        -t ec2-user@$BASTION_HOST \
-        "sudo /usr/local/bin/run-bastion-operation.sh $operation_args"
-
-    local exit_code=$?
-
-    echo "----------------------------------------"
-
-    if [[ "$exit_code" == "0" ]]; then
-        echo -e "${GREEN}✓ Bastion operation completed successfully${NC}"
-    else
-        echo -e "${RED}✗ Bastion operation failed with exit code: $exit_code${NC}"
-        exit 1
-    fi
-}
-
-show_bastion_help() {
-    cat << 'HELP_EOF'
-
-======================================================================
-RoboSystems Bastion Operations - Infrastructure Commands
-======================================================================
-
-Usage:
-  ./bin/tools/tunnels.sh [environment] <operation> [args...]
-
-Quick Examples:
-
-  SEC Data Operations:
-    ./bin/tools/tunnels.sh prod sec-load --ticker NVDA --year 2024
-    ./bin/tools/tunnels.sh prod sec-health --verbose
-    ./bin/tools/tunnels.sh prod sec-status
-
-  Graph Database Queries:
-    ./bin/tools/tunnels.sh prod graph-query --graph-id kg123 --query 'MATCH (e) RETURN e LIMIT 5'
-
-  Queue Management:
-    ./bin/tools/tunnels.sh prod valkey-list-queue default
-    ./bin/tools/tunnels.sh prod valkey-clear-queue default
-    ./bin/tools/tunnels.sh prod dlq-stats
-
-Show All Commands:
-  ./bin/tools/tunnels.sh prod help
-
-Note: For user/subscription management, use the Admin CLI instead:
-  just admin dev credits health
-  just admin dev users list
-
-======================================================================
-
-HELP_EOF
-}
-
 setup_all_tunnels() {
     local environment=$1
     local available_services=()
@@ -600,7 +517,6 @@ main() {
     local environment=""
     local service=""
     local custom_ssh_key=""
-    local -a additional_args=()
 
     # Parse arguments with support for SSH key parameter
     while [[ $# -gt 0 ]]; do
@@ -623,7 +539,7 @@ main() {
                 fi
                 shift
                 ;;
-            postgres|valkey|dagster|migrate|help|all)
+            postgres|valkey|dagster|migrate|all)
                 if [[ -z "$service" ]]; then
                     service="$1"
                 else
@@ -633,18 +549,10 @@ main() {
                 fi
                 shift
                 ;;
-            # Bastion operations - catch all other commands
             *)
-                if [[ -z "$service" && "$1" != -* ]]; then
-                    service="bastion"
-                    # Capture all arguments for bastion operation
-                    additional_args=("$@")
-                    break
-                else
-                    echo -e "${RED}Error: Unknown argument '$1'${NC}"
-                    print_usage
-                    exit 1
-                fi
+                echo -e "${RED}Error: Unknown argument '$1'${NC}"
+                print_usage
+                exit 1
                 ;;
         esac
     done
@@ -701,13 +609,6 @@ main() {
             ;;
         migrate)
             run_database_migration "$environment"
-            ;;
-        bastion)
-            # Run bastion operation with all captured arguments
-            run_bastion_operation "$environment" "${additional_args[@]}"
-            ;;
-        help)
-            show_bastion_help
             ;;
         all|"")
             setup_all_tunnels "$environment"

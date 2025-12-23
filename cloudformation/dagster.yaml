@@ -475,7 +475,7 @@ Resources:
               Value: "true"
             # EcsRunLauncher configuration - Fargate only
             - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
-              Value: !Ref RunJobTaskDefinition
+              Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
             - Name: DAGSTER_ECS_CLUSTER
               Value: !Ref DagsterCluster
             - Name: DAGSTER_ECS_LAUNCH_TYPE
@@ -709,9 +709,27 @@ Outputs:
 
   RunJobTaskDefinitionArn:
     Description: ARN of the run job task definition (for EcsRunLauncher)
-    Value: !Ref RunJobTaskDefinition
+    Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
     Export:
       Name: !Sub ${AWS::StackName}-RunJobTaskDefinition
+
+  DaemonServiceArn:
+    Description: ARN of the Dagster daemon ECS service
+    Value: !Ref DaemonService
+    Export:
+      Name: !Sub ${AWS::StackName}-DaemonServiceArn
+
+  WebserverServiceArn:
+    Description: ARN of the Dagster webserver ECS service
+    Value: !Ref WebserverService
+    Export:
+      Name: !Sub ${AWS::StackName}-WebserverServiceArn
+
+  DagsterUrl:
+    Description: Internal URL for Dagster webserver
+    Value: !Sub http://webserver.dagster.${Environment}.robosystems.local:3000
+    Export:
+      Name: !Sub ${AWS::StackName}-DagsterUrl
 
   TunnelCommand:
     Description: Command to access Dagster UI via bastion tunnel
