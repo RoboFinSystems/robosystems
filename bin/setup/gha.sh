@@ -196,34 +196,44 @@ function setup_minimum_config() {
     gh variable set API_ASG_REFRESH_PROD --body "true"
     gh variable set API_ASG_REFRESH_STAGING --body "true"
 
-    # Dagster Configuration
-    gh variable set DAGSTER_CPU_PROD --body "512"
-    gh variable set DAGSTER_CPU_STAGING --body "512"
-    gh variable set DAGSTER_MEMORY_PROD --body "1024"
-    gh variable set DAGSTER_MEMORY_STAGING --body "1024"
+    # Dagster Daemon Configuration
     gh variable set DAGSTER_DAEMON_CPU_PROD --body "512"
     gh variable set DAGSTER_DAEMON_CPU_STAGING --body "512"
     gh variable set DAGSTER_DAEMON_MEMORY_PROD --body "1024"
     gh variable set DAGSTER_DAEMON_MEMORY_STAGING --body "1024"
-    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_PROD --body "r7g.large"
-    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_STAGING --body "r7g.large"
-    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_PROD --body "500"
-    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_STAGING --body "500"
-    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_PROD --body "0"
-    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_STAGING --body "0"
-    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_PROD --body "5"
-    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_STAGING --body "2"
-    gh variable set DAGSTER_MIN_CAPACITY_PROD --body "1"
-    gh variable set DAGSTER_MIN_CAPACITY_STAGING --body "1"
-    gh variable set DAGSTER_MAX_CAPACITY_PROD --body "3"
-    gh variable set DAGSTER_MAX_CAPACITY_STAGING --body "2"
-    gh variable set DAGSTER_ASG_REFRESH_PROD --body "true"
-    gh variable set DAGSTER_ASG_REFRESH_STAGING --body "true"
+
+    # Dagster Webserver Configuration
+    gh variable set DAGSTER_WEBSERVER_CPU_PROD --body "512"
+    gh variable set DAGSTER_WEBSERVER_CPU_STAGING --body "512"
+    gh variable set DAGSTER_WEBSERVER_MEMORY_PROD --body "1024"
+    gh variable set DAGSTER_WEBSERVER_MEMORY_STAGING --body "1024"
+    gh variable set DAGSTER_WEBSERVER_DESIRED_COUNT_PROD --body "1"
+    gh variable set DAGSTER_WEBSERVER_DESIRED_COUNT_STAGING --body "1"
+    gh variable set DAGSTER_WEBSERVER_MIN_CAPACITY_PROD --body "1"
+    gh variable set DAGSTER_WEBSERVER_MIN_CAPACITY_STAGING --body "1"
+    gh variable set DAGSTER_WEBSERVER_MAX_CAPACITY_PROD --body "3"
+    gh variable set DAGSTER_WEBSERVER_MAX_CAPACITY_STAGING --body "2"
+
+    # Dagster Run Job Configuration (EcsRunLauncher - Fargate)
     gh variable set DAGSTER_RUN_JOB_CPU_PROD --body "1024"
     gh variable set DAGSTER_RUN_JOB_CPU_STAGING --body "1024"
     gh variable set DAGSTER_RUN_JOB_MEMORY_PROD --body "4096"
     gh variable set DAGSTER_RUN_JOB_MEMORY_STAGING --body "4096"
-    gh variable set RUN_MIGRATIONS_PROD --body "false"
+
+    # Dagster Run Worker Configuration (EC2 - for heavy compute)
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_PROD --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_STAGING --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_EBS_SIZE_PROD --body "500"
+    gh variable set DAGSTER_RUN_WORKER_EBS_SIZE_STAGING --body "100"
+    gh variable set DAGSTER_RUN_WORKER_MIN_INSTANCES_PROD --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MIN_INSTANCES_STAGING --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MAX_INSTANCES_PROD --body "5"
+    gh variable set DAGSTER_RUN_WORKER_MAX_INSTANCES_STAGING --body "2"
+
+    # Dagster Deployment Options
+    gh variable set DAGSTER_REFRESH_ECS_PROD --body "false"
+    gh variable set DAGSTER_REFRESH_ECS_STAGING --body "true"
+    gh variable set RUN_MIGRATIONS_PROD --body "true"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
     # Database Configuration
@@ -306,14 +316,25 @@ function setup_minimum_config() {
     gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
     gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
 
+    # GitHub Actions Runner Configuration
+    # Default: "github-hosted" uses GitHub-hosted runners (ubuntu-latest)
+    # For self-hosted: set RUNNER_LABELS to e.g. "self-hosted,Linux,X64"
+    # RUNNER_SCOPE: "repo" (check repo only), "org" (org only), "both" (repo then org)
+    gh variable set RUNNER_LABELS --body "github-hosted"
+    gh variable set RUNNER_SCOPE --body "both"
+
     # Notification Configuration
     gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
 
     # Bastion Configuration
     gh variable set BASTION_KEY_PAIR_NAME --body "$BASTION_KEY_PAIR_NAME"
+    # CIDR for SSH access to bastion (set to your IP)
+    gh variable set BASTION_ALLOWED_CIDR --body "0.0.0.0/32"
+    # CIDR for admin API access (set to your IP)
+    gh variable set ADMIN_ALLOWED_CIDRS --body "0.0.0.0/32"
 
-    # Bastion Access Configuration (uses placeholder IP by default - as variable)
-    gh secret set BASTION_ALLOWED_CIDR_BLOCK --body "0.0.0.0/32"
+    # Publishing Configuration
+    gh variable set DOCKERHUB_PUBLISHING_ENABLED --body "false"
 
     # Features Configuration
     gh variable set OBSERVABILITY_ENABLED_PROD --body "true"
@@ -414,6 +435,10 @@ function setup_full_config() {
 
     # Bastion Configuration
     gh variable set BASTION_KEY_PAIR_NAME --body "$BASTION_KEY_PAIR_NAME"
+    # CIDR for SSH access to bastion (set to your IP)
+    gh variable set BASTION_ALLOWED_CIDR --body "0.0.0.0/32"
+    # CIDR for admin API access (set to your IP)
+    gh variable set ADMIN_ALLOWED_CIDRS --body "0.0.0.0/32"
 
     # API Scaling Configuration
     gh variable set API_MIN_CAPACITY_PROD --body "1"
@@ -423,34 +448,44 @@ function setup_full_config() {
     gh variable set API_ASG_REFRESH_PROD --body "true"
     gh variable set API_ASG_REFRESH_STAGING --body "true"
 
-    # Dagster Configuration
-    gh variable set DAGSTER_CPU_PROD --body "512"
-    gh variable set DAGSTER_CPU_STAGING --body "512"
-    gh variable set DAGSTER_MEMORY_PROD --body "1024"
-    gh variable set DAGSTER_MEMORY_STAGING --body "1024"
+    # Dagster Daemon Configuration
     gh variable set DAGSTER_DAEMON_CPU_PROD --body "512"
     gh variable set DAGSTER_DAEMON_CPU_STAGING --body "512"
     gh variable set DAGSTER_DAEMON_MEMORY_PROD --body "1024"
     gh variable set DAGSTER_DAEMON_MEMORY_STAGING --body "1024"
-    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_PROD --body "r7g.large"
-    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_STAGING --body "r7g.large"
-    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_PROD --body "500"
-    gh variable set DAGSTER_RUN_WORKER_STORAGE_GB_STAGING --body "500"
-    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_PROD --body "0"
-    gh variable set DAGSTER_RUN_WORKER_MIN_CAPACITY_STAGING --body "0"
-    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_PROD --body "5"
-    gh variable set DAGSTER_RUN_WORKER_MAX_CAPACITY_STAGING --body "2"
-    gh variable set DAGSTER_MIN_CAPACITY_PROD --body "1"
-    gh variable set DAGSTER_MIN_CAPACITY_STAGING --body "1"
-    gh variable set DAGSTER_MAX_CAPACITY_PROD --body "3"
-    gh variable set DAGSTER_MAX_CAPACITY_STAGING --body "2"
-    gh variable set DAGSTER_ASG_REFRESH_PROD --body "true"
-    gh variable set DAGSTER_ASG_REFRESH_STAGING --body "true"
+
+    # Dagster Webserver Configuration
+    gh variable set DAGSTER_WEBSERVER_CPU_PROD --body "512"
+    gh variable set DAGSTER_WEBSERVER_CPU_STAGING --body "512"
+    gh variable set DAGSTER_WEBSERVER_MEMORY_PROD --body "1024"
+    gh variable set DAGSTER_WEBSERVER_MEMORY_STAGING --body "1024"
+    gh variable set DAGSTER_WEBSERVER_DESIRED_COUNT_PROD --body "1"
+    gh variable set DAGSTER_WEBSERVER_DESIRED_COUNT_STAGING --body "1"
+    gh variable set DAGSTER_WEBSERVER_MIN_CAPACITY_PROD --body "1"
+    gh variable set DAGSTER_WEBSERVER_MIN_CAPACITY_STAGING --body "1"
+    gh variable set DAGSTER_WEBSERVER_MAX_CAPACITY_PROD --body "3"
+    gh variable set DAGSTER_WEBSERVER_MAX_CAPACITY_STAGING --body "2"
+
+    # Dagster Run Job Configuration (EcsRunLauncher - Fargate)
     gh variable set DAGSTER_RUN_JOB_CPU_PROD --body "1024"
     gh variable set DAGSTER_RUN_JOB_CPU_STAGING --body "1024"
     gh variable set DAGSTER_RUN_JOB_MEMORY_PROD --body "4096"
     gh variable set DAGSTER_RUN_JOB_MEMORY_STAGING --body "4096"
-    gh variable set RUN_MIGRATIONS_PROD --body "false"
+
+    # Dagster Run Worker Configuration (EC2 - for heavy compute)
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_PROD --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_INSTANCE_TYPE_STAGING --body "r7g.large"
+    gh variable set DAGSTER_RUN_WORKER_EBS_SIZE_PROD --body "500"
+    gh variable set DAGSTER_RUN_WORKER_EBS_SIZE_STAGING --body "100"
+    gh variable set DAGSTER_RUN_WORKER_MIN_INSTANCES_PROD --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MIN_INSTANCES_STAGING --body "0"
+    gh variable set DAGSTER_RUN_WORKER_MAX_INSTANCES_PROD --body "5"
+    gh variable set DAGSTER_RUN_WORKER_MAX_INSTANCES_STAGING --body "2"
+
+    # Dagster Deployment Options
+    gh variable set DAGSTER_REFRESH_ECS_PROD --body "false"
+    gh variable set DAGSTER_REFRESH_ECS_STAGING --body "true"
+    gh variable set RUN_MIGRATIONS_PROD --body "true"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"
 
     # Database Configuration
@@ -533,6 +568,13 @@ function setup_full_config() {
     gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
     gh variable set GRAPH_UPDATE_CONTAINERS_STAGING --body "true"
 
+    # GitHub Actions Runner Configuration
+    # Default: "github-hosted" uses GitHub-hosted runners (ubuntu-latest)
+    # For self-hosted: set RUNNER_LABELS to e.g. "self-hosted,Linux,X64"
+    # RUNNER_SCOPE: "repo" (check repo only), "org" (org only), "both" (repo then org)
+    gh variable set RUNNER_LABELS --body "github-hosted"
+    gh variable set RUNNER_SCOPE --body "both"
+
     # Notification Configuration
     gh variable set AWS_SNS_ALERT_EMAIL --body "$AWS_SNS_ALERT_EMAIL"
 
@@ -572,8 +614,8 @@ function setup_full_config() {
         gh variable set ROBOINVESTOR_APP_URL_STAGING --body "https://staging.$ROBOINVESTOR_DOMAIN"
     fi
 
-    # Bastion Access Configuration (uses placeholder IP by default - as secret)
-    gh secret set BASTION_ALLOWED_CIDR_BLOCK --body "0.0.0.0/32"
+    # Publishing Configuration
+    gh variable set DOCKERHUB_PUBLISHING_ENABLED --body "false"
 
     echo ""
     echo "✅ Full configuration completed!"

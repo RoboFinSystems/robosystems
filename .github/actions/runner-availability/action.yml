@@ -38,10 +38,9 @@ runs:
       run: |
         RUNNER_LABELS="${{ inputs.runner_labels }}"
 
-        # If no labels configured, default to GitHub-hosted (skip API check entirely)
-        if [ -z "$RUNNER_LABELS" ]; then
-          echo "ℹ️ No runner labels configured - using GitHub-hosted runners"
-          echo "💡 To use self-hosted runners, set the RUNNER_LABELS variable"
+        # If no labels or "github-hosted", use GitHub-hosted runners (skip API check)
+        if [ -z "$RUNNER_LABELS" ] || [ "$RUNNER_LABELS" = "github-hosted" ]; then
+          echo "✅ Using GitHub-hosted runners (ubuntu-latest)"
           echo ""
           echo "runners_available=false" >> $GITHUB_OUTPUT
           echo "runner_type=github-hosted" >> $GITHUB_OUTPUT
