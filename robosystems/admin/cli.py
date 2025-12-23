@@ -1471,41 +1471,37 @@ def sec():
 @click.option("--year", help="Year to load (optional)")
 @click.pass_obj
 def sec_load(client, ticker, year):
-  """Load SEC data for a company."""
-  if client.environment == "dev":
-    console.print(f"[blue]Loading SEC data locally for {ticker}...[/blue]")
-    year_arg = f" {year}" if year else ""
-    command = f"just sec-load {ticker}{year_arg}"
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    console.print(result.stdout)
-    if result.returncode != 0:
-      console.print(f"[red]Error:[/red] {result.stderr}")
-      raise click.ClickException("SEC load failed")
-  else:
-    executor = SSMExecutor(client.environment)
-    year_arg = f" --year {year}" if year else ""
-    command = (
-      f"/usr/local/bin/run-bastion-operation.sh sec-load --ticker {ticker}{year_arg}"
-    )
-    stdout, _, _ = executor.execute(command)
+  """Load SEC data for a company (local dev only)."""
+  if client.environment != "dev":
+    console.print("[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]")
+    console.print(f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster")
+    console.print("Then open http://localhost:4003 and trigger the SEC pipeline manually.")
+    return
+  console.print(f"[blue]Loading SEC data locally for {ticker}...[/blue]")
+  year_arg = f" {year}" if year else ""
+  command = f"just sec-load {ticker}{year_arg}"
+  result = subprocess.run(command, shell=True, capture_output=True, text=True)
+  console.print(result.stdout)
+  if result.returncode != 0:
+    console.print(f"[red]Error:[/red] {result.stderr}")
+    raise click.ClickException("SEC load failed")
 
 
 @sec.command("health")
 @click.pass_obj
 def sec_health(client):
-  """Check SEC database health."""
-  if client.environment == "dev":
-    command = "just sec-health"
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    console.print(result.stdout)
-    if result.returncode != 0:
-      console.print(f"[red]Error:[/red] {result.stderr}")
-      raise click.ClickException("SEC health check failed")
-  else:
-    executor = SSMExecutor(client.environment)
-    stdout, _, _ = executor.execute(
-      "/usr/local/bin/run-bastion-operation.sh sec-health"
-    )
+  """Check SEC database health (local dev only)."""
+  if client.environment != "dev":
+    console.print("[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]")
+    console.print(f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster")
+    console.print("Then open http://localhost:4003 to view pipeline status and health.")
+    return
+  command = "just sec-health"
+  result = subprocess.run(command, shell=True, capture_output=True, text=True)
+  console.print(result.stdout)
+  if result.returncode != 0:
+    console.print(f"[red]Error:[/red] {result.stderr}")
+    raise click.ClickException("SEC health check failed")
 
 
 # SEC orchestration commands removed - pipeline migrated to Dagster

@@ -286,5 +286,5 @@ jobs:
             echo "  ./bin/tools/tunnels.sh ${{ inputs.environment }} dagster"
           fi
           echo ""
-          echo "Then open: http://localhost:3000"
+          echo "Then open: http://localhost:4003"
           echo "=========================================="
