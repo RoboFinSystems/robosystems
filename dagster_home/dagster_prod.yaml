@@ -77,6 +77,16 @@ run_launcher:
       cpu: "1024"
       memory: "4096"
 
+# Run coordinator - controls concurrent run execution
+# Limits parallel Fargate tasks to avoid overwhelming resources
+# SEC parallel processing sensor benefits from this: 20 concurrent processing jobs
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 20
+    dequeue_interval_seconds: 5
+
 # Telemetry - disable for privacy
 telemetry:
   enabled: false

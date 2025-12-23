@@ -1,5 +1,5 @@
 """
-Tests for UUID v7 utilities.
+Tests for UUID utilities.
 
 Comprehensive test coverage for UUID generation, parsing, and timestamp extraction.
 """
@@ -8,7 +8,6 @@ import time
 from unittest.mock import patch
 
 from robosystems.utils.uuid import (
-  _id_cache,
   create_prefixed_id,
   generate_deterministic_uuid7,
   generate_prefixed_uuid7,
@@ -87,11 +86,7 @@ class TestGeneratePrefixedUuid7:
 
 
 class TestGenerateDeterministicUuid7:
-  """Test deterministic UUID generation with caching."""
-
-  def setup_method(self):
-    """Clear cache before each test."""
-    _id_cache.clear()
+  """Test deterministic UUID generation using UUID5 hashing."""
 
   def test_deterministic_uuid7_same_content(self):
     """Test that same content generates same UUID."""
@@ -122,22 +117,36 @@ class TestGenerateDeterministicUuid7:
     assert uuid1 != uuid3
     assert uuid2 != uuid3
 
-  def test_deterministic_uuid7_caching(self):
-    """Test that caching works correctly."""
-    content = "cached-entity"
+  def test_deterministic_uuid7_consistent_across_calls(self):
+    """Test that the same input always produces the same UUID (truly deterministic)."""
+    content = "consistent-entity"
     namespace = "test"
 
-    # First call should create cache entry
+    # Multiple calls should always return the exact same value
     uuid1 = generate_deterministic_uuid7(content, namespace=namespace)
-
-    # Verify it's in cache
-    cache_key = f"{namespace}:{content}"
-    assert cache_key in _id_cache
-    assert _id_cache[cache_key] == uuid1
-
-    # Second call should return cached value
     uuid2 = generate_deterministic_uuid7(content, namespace=namespace)
-    assert uuid1 == uuid2
+    uuid3 = generate_deterministic_uuid7(content, namespace=namespace)
+
+    assert uuid1 == uuid2 == uuid3
+
+  def test_deterministic_uuid7_format(self):
+    """Test that deterministic UUIDs have valid UUID5 format."""
+    uuid_str = generate_deterministic_uuid7("test-content", namespace="test")
+
+    # Should be 36 characters (32 hex + 4 hyphens)
+    assert len(uuid_str) == 36
+
+    # Should have proper hyphen placement
+    parts = uuid_str.split("-")
+    assert len(parts) == 5
+    assert len(parts[0]) == 8
+    assert len(parts[1]) == 4
+    assert len(parts[2]) == 4
+    assert len(parts[3]) == 4
+    assert len(parts[4]) == 12
+
+    # Should be version 5 (hash-based)
+    assert parts[2].startswith("5")
 
 
 class TestParseUuid7:
@@ -250,10 +259,6 @@ class TestGetTimestampFromUuid7:
 class TestCreatePrefixedId:
   """Test prefixed ID creation utility."""
 
-  def setup_method(self):
-    """Clear cache before each test."""
-    _id_cache.clear()
-
   def test_create_prefixed_id_format(self):
     """Test prefixed ID format."""
     prefix = "user"
@@ -263,10 +268,9 @@ class TestCreatePrefixedId:
 
     assert prefixed_id.startswith(f"{prefix}_")
 
-    # UUID part should be valid
+    # UUID part should be valid (36 chars)
     uuid_part = prefixed_id.split("_", 1)[1]
     assert len(uuid_part) == 36
-    assert parse_uuid7(uuid_part) is not None
 
   def test_create_prefixed_id_deterministic(self):
     """Test that prefixed IDs are deterministic."""
@@ -288,22 +292,6 @@ class TestCreatePrefixedId:
     assert user_id != doc_id
     assert user_id.startswith("user_")
     assert doc_id.startswith("doc_")
-
-  def test_create_prefixed_id_uses_namespace(self):
-    """Test that prefixed ID uses prefix as namespace."""
-    prefix = "test"
-    content = "content-123"
-
-    # Create prefixed ID
-    prefixed_id = create_prefixed_id(prefix, content)
-
-    # Verify cache key includes namespace
-    expected_cache_key = f"{prefix}:{content}"
-    assert expected_cache_key in _id_cache
-
-    # Extract UUID part and verify it matches cached value
-    uuid_part = prefixed_id.split("_", 1)[1]
-    assert _id_cache[expected_cache_key] == uuid_part
 
 
 class TestEdgeCases:

@@ -59,16 +59,16 @@ run_launcher:
   module: dagster.core.launcher
   class: DefaultRunLauncher
 
-# Run coordinator - balanced parallel execution for local dev
-# Note: too high concurrency (>5 workers) can overwhelm the code server
+# Run coordinator - conservative settings for local dev
+# Keep concurrency low to avoid overwhelming the daemon
 run_coordinator:
   module: dagster.core.run_coordinator
   class: QueuedRunCoordinator
   config:
     dequeue_interval_seconds: 1
-    max_concurrent_runs: 10
+    max_concurrent_runs: 2
     dequeue_use_threads: true
-    dequeue_num_workers: 4
+    dequeue_num_workers: 2
 
 # Telemetry - disable for privacy
 telemetry:

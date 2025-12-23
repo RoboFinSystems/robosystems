@@ -329,10 +329,24 @@ class EnvConfig:
     bool(get_secret_value("INSTANCE_SCHEDULES_ENABLED", "false").lower() == "true"),
   )
 
-  # SEC pipeline schedules: daily/weekly download
-  SEC_SCHEDULES_ENABLED = get_bool_env(
-    "SEC_SCHEDULES_ENABLED",
-    bool(get_secret_value("SEC_SCHEDULES_ENABLED", "false").lower() == "true"),
+  # SEC download schedule: daily fetch of new filings
+  SEC_DOWNLOAD_SCHEDULE_ENABLED = get_bool_env(
+    "SEC_DOWNLOAD_SCHEDULE_ENABLED",
+    bool(get_secret_value("SEC_DOWNLOAD_SCHEDULE_ENABLED", "false").lower() == "true"),
+  )
+
+  # SEC materialize schedule: nightly graph rebuild (OFF by default)
+  SEC_MATERIALIZE_SCHEDULE_ENABLED = get_bool_env(
+    "SEC_MATERIALIZE_SCHEDULE_ENABLED",
+    bool(
+      get_secret_value("SEC_MATERIALIZE_SCHEDULE_ENABLED", "false").lower() == "true"
+    ),
+  )
+
+  # SEC parallel processing sensor: auto-triggers parallel filing processing
+  SEC_PARALLEL_SENSOR_ENABLED = get_bool_env(
+    "SEC_PARALLEL_SENSOR_ENABLED",
+    bool(get_secret_value("SEC_PARALLEL_SENSOR_ENABLED", "false").lower() == "true"),
   )
 
   # Shared repository schedule: weekly snapshot + replica refresh
@@ -743,6 +757,8 @@ class EnvConfig:
   SEC_PIPELINE_MAX_RETRIES = get_int_env(
     "SEC_PIPELINE_MAX_RETRIES", SEC_PIPELINE_MAX_RETRIES
   )
+  # Parallel processing concurrency (for local sec-process-parallel command)
+  SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
 
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")

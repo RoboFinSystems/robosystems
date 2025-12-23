@@ -355,13 +355,15 @@ class TestEntityCreation:
     entity_data = processor.make_entity()
     assert entity_data is not None
 
-    # The identifier should be a deterministic UUID7 generated from the entity URI
-    # We check that it's a valid UUID format rather than exact match due to caching
-    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    # The identifier should be a deterministic UUID5 generated from the entity URI
+    # UUID5 uses version 5 (hash-based) for truly deterministic IDs across processes
+    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
     assert re.match(uuid_pattern, entity_data["identifier"], re.IGNORECASE)
     assert entity_data["name"] is None
-    assert entity_data["cik"] == processor.entityId.zfill(10)
+    # CIK is normalized: strip leading zeros then pad to 10 digits
+    normalized_cik = str(processor.entityId).lstrip("0").zfill(10)
+    assert entity_data["cik"] == normalized_cik
     assert len(processor.entities_df) == 1
 
   @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
@@ -423,13 +425,14 @@ class TestEntityCreation:
     entity_data = processor.make_entity()
     assert entity_data is not None
 
-    # The identifier should be a deterministic UUID7 generated from the entity URI
-    # We check that it's a valid UUID format rather than exact match due to caching
-    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    # The identifier should be a deterministic UUID5 generated from the entity URI
+    # UUID5 uses version 5 (hash-based) for truly deterministic IDs across processes
+    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
     assert re.match(uuid_pattern, entity_data["identifier"], re.IGNORECASE)
     assert entity_data["name"] == "Apple Inc."
-    assert entity_data["cik"] == "320193"
+    # CIK is normalized to 10 digits (320193 -> 0000320193)
+    assert entity_data["cik"] == "0000320193"
     assert entity_data["ticker"] == "AAPL"
     assert entity_data["sic"] == "3571"
     assert entity_data["sic_description"] == "Electronic Computers"

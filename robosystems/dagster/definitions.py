@@ -27,15 +27,12 @@ from robosystems.dagster.assets import (
   qb_accounts,
   qb_graph_data,
   qb_transactions,
-  # SEC pipeline - batch processing (for CLI workflows)
-  sec_batch_process,
   # SEC pipeline - download phase
   sec_companies_list,
   # SEC pipeline - staging and materialization
   sec_duckdb_staging,
-  # SEC pipeline - dynamic partition processing (for Dagster UI)
-  sec_filings_to_process,
   sec_graph_materialized,
+  # SEC pipeline - dynamic partition processing
   sec_process_filing,
   sec_raw_filings,
   # Direct staging observable source
@@ -91,8 +88,8 @@ from robosystems.dagster.jobs.sec import (
   sec_daily_download_schedule,
   sec_download_job,
   sec_materialize_job,
+  sec_nightly_materialize_schedule,
   sec_process_job,
-  sec_weekly_download_schedule,
 )
 from robosystems.dagster.resources import (
   DatabaseResource,
@@ -104,6 +101,7 @@ from robosystems.dagster.resources import (
 from robosystems.dagster.sensors import (
   pending_repository_sensor,
   pending_subscription_sensor,
+  sec_processing_sensor,
 )
 
 # ============================================================================
@@ -157,9 +155,9 @@ all_jobs = [
   materialize_file_job,
   materialize_graph_job,
   # SEC pipeline jobs
-  sec_download_job,
-  sec_process_job,
-  sec_materialize_job,
+  sec_download_job,  # Download raw filings to S3
+  sec_process_job,  # Per-filing processing (sensor-triggered)
+  sec_materialize_job,  # Staging + materialization to graph
   # Notification jobs
   send_email_job,
 ]
@@ -185,7 +183,7 @@ all_schedules = [
   full_instance_maintenance_schedule,
   # SEC pipeline schedules
   sec_daily_download_schedule,
-  sec_weekly_download_schedule,
+  sec_nightly_materialize_schedule,
 ]
 
 # ============================================================================
@@ -195,6 +193,7 @@ all_schedules = [
 all_sensors = [
   pending_subscription_sensor,
   pending_repository_sensor,
+  sec_processing_sensor,
 ]
 
 # ============================================================================
@@ -207,10 +206,7 @@ all_assets = [
   # SEC pipeline - download phase
   sec_companies_list,
   sec_raw_filings,
-  # SEC pipeline - batch processing (for CLI workflows)
-  sec_batch_process,
-  # SEC pipeline - dynamic partition processing (for Dagster UI)
-  sec_filings_to_process,
+  # SEC pipeline - dynamic partition processing (sensor handles discovery)
   sec_process_filing,
   # SEC pipeline - staging and materialization
   sec_duckdb_staging,

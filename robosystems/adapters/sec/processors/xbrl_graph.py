@@ -236,16 +236,28 @@ class XBRLGraphProcessor:
       self.entity_data = None
       return None
 
-    # Include all fields from LadybugDB Entity schema
-    # Generate a deterministic UUID for the identifier while keeping CIK for the cik field
-    entity_uri = f"https://www.sec.gov/CIK{self.entityId.zfill(10)}"
-    entity_identifier = create_entity_id(entity_uri)
+    # Determine the authoritative CIK source:
+    # 1. sec_filer.cik if available (most reliable source)
+    # 2. Otherwise fall back to entityId
+    raw_cik = self.entityId
+    if self.sec_filer and self.sec_filer.get("cik"):
+      raw_cik = self.sec_filer.get("cik")
+
+    # Normalize CIK to 10-digit padded format for consistent identification
+    # This ensures the same entity always gets the same identifier regardless of
+    # whether the source data uses padded or unpadded CIK format
+    # Strip leading zeros first, then pad to 10 digits (e.g., "320193" -> "0000320193")
+    normalized_cik = str(raw_cik).lstrip("0").zfill(10)
+
+    # Use canonical URI format for identifier generation - always consistent
+    canonical_uri = f"http://www.sec.gov/CIK#{normalized_cik}"
+    entity_identifier = create_entity_id(canonical_uri)
 
     entity_data = {
-      "identifier": entity_identifier,  # Primary key - UUIDv7 for optimal indexing
-      "uri": entity_uri,  # SEC entity URI
-      "scheme": "https://www.sec.gov/",  # SEC scheme
-      "cik": self.entityId.zfill(10),  # Keep CIK for reference (10-digit padded)
+      "identifier": entity_identifier,  # Primary key - deterministic UUID5
+      "uri": canonical_uri,  # Canonical SEC entity URI
+      "scheme": "http://www.sec.gov/CIK",  # SEC CIK scheme
+      "cik": normalized_cik,  # 10-digit padded CIK for consistent lookups
       "ticker": None,
       "name": None,
       "legal_name": None,
@@ -272,7 +284,8 @@ class XBRLGraphProcessor:
       entity_name = self.sec_filer.get("entity_name") or self.sec_filer.get("name")
       entity_data["name"] = entity_name
       entity_data["legal_name"] = entity_name  # Use name as legal_name if not provided
-      entity_data["cik"] = self.sec_filer.get("cik")
+      # Note: We keep the normalized CIK set above, don't overwrite with sec_filer's
+      # potentially unpadded value to maintain consistent identification
       entity_data["ticker"] = self.sec_filer.get("ticker")
       entity_data["sic"] = self.sec_filer.get("sic")
       entity_data["sic_description"] = self.sec_filer.get("sicDescription")
@@ -306,10 +319,8 @@ class XBRLGraphProcessor:
       if self.sec_filer.get("phone"):
         entity_data["phone"] = self.sec_filer.get("phone")
 
-      # Set XBRL entity URI and scheme if available
-      if entity_data["cik"]:
-        entity_data["scheme"] = "http://www.sec.gov/CIK"
-        entity_data["uri"] = f"http://www.sec.gov/CIK#{entity_data['cik']}"
+      # Note: URI and scheme are already set with canonical format above,
+      # no need to overwrite here
 
       # Map SIC to industry if available
       if entity_data["sic"]:
@@ -960,47 +971,46 @@ class XBRLGraphProcessor:
     """Process entity information from XBRL context.
 
     This creates or links to entities found in XBRL contexts. These could be:
-    - The main entity (if URI matches the top-level entity)
+    - The main entity (if CIK matches the top-level entity after normalization)
     - Subsidiary entities (if different from main entity)
     """
     logger.debug("Processing entity from XBRL context for fact")
     entity_ns, entity_id = xfact.context.entityIdentifier
-    entity_uri = f"{entity_ns}#{entity_id}"
-    logger.debug(f"Processing XBRL entity: {entity_uri}")
+    logger.debug(f"Processing XBRL entity: {entity_ns}#{entity_id}")
+
+    # Normalize entity_id if it looks like a CIK (numeric string)
+    # This handles both "320193" and "0000320193" formats
+    normalized_entity_id = entity_id
+    if entity_id.isdigit():
+      normalized_entity_id = entity_id.lstrip("0").zfill(10)
 
     # Check if this is the main entity or a subsidiary
     is_main_entity = False
     if self.entity_data:
-      # Check if this entity URI matches our main entity
-      main_entity_uri = self.entity_data.get("uri")
       main_entity_cik = self.entity_data.get("cik")
 
-      # Match by URI or by CIK in the entity ID
-      if main_entity_uri == entity_uri:
+      # Match by normalized CIK - both are now 10-digit padded
+      if main_entity_cik and normalized_entity_id == main_entity_cik:
         is_main_entity = True
-      elif main_entity_cik and entity_id == main_entity_cik:
-        is_main_entity = True
-        # Update main entity's URI if not set
-        if not main_entity_uri:
-          self.entity_data["uri"] = entity_uri
-          self.entity_data["scheme"] = entity_ns
 
     if is_main_entity and self.entity_data:
       # Use the main entity identifier
       entity_identifier = self.entity_data["identifier"]
-      logger.debug(f"Using main entity for {entity_uri}")
+      logger.debug(f"Using main entity for CIK {normalized_entity_id}")
     else:
-      # This is a subsidiary or different entity - create it
-      entity_identifier = create_entity_id(entity_uri)
+      # This is a subsidiary or different entity - create canonical URI
+      canonical_uri = f"{entity_ns}#{normalized_entity_id}"
+      entity_identifier = create_entity_id(canonical_uri)
 
       # Check if this subsidiary entity already exists
-      existing_entity = self.entities_df[self.entities_df["uri"] == entity_uri]
+      existing_entity = self.entities_df[self.entities_df["uri"] == canonical_uri]
       if existing_entity.empty:
         entity_data = {
-          "identifier": entity_identifier,  # Primary key - UUIDv7
-          "uri": entity_uri,
+          "identifier": entity_identifier,  # Primary key - deterministic UUID5
+          "uri": canonical_uri,
           "scheme": entity_ns,
-          "name": entity_id,  # Use entity ID as name for now
+          "cik": normalized_entity_id if normalized_entity_id.isdigit() else None,
+          "name": entity_id,  # Keep original ID as name
           "is_parent": False,  # This is not the top-level entity
           "parent_entity_id": self.entity_data["identifier"]
           if self.entity_data
@@ -1018,7 +1028,7 @@ class XBRLGraphProcessor:
 
         self.entities_df = self.safe_concat(self.entities_df, new_entity_df)
         logger.debug(
-          f"Created subsidiary entity: {entity_uri} with ID: {entity_identifier}"
+          f"Created subsidiary entity: {canonical_uri} with ID: {entity_identifier}"
         )
 
     # Create fact-entity relationship

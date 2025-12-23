@@ -11,7 +11,7 @@ from robosystems.config import env
 from robosystems.graph_api.core.ladybug import get_ladybug_service
 from robosystems.graph_api.models.cluster import ClusterInfoResponse
 
-router = APIRouter(tags=["Info"])
+router = APIRouter(tags=["Cluster Info"])
 
 
 def _get_service_for_info():
