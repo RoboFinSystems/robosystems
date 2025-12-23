@@ -62,9 +62,9 @@ package_lambda() {
 
 # postgres-init: Updates secrets AND creates additional databases (dagster, etc.)
 # psycopg2-binary needed for database creation
-package_lambda "postgres-init" "postgres_init.py" "psycopg2-binary==2.9.10"
+package_lambda "postgres-init" "postgres_init.py" "psycopg2-binary==2.9.11"
 
-package_lambda "postgres-rotation" "postgres_rotation.py" "psycopg2-binary==2.9.10"
+package_lambda "postgres-rotation" "postgres_rotation.py" "psycopg2-binary==2.9.11"
 
 package_lambda "valkey-rotation" "valkey_rotation.py" "redis==5.0.1"
 
@@ -76,9 +76,6 @@ package_lambda "graph-volume-manager" "graph_volume_manager.py" ""
 package_lambda "graph-volume-monitor" "graph_volume_monitor.py" "urllib3==2.6.0"
 
 package_lambda "graph-volume-detachment" "graph_volume_detachment.py" ""
-
-# Package worker monitor Lambda function (queue metrics and task protection)
-package_lambda "worker-monitor" "worker_monitor.py" "redis==5.0.1"
 
 # Upload UserData scripts
 echo "📤 Uploading UserData scripts to S3..."
@@ -139,7 +136,7 @@ echo "  \"Lambdas\": {" >> "$MANIFEST"
 
 # Create manifest with S3 keys and hashes
 FIRST=true
-for lambda_name in postgres-init postgres-rotation valkey-rotation graph-api-rotation graph-volume-manager graph-volume-monitor graph-volume-detachment worker-monitor; do
+for lambda_name in postgres-init postgres-rotation valkey-rotation graph-api-rotation graph-volume-manager graph-volume-monitor graph-volume-detachment; do
     if [ "$FIRST" = false ]; then
         echo "," >> "$MANIFEST"
     fi
@@ -165,7 +162,7 @@ echo "✅ Lambda functions, scripts, and CloudFormation templates packaged and u
 echo ""
 echo "📍 S3 Artifacts:"
 LAMBDA_COUNT=0
-for lambda_name in postgres-init postgres-rotation valkey-rotation graph-api-rotation graph-volume-manager graph-volume-monitor graph-volume-detachment worker-monitor; do
+for lambda_name in postgres-init postgres-rotation valkey-rotation graph-api-rotation graph-volume-manager graph-volume-monitor graph-volume-detachment; do
     if [ -f "../${lambda_name}.s3key" ]; then
         LAMBDA_COUNT=$((LAMBDA_COUNT + 1))
     fi
@@ -178,6 +175,6 @@ echo ""
 echo "📋 CloudFormation Parameters:"
 echo "  LambdaCodeBucket configured"
 echo "  Lambda Code Keys: Configured for $LAMBDA_COUNT functions"
-echo "  UserData Script Keys: 4 main scripts + 5 shared scripts configured"
+echo "  UserData Script Keys: 3 main scripts + 5 shared scripts configured"
 echo ""
 echo "  CloudFormation Templates: Configured for ${ENVIRONMENT} environment"
