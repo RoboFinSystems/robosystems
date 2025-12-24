@@ -1,6 +1,8 @@
-name: Test Main Branch
+name: Test CI
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   push:
     branches:
       - main
