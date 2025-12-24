@@ -84,52 +84,48 @@ Dagster is the **sole orchestration system** for all scheduled tasks, event-driv
 ```
 dagster/
 ├── assets/           # Software-Defined Assets (data pipelines)
-│   ├── sec.py        # SEC XBRL pipeline (5 assets)
+│   ├── sec.py        # SEC XBRL pipeline
 │   ├── quickbooks.py # QuickBooks pipeline
-│   └── plaid.py      # Plaid banking pipeline
+│   ├── plaid.py      # Plaid banking pipeline
+│   └── staged_files.py # Direct staging observable source
 ├── jobs/             # Job definitions (all system tasks)
-│   ├── sec.py        # SEC jobs and schedules
 │   ├── billing.py    # Credit allocation, storage billing
-│   ├── infrastructure.py  # Auth cleanup, health checks
+│   ├── infrastructure.py  # Auth cleanup, health checks, instance monitoring
 │   ├── graph.py      # Graph operations (create, backup, restore)
-│   └── provisioning.py    # Subscription provisioning
+│   ├── provisioning.py    # Subscription provisioning
+│   ├── sec.py        # SEC jobs and schedules
+│   └── shared_repository.py # Shared repository operations
 ├── sensors/          # Event-driven triggers
-│   └── provisioning.py    # Watch for pending subscriptions
-├── partitions/       # Partition definitions
-│   └── sec.py        # Year-based partitions (2019-2025)
+│   ├── provisioning.py    # Watch for pending subscriptions
+│   └── sec.py        # SEC processing sensor
+├── resources/        # Dagster resources (DB, S3, Graph)
 └── definitions.py    # Dagster definitions registry
 ```
 
 **What Dagster Handles:**
 
-| Category | Jobs | Description |
-|----------|------|-------------|
-| **Billing** | 4 jobs, 4 schedules | Credit allocation, storage billing, usage collection |
-| **Infrastructure** | 7 jobs, 7 schedules | Auth cleanup, health checks, instance monitoring |
-| **Graph Operations** | 7 jobs | Database creation, backup/restore, materialization |
-| **Data Pipelines** | SEC, QuickBooks, Plaid | Software-Defined Assets with dependencies |
-| **Event Triggers** | 2 sensors | Subscription provisioning, repository sync |
-
-**SEC Pipeline Assets:**
-1. `sec_companies_list` → Fetch company list from SEC EDGAR
-2. `sec_raw_filings` → Download XBRL ZIPs (year-partitioned)
-3. `sec_processed_filings` → Process to Parquet via adapters
-4. `sec_duckdb_staging` → Create DuckDB staging tables
-5. `sec_graph_materialized` → Materialize to LadybugDB
+| Category | Description |
+|----------|-------------|
+| **Billing** | Credit allocation, storage billing, usage collection |
+| **Infrastructure** | Auth cleanup, health checks, instance monitoring |
+| **Graph Operations** | Database creation, backup/restore, materialization |
+| **Data Pipelines** | SEC, QuickBooks, Plaid Software-Defined Assets |
+| **Event Triggers** | Subscription provisioning, repository sync, SEC processing |
 
 **Key Features:**
 - **Single System**: All orchestration in one place - no separate task queues
 - **Asset Dependencies**: Declarative data lineage with automatic orchestration
-- **Year Partitioning**: Process historical data by year (2019-2025)
+- **Year Partitioning**: Process historical data by year
 - **Observability**: Built-in UI at `localhost:3003` for monitoring
 - **Scheduling**: Cron-based schedules for billing, cleanup, and pipelines
 - **Sensors**: Event-driven job triggers (e.g., new subscription → provision graph)
 - **Local Development**: `just sec-load NVDA 2025` triggers pipeline via Docker CLI
 
 **Infrastructure (AWS):**
-- **Fargate**: Daemon (singleton) + Webserver (1-3 replicas) - always on, lightweight
-- **EC2 Run Workers**: r7g.large with 500GB EBS - scale 0-5 based on job queue
-- **Scale to Zero**: No EC2 costs when no jobs running
+- **Fargate**: Daemon + Webserver - always on, lightweight
+- **EC2 Run Workers**: Scale to zero when no jobs running
+
+See [Dagster CloudFormation](https://github.com/RoboFinSystems/robosystems/blob/main/cloudformation/dagster.yaml) for current infrastructure configuration.
 
 ## Graph Database System
 
@@ -195,7 +191,7 @@ The client factory layer provides intelligent routing between application code a
 
 ### DuckDB Staging System
 
-**Location**: `/robosystems/graph_api/core/duckdb_*.py`
+**Location**: `/robosystems/graph_api/core/duckdb/`
 
 High-performance data ingestion via intermediate staging:
 
@@ -214,41 +210,21 @@ High-performance data ingestion via intermediate staging:
 - **DynamoDB Registry**: Track database allocation across instances
 - **API-First**: All access through REST APIs, no direct connections
 
-**Production Tier System (Ladybug):**
+**Tier System:**
 
-- **ladybug-standard**: Multi-tenant, cost-optimized entry
-  - Instance: r7g.large (16GB RAM, 2 vCPUs)
-  - Density: 10 databases per instance
-  - Memory: 2GB per database (oversubscribed for cost efficiency)
-  - Subgraphs: Not supported (single database only)
-  - Storage: 500GB per database
+The platform offers multiple tiers with different isolation levels and capabilities:
 
+- **ladybug-standard**: Multi-tenant, cost-optimized entry tier
 - **ladybug-large**: Dedicated instance with subgraph support
-  - Instance: r7g.large (16GB RAM, 2 vCPUs)
-  - Density: 1 customer per instance (11 total databases with subgraphs)
-  - Subgraphs: Up to 10 subgraphs (1 parent + 10 children)
-  - Storage: 2TB total across all databases
-
 - **ladybug-xlarge**: Maximum performance and scale
-  - Instance: r7g.xlarge (32GB RAM, 4 vCPUs)
-  - Density: 1 customer per instance (26 total databases with subgraphs)
-  - Subgraphs: Up to 25 subgraphs (1 parent + 25 children)
-  - Storage: 5TB total across all databases
+- **ladybug-shared**: Public data repositories (SEC, industry, economic)
+- **neo4j-community-large**: Optional Neo4j backend (disabled by default)
+- **neo4j-enterprise-xlarge**: Optional Neo4j Enterprise (disabled by default)
 
-- **ladybug-shared**: Public data repositories
-  - Instance: r7g.large
-  - Purpose: SEC filings, industry data, economic indicators
-  - Read-only for all users
-
-**Staging Environment:**
-- ladybug-standard: r7g.medium (8GB RAM)
-- ladybug-large: r7g.medium (8GB RAM)
-- ladybug-xlarge: r7g.large (16GB RAM)
-- ladybug-shared: r7g.medium (8GB RAM)
-
-**Optional Neo4j Tiers (Disabled by Default):**
-- neo4j-community-large: r7g.large (production) / r7g.medium (staging)
-- neo4j-enterprise-xlarge: r7g.xlarge (production) / r7g.large (staging)
+For current tier specifications including instance types, memory allocation, subgraph limits, and pricing, see:
+- **[Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** - Infrastructure specifications
+- **[Credits Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/credits.py)** - Credit allocations
+- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/core.py)** - Pricing and plans
 
 ## Data Processing Layer
 
@@ -277,11 +253,13 @@ External service integrations following a consistent client/processor pattern:
 adapters/
 ├── sec/                    # SEC EDGAR adapter
 │   ├── client/
-│   │   └── edgar.py        # SECClient - API client
-│   ├── processors/
-│   │   ├── graph.py        # XBRLGraphProcessor
-│   │   └── duckdb_graph_ingestion.py  # XBRLDuckDBGraphProcessor
-│   └── arelle/             # Arelle XBRL integration
+│   │   ├── edgar.py        # SECClient - API client
+│   │   └── arelle.py       # ArelleClient - XBRL parsing
+│   └── processors/
+│       ├── xbrl_graph.py   # XBRLGraphProcessor
+│       ├── ingestion.py    # XBRLDuckDBGraphProcessor
+│       ├── parquet.py      # Parquet file processing
+│       └── schema.py       # Schema generation
 ├── quickbooks/             # QuickBooks adapter
 │   ├── client/
 │   │   └── api.py          # QBClient - OAuth client
@@ -405,16 +383,17 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 ### Valkey (Redis)
 
-**Purpose**: Caching
+**Purpose**: Caching and coordination
 
-**Database Allocation**:
-- DB 2: Authentication cache
-- DB 3: Server-sent events
-- DB 4: Distributed locks
-- DB 5: Pipeline tracking
-- DB 6: Credits cache
-- DB 7: Rate limiting
-- DB 8: Ladybug client caching
+- Authentication tokens and sessions
+- Server-sent events pub/sub
+- Distributed locks
+- Pipeline tracking
+- Credit balance caching
+- Rate limiting counters
+- Graph client caching
+
+Database allocations are managed in [valkey_registry.py](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/valkey_registry.py).
 
 ### AWS S3
 
@@ -464,12 +443,14 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 ### GitHub Actions Workflows
 
-All deployments automated through GitHub Actions:
+All deployments automated through GitHub Actions. Key workflows include:
 
-- **`prod.yml`**: Production deployment orchestrator
-- **`staging.yml`**: Staging environment deployment
+- **`prod.yml` / `staging.yml`**: Environment deployment orchestrators
 - **`test.yml`**: Automated test suite
 - **`build.yml`**: Docker image building and ECR push
+- **`deploy-*.yml`**: Individual stack deployment workflows
+
+See [.github/workflows/](https://github.com/RoboFinSystems/robosystems/tree/main/.github/workflows) for all available workflows.
 
 **Runner Configuration**:
 - **GitHub-hosted** (default): Free for public repos, no setup required
@@ -491,15 +472,15 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 
 - **`api.yaml`**: ECS Fargate API service with auto-scaling, load balancing, and health checks
 - **`waf.yaml`**: AWS Web Application Firewall for protecting the API from web exploits
-- **`dagster.yaml`**: Dagster webserver and daemon for pipeline orchestration
-- **`dagster-run-worker.yaml`**: EC2 auto-scaling group for Dagster run workers
+- **`dagster.yaml`**: Dagster webserver, daemon, and run workers for pipeline orchestration
 
 #### Graph Database Infrastructure
 
 - **`graph-infra.yaml`**: Base infrastructure for graph database clusters (security groups, roles, registries)
 - **`graph-volumes.yaml`**: EBS volume management and snapshot automation for graph databases
-- **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (LadybugDB backend)
-- **`graph-neo4j.yaml`**: Auto-scaling EC2 writer clusters with tiered instance types (Neo4j backend)
+- **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters (LadybugDB backend)
+- **`graph-ladybug-replicas.yaml`**: Read replica clusters for LadybugDB
+- **`graph-neo4j.yaml`**: Auto-scaling EC2 writer clusters (Neo4j backend)
 
 #### Observability
 
@@ -576,7 +557,7 @@ just setup-aws     # Interactive AWS secrets manager setup
 
 - **Database Isolation**: Each entity gets dedicated graph database
 - **Access Control**: Row-level security in PostgreSQL
-- **Resource Limits**: Per-tier memory, storage, query limits
+- **Resource Limits**: Tier-based resource allocation
 
 ### Scalability
 
