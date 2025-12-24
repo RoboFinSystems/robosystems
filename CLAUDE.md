@@ -337,8 +337,8 @@ just valkey-clear-queue QUEUE # Clear queue
 
 ## CI/CD
 
-- **Self-hosted runner**: Deployments, tests, infrastructure
-- **GitHub-hosted**: Docker builds only
+- **GitHub-hosted runners** (default): Free for public repos, used for tests, builds, and deployments
+- **Self-hosted runners** (optional): Set `RUNNER_LABELS` repo variable to use self-hosted runners
 - **Branches**: `staging` → staging, `main` → production
 - **Infrastructure Config**: `.github/configs/graph.yml`
 
