@@ -464,15 +464,16 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 ### GitHub Actions Workflows
 
-All deployments automated through GitHub Actions with self-hosted runners for infrastructure operations:
+All deployments automated through GitHub Actions:
 
 - **`prod.yml`**: Production deployment orchestrator
 - **`staging.yml`**: Staging environment deployment
-- **`gha-runner.yml`**: Deploy self-hosted GitHub Actions runner
+- **`test.yml`**: Automated test suite
+- **`build.yml`**: Docker image building and ECR push
 
 **Runner Configuration**:
-- Self-hosted runner available if deployed with `gha-runner.yml`
-- GitHub-hosted for Docker builds and as a fallback if self-hosted is not available
+- **GitHub-hosted** (default): Free for public repos, no setup required
+- **Self-hosted** (optional): Forks can use their own org-level or repo-level runners by setting the `RUNNER_LABELS` repository variable
 
 ### CloudFormation Templates
 
@@ -505,9 +506,8 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`prometheus.yaml`**: Amazon Managed Prometheus for metrics collection
 - **`grafana.yaml`**: Amazon Managed Grafana for visualization and dashboards
 
-#### CI/CD & Support
+#### Support
 
-- **`gha-runner.yaml`**: Self-hosted GitHub Actions runner on EC2 spot instances
 - **`bastion.yaml`**: Bastion host for secure access and troubleshooting
 
 ### Environment Configuration
@@ -530,7 +530,6 @@ Environment variables are managed through:
 ```bash
 just setup-gha     # Interactive GitHub secrets/variables setup
 just setup-aws     # Interactive AWS secrets manager setup
-just bootstrap     # Deploy GitHub Actions runner infrastructure
 ```
 
 ## External Integrations
