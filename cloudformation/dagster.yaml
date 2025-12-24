@@ -271,7 +271,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # Secrets Manager
+              # Secrets Manager - GetSecretValue with resource restrictions
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
@@ -279,6 +279,12 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}-*"
                   - !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:robosystems/${Environment}/*"
+              # Secrets Manager - ListSecrets for ECS run launcher tag-based discovery
+              # Note: ListSecrets doesn't support resource-level permissions
+              - Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                Resource: "*"
               # KMS for secrets
               - Effect: Allow
                 Action:
