@@ -19,7 +19,7 @@ on:
         description: "GitHub Actions runner configuration (JSON array)"
         required: false
         type: string
-        default: '["self-hosted", "Linux", "X64", "AL2023", "ci"]'
+        default: '["ubuntu-latest"]'
 
       # AWS Configuration
       aws_region:

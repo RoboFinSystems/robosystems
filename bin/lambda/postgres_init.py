@@ -122,6 +122,18 @@ def lambda_handler(event, context):
       return {"statusCode": 500, "body": "Failed to get RDS instance details"}
 
     db_instance = response["DBInstances"][0]
+
+    # Check if the RDS instance has an endpoint yet (may not be available during startup)
+    if "Endpoint" not in db_instance:
+      print(f"RDS instance {db_instance_id} is not ready yet - no endpoint available")
+      return {
+        "statusCode": 200,
+        "body": json.dumps({
+          "message": "RDS instance not ready yet, skipping initialization",
+          "status": db_instance.get("DBInstanceStatus", "unknown"),
+        }),
+      }
+
     db_endpoint = db_instance["Endpoint"]["Address"]
     db_port = db_instance["Endpoint"]["Port"]
     db_username = os.environ["POSTGRES_USERNAME"]

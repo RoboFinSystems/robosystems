@@ -1,6 +1,8 @@
-name: Test Main Branch
+name: Test CI
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   push:
     branches:
       - main
@@ -26,7 +28,6 @@ jobs:
         with:
           runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
           runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
-          timeout_minutes: "2"
           github_token: ${{ secrets.ACTIONS_TOKEN }}
 
   test:
