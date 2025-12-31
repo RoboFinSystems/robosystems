@@ -2,7 +2,7 @@
   "folders": [
     {
       "name": "robosystems",
-      "path": "../robosystems"
+      "path": ".."
     },
     {
       "name": "robosystems-app",

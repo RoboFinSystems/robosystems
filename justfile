@@ -66,9 +66,9 @@ logs-grep container="worker" pattern="ERROR" lines="100":
 
 # Clone frontend app repositories
 clone-apps:
-    @test -d ../robosystems-app || git clone https://github.com/RoboFinSystems/robosystems-app.git
-    @test -d ../roboledger-app || git clone https://github.com/RoboFinSystems/roboledger-app.git
-    @test -d ../roboinvestor-app || git clone https://github.com/RoboFinSystems/roboinvestor-app.git
+    @test -d ../robosystems-app || git clone https://github.com/RoboFinSystems/robosystems-app.git ../robosystems-app
+    @test -d ../roboledger-app || git clone https://github.com/RoboFinSystems/roboledger-app.git ../roboledger-app
+    @test -d ../roboinvestor-app || git clone https://github.com/RoboFinSystems/roboinvestor-app.git ../roboinvestor-app
 
 
 ## Development Environment ##
