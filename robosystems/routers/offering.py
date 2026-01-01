@@ -378,7 +378,9 @@ async def get_service_offerings(
           # Overage pricing in $/GB/month (1 credit/GB/day * 30 days * $0.00333/credit = ~$0.10/GB/month)
           "overage_pricing": {
             tier: round(30 * 0.00333, 2)  # $0.10/GB/month for all tiers
-            for tier in graph_pricing.get("storage_pricing", {}).get("included_per_tier", {})
+            for tier in graph_pricing.get("storage_pricing", {}).get(
+              "included_per_tier", {}
+            )
           },
         },
         "notes": [

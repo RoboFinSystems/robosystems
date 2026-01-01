@@ -98,7 +98,9 @@ class TestCreditService:
         graph_id="graph123",
         user_id="user123",
         billing_admin_id="user123",
-        monthly_allocation=Decimal("8000"),  # ladybug-standard allocation (~200 agent calls)
+        monthly_allocation=Decimal(
+          "8000"
+        ),  # ladybug-standard allocation (~200 agent calls)
         session=mock_session,
       )
 

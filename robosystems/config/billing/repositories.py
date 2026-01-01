@@ -90,11 +90,11 @@ class RepositoryBillingConfig:
       "price_cents": 9900,  # $99/month
       "price_monthly": 99.0,
       "price_display": "$99/month",
-      "monthly_credits": 32000,  # ~840 agent calls/month
+      "monthly_credits": 17000,  # ~450 agent calls/month
       "access_level": "WRITE",  # Write access for contributions
       "description": "Professional access for analysts and researchers",
       "features": [
-        "32,000 AI agent credits per month",
+        "17,000 AI agent credits per month",
         "Unlimited MCP tool access",
         "2,000 queries per hour",
         "Priority support",
@@ -107,11 +107,11 @@ class RepositoryBillingConfig:
       "price_cents": 49900,  # $499/month
       "price_monthly": 499.0,
       "price_display": "$499/month",
-      "monthly_credits": 160000,  # ~4,200 agent calls/month
+      "monthly_credits": 85000,  # ~2,200 agent calls/month
       "access_level": "ADMIN",  # Full admin access
       "description": "Enterprise access with no limits",
       "features": [
-        "160,000 AI agent credits per month",
+        "85,000 AI agent credits per month",
         "Unlimited MCP tool access",
         "Unlimited queries",
         "Dedicated support",

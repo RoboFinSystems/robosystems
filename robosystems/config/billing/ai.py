@@ -53,11 +53,15 @@ class AIBillingConfig:
   TOKEN_PRICING = {
     "anthropic_claude_4_sonnet": {
       "input": Decimal("3"),  # Credits per 1K input tokens ($10/M tokens, 3.33x markup)
-      "output": Decimal("15"),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
+      "output": Decimal(
+        "15"
+      ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
     },
     "anthropic_claude_3_sonnet": {
       "input": Decimal("3"),  # Credits per 1K input tokens ($10/M tokens, 3.33x markup)
-      "output": Decimal("15"),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
+      "output": Decimal(
+        "15"
+      ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
     },
   }
 

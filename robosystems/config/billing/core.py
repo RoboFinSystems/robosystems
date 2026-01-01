@@ -77,7 +77,8 @@ def get_tier_credit_allocation(tier: str) -> int:
 
 # Build TIER_CREDIT_ALLOCATIONS from plans for backward compatibility
 TIER_CREDIT_ALLOCATIONS = {
-  plan["name"]: plan["monthly_credit_allocation"] for plan in DEFAULT_GRAPH_BILLING_PLANS
+  plan["name"]: plan["monthly_credit_allocation"]
+  for plan in DEFAULT_GRAPH_BILLING_PLANS
 }
 
 
