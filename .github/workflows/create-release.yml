@@ -179,8 +179,12 @@ jobs:
             echo "✅ Production deployment triggered for tag $TAG_NAME"
           elif [ "$DEPLOY_TARGET" = "all" ]; then
             echo "🚀 Triggering deployment to both staging and production..."
+            # Trigger staging first so it queues ahead of prod in the build concurrency group
+            # This ensures staging builds first and populates the cache for prod
             gh workflow run staging.yml --ref "$TAG_NAME"
             echo "✅ Staging deployment triggered for tag $TAG_NAME"
+            echo "⏳ Waiting 2 seconds to ensure staging queues first..."
+            sleep 2
             gh workflow run prod.yml --ref "$TAG_NAME"
             echo "✅ Production deployment triggered for tag $TAG_NAME"
           fi
