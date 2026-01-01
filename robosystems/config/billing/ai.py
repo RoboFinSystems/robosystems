@@ -42,26 +42,55 @@ class AIBillingConfig:
   MINIMUM_CHARGE = Decimal("1")
 
   # Token-based pricing (for dynamic cost calculation)
-  # 3.33x markup over Anthropic API costs for SaaS margins
-  # Anthropic base: $3/M input, $15/M output
-  # RoboSystems: $10/M input, $50/M output
+  # 3.33x markup over API costs for SaaS margins
   #
   # Credit value anchor: 1 credit = $0.00333 (1 GB/day storage = 1 credit)
-  # Input: $0.01/1K tokens ÷ $0.00333/credit = 3 credits/1K tokens
-  # Output: $0.05/1K tokens ÷ $0.00333/credit = 15 credits/1K tokens
-  # Typical agent call (~5K input, ~1.5K output): ~38 credits
+  #
+  # ANTHROPIC PRICING (with 3.33x markup):
+  # - Sonnet: $3/M input, $15/M output → $10/M, $50/M → 3/15 credits per 1K
+  # - Opus: $15/M input, $75/M output → $50/M, $250/M → 15/75 credits per 1K
+  #
+  # OPENAI PRICING (with 3.33x markup):
+  # - GPT-4: $30/M input, $60/M output → $100/M, $200/M → 30/60 credits per 1K
+  # - GPT-3.5: $0.50/M input, $1.50/M output → $1.67/M, $5/M → 0.5/1.5 credits per 1K
+  #
+  # Typical agent call (~5K input, ~1.5K output):
+  # - Sonnet: ~38 credits
+  # - Opus: ~188 credits
   TOKEN_PRICING = {
-    "anthropic_claude_4_sonnet": {
-      "input": Decimal("3"),  # Credits per 1K input tokens ($10/M tokens, 3.33x markup)
-      "output": Decimal(
-        "15"
-      ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
+    # Claude 4/4.1 Opus (premium tier)
+    "anthropic_claude_4_opus": {
+      "input": Decimal("15"),  # Credits per 1K input tokens
+      "output": Decimal("75"),  # Credits per 1K output tokens
     },
+    "anthropic_claude_4.1_opus": {
+      "input": Decimal("15"),  # Credits per 1K input tokens
+      "output": Decimal("75"),  # Credits per 1K output tokens
+    },
+    # Claude 4/4.1 Sonnet (standard tier)
+    "anthropic_claude_4_sonnet": {
+      "input": Decimal("3"),  # Credits per 1K input tokens
+      "output": Decimal("15"),  # Credits per 1K output tokens
+    },
+    # Claude 3 Opus (legacy premium)
+    "anthropic_claude_3_opus": {
+      "input": Decimal("15"),  # Credits per 1K input tokens
+      "output": Decimal("75"),  # Credits per 1K output tokens
+    },
+    # Claude 3/3.5 Sonnet (legacy standard)
     "anthropic_claude_3_sonnet": {
-      "input": Decimal("3"),  # Credits per 1K input tokens ($10/M tokens, 3.33x markup)
-      "output": Decimal(
-        "15"
-      ),  # Credits per 1K output tokens ($50/M tokens, 3.33x markup)
+      "input": Decimal("3"),  # Credits per 1K input tokens
+      "output": Decimal("15"),  # Credits per 1K output tokens
+    },
+    # OpenAI GPT-4
+    "openai_gpt4": {
+      "input": Decimal("30"),  # Credits per 1K input tokens
+      "output": Decimal("60"),  # Credits per 1K output tokens
+    },
+    # OpenAI GPT-3.5 Turbo
+    "openai_gpt35": {
+      "input": Decimal("0.5"),  # Credits per 1K input tokens
+      "output": Decimal("1.5"),  # Credits per 1K output tokens
     },
   }
 

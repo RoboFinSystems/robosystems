@@ -1123,8 +1123,8 @@ class CreditService:
         f"No pricing found for model {model}, using default Sonnet pricing"
       )
       pricing = {
-        "input": Decimal("0.01"),  # Default to Sonnet 4 with 3.33x markup
-        "output": Decimal("0.05"),
+        "input": Decimal("3"),  # Default to Sonnet: 3 credits per 1K input tokens
+        "output": Decimal("15"),  # Default to Sonnet: 15 credits per 1K output tokens
       }
 
     # Calculate actual cost based on tokens

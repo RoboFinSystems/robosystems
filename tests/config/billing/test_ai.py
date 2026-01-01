@@ -9,24 +9,44 @@ def test_token_pricing_contains_expected_models():
   """Test token pricing values are correctly configured.
 
   Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
-  With 3.33x AI markup: 3 credits/1K input, 15 credits/1K output
-  Typical agent call (~5K input, ~1.5K output): ~38 credits
+  Sonnet (3.33x markup): 3 credits/1K input, 15 credits/1K output
+  Opus (3.33x markup): 15 credits/1K input, 75 credits/1K output
+  Typical Sonnet call (~5K input, ~1.5K output): ~38 credits
+  Typical Opus call (~5K input, ~1.5K output): ~188 credits
   """
   pricing = AIBillingConfig.TOKEN_PRICING
 
-  # 3 credits per 1K input tokens ($0.01 / $0.00333 per credit)
+  # Sonnet models: 3/15 credits per 1K tokens
   assert pricing["anthropic_claude_4_sonnet"]["input"] == Decimal("3")
-  # 15 credits per 1K output tokens ($0.05 / $0.00333 per credit)
   assert pricing["anthropic_claude_4_sonnet"]["output"] == Decimal("15")
   assert pricing["anthropic_claude_3_sonnet"]["input"] == Decimal("3")
   assert pricing["anthropic_claude_3_sonnet"]["output"] == Decimal("15")
+
+  # Opus models: 15/75 credits per 1K tokens (5x Sonnet)
+  assert pricing["anthropic_claude_4_opus"]["input"] == Decimal("15")
+  assert pricing["anthropic_claude_4_opus"]["output"] == Decimal("75")
+  assert pricing["anthropic_claude_4.1_opus"]["input"] == Decimal("15")
+  assert pricing["anthropic_claude_4.1_opus"]["output"] == Decimal("75")
+  assert pricing["anthropic_claude_3_opus"]["input"] == Decimal("15")
+  assert pricing["anthropic_claude_3_opus"]["output"] == Decimal("75")
+
+  # OpenAI models
+  assert pricing["openai_gpt4"]["input"] == Decimal("30")
+  assert pricing["openai_gpt4"]["output"] == Decimal("60")
+  assert pricing["openai_gpt35"]["input"] == Decimal("0.5")
+  assert pricing["openai_gpt35"]["output"] == Decimal("1.5")
 
 
 @pytest.mark.parametrize(
   "model,expected_keys",
   [
+    ("anthropic_claude_4_opus", {"input", "output"}),
+    ("anthropic_claude_4.1_opus", {"input", "output"}),
     ("anthropic_claude_4_sonnet", {"input", "output"}),
+    ("anthropic_claude_3_opus", {"input", "output"}),
     ("anthropic_claude_3_sonnet", {"input", "output"}),
+    ("openai_gpt4", {"input", "output"}),
+    ("openai_gpt35", {"input", "output"}),
   ],
 )
 def test_token_pricing_models_have_input_output(model, expected_keys):
