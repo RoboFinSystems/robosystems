@@ -19,10 +19,12 @@ logger = logging.getLogger(__name__)
 # All tier-related settings are defined here in one place.
 # NOTE: Stripe prices are auto-created from this config on first checkout
 #
-# Credit allocations with token-based pricing (~0.125 credits per agent call):
-# - 25 credits = ~200 agent calls/month (~7/day)
-# - 100 credits = ~800 agent calls/month (~27/day)
-# - 300 credits = ~2,400 agent calls/month (~80/day)
+# CREDIT VALUE ANCHOR: 1 credit = 1 GB/day of storage = ~$0.00333
+#
+# Credit allocations with token-based pricing (~38 credits per agent call):
+# - 8,000 credits = ~200 agent calls/month (~7/day)
+# - 32,000 credits = ~800 agent calls/month (~27/day)
+# - 100,000 credits = ~2,600 agent calls/month (~87/day)
 # NOTE: MCP tool access is unlimited - credits only apply to in-house AI agents
 DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
@@ -30,7 +32,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "display_name": "LadybugDB Standard",
     "description": "Multi-tenant LadybugDB infrastructure - perfect for most applications",
     "base_price_cents": 5000,  # $50/month
-    "monthly_credit_allocation": 25,  # ~200 agent calls/month
+    "monthly_credit_allocation": 8000,  # ~200 agent calls/month
     "included_gb": 10,  # 10 GB storage included (overage via credits)
     "max_queries_per_hour": 10000,
     "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
@@ -42,7 +44,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "display_name": "LadybugDB Large",
     "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
     "base_price_cents": 30000,  # $300/month
-    "monthly_credit_allocation": 100,  # ~800 agent calls/month
+    "monthly_credit_allocation": 32000,  # ~800 agent calls/month
     "included_gb": 50,  # 50 GB storage included (overage via credits)
     "max_queries_per_hour": 50000,
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
@@ -54,7 +56,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "display_name": "LadybugDB XLarge",
     "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
     "base_price_cents": 70000,  # $700/month
-    "monthly_credit_allocation": 300,  # ~2,400 agent calls/month
+    "monthly_credit_allocation": 100000,  # ~2,600 agent calls/month
     "included_gb": 100,  # 100 GB storage included (overage via credits)
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",

@@ -148,14 +148,14 @@ No authentication required - this is public service information.""",
                 {
                   "name": "ladybug-standard",
                   "display_name": "LadybugDB Standard",
-                  "monthly_price": 49.99,
-                  "monthly_credits": 10000,
+                  "monthly_price": 50.00,
+                  "monthly_credits": 8000,
                   "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
                   "features": [
-                    "10k AI credits/month per graph",
-                    "100 GB storage included",
-                    "Multi-tenant infrastructure",
-                    "30-day backup retention",
+                    "8,000 AI credits per graph",
+                    "10 GB storage included",
+                    "1 credit/GB/day storage overage",
+                    "7-day backup retention",
                   ],
                 }
               ]
@@ -167,7 +167,7 @@ No authentication required - this is public service information.""",
                   "name": "SEC Data",
                   "enabled": True,
                   "plans": [
-                    {"plan": "starter", "monthly_price": 29.99, "monthly_credits": 5000}
+                    {"plan": "starter", "monthly_price": 29, "monthly_credits": 5000}
                   ],
                 }
               ]
@@ -175,8 +175,8 @@ No authentication required - this is public service information.""",
             "operation_costs": {
               "token_pricing": {
                 "claude_4_sonnet": {
-                  "input_per_1k_tokens": 0.01,
-                  "output_per_1k_tokens": 0.05,
+                  "input_per_1k_tokens": 3,
+                  "output_per_1k_tokens": 15,
                 }
               },
             },
@@ -222,17 +222,15 @@ async def get_service_offerings(
         .get("included_per_tier", {})
         .get(tier_name, 100)
       )
-      storage_overage = (
-        graph_pricing.get("storage_pricing", {})
-        .get("overage_per_gb_per_month", {})
-        .get(tier_name, 1.0)
+      storage_overage_credits = graph_pricing.get("storage_pricing", {}).get(
+        "overage_credits_per_gb_per_day", 1
       )
 
       # Build features list
       features = [
         f"{plan_data.get('monthly_credit_allocation', 0):,} AI credits per graph",
         f"{storage_included:,} GB storage included",
-        f"${storage_overage:.2f}/GB storage overage",
+        f"{storage_overage_credits} credit/GB/day storage overage",
         plan_data.get("infrastructure", "Managed infrastructure"),
         f"{plan_data.get('backup_retention_days', 0)}-day backup retention",
         "Priority support"
@@ -244,6 +242,10 @@ async def get_service_offerings(
       if tier_config and tier_config.get("max_subgraphs", 0) > 0:
         features.append(f"Up to {tier_config.get('max_subgraphs')} subgraphs")
 
+      # Storage overage: 1 credit/GB/day = 30 credits/GB/month = ~$0.10/GB/month
+      # (1 credit = $0.00333, so 30 credits = $0.10)
+      storage_overage_per_gb_month = storage_overage_credits * 30 * 0.00333
+
       tier_info = {
         "name": tier_name,
         "display_name": plan_data.get("display_name", tier_name.title()),
@@ -251,7 +253,7 @@ async def get_service_offerings(
         "monthly_price_per_graph": plan_data.get("base_price_cents", 0) / 100.0,
         "monthly_credits_per_graph": plan_data.get("monthly_credit_allocation", 0),
         "storage_included_gb": storage_included,
-        "storage_overage_per_gb": storage_overage,
+        "storage_overage_per_gb": round(storage_overage_per_gb_month, 2),
         "infrastructure": plan_data.get("infrastructure", "Managed"),
         "features": features,
         "backup_retention_days": plan_data.get("backup_retention_days", 0),
@@ -373,9 +375,11 @@ async def get_service_offerings(
           "included_per_tier": graph_pricing.get("storage_pricing", {}).get(
             "included_per_tier", {}
           ),
-          "overage_pricing": graph_pricing.get("storage_pricing", {}).get(
-            "overage_per_gb_per_month", {}
-          ),
+          # Overage pricing in $/GB/month (1 credit/GB/day * 30 days * $0.00333/credit = ~$0.10/GB/month)
+          "overage_pricing": {
+            tier: round(30 * 0.00333, 2)  # $0.10/GB/month for all tiers
+            for tier in graph_pricing.get("storage_pricing", {}).get("included_per_tier", {})
+          },
         },
         "notes": [
           "Each graph database has its own subscription and monthly cost",
@@ -383,7 +387,7 @@ async def get_service_offerings(
           "Credits are allocated per graph, not shared across the organization",
           "Higher tiers provide dedicated infrastructure with better performance",
           "Storage is included in each graph's subscription price",
-          "Additional storage is billed per GB per month per graph",
+          "Storage overage is billed at 1 credit per GB per day",
         ],
       },
       repository_subscriptions={
@@ -410,7 +414,7 @@ async def get_service_offerings(
           "All database operations are included (queries, imports, backups, exports, etc.)",
           "Token-based pricing applies for actual AI API usage",
           "Credits do not roll over between billing periods",
-          "1 credit ≈ $0.001 USD",
+          "1 credit = 1 GB/day of storage = ~$0.00333 USD",
         ],
       },
       summary={

@@ -10,12 +10,16 @@ from robosystems.config.credits import CreditConfig
 
 
 def test_get_subscription_plan_returns_plan_with_credit_allocation():
-  """Test that subscription plans include monthly_credit_allocation."""
+  """Test that subscription plans include monthly_credit_allocation.
+
+  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
+  ~38 credits per typical agent call → 8,000 credits ≈ 200 agent calls/month
+  """
   plan = BillingConfig.get_subscription_plan("ladybug-standard")
 
   assert plan is not None
   assert plan["name"] == "ladybug-standard"
-  assert plan["monthly_credit_allocation"] == 25
+  assert plan["monthly_credit_allocation"] == 8000  # ~200 agent calls/month
   assert plan["included_gb"] == 10
 
 
@@ -32,10 +36,14 @@ def test_tier_credit_allocations_matches_plans():
 
 
 def test_get_monthly_credits_returns_from_plans():
-  """Test that get_monthly_credits returns values from plans."""
-  assert BillingConfig.get_monthly_credits("ladybug-standard") == 25
-  assert BillingConfig.get_monthly_credits("ladybug-large") == 100
-  assert BillingConfig.get_monthly_credits("ladybug-xlarge") == 300
+  """Test that get_monthly_credits returns values from plans.
+
+  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
+  ~38 credits per typical agent call
+  """
+  assert BillingConfig.get_monthly_credits("ladybug-standard") == 8000  # ~200 calls
+  assert BillingConfig.get_monthly_credits("ladybug-large") == 32000  # ~800 calls
+  assert BillingConfig.get_monthly_credits("ladybug-xlarge") == 100000  # ~2,600 calls
   assert BillingConfig.get_monthly_credits("unknown") == 0
 
 
@@ -72,7 +80,7 @@ def test_validate_configuration_reports_missing_plan(monkeypatch):
 
 
 def test_validate_configuration_passes_when_allocations_match(monkeypatch):
-  monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"ladybug-standard": 25})
+  monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"ladybug-standard": 8000})
   monkeypatch.setattr(
     CreditConfig,
     "OPERATION_COSTS",
@@ -93,6 +101,10 @@ def test_validate_configuration_passes_when_allocations_match(monkeypatch):
 
 
 def test_get_all_pricing_info_returns_expected_structure():
+  """Test get_all_pricing_info returns correct structure.
+
+  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
+  """
   pricing = BillingConfig.get_all_pricing_info()
 
   assert set(pricing["subscription_tiers"]) == {
@@ -101,7 +113,7 @@ def test_get_all_pricing_info_returns_expected_structure():
     "ladybug-xlarge",
   }
   assert (
-    pricing["subscription_tiers"]["ladybug-large"]["monthly_credit_allocation"] == 100
+    pricing["subscription_tiers"]["ladybug-large"]["monthly_credit_allocation"] == 32000
   )
   # AI operations use token-based pricing now, no fixed costs
   assert pricing["ai_operation_costs"] == {}
