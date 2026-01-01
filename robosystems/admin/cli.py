@@ -1473,9 +1473,15 @@ def sec():
 def sec_load(client, ticker, year):
   """Load SEC data for a company (local dev only)."""
   if client.environment != "dev":
-    console.print("[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]")
-    console.print(f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster")
-    console.print("Then open http://localhost:4003 and trigger the SEC pipeline manually.")
+    console.print(
+      "[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]"
+    )
+    console.print(
+      f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster"
+    )
+    console.print(
+      "Then open http://localhost:4003 and trigger the SEC pipeline manually."
+    )
     return
   console.print(f"[blue]Loading SEC data locally for {ticker}...[/blue]")
   year_arg = f" {year}" if year else ""
@@ -1492,8 +1498,12 @@ def sec_load(client, ticker, year):
 def sec_health(client):
   """Check SEC database health (local dev only)."""
   if client.environment != "dev":
-    console.print("[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]")
-    console.print(f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster")
+    console.print(
+      "[yellow]SEC operations in staging/prod are managed by Dagster.[/yellow]"
+    )
+    console.print(
+      f"Use the Dagster UI: ./bin/tools/tunnels.sh {client.environment} dagster"
+    )
     console.print("Then open http://localhost:4003 to view pipeline status and health.")
     return
   command = "just sec-health"

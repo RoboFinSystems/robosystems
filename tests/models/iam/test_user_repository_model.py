@@ -676,7 +676,7 @@ class TestUserRepository:
     config = access.get_repository_plan_config()
 
     assert config["name"] == "Starter"
-    assert config["monthly_credits"] == 50
+    assert config["monthly_credits"] == 15  # SEC Starter allocation (~120 agent calls)
     assert config["price_monthly"] == 29.0
     assert config["access_level"] == RepositoryAccessLevel.READ
 

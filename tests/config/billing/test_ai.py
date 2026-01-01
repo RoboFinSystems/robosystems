@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from robosystems.config.billing.ai import AIBillingConfig, AIOperationType
+from robosystems.config.billing.ai import AIBillingConfig
 
 
 def test_token_pricing_contains_expected_models():
@@ -28,17 +28,3 @@ def test_token_pricing_models_have_input_output(model, expected_keys):
 def test_unknown_model_returns_keyerror():
   with pytest.raises(KeyError):
     _ = AIBillingConfig.TOKEN_PRICING["nonexistent_model"]
-
-
-def test_ai_operation_type_enum_contains_expected_values():
-  values = {operation.value for operation in AIOperationType}
-
-  for expected in [
-    "agent_simple",
-    "agent_complex",
-    "embedding",
-    "completion",
-    "vision",
-    "summarization",
-  ]:
-    assert expected in values

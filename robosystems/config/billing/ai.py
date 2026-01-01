@@ -21,20 +21,6 @@ for AI operations that call external APIs.
 """
 
 from decimal import Decimal
-from enum import Enum
-
-
-# Note: This enum is kept for potential future use but is not currently referenced
-# Consider removing if not needed for future AI operation types
-class AIOperationType(Enum):
-  """Types of AI operations that consume credits."""
-
-  AGENT_SIMPLE = "agent_simple"  # Simple AI agent query
-  AGENT_COMPLEX = "agent_complex"  # Complex multi-step AI analysis
-  EMBEDDING = "embedding"  # Text embedding generation
-  COMPLETION = "completion"  # Direct AI completion
-  VISION = "vision"  # Image analysis with AI
-  SUMMARIZATION = "summarization"  # Document summarization
 
 
 class AIBillingConfig:
@@ -80,10 +66,3 @@ class AIBillingConfig:
     if cost <= 0:
       return Decimal("0")
     return max(cost, cls.MINIMUM_CHARGE)
-
-  # Note: The following methods and attributes are currently unused but kept for potential future use:
-  # - calculate_ai_cost(): Could be used for fixed-cost AI operations
-  # - is_ai_operation(): Could be used to identify AI operations automatically
-  # - get_monthly_allocation(): Could be used for tier-based allocations
-  # - estimate_ai_usage(): Could be used for usage estimation tools
-  # Consider removing these if not needed in the near future

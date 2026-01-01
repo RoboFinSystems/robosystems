@@ -124,7 +124,7 @@ async def get_graph_limits(
     await get_universal_repository(graph_id, "read")
 
     # Import needed functions
-    from robosystems.config.billing.storage import StorageBillingConfig
+    from robosystems.config.billing.core import StorageBillingConfig
     from robosystems.config.graph_tier import (
       GraphTierConfig,
       get_tier_backup_limits,

@@ -128,10 +128,12 @@ def lambda_handler(event, context):
       print(f"RDS instance {db_instance_id} is not ready yet - no endpoint available")
       return {
         "statusCode": 200,
-        "body": json.dumps({
-          "message": "RDS instance not ready yet, skipping initialization",
-          "status": db_instance.get("DBInstanceStatus", "unknown"),
-        }),
+        "body": json.dumps(
+          {
+            "message": "RDS instance not ready yet, skipping initialization",
+            "status": db_instance.get("DBInstanceStatus", "unknown"),
+          }
+        ),
       }
 
     db_endpoint = db_instance["Endpoint"]["Address"]

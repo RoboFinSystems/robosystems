@@ -60,7 +60,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
-from robosystems.config.billing.storage import StorageBillingConfig
+from robosystems.config.billing.core import StorageBillingConfig
 from robosystems.config.constants import (
   FALLBACK_BYTES_PER_ROW_CSV,
   FALLBACK_BYTES_PER_ROW_JSON,

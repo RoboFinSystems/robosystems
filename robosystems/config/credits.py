@@ -1,69 +1,48 @@
 """
-Centralized credit system configuration - AI-focused billing.
+Credit system configuration - operation costs and alerts.
 
-SIMPLIFIED CREDIT MODEL:
-========================
-Credits are now exclusively for AI operations that use external AI APIs
-(Anthropic Claude or OpenAI GPT). All other operations are included as they
-use resources already included with the LadybugDB instance provisioning.
+This module defines credit costs for operations and alert thresholds.
+Tier credit allocations are defined in billing/core.py (single source of truth).
 
-AI CREDITS:
------------
-- Agent calls: 100 credits (uses Anthropic/OpenAI API)
-- Connection sync: 20 credits (when incurring external costs)
+CREDIT MODEL:
+=============
+Credits are consumed by AI operations using token-based pricing.
+All database operations are included with the subscription.
+Storage overage is billed via credits at 1 credit/GB/day.
 
-STORAGE CREDITS (Optional separate mechanism):
-----------------------------------------------
-- Storage: 10 credits per GB per day
-- Can be billed separately from AI credits
-- Allows for storage-specific credit pools
+AI CREDITS (Token-Based Pricing):
+---------------------------------
+AI agent calls consume credits based on actual token usage:
+- Input tokens: 0.01 credits per 1K tokens
+- Output tokens: 0.05 credits per 1K tokens
+- Typical agent call (~5K input, ~1.5K output): ~0.125 credits
+
+NOTE: MCP tool access is unlimited and does not consume credits.
+Credits only apply to in-house AI agent operations.
 
 INCLUDED OPERATIONS (No credit consumption):
----------------------------------------------
+--------------------------------------------
 - All database queries (Cypher, analytics)
 - All API calls (non-AI)
 - MCP protocol calls (graph queries, schema info)
 - Data imports/exports
 - Backups and restores
 - Schema operations
-- Basic connection management
-
-RATIONALE:
-----------
-When a LadybugDB database is provisioned, it comes with defined resource limits:
-- Memory allocation (based on tier)
-- CPU allocation (based on instance type)
-- Storage limits (configurable)
-
-These resources are already paid for through the instance provisioning,
-so there's no need to charge credits for operations that simply use
-these pre-allocated resources. Only external API calls (AI) and
-potentially storage overages need credit-based billing.
+- Connection management
 """
 
 from decimal import Decimal
-
-# SINGLE SOURCE OF TRUTH: Tier Credit Allocations
-# These are the monthly AI credit allocations for each subscription tier
-# Updated 2025-11-09: Reduced to sustainable levels (99% reduction from original)
-TIER_CREDIT_ALLOCATIONS = {
-  "ladybug-standard": 100,  # 100 credits/month = 333 complex queries (~11/day)
-  "ladybug-large": 300,  # 300 credits/month = 1,000 complex queries (~33/day)
-  "ladybug-xlarge": 800,  # 800 credits/month = 2,667 complex queries (~89/day)
-}
 
 
 class CreditConfig:
   """Centralized credit system configuration - AI operations only."""
 
   # Credit cost per operation type (in credits)
-  # Only AI operations that use Anthropic or OpenAI APIs consume credits
+  # AI operations use TOKEN-BASED pricing (see AIBillingConfig.TOKEN_PRICING)
+  # Storage overage uses CREDIT-BASED billing at a flat rate
   OPERATION_COSTS = {
-    # AI operations (consume credits)
-    "agent_call": Decimal("100"),  # AI agent calls using Anthropic/OpenAI
-    "ai_analysis": Decimal("100"),  # AI/Agent analysis
-    # Storage operations (per GB per day) - separate billing mechanism
-    "storage_per_gb_day": Decimal("10"),  # 10 credits per GB per day
+    # Storage overage (per GB per day)
+    "storage_per_gb_day": Decimal("1"),  # 1 credit per GB per day (~$0.75/GB/month at $0.75/credit)
     # Connection sync operations (potential future credit consumption)
     "connection_sync": Decimal("20"),  # Sync external data (may incur costs)
     # All other operations are included in subscription (no credit consumption)
@@ -92,11 +71,12 @@ class CreditConfig:
   }
 
   # Monthly AI credit allocations by subscription tier
-  # Sourced from TIER_CREDIT_ALLOCATIONS in billing/core.py (single source of truth)
+  # NOTE: Single source of truth is in billing/core.py (DEFAULT_GRAPH_BILLING_PLANS)
+  # These values must match - validated by BillingConfig.validate_configuration()
   MONTHLY_ALLOCATIONS = {
-    "ladybug-standard": TIER_CREDIT_ALLOCATIONS.get("ladybug-standard", 100),
-    "ladybug-large": TIER_CREDIT_ALLOCATIONS.get("ladybug-large", 300),
-    "ladybug-xlarge": TIER_CREDIT_ALLOCATIONS.get("ladybug-xlarge", 800),
+    "ladybug-standard": 25,
+    "ladybug-large": 100,
+    "ladybug-xlarge": 300,
   }
 
   # Credit balance thresholds for alerts

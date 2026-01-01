@@ -251,7 +251,7 @@ class TestStorageViolationDetection:
       graph_type="generic",
       org_id=org.id,
       session=db_session,
-      graph_tier=GraphTier.LADYBUG_STANDARD,
+      graph_tier=GraphTier.LADYBUG_XLARGE,
     )
 
     # Create graph credits with limit
@@ -325,7 +325,7 @@ class TestStorageViolationDetection:
       graph_type="generic",
       org_id=org.id,
       session=db_session,
-      graph_tier=GraphTier.LADYBUG_STANDARD,
+      graph_tier=GraphTier.LADYBUG_XLARGE,
     )
 
     # Create graph credits
@@ -378,7 +378,7 @@ class TestStorageCreditsConsumption:
 
     # Record initial balance
     initial_balance = sample_graph_credits.current_balance
-    # Standard tier has 100 GB included, so 200 GB total = 100 GB overage
+    # XLarge tier has 100 GB included, so 200 GB total = 100 GB overage
     storage_gb = Decimal("200")
 
     result = credit_service.consume_storage_credits(
@@ -391,12 +391,12 @@ class TestStorageCreditsConsumption:
     assert result["total_storage_gb"] == 200.0
     assert result["included_gb"] == 100.0
     assert result["overage_gb"] == 100.0
-    assert result["credits_per_gb_day"] == 10
-    assert result["credits_consumed"] == 1000.0  # 100 GB overage * 10 credits/GB/day
+    assert result["credits_per_gb_day"] == 1
+    assert result["credits_consumed"] == 100.0  # 100 GB overage * 1 credit/GB/day
 
     # Check balance was updated
     db_session.refresh(sample_graph_credits)
-    expected_balance = initial_balance - Decimal("1000.0")
+    expected_balance = initial_balance - Decimal("100.0")
     assert sample_graph_credits.current_balance == expected_balance
 
   def test_consume_storage_credits_allows_negative(
@@ -410,16 +410,16 @@ class TestStorageCreditsConsumption:
     db_session.commit()
 
     # Consume more storage credits than available
-    # Standard tier has 100 GB included, so 200 GB = 100 GB overage = 1000 credits
+    # XLarge tier has 100 GB included, so 200 GB = 100 GB overage = 100 credits
     result = credit_service.consume_storage_credits(
       graph_id=sample_graph_credits.graph_id,
-      storage_gb=Decimal("200"),  # 100 GB overage = 1000 credits
+      storage_gb=Decimal("200"),  # 100 GB overage = 100 credits
     )
 
     assert result["success"] is True
     assert result["went_negative"] is True
     assert result["old_balance"] == 1.0
-    assert result["remaining_balance"] == -999.0  # 1.0 - 1000.0
+    assert result["remaining_balance"] == -99.0  # 1.0 - 100.0
 
   def test_consume_storage_credits_creates_transaction(
     self, db_session, sample_graph_credits
@@ -427,7 +427,7 @@ class TestStorageCreditsConsumption:
     """Test that storage overage consumption creates transaction record."""
     credit_service = CreditService(db_session)
 
-    # Standard tier has 100 GB included, use 150 GB = 50 GB overage
+    # XLarge tier has 100 GB included, use 150 GB = 50 GB overage
     credit_service.consume_storage_credits(
       graph_id=sample_graph_credits.graph_id,
       storage_gb=Decimal("150"),
@@ -451,13 +451,13 @@ class TestStorageCreditsConsumption:
     )
 
     assert transaction is not None
-    assert transaction.amount == Decimal("-500.0")  # -50 GB overage * 10 credits/GB/day
+    assert transaction.amount == Decimal("-50.0")  # -50 GB overage * 1 credit/GB/day
     metadata = transaction.get_metadata()
     assert metadata["total_storage_gb"] == "150"
     assert metadata["included_gb"] == "100"
     assert metadata["overage_gb"] == "50"
-    assert metadata["overage_cost"] == "500"
-    assert metadata["credits_per_gb_day"] == "10"
+    assert metadata["overage_cost"] == "50"
+    assert metadata["credits_per_gb_day"] == "1"
     assert metadata["allows_negative"] is True
 
   def test_consume_storage_credits_no_credit_pool(self, db_session):
@@ -495,7 +495,7 @@ def sample_graph_credits(db_session, sample_user):
     session=db_session,
   )
 
-  # Then create the graph
+  # Then create the graph (using XLARGE for 100GB storage limit in tests)
   graph_id = f"test_graph_{uuid.uuid4().hex[:8]}"
   Graph.create(
     graph_id=graph_id,
@@ -503,7 +503,7 @@ def sample_graph_credits(db_session, sample_user):
     graph_type="generic",
     org_id=org.id,
     session=db_session,
-    graph_tier=GraphTier.LADYBUG_STANDARD,
+    graph_tier=GraphTier.LADYBUG_XLARGE,
   )
 
   credits = GraphCredits.create_for_graph(

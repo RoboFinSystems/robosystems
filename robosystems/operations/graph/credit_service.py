@@ -1221,8 +1221,9 @@ class CreditService:
         "message": "Storage within included limit - no charges applied",
       }
 
-    # Calculate overage cost (10 credits per GB per day)
-    overage_cost = get_operation_cost("storage_daily") * overage_gb
+    # Calculate overage cost using centralized config
+    credits_per_gb_day = get_operation_cost("storage_daily")
+    overage_cost = credits_per_gb_day * overage_gb
 
     # Storage charges are always applied, even if it results in negative balance
     old_balance = credits.current_balance
@@ -1235,7 +1236,7 @@ class CreditService:
       "included_gb": str(included_gb),
       "overage_gb": str(overage_gb),
       "overage_cost": str(overage_cost),
-      "credits_per_gb_day": "10",
+      "credits_per_gb_day": str(credits_per_gb_day),
       "old_balance": str(old_balance),
       "new_balance": str(credits.current_balance),
       "allows_negative": True,
@@ -1272,7 +1273,7 @@ class CreditService:
       "overage_gb": float(overage_gb),
       "included_gb": float(included_gb),
       "total_storage_gb": float(storage_gb),
-      "credits_per_gb_day": 10,
+      "credits_per_gb_day": float(credits_per_gb_day),
       "remaining_balance": float(credits.current_balance),
       "went_negative": went_negative,
       "old_balance": float(old_balance),
@@ -1281,12 +1282,13 @@ class CreditService:
 
 
 # Map operation costs to use centralized configuration
+# Note: AI operations (agent_call) use token-based pricing via consume_ai_tokens()
+# Note: Storage overage is billed via credits at storage_per_gb_day rate
 CREDIT_COSTS = {
   "api_call": CreditConfig.OPERATION_COSTS["api_call"],
   "query": CreditConfig.OPERATION_COSTS["query"],
   "mcp_call": CreditConfig.OPERATION_COSTS["mcp_call"],
-  "agent_call": CreditConfig.OPERATION_COSTS["agent_call"],
-  "ai_analysis": CreditConfig.OPERATION_COSTS.get("ai_analysis", Decimal("100")),
+  "mcp_tool_call": CreditConfig.OPERATION_COSTS["mcp_tool_call"],
   "import": CreditConfig.OPERATION_COSTS["import"],
   "backup": CreditConfig.OPERATION_COSTS["backup"],
   "analytics": CreditConfig.OPERATION_COSTS["analytics"],

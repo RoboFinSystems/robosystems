@@ -98,7 +98,7 @@ class TestCreditService:
         graph_id="graph123",
         user_id="user123",
         billing_admin_id="user123",
-        monthly_allocation=Decimal("100"),
+        monthly_allocation=Decimal("25"),  # ladybug-standard allocation
         session=mock_session,
       )
 
@@ -347,7 +347,11 @@ class TestCreditService:
         mock_cache.invalidate_graph_credit_balance.assert_called_once_with("graph123")
 
   def test_get_operation_cost(self):
-    """Test getting operation costs."""
+    """Test getting operation costs.
+
+    Note: AI operations (agent_call) use token-based pricing via consume_ai_tokens(),
+    not fixed costs from get_operation_cost().
+    """
     # Clear cache to ensure we get fresh values from configuration
     try:
       from robosystems.middleware.billing.cache import credit_cache
@@ -356,20 +360,20 @@ class TestCreditService:
     except Exception:
       pass  # Cache might not be available in test environment
 
-    # Test AI operations (consume credits)
-    assert get_operation_cost("agent_call") == Decimal("100")
-    assert get_operation_cost("ai_analysis") == Decimal("100")
-    assert get_operation_cost("mcp_call") == Decimal("0")  # MCP calls are included
+    # Fixed-cost operations (storage is 1 credit/GB/day)
+    assert get_operation_cost("storage_daily") == Decimal("1")
+
+    # MCP calls and other operations are included (0 credits)
+    assert get_operation_cost("mcp_call") == Decimal("0")
+    assert get_operation_cost("mcp_tool_call") == Decimal("0")
 
     # Test included operations (all database operations)
     assert get_operation_cost("query") == Decimal("0")
-    assert get_operation_cost("cypher_query") == Decimal("0")
     assert get_operation_cost("analytics") == Decimal("0")
     assert get_operation_cost("import") == Decimal("0")
     assert get_operation_cost("backup") == Decimal("0")
     assert get_operation_cost("sync") == Decimal("0")
     assert get_operation_cost("api_call") == Decimal("0")
-    assert get_operation_cost("schema_query") == Decimal("0")
 
     # Test unknown operation (should return 0 in simplified model)
     assert get_operation_cost("unknown_op") == Decimal("0")

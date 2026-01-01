@@ -173,7 +173,12 @@ No authentication required - this is public service information.""",
               ]
             },
             "operation_costs": {
-              "base_costs": {"agent_call": 100.0, "ai_analysis": 100.0},
+              "token_pricing": {
+                "claude_4_sonnet": {
+                  "input_per_1k_tokens": 0.01,
+                  "output_per_1k_tokens": 0.05,
+                }
+              },
             },
           }
         }
@@ -348,21 +353,15 @@ async def get_service_offerings(
     # Get no-credit operations list
     no_credit_ops = graph_pricing.get("no_credit_operations", [])
 
-    # Get AI token pricing information (sample of key models)
-    token_pricing = {
-      "claude_4_opus": {
-        "input_per_1k_tokens": 15,  # credits
-        "output_per_1k_tokens": 75,  # credits
-      },
-      "claude_4_sonnet": {
-        "input_per_1k_tokens": 3,  # credits
-        "output_per_1k_tokens": 15,  # credits
-      },
-      "gpt4": {
-        "input_per_1k_tokens": 30,  # credits
-        "output_per_1k_tokens": 60,  # credits
-      },
-    }
+    # Get AI token pricing from authoritative source
+    from ..config.billing.ai import AIBillingConfig
+
+    token_pricing = {}
+    for model_name, prices in AIBillingConfig.TOKEN_PRICING.items():
+      token_pricing[model_name] = {
+        "input_per_1k_tokens": float(prices["input"]),
+        "output_per_1k_tokens": float(prices["output"]),
+      }
 
     return ServiceOfferingsResponse(
       billing_enabled=env.BILLING_ENABLED,
