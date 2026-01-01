@@ -34,7 +34,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "included_gb": 10,  # 10 GB storage included (overage via credits)
     "max_queries_per_hour": 10000,
     "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
-    "backup_retention_days": 30,
+    "backup_retention_days": 7,
     "priority_support": True,
   },
   {
@@ -46,7 +46,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "included_gb": 50,  # 50 GB storage included (overage via credits)
     "max_queries_per_hour": 50000,
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
-    "backup_retention_days": 90,
+    "backup_retention_days": 30,
     "priority_support": True,
   },
   {
@@ -58,7 +58,7 @@ DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
     "included_gb": 100,  # 100 GB storage included (overage via credits)
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
-    "backup_retention_days": 365,
+    "backup_retention_days": 90,
     "priority_support": True,
   },
 ]

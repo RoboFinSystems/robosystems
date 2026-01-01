@@ -150,30 +150,26 @@ class GraphPricingService:
   def _calculate_charges(self, plan: dict, avg_size_gb: float) -> dict:
     """Calculate charges based on plan and usage.
 
-    NOTE: This method is deprecated. Storage is now credit-based rather than GB-based.
-    New storage billing uses daily credit consumption at 0.05 credits per GB.
-    This method is kept for legacy billing compatibility only.
+    NOTE: Storage overage is now credit-based (1 credit/GB/day) rather than dollar-based.
+    This method only returns the base subscription cost. Storage overage is tracked
+    separately via the credit system in CreditService.charge_storage_overage().
     """
     # Convert cents to dollars
     base_price = Decimal(plan["base_price_cents"]) / 100
-    overage_price_per_gb = Decimal(plan["overage_price_cents_per_gb"]) / 100
 
-    # Calculate overage
+    # Calculate overage GB for informational purposes only
+    # Actual billing is handled via credits (1 credit/GB/day)
     avg_gb = Decimal(str(avg_size_gb))
     included_gb = Decimal(str(plan["included_gb"]))
     overage_gb = max(avg_gb - included_gb, Decimal("0"))
 
-    # Calculate costs
-    overage_cost = overage_gb * overage_price_per_gb
-    total_cost = base_price + overage_cost
-
     # Round to 2 decimal places
-    total_cost = total_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    overage_cost = overage_cost.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    base_price = base_price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     return {
       "base_monthly": float(base_price),
-      "storage_overage": float(overage_cost),
-      "total": float(total_cost),
+      "storage_overage": 0.0,  # Now handled via credit system
+      "total": float(base_price),  # Base only; overage via credits
       "overage_gb": float(overage_gb),
+      "overage_billing": "credit-based",  # 1 credit/GB/day
     }
