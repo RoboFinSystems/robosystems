@@ -64,21 +64,24 @@ class RepositoryBillingConfig:
   # Repository subscription tiers (monthly pricing)
   # NOTE: Stripe prices are auto-created from this config on first checkout
   # This is the SINGLE SOURCE OF TRUTH for repository pricing and credits
+  # NOTE: MCP tool access is unlimited - credits only apply to in-house AI agents
+  #
+  # CREDIT VALUE ANCHOR: 1 credit = 1 GB/day of storage = ~$0.00333
+  # ~38 credits per typical agent call
   REPOSITORY_PLANS = {
     RepositoryPlan.STARTER: {
       "name": "Starter",
       "price_cents": 2900,  # $29/month
       "price_monthly": 29.0,  # For display/calculations
       "price_display": "$29/month",
-      "monthly_credits": 50,  # 50 AI agent credits per month (167 complex queries/month = 5.5/day)
+      "monthly_credits": 5000,  # ~130 agent calls/month
       "access_level": "READ",  # Read-only access
       "description": "Basic access for individuals and small teams",
       "features": [
-        "50 AI agent credits per month",
-        "500 queries per hour (included)",
-        "200 MCP queries per hour (included)",
-        "Basic rate limits",
-        "CSV export only",
+        "5,000 AI agent credits per month",
+        "Unlimited MCP tool access",
+        "500 queries per hour",
+        "CSV export",
         "2 years historical data",
       ],
     },
@@ -87,14 +90,13 @@ class RepositoryBillingConfig:
       "price_cents": 9900,  # $99/month
       "price_monthly": 99.0,
       "price_display": "$99/month",
-      "monthly_credits": 200,  # 200 AI agent credits per month (667 complex queries/month = 22/day)
+      "monthly_credits": 17000,  # ~450 agent calls/month
       "access_level": "WRITE",  # Write access for contributions
       "description": "Professional access for analysts and researchers",
       "features": [
-        "200 AI agent credits per month",
-        "2,000 queries per hour (included)",
-        "1,000 MCP queries per hour (included)",
-        "Professional rate limits",
+        "17,000 AI agent credits per month",
+        "Unlimited MCP tool access",
+        "2,000 queries per hour",
         "Priority support",
         "CSV/JSON export",
         "5 years historical data",
@@ -105,16 +107,14 @@ class RepositoryBillingConfig:
       "price_cents": 49900,  # $499/month
       "price_monthly": 499.0,
       "price_display": "$499/month",
-      "monthly_credits": 1000,  # 1,000 AI agent credits per month (3,333 complex queries/month = 111/day)
+      "monthly_credits": 85000,  # ~2,200 agent calls/month
       "access_level": "ADMIN",  # Full admin access
       "description": "Enterprise access with no limits",
       "features": [
-        "1,000 AI agent credits per month",
-        "Unlimited queries (included)",
-        "Unlimited MCP queries (included)",
-        "No daily rate limits",
+        "85,000 AI agent credits per month",
+        "Unlimited MCP tool access",
+        "Unlimited queries",
         "Dedicated support",
-        "Custom integrations",
         "Bulk export capabilities",
         "Full historical archive",
       ],

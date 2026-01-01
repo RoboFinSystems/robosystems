@@ -27,7 +27,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session, relationship
 
-from ...config.billing.storage import StorageBillingConfig
+from ...config.billing.core import StorageBillingConfig
 from ...config.graph_tier import GraphTier
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid

@@ -865,25 +865,23 @@ async def get_available_graph_tiers(
       pricing_info = BillingConfig.get_all_pricing_info()
       tier_pricing = pricing_info.get("subscription_tiers", {})
 
-      # Map old tier names to new tier names for pricing
-      pricing_mapping = {
-        "ladybug-standard": "standard",
-        "ladybug-large": "enterprise",
-        "ladybug-xlarge": "premium",
-      }
-
       for tier in tiers:
         tier_key = tier.get("tier", "")
-        mapped_key = pricing_mapping.get(tier_key, tier_key)
 
-        if tier_pricing.get(mapped_key):
-          tier["monthly_price"] = tier_pricing[mapped_key].get("monthly_price")
+        # tier_pricing uses the same keys as tier names (e.g., "ladybug-standard")
+        if tier_pricing.get(tier_key):
+          # Convert cents to dollars for monthly_price
+          base_price_cents = tier_pricing[tier_key].get("base_price_cents", 0)
+          tier["monthly_price"] = base_price_cents / 100.0
+          tier["monthly_credits"] = tier_pricing[tier_key].get(
+            "monthly_credit_allocation", 0
+          )
         else:
-          # Default pricing if not found
+          # Default pricing if not found (matching current billing config)
           default_prices = {
-            "ladybug-standard": 49.99,
-            "ladybug-large": 199.99,
-            "ladybug-xlarge": 499.99,
+            "ladybug-standard": 50.0,
+            "ladybug-large": 300.0,
+            "ladybug-xlarge": 700.0,
             "neo4j-community-large": 299.99,
             "neo4j-enterprise-xlarge": 999.99,
           }

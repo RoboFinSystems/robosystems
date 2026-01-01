@@ -2,59 +2,110 @@
 Core billing configuration - Graph subscriptions and main billing plans.
 
 This module defines the primary subscription tiers for graph databases
-and core billing functionality.
+and core billing functionality. This is the SINGLE SOURCE OF TRUTH for
+all tier-related configuration.
 """
 
 import logging
 from decimal import Decimal
 from typing import Any
 
-from ..credits import TIER_CREDIT_ALLOCATIONS, CreditConfig
+from ..credits import CreditConfig
 
 logger = logging.getLogger(__name__)
 
 
-# Unified billing plans configuration (aligned with GraphTier infrastructure)
+# SINGLE SOURCE OF TRUTH: Subscription tier configuration
+# All tier-related settings are defined here in one place.
 # NOTE: Stripe prices are auto-created from this config on first checkout
-# NOTE: monthly_credit_allocation comes from TIER_CREDIT_ALLOCATIONS (single source of truth)
+#
+# CREDIT VALUE ANCHOR: 1 credit = 1 GB/day of storage = ~$0.00333
+#
+# Credit allocations with token-based pricing (~38 credits per agent call):
+# - 8,000 credits = ~200 agent calls/month (~7/day)
+# - 32,000 credits = ~800 agent calls/month (~27/day)
+# - 100,000 credits = ~2,600 agent calls/month (~87/day)
+# NOTE: MCP tool access is unlimited - credits only apply to in-house AI agents
 DEFAULT_GRAPH_BILLING_PLANS: list[dict[str, Any]] = [
   {
     "name": "ladybug-standard",
     "display_name": "LadybugDB Standard",
     "description": "Multi-tenant LadybugDB infrastructure - perfect for most applications",
-    "base_price_cents": 4999,  # $49.99
-    "included_gb": 100,  # 100 GB storage included
-    "overage_price_cents_per_gb": 100,  # $1.00 per GB overage
+    "base_price_cents": 5000,  # $50/month
+    "monthly_credit_allocation": 8000,  # ~200 agent calls/month
+    "included_gb": 10,  # 10 GB storage included (overage via credits)
     "max_queries_per_hour": 10000,
     "infrastructure": "Multi-tenant (shared r7g.large/xlarge)",
-    "backup_retention_days": 30,
+    "backup_retention_days": 7,
     "priority_support": True,
   },
   {
     "name": "ladybug-large",
     "display_name": "LadybugDB Large",
     "description": "Dedicated r7g.large instance - enhanced performance with subgraph support",
-    "base_price_cents": 19999,  # $199.99
-    "included_gb": 500,  # 500 GB storage included
-    "overage_price_cents_per_gb": 50,  # $0.50 per GB overage
+    "base_price_cents": 30000,  # $300/month
+    "monthly_credit_allocation": 32000,  # ~800 agent calls/month
+    "included_gb": 50,  # 50 GB storage included (overage via credits)
     "max_queries_per_hour": 50000,
     "infrastructure": "Dedicated r7g.large (2 vCPU, 16 GB RAM)",
-    "backup_retention_days": 90,
+    "backup_retention_days": 30,
     "priority_support": True,
   },
   {
     "name": "ladybug-xlarge",
     "display_name": "LadybugDB XLarge",
     "description": "Dedicated r7g.xlarge instance - maximum performance and scale",
-    "base_price_cents": 49999,  # $499.99
-    "included_gb": 2000,  # 2 TB storage included
-    "overage_price_cents_per_gb": 25,  # $0.25 per GB overage
+    "base_price_cents": 70000,  # $700/month
+    "monthly_credit_allocation": 100000,  # ~2,600 agent calls/month
+    "included_gb": 100,  # 100 GB storage included (overage via credits)
     "max_queries_per_hour": None,  # Unlimited
     "infrastructure": "Dedicated r7g.xlarge (4 vCPU, 32 GB RAM)",
-    "backup_retention_days": 365,
+    "backup_retention_days": 90,
     "priority_support": True,
   },
 ]
+
+
+# Helper to get credit allocations by tier name (for backward compatibility)
+def get_tier_credit_allocation(tier: str) -> int:
+  """Get monthly credit allocation for a tier from the billing plans."""
+  for plan in DEFAULT_GRAPH_BILLING_PLANS:
+    if plan["name"] == tier:
+      return plan.get("monthly_credit_allocation", 0)
+  return 0
+
+
+# Build TIER_CREDIT_ALLOCATIONS from plans for backward compatibility
+TIER_CREDIT_ALLOCATIONS = {
+  plan["name"]: plan["monthly_credit_allocation"]
+  for plan in DEFAULT_GRAPH_BILLING_PLANS
+}
+
+
+# Helper to get included storage by tier name
+def get_included_storage(tier: str) -> int:
+  """Get included storage in GB for a tier from the billing plans."""
+  for plan in DEFAULT_GRAPH_BILLING_PLANS:
+    if plan["name"] == tier:
+      return plan.get("included_gb", 100)
+  return 100  # Default for unknown tiers
+
+
+# Build STORAGE_INCLUDED from plans for backward compatibility
+STORAGE_INCLUDED = {
+  plan["name"]: plan["included_gb"] for plan in DEFAULT_GRAPH_BILLING_PLANS
+}
+
+
+class StorageBillingConfig:
+  """Storage limits by subscription tier (derived from billing plans)."""
+
+  STORAGE_INCLUDED = STORAGE_INCLUDED
+
+  @classmethod
+  def get_included_storage(cls, tier: str) -> int:
+    """Get included storage in GB for a tier."""
+    return get_included_storage(tier)
 
 
 class BillingConfig:
@@ -80,14 +131,9 @@ class BillingConfig:
     Returns:
         Dict with plan details or None if not found
     """
-    # First check billing plans
     for plan in DEFAULT_GRAPH_BILLING_PLANS:
       if plan["name"] == tier:
-        return {
-          **plan,
-          # Add monthly credit allocation from TIER_CREDIT_ALLOCATIONS
-          "monthly_credit_allocation": TIER_CREDIT_ALLOCATIONS.get(tier, 0),
-        }
+        return plan
 
     return None
 
@@ -241,11 +287,9 @@ class BillingConfig:
         for tier in ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]
         if cls.get_subscription_plan(tier)
       },
-      "ai_operation_costs": {
-        "agent_call": float(CreditConfig.OPERATION_COSTS.get("agent_call", 0)),
-        "mcp_call": float(CreditConfig.OPERATION_COSTS.get("mcp_call", 0)),
-        "ai_analysis": float(CreditConfig.OPERATION_COSTS.get("ai_analysis", 0)),
-      },
+      # AI operations use token-based pricing (see AIBillingConfig.TOKEN_PRICING)
+      # No fixed-cost AI operations - all are billed per token
+      "ai_operation_costs": {},
       "no_credit_operations": [
         "query",
         "analytics",
@@ -259,14 +303,10 @@ class BillingConfig:
       ],
       "storage_pricing": {
         "included_per_tier": {
-          "ladybug-standard": 100,  # GB
-          "ladybug-large": 500,  # GB
-          "ladybug-xlarge": 2000,  # GB
+          "ladybug-standard": 10,  # GB
+          "ladybug-large": 50,  # GB
+          "ladybug-xlarge": 100,  # GB
         },
-        "overage_per_gb_per_month": {
-          "ladybug-standard": 1.00,  # $1.00/GB
-          "ladybug-large": 0.50,  # $0.50/GB
-          "ladybug-xlarge": 0.25,  # $0.25/GB
-        },
+        "overage_credits_per_gb_per_day": 1,  # 1 credit/GB/day for storage overage
       },
     }

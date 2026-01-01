@@ -1,44 +1,50 @@
 from decimal import Decimal
 
-from robosystems.config import credits as credits_module
 from robosystems.config.billing import core
-from robosystems.config.billing.core import DEFAULT_GRAPH_BILLING_PLANS, BillingConfig
+from robosystems.config.billing.core import (
+  DEFAULT_GRAPH_BILLING_PLANS,
+  TIER_CREDIT_ALLOCATIONS,
+  BillingConfig,
+)
 from robosystems.config.credits import CreditConfig
 
 
-def test_get_subscription_plan_injects_latest_credit_allocation(monkeypatch):
-  credits = {
-    "ladybug-standard": 1234,
-    "ladybug-large": 4321,
-    "ladybug-xlarge": 9999,
-  }
-  # Patch in both modules since core imports it at module load time
-  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
-  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
+def test_get_subscription_plan_returns_plan_with_credit_allocation():
+  """Test that subscription plans include monthly_credit_allocation.
 
+  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
+  ~38 credits per typical agent call → 8,000 credits ≈ 200 agent calls/month
+  """
   plan = BillingConfig.get_subscription_plan("ladybug-standard")
 
   assert plan is not None
   assert plan["name"] == "ladybug-standard"
-  assert plan["monthly_credit_allocation"] == 1234
-  assert plan is not DEFAULT_GRAPH_BILLING_PLANS[0]
+  assert plan["monthly_credit_allocation"] == 8000  # ~200 agent calls/month
+  assert plan["included_gb"] == 10
 
 
 def test_get_subscription_plan_returns_none_for_unknown_tier():
   assert BillingConfig.get_subscription_plan("does-not-exist") is None
 
 
-def test_get_monthly_credits_returns_from_tier_allocations(monkeypatch):
-  credits = {
-    "ladybug-standard": 100,
-    "ladybug-large": 777,
-    "ladybug-xlarge": 800,
-  }
-  # Patch in both modules since core imports it at module load time
-  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
-  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
+def test_tier_credit_allocations_matches_plans():
+  """Test that TIER_CREDIT_ALLOCATIONS is built from DEFAULT_GRAPH_BILLING_PLANS."""
+  for plan in DEFAULT_GRAPH_BILLING_PLANS:
+    tier_name = plan["name"]
+    assert tier_name in TIER_CREDIT_ALLOCATIONS
+    assert TIER_CREDIT_ALLOCATIONS[tier_name] == plan["monthly_credit_allocation"]
 
-  assert BillingConfig.get_monthly_credits("ladybug-large") == 777
+
+def test_get_monthly_credits_returns_from_plans():
+  """Test that get_monthly_credits returns values from plans.
+
+  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
+  ~38 credits per typical agent call
+  """
+  assert BillingConfig.get_monthly_credits("ladybug-standard") == 8000  # ~200 calls
+  assert BillingConfig.get_monthly_credits("ladybug-large") == 32000  # ~800 calls
+  assert BillingConfig.get_monthly_credits("ladybug-xlarge") == 100000  # ~2,600 calls
+  assert BillingConfig.get_monthly_credits("unknown") == 0
 
 
 def test_get_operation_cost_uses_credit_config(monkeypatch):
@@ -74,10 +80,7 @@ def test_validate_configuration_reports_missing_plan(monkeypatch):
 
 
 def test_validate_configuration_passes_when_allocations_match(monkeypatch):
-  credits = {"ladybug-standard": 111}
-  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
-  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
-  monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"ladybug-standard": 111})
+  monkeypatch.setattr(CreditConfig, "MONTHLY_ALLOCATIONS", {"ladybug-standard": 8000})
   monkeypatch.setattr(
     CreditConfig,
     "OPERATION_COSTS",
@@ -97,24 +100,11 @@ def test_validate_configuration_passes_when_allocations_match(monkeypatch):
   assert any("validation passed" in message for message in infos)
 
 
-def test_get_all_pricing_info_returns_expected_structure(monkeypatch):
-  credits = {
-    "ladybug-standard": 100,
-    "ladybug-large": 200,
-    "ladybug-xlarge": 300,
-  }
-  monkeypatch.setattr(credits_module, "TIER_CREDIT_ALLOCATIONS", credits)
-  monkeypatch.setattr(core, "TIER_CREDIT_ALLOCATIONS", credits)
-  monkeypatch.setattr(
-    CreditConfig,
-    "OPERATION_COSTS",
-    {
-      "agent_call": Decimal("10"),
-      "mcp_call": Decimal("5"),
-      "ai_analysis": Decimal("20"),
-    },
-  )
+def test_get_all_pricing_info_returns_expected_structure():
+  """Test get_all_pricing_info returns correct structure.
 
+  Credit anchor: 1 credit = 1 GB/day storage = ~$0.00333
+  """
   pricing = BillingConfig.get_all_pricing_info()
 
   assert set(pricing["subscription_tiers"]) == {
@@ -123,12 +113,9 @@ def test_get_all_pricing_info_returns_expected_structure(monkeypatch):
     "ladybug-xlarge",
   }
   assert (
-    pricing["subscription_tiers"]["ladybug-large"]["monthly_credit_allocation"] == 200
+    pricing["subscription_tiers"]["ladybug-large"]["monthly_credit_allocation"] == 32000
   )
-  assert pricing["ai_operation_costs"] == {
-    "agent_call": 10.0,
-    "mcp_call": 5.0,
-    "ai_analysis": 20.0,
-  }
+  # AI operations use token-based pricing now, no fixed costs
+  assert pricing["ai_operation_costs"] == {}
   assert "query" in pricing["no_credit_operations"]
-  assert pricing["storage_pricing"]["included_per_tier"]["ladybug-standard"] == 100
+  assert pricing["storage_pricing"]["included_per_tier"]["ladybug-standard"] == 10

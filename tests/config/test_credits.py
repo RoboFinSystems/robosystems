@@ -9,10 +9,13 @@ class TestCreditConfig:
   """Test CreditConfig class."""
 
   def test_operation_costs_constants(self):
-    """Test that operation costs are defined correctly."""
-    assert CreditConfig.OPERATION_COSTS["agent_call"] == Decimal("100")
-    assert CreditConfig.OPERATION_COSTS["ai_analysis"] == Decimal("100")
-    assert CreditConfig.OPERATION_COSTS["storage_per_gb_day"] == Decimal("10")
+    """Test that operation costs are defined correctly.
+
+    Note: AI operations (agent_call) use token-based pricing via AIBillingConfig,
+    not fixed costs in OPERATION_COSTS.
+    """
+    # Fixed-cost operations
+    assert CreditConfig.OPERATION_COSTS["storage_per_gb_day"] == Decimal("1")
     assert CreditConfig.OPERATION_COSTS["connection_sync"] == Decimal("20")
 
     # All other operations should be free (0 credits)
@@ -69,11 +72,12 @@ class TestCreditConfig:
     # Note: This is a business logic test, not a strict requirement
 
   def test_get_operation_cost_known_operations(self):
-    """Test getting costs for known operations."""
-    # AI operations should have costs
-    assert CreditConfig.get_operation_cost("agent_call") == Decimal("100")
-    assert CreditConfig.get_operation_cost("ai_analysis") == Decimal("100")
-    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("10")
+    """Test getting costs for known operations.
+
+    Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING.
+    """
+    # Fixed-cost operations
+    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
     assert CreditConfig.get_operation_cost("connection_sync") == Decimal("20")
 
     # Free operations should return 0
@@ -153,22 +157,21 @@ class TestCreditConfig:
 
   def test_decimal_precision_in_costs(self):
     """Test that costs maintain decimal precision."""
-    cost = CreditConfig.get_operation_cost("agent_call")
+    cost = CreditConfig.get_operation_cost("storage_per_gb_day")
     assert isinstance(cost, Decimal)
-    assert cost == Decimal("100")
+    assert cost == Decimal("1")
 
     # Test arithmetic operations maintain precision
     double_cost = cost * 2
     assert isinstance(double_cost, Decimal)
-    assert double_cost == Decimal("200")
+    assert double_cost == Decimal("2")
 
   def test_ai_vs_free_operation_categorization(self):
-    """Test that operations are correctly categorized as AI vs free."""
-    # AI operations (should have positive costs)
-    ai_operations = ["agent_call", "ai_analysis"]
-    for op in ai_operations:
-      assert CreditConfig.get_operation_cost(op) > Decimal("0")
+    """Test that operations are correctly categorized.
 
+    Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING,
+    not fixed costs in OPERATION_COSTS.
+    """
     # Storage and connection operations (configurable costs)
     configurable_ops = ["storage_per_gb_day", "connection_sync"]
     for op in configurable_ops:
@@ -189,11 +192,11 @@ class TestCreditConfig:
       assert CreditConfig.get_operation_cost(op) == Decimal("0")
 
   def test_operation_costs_coverage(self):
-    """Test that all expected operation types are covered."""
+    """Test that all expected operation types are covered.
+
+    Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING.
+    """
     required_operations = [
-      # AI operations
-      "agent_call",
-      "ai_analysis",
       # Storage operations
       "storage_per_gb_day",
       # Connection operations
@@ -261,7 +264,7 @@ class TestCreditConfig:
     assert callable(CreditConfig.should_alert)
 
     # Methods should work when called on the class
-    cost = CreditConfig.get_operation_cost("agent_call")
+    cost = CreditConfig.get_operation_cost("storage_per_gb_day")
     allocation = CreditConfig.get_monthly_allocation("standard")
     alert = CreditConfig.should_alert(100, 1000)
 
@@ -270,12 +273,12 @@ class TestCreditConfig:
     assert isinstance(alert, str)
 
   def test_operation_cost_consistency(self):
-    """Test that operation costs are consistent with documentation."""
-    # Verify the costs match the documented values in the module docstring
-    assert CreditConfig.get_operation_cost("agent_call") == Decimal("100")
+    """Test that operation costs are consistent with documentation.
 
-    # Storage should be 10 credits per GB per day
-    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("10")
+    Note: AI operations use token-based pricing via AIBillingConfig.TOKEN_PRICING.
+    """
+    # Storage should be 1 credit per GB per day
+    assert CreditConfig.get_operation_cost("storage_per_gb_day") == Decimal("1")
 
     # Connection sync should be 20 credits
     assert CreditConfig.get_operation_cost("connection_sync") == Decimal("20")
@@ -285,8 +288,8 @@ class TestCreditConfig:
     # Test that the module can handle various edge cases gracefully
 
     # Should still be able to get operation costs
-    cost = CreditConfig.get_operation_cost("agent_call")
-    assert cost == Decimal("100")
+    cost = CreditConfig.get_operation_cost("storage_per_gb_day")
+    assert cost == Decimal("1")
 
     # Alert functionality should work with manual allocations
     alert = CreditConfig.should_alert(100, 1000)

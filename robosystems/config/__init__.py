@@ -20,7 +20,6 @@ from .agents import (
 from .billing import (
   DEFAULT_GRAPH_BILLING_PLANS,
   AIBillingConfig,
-  AIOperationType,
   BillingConfig,
   RepositoryBillingConfig,
   SharedRepository,
@@ -37,7 +36,6 @@ from .validation import EnvValidator
 __all__ = [
   "DEFAULT_GRAPH_BILLING_PLANS",
   "AIBillingConfig",
-  "AIOperationType",
   # Agent exports
   "AgentConfig",
   "AgentExecutionMode",

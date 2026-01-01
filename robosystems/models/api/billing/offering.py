@@ -117,8 +117,8 @@ class RepositorySubscriptions(BaseModel):
 class TokenPricing(BaseModel):
   """AI token pricing for a specific model."""
 
-  input_per_1k_tokens: int = Field(..., description="Credits per 1K input tokens")
-  output_per_1k_tokens: int = Field(..., description="Credits per 1K output tokens")
+  input_per_1k_tokens: float = Field(..., description="Credits per 1K input tokens")
+  output_per_1k_tokens: float = Field(..., description="Credits per 1K output tokens")
 
 
 class OperationCosts(BaseModel):
