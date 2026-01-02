@@ -328,7 +328,7 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/robosystems-graph-${Environment}-*/index/*"
-              # EC2 for snapshot management (shared repository jobs)
+              # EC2 for snapshot management and ECS run launcher
               - Effect: Allow
                 Action:
                   - ec2:CreateSnapshot
@@ -336,6 +336,7 @@ Resources:
                   - ec2:CreateTags
                   - ec2:DescribeVolumes
                   - ec2:DescribeInstances
+                  - ec2:DescribeNetworkInterfaces
                 Resource: "*"
               # EC2 Launch Template management (for replica updates)
               - Effect: Allow
@@ -384,6 +385,20 @@ Resources:
                   - logs:DescribeLogStreams
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/robosystems/${Environment}/dagster:*"
+              # CloudWatch Metrics for instance monitoring and auto-scaling
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "cloudwatch:namespace": !Sub "RoboSystems/Graph/${Environment}"
+              # SES for transactional emails (verification, password reset, welcome)
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/robosystems.ai"
       Tags:
         - Key: Environment
           Value: !Ref Environment
