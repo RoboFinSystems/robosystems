@@ -166,10 +166,16 @@ jobs:
           fi
 
   ami-update-variable:
-    if: needs.ami-get-latest.outputs.ami_changed == 'true'
+    if: |
+      always() &&
+      needs.ami-get-latest.result == 'success' &&
+      needs.ami-get-latest.outputs.ami_changed == 'true'
     needs: [ami-get-latest]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Update AMI Variable
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
@@ -181,7 +187,8 @@ jobs:
 
   ami-trigger-deploy:
     if: |
-      needs.ami-get-latest.outputs.ami_changed == 'true' &&
+      always() &&
+      needs.ami-update-variable.result == 'success' &&
       needs.ami-get-latest.outputs.skip_deploy != 'true'
     needs: [ami-get-latest, ami-update-variable]
     runs-on: ubuntu-latest
@@ -189,6 +196,9 @@ jobs:
       run_id: ${{ steps.trigger.outputs.run_id }}
       deploy_ref: ${{ steps.trigger.outputs.deploy_ref }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Trigger Deploy Workflow
         id: trigger
         env:
