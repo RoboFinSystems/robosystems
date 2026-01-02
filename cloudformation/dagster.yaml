@@ -398,7 +398,7 @@ Resources:
                 Action:
                   - ses:SendEmail
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
+                  - !Sub "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/robosystems.ai"
       Tags:
         - Key: Environment
           Value: !Ref Environment
