@@ -110,6 +110,13 @@ on:
         description: Shared tier maximum instances
         default: ""
 
+      # AMI Configuration
+      ami_id:
+        description: "Amazon Linux 2023 ARM64 AMI ID for graph instances"
+        required: false
+        type: string
+        default: "ami-05ec8931dc5ae74ec"
+
       # Notification Configuration
       aws_sns_alert_email:
         description: "Email address for SNS alerts and notifications"
@@ -342,6 +349,7 @@ jobs:
       shared_repositories: ${{ matrix.shared_repositories }}
       # Instance Configuration
       instance_type: ${{ matrix.instance_type }}
+      ami_id: ${{ inputs.ami_id }}
       # Valkey Configuration
       valkey_sg_id: ${{ inputs.valkey_sg_id }}
       # Other Configuration

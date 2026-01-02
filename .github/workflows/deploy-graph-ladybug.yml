@@ -40,7 +40,7 @@ on:
 
       # Instance Configuration
       ami_id:
-        description: "Amazon Linux 2023 ARM64 AMI ID"
+        description: "Amazon Linux 2023 ARM64 AMI ID (passed from parent workflow)"
         required: false
         default: "ami-05ec8931dc5ae74ec"
         type: string

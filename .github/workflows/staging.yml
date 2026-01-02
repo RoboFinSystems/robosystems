@@ -233,14 +233,7 @@ jobs:
           echo "✅ Scripts packaged and uploaded successfully"
 
   deploy-postgres:
-    needs:
-      [
-        runner,
-        create-deployment,
-        stack-config,
-        build,
-        deploy-vpc,
-      ]
+    needs: [runner, create-deployment, stack-config, build, deploy-vpc]
     uses: ./.github/workflows/deploy-postgres.yml
     with:
       # Stack & Repository Configuration
@@ -272,14 +265,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
   deploy-valkey:
-    needs:
-      [
-        runner,
-        create-deployment,
-        stack-config,
-        build,
-        deploy-vpc,
-      ]
+    needs: [runner, create-deployment, stack-config, build, deploy-vpc]
     uses: ./.github/workflows/deploy-valkey.yml
     with:
       # Stack & Repository Configuration
@@ -376,14 +362,7 @@ jobs:
   # Graph Infrastructure - Step 1: Deploy DynamoDB, Secrets, Lambda monitoring
   deploy-graph-infra:
     needs:
-      [
-        runner,
-        create-deployment,
-        stack-config,
-        build,
-        deploy-vpc,
-        deploy-s3,
-      ]
+      [runner, create-deployment, stack-config, build, deploy-vpc, deploy-s3]
     uses: ./.github/workflows/deploy-graph-infra.yml
     with:
       # Stack & Repository Configuration
@@ -457,6 +436,7 @@ jobs:
       subnet_ids: ${{ needs.deploy-vpc.outputs.private_subnet_ids }}
       public_subnet_ids: ${{ needs.deploy-vpc.outputs.public_subnet_ids }}
       valkey_sg_id: ${{ needs.deploy-valkey.outputs.valkey_sg_id }}
+      ami_id: ${{ vars.GRAPH_AMI_ID_STAGING }}
       # Container Configuration
       ecr_image_tag: staging
       # Infrastructure inputs from graph infrastructure jobs

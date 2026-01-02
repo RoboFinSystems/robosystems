@@ -228,28 +228,21 @@ jobs:
           timeout: "1800"
           interval: "10"
 
-      - name: Refresh ECS Services
+      - name: Refresh Dagster Daemon Service
         if: inputs.refresh_ecs_service == 'true' && steps.deploy-stack.outputs.is_new_stack != 'true'
-        run: |
-          echo "Refreshing Dagster ECS services..."
+        uses: ./.github/actions/refresh-ecs
+        with:
+          cluster-name: robosystems-dagster-${{ inputs.environment }}-cluster
+          service-name: robosystems-dagster-daemon-${{ inputs.environment }}
+          service-type: daemon
 
-          CLUSTER_NAME="robosystems-dagster-${{ inputs.environment }}-cluster"
-
-          # Refresh daemon service
-          aws ecs update-service \
-            --cluster $CLUSTER_NAME \
-            --service "robosystems-dagster-daemon-${{ inputs.environment }}" \
-            --force-new-deployment \
-            --no-cli-pager
-
-          # Refresh webserver service
-          aws ecs update-service \
-            --cluster $CLUSTER_NAME \
-            --service "robosystems-dagster-webserver-${{ inputs.environment }}" \
-            --force-new-deployment \
-            --no-cli-pager
-
-          echo "ECS services refresh initiated"
+      - name: Refresh Dagster Webserver Service
+        if: inputs.refresh_ecs_service == 'true' && steps.deploy-stack.outputs.is_new_stack != 'true'
+        uses: ./.github/actions/refresh-ecs
+        with:
+          cluster-name: robosystems-dagster-${{ inputs.environment }}-cluster
+          service-name: robosystems-dagster-webserver-${{ inputs.environment }}
+          service-type: api
 
       - name: Update Deployment Status
         if: always()

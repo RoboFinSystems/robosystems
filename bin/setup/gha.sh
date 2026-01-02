@@ -311,6 +311,11 @@ function setup_minimum_config() {
     gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD --body "false"
     gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING --body "false"
 
+    # Graph AMI Configuration (updated via Graph Maintenance workflow)
+    gh variable set GRAPH_AMI_ID_PROD --body "ami-05ec8931dc5ae74ec"
+    gh variable set GRAPH_AMI_ID_STAGING --body "ami-05ec8931dc5ae74ec"
+    # gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"  # Opt-in: set to "true" to enable monthly auto-updates
+
     # Other Graph Settings
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
     gh variable set GRAPH_UPDATE_CONTAINERS_PROD --body "true"
@@ -562,6 +567,11 @@ function setup_full_config() {
     gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_STAGING --body "false"
     gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD --body "false"
     gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_STAGING --body "false"
+
+    # Graph AMI Configuration (updated via Graph Maintenance workflow)
+    gh variable set GRAPH_AMI_ID_PROD --body "ami-05ec8931dc5ae74ec"
+    gh variable set GRAPH_AMI_ID_STAGING --body "ami-05ec8931dc5ae74ec"
+    # gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"  # Opt-in: set to "true" to enable monthly auto-updates
 
     # Graph Settings
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
