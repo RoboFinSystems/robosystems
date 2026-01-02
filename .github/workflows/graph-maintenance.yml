@@ -36,15 +36,16 @@ on:
   # Staging runs first (1st of month), Prod follows next day (2nd of month)
   # Only deploys if AMI has actually changed (ami_changed gate)
   schedule:
-    - cron: "0 2 1 * *"  # Staging: 1st of every month at 2am UTC
-    - cron: "0 2 2 * *"  # Prod: 2nd of every month at 2am UTC
+    - cron: "0 7 1 * *"  # Staging: 1st of every month at 7am UTC (2am EST)
+    - cron: "0 7 2 * *"  # Prod: 2nd of every month at 7am UTC (2am EST)
 
 permissions:
   contents: read
   actions: write
 
 concurrency:
-  group: graph-maintenance-${{ inputs.environment || 'scheduled' }}
+  # Use environment for manual runs, cron schedule for scheduled runs (distinguishes staging vs prod)
+  group: graph-maintenance-${{ inputs.environment || github.event.schedule }}
   cancel-in-progress: false
 
 jobs:
@@ -227,10 +228,10 @@ jobs:
             echo "Using latest release tag: $DEPLOY_REF"
           fi
 
-          # Validate ref is a version tag (v*) or main branch
-          if [[ "$DEPLOY_REF" != "main" && ! "$DEPLOY_REF" =~ ^v[0-9] ]]; then
+          # Validate ref is a semver tag (vX.Y.Z) or main branch
+          if [[ "$DEPLOY_REF" != "main" && ! "$DEPLOY_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Invalid deploy ref: $DEPLOY_REF"
-            echo "Must be 'main' or a version tag (v*)"
+            echo "Must be 'main' or a semver tag (e.g., v1.2.3)"
             exit 1
           fi
 

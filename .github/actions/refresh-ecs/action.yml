@@ -240,14 +240,13 @@ runs:
 
         # Force a new deployment
         echo "Forcing new deployment of ECS service to refresh tasks..."
-        UPDATE_RESULT=$(aws ecs update-service \
+        if ! UPDATE_RESULT=$(aws ecs update-service \
           --cluster "$CLUSTER_NAME" \
           --service "$SERVICE_NAME" \
           --force-new-deployment \
-          --output json)
-
-        if [ $? -ne 0 ]; then
+          --output json 2>&1); then
           echo "Error: Failed to update service"
+          echo "$UPDATE_RESULT"
           exit 1
         fi
 
