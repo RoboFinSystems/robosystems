@@ -1105,8 +1105,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1216,8 +1215,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1354,8 +1352,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1418,7 +1415,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
           },
           "expression": "",
           "hide": false,
@@ -1515,8 +1512,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1625,8 +1621,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1734,8 +1729,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -2017,13 +2011,13 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
           },
           "expression": "",
           "id": "",
-          "label": "",
+          "label": "Standard Network In",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "NetworkIn",
           "metricQueryType": 0,
@@ -2041,14 +2035,14 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardProd-writers-asg"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Standard Network Out",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "NetworkOut",
           "metricQueryType": 0,
@@ -2071,9 +2065,9 @@
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Shared Network In",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "NetworkIn",
           "metricQueryType": 0,
@@ -2096,7 +2090,7 @@
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Shared Network Out",
           "logGroups": [],
           "matchExact": false,
           "metricEditorMode": 0,
@@ -3855,7 +3849,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["robosystems", "prod", "infrastructure"],
+  "tags": ["robosystems", "infrastructure", "prod"],
   "templating": {
     "list": [
       {
@@ -3890,6 +3884,7 @@
   "timepicker": {},
   "timezone": "",
   "title": "RoboSystems Production Dashboard",
-  "version": 1,
+  "uid": null,
+  "version": 6,
   "weekStart": ""
 }

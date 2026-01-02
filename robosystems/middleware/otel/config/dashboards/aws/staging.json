@@ -1105,7 +1105,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1215,7 +1216,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1352,7 +1354,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1415,7 +1418,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedStaging-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardStaging-writers-asg"
           },
           "expression": "",
           "hide": false,
@@ -1512,7 +1515,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1621,7 +1625,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1729,7 +1734,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1838,7 +1844,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -1973,7 +1980,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2011,13 +2019,13 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardStaging-writers-asg"
           },
           "expression": "",
           "id": "",
-          "label": "",
+          "label": "Standard Network In",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "NetworkIn",
           "metricQueryType": 0,
@@ -2035,14 +2043,14 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugStandardStaging-writers-asg"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Standard Network Out",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "NetworkOut",
           "metricQueryType": 0,
@@ -2060,14 +2068,14 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedStaging-writers-asg"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Shared Network In",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "NetworkIn",
           "metricQueryType": 0,
@@ -2085,14 +2093,14 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedStaging-writers-asg"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "",
+          "label": "Shared Network Out",
           "logGroups": [],
-          "matchExact": false,
+          "matchExact": true,
           "metricEditorMode": 0,
           "metricName": "NetworkOut",
           "metricQueryType": 0,
@@ -2157,7 +2165,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2267,7 +2276,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2338,7 +2348,7 @@
         "x": 0,
         "y": 95
       },
-      "id": null,
+      "id": 20,
       "options": {
         "code": {
           "language": "plaintext",
@@ -2402,7 +2412,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2511,7 +2522,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2620,7 +2632,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2729,7 +2742,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2838,7 +2852,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -2947,7 +2962,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3056,7 +3072,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3165,7 +3182,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3300,7 +3318,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -3884,6 +3903,7 @@
   "timepicker": {},
   "timezone": "",
   "title": "RoboSystems Staging Dashboard",
-  "version": 1,
+  "uid": null,
+  "version": 68,
   "weekStart": ""
 }
