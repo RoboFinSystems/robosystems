@@ -2194,9 +2194,7 @@
             "type": "cloudwatch",
             "uid": "${DS_CLOUDWATCH}"
           },
-          "dimensions": {
-            "Environment": "prod"
-          },
+          "dimensions": {},
           "expression": "",
           "id": "",
           "label": "",
@@ -2304,9 +2302,7 @@
             "type": "cloudwatch",
             "uid": "${DS_CLOUDWATCH}"
           },
-          "dimensions": {
-            "Environment": "prod"
-          },
+          "dimensions": {},
           "expression": "",
           "id": "",
           "label": "",

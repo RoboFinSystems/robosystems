@@ -1443,7 +1443,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedStaging-writers-asg"
           },
           "expression": "",
           "hide": false,
@@ -2203,9 +2203,7 @@
             "type": "cloudwatch",
             "uid": "${DS_CLOUDWATCH}"
           },
-          "dimensions": {
-            "Environment": "staging"
-          },
+          "dimensions": {},
           "expression": "",
           "id": "",
           "label": "",
@@ -2314,9 +2312,7 @@
             "type": "cloudwatch",
             "uid": "${DS_CLOUDWATCH}"
           },
-          "dimensions": {
-            "Environment": "staging"
-          },
+          "dimensions": {},
           "expression": "",
           "id": "",
           "label": "",
