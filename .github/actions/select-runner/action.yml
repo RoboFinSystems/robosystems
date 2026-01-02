@@ -7,11 +7,11 @@ inputs:
     required: false
     default: "self-hosted,Linux,X64"
   runner_scope:
-    description: Where to check for runners: "org" (organization), "repo" (repository), or "both" (check repo first, fallback to org)
+    description: 'Where to check for runners: "org" (organization), "repo" (repository), or "both" (check repo first, fallback to org)'
     required: false
     default: "both"
   github_token:
-    description: GitHub token for API access (needs admin:org for org runners, or repo scope for repo runners)
+    description: 'GitHub token for API access (needs admin:org for org runners, or repo scope for repo runners)'
     required: true
 
 outputs:
