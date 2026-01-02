@@ -77,31 +77,8 @@ on:
         required: true
 
 jobs:
-  check-runner-availability:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    outputs:
-      runner_config: ${{ steps.check.outputs.runner_config }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN }}
-
-      - name: Check runner availability
-        id: check
-        uses: ./.github/actions/runner-availability
-        with:
-          runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
-          runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
-          github_token: ${{ secrets.ACTIONS_TOKEN || github.token }}
-
   collect-instances:
-    needs: [check-runner-availability]
-    if: always() && (needs.check-runner-availability.result == 'success' || needs.check-runner-availability.result == 'skipped')
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJSON(needs.check-runner-availability.outputs.runner_config) || fromJSON(inputs.runner_config) }}
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
     outputs:
       matrix: ${{ steps.collect.outputs.matrix }}
       has_instances: ${{ steps.collect.outputs.has_instances }}
@@ -236,12 +213,9 @@ jobs:
           fi
 
   update-containers:
-    needs: [check-runner-availability, collect-instances]
-    if: |
-      always() &&
-      needs.collect-instances.outputs.has_instances == 'true' &&
-      (needs.check-runner-availability.result == 'success' || needs.check-runner-availability.result == 'skipped')
-    runs-on: ${{ github.event_name == 'workflow_dispatch' && fromJSON(needs.check-runner-availability.outputs.runner_config) || fromJSON(inputs.runner_config) }}
+    needs: [collect-instances]
+    if: needs.collect-instances.outputs.has_instances == 'true'
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-latest' || fromJSON(inputs.runner_config) }}
     timeout-minutes: 15
     strategy:
       matrix: ${{ fromJSON(needs.collect-instances.outputs.matrix) }}

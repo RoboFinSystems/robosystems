@@ -38,37 +38,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check-runner-availability:
-    runs-on: ubuntu-latest
-    outputs:
-      runner_config: ${{ steps.check.outputs.runner_config }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
-          token: ${{ secrets.ACTIONS_TOKEN }}
-
-      - name: Check runner availability
-        id: check
-        uses: ./.github/actions/runner-availability
-        with:
-          runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
-          runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
-          github_token: ${{ secrets.ACTIONS_TOKEN || github.token }}
-
   refresh-asgs:
-    needs: [check-runner-availability]
-    runs-on: ${{ fromJSON(needs.check-runner-availability.outputs.runner_config) }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
           token: ${{ secrets.ACTIONS_TOKEN }}
 
       - name: Configure AWS credentials
@@ -112,7 +88,6 @@ jobs:
     needs: [refresh-asgs]
     if: failure()
     runs-on: ubuntu-latest
-
     steps:
       - name: Notify failure
         run: |

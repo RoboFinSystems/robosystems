@@ -1,32 +1,32 @@
-name: 'Check Runner Availability'
-description: 'Check if self-hosted GitHub Actions runners are available and set outputs for conditional runner selection. Supports both organization and repository-level runners for fork compatibility.'
+name: Select Runner
+description: Select GitHub Actions runner based on self-hosted availability. Falls back to GitHub-hosted if none available. Supports organization and repository-level runners.
 
 inputs:
   runner_labels:
     description: 'Comma-separated list of required runner labels (e.g., "self-hosted,Linux,X64")'
     required: false
-    default: 'self-hosted,Linux,X64'
+    default: "self-hosted,Linux,X64"
   runner_scope:
-    description: 'Where to check for runners: "org" (organization), "repo" (repository), or "both" (check repo first, fallback to org)'
+    description: Where to check for runners: "org" (organization), "repo" (repository), or "both" (check repo first, fallback to org)
     required: false
-    default: 'both'
+    default: "both"
   github_token:
-    description: 'GitHub token for API access (needs admin:org for org runners, or repo scope for repo runners)'
+    description: GitHub token for API access (needs admin:org for org runners, or repo scope for repo runners)
     required: true
 
 outputs:
   runners_available:
-    description: 'Whether self-hosted runners are available (true/false)'
+    description: Whether self-hosted runners are available (true/false)
     value: ${{ steps.check-runners.outputs.runners_available }}
   runner_type:
-    description: 'Recommended runner type (self-hosted or github-hosted)'
+    description: Recommended runner type (self-hosted or github-hosted)
     value: ${{ steps.check-runners.outputs.runner_type }}
   runner_config:
-    description: 'JSON array of runner configuration to use'
+    description: JSON array of runner configuration to use
     value: ${{ steps.check-runners.outputs.runner_config }}
 
 runs:
-  using: 'composite'
+  using: composite
   steps:
     - name: Check if self-hosted runners are available
       id: check-runners
