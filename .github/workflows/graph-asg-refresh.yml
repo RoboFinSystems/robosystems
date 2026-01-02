@@ -11,33 +11,24 @@ on:
           - staging
           - prod
       tier:
-        description: "Graph tier to refresh"
-        required: true
+        description: "Tier to refresh (leave empty for all tiers)"
+        required: false
         type: choice
         options:
+          - ""
           - ladybug-standard
           - ladybug-large
           - ladybug-xlarge
           - ladybug-shared
           - neo4j-community-large
           - neo4j-enterprise-xlarge
-      dry_run:
-        description: "Dry run - only show what would be refreshed"
-        required: false
-        type: boolean
-        default: false
-      force_refresh:
-        description: "Force refresh even if instances have allocated databases"
-        required: false
-        type: boolean
-        default: false
-      pause_between_instances:
-        description: "Seconds to pause between instance refreshes"
+      min_healthy_percentage:
+        description: "Minimum healthy percentage during refresh (default 50%)"
         required: false
         type: string
-        default: "300"
-      health_check_timeout:
-        description: "Seconds to wait for health check"
+        default: "50"
+      instance_warmup:
+        description: "Seconds to wait for instance warmup"
         required: false
         type: string
         default: "300"
@@ -48,7 +39,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: graph-asg-refresh-${{ inputs.tier }}-${{ inputs.environment }}
+  group: graph-asg-refresh-${{ inputs.environment }}-${{ inputs.tier || 'all' }}
   cancel-in-progress: false
 
 jobs:
@@ -72,7 +63,7 @@ jobs:
           runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
           github_token: ${{ secrets.ACTIONS_TOKEN || github.token }}
 
-  refresh-instances:
+  refresh-asgs:
     needs: [check-runner-availability]
     runs-on: ${{ fromJSON(needs.check-runner-availability.outputs.runner_config) }}
     timeout-minutes: 30
@@ -92,12 +83,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
-      - name: Get AWS Account ID
-        id: aws-account
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          echo "account_id=${ACCOUNT_ID}" >> $GITHUB_OUTPUT
-
       - name: Graph ASG Refresh
         id: refresh
         uses: ./.github/actions/refresh-graph-asg
@@ -105,42 +90,44 @@ jobs:
           environment: ${{ inputs.environment }}
           tier: ${{ inputs.tier }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
-          aws-account-id: ${{ steps.aws-account.outputs.account_id }}
-          dry-run: ${{ inputs.dry_run && 'true' || 'false' }}
-          force-refresh: ${{ inputs.force_refresh && 'true' || 'false' }}
-          pause-between-batches: ${{ inputs.pause_between_instances }}
-          health-check-timeout: ${{ inputs.health_check_timeout }}
-          instance-wait-timeout: "600"
+          min-healthy-percentage: ${{ inputs.min_healthy_percentage }}
+          instance-warmup: ${{ inputs.instance_warmup }}
 
       - name: Summary
         if: always()
         run: |
-          echo "### 🔄 Graph Database Instance Refresh Summary"
-          echo ""
-          echo "| Parameter | Value |"
-          echo "|-----------|--------|"
-          echo "| Tier | ${{ inputs.tier }} |"
-          echo "| Environment | ${{ inputs.environment }} |"
-          echo "| Dry Run | ${{ inputs.dry_run }} |"
-          echo "| Force Refresh | ${{ inputs.force_refresh }} |"
-          echo "| Total Instances | ${{ steps.refresh.outputs.instance-count || '0' }} |"
-          echo "| Protected Instances | ${{ steps.refresh.outputs.protected-count || '0' }} |"
-          echo "| Allocated Instances | ${{ steps.refresh.outputs.allocated-count || '0' }} |"
-          echo "| Refresh Status | ${{ steps.refresh.outputs.refresh-status || 'N/A' }} |"
-          echo "| Instances Refreshed | ${{ steps.refresh.outputs.instances-refreshed || '0' }} |"
-          echo ""
-          echo "Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          echo "Triggered by: ${{ github.actor }}"
+          echo "## Graph ASG Instance Refresh Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tier | ${{ inputs.tier || 'all' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Min Healthy % | ${{ inputs.min_healthy_percentage }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| Instance Warmup | ${{ inputs.instance_warmup }}s |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ steps.refresh.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ASGs Refreshed | ${{ steps.refresh.outputs['total-refreshed'] }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Refreshed ASGs | ${{ steps.refresh.outputs['refreshed-asgs'] || 'none' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Triggered by: ${{ github.actor }} at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
 
   notify-failure:
-    needs: [refresh-instances]
+    needs: [refresh-asgs]
     if: failure()
     runs-on: ubuntu-latest
 
     steps:
       - name: Notify failure
         run: |
-          echo "❌ Graph database instance refresh failed"
-          echo "Tier: ${{ inputs.tier }}"
-          echo "Environment: ${{ inputs.environment }}"
-          echo "Please check the workflow logs for details."
+          echo "## Graph ASG Refresh Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tier | ${{ inputs.tier || 'all' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please check the workflow logs for details." >> $GITHUB_STEP_SUMMARY

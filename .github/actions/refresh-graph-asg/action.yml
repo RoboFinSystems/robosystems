@@ -1,67 +1,39 @@
 name: Refresh Graph ASG
 description: |
-  Performs a controlled instance refresh for graph database writer EC2 instances using Auto Scaling Groups.
-  Handles volume attachment and database allocation carefully to ensure data persistence.
-  Supports both LadybugDB and Neo4j backends.
+  Performs a rolling instance refresh for graph database EC2 instances using AWS native ASG instance refresh.
+  Supports refreshing all tiers in an environment or a specific tier.
 
 inputs:
   environment:
     description: "Environment (staging, prod)"
     required: true
   tier:
-    description: "Graph tier to refresh (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge)"
-    required: true
+    description: "Specific tier to refresh (optional - if not set, refreshes all enabled tiers)"
+    required: false
+    default: ""
   aws-region:
     description: "AWS region"
     required: false
     default: "us-east-1"
-  aws-account-id:
-    description: "AWS account ID"
-    required: true
-  max-instances-per-batch:
-    description: "Maximum instances to refresh in each batch"
+  min-healthy-percentage:
+    description: "Minimum healthy percentage during refresh (default 50 for rolling)"
     required: false
-    default: "1"
-  pause-between-batches:
-    description: "Seconds to pause between batches"
+    default: "50"
+  instance-warmup:
+    description: "Seconds to wait for instance warmup before considering healthy"
     required: false
     default: "300"
-  health-check-timeout:
-    description: "Seconds to wait for health check after instance comes up"
-    required: false
-    default: "300"
-  instance-wait-timeout:
-    description: "Maximum seconds to wait for replacement instance to launch"
-    required: false
-    default: "600"
-  dry-run:
-    description: "If true, only show what would be refreshed without making changes"
-    required: false
-    default: "false"
-  force-refresh:
-    description: "If true, refresh even if instances have allocated databases (writer only)"
-    required: false
-    default: "false"
 
 outputs:
-  instances-refreshed:
-    description: "Number of instances refreshed"
-    value: ${{ steps.refresh.outputs.count }}
-  refresh-status:
-    description: "Status of the refresh operation"
+  refreshed-asgs:
+    description: "Comma-separated list of ASGs that were refreshed"
+    value: ${{ steps.refresh.outputs.refreshed_asgs }}
+  total-refreshed:
+    description: "Total number of ASGs refreshed"
+    value: ${{ steps.refresh.outputs.total_refreshed }}
+  status:
+    description: "Overall status of the refresh operation"
     value: ${{ steps.refresh.outputs.status }}
-  instance-count:
-    description: "Total number of instances found"
-    value: ${{ steps.refresh.outputs.instance_count }}
-  protected-count:
-    description: "Number of protected instances"
-    value: ${{ steps.refresh.outputs.protected_count }}
-  allocated-count:
-    description: "Number of instances with allocated databases"
-    value: ${{ steps.refresh.outputs.allocated_count }}
-  can-proceed:
-    description: "Whether the refresh can proceed"
-    value: ${{ steps.refresh.outputs.can_proceed }}
 
 runs:
   using: composite
@@ -69,399 +41,187 @@ runs:
     - name: Validate Inputs
       shell: bash
       run: |
+        if [[ ! "${{ inputs.environment }}" =~ ^(staging|prod)$ ]]; then
+          echo "::error::Invalid environment: ${{ inputs.environment }}. Must be staging or prod."
+          exit 1
+        fi
+
         VALID_TIERS="ladybug-standard|ladybug-large|ladybug-xlarge|ladybug-shared|neo4j-community-large|neo4j-enterprise-xlarge"
-        if [[ ! "${{ inputs.tier }}" =~ ^($VALID_TIERS)$ ]]; then
-          echo "❌ Invalid tier: ${{ inputs.tier }}"
+        if [[ -n "${{ inputs.tier }}" && ! "${{ inputs.tier }}" =~ ^($VALID_TIERS)$ ]]; then
+          echo "::error::Invalid tier: ${{ inputs.tier }}"
           echo "Must be one of: ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared, neo4j-community-large, neo4j-enterprise-xlarge"
           exit 1
         fi
 
-        if [[ ! "${{ inputs.environment }}" =~ ^(staging|prod)$ ]]; then
-          echo "❌ Invalid environment: ${{ inputs.environment }}"
-          echo "Must be one of: staging, prod"
-          exit 1
-        fi
-
-    - name: Validate and Refresh Instances
+    - name: Refresh ASGs
       id: refresh
       shell: bash
       run: |
-        echo "🔄 Starting graph database instance refresh..."
-        echo "Tier: ${{ inputs.tier }}"
-        echo "Environment: ${{ inputs.environment }}"
-        echo "Force Refresh: ${{ inputs.force-refresh }}"
-        echo "Dry Run: ${{ inputs.dry-run }}"
+        set -e
+
+        ENVIRONMENT="${{ inputs.environment }}"
+        SPECIFIC_TIER="${{ inputs.tier }}"
+        REGION="${{ inputs.aws-region }}"
+        MIN_HEALTHY="${{ inputs.min-healthy-percentage }}"
+        WARMUP="${{ inputs.instance-warmup }}"
+
+        # Environment suffix for stack names
+        if [ "$ENVIRONMENT" == "prod" ]; then
+          ENV_SUFFIX="Prod"
+        else
+          ENV_SUFFIX="Staging"
+        fi
+
+        echo "========================================"
+        echo "Graph ASG Instance Refresh"
+        echo "========================================"
+        echo "Environment: $ENVIRONMENT"
+        echo "Specific Tier: ${SPECIFIC_TIER:-all}"
         echo ""
 
-        # Convert tier to stack suffix (ladybug-standard → LadybugStandard)
-        TIER="${{ inputs.tier }}"
-        STACK_SUFFIX=$(echo "$TIER" | awk -F'-' '{
-          for(i=1; i<=NF; i++) {
-            printf "%s%s", toupper(substr($i,1,1)), substr($i,2)
-          }
-        }')
-
-        # Build stack name
-        if [ "${{ inputs.environment }}" == "staging" ]; then
-          STACK_NAME="RoboSystemsGraph${STACK_SUFFIX}Staging"
-        else
-          STACK_NAME="RoboSystemsGraph${STACK_SUFFIX}Prod"
-        fi
-
-        echo "Stack Name: ${STACK_NAME}"
-
-        # Determine tag filtering based on tier
-        if [[ "$TIER" == ladybug-* ]]; then
-          # LadybugDB uses LadybugRole tag
-          TAG_NAME="LadybugRole"
-          TAG_VALUE="writer"
-          echo "Using LadybugDB tags: ${TAG_NAME}=${TAG_VALUE}"
-        elif [[ "$TIER" == neo4j-* ]]; then
-          # Neo4j uses GraphRole + GraphBackend tags
-          TAG_NAME="GraphRole"
-          TAG_VALUE="writer"
-          BACKEND_TAG_FILTER="Name=tag:GraphBackend,Values=neo4j"
-          echo "Using Neo4j tags: ${TAG_NAME}=${TAG_VALUE}, GraphBackend=neo4j"
-        fi
-
-        # Determine health check port based on tier
-        if [[ "$TIER" == neo4j-* ]]; then
-          HEALTH_PORT="7474"
-        else
-          HEALTH_PORT="8001"
-        fi
-        echo "Health check port: ${HEALTH_PORT}"
-
-        # Get ASG name from CloudFormation stack
-        ASG_NAME=$(aws cloudformation describe-stacks \
-          --stack-name "${STACK_NAME}" \
-          --query "Stacks[0].Outputs[?OutputKey=='WriterAutoScalingGroupName'].OutputValue" \
-          --output text \
-          --region "${{ inputs.aws-region }}" 2>/dev/null || echo "")
-
-        if [ -z "$ASG_NAME" ]; then
-          echo "❌ Could not find ASG for stack: ${STACK_NAME}"
-          echo "status=failed" >> $GITHUB_OUTPUT
-          echo "count=0" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-
-        echo "Found ASG: ${ASG_NAME}"
-
-        # Validation phase - check instances and their status
-        echo "📊 Validating instance refresh request..."
-
-        # Build filter args for ec2 describe-instances
-        FILTER_ARGS=(
-          --filters
-          "Name=tag:Environment,Values=${{ inputs.environment }}"
-          "Name=tag:${TAG_NAME},Values=${TAG_VALUE}"
-          "Name=instance-state-name,Values=running"
+        # Define all possible tiers and their stack suffixes
+        declare -A TIER_STACKS=(
+          ["ladybug-standard"]="LadybugStandard"
+          ["ladybug-large"]="LadybugLarge"
+          ["ladybug-xlarge"]="LadybugXlarge"
+          ["ladybug-shared"]="LadybugShared"
+          ["neo4j-community-large"]="Neo4jCommunityLarge"
+          ["neo4j-enterprise-xlarge"]="Neo4jEnterpriseXlarge"
         )
 
-        # Add backend filter for Neo4j
-        if [[ "$TIER" == neo4j-* ]]; then
-          FILTER_ARGS+=("Name=tag:GraphBackend,Values=neo4j")
+        # Shared tiers have rebuildable data (no database allocation check needed)
+        declare -A SHARED_TIERS=(
+          ["ladybug-shared"]=1
+        )
+
+        REFRESHED_ASGS=""
+        TOTAL_REFRESHED=0
+        HAS_ERRORS=false
+
+        # Determine which tiers to process
+        if [ -n "$SPECIFIC_TIER" ]; then
+          TIERS_TO_PROCESS="$SPECIFIC_TIER"
+        else
+          TIERS_TO_PROCESS="${!TIER_STACKS[@]}"
         fi
 
-        # Get instances by tag for validation
-        INSTANCES=$(aws ec2 describe-instances \
-          "${FILTER_ARGS[@]}" \
-          --query "Reservations[].Instances[].InstanceId" \
-          --output text \
-          --region "${{ inputs.aws-region }}")
+        for TIER in $TIERS_TO_PROCESS; do
+          STACK_SUFFIX="${TIER_STACKS[$TIER]}"
+          STACK_NAME="RoboSystemsGraph${STACK_SUFFIX}${ENV_SUFFIX}"
 
-        if [ -z "$INSTANCES" ]; then
-          echo "⚠️  No running instances found"
-          echo "can_proceed=false" >> $GITHUB_OUTPUT
-          echo "status=no_instances" >> $GITHUB_OUTPUT
-          echo "count=0" >> $GITHUB_OUTPUT
-          echo "instance_count=0" >> $GITHUB_OUTPUT
-          echo "protected_count=0" >> $GITHUB_OUTPUT
-          echo "allocated_count=0" >> $GITHUB_OUTPUT
-          exit 0
-        fi
+          echo "----------------------------------------"
+          echo "Processing: $TIER"
+          echo "Stack: $STACK_NAME"
 
-        INSTANCE_COUNT=$(echo "$INSTANCES" | wc -w)
-        echo "Found $INSTANCE_COUNT instances"
+          # Check if stack exists and get ASG name
+          ASG_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='WriterAutoScalingGroupName'].OutputValue" \
+            --output text \
+            --region "$REGION" 2>/dev/null || echo "")
 
-        # For non-shared tiers, check protection and allocation
-        PROTECTED_COUNT=0
-        ALLOCATED_COUNT=0
-
-        if [[ "$TIER" != *"shared"* ]]; then
-          for INSTANCE_ID in $INSTANCES; do
-            # Check protection status
-            PROTECTION=$(aws autoscaling describe-auto-scaling-instances \
-              --instance-ids "$INSTANCE_ID" \
-              --query "AutoScalingInstances[0].ProtectedFromScaleIn" \
-              --output text \
-              --region "${{ inputs.aws-region }}" 2>/dev/null || echo "false")
-
-            if [ "$PROTECTION" == "true" ]; then
-              PROTECTED_COUNT=$((PROTECTED_COUNT + 1))
-            fi
-
-            # Check database allocation
-            DB_ITEM=$(aws dynamodb get-item \
-              --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
-              --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
-              --output json \
-              --region "${{ inputs.aws-region }}" 2>/dev/null || echo '{}')
-
-            # Safely extract database count with null check
-            DB_COUNT="0"
-            if [ -n "$DB_ITEM" ] && [ "$DB_ITEM" != "{}" ]; then
-              DB_COUNT=$(echo "$DB_ITEM" | jq -r '.Item.database_count.N // "0"')
-            fi
-
-            if [ "$DB_COUNT" != "0" ]; then
-              ALLOCATED_COUNT=$((ALLOCATED_COUNT + 1))
-              echo "  - $INSTANCE_ID: $DB_COUNT databases allocated"
-            fi
-          done
-
-          echo ""
-          echo "📊 Instance Summary:"
-          echo "  Total instances: $INSTANCE_COUNT"
-          echo "  Protected instances: $PROTECTED_COUNT"
-          echo "  Instances with databases: $ALLOCATED_COUNT"
-
-          if [ $ALLOCATED_COUNT -gt 0 ] && [ "${{ inputs.force-refresh }}" != "true" ]; then
-            echo ""
-            echo "⚠️  WARNING: $ALLOCATED_COUNT instances have allocated databases"
-            echo "To proceed, enable 'force_refresh' option"
-            echo "can_proceed=false" >> $GITHUB_OUTPUT
-            echo "status=validation_failed" >> $GITHUB_OUTPUT
-            echo "count=0" >> $GITHUB_OUTPUT
-            echo "instance_count=$INSTANCE_COUNT" >> $GITHUB_OUTPUT
-            echo "protected_count=$PROTECTED_COUNT" >> $GITHUB_OUTPUT
-            echo "allocated_count=$ALLOCATED_COUNT" >> $GITHUB_OUTPUT
-            exit 0
+          if [ -z "$ASG_NAME" ] || [ "$ASG_NAME" == "None" ]; then
+            echo "  Stack not found or no ASG output - skipping"
+            continue
           fi
-        fi
 
-        # Output validation results
-        echo "instance_count=$INSTANCE_COUNT" >> $GITHUB_OUTPUT
-        echo "protected_count=$PROTECTED_COUNT" >> $GITHUB_OUTPUT
-        echo "allocated_count=$ALLOCATED_COUNT" >> $GITHUB_OUTPUT
-        echo "can_proceed=true" >> $GITHUB_OUTPUT
+          echo "  ASG: $ASG_NAME"
 
-        # Get current instances
-        INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
-          --auto-scaling-group-names "${ASG_NAME}" \
-          --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
-          --output text \
-          --region "${{ inputs.aws-region }}")
+          # Get ASG details
+          ASG_INFO=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query "AutoScalingGroups[0].{DesiredCapacity: DesiredCapacity, Instances: Instances[?LifecycleState=='InService'].InstanceId}" \
+            --output json \
+            --region "$REGION" 2>/dev/null || echo '{}')
 
-        if [ -z "$INSTANCES" ]; then
-          echo "ℹ️ No instances found in service"
-          echo "status=no_instances" >> $GITHUB_OUTPUT
-          echo "count=0" >> $GITHUB_OUTPUT
-          exit 0
-        fi
+          DESIRED=$(echo "$ASG_INFO" | jq -r '.DesiredCapacity // 0')
+          INSTANCES=$(echo "$ASG_INFO" | jq -r '.Instances // [] | length')
 
-        INSTANCE_COUNT=$(echo "$INSTANCES" | wc -w)
-        echo "Found ${INSTANCE_COUNT} instances to refresh"
+          echo "  Desired: $DESIRED, InService: $INSTANCES"
 
-        if [ "${{ inputs.dry-run }}" == "true" ]; then
-          echo "🔍 DRY RUN - Would refresh the following instances:"
-          for INSTANCE_ID in $INSTANCES; do
-            echo "  - ${INSTANCE_ID}"
-          done
-          echo "status=dry_run" >> $GITHUB_OUTPUT
-          echo "count=${INSTANCE_COUNT}" >> $GITHUB_OUTPUT
-          exit 0
-        fi
+          if [ "$INSTANCES" -eq 0 ]; then
+            echo "  No instances in service - skipping"
+            continue
+          fi
 
-        # Handle writer instances one at a time with protection
-        echo "⚠️  Writer instance refresh requires careful handling due to volume attachment"
-        REFRESHED=0
+          # For non-shared tiers, log allocated databases (informational only)
+          IS_SHARED="${SHARED_TIERS[$TIER]:-0}"
 
-        for INSTANCE_ID in $INSTANCES; do
-            echo ""
-            echo "📦 Refreshing instance $((REFRESHED + 1))/${INSTANCE_COUNT}: ${INSTANCE_ID}"
+          if [ "$IS_SHARED" != "1" ]; then
+            INSTANCE_IDS=$(echo "$ASG_INFO" | jq -r '.Instances[]')
+            ALLOCATED_COUNT=0
 
-            # Check instance status in DynamoDB
-            INSTANCE_STATUS=$(aws dynamodb get-item \
-              --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
-              --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
-              --query "Item.database_count.N" \
-              --output text \
-              --region "${{ inputs.aws-region }}" 2>/dev/null || echo "0")
-
-            if [ "$INSTANCE_STATUS" != "0" ] && [ "$INSTANCE_STATUS" != "None" ]; then
-              echo "⚠️  Instance has ${INSTANCE_STATUS} allocated databases"
-
-              if [ "${{ inputs.force-refresh }}" != "true" ]; then
-                echo "❌ Skipping instance with allocated databases. Use force-refresh=true to override."
-                continue
-              else
-                echo "⚠️  Force refresh enabled - proceeding with refresh"
-              fi
-            fi
-
-            # Get instance protection status
-            PROTECTION_STATUS=$(aws autoscaling describe-auto-scaling-instances \
-              --instance-ids "${INSTANCE_ID}" \
-              --query "AutoScalingInstances[0].ProtectedFromScaleIn" \
-              --output text \
-              --region "${{ inputs.aws-region }}" 2>/dev/null || echo "false")
-
-            if [ "$PROTECTION_STATUS" == "true" ]; then
-              echo "🔒 Instance is protected from scale-in"
-
-              if [ "${{ inputs.force-refresh }}" != "true" ]; then
-                echo "❌ Skipping protected instance. Use force-refresh=true to override."
-                continue
-              else
-                echo "🔓 Removing instance protection for refresh"
-                aws autoscaling set-instance-protection \
-                  --instance-ids "${INSTANCE_ID}" \
-                  --auto-scaling-group-name "${ASG_NAME}" \
-                  --no-protected-from-scale-in \
-                  --region "${{ inputs.aws-region }}"
-              fi
-            fi
-
-            # Terminate the instance
-            echo "🔪 Terminating instance ${INSTANCE_ID}..."
-            aws ec2 terminate-instances \
-              --instance-ids "${INSTANCE_ID}" \
-              --region "${{ inputs.aws-region }}"
-
-            # Wait for ASG to launch replacement
-            echo "⏳ Waiting for replacement instance to launch..."
-            WAIT_TIME=0
-            MAX_WAIT=${{ inputs.instance-wait-timeout }}
-
-            while [ $WAIT_TIME -lt $MAX_WAIT ]; do
-              NEW_INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
-                --auto-scaling-group-names "${ASG_NAME}" \
-                --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId" \
+            for INSTANCE_ID in $INSTANCE_IDS; do
+              DB_COUNT=$(aws dynamodb get-item \
+                --table-name "robosystems-graph-${ENVIRONMENT}-instance-registry" \
+                --key "{\"instance_id\":{\"S\":\"${INSTANCE_ID}\"}}" \
+                --query "Item.database_count.N" \
                 --output text \
-                --region "${{ inputs.aws-region }}")
+                --region "$REGION" 2>/dev/null || echo "0")
 
-              NEW_COUNT=$(echo "$NEW_INSTANCES" | wc -w)
-
-              if [ "$NEW_COUNT" -ge "$INSTANCE_COUNT" ]; then
-                echo "✅ Replacement instance launched"
-                break
-              fi
-
-              echo "⏳ Waiting for replacement... ($WAIT_TIME/$MAX_WAIT seconds)"
-              sleep 30
-              WAIT_TIME=$((WAIT_TIME + 30))
-            done
-
-            if [ $WAIT_TIME -ge $MAX_WAIT ]; then
-              echo "❌ Timeout waiting for replacement instance"
-              echo "status=failed" >> $GITHUB_OUTPUT
-              echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
-              exit 1
-            fi
-
-            # Health check the new instance
-            echo "🏥 Performing health check on new instance..."
-            sleep "${{ inputs.health-check-timeout }}"
-
-            # Find the new instance
-            NEW_INSTANCE=""
-            for NEW_ID in $NEW_INSTANCES; do
-              if [[ ! " $INSTANCES " =~ " $NEW_ID " ]]; then
-                NEW_INSTANCE=$NEW_ID
-                break
+              if [ "$DB_COUNT" != "0" ] && [ "$DB_COUNT" != "None" ] && [ -n "$DB_COUNT" ]; then
+                ALLOCATED_COUNT=$((ALLOCATED_COUNT + 1))
               fi
             done
 
-            if [ -n "$NEW_INSTANCE" ]; then
-              echo "🆕 New instance: ${NEW_INSTANCE}"
-
-              # Wait for instance to register in DynamoDB
-              echo "⏳ Waiting for instance to register in DynamoDB..."
-              REGISTER_WAIT=0
-              while [ $REGISTER_WAIT -lt 120 ]; do
-                REGISTRY_STATUS=$(aws dynamodb get-item \
-                  --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
-                  --key "{\"instance_id\":{\"S\":\"${NEW_INSTANCE}\"}}" \
-                  --query "Item.status.S" \
-                  --output text \
-                  --region "${{ inputs.aws-region }}" 2>/dev/null || echo "not_found")
-
-                if [ "$REGISTRY_STATUS" != "not_found" ] && [ "$REGISTRY_STATUS" != "None" ]; then
-                  echo "✅ Instance registered with status: ${REGISTRY_STATUS}"
-                  break
-                fi
-
-                sleep 10
-                REGISTER_WAIT=$((REGISTER_WAIT + 10))
-              done
-
-              # Verify health
-              echo "🏥 Performing health check..."
-              HEALTH_COMMAND=$(aws ssm send-command \
-                --instance-ids "${NEW_INSTANCE}" \
-                --document-name "AWS-RunShellScript" \
-                --parameters "commands=[\"curl -f -s http://localhost:${HEALTH_PORT}/health || echo UNHEALTHY\"]" \
-                --query "Command.CommandId" \
-                --output text \
-                --region "${{ inputs.aws-region }}")
-
-              # Wait for health check command to complete (up to 120 seconds default)
-              if aws ssm wait command-executed \
-                --command-id "${HEALTH_COMMAND}" \
-                --instance-id "${NEW_INSTANCE}" \
-                --region "${{ inputs.aws-region }}"; then
-
-                HEALTH_STATUS=$(aws ssm get-command-invocation \
-                  --command-id "${HEALTH_COMMAND}" \
-                  --instance-id "${NEW_INSTANCE}" \
-                  --query "StandardOutputContent" \
-                  --output text \
-                  --region "${{ inputs.aws-region }}")
-
-                if [[ "$HEALTH_STATUS" == *"UNHEALTHY"* ]]; then
-                  echo "❌ New instance failed health check"
-                  echo "status=failed" >> $GITHUB_OUTPUT
-                  echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
-                  exit 1
-                fi
-
-                echo "✅ New instance is healthy"
-              else
-                echo "❌ Health check command failed"
-                ERROR_OUTPUT=$(aws ssm get-command-invocation \
-                  --command-id "${HEALTH_COMMAND}" \
-                  --instance-id "${NEW_INSTANCE}" \
-                  --query "StandardErrorContent" \
-                  --output text \
-                  --region "${{ inputs.aws-region }}" 2>/dev/null || echo "No error details available")
-                echo "Error details: ${ERROR_OUTPUT}"
-                echo "status=failed" >> $GITHUB_OUTPUT
-                echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
-                exit 1
-              fi
-
-              # Update instance status to healthy
-              aws dynamodb update-item \
-                --table-name "robosystems-graph-${{ inputs.environment }}-instance-registry" \
-                --key "{\"instance_id\":{\"S\":\"${NEW_INSTANCE}\"}}" \
-                --update-expression "SET #status = :status" \
-                --expression-attribute-names '{"#status": "status"}' \
-                --expression-attribute-values '{":status": {"S": "healthy"}}' \
-                --region "${{ inputs.aws-region }}" || true
+            if [ "$ALLOCATED_COUNT" -gt 0 ]; then
+              echo "  Note: $ALLOCATED_COUNT instances have allocated databases"
             fi
+          else
+            echo "  Shared tier (data is rebuildable)"
+          fi
 
-            REFRESHED=$((REFRESHED + 1))
+          # Check for in-progress refresh
+          CURRENT_REFRESH=$(aws autoscaling describe-instance-refreshes \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --query "InstanceRefreshes[?Status=='InProgress' || Status=='Pending'].InstanceRefreshId" \
+            --output text \
+            --region "$REGION" 2>/dev/null || echo "")
 
-            # Pause between instances
-            if [ $REFRESHED -lt $INSTANCE_COUNT ]; then
-              echo "⏸️  Pausing ${{ inputs.pause-between-batches }} seconds before next instance..."
-              sleep "${{ inputs.pause-between-batches }}"
-            fi
-          done
+          if [ -n "$CURRENT_REFRESH" ] && [ "$CURRENT_REFRESH" != "None" ]; then
+            echo "  Refresh already in progress: $CURRENT_REFRESH - skipping"
+            continue
+          fi
 
-          echo ""
-          echo "✅ Successfully refreshed ${REFRESHED} instances"
+          # Start instance refresh
+          echo "  Starting instance refresh..."
+          echo "    MinHealthyPercentage: $MIN_HEALTHY%"
+          echo "    InstanceWarmup: ${WARMUP}s"
+
+          REFRESH_RESULT=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --preferences "{\"MinHealthyPercentage\": $MIN_HEALTHY, \"InstanceWarmup\": $WARMUP}" \
+            --region "$REGION" 2>&1) || {
+              echo "  ERROR: Failed to start instance refresh"
+              echo "  $REFRESH_RESULT"
+              HAS_ERRORS=true
+              continue
+            }
+
+          REFRESH_ID=$(echo "$REFRESH_RESULT" | jq -r '.InstanceRefreshId // "unknown"')
+          echo "  Instance refresh started: $REFRESH_ID"
+          REFRESHED_ASGS="${REFRESHED_ASGS}${ASG_NAME},"
+          TOTAL_REFRESHED=$((TOTAL_REFRESHED + 1))
+        done
+
+        echo ""
+        echo "========================================"
+        echo "Summary"
+        echo "========================================"
+        echo "Total ASGs refreshed: $TOTAL_REFRESHED"
+
+        # Remove trailing comma
+        REFRESHED_ASGS="${REFRESHED_ASGS%,}"
+
+        # Set outputs
+        echo "refreshed_asgs=$REFRESHED_ASGS" >> $GITHUB_OUTPUT
+        echo "total_refreshed=$TOTAL_REFRESHED" >> $GITHUB_OUTPUT
+
+        if [ "$HAS_ERRORS" = true ]; then
+          echo "status=partial_failure" >> $GITHUB_OUTPUT
+          exit 1
+        elif [ "$TOTAL_REFRESHED" -eq 0 ]; then
+          echo "status=no_asgs_found" >> $GITHUB_OUTPUT
+        else
           echo "status=success" >> $GITHUB_OUTPUT
-          echo "count=${REFRESHED}" >> $GITHUB_OUTPUT
+        fi
