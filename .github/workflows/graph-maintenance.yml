@@ -166,7 +166,10 @@ jobs:
           fi
 
   ami-update-variable:
-    if: needs.ami-get-latest.outputs.ami_changed == 'true'
+    if: |
+      always() &&
+      needs.ami-get-latest.result == 'success' &&
+      needs.ami-get-latest.outputs.ami_changed == 'true'
     needs: [ami-get-latest]
     runs-on: ubuntu-latest
     steps:
@@ -181,7 +184,8 @@ jobs:
 
   ami-trigger-deploy:
     if: |
-      needs.ami-get-latest.outputs.ami_changed == 'true' &&
+      always() &&
+      needs.ami-update-variable.result == 'success' &&
       needs.ami-get-latest.outputs.skip_deploy != 'true'
     needs: [ami-get-latest, ami-update-variable]
     runs-on: ubuntu-latest
