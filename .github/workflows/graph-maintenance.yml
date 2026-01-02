@@ -36,8 +36,8 @@ on:
   # Staging runs first (1st of month), Prod follows next day (2nd of month)
   # Only deploys if AMI has actually changed (ami_changed gate)
   schedule:
-    - cron: "0 7 1 * *"  # Staging: 1st of every month at 7am UTC (2am EST)
-    - cron: "0 7 2 * *"  # Prod: 2nd of every month at 7am UTC (2am EST)
+    - cron: "0 7 1 * *" # Staging: 1st of every month at 7am UTC (2am EST)
+    - cron: "0 7 2 * *" # Prod: 2nd of every month at 7am UTC (2am EST)
 
 permissions:
   contents: read
@@ -81,9 +81,11 @@ jobs:
           fi
 
   check-runner:
+    # always() required so this job runs even when schedule-gate is skipped (workflow_dispatch)
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'schedule' && needs.schedule-gate.outputs.should_run == 'true')
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && needs.schedule-gate.outputs.should_run == 'true'))
     needs: [schedule-gate]
     runs-on: ubuntu-latest
     outputs:
@@ -134,7 +136,7 @@ jobs:
   # =============================================================================
   ami-get-latest:
     if: needs.check-runner.outputs.task == 'update-ami'
-    needs: [schedule-gate, check-runner]
+    needs: [check-runner]
     runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
     outputs:
       ami_id: ${{ steps.ami.outputs.ami_id }}
@@ -189,7 +191,7 @@ jobs:
 
   ami-update-variable:
     if: needs.check-runner.outputs.task == 'update-ami' && needs.ami-get-latest.outputs.ami_changed == 'true'
-    needs: [schedule-gate, check-runner, ami-get-latest]
+    needs: [check-runner, ami-get-latest]
     runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
     steps:
       - name: Update AMI Variable
@@ -206,7 +208,7 @@ jobs:
       needs.check-runner.outputs.task == 'update-ami' &&
       needs.ami-get-latest.outputs.ami_changed == 'true' &&
       needs.check-runner.outputs.skip_deploy != 'true'
-    needs: [schedule-gate, check-runner, ami-get-latest, ami-update-variable]
+    needs: [check-runner, ami-get-latest, ami-update-variable]
     runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
     outputs:
       run_id: ${{ steps.trigger.outputs.run_id }}
@@ -262,7 +264,7 @@ jobs:
       needs.check-runner.outputs.skip_refresh != 'true' &&
       (needs.ami-trigger-deploy.result == 'success' || (needs.check-runner.outputs.skip_deploy == 'true' && needs.ami-update-variable.result == 'success'))
     needs:
-      [schedule-gate, check-runner, ami-get-latest, ami-update-variable, ami-trigger-deploy]
+      [check-runner, ami-get-latest, ami-update-variable, ami-trigger-deploy]
     runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
     steps:
       - name: Checkout
@@ -290,7 +292,6 @@ jobs:
   summary:
     needs:
       [
-        schedule-gate,
         check-runner,
         ami-get-latest,
         ami-update-variable,
