@@ -173,6 +173,9 @@ jobs:
     needs: [ami-get-latest]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Update AMI Variable
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
@@ -193,6 +196,9 @@ jobs:
       run_id: ${{ steps.trigger.outputs.run_id }}
       deploy_ref: ${{ steps.trigger.outputs.deploy_ref }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Trigger Deploy Workflow
         id: trigger
         env:
