@@ -61,7 +61,7 @@ jobs:
   refresh-asgs:
     needs: [check-runner-availability]
     runs-on: ${{ fromJSON(needs.check-runner-availability.outputs.runner_config) }}
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
