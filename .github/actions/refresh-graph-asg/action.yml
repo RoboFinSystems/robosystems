@@ -15,10 +15,6 @@ inputs:
     description: "AWS region"
     required: false
     default: "us-east-1"
-  min-healthy-percentage:
-    description: "Minimum healthy percentage during refresh (default 50 for rolling)"
-    required: false
-    default: "50"
   instance-warmup:
     description: "Seconds to wait for instance warmup before considering healthy"
     required: false
@@ -62,7 +58,7 @@ runs:
         ENVIRONMENT="${{ inputs.environment }}"
         SPECIFIC_TIER="${{ inputs.tier }}"
         REGION="${{ inputs.aws-region }}"
-        MIN_HEALTHY="${{ inputs.min-healthy-percentage }}"
+        MIN_HEALTHY="50"
         WARMUP="${{ inputs.instance-warmup }}"
 
         # Environment suffix for stack names
@@ -183,6 +179,19 @@ runs:
             continue
           fi
 
+          # Disable scale-in protection on all instances (required for refresh to proceed)
+          INSTANCE_IDS=$(echo "$ASG_INFO" | jq -r '.Instances[]' 2>/dev/null || echo "")
+          if [ -n "$INSTANCE_IDS" ]; then
+            echo "  Disabling scale-in protection..."
+            for INSTANCE_ID in $INSTANCE_IDS; do
+              aws autoscaling set-instance-protection \
+                --instance-ids "$INSTANCE_ID" \
+                --auto-scaling-group-name "$ASG_NAME" \
+                --no-protected-from-scale-in \
+                --region "$REGION" 2>/dev/null || true
+            done
+          fi
+
           # Start instance refresh
           echo "  Starting instance refresh..."
           echo "    MinHealthyPercentage: $MIN_HEALTHY%"
@@ -204,24 +213,79 @@ runs:
           TOTAL_REFRESHED=$((TOTAL_REFRESHED + 1))
         done
 
+        # Remove trailing comma
+        REFRESHED_ASGS="${REFRESHED_ASGS%,}"
+
+        echo ""
+        echo "========================================"
+        echo "Waiting for Refreshes to Complete"
+        echo "========================================"
+
+        if [ "$TOTAL_REFRESHED" -eq 0 ]; then
+          echo "No ASGs were refreshed"
+          echo "refreshed_asgs=" >> $GITHUB_OUTPUT
+          echo "total_refreshed=0" >> $GITHUB_OUTPUT
+          echo "status=no_asgs_found" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Wait for all refreshes to complete (max 20 minutes)
+        MAX_WAIT=1200
+        POLL_INTERVAL=30
+        ELAPSED=0
+
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+          ALL_COMPLETE=true
+          ANY_FAILED=false
+
+          IFS=',' read -ra ASG_ARRAY <<< "$REFRESHED_ASGS"
+          for ASG in "${ASG_ARRAY[@]}"; do
+            STATUS=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG" \
+              --query "InstanceRefreshes[0].{Status:Status,Percent:PercentageComplete}" \
+              --output json \
+              --region "$REGION" 2>/dev/null || echo '{}')
+
+            REFRESH_STATUS=$(echo "$STATUS" | jq -r '.Status // "Unknown"')
+            PERCENT=$(echo "$STATUS" | jq -r '.Percent // 0')
+
+            echo "  $ASG: $REFRESH_STATUS ($PERCENT%)"
+
+            if [ "$REFRESH_STATUS" == "InProgress" ] || [ "$REFRESH_STATUS" == "Pending" ]; then
+              ALL_COMPLETE=false
+            elif [ "$REFRESH_STATUS" == "Failed" ] || [ "$REFRESH_STATUS" == "Cancelled" ]; then
+              ANY_FAILED=true
+            fi
+          done
+
+          if [ "$ALL_COMPLETE" = true ]; then
+            break
+          fi
+
+          echo "  Waiting ${POLL_INTERVAL}s... ($ELAPSED/$MAX_WAIT)"
+          sleep $POLL_INTERVAL
+          ELAPSED=$((ELAPSED + POLL_INTERVAL))
+        done
+
         echo ""
         echo "========================================"
         echo "Summary"
         echo "========================================"
         echo "Total ASGs refreshed: $TOTAL_REFRESHED"
 
-        # Remove trailing comma
-        REFRESHED_ASGS="${REFRESHED_ASGS%,}"
-
         # Set outputs
         echo "refreshed_asgs=$REFRESHED_ASGS" >> $GITHUB_OUTPUT
         echo "total_refreshed=$TOTAL_REFRESHED" >> $GITHUB_OUTPUT
 
-        if [ "$HAS_ERRORS" = true ]; then
-          echo "status=partial_failure" >> $GITHUB_OUTPUT
+        if [ "$ANY_FAILED" = true ] || [ "$HAS_ERRORS" = true ]; then
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "One or more refreshes failed"
           exit 1
-        elif [ "$TOTAL_REFRESHED" -eq 0 ]; then
-          echo "status=no_asgs_found" >> $GITHUB_OUTPUT
+        elif [ "$ALL_COMPLETE" = false ]; then
+          echo "status=timeout" >> $GITHUB_OUTPUT
+          echo "Timeout waiting for refreshes to complete"
+          exit 1
         else
           echo "status=success" >> $GITHUB_OUTPUT
+          echo "All refreshes completed successfully"
         fi
