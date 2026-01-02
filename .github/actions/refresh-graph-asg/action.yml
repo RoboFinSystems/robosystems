@@ -15,10 +15,6 @@ inputs:
     description: "AWS region"
     required: false
     default: "us-east-1"
-  min-healthy-percentage:
-    description: "Minimum healthy percentage during refresh (default 50 for rolling)"
-    required: false
-    default: "50"
   instance-warmup:
     description: "Seconds to wait for instance warmup before considering healthy"
     required: false
@@ -62,7 +58,7 @@ runs:
         ENVIRONMENT="${{ inputs.environment }}"
         SPECIFIC_TIER="${{ inputs.tier }}"
         REGION="${{ inputs.aws-region }}"
-        MIN_HEALTHY="${{ inputs.min-healthy-percentage }}"
+        MIN_HEALTHY="50"
         WARMUP="${{ inputs.instance-warmup }}"
 
         # Environment suffix for stack names
@@ -181,6 +177,19 @@ runs:
           if [ -n "$CURRENT_REFRESH" ] && [ "$CURRENT_REFRESH" != "None" ]; then
             echo "  Refresh already in progress: $CURRENT_REFRESH - skipping"
             continue
+          fi
+
+          # Disable scale-in protection on all instances (required for refresh to proceed)
+          INSTANCE_IDS=$(echo "$ASG_INFO" | jq -r '.Instances[]' 2>/dev/null || echo "")
+          if [ -n "$INSTANCE_IDS" ]; then
+            echo "  Disabling scale-in protection..."
+            for INSTANCE_ID in $INSTANCE_IDS; do
+              aws autoscaling set-instance-protection \
+                --instance-ids "$INSTANCE_ID" \
+                --auto-scaling-group-name "$ASG_NAME" \
+                --no-protected-from-scale-in \
+                --region "$REGION" 2>/dev/null || true
+            done
           fi
 
           # Start instance refresh

@@ -22,11 +22,6 @@ on:
           - ladybug-shared
           - neo4j-community-large
           - neo4j-enterprise-xlarge
-      min_healthy_percentage:
-        description: "Minimum healthy percentage during refresh (default 50%)"
-        required: false
-        type: string
-        default: "50"
       instance_warmup:
         description: "Seconds to wait for instance warmup"
         required: false
@@ -90,7 +85,6 @@ jobs:
           environment: ${{ inputs.environment }}
           tier: ${{ inputs.tier }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
-          min-healthy-percentage: ${{ inputs.min_healthy_percentage }}
           instance-warmup: ${{ inputs.instance_warmup }}
 
       - name: Summary
@@ -102,7 +96,6 @@ jobs:
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Environment | ${{ inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier | ${{ inputs.tier || 'all' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Min Healthy % | ${{ inputs.min_healthy_percentage }}% |" >> $GITHUB_STEP_SUMMARY
           echo "| Instance Warmup | ${{ inputs.instance_warmup }}s |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Results" >> $GITHUB_STEP_SUMMARY
