@@ -127,7 +127,7 @@ jobs:
           BASTION_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
                 ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
                 ParameterKey=PublicSubnetId,ParameterValue=$PUBLIC_SUBNET_ID \
-                ParameterKey=AmiId,ParameterValue=${{ steps.ami.outputs.ami-id }} \
+                ParameterKey=AmiId,ParameterValue=${{ steps.ami.outputs.ami_id }} \
                 ParameterKey=KeyPairName,ParameterValue=${{ inputs.bastion_key_pair_name }} \
                 ParameterKey=AllowedCidrBlock,ParameterValue=${{ inputs.bastion_allowed_cidr }}"
 
@@ -152,7 +152,7 @@ jobs:
           echo "Environment: ${{ inputs.environment }}"
           echo "VPC configured"
           echo "Public Subnets: ${{ inputs.public_subnet_ids }}"
-          echo "AMI: ${{ steps.ami.outputs.ami-id }} (latest Amazon Linux 2023 ARM64)"
+          echo "AMI: ${{ steps.ami.outputs.ami_id }} (latest Amazon Linux 2023 ARM64)"
 
           # Deploy or update the stack
           if [ "$STACK_ACTION" = "create-stack" ]; then

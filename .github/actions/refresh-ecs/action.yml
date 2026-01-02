@@ -3,11 +3,20 @@ description: "Refreshes tasks in an ECS service by forcing a new deployment"
 
 inputs:
   stack-name:
-    description: "Name of the CloudFormation stack containing the ECS service"
-    required: true
+    description: "Name of the CloudFormation stack containing the ECS service (optional if cluster-name and service-name are provided)"
+    required: false
+    default: ""
+  cluster-name:
+    description: "ECS cluster name (optional - use instead of stack lookup)"
+    required: false
+    default: ""
+  service-name:
+    description: "ECS service name (optional - use instead of stack lookup)"
+    required: false
+    default: ""
   skip-autoscale-refresh:
     description: "Whether to skip the service refresh"
-    required: true
+    required: false
     default: "false"
   max-wait-time:
     description: "Maximum time to wait for service stabilization (in seconds)"
@@ -18,7 +27,7 @@ inputs:
     required: false
     default: "30"
   service-type:
-    description: "Type of service being refreshed (api, worker, beat) for optimized timeouts"
+    description: "Type of service being refreshed (api, daemon) for optimized timeouts"
     required: false
     default: "auto"
 
@@ -31,10 +40,51 @@ runs:
       run: |
         set -euo pipefail
 
-        echo "Getting ECS cluster name from CloudFormation outputs..."
+        # Check if direct cluster/service names are provided
+        if [ -n "${{ inputs.cluster-name }}" ] && [ -n "${{ inputs.service-name }}" ]; then
+          echo "Using provided cluster and service names..."
+          CLUSTER_NAME="${{ inputs.cluster-name }}"
+          SERVICE_NAME="${{ inputs.service-name }}"
+          echo "Cluster: $CLUSTER_NAME"
+          echo "Service: $SERVICE_NAME"
 
-        # First try to get the cluster name from outputs
-        CLUSTER_NAME=$(aws cloudformation describe-stacks \
+          # Determine service type for optimized timeouts
+          SERVICE_TYPE="${{ inputs.service-type }}"
+          if [ "$SERVICE_TYPE" == "auto" ]; then
+            # Auto-detect from service name
+            if [[ "$SERVICE_NAME" =~ api|webserver ]]; then
+              SERVICE_TYPE="api"
+            elif [[ "$SERVICE_NAME" =~ daemon ]]; then
+              SERVICE_TYPE="daemon"
+            else
+              SERVICE_TYPE="daemon"
+            fi
+          fi
+
+          # Set optimized timeouts based on service type
+          case "$SERVICE_TYPE" in
+            "api")
+              OPTIMIZED_MAX_WAIT=180
+              OPTIMIZED_STABILITY_DELAY=15
+              echo "Using API-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
+              ;;
+            *)
+              OPTIMIZED_MAX_WAIT=600
+              OPTIMIZED_STABILITY_DELAY=30
+              echo "Using daemon-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
+              ;;
+          esac
+        else
+          # Fall back to CloudFormation stack lookup
+          if [ -z "${{ inputs.stack-name }}" ]; then
+            echo "Error: Either stack-name or both cluster-name and service-name must be provided"
+            exit 1
+          fi
+
+          echo "Getting ECS cluster name from CloudFormation outputs..."
+
+          # First try to get the cluster name from outputs
+          CLUSTER_NAME=$(aws cloudformation describe-stacks \
           --stack-name ${{ inputs.stack-name }} \
           --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue" \
           --output text 2>/dev/null || true)
@@ -113,40 +163,22 @@ runs:
           # Auto-detect service type from stack name
           if [[ "${{ inputs.stack-name }}" =~ API ]]; then
             SERVICE_TYPE="api"
-          elif [[ "${{ inputs.stack-name }}" =~ Worker ]]; then
-            SERVICE_TYPE="worker"  
-          elif [[ "${{ inputs.stack-name }}" =~ Beat ]]; then
-            SERVICE_TYPE="beat"
           else
-            SERVICE_TYPE="worker"  # Default to worker timeouts
+            SERVICE_TYPE="daemon"
           fi
         fi
-        
+
         # Set optimized timeouts based on service type
         case "$SERVICE_TYPE" in
           "api")
-            # API services can shutdown quickly (no long-running tasks)
-            OPTIMIZED_MAX_WAIT=180        # 3 minutes
-            OPTIMIZED_STABILITY_DELAY=15   # 15 seconds
+            OPTIMIZED_MAX_WAIT=180
+            OPTIMIZED_STABILITY_DELAY=15
             echo "Using API-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
             ;;
-          "worker")
-            # Worker services need more time for task completion
-            OPTIMIZED_MAX_WAIT=600        # 10 minutes (current default)
-            OPTIMIZED_STABILITY_DELAY=30   # 30 seconds (current default)  
-            echo "Using worker-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
-            ;;
-          "beat")
-            # Beat services are lightweight schedulers
-            OPTIMIZED_MAX_WAIT=120        # 2 minutes
-            OPTIMIZED_STABILITY_DELAY=10   # 10 seconds
-            echo "Using beat-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
-            ;;
           *)
-            # Use provided values or defaults
-            OPTIMIZED_MAX_WAIT=${{ inputs.max-wait-time }}
-            OPTIMIZED_STABILITY_DELAY=${{ inputs.service-stability-delay }}
-            echo "Using provided timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
+            OPTIMIZED_MAX_WAIT=600
+            OPTIMIZED_STABILITY_DELAY=30
+            echo "Using daemon-optimized timeouts: ${OPTIMIZED_MAX_WAIT}s max wait, ${OPTIMIZED_STABILITY_DELAY}s delay"
             ;;
         esac
 
@@ -204,6 +236,7 @@ runs:
         fi
 
         echo "Using service: $SERVICE_NAME"
+        fi
 
         # Force a new deployment
         echo "Forcing new deployment of ECS service to refresh tasks..."

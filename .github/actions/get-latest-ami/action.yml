@@ -13,13 +13,13 @@ inputs:
     type: string
 
 outputs:
-  ami-id:
+  ami_id:
     description: "Latest AMI ID"
     value: ${{ steps.lookup.outputs.ami_id }}
-  ami-name:
+  ami_name:
     description: "AMI Name (if available)"
     value: ${{ steps.lookup.outputs.ami_name }}
-  ami-description:
+  ami_description:
     description: "AMI Description (if available)"
     value: ${{ steps.lookup.outputs.ami_description }}
 
