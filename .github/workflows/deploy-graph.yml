@@ -317,7 +317,7 @@ jobs:
   # Step 2a: Deploy Graph Writers (LadybugDB Backend)
   deploy-graph-ladybug:
     needs: [prepare-writer-matrix]
-    if: needs.prepare-writer-matrix.outputs.lbug_matrix != '{"include":[]}'
+    if: fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
     permissions: {}
     strategy:
       fail-fast: false
@@ -357,7 +357,7 @@ jobs:
   # Step 2b: Deploy Neo4j Writers
   deploy-graph-neo4j:
     needs: [prepare-writer-matrix]
-    if: needs.prepare-writer-matrix.outputs.neo4j_matrix != '{"include":[]}'
+    if: fromJson(needs.prepare-writer-matrix.outputs.neo4j_matrix).include[0] != null
     permissions: {}
     strategy:
       fail-fast: false
