@@ -41,7 +41,8 @@ if TYPE_CHECKING:
 
 
 # Configuration
-CLOUDWATCH_NAMESPACE = "RoboSystems/Graph"
+# Note: CLOUDWATCH_NAMESPACE is environment-specific: RoboSystems/Graph/{environment}
+# The namespace includes the environment (prod/staging) instead of using an Environment dimension
 STALE_GRAPH_DAYS = 7
 STALE_VOLUME_DAYS = 30
 
@@ -687,7 +688,7 @@ class InstanceMonitor:
         total_used += used_dbs
         total_available += available_dbs
 
-        # Per-instance metrics
+        # Per-instance metrics (environment is in namespace, not dimension)
         metrics.extend(
           [
             {
@@ -696,7 +697,6 @@ class InstanceMonitor:
               "Unit": "Count",
               "Dimensions": [
                 {"Name": "InstanceId", "Value": instance_id},
-                {"Name": "Environment", "Value": self.environment},
                 {"Name": "ClusterTier", "Value": tier},
               ],
             },
@@ -706,7 +706,6 @@ class InstanceMonitor:
               "Unit": "Percent",
               "Dimensions": [
                 {"Name": "InstanceId", "Value": instance_id},
-                {"Name": "Environment", "Value": self.environment},
                 {"Name": "ClusterTier", "Value": tier},
               ],
             },
@@ -716,7 +715,6 @@ class InstanceMonitor:
               "Unit": "Count",
               "Dimensions": [
                 {"Name": "InstanceId", "Value": instance_id},
-                {"Name": "Environment", "Value": self.environment},
                 {"Name": "ClusterTier", "Value": tier},
               ],
             },
@@ -743,48 +741,43 @@ class InstanceMonitor:
         available_percent = (total_available / total_capacity) * 100
         used_percent = (total_used / total_capacity) * 100
 
+        # Cluster-wide metrics (no Environment dimension - it's in the namespace)
         metrics.extend(
           [
             {
               "MetricName": "ClusterTotalCapacity",
               "Value": total_capacity,
               "Unit": "Count",
-              "Dimensions": [{"Name": "Environment", "Value": self.environment}],
             },
             {
               "MetricName": "ClusterTotalUsed",
               "Value": total_used,
               "Unit": "Count",
-              "Dimensions": [{"Name": "Environment", "Value": self.environment}],
             },
             {
               "MetricName": "ClusterTotalActive",
               "Value": total_active,
               "Unit": "Count",
-              "Dimensions": [{"Name": "Environment", "Value": self.environment}],
             },
             {
               "MetricName": "ClusterAvailableCapacityPercent",
               "Value": available_percent,
               "Unit": "Percent",
-              "Dimensions": [{"Name": "Environment", "Value": self.environment}],
             },
             {
               "MetricName": "ClusterUsedCapacityPercent",
               "Value": used_percent,
               "Unit": "Percent",
-              "Dimensions": [{"Name": "Environment", "Value": self.environment}],
             },
             {
               "MetricName": "ClusterInstanceCount",
               "Value": len(instances),
               "Unit": "Count",
-              "Dimensions": [{"Name": "Environment", "Value": self.environment}],
             },
           ]
         )
 
-        # Instance age distribution
+        # Instance age distribution (no Environment dimension - it's in the namespace)
         for age_type, count in instance_age_buckets.items():
           metrics.append(
             {
@@ -792,13 +785,12 @@ class InstanceMonitor:
               "Value": count,
               "Unit": "Count",
               "Dimensions": [
-                {"Name": "Environment", "Value": self.environment},
                 {"Name": "AgeCategory", "Value": age_type},
               ],
             }
           )
 
-        # Tier distribution
+        # Tier distribution (no Environment dimension - it's in the namespace)
         for tier, count in tier_counts.items():
           if count > 0:
             metrics.append(
@@ -807,24 +799,26 @@ class InstanceMonitor:
                 "Value": count,
                 "Unit": "Count",
                 "Dimensions": [
-                  {"Name": "Environment", "Value": self.environment},
                   {"Name": "ClusterTier", "Value": tier},
                 ],
               }
             )
 
+      # Use environment-specific namespace
+      cloudwatch_namespace = f"RoboSystems/Graph/{self.environment}"
+
       # Publish metrics in batches of 20
       for i in range(0, len(metrics), 20):
         batch = metrics[i : i + 20]
         self.cloudwatch.put_metric_data(
-          Namespace=CLOUDWATCH_NAMESPACE,
+          Namespace=cloudwatch_namespace,
           MetricData=batch,
         )
         result.metrics_published += len(batch)
 
       logger.info(
         f"Published {result.metrics_published} metrics to CloudWatch "
-        f"namespace {CLOUDWATCH_NAMESPACE}"
+        f"namespace {cloudwatch_namespace}"
       )
 
     except Exception as e:

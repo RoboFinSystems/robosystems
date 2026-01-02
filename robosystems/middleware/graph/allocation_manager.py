@@ -1143,7 +1143,6 @@ class LadybugAllocationManager:
           "Value": utilization_percent,
           "Unit": "Percent",
           "Dimensions": [
-            {"Name": "Environment", "Value": self.environment},
             {"Name": "NodeType", "Value": "writer"},
           ],
         },
@@ -1152,7 +1151,6 @@ class LadybugAllocationManager:
           "Value": metrics["total_databases"],
           "Unit": "Count",
           "Dimensions": [
-            {"Name": "Environment", "Value": self.environment},
             {"Name": "NodeType", "Value": "writer"},
           ],
         },
@@ -1161,8 +1159,8 @@ class LadybugAllocationManager:
       # Also publish the capacity utilization metric that alarms use
       await self._publish_capacity_metric(utilization_percent)
 
-      # Publish to unified Graph namespace (environment is dimensionalized)
-      namespace = "RoboSystems/Graph"
+      # Publish to environment-specific Graph namespace
+      namespace = f"RoboSystems/Graph/{self.environment}"
       self.cloudwatch.put_metric_data(Namespace=namespace, MetricData=metric_data)
 
     except ClientError as e:
@@ -1177,14 +1175,14 @@ class LadybugAllocationManager:
       return
 
     try:
-      namespace = "RoboSystems/Graph"
+      # Use environment-specific namespace instead of Environment dimension
+      namespace = f"RoboSystems/Graph/{self.environment}"
       metric_data = [
         {
           "MetricName": "AllocationFailures",
           "Value": 1,
           "Unit": "Count",
           "Dimensions": [
-            {"Name": "Environment", "Value": self.environment},
             {"Name": "FailureReason", "Value": failure_reason},
           ],
         }
@@ -1204,14 +1202,14 @@ class LadybugAllocationManager:
       return
 
     try:
-      namespace = "RoboSystems/Graph"
+      # Use environment-specific namespace instead of Environment dimension
+      namespace = f"RoboSystems/Graph/{self.environment}"
       metric_data = [
         {
           "MetricName": "CapacityUtilization",
           "Value": utilization_percent,
           "Unit": "Percent",
           "Dimensions": [
-            {"Name": "Environment", "Value": self.environment},
             {"Name": "NodeType", "Value": "writer"},
           ],
         }

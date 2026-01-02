@@ -533,15 +533,12 @@ Resources:
       AlarmName: !Sub robosystems-graph-${Environment}-database-capacity
       AlarmDescription: RoboSystems graph database capacity is running low
       MetricName: DatabaseUtilizationPercent
-      Namespace: RoboSystems/Graph
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2
       Threshold: 85
       ComparisonOperator: GreaterThanThreshold
-      Dimensions:
-        - Name: Environment
-          Value: !Ref Environment
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref InfraAlertTopic

@@ -464,10 +464,7 @@ Resources:
       AlarmName: !Sub "robosystems-graph-volumes-${Environment}-orphaned"
       AlarmDescription: Alert when orphaned volumes are detected
       MetricName: OrphanedVolumes
-      Namespace: RoboSystems/Graph
-      Dimensions:
-        - Name: Environment
-          Value: !Ref Environment
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Maximum
       Period: 3600
       EvaluationPeriods: 1
@@ -513,10 +510,8 @@ Resources:
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: RoboSystems/Graph
+              Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
-                - Name: Environment
-                  Value: !Ref Environment
                 - Name: path
                   Value: /mnt/lbug-data
             Stat: Maximum
@@ -540,10 +535,8 @@ Resources:
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: RoboSystems/Graph
+              Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
-                - Name: Environment
-                  Value: !Ref Environment
                 - Name: path
                   Value: /mnt/lbug-data
             Stat: Maximum
@@ -570,10 +563,8 @@ Resources:
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: RoboSystems/Graph
+              Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
-                - Name: Environment
-                  Value: !Ref Environment
                 - Name: path
                   Value: /mnt/lbug-data
             Stat: Maximum
@@ -602,10 +593,8 @@ Resources:
           MetricStat:
             Metric:
               MetricName: DISK_USED_PERCENT
-              Namespace: RoboSystems/Graph
+              Namespace: !Sub "RoboSystems/Graph/${Environment}"
               Dimensions:
-                - Name: Environment
-                  Value: !Ref Environment
                 - Name: path
                   Value: /mnt/lbug-data
             Period: 1800 # 30 minutes

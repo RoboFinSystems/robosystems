@@ -547,13 +547,12 @@ def cleanup_orphaned_volumes() -> dict[str, Any]:
 
   # Publish metric
   cloudwatch.put_metric_data(
-    Namespace="RoboSystems/Graph",
+    Namespace=f"RoboSystems/Graph/{ENVIRONMENT}",
     MetricData=[
       {
         "MetricName": "OrphanedVolumes",
         "Value": len(orphaned),
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       }
     ],
   )
@@ -948,25 +947,22 @@ Updated {len(corrections_applied["updated"])} mismatched entries: {corrections_a
 
   # Publish metrics
   cloudwatch.put_metric_data(
-    Namespace="RoboSystems/Graph",
+    Namespace=f"RoboSystems/Graph/{ENVIRONMENT}",
     MetricData=[
       {
         "MetricName": "RegistryStaleEntries",
         "Value": len(corrections_applied["removed"]),
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
       {
         "MetricName": "RegistryMissingEntries",
         "Value": len(corrections_applied["added"]),
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
       {
         "MetricName": "RegistryMismatchedEntries",
         "Value": len(corrections_applied["updated"]),
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
     ],
   )

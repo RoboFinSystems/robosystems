@@ -487,8 +487,8 @@ Resources:
             export AWS_STACK_NAME="${AWS::StackName}"
             export ECR_URI="${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/robosystems"
             export ECR_IMAGE_TAG="${ECRImageTag}"
-            # Set CloudWatch namespace (environment is dimensionalized in metrics)
-            export CloudWatchNamespace="RoboSystems/Graph"
+            # Set CloudWatch namespace (includes environment since dimensions don't work reliably)
+            export CloudWatchNamespace="RoboSystems/Graph/${Environment}"
 
             # Critical missing variables
             export AWS_REGION="${AWS::Region}"
@@ -654,7 +654,7 @@ Resources:
       AlarmName: !Sub "robosystems-ladybug-${WriterTier}-${Environment}-high-memory"
       AlarmDescription: Triggers when memory usage exceeds 85% for 5 minutes
       MetricName: mem_used_percent
-      Namespace: RoboSystems/Graph
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Average
       Period: 300
       EvaluationPeriods: 1
@@ -674,7 +674,7 @@ Resources:
       AlarmName: !Sub "robosystems-ladybug-${WriterTier}-${Environment}-allocation-failures"
       AlarmDescription: "Alert when database allocations fail"
       MetricName: AllocationFailures
-      Namespace: RoboSystems/Graph
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -693,7 +693,7 @@ Resources:
       AlarmName: !Sub "robosystems-ladybug-${WriterTier}-${Environment}-high-capacity-utilization"
       AlarmDescription: "Alert when capacity utilization exceeds 80%"
       MetricName: CapacityUtilization
-      Namespace: RoboSystems/Graph
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Average
       Period: 300
       EvaluationPeriods: 2

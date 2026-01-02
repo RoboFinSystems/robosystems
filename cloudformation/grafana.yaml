@@ -140,8 +140,10 @@ Resources:
                   - s3:CreateBucket
                   - s3:PutObject
                 Resource:
+                  # Athena query results bucket
                   - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::AccountId}-${AWS::Region}"
                   - !Sub "arn:${AWS::Partition}:s3:::aws-athena-query-results-${AWS::AccountId}-${AWS::Region}/*"
+                  # CUR bucket for cost dashboards - see robosystems/middleware/otel/config/dashboards/aws/README.md
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-cur"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-cur/*"
               # Allow Glue access for Athena data catalog

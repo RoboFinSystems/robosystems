@@ -366,13 +366,13 @@ class LadybugGraphBackupService:
   async def _publish_backup_metrics(self, summary: dict[str, Any]) -> None:
     """Publish backup metrics to CloudWatch."""
     try:
+      # Use environment-specific namespace instead of Environment dimension
       metric_data = [
         {
           "MetricName": "GraphDatabaseBackups",
           "Value": summary["backed_up"],
           "Unit": "Count",
           "Dimensions": [
-            {"Name": "Environment", "Value": self.environment},
             {"Name": "InstanceId", "Value": self.instance_id},
             {"Name": "Status", "Value": "Success"},
           ],
@@ -382,7 +382,6 @@ class LadybugGraphBackupService:
           "Value": summary["failed"],
           "Unit": "Count",
           "Dimensions": [
-            {"Name": "Environment", "Value": self.environment},
             {"Name": "InstanceId", "Value": self.instance_id},
             {"Name": "Status", "Value": "Failed"},
           ],
@@ -392,14 +391,13 @@ class LadybugGraphBackupService:
           "Value": summary["execution_time_minutes"],
           "Unit": "Minutes",
           "Dimensions": [
-            {"Name": "Environment", "Value": self.environment},
             {"Name": "InstanceId", "Value": self.instance_id},
           ],
         },
       ]
 
-      # Publish to unified Graph namespace (environment is dimensionalized)
-      namespace = "RoboSystems/Graph"
+      # Publish to environment-specific Graph namespace
+      namespace = f"RoboSystems/Graph/{self.environment}"
       self.cloudwatch.put_metric_data(Namespace=namespace, MetricData=metric_data)
 
     except Exception as e:
