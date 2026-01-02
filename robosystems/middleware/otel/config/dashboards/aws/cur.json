@@ -18,6 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
+  "id": null,
   "links": [],
   "panels": [
     {
@@ -430,7 +431,7 @@
             "uid": "${DS_ATHENA}"
           },
           "format": 1,
-          "rawSQL": "SELECT\n      CASE\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN line_item_unblended_cost < 0.01 THEN 'Other'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      line_item_unblended_cost > 0.01\nGROUP BY 1\nORDER BY cost DESC",
+          "rawSQL": "SELECT\n      CASE\n            WHEN line_item_unblended_cost < 0.02 THEN 'Other'\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment)) AND\n      line_item_unblended_cost > 0.01\nGROUP BY 1\nORDER BY cost DESC",
           "refId": "A",
           "table": "robosystemscostandusage"
         }
@@ -536,7 +537,7 @@
             "uid": "${DS_ATHENA}"
           },
           "format": 1,
-          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN line_item_unblended_cost < 0.01 THEN 'Other'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1,2\nORDER BY cost, usage_date",
+          "rawSQL": "SELECT\n      DATE(line_item_usage_start_date) as usage_date,\n      CASE\n            WHEN line_item_unblended_cost < 0.02 THEN 'Other'\n            WHEN resource_tags_user_component in ($component) AND resource_tags_user_component != '' THEN resource_tags_user_component\n            WHEN product_servicename = 'Amazon Virtual Private Cloud' THEN 'VPC'\n            WHEN product_servicename IS NOT NULL AND product_servicename != '' THEN replace(replace(replace(product_servicename,'Amazon',''),'AWS',''),' ','')\n            ELSE 'Other'\n      END as component,\n      round(sum(CASE\n            WHEN (line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN savings_plan_savings_plan_effective_cost\n            WHEN (line_item_line_item_type = 'SavingsPlanRecurringFee') THEN round((savings_plan_total_commitment_to_date - savings_plan_used_commitment),8)\n            WHEN (line_item_line_item_type = 'SavingsPlanNegation') THEN 0\n            WHEN (line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN 0\n            WHEN (line_item_line_item_type = 'DiscountedUsage') THEN reservation_effective_cost\n            WHEN (line_item_line_item_type = 'RIFee') THEN (reservation_unused_amortized_upfront_fee_for_billing_period + reservation_unused_recurring_fee)\n            WHEN ((line_item_line_item_type = 'Fee') AND (reservation_reservation_a_r_n <> '')) THEN 0 \n            ELSE line_item_unblended_cost \n      END),2) as cost\nFROM \"athenacurcfn_robo_systems_cost_and_usage\".\"robosystemscostandusage\"\nWHERE \n      DATE(line_item_usage_start_date) >= DATE($__timeFrom) AND \n      DATE(line_item_usage_start_date) <= DATE($__timeTo) AND\n      line_item_line_item_type != 'RIFee' AND\n      (resource_tags_user_component in ($component)) AND \n      (resource_tags_user_environment in ($environment))\nGROUP BY 1,2\nORDER BY cost, usage_date",
           "refId": "A",
           "table": "robosystemscostandusage"
         }
@@ -941,24 +942,6 @@
       {
         "current": {
           "selected": true,
-          "text": "Athena",
-          "value": "Athena"
-        },
-        "hide": 0,
-        "includeAll": false,
-        "label": "Data Source",
-        "multi": false,
-        "name": "DS_ATHENA",
-        "options": [],
-        "query": "grafana-athena-datasource",
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "type": "datasource"
-      },
-      {
-        "current": {
-          "selected": false,
           "text": ["All"],
           "value": ["$__all"]
         },
@@ -1017,7 +1000,7 @@
             "resultReuseMaxAgeInMinutes": 60
           },
           "format": 1,
-          "rawSQL": "select distinct resource_tags_user_component from robosystemscostandusage",
+          "rawSQL": "select distinct resource_tags_user_component from robosystemscostandusage\nwhere year = '2025' and month ='11'",
           "table": "robosystemscostandusage"
         },
         "refresh": 1,
@@ -1037,7 +1020,6 @@
   },
   "timezone": "utc",
   "title": "RoboSystems Cost and Usage Dashboard",
-  "uid": "depgbcbsbfe2oa",
-  "version": 18,
+  "version": 1,
   "weekStart": ""
 }

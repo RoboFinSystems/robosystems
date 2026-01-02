@@ -18,12 +18,13 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
+  "id": null,
   "links": [],
   "panels": [
     {
       "datasource": {
         "type": "text",
-        "uid": "${DS_DEFAULT}"
+        "uid": "-- Mixed --"
       },
       "description": "",
       "gridPos": {
@@ -134,7 +135,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket{endpoint!=\"/v1/status\"}[5m]))",
+          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket[5m]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -206,7 +207,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket{endpoint!=\"/v1/status\"}[5m]))",
+          "expr": "avg by(endpoint) (rate(robosystems_api_request_duration_seconds_bucket[5m]))",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -308,7 +309,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "topk(15, sum by(endpoint) (rate(robosystems_api_requests_total{endpoint!=\"/v1/status\"}[5m]))) * 60",
+          "expr": "topk(15, sum by(endpoint) (rate(robosystems_api_requests_total[5m]))) * 60",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -380,7 +381,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum(rate(robosystems_api_requests_total{endpoint!=\"/v1/status\"}[5m]))",
+          "expr": "sum(rate(robosystems_api_requests_total[5m]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -446,7 +447,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "sum by(status_code) (rate(robosystems_api_requests_total{endpoint!=\"/v1/status\"}[5m]))",
+          "expr": "sum by(status_code) (rate(robosystems_api_requests_total[5m]))",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -634,7 +635,7 @@
     {
       "datasource": {
         "type": "text",
-        "uid": "${DS_DEFAULT}"
+        "uid": "-- Mixed --"
       },
       "gridPos": {
         "h": 3,
@@ -745,8 +746,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "robosystems-api-prod-cluster",
-            "ServiceName": "robosystems-api-prod-service"
+            "ClusterName": "robosystems-api-staging-cluster",
+            "ServiceName": "robosystems-api-staging-service"
           },
           "expression": "",
           "id": "",
@@ -770,8 +771,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboledger-prod-cluster",
-            "ServiceName": "roboledger-prod-service"
+            "ClusterName": "roboledger-staging-cluster",
+            "ServiceName": "roboledger-staging-service"
           },
           "expression": "",
           "id": "",
@@ -795,8 +796,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboinvestor-prod-cluster",
-            "ServiceName": "roboinvestor-prod-service"
+            "ClusterName": "roboinvestor-staging-cluster",
+            "ServiceName": "roboinvestor-staging-service"
           },
           "expression": "",
           "id": "",
@@ -820,8 +821,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "robosystems-app-prod-cluster",
-            "ServiceName": "robosystems-app-prod-service"
+            "ClusterName": "robosystems-app-staging-cluster",
+            "ServiceName": "robosystems-app-staging-service"
           },
           "expression": "",
           "id": "",
@@ -931,8 +932,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "robosystems-api-prod-cluster",
-            "ServiceName": "robosystems-api-prod-service"
+            "ClusterName": "robosystems-api-staging-cluster",
+            "ServiceName": "robosystems-api-staging-service"
           },
           "expression": "",
           "id": "",
@@ -956,8 +957,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboledger-prod-cluster",
-            "ServiceName": "roboledger-prod-service"
+            "ClusterName": "roboledger-staging-cluster",
+            "ServiceName": "roboledger-staging-service"
           },
           "expression": "",
           "id": "",
@@ -981,8 +982,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "roboinvestor-prod-cluster",
-            "ServiceName": "roboinvestor-prod-service"
+            "ClusterName": "roboinvestor-staging-cluster",
+            "ServiceName": "roboinvestor-staging-service"
           },
           "expression": "",
           "id": "",
@@ -1006,8 +1007,8 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "robosystems-app-prod-cluster",
-            "ServiceName": "robosystems-app-prod-service"
+            "ClusterName": "robosystems-app-staging-cluster",
+            "ServiceName": "robosystems-app-staging-service"
           },
           "expression": "",
           "id": "",
@@ -1032,7 +1033,7 @@
     {
       "datasource": {
         "type": "text",
-        "uid": "${DS_DEFAULT}"
+        "uid": "-- Mixed --"
       },
       "gridPos": {
         "h": 3,
@@ -1117,8 +1118,8 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
-        "w": 8,
+        "h": 10,
+        "w": 12,
         "x": 0,
         "y": 42
       },
@@ -1142,156 +1143,27 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "robosystems-worker-default-prod-cluster",
-            "ServiceName": "robosystems-worker-default-prod-service"
+            "ClusterName": "robosystems-dagster-staging-cluster"
           },
           "expression": "",
+          "hide": false,
           "id": "",
-          "label": "Default",
+          "label": "",
           "logGroups": [],
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "CPUUtilization",
           "metricQueryType": 0,
           "namespace": "AWS/ECS",
-          "period": "300",
+          "period": "",
           "queryMode": "Metrics",
           "refId": "A",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-critical-prod-cluster",
-            "ServiceName": "robosystems-worker-critical-prod-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Critical",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "CPUUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "C",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-shared-extraction-prod-cluster",
-            "ServiceName": "robosystems-worker-shared-extraction-prod-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Extraction",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "CPUUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "F",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-shared-processing-prod-cluster",
-            "ServiceName": "robosystems-worker-shared-processing-prod-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Processing",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "CPUUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "D",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-shared-ingestion-prod-cluster",
-            "ServiceName": "robosystems-worker-shared-ingestion-prod-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Ingestion",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "CPUUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "E",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-maintenance-prod-cluster"
-          },
-          "expression": "SELECT AVG(CPUUtilization) FROM SCHEMA(\"AWS/ECS\", ClusterName,ServiceName) WHERE ClusterName = 'robosystems-beat-prod-cluster'",
-          "hide": false,
-          "id": "",
-          "label": "Beat",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 1,
-          "metricName": "CPUUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "B",
           "region": "default",
           "sqlExpression": "",
-          "statistic": "Maximum"
+          "statistic": "Average"
         }
       ],
-      "title": "Worker CPU Utilization",
+      "title": "Dagster CPU Utilization",
       "type": "timeseries"
     },
     {
@@ -1356,9 +1228,9 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 8,
+        "h": 10,
+        "w": 12,
+        "x": 12,
         "y": 42
       },
       "id": 9,
@@ -1381,151 +1253,22 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "ClusterName": "robosystems-worker-default-prod-cluster",
-            "ServiceName": "robosystems-worker-default-prod-service"
+            "ClusterName": "robosystems-dagster-staging-cluster"
           },
           "expression": "",
+          "hide": false,
           "id": "",
-          "label": "Default",
+          "label": "",
           "logGroups": [],
-          "matchExact": true,
+          "matchExact": false,
           "metricEditorMode": 0,
           "metricName": "MemoryUtilization",
           "metricQueryType": 0,
           "namespace": "AWS/ECS",
-          "period": "300",
+          "period": "",
           "queryMode": "Metrics",
           "refId": "A",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-critical-prod-cluster",
-            "ServiceName": "robosystems-worker-critical-prod-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Critical",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "MemoryUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "C",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-shared-extraction-staging-cluster",
-            "ServiceName": "robosystems-worker-shared-extraction-staging-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Extraction",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "MemoryUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "F",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-shared-processing-prod-cluster",
-            "ServiceName": "robosystems-worker-shared-processing-prod-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Processing",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "MemoryUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "D",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-worker-shared-ingestion-prod-cluster",
-            "ServiceName": "robosystems-worker-shared-ingestion-prod-service"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Ingestion",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "MemoryUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "E",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "ClusterName": "robosystems-beat-prod-cluster",
-            "ServiceName": "robosystems-beat-prod-service"
-          },
-          "expression": "",
-          "id": "",
-          "label": "Beat",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "MemoryUtilization",
-          "metricQueryType": 0,
-          "namespace": "AWS/ECS",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "B",
-          "region": "${aws_region}",
+          "region": "default",
           "sqlExpression": "",
           "statistic": "Average"
         }
@@ -1535,255 +1278,15 @@
     },
     {
       "datasource": {
-        "type": "cloudwatch",
-        "uid": "${DS_CLOUDWATCH}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green"
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 16,
-        "y": 42
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "Environment": "prod",
-            "Queue": "default"
-          },
-          "expression": "",
-          "id": "",
-          "label": "Default",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "QueueSize",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "A",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "Environment": "prod",
-            "Queue": "critical"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Critical",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "QueueSize",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "B",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "Environment": "prod",
-            "Queue": "shared-extraction"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Extraction",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "QueueSize",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "F",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "Environment": "prod",
-            "Queue": "shared-processing"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Processing",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "QueueSize",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "C",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "Environment": "prod",
-            "Queue": "shared-ingestion"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "Shared Ingestion",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "QueueSize",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "D",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "Environment": "prod",
-            "Queue": "dead_letter"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "DLQ",
-          "logGroups": [],
-          "matchExact": true,
-          "metricEditorMode": 0,
-          "metricName": "QueueSize",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Worker",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "E",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Average"
-        }
-      ],
-      "title": "Celery Queue Size",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
         "type": "text",
-        "uid": "${DS_DEFAULT}"
+        "uid": "-- Mixed --"
       },
       "description": "",
       "gridPos": {
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 51
+        "y": 52
       },
       "id": 11,
       "options": {
@@ -1792,7 +1295,7 @@
           "showLineNumbers": false,
           "showMiniMap": false
         },
-        "content": "# LadybugDB Clusters",
+        "content": "# Graph Instances",
         "mode": "markdown"
       },
       "pluginVersion": "10.4.1",
@@ -1865,7 +1368,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 54
+        "y": 55
       },
       "id": 12,
       "options": {
@@ -1912,12 +1415,12 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphWritersStandardProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedStaging-writers-asg"
           },
           "expression": "",
           "hide": false,
           "id": "",
-          "label": "ASG",
+          "label": "Standard ASG",
           "logGroups": [],
           "matchExact": true,
           "metricEditorMode": 0,
@@ -1930,9 +1433,34 @@
           "region": "default",
           "sqlExpression": "",
           "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "Shared ASG",
+          "logGroups": [],
+          "matchExact": true,
+          "metricEditorMode": 0,
+          "metricName": "CPUUtilization",
+          "metricQueryType": 0,
+          "namespace": "AWS/EC2",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "C",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
         }
       ],
-      "title": "LadybugDB CPU Utilization",
+      "title": "Graph CPU Utilization",
       "type": "timeseries"
     },
     {
@@ -2000,7 +1528,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 54
+        "y": 55
       },
       "id": 13,
       "options": {
@@ -2041,7 +1569,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "LadybugDB Memory Used",
+      "title": "Graph Memory Used",
       "type": "timeseries"
     },
     {
@@ -2109,7 +1637,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 64
+        "y": 65
       },
       "id": 14,
       "options": {
@@ -2150,7 +1678,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "LadybugDB Disk Utilization",
+      "title": "Graph Disk Utilization",
       "type": "timeseries"
     },
     {
@@ -2217,7 +1745,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 64
+        "y": 65
       },
       "id": 37,
       "options": {
@@ -2258,7 +1786,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "LadybugDB Disk Used",
+      "title": "Graph Disk Used",
       "type": "timeseries"
     },
     {
@@ -2326,7 +1854,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 75
       },
       "id": 38,
       "options": {
@@ -2394,7 +1922,7 @@
           "statistic": "Average"
         }
       ],
-      "title": "LadybugDB Disk IO",
+      "title": "Graph Disk IO",
       "type": "timeseries"
     },
     {
@@ -2461,7 +1989,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 75
       },
       "id": 36,
       "options": {
@@ -2483,7 +2011,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphWritersStandardProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
           },
           "expression": "",
           "id": "",
@@ -2507,7 +2035,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "AutoScalingGroupName": "RoboSystemsGraphWritersStandardProd-writers-asg"
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
           },
           "expression": "",
           "hide": false,
@@ -2525,9 +2053,59 @@
           "region": "default",
           "sqlExpression": "",
           "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "",
+          "logGroups": [],
+          "matchExact": false,
+          "metricEditorMode": 0,
+          "metricName": "NetworkIn",
+          "metricQueryType": 0,
+          "namespace": "AWS/EC2",
+          "period": "300",
+          "queryMode": "Metrics",
+          "refId": "C",
+          "region": "${aws_region}",
+          "sqlExpression": "",
+          "statistic": "Average"
+        },
+        {
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${DS_CLOUDWATCH}"
+          },
+          "dimensions": {
+            "AutoScalingGroupName": "RoboSystemsGraphLadybugSharedProd-writers-asg"
+          },
+          "expression": "",
+          "hide": false,
+          "id": "",
+          "label": "",
+          "logGroups": [],
+          "matchExact": false,
+          "metricEditorMode": 0,
+          "metricName": "NetworkOut",
+          "metricQueryType": 0,
+          "namespace": "AWS/EC2",
+          "period": "",
+          "queryMode": "Metrics",
+          "refId": "D",
+          "region": "default",
+          "sqlExpression": "",
+          "statistic": "Average"
         }
       ],
-      "title": "LadybugDB Network Bandwidth",
+      "title": "Graph Network Bandwidth",
       "type": "timeseries"
     },
     {
@@ -2595,7 +2173,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 85
       },
       "id": 39,
       "options": {
@@ -2617,7 +2195,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "Environment": "prod"
+            "Environment": "staging"
           },
           "expression": "",
           "id": "",
@@ -2625,7 +2203,7 @@
           "logGroups": [],
           "matchExact": false,
           "metricEditorMode": 0,
-          "metricName": "InstanceDatabaseCount",
+          "metricName": "InstancesMonitored",
           "metricQueryType": 0,
           "namespace": "RoboSystems/Graph",
           "period": "300",
@@ -2633,7 +2211,7 @@
           "refId": "A",
           "region": "${aws_region}",
           "sqlExpression": "",
-          "statistic": "Average"
+          "statistic": "Minimum"
         }
       ],
       "title": "Database per Instance",
@@ -2705,7 +2283,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 84
+        "y": 85
       },
       "id": 40,
       "options": {
@@ -2727,7 +2305,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "Environment": "prod"
+            "Environment": "staging"
           },
           "expression": "",
           "id": "",
@@ -2744,31 +2322,6 @@
           "region": "${aws_region}",
           "sqlExpression": "",
           "statistic": "Maximum"
-        },
-        {
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${DS_CLOUDWATCH}"
-          },
-          "dimensions": {
-            "Environment": "prod"
-          },
-          "expression": "",
-          "hide": false,
-          "id": "",
-          "label": "",
-          "logGroups": [],
-          "matchExact": false,
-          "metricEditorMode": 0,
-          "metricName": "VolumesExpanded",
-          "metricQueryType": 0,
-          "namespace": "RoboSystems/Graph",
-          "period": "300",
-          "queryMode": "Metrics",
-          "refId": "B",
-          "region": "${aws_region}",
-          "sqlExpression": "",
-          "statistic": "Maximum"
         }
       ],
       "title": "Volume Errors",
@@ -2777,15 +2330,15 @@
     {
       "datasource": {
         "type": "text",
-        "uid": "${DS_DEFAULT}"
+        "uid": "-- Mixed --"
       },
       "gridPos": {
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 94
+        "y": 95
       },
-      "id": 20,
+      "id": null,
       "options": {
         "code": {
           "language": "plaintext",
@@ -2865,7 +2418,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 97
+        "y": 98
       },
       "id": 21,
       "options": {
@@ -2887,7 +2440,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -2974,7 +2527,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 97
+        "y": 98
       },
       "id": 42,
       "options": {
@@ -2996,7 +2549,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -3083,7 +2636,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 97
+        "y": 98
       },
       "id": 43,
       "options": {
@@ -3105,7 +2658,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -3192,7 +2745,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 106
+        "y": 107
       },
       "id": 44,
       "options": {
@@ -3214,7 +2767,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -3301,7 +2854,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 106
+        "y": 107
       },
       "id": 41,
       "options": {
@@ -3323,7 +2876,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -3410,7 +2963,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 106
+        "y": 107
       },
       "id": 46,
       "options": {
@@ -3432,7 +2985,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -3519,7 +3072,7 @@
         "h": 9,
         "w": 8,
         "x": 0,
-        "y": 115
+        "y": 116
       },
       "id": 45,
       "options": {
@@ -3541,7 +3094,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -3628,7 +3181,7 @@
         "h": 9,
         "w": 8,
         "x": 8,
-        "y": 115
+        "y": 116
       },
       "id": 22,
       "options": {
@@ -3650,7 +3203,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "hide": false,
@@ -3675,7 +3228,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "hide": false,
@@ -3763,7 +3316,7 @@
         "h": 9,
         "w": 8,
         "x": 16,
-        "y": 115
+        "y": 116
       },
       "id": 47,
       "options": {
@@ -3785,7 +3338,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "id": "",
@@ -3809,7 +3362,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "CacheClusterId": "robosystems-prod-valkey-001"
+            "CacheClusterId": "robosystems-staging-valkey-001"
           },
           "expression": "",
           "hide": false,
@@ -3835,13 +3388,13 @@
     {
       "datasource": {
         "type": "text",
-        "uid": "${DS_DEFAULT}"
+        "uid": "-- Mixed --"
       },
       "gridPos": {
         "h": 3,
         "w": 24,
         "x": 0,
-        "y": 124
+        "y": 125
       },
       "id": 15,
       "options": {
@@ -3923,7 +3476,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 127
+        "y": 128
       },
       "id": 16,
       "options": {
@@ -3945,7 +3498,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-prod"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",
@@ -4032,7 +3585,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 127
+        "y": 128
       },
       "id": 18,
       "options": {
@@ -4054,7 +3607,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-prod"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",
@@ -4141,7 +3694,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 137
+        "y": 138
       },
       "id": 17,
       "options": {
@@ -4163,7 +3716,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-prod"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",
@@ -4249,7 +3802,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 137
+        "y": 138
       },
       "id": 19,
       "options": {
@@ -4271,7 +3824,7 @@
             "uid": "${DS_CLOUDWATCH}"
           },
           "dimensions": {
-            "DBInstanceIdentifier": "robosystems-prod"
+            "DBInstanceIdentifier": "robosystems-staging"
           },
           "expression": "",
           "id": "",
@@ -4296,7 +3849,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["${SYSTEM_NAME_LOWER}", "prod", "infrastructure"],
+  "tags": ["robosystems", "staging", "infrastructure"],
   "templating": {
     "list": [
       {
@@ -4325,12 +3878,12 @@
     ]
   },
   "time": {
-    "from": "now-1h",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {},
-  "timezone": "browser",
-  "title": "${SYSTEM_NAME} Production Dashboard",
-  "uid": "prod-monitoring-dashboard",
+  "timezone": "",
+  "title": "RoboSystems Staging Dashboard",
+  "version": 1,
   "weekStart": ""
 }
