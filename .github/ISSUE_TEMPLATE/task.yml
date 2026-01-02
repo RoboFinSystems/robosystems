@@ -1,0 +1,65 @@
+name: Task
+description: A specific work item
+type: Task
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What needs to be done?
+      placeholder: Describe the task...
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Why is this needed?
+      placeholder: This is needed because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected
+    attributes:
+      label: Scope - Affected
+      description: What areas/files are affected?
+      placeholder: |
+        - [ ]
+        - [ ]
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Scope - Out of Scope
+      description: What's explicitly NOT part of this task?
+      placeholder: |
+        -
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: How do we know when this is done?
+      placeholder: |
+        - [ ]
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      placeholder: Implementation hints or constraints...
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related Issues
+      placeholder: |
+        - Parent: #
+        - Blocks: #
+        - Blocked by: #

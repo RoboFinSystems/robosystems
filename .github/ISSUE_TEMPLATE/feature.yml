@@ -1,0 +1,34 @@
+name: Feature
+description: I wish I could...
+type: Feature
+body:
+  - type: textarea
+    id: request
+    attributes:
+      label: What would you like?
+      description: A clear description of what you wish you could do.
+      placeholder: I wish I could...
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What problem would this solve for you?
+      placeholder: This would help because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: ideas
+    attributes:
+      label: Any ideas on how?
+      description: Optional - if you have thoughts on implementation, share them here.
+      placeholder: One way to do this might be...
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      placeholder: Screenshots, examples, or links that help explain the request.

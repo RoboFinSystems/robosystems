@@ -1,0 +1,103 @@
+name: RFC (Design Document)
+description: Propose a significant design change for team feedback
+type: RFC
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One paragraph explaining the proposal
+      placeholder: This RFC proposes...
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Motivation: Problem"
+      description: What problem does this solve?
+      placeholder: Currently, we have...
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-now
+    attributes:
+      label: "Motivation: Why Now?"
+      description: Why is this the right time?
+      placeholder: This is urgent because...
+
+  - type: textarea
+    id: overview
+    attributes:
+      label: "Proposed Design: Overview"
+      description: High-level approach
+      placeholder: The proposed solution is to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: detailed-design
+    attributes:
+      label: "Proposed Design: Detailed Design"
+      description: Technical details, architecture, data models, APIs
+      placeholder: |
+        ## Architecture
+
+        ## Data Model
+
+        ## API Design
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      placeholder: |
+        | Alternative | Pros | Cons |
+        |-------------|------|------|
+        | Option A | | |
+        | Option B | | |
+
+        **Why this approach:**
+
+  - type: textarea
+    id: phases
+    attributes:
+      label: "Implementation: Phases"
+      placeholder: |
+        1. **Phase 1:**
+        2. **Phase 2:**
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: "Implementation: Dependencies"
+      placeholder: List any dependencies or blockers
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks & Mitigations
+      placeholder: |
+        | Risk | Mitigation |
+        |------|------------|
+        | | |
+
+  - type: textarea
+    id: questions
+    attributes:
+      label: Open Questions
+      description: Questions for discussion
+      placeholder: |
+        - [ ]
+        - [ ]
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      placeholder: |
+        - Related: #
+        - External:
