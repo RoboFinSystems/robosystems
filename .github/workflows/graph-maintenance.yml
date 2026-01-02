@@ -49,7 +49,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # For scheduled runs, check if auto-update is enabled and set defaults
+  # For scheduled runs, check if auto-update is enabled
   schedule-gate:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
@@ -66,7 +66,7 @@ jobs:
             # Determine environment based on which cron triggered
             # 1st of month = staging, 2nd of month = prod
             CRON="${{ github.event.schedule }}"
-            if [[ "$CRON" == "0 2 1 "* ]]; then
+            if [[ "$CRON" == "0 7 1 "* ]]; then
               ENV="staging"
             else
               ENV="prod"
@@ -80,8 +80,13 @@ jobs:
             echo "Scheduled AMI update is disabled (set GRAPH_AMI_AUTO_UPDATE=true to enable)"
           fi
 
-  check-runner:
-    # always() required so this job runs even when schedule-gate is skipped (workflow_dispatch)
+  # =============================================================================
+  # Task: update-ami
+  # Updates the GRAPH_AMI_ID variable with the latest Amazon Linux 2023 ARM64 AMI,
+  # triggers a full deploy to update Launch Templates, then refreshes ASGs.
+  # =============================================================================
+  ami-get-latest:
+    # always() needed because schedule-gate is skipped for workflow_dispatch
     if: |
       always() &&
       (github.event_name == 'workflow_dispatch' ||
@@ -89,62 +94,34 @@ jobs:
     needs: [schedule-gate]
     runs-on: ubuntu-latest
     outputs:
-      runner_config: ${{ steps.check.outputs.runner_config }}
-      # Resolved inputs (handles both manual and scheduled triggers)
-      task: ${{ steps.resolve.outputs.task }}
-      environment: ${{ steps.resolve.outputs.environment }}
-      skip_deploy: ${{ steps.resolve.outputs.skip_deploy }}
-      skip_refresh: ${{ steps.resolve.outputs.skip_refresh }}
-      deploy_ref: ${{ steps.resolve.outputs.deploy_ref }}
-    steps:
-      - name: Resolve inputs
-        id: resolve
-        run: |
-          if [ "${{ github.event_name }}" == "schedule" ]; then
-            echo "task=update-ami" >> $GITHUB_OUTPUT
-            echo "environment=${{ needs.schedule-gate.outputs.environment }}" >> $GITHUB_OUTPUT
-            echo "skip_deploy=false" >> $GITHUB_OUTPUT
-            echo "skip_refresh=false" >> $GITHUB_OUTPUT
-            echo "deploy_ref=" >> $GITHUB_OUTPUT
-            echo "Scheduled run: update-ami for ${{ needs.schedule-gate.outputs.environment }}"
-          else
-            echo "task=${{ inputs.task }}" >> $GITHUB_OUTPUT
-            echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
-            echo "skip_deploy=${{ inputs.skip_deploy }}" >> $GITHUB_OUTPUT
-            echo "skip_refresh=${{ inputs.skip_refresh }}" >> $GITHUB_OUTPUT
-            echo "deploy_ref=${{ inputs.deploy_ref }}" >> $GITHUB_OUTPUT
-            echo "Manual run: ${{ inputs.task }} for ${{ inputs.environment }}"
-          fi
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.ACTIONS_TOKEN }}
-
-      - name: Check runner availability
-        id: check
-        uses: ./.github/actions/runner-availability
-        with:
-          runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
-          runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
-          github_token: ${{ secrets.ACTIONS_TOKEN }}
-
-  # =============================================================================
-  # Task: update-ami
-  # Updates the GRAPH_AMI_ID variable with the latest Amazon Linux 2023 ARM64 AMI,
-  # triggers a full deploy to update Launch Templates, then refreshes ASGs.
-  # =============================================================================
-  ami-get-latest:
-    if: needs.check-runner.outputs.task == 'update-ami'
-    needs: [check-runner]
-    runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
-    outputs:
       ami_id: ${{ steps.ami.outputs.ami_id }}
       ami_name: ${{ steps.ami.outputs.ami_name }}
       current_ami: ${{ steps.current.outputs.current_ami }}
       var_name: ${{ steps.current.outputs.var_name }}
       ami_changed: ${{ steps.compare.outputs.ami_changed }}
+      # Pass-through inputs for downstream jobs
+      environment: ${{ steps.inputs.outputs.environment }}
+      skip_deploy: ${{ steps.inputs.outputs.skip_deploy }}
+      skip_refresh: ${{ steps.inputs.outputs.skip_refresh }}
+      deploy_ref: ${{ steps.inputs.outputs.deploy_ref }}
     steps:
+      - name: Resolve inputs
+        id: inputs
+        run: |
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            echo "environment=${{ needs.schedule-gate.outputs.environment }}" >> $GITHUB_OUTPUT
+            echo "skip_deploy=false" >> $GITHUB_OUTPUT
+            echo "skip_refresh=false" >> $GITHUB_OUTPUT
+            echo "deploy_ref=" >> $GITHUB_OUTPUT
+            echo "Scheduled run for ${{ needs.schedule-gate.outputs.environment }}"
+          else
+            echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "skip_deploy=${{ inputs.skip_deploy }}" >> $GITHUB_OUTPUT
+            echo "skip_refresh=${{ inputs.skip_refresh }}" >> $GITHUB_OUTPUT
+            echo "deploy_ref=${{ inputs.deploy_ref }}" >> $GITHUB_OUTPUT
+            echo "Manual run for ${{ inputs.environment }}"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -168,8 +145,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
         run: |
-          # Use environment-specific variable
-          ENV="${{ needs.check-runner.outputs.environment }}"
+          ENV="${{ steps.inputs.outputs.environment }}"
           VAR_NAME="GRAPH_AMI_ID_$(echo $ENV | tr '[:lower:]' '[:upper:]')"
           CURRENT_AMI=$(gh variable get "$VAR_NAME" 2>/dev/null || echo "not-set")
           echo "current_ami=$CURRENT_AMI" >> $GITHUB_OUTPUT
@@ -190,9 +166,9 @@ jobs:
           fi
 
   ami-update-variable:
-    if: needs.check-runner.outputs.task == 'update-ami' && needs.ami-get-latest.outputs.ami_changed == 'true'
-    needs: [check-runner, ami-get-latest]
-    runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
+    if: needs.ami-get-latest.outputs.ami_changed == 'true'
+    needs: [ami-get-latest]
+    runs-on: ubuntu-latest
     steps:
       - name: Update AMI Variable
         env:
@@ -205,11 +181,10 @@ jobs:
 
   ami-trigger-deploy:
     if: |
-      needs.check-runner.outputs.task == 'update-ami' &&
       needs.ami-get-latest.outputs.ami_changed == 'true' &&
-      needs.check-runner.outputs.skip_deploy != 'true'
-    needs: [check-runner, ami-get-latest, ami-update-variable]
-    runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
+      needs.ami-get-latest.outputs.skip_deploy != 'true'
+    needs: [ami-get-latest, ami-update-variable]
+    runs-on: ubuntu-latest
     outputs:
       run_id: ${{ steps.trigger.outputs.run_id }}
       deploy_ref: ${{ steps.trigger.outputs.deploy_ref }}
@@ -219,11 +194,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
         run: |
-          WORKFLOW="${{ needs.check-runner.outputs.environment }}.yml"
+          WORKFLOW="${{ needs.ami-get-latest.outputs.environment }}.yml"
 
           # Determine deploy ref (use input or latest release tag)
-          if [ -n "${{ needs.check-runner.outputs.deploy_ref }}" ]; then
-            DEPLOY_REF="${{ needs.check-runner.outputs.deploy_ref }}"
+          if [ -n "${{ needs.ami-get-latest.outputs.deploy_ref }}" ]; then
+            DEPLOY_REF="${{ needs.ami-get-latest.outputs.deploy_ref }}"
             echo "Using specified ref: $DEPLOY_REF"
           else
             DEPLOY_REF=$(gh release view --json tagName --jq '.tagName')
@@ -259,13 +234,11 @@ jobs:
   ami-refresh-asgs:
     if: |
       always() &&
-      needs.check-runner.outputs.task == 'update-ami' &&
       needs.ami-get-latest.outputs.ami_changed == 'true' &&
-      needs.check-runner.outputs.skip_refresh != 'true' &&
-      (needs.ami-trigger-deploy.result == 'success' || (needs.check-runner.outputs.skip_deploy == 'true' && needs.ami-update-variable.result == 'success'))
-    needs:
-      [check-runner, ami-get-latest, ami-update-variable, ami-trigger-deploy]
-    runs-on: ${{ fromJSON(needs.check-runner.outputs.runner_config) }}
+      needs.ami-get-latest.outputs.skip_refresh != 'true' &&
+      (needs.ami-trigger-deploy.result == 'success' || (needs.ami-get-latest.outputs.skip_deploy == 'true' && needs.ami-update-variable.result == 'success'))
+    needs: [ami-get-latest, ami-update-variable, ami-trigger-deploy]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -282,7 +255,7 @@ jobs:
       - name: Refresh Graph ASGs
         uses: ./.github/actions/refresh-graph-asg
         with:
-          environment: ${{ needs.check-runner.outputs.environment }}
+          environment: ${{ needs.ami-get-latest.outputs.environment }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
           instance-warmup: "300"
 
@@ -290,15 +263,8 @@ jobs:
   # Summary (runs for all tasks)
   # =============================================================================
   summary:
-    needs:
-      [
-        check-runner,
-        ami-get-latest,
-        ami-update-variable,
-        ami-trigger-deploy,
-        ami-refresh-asgs,
-      ]
-    if: always() && needs.check-runner.outputs.task == 'update-ami'
+    needs: [ami-get-latest, ami-update-variable, ami-trigger-deploy, ami-refresh-asgs]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Generate AMI Update Summary
@@ -310,14 +276,14 @@ jobs:
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | ${{ needs.check-runner.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ needs.ami-get-latest.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Variable | \`${{ needs.ami-get-latest.outputs.var_name }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Previous AMI | \`${{ needs.ami-get-latest.outputs.current_ami }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Latest AMI | \`${{ needs.ami-get-latest.outputs.ami_id }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| AMI Name | ${{ needs.ami-get-latest.outputs.ami_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| AMI Changed | ${{ needs.ami-get-latest.outputs.ami_changed }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip Deploy | ${{ needs.check-runner.outputs.skip_deploy }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Skip Refresh | ${{ needs.check-runner.outputs.skip_refresh }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip Deploy | ${{ needs.ami-get-latest.outputs.skip_deploy }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Skip Refresh | ${{ needs.ami-get-latest.outputs.skip_refresh }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Deploy Ref | \`${{ needs.ami-trigger-deploy.outputs.deploy_ref || 'skipped' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Job Results" >> $GITHUB_STEP_SUMMARY

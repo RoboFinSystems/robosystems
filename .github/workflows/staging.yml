@@ -16,9 +16,9 @@ jobs:
   runner:
     runs-on: ubuntu-latest
     outputs:
-      runners_available: ${{ steps.check.outputs.runners_available }}
-      runner_type: ${{ steps.check.outputs.runner_type }}
-      runner_config: ${{ steps.check.outputs.runner_config }}
+      runners_available: ${{ steps.select.outputs.runners_available }}
+      runner_type: ${{ steps.select.outputs.runner_type }}
+      runner_config: ${{ steps.select.outputs.runner_config }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,9 +27,9 @@ jobs:
           ref: ${{ github.ref }}
           token: ${{ secrets.ACTIONS_TOKEN }}
 
-      - name: Check runner availability
-        id: check
-        uses: ./.github/actions/runner-availability
+      - name: Select runner
+        id: select
+        uses: ./.github/actions/select-runner
         with:
           runner_labels: ${{ vars.RUNNER_LABELS || 'github-hosted' }}
           runner_scope: ${{ vars.RUNNER_SCOPE || 'both' }}
