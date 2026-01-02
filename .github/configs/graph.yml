@@ -201,13 +201,13 @@ production:
 
       # Instance configuration
       instance:
-        type: r7g.large # 16GB RAM per repository instance
+        type: r7g.xlarge # 32GB RAM for faster SEC data loading
         databases_per_instance: 1 # One repository per instance (SEC gets dedicated instance)
         # Note: Major repositories like SEC get dedicated instances for performance
 
         # Memory configuration
-        max_memory_mb: 14336 # 14GB available for repository
-        memory_per_db_mb: 14336 # Full instance memory for single repository
+        max_memory_mb: 30720 # 30GB available for repository
+        memory_per_db_mb: 30720 # Full instance memory for single repository
 
         # LadybugDB-specific performance settings (optimized for read-heavy analytical queries)
         chunk_size: 2500 # Large chunks for bulk operations
