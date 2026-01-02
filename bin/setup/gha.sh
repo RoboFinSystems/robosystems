@@ -314,7 +314,10 @@ function setup_minimum_config() {
     # Graph AMI Configuration (updated via Graph Maintenance workflow)
     gh variable set GRAPH_AMI_ID_PROD --body "ami-05ec8931dc5ae74ec"
     gh variable set GRAPH_AMI_ID_STAGING --body "ami-05ec8931dc5ae74ec"
-    # gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"  # Opt-in: set to "true" to enable monthly auto-updates
+    # Opt-in: set to "true" to enable monthly scheduled AMI checks
+    # gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"
+    # Opt-in: set to "true" to also trigger deploy when scheduled AMI update finds a new AMI
+    # gh variable set GRAPH_AMI_AUTO_DEPLOY --body "true"
 
     # Other Graph Settings
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"
@@ -571,7 +574,10 @@ function setup_full_config() {
     # Graph AMI Configuration (updated via Graph Maintenance workflow)
     gh variable set GRAPH_AMI_ID_PROD --body "ami-05ec8931dc5ae74ec"
     gh variable set GRAPH_AMI_ID_STAGING --body "ami-05ec8931dc5ae74ec"
-    # gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"  # Opt-in: set to "true" to enable monthly auto-updates
+    # Opt-in: set to "true" to enable monthly scheduled AMI checks
+    # gh variable set GRAPH_AMI_AUTO_UPDATE --body "true"
+    # Opt-in: set to "true" to also trigger deploy when scheduled AMI update finds a new AMI
+    # gh variable set GRAPH_AMI_AUTO_DEPLOY --body "true"
 
     # Graph Settings
     gh variable set GRAPH_API_KEY_ROTATION_DAYS --body "90"

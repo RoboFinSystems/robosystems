@@ -114,7 +114,7 @@ runs:
 
           # Extract component and environment from stack name
           # Expected patterns: RoboSystemsAPIProd, RoboSystemsWorkerDefaultStaging, etc.
-          if [[ ${{ inputs.stack-name }} =~ ^RoboSystems(Worker[A-Za-z]*|API|[A-Za-z]+)(Prod|Staging|Dev)$ ]]; then
+          if [[ "${{ inputs.stack-name }}" =~ ^RoboSystems(Worker[A-Za-z]*|API|[A-Za-z]+)(Prod|Staging|Dev)$ ]]; then
             COMPONENT=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
             ENVIRONMENT=$(echo "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
 
