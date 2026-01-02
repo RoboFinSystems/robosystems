@@ -501,14 +501,13 @@ def perform_volume_expansion(
 
     # Publish CloudWatch metric
     cloudwatch.put_metric_data(
-      Namespace="RoboSystems/Graph",
+      Namespace=f"RoboSystems/Graph/{ENVIRONMENT}",
       MetricData=[
         {
           "MetricName": "VolumeExpansions",
           "Value": 1,
           "Unit": "Count",
           "Dimensions": [
-            {"Name": "Environment", "Value": ENVIRONMENT},
             {"Name": "InstanceId", "Value": instance_id},
           ],
         }
@@ -844,32 +843,28 @@ def publish_monitoring_metrics(results: dict):
   """Publish monitoring metrics to CloudWatch"""
 
   try:
-    namespace = "RoboSystems/Graph"
+    namespace = f"RoboSystems/Graph/{ENVIRONMENT}"
 
     metric_data = [
       {
         "MetricName": "VolumeMonitorExecutions",
         "Value": 1,
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
       {
         "MetricName": "InstancesMonitored",
         "Value": results.get("instances_checked", 0),
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
       {
         "MetricName": "VolumesExpanded",
         "Value": len(results.get("volumes_expanded", [])),
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
       {
         "MetricName": "VolumeMonitorErrors",
         "Value": len(results.get("errors", [])),
         "Unit": "Count",
-        "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
       },
     ]
 
@@ -1209,13 +1204,12 @@ def sync_volume_registry():
 
       # Publish metric
       cloudwatch.put_metric_data(
-        Namespace="RoboSystems/Graph",
+        Namespace=f"RoboSystems/Graph/{ENVIRONMENT}",
         MetricData=[
           {
             "MetricName": "RegistryUpdates",
             "Value": updated_count,
             "Unit": "Count",
-            "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
           }
         ],
       )

@@ -635,8 +635,8 @@ Resources:
             export NEO4J_VERSION="${Neo4jVersion}"
             export NEO4J_AUTH="neo4j/$NEO4J_PASSWORD"
             export WRITER_TIER="${WriterTier}"
-            # Set CloudWatch namespace (environment is dimensionalized in metrics)
-            export CloudWatchNamespace="RoboSystems/Graph"
+            # Set CloudWatch namespace (includes environment since dimensions don't work reliably)
+            export CloudWatchNamespace="RoboSystems/Graph/${Environment}"
             export AWS_REGION="${AWS::Region}"
             export AWS_DEFAULT_REGION="${AWS::Region}"
             export GRAPH_NODE_TYPE="writer"
@@ -781,7 +781,7 @@ Resources:
       AlarmName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-high-memory"
       AlarmDescription: Triggers when memory usage exceeds 85% for 5 minutes
       MetricName: mem_used_percent
-      Namespace: RoboSystems/Graph
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Average
       Period: 300
       EvaluationPeriods: 1
@@ -800,7 +800,7 @@ Resources:
       AlarmName: !Sub "robosystems-neo4j-${WriterTier}-${Environment}-allocation-failures"
       AlarmDescription: "Alert when database allocations fail"
       MetricName: AllocationFailures
-      Namespace: RoboSystems/Graph
+      Namespace: !Sub "RoboSystems/Graph/${Environment}"
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1

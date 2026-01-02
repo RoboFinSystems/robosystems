@@ -1,15 +1,20 @@
 #!/bin/bash
 # Universal CloudWatch Agent Setup for Graph Databases
 # Supports both LadybugDB and Neo4j with standardized monitoring
+#
+# Note: Environment is included in the namespace (e.g., RoboSystems/Graph/prod)
+# rather than as a dimension, since CloudWatch Agent's append_dimensions
+# doesn't reliably propagate custom dimensions to the OTEL-based config.
 
 set -e
 
 # Validate required environment variables
 : ${DATABASE_TYPE:?"DATABASE_TYPE must be set (ladybug|neo4j)"}
-: ${NODE_TYPE:?"NODE_TYPE must be set"}
-: ${ENVIRONMENT:?"ENVIRONMENT must be set"}
 : ${CLOUDWATCH_NAMESPACE:?"CLOUDWATCH_NAMESPACE must be set"}
 : ${DATA_DIR:?"DATA_DIR must be set"}
+
+# Extract environment from namespace for log group (e.g., RoboSystems/Graph/prod -> prod)
+ENVIRONMENT="${CLOUDWATCH_NAMESPACE##*/}"
 
 # Use unified log group from CloudFormation
 UNIFIED_LOG_GROUP="/robosystems/${ENVIRONMENT}/graph-api"
@@ -100,10 +105,7 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
     },
     "append_dimensions": {
       "InstanceId": "\${aws:InstanceId}",
-      "InstanceType": "\${aws:InstanceType}",
-      "NodeType": "${NODE_TYPE}",
-      "Environment": "${ENVIRONMENT}",
-      "DatabaseType": "${DATABASE_TYPE}"
+      "InstanceType": "\${aws:InstanceType}"
     }
   },
   "logs": {
