@@ -89,7 +89,7 @@ runs:
           ["neo4j-enterprise-xlarge"]="Neo4jEnterpriseXlarge"
         )
 
-        # Shared tiers don't require force_refresh (data is rebuildable)
+        # Shared tiers have rebuildable data (no database allocation check needed)
         declare -A SHARED_TIERS=(
           ["ladybug-shared"]=1
         )
@@ -169,6 +169,18 @@ runs:
             fi
           else
             echo "  Shared tier (data is rebuildable)"
+          fi
+
+          # Check for in-progress refresh
+          CURRENT_REFRESH=$(aws autoscaling describe-instance-refreshes \
+            --auto-scaling-group-name "$ASG_NAME" \
+            --query "InstanceRefreshes[?Status=='InProgress' || Status=='Pending'].InstanceRefreshId" \
+            --output text \
+            --region "$REGION" 2>/dev/null || echo "")
+
+          if [ -n "$CURRENT_REFRESH" ] && [ "$CURRENT_REFRESH" != "None" ]; then
+            echo "  Refresh already in progress: $CURRENT_REFRESH - skipping"
+            continue
           fi
 
           # Start instance refresh

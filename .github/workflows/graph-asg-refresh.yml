@@ -110,8 +110,8 @@ jobs:
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Status | ${{ steps.refresh.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ASGs Refreshed | ${{ steps.refresh.outputs.total-refreshed }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Refreshed ASGs | ${{ steps.refresh.outputs.refreshed-asgs || 'none' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ASGs Refreshed | ${{ steps.refresh.outputs['total-refreshed'] }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Refreshed ASGs | ${{ steps.refresh.outputs['refreshed-asgs'] || 'none' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Triggered by: ${{ github.actor }} at $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
 
