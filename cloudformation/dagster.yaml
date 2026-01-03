@@ -162,6 +162,15 @@ Resources:
       HealthCheckCustomConfig:
         FailureThreshold: 1
       Description: Dagster webserver service discovery
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
   # ========================================
   # ECS CLUSTER (Fargate Only)
@@ -442,6 +451,12 @@ Resources:
       Tags:
         - Key: Environment
           Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
   # ========================================
   # TASK DEFINITIONS
@@ -460,6 +475,15 @@ Resources:
         OperatingSystemFamily: LINUX
       ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
       ContainerDefinitions:
         - Name: dagster-daemon
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
@@ -517,6 +541,15 @@ Resources:
         OperatingSystemFamily: LINUX
       ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
       ContainerDefinitions:
         - Name: dagster-webserver
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
@@ -590,6 +623,15 @@ Resources:
       # Fargate ephemeral storage (default 20GB, can increase to 200GB)
       EphemeralStorage:
         SizeInGiB: 100
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
       ContainerDefinitions:
         - Name: dagster-run
           Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
@@ -644,12 +686,19 @@ Resources:
             - !Ref DatabaseSecurityGroupId
       TaskDefinition: !Ref DaemonTaskDefinition
       EnableExecuteCommand: true
+      PropagateTags: SERVICE
       DeploymentConfiguration:
         MaximumPercent: 100
         MinimumHealthyPercent: 0
       Tags:
         - Key: Environment
           Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
   WebserverService:
     Type: AWS::ECS::Service
@@ -675,6 +724,7 @@ Resources:
       ServiceRegistries:
         - RegistryArn: !GetAtt WebserverServiceDiscovery.Arn
       EnableExecuteCommand: true
+      PropagateTags: SERVICE
       DeploymentConfiguration:
         DeploymentCircuitBreaker:
           Enable: true
@@ -684,6 +734,12 @@ Resources:
       Tags:
         - Key: Environment
           Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
 
   # Auto Scaling for Webserver
   WebserverScalingTarget:
