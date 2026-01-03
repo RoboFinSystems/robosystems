@@ -616,7 +616,7 @@ class GraphQueryValidator:
       error_msg += "\n"
 
     # Add fixed query if available
-    if validation.fixed_query and validation.fixed_query != validation.fixed_query:
+    if validation.fixed_query:
       error_msg += "**🔧 Auto-fixed query:**\n"
       error_msg += f"```cypher\n{validation.fixed_query}\n```\n"
 

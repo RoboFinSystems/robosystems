@@ -172,10 +172,10 @@ class TimeoutCoordinator:
       # Adjust based on limit/row count
       if "limit" in complexity_factors:
         limit = complexity_factors["limit"]
-        if limit > 1000:
-          multiplier *= 1.5
-        elif limit > 5000:
+        if limit > 5000:
           multiplier *= 2.0
+        elif limit > 1000:
+          multiplier *= 1.5
 
       # Adjust for search operations
       if complexity_factors.get("has_search", False):
