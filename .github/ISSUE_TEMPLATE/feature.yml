@@ -1,5 +1,5 @@
 name: Feature
-description: I wish I could...
+description: Request a new capability (no design required)
 type: Feature
 body:
   - type: textarea

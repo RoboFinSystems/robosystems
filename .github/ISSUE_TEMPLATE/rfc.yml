@@ -1,5 +1,5 @@
-name: RFC (Design Document)
-description: Propose a significant design change for team feedback
+name: RFC
+description: Propose a design for discussion before implementation
 type: RFC
 body:
   - type: textarea

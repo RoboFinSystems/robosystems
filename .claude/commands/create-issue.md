@@ -1,25 +1,27 @@
-Create a GitHub issue for the RoboSystems repository based on the user's input.
+Create a GitHub issue for the current repository based on the user's input.
 
 ## Instructions
 
 1. **Determine Issue Type** - Based on the user's description, determine which type to use:
    - **Bug**: Defects or unexpected behavior
    - **Task**: Specific, bounded work items that can be completed in one PR
-   - **Feature**: User-facing feature suggestions
-   - **Spec**: Features requiring technical design, multiple phases, or architectural changes
-   - **RFC**: Significant design proposals needing team discussion before implementation
+   - **Feature**: Request a new capability (no design required)
+   - **RFC**: Propose a design for discussion before implementation (if available)
+   - **Spec**: Approved implementation plan ready for execution (if available)
+
+   Note: Not all repos have RFC/Spec templates. Check `.github/ISSUE_TEMPLATE/` first.
 
 2. **Gather Context** - If the user provides a file path or references existing code:
    - Read the relevant files to understand the current implementation
-   - Check related configuration in `/robosystems/config/`
-   - Review any referenced roadmap docs in `/local/docs/`
+   - Check related configuration files
+   - Review any referenced documentation
 
 3. **Draft the Issue** - Use the YAML templates in `.github/ISSUE_TEMPLATE/`:
    - `bug.yml` - Include reproduction steps, impact, environment
    - `task.yml` - Be specific about scope and acceptance criteria
-   - `feature.yml` - Simple "I wish I could..." format
-   - `spec.yml` - Fill in all sections with technical detail
-   - `rfc.yml` - Comprehensive design with alternatives considered
+   - `feature.yml` - Capture the need and why it matters
+   - `spec.yml` - Fill in all sections with technical detail (if available)
+   - `rfc.yml` - Comprehensive design with alternatives considered (if available)
 
 4. **Sanitize for Public Visibility** - Before creating:
    - Remove any internal pricing, margins, or cost details
@@ -34,27 +36,24 @@ Create a GitHub issue for the RoboSystems repository based on the user's input.
 
 6. **Set Issue Type** - After creation, set the issue type via GraphQL:
    ```bash
-   # Get issue ID
-   gh api graphql -f query='{ repository(owner: "RoboFinSystems", name: "robosystems") { issue(number: NUMBER) { id } } }'
+   # Get repo info from current directory
+   REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   OWNER=$(echo $REPO | cut -d'/' -f1)
+   NAME=$(echo $REPO | cut -d'/' -f2)
 
-   # Set type (use correct type ID)
+   # Get issue ID
+   gh api graphql -f query="{ repository(owner: \"$OWNER\", name: \"$NAME\") { issue(number: NUMBER) { id } } }"
+
+   # Get available issue types for this repo
+   gh api graphql -f query="{ repository(owner: \"$OWNER\", name: \"$NAME\") { issueTypes(first: 10) { nodes { id name } } } }"
+
+   # Set type (use correct type ID from above)
    gh api graphql -f query='mutation { updateIssue(input: { id: "ISSUE_ID", issueTypeId: "TYPE_ID" }) { issue { number } } }'
    ```
 
-   Issue Type IDs:
-   - Task: `IT_kwDODL_jkM4BnUUo`
-   - Bug: `IT_kwDODL_jkM4BnUUp`
-   - Feature: `IT_kwDODL_jkM4BnUUq`
-   - Spec: `IT_kwDODL_jkM4B0XrY`
-   - RFC: `IT_kwDODL_jkM4B0XrZ`
-
 ## Labels
 
-Issue types handle primary categorization. Use labels for metadata:
-
-**Area** (which component):
-- `area:api`, `area:dagster`, `area:infrastructure`, `area:graph-api`
-- `area:billing`, `area:auth`, `area:frontend`
+Issue types handle primary categorization. Use labels for metadata (varies by repo):
 
 **Priority** (when to do it):
 - `priority:critical` - Drop everything
@@ -70,17 +69,19 @@ Issue types handle primary categorization. Use labels for metadata:
 - `blocked` - Waiting on something
 - `needs-review` - Ready for review
 
+Check `gh label list` for available labels in the current repo.
+
 ## Example Usage
 
-User: "We need to add support for Plaid bank connections"
+User: "We need to add export functionality"
 
-Response: I'll create a spec issue for Plaid integration. Let me first check the existing adapter scaffolding...
+Response: I'll create a feature issue for export functionality. Let me first understand the current state...
 
-[Read /robosystems/adapters/plaid/ to understand current state]
-[Draft spec with implementation phases]
+[Read relevant files to understand current implementation]
+[Draft issue matching the template structure]
 [Create issue with gh issue create]
-[Set issue type to Spec via GraphQL]
-[Add labels: area:dagster, size:large]
+[Set issue type via GraphQL]
+[Add appropriate labels]
 
 ## Output Format
 
