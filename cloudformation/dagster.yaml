@@ -366,6 +366,7 @@ Resources:
                   - ecs:RegisterTaskDefinition
                   - ecs:DeregisterTaskDefinition
                   - ecs:DescribeServices
+                  - ecs:TagResource
                 Resource: "*"
               # IAM pass role for task execution
               - Effect: Allow
