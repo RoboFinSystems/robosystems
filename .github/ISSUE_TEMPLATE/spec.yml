@@ -1,5 +1,5 @@
-name: Technical Specification
-description: Detailed design for a feature or system change
+name: Spec
+description: Approved implementation plan ready for execution
 type: Spec
 body:
   - type: textarea

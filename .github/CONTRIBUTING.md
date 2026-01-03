@@ -1,6 +1,12 @@
 # Contributing to RoboSystems
 
-Thank you for your interest in contributing to RoboSystems! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to RoboSystems! This is the core API and backend service that powers the RoboSystems platform.
+
+## Community
+
+- **[Discussions](https://github.com/orgs/RoboFinSystems/discussions)** - Questions, ideas, and general conversation
+- **[Project Board](https://github.com/orgs/RoboFinSystems/projects/3)** - Track work across all RoboSystems repositories
+- **[Wiki](https://github.com/RoboFinSystems/robosystems/wiki)** - Architecture docs and guides
 
 ## Table of Contents
 
@@ -19,7 +25,7 @@ Thank you for your interest in contributing to RoboSystems! This document provid
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/github-org/robosystems.git
+   git clone https://github.com/YOUR-USERNAME/robosystems.git
    cd robosystems
    ```
 3. **Add the upstream remote**:
@@ -71,25 +77,31 @@ just create-feature refactor improve-error-handling main
 
 ## How to Contribute
 
+### Issue Types
+
+We use issue templates to organize work. Choose the right type based on your contribution:
+
+| Type | When to Use |
+|------|-------------|
+| **Bug** | Defects or unexpected behavior |
+| **Task** | Specific, bounded work that fits in one PR |
+| **Feature** | Request a new capability (no design required) |
+| **RFC** | Propose a design for discussion before implementation |
+| **Spec** | Approved implementation plan ready for execution |
+
+**Workflow for larger features:**
+1. **Feature** → Capture the need ("I wish I could...")
+2. **RFC** → Propose and discuss the design approach
+3. **Spec** → Document the approved implementation plan
+
 ### Reporting Bugs
 
-Before creating a bug report, please check existing issues to avoid duplicates. When creating a bug report, include:
+Before creating a bug report, check existing issues to avoid duplicates. Include:
 
-- Clear, descriptive title
 - Steps to reproduce the issue
-- Expected behavior
-- Actual behavior
-- System information (OS, Python version, etc.)
+- Expected vs actual behavior
+- Environment details (OS, Python version, etc.)
 - Relevant logs or error messages
-
-### Suggesting Enhancements
-
-Enhancement suggestions are welcome! Please provide:
-
-- Clear, descriptive title
-- Detailed description of the proposed feature
-- Use cases and benefits
-- Possible implementation approach (if applicable)
 
 ### First-Time Contributors
 
@@ -429,9 +441,9 @@ just cf-lint worker
 
 ## Questions and Support
 
-- **GitHub Issues**: For bugs and feature requests
-- **GitHub Discussions**: For questions and discussions
-- **Email**: hello@robosystems.ai for other inquiries
+- **[GitHub Discussions](https://github.com/orgs/RoboFinSystems/discussions)** - Best place for questions and community conversation
+- **[GitHub Issues](https://github.com/RoboFinSystems/robosystems/issues)** - Bug reports and feature requests for this repo
+- **Email**: security@robosystems.ai for security issues only
 
 ## Recognition
 
