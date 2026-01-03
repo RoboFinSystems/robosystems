@@ -239,11 +239,11 @@ class TestTimeoutCoordinator:
     )
     assert timeout == 45.0  # 30.0 * 1.5
 
-    # Large limit - still 1.5x multiplier (due to elif logic)
+    # Large limit - 2.0x multiplier
     timeout = coordinator.calculate_timeout(
       "database_query", complexity_factors={"limit": 6000}
     )
-    assert timeout == 45.0  # 30.0 * 1.5 (the elif condition never hits)
+    assert timeout == 60.0  # 30.0 * 2.0
 
   def test_calculate_timeout_with_search_factor(self):
     """Test calculating timeout with search complexity factor."""
@@ -293,13 +293,14 @@ class TestTimeoutCoordinator:
     timeout = coordinator.calculate_timeout(
       "database_query",
       complexity_factors={
-        "limit": 10000,  # 1.5x multiplier (not 2.0x due to elif logic)
+        "limit": 10000,  # 2.0x multiplier (> 5000 threshold)
         "has_search": True,  # 1.3x multiplier
         "fields_count": 10,  # 1.2x multiplier
       },
     )
-    # Would be 30.0 * 1.5 * 1.3 * 1.2 = 70.2, which is under the 3.0 cap
-    assert timeout == 70.2
+    # Would be 2.0 * 1.3 * 1.2 = 3.12, capped to 3.0
+    # Result: 30.0 * 3.0 = 90.0
+    assert timeout == 90.0
 
   def test_calculate_timeout_logging(self):
     """Test that timeout calculation logs debug information."""
