@@ -88,7 +88,7 @@ print_usage() {
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
     echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
     echo "  dagster       - Dagster webserver tunnel (localhost:3003)"
-    echo "  all           - All database tunnels (postgres + valkey)"
+    echo "  all           - All service tunnels (postgres + valkey + dagster)"
     echo ""
     echo -e "${GREEN}======================================================================"
     echo "Database Operations"
