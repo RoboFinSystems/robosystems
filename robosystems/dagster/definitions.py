@@ -15,7 +15,7 @@ Usage:
     dagster-webserver -m robosystems.dagster
 """
 
-from dagster import Definitions, EnvVar
+from dagster import Definitions
 
 # Import assets
 from robosystems.dagster.assets import (
@@ -108,19 +108,13 @@ from robosystems.dagster.sensors import (
 # Resource Configuration
 # ============================================================================
 
-# Resources are configured via environment variables for flexibility
-# across dev/staging/prod environments
+# Resources use internal fallback logic to fetch configuration from
+# env.* (which uses secrets_manager for prod/staging). This ensures
+# consistency with how the rest of the application fetches secrets.
 resources = {
-  "db": DatabaseResource(
-    database_url=EnvVar("DATABASE_URL"),
-  ),
-  "s3": S3Resource(
-    bucket_name=EnvVar("AWS_S3_BUCKET"),
-    region_name=EnvVar("AWS_REGION"),
-  ),
-  "graph": GraphResource(
-    graph_api_url=EnvVar("GRAPH_API_URL"),
-  ),
+  "db": DatabaseResource(),  # Falls back to env.DATABASE_URL
+  "s3": S3Resource(),  # Falls back to env.AWS_S3_BUCKET, env.AWS_REGION
+  "graph": GraphResource(),  # Falls back to env.GRAPH_API_URL
 }
 
 # ============================================================================

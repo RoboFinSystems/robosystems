@@ -293,7 +293,7 @@
       "type": "pickString",
       "description": "Choose service to tunnel:",
       "default": "postgres",
-      "options": ["all", "postgres", "valkey"]
+      "options": ["all", "postgres", "valkey", "dagster"]
     },
     {
       "id": "versionType",
