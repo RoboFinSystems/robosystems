@@ -4,6 +4,18 @@ set -euo pipefail
 # Signal handling for graceful shutdown
 trap 'echo "Received shutdown signal"; kill -TERM $PID 2>/dev/null || true; wait $PID; exit 0' SIGTERM SIGINT
 
+# ============================================================================
+# Dagster Run Task Detection
+# ============================================================================
+# When EcsRunLauncher launches a run task, it overrides CMD with:
+#   dagster api execute_run <args>
+# We must detect this and execute the command instead of running a profile.
+# This check must come BEFORE profile handling.
+if [[ $# -gt 0 && "$1" == "dagster" ]]; then
+    echo "Dagster run task detected, executing: $*"
+    exec uv run "$@"
+fi
+
 # Default to API mode if not specified
 DOCKER_PROFILE=${DOCKER_PROFILE:-api}
 RUN_MIGRATIONS=${RUN_MIGRATIONS:-false}
