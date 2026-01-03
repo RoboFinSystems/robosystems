@@ -87,7 +87,7 @@ print_usage() {
     echo "======================================================================${NC}"
     echo "  postgres      - PostgreSQL tunnel (localhost:5432)"
     echo "  valkey        - Valkey ElastiCache tunnel (localhost:6379)"
-    echo "  dagster       - Dagster webserver tunnel (localhost:4003)"
+    echo "  dagster       - Dagster webserver tunnel (localhost:3003)"
     echo "  all           - All database tunnels (postgres + valkey)"
     echo ""
     echo -e "${GREEN}======================================================================"
@@ -341,15 +341,15 @@ setup_dagster_tunnel() {
     fi
 
     echo -e "${GREEN}Setting up Dagster webserver tunnel...${NC}"
-    echo -e "${BLUE}Local: localhost:4003 -> Remote: $DAGSTER_ENDPOINT:3000${NC}"
+    echo -e "${BLUE}Local: localhost:3003 -> Remote: $DAGSTER_ENDPOINT:3000${NC}"
     echo ""
     echo -e "${YELLOW}Access Dagster UI:${NC}"
-    echo "Open http://localhost:4003 in your browser"
+    echo "Open http://localhost:3003 in your browser"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop the tunnel${NC}"
     echo ""
 
-    ssh -i $SSH_KEY -N -L 4003:$DAGSTER_ENDPOINT:3000 ec2-user@$BASTION_HOST
+    ssh -i $SSH_KEY -N -L 3003:$DAGSTER_ENDPOINT:3000 ec2-user@$BASTION_HOST
 }
 
 run_database_migration() {
@@ -455,6 +455,11 @@ setup_all_tunnels() {
         tunnel_args="$tunnel_args -L 6379:$VALKEY_ENDPOINT:6379"
     fi
 
+    if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
+        available_services+=("Dagster")
+        tunnel_args="$tunnel_args -L 3003:$DAGSTER_ENDPOINT:3000"
+    fi
+
     if [[ ${#available_services[@]} -eq 0 ]]; then
         echo -e "${RED}Error: No services found to tunnel${NC}"
         exit 1
@@ -470,6 +475,10 @@ setup_all_tunnels() {
         echo -e "${BLUE}Valkey:     localhost:6379 -> $VALKEY_ENDPOINT:6379${NC}"
     fi
 
+    if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
+        echo -e "${BLUE}Dagster:    localhost:3003 -> $DAGSTER_ENDPOINT:3000${NC}"
+    fi
+
     echo ""
     echo -e "${YELLOW}Connection commands:${NC}"
 
@@ -482,6 +491,10 @@ setup_all_tunnels() {
         echo "            Note: Valkey uses AUTH. Get token with:"
         echo "            aws secretsmanager get-secret-value --secret-id robosystems/$environment/valkey --query 'SecretString' | jq -r '.VALKEY_AUTH_TOKEN'"
         echo "            Then connect: redis-cli -h localhost -p 6379 -a <AUTH_TOKEN> --tls"
+    fi
+
+    if [[ -n "$DAGSTER_ENDPOINT" && "$DAGSTER_ENDPOINT" != "NOT_FOUND" ]]; then
+        echo "Dagster:    Open http://localhost:3003 in your browser"
     fi
 
     echo ""
