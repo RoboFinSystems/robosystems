@@ -473,7 +473,6 @@ class EnvConfig:
   LBUG_DATABASE_PATH = get_str_env("LBUG_DATABASE_PATH", "./data/lbug-dbs")
   LBUG_ACCESS_PATTERN = get_str_env("LBUG_ACCESS_PATTERN", "api_auto")
   LBUG_NODE_TYPE = get_str_env("LBUG_NODE_TYPE", "writer")
-  GRAPH_DATABASES_BUCKET = get_str_env("GRAPH_DATABASES_BUCKET", "")
   LBUG_HOME = get_str_env("LBUG_HOME", "/app/data/.ladybug")
 
   # DuckDB Staging Configuration (for data ingestion/materialization)
@@ -671,17 +670,48 @@ class EnvConfig:
   # S3 configuration
   AWS_S3_PREFIX = get_str_env("AWS_S3_PREFIX", "robosystems")
 
-  # S3-specific credentials and buckets
+  # S3-specific credentials
   # Use secrets manager for prod/staging, environment variables for local dev
   AWS_S3_ACCESS_KEY_ID = get_secret_value("AWS_S3_ACCESS_KEY_ID", "")
   AWS_S3_SECRET_ACCESS_KEY = get_secret_value("AWS_S3_SECRET_ACCESS_KEY", "")
-  AWS_S3_BUCKET = get_secret_value("AWS_S3_BUCKET", f"robosystems-{ENVIRONMENT}")
-  SEC_RAW_BUCKET = get_secret_value("SEC_RAW_BUCKET", "robosystems-sec-raw")
-  SEC_PROCESSED_BUCKET = get_secret_value(
-    "SEC_PROCESSED_BUCKET", "robosystems-sec-processed"
+
+  # S3 Bucket Configuration (2026-01 restructure)
+  # Bucket names are deterministic based on environment - no secrets needed.
+  # Pattern: robosystems-{purpose}-{environment}
+  #
+  # For local dev, use env vars to override (e.g., for LocalStack bucket names)
+  # For prod/staging, the pattern is fixed and predictable.
+
+  # Resolve environment suffix for bucket names
+  # Local dev uses no suffix, prod/staging append -{environment}
+  _BUCKET_SUFFIX = "" if ENVIRONMENT == "dev" else f"-{ENVIRONMENT}"
+
+  # Core bucket configuration - computed, not fetched from secrets
+  SHARED_RAW_BUCKET = get_str_env(
+    "SHARED_RAW_BUCKET", f"robosystems-shared-raw{_BUCKET_SUFFIX}"
   )
-  PUBLIC_DATA_BUCKET = get_secret_value("PUBLIC_DATA_BUCKET", "robosystems-public-data")
-  PUBLIC_DATA_CDN_URL = get_secret_value("PUBLIC_DATA_CDN_URL", "")
+  SHARED_PROCESSED_BUCKET = get_str_env(
+    "SHARED_PROCESSED_BUCKET", f"robosystems-shared-processed{_BUCKET_SUFFIX}"
+  )
+  USER_DATA_BUCKET = get_str_env(
+    "USER_DATA_BUCKET", f"robosystems-user{_BUCKET_SUFFIX}"
+  )
+  # Public data bucket unchanged - actively serving CDN content
+  PUBLIC_DATA_BUCKET = get_str_env(
+    "PUBLIC_DATA_BUCKET", f"robosystems-public-data{_BUCKET_SUFFIX}"
+  )
+  DEPLOYMENT_BUCKET = get_str_env(
+    "DEPLOYMENT_BUCKET", f"robosystems{_BUCKET_SUFFIX}-deployment"
+  )
+
+  # CDN URL passed via ECS task definition (depends on CloudFront distribution)
+  PUBLIC_DATA_CDN_URL = get_str_env("PUBLIC_DATA_CDN_URL", "")
+
+  # Deprecated bucket aliases (kept for backwards compatibility during migration)
+  # These point to the new bucket names and will be removed after migration
+  AWS_S3_BUCKET = get_str_env("AWS_S3_BUCKET", USER_DATA_BUCKET)
+  SEC_RAW_BUCKET = get_str_env("SEC_RAW_BUCKET", SHARED_RAW_BUCKET)
+  SEC_PROCESSED_BUCKET = get_str_env("SEC_PROCESSED_BUCKET", SHARED_PROCESSED_BUCKET)
 
   # ==========================================================================
   # SECURITY AND AUTHENTICATION

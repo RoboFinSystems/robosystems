@@ -417,32 +417,8 @@ class TestSubgraphService:
         assert result["status"] == "deleted"
         mock_lbug_client.delete_database.assert_called_once()
 
-  @pytest.mark.asyncio
-  async def test_delete_subgraph_with_backup(
-    self, service, mock_allocation_manager, mock_lbug_client, mock_parent_location
-  ):
-    """Test deletion with backup creation."""
-    mock_allocation_manager.find_database_location.return_value = mock_parent_location
-    mock_lbug_client.list_databases.return_value = {
-      "databases": [{"graph_id": "kg5f2e5e0da65d45d69645_analysis"}]
-    }
-    mock_lbug_client.execute.return_value = [{"node_count": 0}]
-    mock_lbug_client.backup.return_value = {"location": "s3://backup/location"}
-
-    with patch(
-      "robosystems.operations.graph.subgraph_service.get_graph_client_for_instance"
-    ) as mock_get_client:
-      with patch("robosystems.graph_api.client.GraphClient") as mock_graph_client_class:
-        mock_graph_client_class.return_value = mock_lbug_client
-        mock_get_client.return_value = mock_lbug_client
-
-        result = await service.delete_subgraph_database(
-          "kg5f2e5e0da65d45d69645_analysis", create_backup=True
-        )
-
-        assert result["status"] == "deleted"
-        assert result["backup_location"] is not None
-        mock_lbug_client.backup.assert_called_once()
+  # NOTE: test_delete_subgraph_with_backup removed - create_backup capability
+  # was removed from subgraph_service.py as part of S3 bucket restructure
 
   @pytest.mark.asyncio
   async def test_delete_invalid_subgraph_id(self, service):
@@ -610,25 +586,9 @@ class TestSubgraphService:
 
     assert result is False
 
-  @pytest.mark.asyncio
-  async def test_private_create_backup(self, service, mock_lbug_client):
-    """Test private method _create_backup."""
-    mock_lbug_client.backup.return_value = {"location": "s3://backup/test.backup"}
-
-    result = await service._create_backup(mock_lbug_client, "test_db", "i-123456")
-
-    assert "s3://backup" in result
-    mock_lbug_client.backup.assert_called_once()
-
-  @pytest.mark.asyncio
-  async def test_private_create_backup_not_implemented(self, service, mock_lbug_client):
-    """Test backup when method not implemented."""
-    del mock_lbug_client.backup  # Remove the backup method
-
-    result = await service._create_backup(mock_lbug_client, "test_db", "i-123456")
-
-    # Should return None when backup not implemented
-    assert result is None
+  # NOTE: test_private_create_backup and test_private_create_backup_not_implemented
+  # removed - _create_backup method was removed from subgraph_service.py as part
+  # of S3 bucket restructure (graph-sync bucket was unused)
 
   @pytest.mark.asyncio
   async def test_private_get_database_stats(self, service, mock_lbug_client):

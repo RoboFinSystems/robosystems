@@ -160,9 +160,8 @@ Resources:
                       - InnerItem: !Join
                           - "/*,arn:${AWS::Partition}:s3:::"
                           - !Ref MonitoredBuckets
-                  # Default critical buckets if none specified
-                  - - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
-                    - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}/*"
+                  # Default critical buckets if none specified (user data with backups/uploads)
+                  - - !Sub "arn:${AWS::Partition}:s3:::robosystems-user-${Environment}/*"
             - !Ref AWS::NoValue
       Tags:
         - Key: Name

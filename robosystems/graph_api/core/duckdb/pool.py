@@ -262,15 +262,24 @@ class DuckDBConnectionPool:
       conn.execute("INSTALL parquet")
       conn.execute("LOAD parquet")
 
-      # Configure S3 access
-      # Use S3-specific credentials (AWS_S3_*) for compatibility with local dev and cross-account access
-      if env.AWS_S3_ACCESS_KEY_ID and env.AWS_S3_SECRET_ACCESS_KEY:
+      # Configure S3 access based on environment
+      if env.ENVIRONMENT in ["prod", "staging"]:
+        # Production/Staging: Always use IAM roles (ECS task roles)
+        try:
+          conn.execute("CALL load_aws_credentials()")
+          conn.execute("SET s3_region=?", [env.AWS_DEFAULT_REGION])
+          logger.debug("Loaded AWS credentials from IAM role (production)")
+        except Exception as cred_err:
+          logger.error(f"Failed to load IAM role credentials in production: {cred_err}")
+          raise  # In production, credential failures should fail hard
+      elif env.AWS_S3_ACCESS_KEY_ID and env.AWS_S3_SECRET_ACCESS_KEY:
+        # Development: Use explicit credentials if provided
         conn.execute("SET s3_access_key_id=?", [env.AWS_S3_ACCESS_KEY_ID])
         conn.execute("SET s3_secret_access_key=?", [env.AWS_S3_SECRET_ACCESS_KEY])
         conn.execute("SET s3_region=?", [env.AWS_DEFAULT_REGION])
+        logger.debug("Using explicit S3 credentials (development)")
       else:
-        # Load credentials from AWS credential provider chain (instance metadata, env vars, etc.)
-        # This is required for EC2 instances with IAM roles
+        # Development fallback: Try credential provider chain
         try:
           conn.execute("CALL load_aws_credentials()")
           conn.execute("SET s3_region=?", [env.AWS_DEFAULT_REGION])
@@ -292,8 +301,6 @@ class DuckDBConnectionPool:
         )
 
       # Performance settings (configurable via environment variables)
-      from robosystems.config import env
-
       conn.execute(f"SET threads TO {env.DUCKDB_MAX_THREADS}")
       conn.execute(f"SET memory_limit='{env.DUCKDB_MEMORY_LIMIT}'")
 

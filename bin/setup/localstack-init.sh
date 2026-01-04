@@ -4,19 +4,47 @@
 
 echo "Creating S3 buckets for RoboSystems..."
 
-# Create the local bucket (used by Docker environment)
+# ==============================================================================
+# NEW BUCKET STRUCTURE (2026-01 Restructure)
+# ==============================================================================
+
+echo "Creating new structure buckets..."
+
+# Shared Raw Data Bucket (external source downloads: SEC, FRED, BLS, etc.)
+awslocal s3api create-bucket \
+  --bucket robosystems-shared-raw \
+  --region us-east-1 || echo "Bucket robosystems-shared-raw already exists"
+
+# Shared Processed Data Bucket (parquet files for graph ingestion)
+awslocal s3api create-bucket \
+  --bucket robosystems-shared-processed \
+  --region us-east-1 || echo "Bucket robosystems-shared-processed already exists"
+
+# User Data Bucket (user uploads, staging tables, exports)
+awslocal s3api create-bucket \
+  --bucket robosystems-user \
+  --region us-east-1 || echo "Bucket robosystems-user already exists"
+
+# NOTE: Public Data Bucket (robosystems-public-data) is created in legacy section
+# and remains unchanged - it's actively serving CDN content
+
+# ==============================================================================
+# LEGACY BUCKETS (kept for backwards compatibility during migration)
+# ==============================================================================
+
+echo "Creating legacy buckets for backwards compatibility..."
+
+# Legacy local bucket
 awslocal s3api create-bucket \
   --bucket robosystems-local \
   --region us-east-1 || echo "Bucket robosystems-local already exists"
 
-# Create the dev bucket
+# Legacy dev bucket
 awslocal s3api create-bucket \
   --bucket robosystems-dev \
   --region us-east-1 || echo "Bucket robosystems-dev already exists"
 
-# Create SEC-related buckets
-echo "Creating SEC data buckets..."
-
+# Legacy SEC buckets (will be deprecated)
 awslocal s3api create-bucket \
   --bucket robosystems-sec-raw \
   --region us-east-1 || echo "Bucket robosystems-sec-raw already exists"
@@ -25,16 +53,16 @@ awslocal s3api create-bucket \
   --bucket robosystems-sec-processed \
   --region us-east-1 || echo "Bucket robosystems-sec-processed already exists"
 
+# Legacy public data bucket
 awslocal s3api create-bucket \
   --bucket robosystems-public-data \
   --region us-east-1 || echo "Bucket robosystems-public-data already exists"
 
-# Configure CORS for the public data bucket (needed for browser access)
 awslocal s3api put-bucket-cors \
   --bucket robosystems-public-data \
-  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"MaxAge":3600}]}' || echo "CORS already configured"
+  --cors-configuration '{"CORSRules":[{"AllowedOrigins":["*"],"AllowedMethods":["GET","HEAD"],"AllowedHeaders":["*"],"MaxAge":3600}]}' || echo "CORS already configured for robosystems-public-data"
 
-# Create graph database buckets
+# Legacy graph database buckets
 awslocal s3api create-bucket \
   --bucket robosystems-graph-databases \
   --region us-east-1 || echo "Bucket robosystems-graph-databases already exists"

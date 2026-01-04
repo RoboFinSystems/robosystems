@@ -271,13 +271,13 @@ class TestSecretMappingsConfiguration:
 
   def test_all_critical_secrets_mapped(self):
     """Verify all critical secrets are in the mapping."""
+    # Note: Bucket names (SEC_RAW_BUCKET, SEC_PROCESSED_BUCKET, etc.) are
+    # computed from environment in env.py, not fetched from secrets.
     critical_secrets = [
       "DATABASE_URL",
       "JWT_SECRET_KEY",
       "AWS_S3_ACCESS_KEY_ID",
       "AWS_S3_SECRET_ACCESS_KEY",
-      "SEC_RAW_BUCKET",
-      "SEC_PROCESSED_BUCKET",
       "GRAPH_API_KEY",
     ]
 
@@ -289,26 +289,33 @@ class TestSecretsManagerHelpers:
   """Tests covering helper methods and global accessors."""
 
   def test_get_s3_buckets_dev_defaults(self):
+    """Test bucket names computed for dev environment (no suffix)."""
     manager = SecretsManager(environment="dev")
     buckets = manager.get_s3_buckets()
-    assert buckets["aws_s3"] == "robosystems-dev"
-    assert buckets["sec_raw"] == "robosystems-sec-raw-dev"
+    # New bucket names
+    assert buckets["shared_raw"] == "robosystems-shared-raw"
+    assert buckets["shared_processed"] == "robosystems-shared-processed"
+    assert buckets["user_data"] == "robosystems-user"
+    assert buckets["public_data"] == "robosystems-public-data"
+    # Deprecated aliases point to new names
+    assert buckets["aws_s3"] == "robosystems-user"
+    assert buckets["sec_raw"] == "robosystems-shared-raw"
+    assert buckets["sec_processed"] == "robosystems-shared-processed"
 
-  def test_get_s3_buckets_from_secrets(self):
-    with patch("boto3.client") as mock_boto:
-      mock_client = MagicMock()
-      mock_client.get_secret_value.return_value = {
-        "SecretString": json.dumps({"SEC_RAW_BUCKET": "custom-raw"})
-      }
-      mock_boto.return_value = mock_client
+  def test_get_s3_buckets_staging_computed(self):
+    """Test bucket names computed for staging environment (with suffix)."""
+    # Bucket names are now computed from environment, not fetched from secrets
+    manager = SecretsManager(environment="staging")
+    buckets = manager.get_s3_buckets()
 
-      manager = SecretsManager(environment="staging")
-      buckets = manager.get_s3_buckets()
-
-      assert buckets["sec_raw"] == "custom-raw"
-      # ensure caching reuses response
-      manager.get_s3_buckets()
-      assert mock_client.get_secret_value.call_count == 1
+    # New bucket names with environment suffix
+    assert buckets["shared_raw"] == "robosystems-shared-raw-staging"
+    assert buckets["shared_processed"] == "robosystems-shared-processed-staging"
+    assert buckets["user_data"] == "robosystems-user-staging"
+    assert buckets["public_data"] == "robosystems-public-data-staging"
+    # Deprecated aliases point to new names
+    assert buckets["aws_s3"] == "robosystems-user-staging"
+    assert buckets["sec_raw"] == "robosystems-shared-raw-staging"
 
   def test_get_database_url_non_prod(self):
     manager = SecretsManager(environment="dev")
