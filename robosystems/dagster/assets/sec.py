@@ -379,7 +379,9 @@ def sec_raw_filings(
     # Step 1.5: Fetch submissions data for unique CIKs (parallel with rate limiting)
     # This provides company metadata (name, SIC, fiscal year end, etc.)
     unique_ciks = list({hit.cik for hit in hits})
-    context.log.info(f"Phase 1.5: Fetching submissions for {len(unique_ciks)} unique companies...")
+    context.log.info(
+      f"Phase 1.5: Fetching submissions for {len(unique_ciks)} unique companies..."
+    )
 
     # Filter to only CIKs that need fetching
     ciks_to_fetch = []
@@ -395,7 +397,9 @@ def sec_raw_filings(
           pass
       ciks_to_fetch.append(cik)
 
-    context.log.info(f"Submissions: {submissions_skipped} cached, {len(ciks_to_fetch)} to fetch")
+    context.log.info(
+      f"Submissions: {submissions_skipped} cached, {len(ciks_to_fetch)} to fetch"
+    )
 
     submissions_fetched = submissions_skipped
     submissions_failed = 0
@@ -420,7 +424,9 @@ def sec_raw_filings(
                 async with session.get(url) as response:
                   if response.status == 429:
                     retry_after = int(response.headers.get("Retry-After", 60))
-                    context.log.warning(f"Rate limited on submissions, waiting {retry_after}s")
+                    context.log.warning(
+                      f"Rate limited on submissions, waiting {retry_after}s"
+                    )
                     await asyncio.sleep(retry_after)
                     return await fetch_submission(cik)
 
@@ -451,11 +457,15 @@ def sec_raw_filings(
         if completed % 50 == 0:
           context.log.info(f"Submissions progress: {completed}/{len(ciks_to_fetch)}")
 
-    context.log.info(f"Submissions complete: {submissions_fetched} fetched, {submissions_failed} failed")
+    context.log.info(
+      f"Submissions complete: {submissions_fetched} fetched, {submissions_failed} failed"
+    )
 
     # Apply max_filings limit if specified
     if config.max_filings > 0 and len(hits) > config.max_filings:
-      context.log.info(f"Limiting to {config.max_filings} filings (of {len(hits)} discovered)")
+      context.log.info(
+        f"Limiting to {config.max_filings} filings (of {len(hits)} discovered)"
+      )
       hits = hits[: config.max_filings]
 
     # Dry run mode - just report what would be downloaded
@@ -583,7 +593,9 @@ def sec_raw_filings(
   result = asyncio.run(run_efts_download())
 
   if result.get("dry_run"):
-    context.log.info(f"[DRY RUN] Discovery complete for year {year}: {result['filings_found']} filings found")
+    context.log.info(
+      f"[DRY RUN] Discovery complete for year {year}: {result['filings_found']} filings found"
+    )
   else:
     context.log.info(
       f"Download complete for year {year}: "

@@ -120,7 +120,9 @@ class SECDownloader:
   ) -> bool:
     """Download a single filing to S3."""
     if not self._session:
-      raise RuntimeError("Downloader not initialized. Use 'async with SECDownloader():'")
+      raise RuntimeError(
+        "Downloader not initialized. Use 'async with SECDownloader():'"
+      )
 
     s3_key = self._get_s3_key(hit, year)
 
