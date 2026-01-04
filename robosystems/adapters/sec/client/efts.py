@@ -109,8 +109,12 @@ class EFTSClient:
     params: dict,
     offset: int = 0,
     size: int = EFTS_MAX_PAGE_SIZE,
+    retry_count: int = 0,
   ) -> dict:
     """Fetch a single page of results from EFTS."""
+    MAX_RETRIES = 3
+    MAX_RETRY_AFTER = 300  # Cap at 5 minutes to prevent DoS
+
     if not self._session:
       raise RuntimeError("Client not initialized. Use 'async with EFTSClient():'")
 
@@ -122,10 +126,17 @@ class EFTSClient:
         await self.monitor.record(len(content))
 
         if response.status == 429:
-          retry_after = int(response.headers.get("Retry-After", 60))
-          logger.warning(f"EFTS rate limited, waiting {retry_after}s")
+          if retry_count >= MAX_RETRIES:
+            raise RuntimeError(f"EFTS max retries ({MAX_RETRIES}) exceeded for query")
+          retry_after = min(
+            int(response.headers.get("Retry-After", 60)), MAX_RETRY_AFTER
+          )
+          logger.warning(
+            f"EFTS rate limited, waiting {retry_after}s "
+            f"(retry {retry_count + 1}/{MAX_RETRIES})"
+          )
           await asyncio.sleep(retry_after)
-          return await self._fetch_page(params, offset, size)
+          return await self._fetch_page(params, offset, size, retry_count + 1)
 
         response.raise_for_status()
         return await response.json()

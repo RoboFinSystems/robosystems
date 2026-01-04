@@ -117,8 +117,12 @@ class SECDownloader:
     hit: EFTSHit,
     year: int,
     bucket: str,
+    retry_count: int = 0,
   ) -> bool:
     """Download a single filing to S3."""
+    MAX_RETRIES = 3
+    MAX_RETRY_AFTER = 300  # Cap at 5 minutes to prevent DoS
+
     if not self._session:
       raise RuntimeError(
         "Downloader not initialized. Use 'async with SECDownloader():'"
@@ -144,10 +148,19 @@ class SECDownloader:
               return True
 
             if response.status == 429:
-              retry_after = int(response.headers.get("Retry-After", 60))
-              logger.warning(f"Rate limited, waiting {retry_after}s")
+              if retry_count >= MAX_RETRIES:
+                logger.error(f"Max retries exceeded for {hit.accession_number}")
+                self._stats.failed += 1
+                return False
+              retry_after = min(
+                int(response.headers.get("Retry-After", 60)), MAX_RETRY_AFTER
+              )
+              logger.warning(
+                f"Rate limited, waiting {retry_after}s "
+                f"(retry {retry_count + 1}/{MAX_RETRIES})"
+              )
               await asyncio.sleep(retry_after)
-              return await self._download_filing(hit, year, bucket)
+              return await self._download_filing(hit, year, bucket, retry_count + 1)
 
             response.raise_for_status()
             content = await response.read()
@@ -164,21 +177,21 @@ class SECDownloader:
           self._stats.failed += 1
           return False
 
-    # Upload to S3
-    try:
-      self._get_s3_client().s3_client.put_object(
-        Bucket=bucket,
-        Key=s3_key,
-        Body=content,
-        ContentType="application/zip",
-      )
-      self._stats.downloaded += 1
-      self._stats.bytes_downloaded += len(content)
-      return True
-    except Exception as e:
-      logger.error(f"S3 upload failed for {hit.accession_number}: {e}")
-      self._stats.failed += 1
-      return False
+      # Upload to S3 (inside semaphore to limit concurrent uploads)
+      try:
+        self._get_s3_client().s3_client.put_object(
+          Bucket=bucket,
+          Key=s3_key,
+          Body=content,
+          ContentType="application/zip",
+        )
+        self._stats.downloaded += 1
+        self._stats.bytes_downloaded += len(content)
+        return True
+      except Exception as e:
+        logger.error(f"S3 upload failed for {hit.accession_number}: {e}")
+        self._stats.failed += 1
+        return False
 
   async def download_filings(
     self,

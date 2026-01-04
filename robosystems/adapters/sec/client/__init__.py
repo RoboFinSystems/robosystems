@@ -34,23 +34,14 @@ def __getattr__(name: str):
 
 
 __all__ = [
-  # Legacy client
+  # Eagerly loaded (safe for `from ... import *`)
   "SEC_BASE_URL",
   "ArelleClient",
-  # Rate limiting (lazy)
-  "AsyncRateLimiter",
-  "DownloadStats",
-  # EFTS discovery (lazy)
-  "EFTSClient",
-  "EFTSHit",
-  "RateMonitor",
-  "RateStats",
   "SECClient",
-  # Async downloader (lazy)
-  "SECDownloader",
-  "download_sec_filings",
-  "download_sec_filings_sync",
   "enable_test_mode",
-  "query_efts",
-  "query_efts_sync",
 ]
+
+# Note: The following are available via lazy import (use direct imports):
+# - EFTSClient, EFTSHit, query_efts, query_efts_sync (from .efts)
+# - SECDownloader, DownloadStats, download_sec_filings, download_sec_filings_sync (from .downloader)
+# - AsyncRateLimiter, RateMonitor, RateStats (from .rate_limiter)
