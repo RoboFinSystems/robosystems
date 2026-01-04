@@ -516,6 +516,8 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: AWS_S3_BUCKET
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/s3:SecretString:AWS_S3_BUCKET}}"
             # Run database migrations on daemon startup (singleton pattern)
             - Name: RUN_MIGRATIONS
               Value: "true"
@@ -587,6 +589,8 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: AWS_S3_BUCKET
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/s3:SecretString:AWS_S3_BUCKET}}"
             # EcsRunLauncher configuration - needed for webserver to understand run launcher
             - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
               Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
@@ -661,6 +665,8 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
+            - Name: AWS_S3_BUCKET
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/s3:SecretString:AWS_S3_BUCKET}}"
 
   # ========================================
   # ECS SERVICES

@@ -262,12 +262,23 @@ class DuckDBConnectionPool:
       conn.execute("INSTALL parquet")
       conn.execute("LOAD parquet")
 
-      # Configure S3 access if credentials available
+      # Configure S3 access
       # Use S3-specific credentials (AWS_S3_*) for compatibility with local dev and cross-account access
       if env.AWS_S3_ACCESS_KEY_ID and env.AWS_S3_SECRET_ACCESS_KEY:
         conn.execute("SET s3_access_key_id=?", [env.AWS_S3_ACCESS_KEY_ID])
         conn.execute("SET s3_secret_access_key=?", [env.AWS_S3_SECRET_ACCESS_KEY])
         conn.execute("SET s3_region=?", [env.AWS_DEFAULT_REGION])
+      else:
+        # Load credentials from AWS credential provider chain (instance metadata, env vars, etc.)
+        # This is required for EC2 instances with IAM roles
+        try:
+          conn.execute("CALL load_aws_credentials()")
+          conn.execute("SET s3_region=?", [env.AWS_DEFAULT_REGION])
+          logger.debug("Loaded AWS credentials from credential provider chain")
+        except Exception as cred_err:
+          logger.debug(
+            f"Could not load AWS credentials from provider chain: {cred_err}"
+          )
 
       # Configure S3 endpoint if using LocalStack or custom endpoint
       if env.AWS_ENDPOINT_URL:

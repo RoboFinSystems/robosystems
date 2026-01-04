@@ -40,10 +40,12 @@ class S3Client:
 
     # Initialize boto3 client
     # Use S3-specific credentials if provided, otherwise rely on IAM roles
-    s3_config = {
+    s3_config: dict[str, Any] = {
       "region_name": self.region_name,
-      "endpoint_url": self.endpoint_url,
     }
+    # Only include endpoint_url if set (empty string breaks boto3)
+    if self.endpoint_url:
+      s3_config["endpoint_url"] = self.endpoint_url
 
     # Prefer IAM roles over access keys for security
     # In production/staging: Use ECS task role automatically
