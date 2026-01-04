@@ -2,9 +2,10 @@
 
 Pipeline Architecture (3 phases, run independently):
 
-  Phase 1 - Download:
-    sec_download_job: sec_companies_list → sec_raw_filings
-    Downloads raw XBRL ZIPs to S3.
+  Phase 1 - Download (EFTS-based):
+    sec_download_job: sec_raw_filings
+    Uses SEC EFTS API to discover and download XBRL ZIPs to S3.
+    O(1) discovery via EFTS query instead of per-company iteration.
 
   Phase 2 - Process (sensor-triggered or manual):
     sec_process_job: sec_process_filing (dynamic partitions)
@@ -15,7 +16,7 @@ Pipeline Architecture (3 phases, run independently):
     Ingests all processed data to LadybugDB graph.
 
 Workflow:
-  just sec-download 10 2024    # Download top 10 companies
+  just sec-download 2024       # Download all filings for year
   just sec-process 2024        # Process in parallel
   just sec-materialize         # Ingest to graph
 
@@ -33,9 +34,7 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.assets import (
-  SECCompaniesConfig,
   SECDownloadConfig,
-  sec_companies_list,
   sec_duckdb_staging,
   sec_filing_partitions,
   sec_graph_materialized,
@@ -50,13 +49,12 @@ from robosystems.dagster.assets import (
 
 
 # Phase 1: Download (year-partitioned)
-# Downloads raw XBRL ZIPs to S3.
+# Downloads raw XBRL ZIPs to S3 using EFTS discovery.
 # Use with sec_processing_sensor to trigger parallel processing.
 sec_download_job = define_asset_job(
   name="sec_download",
-  description="Download SEC XBRL filings to S3. Use sensor or just sec-process for parallel processing.",
+  description="Download SEC XBRL filings to S3 via EFTS. Use sensor or just sec-process for parallel processing.",
   selection=AssetSelection.assets(
-    sec_companies_list,
     sec_raw_filings,
   ),
   tags={"pipeline": "sec", "phase": "download"},
@@ -113,13 +111,12 @@ SEC_MATERIALIZE_SCHEDULE_STATUS = (
 
 sec_daily_download_schedule = ScheduleDefinition(
   name="sec_daily_download",
-  description="Daily SEC download at 6 AM UTC. Sensor triggers parallel processing.",
+  description="Daily SEC download at 6 AM UTC via EFTS. Sensor triggers parallel processing.",
   job=sec_download_job,
   cron_schedule="0 6 * * *",
   default_status=SEC_DOWNLOAD_SCHEDULE_STATUS,
   run_config=RunConfig(
     ops={
-      "sec_companies_list": SECCompaniesConfig(),
       "sec_raw_filings": SECDownloadConfig(
         skip_existing=True,
         form_types=["10-K", "10-Q"],

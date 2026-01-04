@@ -3,8 +3,7 @@
 Pipeline stages (run independently via separate jobs):
 
 1. DOWNLOAD (sec_download job):
-   - sec_companies_list - Fetch company list from SEC EDGAR
-   - sec_raw_filings - Download XBRL ZIPs (year-partitioned)
+   - sec_raw_filings - Discover via EFTS, download XBRL ZIPs (year-partitioned)
 
 2. PROCESS (sec_process job, sensor-triggered):
    - sec_process_filing - Process single filing to parquet (dynamic partitions)
@@ -14,11 +13,13 @@ Pipeline stages (run independently via separate jobs):
    - sec_graph_materialized - Materialize to LadybugDB graph
 
 The pipeline leverages existing adapters:
-- robosystems.adapters.sec.SECClient - EDGAR API client
+- robosystems.adapters.sec.client.EFTSClient - EFTS discovery API
+- robosystems.adapters.sec.SECClient - EDGAR API client (submissions)
 - robosystems.adapters.sec.XBRLGraphProcessor - XBRL processing
 - robosystems.adapters.sec.XBRLDuckDBGraphProcessor - DuckDB staging/materialization
 
 Architecture Notes:
+- EFTS-based O(1) discovery replaces per-company iteration
 - Year partitioning for downloads
 - Dynamic partitioning for processing (one partition per filing, parallel)
 - Sensor discovers unprocessed filings and triggers processing
@@ -26,7 +27,6 @@ Architecture Notes:
 """
 
 from datetime import UTC
-from typing import Any
 
 from dagster import (
   AssetExecutionContext,
@@ -34,7 +34,6 @@ from dagster import (
   DynamicPartitionsDefinition,
   MaterializeResult,
   MetadataValue,
-  Output,
   RetryPolicy,
   StaticPartitionsDefinition,
   asset,
@@ -120,7 +119,7 @@ def _load_entity_submissions_snapshot(s3_client, bucket: str, cik: str) -> dict 
   import json
 
   try:
-    s3_key = f"submissions/{cik}/latest.json"
+    s3_key = get_raw_key(DataSourceType.SEC, "submissions", f"{cik}.json")
     response = s3_client.get_object(Bucket=bucket, Key=s3_key)
     return json.loads(response["Body"].read().decode("utf-8"))
   except Exception:
@@ -235,21 +234,29 @@ sec_filing_partitions = DynamicPartitionsDefinition(name="sec_filings")
 # ============================================================================
 
 
-class SECCompaniesConfig(Config):
-  """Configuration for SEC companies list asset."""
-
-  ticker_filter: list[str] = []  # Filter to specific tickers (e.g., ["NVDA", "AAPL"])
-  cik_filter: list[str] = []  # Filter to specific CIKs
-  max_companies: int = 0  # Limit number of companies (0 = unlimited)
-
-
 class SECDownloadConfig(Config):
-  """Configuration for SEC raw filings download."""
+  """Configuration for SEC raw filings download.
+
+  Production Scaling Notes:
+  - Each year partition runs independently (can parallelize years)
+  - Submissions fetching: ~8 req/sec, 5 concurrent (configurable)
+  - Filing downloads: ~5 req/sec, 10 concurrent (configurable)
+  - For full year (~5000 companies, ~10000 filings): ~45 min total
+  - Use max_filings for testing, dry_run for discovery only
+  """
 
   skip_existing: bool = True  # Skip already downloaded filings
   form_types: list[str] = ["10-K", "10-Q"]  # Form types to download
   tickers: list[str] = []  # Optional ticker filter (empty = all companies)
   ciks: list[str] = []  # Optional CIK filter
+  max_filings: int = 0  # Max filings to download (0 = unlimited)
+  dry_run: bool = False  # If True, discover only - don't download
+
+  # Concurrency controls for production
+  submissions_rate: float = 8.0  # Submissions requests per second
+  submissions_concurrency: int = 5  # Max concurrent submission fetches
+  download_rate: float = 5.0  # Download requests per second
+  download_concurrency: int = 10  # Max concurrent downloads
 
 
 class SECSingleFilingConfig(Config):
@@ -274,81 +281,15 @@ class SECMaterializeConfig(Config):
 
 
 # ============================================================================
-# Assets
+# Year-Partitioned Assets (download phase)
 # ============================================================================
 
 
 @asset(
   group_name="sec_pipeline",
-  description="Fetch list of SEC-registered companies from EDGAR",
-  compute_kind="download",
-  metadata={
-    "pipeline": "sec",
-    "stage": "discovery",
-  },
-)
-def sec_companies_list(
-  context: AssetExecutionContext,
-  config: SECCompaniesConfig,
-) -> Output[dict[str, Any]]:
-  """Fetch list of SEC-registered companies.
-
-  Downloads the company tickers list from SEC EDGAR and optionally
-  filters by ticker or CIK.
-
-  Returns:
-      Dictionary with company data keyed by CIK
-  """
-  from robosystems.adapters.sec import SECClient
-
-  context.log.info("Fetching SEC companies list from EDGAR")
-
-  sec_client = SECClient()
-  companies_raw = sec_client.get_companies()
-
-  # Convert to dict keyed by CIK for easier lookups
-  companies = {}
-  for idx, company in companies_raw.items():
-    cik = str(company.get("cik_str", company.get("cik", "")))
-    ticker = company.get("ticker", "")
-
-    # Apply filters if specified
-    if config.ticker_filter and ticker not in config.ticker_filter:
-      continue
-    if config.cik_filter and cik not in config.cik_filter:
-      continue
-
-    companies[cik] = {
-      "cik": cik,
-      "ticker": ticker,
-      "title": company.get("title", ""),
-    }
-
-    # Apply max limit if specified
-    if config.max_companies > 0 and len(companies) >= config.max_companies:
-      break
-
-  context.log.info(f"Retrieved {len(companies)} companies from SEC")
-
-  return Output(
-    companies,
-    metadata={
-      "company_count": len(companies),
-      "filtered_by_ticker": len(config.ticker_filter) > 0,
-      "filtered_by_cik": len(config.cik_filter) > 0,
-      "sample_companies": MetadataValue.json(
-        list(companies.values())[:5] if companies else []
-      ),
-    },
-  )
-
-
-@asset(
-  group_name="sec_pipeline",
-  description="Download SEC XBRL filings for a specific year",
+  description="Download SEC XBRL filings for a specific year using EFTS discovery",
   compute_kind="download",
   partitions_def=sec_year_partitions,
-  deps=[sec_companies_list],
   metadata={
     "pipeline": "sec_download",
     "stage": "extraction",
@@ -362,140 +303,314 @@ def sec_raw_filings(
   config: SECDownloadConfig,
   s3: S3Resource,
 ) -> MaterializeResult:
-  """Download SEC XBRL filings for a specific year.
+  """Download SEC XBRL filings for a specific year using EFTS discovery.
 
-  Downloads 10-K and 10-Q filings for the partition year,
-  storing ZIPs in S3 for subsequent processing.
+  Uses SEC EFTS API to discover all filings matching criteria in a single query,
+  then downloads them with async rate-limited parallelism.
+
+  This replaces the per-company iteration approach with O(1) discovery.
 
   Concurrency limited to 2 via dagster/concurrency_key to avoid SEC rate limiting.
 
   Returns:
       MaterializeResult with download statistics
   """
-  from robosystems.adapters.sec import SECClient
+  import asyncio
 
   year = int(context.partition_key)
-  context.log.info(f"Downloading SEC filings for year {year}")
+  context.log.info(f"Downloading SEC filings for year {year} via EFTS")
 
-  # Get bucket for raw filings (shared bucket with sec/ prefix)
   bucket = env.SHARED_RAW_BUCKET
 
-  # Initialize counters
-  total_downloaded = 0
-  total_skipped = 0
-  total_errors = 0
-  companies_processed = 0
+  async def run_efts_download():
+    # Import here to avoid circular imports at module load time
+    import aiohttp
 
-  # Get companies to process - use filters from config or fetch all
-  sec_client = SECClient()
-  if config.tickers or config.ciks:
-    # Filtered mode - process specific companies
-    companies_raw = sec_client.get_companies()
-    companies = []
-    for _, company in companies_raw.items():
-      ticker = company.get("ticker", "")
-      cik = str(company.get("cik_str", company.get("cik", "")))
-      if (config.tickers and ticker in config.tickers) or (
-        config.ciks and cik in config.ciks
-      ):
-        companies.append({"cik": cik, "ticker": ticker})
-  else:
-    # Full mode - get all companies
-    companies_raw = sec_client.get_companies()
-    companies = [
-      {"cik": str(c.get("cik_str", c.get("cik", ""))), "ticker": c.get("ticker", "")}
-      for _, c in companies_raw.items()
-    ]
+    from robosystems.adapters.sec.client.efts import EFTSClient, EFTSHit
+    from robosystems.adapters.sec.client.rate_limiter import (
+      AsyncRateLimiter,
+      RateMonitor,
+    )
+    from robosystems.config import ExternalServicesConfig
 
-  context.log.info(f"Processing {len(companies)} companies for year {year}")
+    SEC_CONFIG = ExternalServicesConfig.SEC_CONFIG
+    SEC_BASE_URL = SEC_CONFIG["base_url"]
+    SEC_HEADERS = SEC_CONFIG["headers"]
 
-  for company in companies:
-    cik = company["cik"]
-    ticker = company["ticker"]
+    # Step 1: Discover filings via EFTS
+    context.log.info("Phase 1: Discovering filings via EFTS...")
 
-    try:
-      client = SECClient(cik=cik)
+    async with EFTSClient(requests_per_second=5.0) as efts:
+      # Build CIK filter if specified
+      cik_filter = None
+      if config.ciks:
+        cik_filter = config.ciks
+      elif config.tickers:
+        # Resolve tickers to CIKs using company list
+        from robosystems.adapters.sec import SECClient
 
-      # Fetch full submissions and store snapshot in S3 for later processing
-      submissions_raw = client.get_submissions()
-      _store_entity_submissions_snapshot(s3.client, bucket, cik, submissions_raw)
+        sec_client = SECClient()
+        companies_raw = sec_client.get_companies()
+        cik_filter = []
+        for _, company in companies_raw.items():
+          ticker = company.get("ticker", "")
+          if ticker in config.tickers:
+            cik = str(company.get("cik_str", company.get("cik", "")))
+            cik_filter.append(cik)
 
-      # Get DataFrame for filtering
-      submissions = client.submissions_df()
+      hits = await efts.query_by_year(
+        year=year,
+        form_types=config.form_types,
+        ciks=cik_filter,
+      )
 
-      # Filter to target year and form types
-      year_mask = submissions["reportDate"].str.startswith(str(year))
-      form_mask = submissions["form"].isin(config.form_types)
-      xbrl_mask = submissions["isXBRL"] | submissions["isInlineXBRL"]
+    context.log.info(f"EFTS discovered {len(hits)} filings for {year}")
 
-      filings = submissions[year_mask & form_mask & xbrl_mask]
+    if not hits:
+      return {
+        "filings_found": 0,
+        "submissions_fetched": 0,
+        "downloaded": 0,
+        "skipped": 0,
+        "failed": 0,
+        "dry_run": config.dry_run,
+      }
 
-      for _, filing in filings.iterrows():
-        accession = filing["accessionNumber"]
-        s3_key = get_raw_key(
-          DataSourceType.SEC, f"year={year}", cik, f"{accession}.zip"
-        )
+    # Step 1.5: Fetch submissions data for unique CIKs (parallel with rate limiting)
+    # This provides company metadata (name, SIC, fiscal year end, etc.)
+    unique_ciks = list({hit.cik for hit in hits})
+    context.log.info(
+      f"Phase 1.5: Fetching submissions for {len(unique_ciks)} unique companies..."
+    )
 
-        # Skip if exists and configured to do so
-        if config.skip_existing:
-          existing = s3.list_objects(s3_key)
-          if existing:
-            total_skipped += 1
-            continue
-
-        # Download the filing
+    # Filter to only CIKs that need fetching
+    ciks_to_fetch = []
+    submissions_skipped = 0
+    for cik in unique_ciks:
+      submissions_key = get_raw_key(DataSourceType.SEC, "submissions", f"{cik}.json")
+      if config.skip_existing:
         try:
-          report_url = client.get_report_url(filing)
-          if report_url:
-            # Download XBRL ZIP
-            xbrlzip_url = client.get_xbrlzip_url(filing)
-            xbrl_zip = client.download_xbrlzip(xbrlzip_url)
+          s3.client.head_object(Bucket=bucket, Key=submissions_key)
+          submissions_skipped += 1
+          continue
+        except Exception:
+          pass
+      ciks_to_fetch.append(cik)
 
-            if xbrl_zip:
-              # Save to S3 as bytes
-              import zipfile
-              from io import BytesIO
+    context.log.info(
+      f"Submissions: {submissions_skipped} cached, {len(ciks_to_fetch)} to fetch"
+    )
 
-              buffer = BytesIO()
-              with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                for name in xbrl_zip.namelist():
-                  zf.writestr(name, xbrl_zip.read(name))
-              buffer.seek(0)
+    submissions_fetched = submissions_skipped
+    submissions_failed = 0
 
-              # Upload to S3
-              s3.client.upload_fileobj(buffer, bucket, s3_key)
-              total_downloaded += 1
-              context.log.debug(f"Downloaded {ticker} ({cik}) {accession} for {year}")
+    if ciks_to_fetch:
+      import json
 
-        except Exception as e:
-          context.log.warning(f"Failed to download {ticker} {accession}: {e}")
-          total_errors += 1
+      # Rate limiter and semaphore for parallel fetching (configurable)
+      submissions_limiter = AsyncRateLimiter(rate=config.submissions_rate)
+      submissions_semaphore = asyncio.Semaphore(config.submissions_concurrency)
 
-      companies_processed += 1
+      async def fetch_submission(cik: str) -> bool:
+        nonlocal submissions_fetched, submissions_failed
+        submissions_key = get_raw_key(DataSourceType.SEC, "submissions", f"{cik}.json")
 
-      # Progress log every 100 companies
-      if companies_processed % 100 == 0:
+        async with submissions_semaphore:
+          async with submissions_limiter:
+            try:
+              # Use aiohttp for async HTTP
+              url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+              async with aiohttp.ClientSession(headers=SEC_HEADERS) as session:
+                async with session.get(url) as response:
+                  if response.status == 429:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    context.log.warning(
+                      f"Rate limited on submissions, waiting {retry_after}s"
+                    )
+                    await asyncio.sleep(retry_after)
+                    return await fetch_submission(cik)
+
+                  response.raise_for_status()
+                  submissions_data = await response.json()
+
+              # Store to S3
+              s3.client.put_object(
+                Bucket=bucket,
+                Key=submissions_key,
+                Body=json.dumps(submissions_data),
+                ContentType="application/json",
+              )
+              submissions_fetched += 1
+              return True
+
+            except Exception as e:
+              context.log.debug(f"Failed to fetch submissions for CIK {cik}: {e}")
+              submissions_failed += 1
+              return False
+
+      # Run all fetches in parallel
+      tasks = [fetch_submission(cik) for cik in ciks_to_fetch]
+      completed = 0
+      for coro in asyncio.as_completed(tasks):
+        await coro
+        completed += 1
+        if completed % 50 == 0:
+          context.log.info(f"Submissions progress: {completed}/{len(ciks_to_fetch)}")
+
+    context.log.info(
+      f"Submissions complete: {submissions_fetched} fetched, {submissions_failed} failed"
+    )
+
+    # Apply max_filings limit if specified
+    if config.max_filings > 0 and len(hits) > config.max_filings:
+      context.log.info(
+        f"Limiting to {config.max_filings} filings (of {len(hits)} discovered)"
+      )
+      hits = hits[: config.max_filings]
+
+    # Dry run mode - just report what would be downloaded
+    if config.dry_run:
+      context.log.info(f"[DRY RUN] Would download {len(hits)} filings:")
+      for hit in hits[:10]:
+        context.log.info(f"  - {hit.cik}/{hit.accession_number} ({hit.form_type})")
+      if len(hits) > 10:
+        context.log.info(f"  ... and {len(hits) - 10} more")
+      return {
+        "filings_found": len(hits),
+        "submissions_fetched": submissions_fetched,
+        "downloaded": 0,
+        "skipped": 0,
+        "failed": 0,
+        "dry_run": True,
+      }
+
+    # Step 2: Download filings with async rate limiting
+    context.log.info(f"Phase 2: Downloading {len(hits)} filings...")
+
+    limiter = AsyncRateLimiter(rate=config.download_rate)
+    monitor = RateMonitor()
+    semaphore = asyncio.Semaphore(config.download_concurrency)
+
+    downloaded = 0
+    skipped = 0
+    failed = 0
+
+    async def download_filing(hit: EFTSHit) -> bool:
+      nonlocal downloaded, skipped, failed
+
+      # Construct S3 key
+      s3_key = get_raw_key(
+        DataSourceType.SEC,
+        f"year={year}",
+        hit.cik,
+        f"{hit.accession_number}.zip",
+      )
+
+      # Skip if exists
+      if config.skip_existing:
+        try:
+          s3.client.head_object(Bucket=bucket, Key=s3_key)
+          skipped += 1
+          return True
+        except Exception:
+          pass  # File doesn't exist, continue to download
+
+      # Construct XBRL ZIP URL
+      cik_no_zeros = str(int(hit.cik))
+      accno_no_dash = hit.accession_number.replace("-", "")
+      url = f"{SEC_BASE_URL}/Archives/edgar/data/{cik_no_zeros}/{accno_no_dash}/{hit.accession_number}-xbrl.zip"
+
+      async with semaphore:
+        async with limiter:
+          try:
+            async with aiohttp.ClientSession(headers=SEC_HEADERS) as session:
+              async with session.get(url) as response:
+                if response.status == 404:
+                  # No XBRL ZIP for this filing
+                  skipped += 1
+                  return True
+
+                if response.status == 429:
+                  retry_after = int(response.headers.get("Retry-After", 60))
+                  context.log.warning(f"Rate limited, waiting {retry_after}s")
+                  await asyncio.sleep(retry_after)
+                  return await download_filing(hit)
+
+                response.raise_for_status()
+                content = await response.read()
+
+                if not content:
+                  failed += 1
+                  return False
+
+                await monitor.record(len(content))
+
+          except Exception as e:
+            context.log.debug(f"Download failed for {hit.accession_number}: {e}")
+            failed += 1
+            return False
+
+      # Upload to S3
+      try:
+        s3.client.put_object(
+          Bucket=bucket,
+          Key=s3_key,
+          Body=content,
+          ContentType="application/zip",
+        )
+        downloaded += 1
+        return True
+      except Exception as e:
+        context.log.warning(f"S3 upload failed for {hit.accession_number}: {e}")
+        failed += 1
+        return False
+
+    # Execute downloads with progress logging
+    tasks = [download_filing(hit) for hit in hits]
+    completed = 0
+
+    for coro in asyncio.as_completed(tasks):
+      await coro
+      completed += 1
+      if completed % 100 == 0:
+        stats = monitor.get_stats()
         context.log.info(
-          f"Progress: {companies_processed}/{len(companies)} companies, "
-          f"{total_downloaded} downloaded, {total_skipped} skipped"
+          f"Progress: {completed}/{len(hits)} "
+          f"({stats.requests_per_second} req/s, {stats.mb_per_second} MB/s) "
+          f"[{downloaded} new, {skipped} skipped, {failed} failed]"
         )
 
-    except Exception as e:
-      context.log.warning(f"Failed to process company {ticker} ({cik}): {e}")
-      total_errors += 1
+    return {
+      "filings_found": len(hits),
+      "submissions_fetched": submissions_fetched,
+      "downloaded": downloaded,
+      "skipped": skipped,
+      "failed": failed,
+      "dry_run": False,
+    }
 
-  context.log.info(
-    f"Download complete for year {year}: "
-    f"{total_downloaded} downloaded, {total_skipped} skipped, {total_errors} errors"
-  )
+  # Run async code in sync Dagster context
+  result = asyncio.run(run_efts_download())
+
+  if result.get("dry_run"):
+    context.log.info(
+      f"[DRY RUN] Discovery complete for year {year}: {result['filings_found']} filings found"
+    )
+  else:
+    context.log.info(
+      f"Download complete for year {year}: "
+      f"{result['downloaded']} downloaded, {result['skipped']} skipped, {result['failed']} failed"
+    )
 
   return MaterializeResult(
     metadata={
       "year": year,
-      "companies_processed": companies_processed,
-      "filings_downloaded": total_downloaded,
-      "filings_skipped": total_skipped,
-      "errors": total_errors,
+      "filings_found": result["filings_found"],
+      "submissions_fetched": result.get("submissions_fetched", 0),
+      "filings_downloaded": result["downloaded"],
+      "filings_skipped": result["skipped"],
+      "errors": result["failed"],
+      "dry_run": result.get("dry_run", False),
     }
   )
 

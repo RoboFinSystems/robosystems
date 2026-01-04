@@ -27,8 +27,6 @@ from robosystems.dagster.assets import (
   qb_accounts,
   qb_graph_data,
   qb_transactions,
-  # SEC pipeline - download phase
-  sec_companies_list,
   # SEC pipeline - staging and materialization
   sec_duckdb_staging,
   sec_graph_materialized,
@@ -197,8 +195,7 @@ all_sensors = [
 all_assets = [
   # Direct staging (observable source for API direct staging)
   staged_files_source,
-  # SEC pipeline - download phase
-  sec_companies_list,
+  # SEC pipeline - download phase (EFTS-based discovery)
   sec_raw_filings,
   # SEC pipeline - dynamic partition processing (sensor handles discovery)
   sec_process_filing,
