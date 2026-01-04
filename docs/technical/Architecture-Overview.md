@@ -399,10 +399,33 @@ Database allocations are managed in [valkey_registry.py](https://github.com/Robo
 
 **Purpose**: Document storage and data lake
 
-- **User uploads**: Parquet files for graph ingestion
-- **Backups**: Database snapshots and archives
-- **SEC data**: XBRL filing storage
-- **Graph exports**: Database dumps and migrations
+S3 storage is organized into four canonical buckets with consistent naming (`robosystems-{purpose}-{env}`):
+
+| Bucket | Environment Variable | Purpose |
+|--------|---------------------|---------|
+| `robosystems-shared-raw-{env}` | `SHARED_RAW_BUCKET` | Raw downloads from external sources (SEC filings, etc.) |
+| `robosystems-shared-processed-{env}` | `SHARED_PROCESSED_BUCKET` | Processed parquet files for graph ingestion |
+| `robosystems-user-{env}` | `USER_DATA_BUCKET` | User uploads, graph backups, staging files |
+| `robosystems-public-data-{env}` | `PUBLIC_DATA_BUCKET` | CDN-served public content |
+
+**Key Structure:**
+
+```
+# Shared data (SEC, FRED, etc.)
+s3://robosystems-shared-raw-{env}/
+  sec/year=2024/{cik}/{accession}.zip
+
+s3://robosystems-shared-processed-{env}/
+  sec/year=2024/nodes/Entity/*.parquet
+
+# User/graph data
+s3://robosystems-user-{env}/
+  user-staging/{user_id}/{graph_id}/{table}/*.parquet
+  graph-backups/databases/{graph_id}/full/*.lbug.gz
+  graph-databases/{env}/{graph_id}/*.tar.gz
+```
+
+**Configuration**: Path helpers are centralized in [`robosystems/config/storage/`](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/storage/README.md) with `shared.py` for external data sources and `graph.py` for customer graph storage
 
 ## Infrastructure
 
