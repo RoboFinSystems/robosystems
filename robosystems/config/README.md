@@ -25,7 +25,11 @@ config/
 ├── agents.py                # Agent/AI configuration
 ├── external_services.py     # External API configurations
 ├── validation.py            # Startup validation
-└── repositories.py          # Repository configuration
+├── repositories.py          # Repository configuration
+└── storage/                 # S3 path configuration (see storage/README.md)
+    ├── __init__.py          # Re-exports from shared and graph
+    ├── shared.py            # Shared data sources (SEC, FRED, etc.)
+    └── graph.py             # Graph database storage paths
 ```
 
 ## Key Components
@@ -398,6 +402,43 @@ DEFAULT_MODEL_CONFIG = ModelConfig(
     temperature=0.7,
 )
 ```
+
+### 7. Storage Configuration (`storage/`)
+
+Centralized S3 path helpers for consistent bucket usage across the platform.
+
+**Features:**
+
+- **Shared Data Sources**: SEC, FRED, and future data repositories
+- **Graph Storage**: User staging, backups, and instance-level database storage
+- **Consistent Paths**: Centralized key generation for all S3 operations
+- **Data Source Registry**: Config-driven data source management
+
+**Bucket Variables:**
+
+```python
+SHARED_RAW_BUCKET        # Raw downloads (SEC filings, etc.)
+SHARED_PROCESSED_BUCKET  # Processed parquet files
+USER_DATA_BUCKET         # User uploads, graph backups
+PUBLIC_DATA_BUCKET       # CDN-served public content
+```
+
+**Usage:**
+
+```python
+from robosystems.config.storage import shared, graph
+from robosystems.config.storage.shared import DataSourceType
+
+# Shared data paths (SEC, FRED, etc.)
+raw_key = shared.get_raw_key(DataSourceType.SEC, "year=2024", "320193", "filing.zip")
+processed_key = shared.get_processed_key(DataSourceType.SEC, "year=2024", "nodes", "Entity.parquet")
+
+# Graph storage paths
+staging_key = graph.get_staging_key("user123", "kg456", "Entity", "file789", "data.parquet")
+backup_key = graph.get_instance_backup_key("prod", "kg456", timestamp)
+```
+
+See `storage/README.md` for complete documentation.
 
 ## Configuration Philosophy
 

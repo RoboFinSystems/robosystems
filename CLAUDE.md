@@ -169,6 +169,7 @@ All configuration is centralized and config-as-code:
 | `agents.py`          | Claude model configuration (Bedrock)           |
 | `validation.py`      | Startup configuration checks                   |
 | `valkey_registry.py` | Redis database allocation                      |
+| `storage/`           | S3 path helpers (shared data, graph storage)   |
 
 ### Subscription Tiers
 
@@ -356,6 +357,7 @@ just valkey-clear-queue QUEUE # Clear queue
 Before working in a directory, read its README:
 
 - `/robosystems/config/README.md` - Configuration patterns
+- `/robosystems/config/storage/README.md` - S3 storage paths
 - `/robosystems/graph_api/README.md` - Graph API details
 - `/robosystems/middleware/auth/README.md` - Authentication system
 - `/robosystems/middleware/graph/README.md` - Graph routing
