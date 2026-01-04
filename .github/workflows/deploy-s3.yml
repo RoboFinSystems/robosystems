@@ -108,8 +108,7 @@ jobs:
             echo "is_new_stack=false" >> $GITHUB_OUTPUT
           fi
 
-          S3_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
-                ParameterKey=AwsRegion,ParameterValue=${{ inputs.aws_region }}"
+          S3_STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }}"
           
           # Add domain parameters if provided
           if [ -n "${{ inputs.public_domain_name }}" ]; then
