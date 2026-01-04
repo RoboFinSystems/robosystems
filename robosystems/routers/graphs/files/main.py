@@ -656,7 +656,7 @@ async def delete_file(
           logger.info(f"Marked graph {graph_id} as stale due to file deletion")
 
     s3_client = S3Client()
-    bucket = env.AWS_S3_BUCKET
+    bucket = env.USER_DATA_BUCKET
 
     s3_client.s3_client.delete_object(Bucket=bucket, Key=s3_key)
     logger.info(f"Deleted file from S3: {s3_key}")

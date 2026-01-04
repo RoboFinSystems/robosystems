@@ -31,6 +31,7 @@ import time
 from typing import Any
 
 from robosystems.config import env
+from robosystems.config.shared_data import DATA_SOURCES, DataSourceType
 from robosystems.graph_api.client.factory import get_graph_client
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
@@ -51,18 +52,20 @@ class XBRLDuckDBGraphProcessor:
     consolidated files to test performance with high file counts
   """
 
-  def __init__(self, graph_id: str = "sec", source_prefix: str = "processed"):
+  def __init__(self, graph_id: str = "sec", source_prefix: str | None = None):
     """
     Initialize XBRL graph ingestion processor.
 
     Args:
         graph_id: Graph database identifier (default: "sec")
-        source_prefix: S3 prefix for source files (default: "processed")
+        source_prefix: S3 prefix for source files (default: SEC prefix from shared_data.py)
     """
     self.graph_id = graph_id
     self.s3_client = S3Client()
-    self.bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
-    self.source_prefix = source_prefix
+    self.bucket = env.SHARED_PROCESSED_BUCKET
+    # Use SEC prefix from centralized config if not specified
+    sec_config = DATA_SOURCES[DataSourceType.SEC]
+    self.source_prefix = source_prefix or sec_config.processed_prefix.rstrip("/")
 
   async def process_files(
     self,

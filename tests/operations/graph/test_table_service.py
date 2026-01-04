@@ -191,10 +191,10 @@ class TestTableServiceS3Pattern:
     return TableService(mock_session)
 
   def test_get_s3_pattern_for_table(self, table_service, monkeypatch):
-    monkeypatch.setenv("AWS_S3_BUCKET", "test-bucket")
+    monkeypatch.setenv("USER_DATA_BUCKET", "test-bucket")
     from robosystems.config import env
 
-    env.AWS_S3_BUCKET = "test-bucket"
+    env.USER_DATA_BUCKET = "test-bucket"
 
     pattern = table_service.get_s3_pattern_for_table(
       graph_id="kg123", table_name="Company", user_id="user456"

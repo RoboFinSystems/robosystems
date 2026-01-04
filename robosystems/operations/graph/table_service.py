@@ -151,7 +151,7 @@ class TableService:
     Returns:
         S3 glob pattern for all files in this table
     """
-    bucket = env.AWS_S3_BUCKET
+    bucket = env.USER_DATA_BUCKET
     return f"s3://{bucket}/user-staging/{user_id}/{graph_id}/{table_name}/**/*.parquet"
 
   def delete_table(self, graph_id: str, table_name: str) -> None:

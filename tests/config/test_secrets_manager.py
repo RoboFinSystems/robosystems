@@ -214,11 +214,13 @@ class TestSecretValueFunction:
 
       # Setup mock for S3 secrets
       mock_client.get_secret_value.return_value = {
-        "SecretString": json.dumps({"SEC_RAW_BUCKET": "robosystems-sec-raw-staging"})
+        "SecretString": json.dumps(
+          {"SHARED_RAW_BUCKET": "robosystems-shared-raw-staging"}
+        )
       }
 
-      result = get_secret_value("SEC_RAW_BUCKET", "default")
-      assert result == "robosystems-sec-raw-staging"
+      result = get_secret_value("SHARED_RAW_BUCKET", "default")
+      assert result == "robosystems-shared-raw-staging"
 
   def test_get_secret_value_handles_exceptions(self):
     """Test that exceptions are caught and defaults returned."""
@@ -271,7 +273,7 @@ class TestSecretMappingsConfiguration:
 
   def test_all_critical_secrets_mapped(self):
     """Verify all critical secrets are in the mapping."""
-    # Note: Bucket names (SEC_RAW_BUCKET, SEC_PROCESSED_BUCKET, etc.) are
+    # Note: Bucket names (SHARED_RAW_BUCKET, SHARED_PROCESSED_BUCKET, etc.) are
     # computed from environment in env.py, not fetched from secrets.
     critical_secrets = [
       "DATABASE_URL",

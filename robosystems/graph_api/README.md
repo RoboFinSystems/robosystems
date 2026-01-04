@@ -589,7 +589,9 @@ GRAPH_API_KEY=                           # Unified API key (both backends)
 # AWS Configuration
 AWS_DEFAULT_REGION=us-east-1
 DATABASE_URL=postgresql://...           # PostgreSQL for metadata
-AWS_S3_BUCKET=robosystems-data         # S3 for ingestion
+USER_DATA_BUCKET=robosystems-user-dev  # S3 for user data ingestion
+SHARED_RAW_BUCKET=robosystems-shared-raw-dev  # S3 for shared raw data
+SHARED_PROCESSED_BUCKET=robosystems-shared-processed-dev  # S3 for shared processed data
 
 # Feature Flags
 LBUG_CIRCUIT_BREAKERS_ENABLED=true     # Enable circuit breakers

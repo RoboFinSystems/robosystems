@@ -41,6 +41,11 @@ from dagster import (
 )
 
 from robosystems.config import env
+from robosystems.config.shared_data import (
+  DataSourceType,
+  get_processed_key,
+  get_raw_key,
+)
 from robosystems.dagster.resources import S3Resource
 
 # In-memory cache for SEC submissions during a single run
@@ -372,8 +377,8 @@ def sec_raw_filings(
   year = int(context.partition_key)
   context.log.info(f"Downloading SEC filings for year {year}")
 
-  # Get bucket for raw filings
-  bucket = env.SEC_RAW_BUCKET or "robosystems-sec-raw"
+  # Get bucket for raw filings (shared bucket with sec/ prefix)
+  bucket = env.SHARED_RAW_BUCKET
 
   # Initialize counters
   total_downloaded = 0
@@ -427,7 +432,9 @@ def sec_raw_filings(
 
       for _, filing in filings.iterrows():
         accession = filing["accessionNumber"]
-        s3_key = f"raw/year={year}/{cik}/{accession}.zip"
+        s3_key = get_raw_key(
+          DataSourceType.SEC, f"year={year}", cik, f"{accession}.zip"
+        )
 
         # Skip if exists and configured to do so
         if config.skip_existing:
@@ -540,11 +547,11 @@ def sec_process_filing(
   year, cik, accession = parts
   context.log.info(f"Processing filing: year={year}, cik={cik}, accession={accession}")
 
-  raw_bucket = env.SEC_RAW_BUCKET or "robosystems-sec-raw"
-  processed_bucket = env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
+  raw_bucket = env.SHARED_RAW_BUCKET
+  processed_bucket = env.SHARED_PROCESSED_BUCKET
 
-  # Download raw ZIP
-  raw_key = f"raw/year={year}/{cik}/{accession}.zip"
+  # Download raw ZIP from shared bucket
+  raw_key = get_raw_key(DataSourceType.SEC, f"year={year}", cik, f"{accession}.zip")
 
   import os
   import tempfile
@@ -635,7 +642,13 @@ def sec_process_filing(
             if parquet_file.endswith(".parquet"):
               local_path = os.path.join(entity_dir, parquet_file)
               table_name = parquet_file.replace(".parquet", "")
-              s3_key = f"processed/year={year}/{entity_type}/{table_name}/{cik}_{accession}.parquet"
+              s3_key = get_processed_key(
+                DataSourceType.SEC,
+                f"year={year}",
+                entity_type,
+                table_name,
+                f"{cik}_{accession}.parquet",
+              )
 
               with open(local_path, "rb") as f:
                 s3.client.upload_fileobj(f, processed_bucket, s3_key)
@@ -702,7 +715,8 @@ def sec_duckdb_staging(
   context.log.info("Creating DuckDB staging tables from processed files")
 
   # Use the existing processor's discovery and staging logic
-  processor = XBRLDuckDBGraphProcessor(graph_id="sec", source_prefix="processed")
+  # source_prefix matches the DataSourceType.SEC prefix in shared_data.py
+  processor = XBRLDuckDBGraphProcessor(graph_id="sec", source_prefix="sec")
 
   async def run_staging():
     # Discover all processed files (no year filter - ingest everything)
@@ -772,9 +786,8 @@ def sec_graph_materialized(
   context.log.info(f"Materializing to graph: {config.graph_id}")
 
   # Use the existing processor for full pipeline
-  processor = XBRLDuckDBGraphProcessor(
-    graph_id=config.graph_id, source_prefix="processed"
-  )
+  # source_prefix matches the DataSourceType.SEC prefix in shared_data.py
+  processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id, source_prefix="sec")
 
   async def run_materialization():
     # Ensure the SEC repository metadata exists in PostgreSQL

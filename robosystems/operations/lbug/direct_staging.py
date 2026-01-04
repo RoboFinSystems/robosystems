@@ -99,7 +99,7 @@ async def stage_file_directly(
       }
 
     # Build file list with S3 URIs
-    bucket = env.AWS_S3_BUCKET
+    bucket = env.USER_DATA_BUCKET
     s3_files = [f"s3://{bucket}/{f.s3_key}" for f in uploaded_files]
     file_id_map = {f"s3://{bucket}/{f.s3_key}": f.id for f in uploaded_files}
 

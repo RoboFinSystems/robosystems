@@ -18,7 +18,7 @@ class TestParseRawS3Key:
 
   def test_valid_key(self):
     """Test parsing a valid S3 key."""
-    key = "raw/year=2024/320193/0000320193-24-000081.zip"
+    key = "sec/year=2024/320193/0000320193-24-000081.zip"
     result = _parse_raw_s3_key(key)
 
     assert result is not None
@@ -29,7 +29,7 @@ class TestParseRawS3Key:
 
   def test_invalid_key_no_zip(self):
     """Test parsing a key without .zip extension."""
-    key = "raw/year=2024/320193/0000320193-24-000081.parquet"
+    key = "sec/year=2024/320193/0000320193-24-000081.parquet"
     result = _parse_raw_s3_key(key)
     assert result is None
 
@@ -41,7 +41,7 @@ class TestParseRawS3Key:
 
   def test_invalid_key_no_year_prefix(self):
     """Test parsing a key without year= prefix."""
-    key = "raw/2024/320193/0000320193-24-000081.zip"
+    key = "sec/2024/320193/0000320193-24-000081.zip"
     result = _parse_raw_s3_key(key)
     assert result is None
 
@@ -93,8 +93,8 @@ class TestSecProcessingSensor:
   def test_skips_without_bucket_config(self, mock_env):
     """Test sensor skips when S3 buckets are not configured."""
     mock_env.ENVIRONMENT = "prod"
-    mock_env.SEC_RAW_BUCKET = None
-    mock_env.SEC_PROCESSED_BUCKET = "test-processed"
+    mock_env.SHARED_RAW_BUCKET = None
+    mock_env.SHARED_PROCESSED_BUCKET = "test-processed"
 
     context = build_sensor_context()
     result = list(sec_processing_sensor(context))
@@ -107,8 +107,8 @@ class TestSecProcessingSensor:
   def test_handles_no_such_bucket_error(self, mock_env, mock_get_client):
     """Test sensor handles NoSuchBucket error gracefully."""
     mock_env.ENVIRONMENT = "prod"
-    mock_env.SEC_RAW_BUCKET = "nonexistent-bucket"
-    mock_env.SEC_PROCESSED_BUCKET = "test-processed"
+    mock_env.SHARED_RAW_BUCKET = "nonexistent-bucket"
+    mock_env.SHARED_PROCESSED_BUCKET = "test-processed"
 
     mock_client = MagicMock()
     mock_paginator = MagicMock()
@@ -132,8 +132,8 @@ class TestSecProcessingSensor:
   ):
     """Test sensor discovers unprocessed filings and yields run requests."""
     mock_env.ENVIRONMENT = "prod"
-    mock_env.SEC_RAW_BUCKET = "test-raw"
-    mock_env.SEC_PROCESSED_BUCKET = "test-processed"
+    mock_env.SHARED_RAW_BUCKET = "test-raw"
+    mock_env.SHARED_PROCESSED_BUCKET = "test-processed"
 
     # Mock S3 listing
     mock_client = MagicMock()
@@ -141,8 +141,8 @@ class TestSecProcessingSensor:
     mock_paginator.paginate.return_value = [
       {
         "Contents": [
-          {"Key": "raw/year=2024/320193/0000320193-24-000081.zip"},
-          {"Key": "raw/year=2024/320193/0000320193-24-000082.zip"},
+          {"Key": "sec/year=2024/320193/0000320193-24-000081.zip"},
+          {"Key": "sec/year=2024/320193/0000320193-24-000082.zip"},
         ]
       }
     ]
@@ -167,8 +167,8 @@ class TestSecProcessingSensor:
   def test_handles_empty_bucket(self, mock_env, mock_get_client):
     """Test sensor handles empty bucket gracefully."""
     mock_env.ENVIRONMENT = "prod"
-    mock_env.SEC_RAW_BUCKET = "test-raw"
-    mock_env.SEC_PROCESSED_BUCKET = "test-processed"
+    mock_env.SHARED_RAW_BUCKET = "test-raw"
+    mock_env.SHARED_PROCESSED_BUCKET = "test-processed"
 
     mock_client = MagicMock()
     mock_paginator = MagicMock()
@@ -188,13 +188,13 @@ class TestSecProcessingSensor:
   def test_all_filings_processed(self, mock_env, mock_get_client, mock_check_processed):
     """Test sensor handles case where all filings are already processed."""
     mock_env.ENVIRONMENT = "prod"
-    mock_env.SEC_RAW_BUCKET = "test-raw"
-    mock_env.SEC_PROCESSED_BUCKET = "test-processed"
+    mock_env.SHARED_RAW_BUCKET = "test-raw"
+    mock_env.SHARED_PROCESSED_BUCKET = "test-processed"
 
     mock_client = MagicMock()
     mock_paginator = MagicMock()
     mock_paginator.paginate.return_value = [
-      {"Contents": [{"Key": "raw/year=2024/320193/0000320193-24-000081.zip"}]}
+      {"Contents": [{"Key": "sec/year=2024/320193/0000320193-24-000081.zip"}]}
     ]
     mock_client.get_paginator.return_value = mock_paginator
     mock_get_client.return_value = mock_client

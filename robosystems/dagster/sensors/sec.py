@@ -23,6 +23,11 @@ from dagster import (
 )
 
 from robosystems.config import env
+from robosystems.config.shared_data import (
+  DataSourceType,
+  get_processed_key,
+  get_raw_key,
+)
 from robosystems.dagster.jobs.sec import sec_process_job
 
 
@@ -39,13 +44,21 @@ def _get_s3_client():
 def _parse_raw_s3_key(key: str) -> tuple[str, str, str] | None:
   """Parse S3 key to extract year, cik, accession.
 
-  Expected format: raw/year=2024/320193/0000320193-24-000081.zip
+  Expected format: sec/year=2024/320193/0000320193-24-000081.zip
+  (matches structure from get_raw_key(DataSourceType.SEC, ...))
 
   Returns:
       Tuple of (year, cik, accession) or None if invalid format
   """
+  # Get the expected prefix for SEC data
+  sec_prefix = get_raw_key(DataSourceType.SEC)  # Returns "sec"
+
   parts = key.split("/")
   if len(parts) < 4 or not parts[-1].endswith(".zip"):
+    return None
+
+  # First part should match SEC prefix
+  if parts[0] != sec_prefix:
     return None
 
   # Extract year from "year=2024"
@@ -70,7 +83,13 @@ def _check_processed_exists(
 
   We check for the Entity parquet file as a proxy for "fully processed".
   """
-  processed_key = f"processed/year={year}/nodes/Entity/{cik}_{accession}.parquet"
+  processed_key = get_processed_key(
+    DataSourceType.SEC,
+    f"year={year}",
+    "nodes",
+    "Entity",
+    f"{cik}_{accession}.parquet",
+  )
   try:
     s3_client.head_object(Bucket=bucket, Key=processed_key)
     return True
@@ -96,7 +115,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   """Watch for raw SEC filings in S3 and trigger parallel processing.
 
   This sensor:
-  1. Lists raw XBRL ZIPs in S3 (raw/year=*/cik/*.zip)
+  1. Lists raw XBRL ZIPs in S3 (sec/year=*/cik/*.zip)
   2. Checks which don't have corresponding parquet output
   3. Registers dynamic partitions for unprocessed filings
   4. Yields RunRequest for each to trigger sec_process_job
@@ -112,13 +131,13 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     )
     return
 
-  raw_bucket = env.SEC_RAW_BUCKET
-  processed_bucket = env.SEC_PROCESSED_BUCKET
+  raw_bucket = env.SHARED_RAW_BUCKET
+  processed_bucket = env.SHARED_PROCESSED_BUCKET
 
   # Validate required S3 bucket configuration
   if not raw_bucket or not processed_bucket:
     yield SkipReason(
-      "Missing required S3 bucket configuration (SEC_RAW_BUCKET or SEC_PROCESSED_BUCKET)"
+      "Missing required S3 bucket configuration (SHARED_RAW_BUCKET or SHARED_PROCESSED_BUCKET)"
     )
     return
 
@@ -129,7 +148,8 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     paginator = s3_client.get_paginator("list_objects_v2")
     raw_files = []
 
-    for page in paginator.paginate(Bucket=raw_bucket, Prefix="raw/"):
+    sec_prefix = f"{get_raw_key(DataSourceType.SEC)}/"  # "sec/"
+    for page in paginator.paginate(Bucket=raw_bucket, Prefix=sec_prefix):
       for obj in page.get("Contents", []):
         key = obj["Key"]
         if key.endswith(".zip"):

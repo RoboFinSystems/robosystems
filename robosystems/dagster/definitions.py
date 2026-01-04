@@ -113,7 +113,7 @@ from robosystems.dagster.sensors import (
 # consistency with how the rest of the application fetches secrets.
 resources = {
   "db": DatabaseResource(),  # Falls back to env.DATABASE_URL
-  "s3": S3Resource(),  # Falls back to env.AWS_S3_BUCKET, env.AWS_REGION
+  "s3": S3Resource(),  # Falls back to env.USER_DATA_BUCKET, env.AWS_REGION
   "graph": GraphResource(),  # Falls back to env.GRAPH_API_URL
 }
 
