@@ -173,9 +173,9 @@ class SECPipeline:
       }
     else:
       # sec_download job: download raw ZIPs only (no processing)
+      # EFTS-based discovery - resolves tickers to CIKs in the asset
       config = {
         "ops": {
-          "sec_companies_list": {"config": {"ticker_filter": tickers}},
           "sec_raw_filings": {
             "config": {
               "skip_existing": skip_existing,
