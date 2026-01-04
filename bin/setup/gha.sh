@@ -231,7 +231,7 @@ function setup_minimum_config() {
     gh variable set DAGSTER_RUN_WORKER_MAX_INSTANCES_STAGING --body "2"
 
     # Dagster Deployment Options
-    gh variable set DAGSTER_REFRESH_ECS_PROD --body "false"
+    gh variable set DAGSTER_REFRESH_ECS_PROD --body "true"
     gh variable set DAGSTER_REFRESH_ECS_STAGING --body "true"
     gh variable set RUN_MIGRATIONS_PROD --body "true"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"
@@ -491,7 +491,7 @@ function setup_full_config() {
     gh variable set DAGSTER_RUN_WORKER_MAX_INSTANCES_STAGING --body "2"
 
     # Dagster Deployment Options
-    gh variable set DAGSTER_REFRESH_ECS_PROD --body "false"
+    gh variable set DAGSTER_REFRESH_ECS_PROD --body "true"
     gh variable set DAGSTER_REFRESH_ECS_STAGING --body "true"
     gh variable set RUN_MIGRATIONS_PROD --body "true"
     gh variable set RUN_MIGRATIONS_STAGING --body "true"

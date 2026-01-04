@@ -543,7 +543,7 @@ jobs:
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
-      refresh_ecs_service: ${{ vars.API_ASG_REFRESH_PROD || 'false' }}
+      refresh_ecs_service: ${{ vars.API_ASG_REFRESH_PROD || 'true' }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -599,7 +599,7 @@ jobs:
       # Bastion Access (for internal UI access)
       bastion_sg_id: ${{ needs.deploy-bastion.outputs.bastion_sg_id }}
       # Other Configuration
-      refresh_ecs_service: ${{ vars.DAGSTER_REFRESH_ECS_PROD || 'false' }}
+      refresh_ecs_service: ${{ vars.DAGSTER_REFRESH_ECS_PROD || 'true' }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

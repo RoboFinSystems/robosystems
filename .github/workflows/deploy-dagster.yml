@@ -121,7 +121,7 @@ on:
         description: "Refresh ECS services after deployment"
         required: false
         type: string
-        default: "false"
+        default: "true"
 
     secrets:
       ACTIONS_TOKEN:
