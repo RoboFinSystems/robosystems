@@ -128,6 +128,13 @@ Parameters:
     Default: Dagster
     Description: Component tag for resource identification and billing
 
+Mappings:
+  StackNames:
+    prod:
+      S3: RoboSystemsS3Prod
+    staging:
+      S3: RoboSystemsS3Staging
+
 Conditions:
   HasBastionAccess: !Not [!Equals [!Ref BastionSecurityGroupId, ""]]
 
@@ -664,7 +671,9 @@ Resources:
             # CDN URL for public data (text block externalization in SEC processing)
             - Name: PUBLIC_DATA_CDN_URL
               Value:
-                Fn::ImportValue: !Sub robosystems-s3-${Environment}-PublicDataCDNURL
+                Fn::ImportValue: !Sub
+                  - "${S3StackName}-${Environment}-PublicDataCDNURL"
+                  - S3StackName: !FindInMap [StackNames, !Ref Environment, S3]
 
   # ========================================
   # ECS SERVICES
