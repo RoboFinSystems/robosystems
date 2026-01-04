@@ -24,11 +24,12 @@ import boto3
 from botocore.exceptions import ClientError
 
 from ...config import env
+from ...config.storage import graph
 from ...logger import logger
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
 
 # Backup configuration
-DEFAULT_BACKUP_BUCKET = "robosystems-graph-backups"
+# Graph backups are stored in the USER_DATA_BUCKET under graph-databases/ prefix
 DEFAULT_RETENTION_DAYS = 30  # Keep customer backups longer than shared repos
 DEFAULT_COMPRESSION_LEVEL = 6
 MAX_BACKUP_SIZE_GB = 10  # Skip backup if database > 10GB (log warning)
@@ -72,9 +73,9 @@ class LadybugGraphBackupService:
     self.retention_days = retention_days
     self.compression_level = compression_level
 
-    # S3 configuration
-    self.s3_bucket = s3_bucket or f"{DEFAULT_BACKUP_BUCKET}-{environment}"
-    self.s3_prefix = f"graph-databases/{environment}"
+    # S3 configuration - use canonical USER_DATA_BUCKET for customer graph backups
+    self.s3_bucket = s3_bucket or env.USER_DATA_BUCKET
+    self.s3_prefix = graph.get_instance_backup_prefix(environment).rstrip("/")
 
     # AWS clients - use S3-specific credentials
     s3_config = env.get_s3_config()
@@ -239,8 +240,8 @@ class LadybugGraphBackupService:
         # Calculate checksum
         checksum = self._calculate_file_checksum(backup_file)
 
-        # Upload to S3
-        s3_key = f"{self.s3_prefix}/{graph_id}/{backup_file.name}"
+        # Upload to S3 using centralized path helper
+        s3_key = graph.get_instance_backup_key(self.environment, graph_id, start_time)
         await self._upload_backup_to_s3(backup_file, s3_key, checksum)
 
         backup_size_mb = backup_file.stat().st_size / (1024**2)
@@ -295,8 +296,8 @@ class LadybugGraphBackupService:
   async def _is_backup_current(self, graph_id: str, db_path: Path) -> bool:
     """Check if an up-to-date backup already exists."""
     try:
-      # Get latest backup from S3
-      s3_prefix = f"{self.s3_prefix}/{graph_id}/"
+      # Get latest backup from S3 using centralized path helper
+      s3_prefix = graph.get_instance_backup_prefix(self.environment, graph_id)
 
       response = self.s3_client.list_objects_v2(
         Bucket=self.s3_bucket, Prefix=s3_prefix, MaxKeys=1
