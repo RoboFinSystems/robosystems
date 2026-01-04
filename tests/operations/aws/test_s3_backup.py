@@ -22,7 +22,7 @@ class TestS3BackupAdapter:
     # Store original values
     original_env = {}
     env_vars = {
-      "AWS_S3_BUCKET": "robosystems-local",
+      "USER_DATA_BUCKET": "robosystems-local",
       "AWS_S3_ACCESS_KEY_ID": "test",
       "AWS_S3_SECRET_ACCESS_KEY": "test",
       "AWS_REGION": "us-east-1",

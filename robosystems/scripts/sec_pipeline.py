@@ -41,6 +41,11 @@ from typing import Any
 import yaml
 
 from robosystems.config import env
+from robosystems.config.shared_data import (
+  DataSourceType,
+  get_processed_key,
+  get_raw_key,
+)
 from robosystems.logger import logger
 
 # Top companies by market cap (as of 2024)
@@ -442,31 +447,37 @@ class SECPipeline:
       return False
 
   def _clear_s3_buckets(self):
-    """Clear LocalStack S3 buckets."""
-    buckets = [
-      "robosystems-sec-raw",
-      "robosystems-sec-processed",
-      "robosystems-sec-textblocks",
+    """Clear SEC data from shared S3 buckets."""
+    from robosystems.config import env as app_env
+
+    sec_prefix = get_raw_key(DataSourceType.SEC)  # "sec"
+
+    # Clear SEC prefix in shared buckets
+    bucket_prefixes = [
+      (app_env.SHARED_RAW_BUCKET, sec_prefix),
+      (app_env.SHARED_PROCESSED_BUCKET, sec_prefix),
     ]
-    logger.info("  Clearing S3 buckets...")
-    for bucket in buckets:
+    logger.info("  Clearing SEC data from shared buckets...")
+    for bucket, prefix in bucket_prefixes:
+      if not bucket:
+        continue
       try:
         cmd = [
           "aws",
           "s3",
           "rm",
-          f"s3://{bucket}",
+          f"s3://{bucket}/{prefix}/",
           "--recursive",
-          "--endpoint-url",
-          "http://localhost:4566",
         ]
+        if app_env.AWS_ENDPOINT_URL:
+          cmd.extend(["--endpoint-url", app_env.AWS_ENDPOINT_URL])
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
-          logger.info(f"    Cleared: {bucket}")
+          logger.info(f"    Cleared: {bucket}/{prefix}/")
         elif "NoSuchBucket" in result.stderr:
           logger.debug(f"    Bucket doesn't exist: {bucket}")
       except Exception as e:
-        logger.warning(f"    Error clearing {bucket}: {e}")
+        logger.warning(f"    Error clearing {bucket}/{prefix}/: {e}")
 
   def _run_parallel_processing(self) -> StageResult | None:
     """Run parallel processing for downloaded filings.
@@ -479,8 +490,12 @@ class SECPipeline:
 
     start_time = time.time()
 
-    raw_bucket = app_env.SEC_RAW_BUCKET or "robosystems-sec-raw"
-    processed_bucket = app_env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
+    raw_bucket = app_env.SHARED_RAW_BUCKET
+    processed_bucket = app_env.SHARED_PROCESSED_BUCKET
+
+    if not raw_bucket or not processed_bucket:
+      logger.error("  Missing SHARED_RAW_BUCKET or SHARED_PROCESSED_BUCKET")
+      return None
 
     # Create S3 client (with LocalStack support)
     s3_kwargs = {"region_name": app_env.AWS_REGION or "us-east-1"}
@@ -488,11 +503,14 @@ class SECPipeline:
       s3_kwargs["endpoint_url"] = app_env.AWS_ENDPOINT_URL
     s3_client = boto3.client("s3", **s3_kwargs)
 
+    # Get SEC prefix from shared_data.py
+    sec_prefix = f"{get_raw_key(DataSourceType.SEC)}/"  # "sec/"
+
     # Discover unprocessed filings
     raw_files = []
     paginator = s3_client.get_paginator("list_objects_v2")
 
-    for page in paginator.paginate(Bucket=raw_bucket, Prefix="raw/"):
+    for page in paginator.paginate(Bucket=raw_bucket, Prefix=sec_prefix):
       for obj in page.get("Contents", []):
         key = obj["Key"]
         if key.endswith(".zip"):
@@ -505,6 +523,7 @@ class SECPipeline:
     # Check which need processing
     unprocessed = []
     for raw_key in raw_files:
+      # Parse: sec/year=2024/320193/0000320193-24-000081.zip
       parts = raw_key.split("/")
       if len(parts) < 4:
         continue
@@ -514,9 +533,13 @@ class SECPipeline:
       accession = parts[-1].replace(".zip", "")
       partition_key = f"{year_part}_{cik}_{accession}"
 
-      # Check if already processed
-      processed_key = (
-        f"processed/year={year_part}/nodes/Entity/{cik}_{accession}.parquet"
+      # Check if already processed using shared_data.py helper
+      processed_key = get_processed_key(
+        DataSourceType.SEC,
+        f"year={year_part}",
+        "nodes",
+        "Entity",
+        f"{cik}_{accession}.parquet",
       )
       try:
         s3_client.head_object(Bucket=processed_bucket, Key=processed_key)
@@ -851,8 +874,12 @@ def cmd_process_parallel(args):
   logger.info("SEC Parallel Processing (Phase 2)")
   logger.info("=" * 60)
 
-  raw_bucket = app_env.SEC_RAW_BUCKET or "robosystems-sec-raw"
-  processed_bucket = app_env.SEC_PROCESSED_BUCKET or "robosystems-sec-processed"
+  raw_bucket = app_env.SHARED_RAW_BUCKET
+  processed_bucket = app_env.SHARED_PROCESSED_BUCKET
+
+  if not raw_bucket or not processed_bucket:
+    logger.error("Missing SHARED_RAW_BUCKET or SHARED_PROCESSED_BUCKET")
+    return 1
 
   # Create S3 client (with LocalStack support)
   s3_kwargs = {"region_name": app_env.AWS_REGION or "us-east-1"}
@@ -860,12 +887,15 @@ def cmd_process_parallel(args):
     s3_kwargs["endpoint_url"] = app_env.AWS_ENDPOINT_URL
   s3_client = boto3.client("s3", **s3_kwargs)
 
+  # Get SEC prefix from shared_data.py
+  sec_prefix = get_raw_key(DataSourceType.SEC)  # "sec"
+
   # List raw filings
   logger.info(f"Scanning S3 bucket: {raw_bucket}")
   paginator = s3_client.get_paginator("list_objects_v2")
 
   # Filter by year if specified
-  prefix = f"raw/year={args.year}/" if args.year else "raw/"
+  prefix = f"{sec_prefix}/year={args.year}/" if args.year else f"{sec_prefix}/"
   raw_files = []
 
   for page in paginator.paginate(Bucket=raw_bucket, Prefix=prefix):
@@ -883,7 +913,7 @@ def cmd_process_parallel(args):
   # Check which need processing
   unprocessed = []
   for raw_key in raw_files:
-    # Parse: raw/year=2024/320193/0000320193-24-000081.zip
+    # Parse: sec/year=2024/320193/0000320193-24-000081.zip
     parts = raw_key.split("/")
     if len(parts) < 4:
       continue
@@ -893,8 +923,14 @@ def cmd_process_parallel(args):
     accession = parts[-1].replace(".zip", "")
     partition_key = f"{year_part}_{cik}_{accession}"
 
-    # Check if already processed
-    processed_key = f"processed/year={year_part}/nodes/Entity/{cik}_{accession}.parquet"
+    # Check if already processed using shared_data.py helper
+    processed_key = get_processed_key(
+      DataSourceType.SEC,
+      f"year={year_part}",
+      "nodes",
+      "Entity",
+      f"{cik}_{accession}.parquet",
+    )
     try:
       s3_client.head_object(Bucket=processed_bucket, Key=processed_key)
       continue  # Already processed

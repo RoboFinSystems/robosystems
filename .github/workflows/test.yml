@@ -49,10 +49,12 @@ jobs:
       OPENFIGI_API_KEY: test-openfigi-key
       # LocalStack S3 Configuration for testing
       AWS_ENDPOINT_URL: http://localhost:4566
-      AWS_S3_BUCKET: robosystems-local
       AWS_S3_ACCESS_KEY_ID: test
       AWS_S3_SECRET_ACCESS_KEY: test
       AWS_REGION: us-east-1
+      USER_DATA_BUCKET: robosystems-local
+      SHARED_RAW_BUCKET: robosystems-local
+      SHARED_PROCESSED_BUCKET: robosystems-local
       # Graph Database Backup Configuration
       LBUG_BACKUP_ENCRYPTION_KEY: test-encryption-key-dev
       # Queue Management Configuration (from pytest.ini)

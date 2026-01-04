@@ -1,16 +1,11 @@
 Description: RoboSystems File Storage Service - S3 Buckets and IAM Policies
 #
-# Bucket Structure (2026-01 Restructure):
+# Bucket Structure:
 # - robosystems-shared-raw-{env}      : Raw downloads from external sources (SEC, FRED, BLS)
 # - robosystems-shared-processed-{env}: Processed parquet files for graph ingestion
 # - robosystems-user-{env}            : User uploads, staging tables, exports
-# - robosystems-public-data-{env}     : CloudFront-served public content (unchanged)
-# - robosystems-{env}-deployment      : Lambda packages, userdata scripts (unchanged)
-#
-# Legacy buckets (kept for migration, will be removed in Phase 2):
-# - robosystems-sec-raw-{env}         : -> migrated to shared-raw/sec/
-# - robosystems-sec-processed-{env}   : -> migrated to shared-processed/sec/
-# - robosystems-{env}                 : -> migrated to user bucket
+# - robosystems-public-data-{env}     : CloudFront-served public content
+# - robosystems-{env}-deployment      : Lambda packages, userdata scripts
 
 Parameters:
   # Environment
@@ -23,23 +18,11 @@ Parameters:
       - staging
     ConstraintDescription: Must be prod or staging
 
-  # AWS Configuration
-  AwsRegion:
-    Type: String
-    Description: AWS region
-    Default: us-east-1
-    AllowedPattern: ^[a-z]{2}-[a-z]+-[0-9]$
-    ConstraintDescription: Must be a valid AWS region
-
   # Tagging Configuration
   ServiceTag:
     Type: String
     Description: Service tag for resource identification and billing
     Default: RoboSystems
-  ComponentTag:
-    Type: String
-    Description: Component tag for resource identification and billing
-    Default: S3
 
   # Domain Configuration for Public CDN
   PublicDomainName:
@@ -56,139 +39,8 @@ Conditions:
   HasCustomDomain: !Not [!Equals [!Ref PublicDomainName, ""]]
 
 Resources:
-  # ==========================================================================
-  # DEPRECATED BUCKETS - Phase 2 Cleanup
-  # These buckets are replaced by the new structure below. Keep for now to
-  # allow data migration. Remove in follow-up PR after verifying new buckets.
-  # - S3BucketRoboSystems → S3BucketUserData
-  # - S3BucketSECRaw → S3BucketSharedRaw
-  # - S3BucketSECProcessed → S3BucketSharedProcessed
-  # ==========================================================================
-
-  # DEPRECATED: Use S3BucketUserData instead
-  S3BucketRoboSystems:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      PublicAccessBlockConfiguration:
-        RestrictPublicBuckets: true
-        IgnorePublicAcls: true
-        BlockPublicPolicy: true
-        BlockPublicAcls: true
-      BucketName: !Sub robosystems-${Environment}
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - BucketKeyEnabled: false
-            ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      LifecycleConfiguration:
-        Rules:
-          - Id: TransitionToIA
-            Status: Enabled
-            Transitions:
-              - TransitionInDays: 30
-                StorageClass: STANDARD_IA
-          - Id: TransitionToIntelligentTiering
-            Status: Enabled
-            Transitions:
-              - TransitionInDays: 90
-                StorageClass: INTELLIGENT_TIERING
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-${Environment}-bucket
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: !Ref ComponentTag
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # DEPRECATED: Use S3BucketSharedProcessed instead
-  S3BucketSECProcessed:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      PublicAccessBlockConfiguration:
-        RestrictPublicBuckets: true
-        IgnorePublicAcls: true
-        BlockPublicPolicy: true
-        BlockPublicAcls: true
-      BucketName: !Sub robosystems-sec-processed-${Environment}
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - BucketKeyEnabled: false
-            ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      LifecycleConfiguration:
-        Rules:
-          - Id: TransitionToIntelligentTiering
-            Status: Enabled
-            Transitions:
-              - TransitionInDays: 0
-                StorageClass: INTELLIGENT_TIERING
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-${Environment}-sec-processed-bucket
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: ProcessedData
-        - Key: CreatedBy
-          Value: CloudFormation
-
-  # DEPRECATED: Use S3BucketSharedRaw instead
-  S3BucketSECRaw:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      PublicAccessBlockConfiguration:
-        RestrictPublicBuckets: true
-        IgnorePublicAcls: true
-        BlockPublicPolicy: true
-        BlockPublicAcls: true
-      BucketName: !Sub robosystems-sec-raw-${Environment}
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - BucketKeyEnabled: false
-            ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      LifecycleConfiguration:
-        Rules:
-          - Id: TransitionToIntelligentTiering
-            Status: Enabled
-            Transitions:
-              - TransitionInDays: 0
-                StorageClass: INTELLIGENT_TIERING
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-${Environment}-sec-raw-bucket
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Service
-          Value: !Ref ServiceTag
-        - Key: Component
-          Value: RawData
-        - Key: CreatedBy
-          Value: CloudFormation
-
   # ============================================================================
-  # NEW BUCKET STRUCTURE (2026-01 Restructure)
+  # S3 BUCKETS
   # ============================================================================
 
   # Shared Raw Data Bucket (external source downloads: SEC, FRED, BLS, etc.)
@@ -318,10 +170,6 @@ Resources:
           Value: UserData
         - Key: CreatedBy
           Value: CloudFormation
-
-  # ============================================================================
-  # LEGACY BUCKETS (kept for backwards compatibility during migration)
-  # ============================================================================
 
   # Public Data Repository Bucket (for all publicly accessible data including SEC textblocks)
   S3BucketPublicData:
@@ -569,7 +417,7 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # Read access to shared data buckets (new structure)
+          # Read access to shared data buckets
           - Effect: Allow
             Action:
               - s3:GetObject
@@ -579,16 +427,6 @@ Resources:
               - !Sub ${S3BucketSharedRaw.Arn}/*
               - !GetAtt S3BucketSharedProcessed.Arn
               - !Sub ${S3BucketSharedProcessed.Arn}/*
-          # Read access to legacy SEC buckets (during migration)
-          - Effect: Allow
-            Action:
-              - s3:GetObject
-              - s3:ListBucket
-            Resource:
-              - !GetAtt S3BucketSECRaw.Arn
-              - !Sub ${S3BucketSECRaw.Arn}/*
-              - !GetAtt S3BucketSECProcessed.Arn
-              - !Sub ${S3BucketSECProcessed.Arn}/*
           # Write access to public data bucket
           - Effect: Allow
             Action:
@@ -623,72 +461,12 @@ Resources:
               - !Sub ${S3BucketSharedRaw.Arn}/*
               - !GetAtt S3BucketSharedProcessed.Arn
               - !Sub ${S3BucketSharedProcessed.Arn}/*
-          # Full access to legacy SEC buckets (during migration)
-          - Effect: Allow
-            Action:
-              - s3:GetObject
-              - s3:PutObject
-              - s3:DeleteObject
-              - s3:ListBucket
-            Resource:
-              - !GetAtt S3BucketSECRaw.Arn
-              - !Sub ${S3BucketSECRaw.Arn}/*
-              - !GetAtt S3BucketSECProcessed.Arn
-              - !Sub ${S3BucketSECProcessed.Arn}/*
 
   # NOTE: S3 Secret removed in 2026-01 restructure
   # Bucket names are computed from environment in application code.
   # PUBLIC_DATA_CDN_URL is passed via ECS task definition environment variables.
 
 Outputs:
-  S3BucketName:
-    Description: Name of the S3 bucket
-    Value: !Ref S3BucketRoboSystems
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketName
-  S3BucketArn:
-    Description: ARN of the S3 bucket
-    Value: !GetAtt S3BucketRoboSystems.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketArn
-  S3BucketUrl:
-    Description: URL of the S3 bucket
-    Value: !Sub https://${S3BucketRoboSystems}.s3.${AWS::URLSuffix}
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketUrl
-
-  S3BucketRegion:
-    Description: Region of the S3 bucket
-    Value: !Ref AwsRegion
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-S3BucketRegion
-
-  # SEC Raw Bucket Outputs
-  SECRawBucketName:
-    Description: Name of the SEC raw data bucket
-    Value: !Ref S3BucketSECRaw
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-SECRawBucketName
-
-  SECRawBucketArn:
-    Description: ARN of the SEC raw data bucket
-    Value: !GetAtt S3BucketSECRaw.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-SECRawBucketArn
-
-  # SEC Processed Bucket Outputs
-  SECProcessedBucketName:
-    Description: Name of the SEC processed data bucket
-    Value: !Ref S3BucketSECProcessed
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-SECProcessedBucketName
-
-  SECProcessedBucketArn:
-    Description: ARN of the SEC processed data bucket
-    Value: !GetAtt S3BucketSECProcessed.Arn
-    Export:
-      Name: !Sub ${AWS::StackName}-${Environment}-SECProcessedBucketArn
-
   # Policy ARNs for use by other stacks
   GraphWriterS3PolicyArn:
     Description: ARN of the graph writer S3 policy
@@ -736,10 +514,6 @@ Outputs:
     Value: !Ref CloudFrontDistribution
     Export:
       Name: !Sub ${AWS::StackName}-${Environment}-CloudFrontDistributionId
-
-  # ============================================================================
-  # NEW BUCKET OUTPUTS (2026-01 Restructure)
-  # ============================================================================
 
   # Shared Raw Bucket Outputs
   SharedRawBucketName:

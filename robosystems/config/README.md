@@ -56,7 +56,7 @@ if env.is_production():
     setup_production_logging()
 
 # AWS configuration
-s3_bucket = env.AWS_S3_BUCKET
+s3_bucket = env.USER_DATA_BUCKET
 region = env.AWS_REGION
 ```
 
@@ -75,7 +75,9 @@ LBUG_MAX_DATABASES_PER_NODE  # Capacity limit
 
 # AWS Settings
 AWS_REGION           # AWS region
-AWS_S3_BUCKET        # S3 bucket for storage
+USER_DATA_BUCKET     # S3 bucket for user data storage
+SHARED_RAW_BUCKET    # S3 bucket for shared raw data (SEC, FRED, etc.)
+SHARED_PROCESSED_BUCKET  # S3 bucket for shared processed data
 
 # Feature Flags
 ENABLE_RATE_LIMITING # Rate limiting toggle

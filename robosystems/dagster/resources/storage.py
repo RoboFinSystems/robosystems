@@ -4,7 +4,7 @@ Provides AWS S3 operations for data storage and retrieval,
 consistent with existing RoboSystems S3 patterns.
 
 Bucket Configuration:
-    Default bucket is USER_DATA_BUCKET (robosystems-user-{env}) via AWS_S3_BUCKET alias.
+    Default bucket is USER_DATA_BUCKET (robosystems-user-{env}).
     For shared data operations (SEC, FRED, etc.), use explicit bucket names:
     - SHARED_RAW_BUCKET: Raw downloaded data (robosystems-shared-raw-{env})
     - SHARED_PROCESSED_BUCKET: Processed parquet files (robosystems-shared-processed-{env})
@@ -32,9 +32,9 @@ class S3Resource(ConfigurableResource):
   def bucket(self) -> str:
     """Get the configured bucket name.
 
-    Falls back to USER_DATA_BUCKET (via AWS_S3_BUCKET alias) if not explicitly set.
+    Falls back to USER_DATA_BUCKET if not explicitly set.
     """
-    return self.bucket_name or env.AWS_S3_BUCKET
+    return self.bucket_name or env.USER_DATA_BUCKET
 
   @property
   def client(self) -> Any:

@@ -274,7 +274,7 @@ async def create_file_upload(
     s3_key = f"user-staging/{current_user.id}/{graph_id}/{table_name}/{file_id}/{request.file_name}"
 
     s3_client = S3Client()
-    bucket = env.AWS_S3_BUCKET
+    bucket = env.USER_DATA_BUCKET
 
     upload_url = s3_client.s3_client.generate_presigned_url(
       "put_object",
@@ -583,7 +583,7 @@ async def update_file(
       }
 
     s3_client = S3Client()
-    bucket = env.AWS_S3_BUCKET
+    bucket = env.USER_DATA_BUCKET
 
     try:
       head_response = s3_client.s3_client.head_object(

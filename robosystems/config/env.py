@@ -707,12 +707,6 @@ class EnvConfig:
   # CDN URL passed via ECS task definition (depends on CloudFront distribution)
   PUBLIC_DATA_CDN_URL = get_str_env("PUBLIC_DATA_CDN_URL", "")
 
-  # Deprecated bucket aliases (kept for backwards compatibility during migration)
-  # These point to the new bucket names and will be removed after migration
-  AWS_S3_BUCKET = get_str_env("AWS_S3_BUCKET", USER_DATA_BUCKET)
-  SEC_RAW_BUCKET = get_str_env("SEC_RAW_BUCKET", SHARED_RAW_BUCKET)
-  SEC_PROCESSED_BUCKET = get_str_env("SEC_PROCESSED_BUCKET", SHARED_PROCESSED_BUCKET)
-
   # ==========================================================================
   # SECURITY AND AUTHENTICATION
   # ==========================================================================

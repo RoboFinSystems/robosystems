@@ -619,7 +619,7 @@ class EntityGraphService:
       file_id = str(uuid.uuid4())
       s3_key = f"user-staging/{user_id}/{graph_id}/Entity/{file_id}/entity.parquet"
 
-      s3_client.s3_client.upload_fileobj(parquet_buffer, env.AWS_S3_BUCKET, s3_key)
+      s3_client.s3_client.upload_fileobj(parquet_buffer, env.USER_DATA_BUCKET, s3_key)
 
       logger.info(f"Uploaded entity Parquet to S3: {s3_key}")
 
@@ -652,7 +652,7 @@ class EntityGraphService:
       logger.info(f"Created GraphFile record {graph_file.id}")
 
       # Step 6: Trigger ingestion via Graph API
-      s3_pattern = f"s3://{env.AWS_S3_BUCKET}/user-staging/{user_id}/{graph_id}/Entity/**/*.parquet"
+      s3_pattern = f"s3://{env.USER_DATA_BUCKET}/user-staging/{user_id}/{graph_id}/Entity/**/*.parquet"
 
       logger.info(f"Creating DuckDB staging table with pattern: {s3_pattern}")
       await graph_client.create_table(

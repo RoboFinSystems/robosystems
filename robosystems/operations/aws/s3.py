@@ -480,18 +480,18 @@ class S3BackupAdapter:
     Initialize S3 backup adapter.
 
     Args:
-        bucket_name: S3 bucket name (defaults to AWS_S3_BUCKET env var)
+        bucket_name: S3 bucket name (defaults to USER_DATA_BUCKET env var)
         region: AWS region (defaults to AWS_REGION env var)
         enable_compression: Enable gzip compression
     Note: Encryption is handled by the backup task using security/encryption.py
     """
-    self.bucket_name = bucket_name or env.AWS_S3_BUCKET
+    self.bucket_name = bucket_name or env.USER_DATA_BUCKET
     self.region = region or env.AWS_DEFAULT_REGION
     self.enable_compression = enable_compression
 
     if not self.bucket_name:
       raise ValueError(
-        "S3 bucket name must be provided via parameter or AWS_S3_BUCKET env var"
+        "S3 bucket name must be provided via parameter or USER_DATA_BUCKET env var"
       )
 
     # Initialize S3 client

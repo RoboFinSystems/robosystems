@@ -161,7 +161,7 @@ async def test_get_upload_url_success(monkeypatch):
       )
 
   monkeypatch.setattr(files_upload, "S3Client", FakeS3Client)
-  monkeypatch.setattr(files_upload.env, "AWS_S3_BUCKET", "bucket")
+  monkeypatch.setattr(files_upload.env, "USER_DATA_BUCKET", "bucket")
 
   class _StubUUID:
     def __str__(self):

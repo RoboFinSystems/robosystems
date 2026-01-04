@@ -423,6 +423,7 @@ jobs:
         deploy-s3,
         deploy-graph-infra,
         deploy-graph-volumes,
+        package-scripts,
       ]
     uses: ./.github/workflows/deploy-graph.yml
     with:
