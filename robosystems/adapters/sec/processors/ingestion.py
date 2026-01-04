@@ -31,7 +31,7 @@ import time
 from typing import Any
 
 from robosystems.config import env
-from robosystems.config.shared_data import DATA_SOURCES, DataSourceType
+from robosystems.config.storage.shared import DATA_SOURCES, DataSourceType
 from robosystems.graph_api.client.factory import get_graph_client
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client

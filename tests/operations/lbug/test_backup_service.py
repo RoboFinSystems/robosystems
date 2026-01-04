@@ -17,12 +17,14 @@ from botocore.exceptions import ClientError
 from moto import mock_aws
 
 from robosystems.operations.lbug.backup import (
-  DEFAULT_BACKUP_BUCKET,
   DEFAULT_RETENTION_DAYS,
   MAX_BACKUP_SIZE_GB,
   LadybugGraphBackupService,
   create_graph_backup_service,
 )
+
+# Test bucket name - mirrors the pattern used in LocalStack/pytest
+TEST_BACKUP_BUCKET = "robosystems-local"
 
 
 @pytest.fixture
@@ -48,7 +50,7 @@ def mock_s3_client():
   with mock_aws():
     client = boto3.client("s3", region_name="us-east-1")
     # Create test bucket
-    client.create_bucket(Bucket=DEFAULT_BACKUP_BUCKET)
+    client.create_bucket(Bucket=TEST_BACKUP_BUCKET)
     yield client
 
 
@@ -111,7 +113,7 @@ def backup_service(
           service = LadybugGraphBackupService(
             environment="test",
             base_path=str(temp_db_dir),
-            s3_bucket=DEFAULT_BACKUP_BUCKET,
+            s3_bucket=TEST_BACKUP_BUCKET,
             retention_days=DEFAULT_RETENTION_DAYS,
           )
           yield service
@@ -193,7 +195,7 @@ class TestLadybugGraphBackupService:
     # Create a recent backup in S3
     recent_key = f"backups/{graph_id}/{graph_id}_backup_latest.tar.gz"
     mock_s3_client.put_object(
-      Bucket=DEFAULT_BACKUP_BUCKET,
+      Bucket=TEST_BACKUP_BUCKET,
       Key=recent_key,
       Body=b"recent backup data",
       Metadata={
@@ -239,7 +241,7 @@ class TestLadybugGraphBackupService:
 
     # Check object exists in S3
     response = mock_s3_client.list_objects_v2(
-      Bucket=DEFAULT_BACKUP_BUCKET, Prefix=f"graph-databases/test/{graph_id}/"
+      Bucket=TEST_BACKUP_BUCKET, Prefix=f"graph-databases/test/{graph_id}/"
     )
     assert response["KeyCount"] > 0
 
@@ -342,7 +344,7 @@ class TestLadybugGraphBackupService:
 
     # Check S3 object metadata
     response = mock_s3_client.head_object(
-      Bucket=DEFAULT_BACKUP_BUCKET, Key=result["s3_key"]
+      Bucket=TEST_BACKUP_BUCKET, Key=result["s3_key"]
     )
 
     metadata = response.get("Metadata", {})
@@ -421,7 +423,7 @@ class TestBackupIntegration:
       # Verify all databases were backed up
       for graph_id in ["kg1a2b3c4d5", "kg5d4c3b2a1"]:
         response = mock_s3_client.list_objects_v2(
-          Bucket=DEFAULT_BACKUP_BUCKET, Prefix=f"graph-databases/test/{graph_id}/"
+          Bucket=TEST_BACKUP_BUCKET, Prefix=f"graph-databases/test/{graph_id}/"
         )
         assert response["KeyCount"] > 0
 

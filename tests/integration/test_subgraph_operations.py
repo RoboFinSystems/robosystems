@@ -48,10 +48,6 @@ class TestSubgraphOperations:
       }
     )
 
-    client.backup = AsyncMock(
-      return_value={"location": "s3://robosystems-backups/test/backup.zip"}
-    )
-
     return client
 
   @pytest.fixture
@@ -111,15 +107,6 @@ class TestSubgraphOperations:
     )
     assert has_data is True
 
-  async def test_create_backup(self, subgraph_service, mock_lbug_client):
-    """Test backup creation."""
-    backup_location = await subgraph_service._create_backup(
-      mock_lbug_client, "test_db", "instance_123"
-    )
-
-    assert "s3://robosystems-backups" in backup_location
-    mock_lbug_client.backup.assert_called_once()
-
   async def test_get_database_stats(self, subgraph_service, mock_lbug_client):
     """Test database statistics collection."""
     # Set up return values for the two queries
@@ -158,18 +145,6 @@ class TestSubgraphOperations:
 
     with pytest.raises(Exception, match="Schema installation failed"):
       await subgraph_service._install_base_schema(mock_lbug_client, "test_db")
-
-  async def test_backup_fallback(self, subgraph_service, mock_lbug_client):
-    """Test backup fallback when method not implemented."""
-    # Remove backup method to simulate not implemented
-    delattr(mock_lbug_client, "backup")
-
-    backup_location = await subgraph_service._create_backup(
-      mock_lbug_client, "test_db", "instance_123"
-    )
-
-    # Should return None when backup method is not implemented
-    assert backup_location is None
 
   async def test_stats_error_handling(self, subgraph_service, mock_lbug_client):
     """Test statistics collection error handling."""

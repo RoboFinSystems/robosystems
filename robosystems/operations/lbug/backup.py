@@ -28,7 +28,7 @@ from ...logger import logger
 from ...middleware.graph.allocation_manager import LadybugAllocationManager
 
 # Backup configuration
-DEFAULT_BACKUP_BUCKET = "robosystems-graph-backups"
+# Graph backups are stored in the USER_DATA_BUCKET under graph-databases/ prefix
 DEFAULT_RETENTION_DAYS = 30  # Keep customer backups longer than shared repos
 DEFAULT_COMPRESSION_LEVEL = 6
 MAX_BACKUP_SIZE_GB = 10  # Skip backup if database > 10GB (log warning)
@@ -72,8 +72,8 @@ class LadybugGraphBackupService:
     self.retention_days = retention_days
     self.compression_level = compression_level
 
-    # S3 configuration
-    self.s3_bucket = s3_bucket or f"{DEFAULT_BACKUP_BUCKET}-{environment}"
+    # S3 configuration - use canonical USER_DATA_BUCKET for customer graph backups
+    self.s3_bucket = s3_bucket or env.USER_DATA_BUCKET
     self.s3_prefix = f"graph-databases/{environment}"
 
     # AWS clients - use S3-specific credentials
