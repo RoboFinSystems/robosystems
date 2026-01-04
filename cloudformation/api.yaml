@@ -340,12 +340,12 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-shared-processed-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-shared-processed-${Environment}/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-databases-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-sync-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-graph-sync-${Environment}/*"
               # Read/Write access to public data bucket for API serving
               - Effect: Allow
                 Action:
@@ -354,9 +354,9 @@ Resources:
                   - s3:DeleteObject
                   - s3:ListBucket
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-public-data-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-public-data-${Environment}/*"
-              # Read/Write access to main application bucket for user uploads/temp files
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-public-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-public-${Environment}/*"
+              # Read/Write access to user data bucket for uploads/temp files
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -364,8 +364,8 @@ Resources:
                   - s3:DeleteObject
                   - s3:ListBucket
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-user-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-user-${Environment}/*"
               # SES permissions for sending emails
               - Effect: Allow
                 Action:

@@ -176,38 +176,22 @@ class SecretsManager:
     Returns:
         Dictionary mapping bucket purposes to bucket names.
     """
-    # For local dev, return defaults
-    if self.environment not in ["prod", "staging"]:
-      return {
-        "aws_s3": f"robosystems-{self.environment}",
-        "ladybug": f"robosystems-graph-databases-{self.environment}",
-        "sec_raw": f"robosystems-sec-raw-{self.environment}",
-        "sec_processed": f"robosystems-sec-processed-{self.environment}",
-        "public_data": f"robosystems-public-data-{self.environment}",
-        "deployment": f"robosystems-deployment-{self.environment}",
-      }
+    # Bucket names are computed from environment, not stored in secrets
+    # For dev: no suffix (robosystems-shared-raw)
+    # For staging/prod: with suffix (robosystems-shared-raw-staging)
+    suffix = "" if self.environment == "dev" else f"-{self.environment}"
 
-    # Get S3-specific secrets for prod/staging
-    secrets = self.get_secret("s3")
-
-    # Extract bucket names with environment suffix handling
     buckets = {
-      "aws_s3": secrets.get("AWS_S3_BUCKET", f"robosystems-{self.environment}"),
-      "ladybug": secrets.get(
-        "GRAPH_DATABASES_BUCKET", f"robosystems-graph-databases-{self.environment}"
-      ),
-      "sec_raw": secrets.get(
-        "SEC_RAW_BUCKET", f"robosystems-sec-raw-{self.environment}"
-      ),
-      "sec_processed": secrets.get(
-        "SEC_PROCESSED_BUCKET", f"robosystems-sec-processed-{self.environment}"
-      ),
-      "public_data": secrets.get(
-        "PUBLIC_DATA_BUCKET", f"robosystems-public-data-{self.environment}"
-      ),
-      "deployment": secrets.get(
-        "DEPLOYMENT_BUCKET", f"robosystems-deployment-{self.environment}"
-      ),
+      # New bucket names (computed)
+      "shared_raw": f"robosystems-shared-raw{suffix}",
+      "shared_processed": f"robosystems-shared-processed{suffix}",
+      "user_data": f"robosystems-user{suffix}",
+      "public_data": f"robosystems-public-data{suffix}",
+      "deployment": f"robosystems{suffix}-deployment",
+      # Deprecated aliases (point to new names)
+      "aws_s3": f"robosystems-user{suffix}",
+      "sec_raw": f"robosystems-shared-raw{suffix}",
+      "sec_processed": f"robosystems-shared-processed{suffix}",
     }
 
     return buckets
@@ -295,7 +279,7 @@ def get_s3_bucket_name(purpose: str) -> str:
   Get an S3 bucket name for a specific purpose.
 
   Args:
-      purpose: The purpose of the bucket (e.g., "sec_processed", "sec_raw", "ladybug")
+      purpose: The purpose of the bucket (e.g., "sec_processed", "sec_raw", "user_data")
 
   Returns:
       The bucket name with proper environment suffix.
@@ -307,7 +291,6 @@ def get_s3_bucket_name(purpose: str) -> str:
   purpose_map = {
     "sec_processed": "sec_processed",
     "sec_raw": "sec_raw",
-    "ladybug": "ladybug",
     "aws_s3": "aws_s3",
     "public": "public_data",
     "deployment": "deployment",
@@ -329,14 +312,11 @@ SECRET_MAPPINGS = {
   "DATABASE_URL": ("postgres", "DATABASE_URL"),
   # Valkey secrets
   "VALKEY_AUTH_TOKEN": ("valkey", "VALKEY_AUTH_TOKEN"),
-  # S3 secrets
-  "AWS_S3_ACCESS_KEY_ID": ("s3", "AWS_S3_ACCESS_KEY_ID"),
-  "AWS_S3_SECRET_ACCESS_KEY": ("s3", "AWS_S3_SECRET_ACCESS_KEY"),
-  "AWS_S3_BUCKET": ("s3", "AWS_S3_BUCKET"),
-  "SEC_RAW_BUCKET": ("s3", "SEC_RAW_BUCKET"),
-  "SEC_PROCESSED_BUCKET": ("s3", "SEC_PROCESSED_BUCKET"),
-  "PUBLIC_DATA_BUCKET": ("s3", "PUBLIC_DATA_BUCKET"),
-  "PUBLIC_DATA_CDN_URL": ("s3", "PUBLIC_DATA_CDN_URL"),
+  # S3 credentials (optional, for cross-account or local dev with explicit keys)
+  # Note: Bucket names are computed from environment in env.py, not secrets
+  # Note: PUBLIC_DATA_CDN_URL is passed via ECS task definition, not secrets
+  "AWS_S3_ACCESS_KEY_ID": (None, "AWS_S3_ACCESS_KEY_ID"),
+  "AWS_S3_SECRET_ACCESS_KEY": (None, "AWS_S3_SECRET_ACCESS_KEY"),
   # Admin API key
   "ADMIN_API_KEY": ("admin", "ADMIN_API_KEY"),
   # Graph API secrets

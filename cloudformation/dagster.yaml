@@ -305,7 +305,7 @@ Resources:
                   StringEquals:
                     "kms:ViaService":
                       - !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
-              # S3 for SEC data and deployments
+              # S3 for shared data pipelines and deployments
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -314,14 +314,14 @@ Resources:
                   - s3:ListBucket
                   - s3:GetBucketLocation
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-raw-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-raw-${Environment}/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-sec-processed-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-shared-raw-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-shared-raw-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-shared-processed-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-shared-processed-${Environment}/*"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment"
                   - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}-deployment/*"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}"
-                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-${Environment}/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-user-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:s3:::robosystems-user-${Environment}/*"
               # DynamoDB for graph registries (needed for shared master discovery)
               - Effect: Allow
                 Action:
@@ -516,8 +516,6 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: AWS_S3_BUCKET
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/s3:SecretString:AWS_S3_BUCKET}}"
             # Run database migrations on daemon startup (singleton pattern)
             - Name: RUN_MIGRATIONS
               Value: "true"
@@ -589,8 +587,6 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: AWS_S3_BUCKET
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/s3:SecretString:AWS_S3_BUCKET}}"
             # EcsRunLauncher configuration - needed for webserver to understand run launcher
             - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
               Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
@@ -665,8 +661,10 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: AWS_S3_BUCKET
-              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/s3:SecretString:AWS_S3_BUCKET}}"
+            # CDN URL for public data (text block externalization in SEC processing)
+            - Name: PUBLIC_DATA_CDN_URL
+              Value:
+                Fn::ImportValue: !Sub robosystems-s3-${Environment}-PublicDataCDNURL
 
   # ========================================
   # ECS SERVICES

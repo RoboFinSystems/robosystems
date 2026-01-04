@@ -403,7 +403,6 @@ class SubgraphService:
           await self.delete_subgraph_database(
             subgraph_id=subgraph_id,
             force=True,
-            create_backup=False,
           )
           logger.info(f"Successfully cleaned up orphaned database {subgraph_id}")
         except Exception as cleanup_error:
@@ -420,7 +419,6 @@ class SubgraphService:
     self,
     subgraph_id: str,
     force: bool = False,
-    create_backup: bool = False,
   ) -> dict[str, Any]:
     """
     Delete a subgraph database from the parent's instance.
@@ -428,13 +426,11 @@ class SubgraphService:
     Args:
         subgraph_id: Full subgraph identifier to delete
         force: Force deletion even if database contains data
-        create_backup: Create a backup before deletion
 
     Returns:
         Dictionary with deletion status including:
-        - status: "deleted", "not_found", or "backup_created"
+        - status: "deleted" or "not_found"
         - graph_id: Deleted subgraph ID
-        - backup_location: S3 location if backup was created
 
     Raises:
         GraphAllocationError: If deletion fails
@@ -499,12 +495,6 @@ class SubgraphService:
       else:
         instance_id = parent_location.instance_id if parent_location else "unknown"
 
-      # Create backup if requested
-      backup_location = None
-      if create_backup:
-        logger.info(f"Creating backup of {database_name} before deletion")
-        backup_location = await self._create_backup(client, database_name, instance_id)
-
       # Check if database contains data (unless forced)
       if not force:
         has_data = await self._check_database_has_data(client, database_name)
@@ -526,7 +516,6 @@ class SubgraphService:
         "database_name": database_name,
         "parent_graph_id": parent_graph_id,
         "instance_id": instance_id,
-        "backup_location": backup_location,
         "deleted_at": datetime.now(UTC).isoformat(),
       }
 
@@ -751,39 +740,6 @@ class SubgraphService:
       logger.warning(f"Could not check data for {database_name}: {e}")
       # If we can't check, assume no data for safety
       return False
-
-  async def _create_backup(
-    self,
-    client: "GraphClient",
-    database_name: str,
-    instance_id: str,
-  ) -> str | None:
-    """Create a backup of the database.
-
-    Returns:
-        Backup location if successful, None if backup is not implemented.
-
-    Raises:
-        Exception if backup fails unexpectedly.
-    """
-    try:
-      timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-      backup_location = f"s3://{env.GRAPH_DATABASES_BUCKET}/{instance_id}/{database_name}_{timestamp}.backup"
-
-      # Use the backup endpoint if available
-      backup_response = await client.backup(
-        graph_id=database_name, backup_location=backup_location
-      )
-
-      logger.info(f"Created backup at {backup_location}")
-      return backup_response.get("location", backup_location)
-    except AttributeError:
-      # Backup method may not be implemented yet
-      logger.warning(f"Backup not yet implemented for {database_name}")
-      return None
-    except Exception as e:
-      logger.error(f"Failed to create backup for {database_name}: {e}")
-      raise
 
   async def _get_database_stats(
     self,
