@@ -14,6 +14,7 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 - [GitHub Secrets](#github-secrets)
 - [AWS Secrets Manager](#aws-secrets-manager)
 - [Fresh AWS Account Checklist](#fresh-aws-account-checklist)
+- [Domain Configuration](#domain-configuration)
 - [Troubleshooting](#troubleshooting)
 - [Local Development (Optional)](#local-development-optional)
 - [Quick Reference](#quick-reference)
@@ -189,9 +190,46 @@ just bootstrap
 ### Phase 2: Deploy
 
 ```bash
-# Deploy to production
+# Deploy to production (~20-30 min for initial setup)
 just deploy prod
 ```
+
+Initial deployment creates all infrastructure (VPC, databases, ECS services, etc.). Subsequent deployments are faster as they only update changed resources.
+
+## Domain Configuration
+
+RoboSystems supports two deployment modes:
+
+### Internal-Only Mode (Default)
+
+No custom domain required. The API is accessible via the AWS load balancer URL:
+
+```
+http://robosystems-api-123456789.us-east-1.elb.amazonaws.com
+```
+
+This is the default when `API_DOMAIN_NAME_ROOT` is not set. The backend API can be consumed as a microservice by your own applications - build your own frontend or integrate with existing systems.
+
+### Custom Domain Mode
+
+For production deployments with a custom domain (e.g., `api.robosystems.ai`):
+
+1. **Set the domain variable** before deploying:
+   ```bash
+   gh variable set API_DOMAIN_NAME_ROOT --body "robosystems.ai"
+   ```
+
+2. **Prerequisites:**
+   - Domain registered and DNS hosted in Route53 (or external DNS)
+   - ACM certificate for `*.robosystems.ai` in the deployment region
+   - The deployment will create Route53 records automatically if using Route53
+
+3. **Result:**
+   - API accessible at `https://api.robosystems.ai`
+   - Automatic HTTPS redirect
+   - SSL/TLS termination at the load balancer
+
+**Note:** You can switch between modes by setting or clearing `API_DOMAIN_NAME_ROOT` and redeploying.
 
 ## Troubleshooting
 
@@ -257,7 +295,8 @@ gh secret list
 aws sts get-caller-identity
 
 # Deploy
-just deploy prod        # Deploy to production
+just deploy prod        # Deploy to production (~20-30 min initial)
+just deploy staging     # Deploy to staging
 ```
 
 ## CloudFormation Templates
