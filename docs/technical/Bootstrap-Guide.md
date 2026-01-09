@@ -174,8 +174,19 @@ Creates:
 1. [ ] Log in as root user
 2. [ ] Enable MFA on root
 3. [ ] Enable IAM Identity Center (SSO)
-4. [ ] Create SSO admin user
-5. [ ] Configure AWS CLI locally
+4. [ ] Create Permission Set:
+   - Go to IAM Identity Center → Permission sets → Create permission set
+   - Select "Predefined permission set" → "AdministratorAccess"
+   - Click Next → Create
+5. [ ] Create SSO admin user:
+   - Go to IAM Identity Center → Users → Add user
+   - Complete user details and set up MFA
+6. [ ] Assign permissions to user:
+   - Go to Users → [your user] → Assign AWS accounts
+   - Select your AWS account(s)
+   - Click Next, select the AdministratorAccess permission set
+   - Submit
+7. [ ] Configure AWS CLI locally
 
 ### Phase 1: Bootstrap
 
