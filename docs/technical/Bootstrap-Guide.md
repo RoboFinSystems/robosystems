@@ -100,7 +100,7 @@ After bootstrapping the main repo, run the lightweight bootstrap in each fronten
 
 ```bash
 # In robosystems-app, roboledger-app, or roboinvestor-app
-./bin/bootstrap
+npm run setup:bootstrap
 ```
 
 This will:
@@ -109,7 +109,7 @@ This will:
 3. Set `AWS_ROLE_ARN` to the **frontend role** (limited permissions)
 4. Set `AWS_ACCOUNT_ID` and `AWS_REGION`
 5. Check for required secrets (repo and org level)
-6. Optionally run the full variable setup (`bin/gha-setup`)
+6. Optionally run the full variable setup (`npm run setup:gha`)
 
 ## Allowed Branches
 
