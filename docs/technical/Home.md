@@ -14,6 +14,10 @@ New to RoboSystems? Start here:
 
 - **[Architecture Overview](Architecture-Overview)** - System design and components
 
+### Infrastructure & Operations
+
+- **[Bootstrap Guide](Bootstrap-Guide)** - Set up AWS OIDC federation and GitHub Actions
+
 ### User Guides
 
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Working with SEC financial data
