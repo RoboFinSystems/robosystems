@@ -49,6 +49,7 @@ RoboSystems uses GitHub OIDC federation for AWS authentication. No AWS credentia
 - AWS CLI v2 installed
 - GitHub CLI installed and authenticated (`gh auth login`)
 - `jq` installed (JSON parser - `brew install jq` or `apt install jq`)
+- `direnv` installed (optional but recommended - `brew install direnv`)
 
 ## Bootstrap Steps
 
@@ -132,6 +133,21 @@ aws sso login --profile robosystems-sso
 export AWS_PROFILE=robosystems-sso
 aws sts get-caller-identity
 ```
+
+### Automatic Profile Selection with direnv
+
+The bootstrap creates a `.envrc` file that automatically sets `AWS_PROFILE` when you enter the directory:
+
+```bash
+# After bootstrap, allow direnv to load the .envrc
+direnv allow
+
+# Now AWS_PROFILE is automatically set when you cd into the repo
+cd robosystems
+echo $AWS_PROFILE  # robosystems-sso
+```
+
+This prevents accidentally running commands against the wrong AWS account when working across multiple repositories or forks. Each fork can have its own `.envrc` with the appropriate profile.
 
 ## GitHub Secrets
 
@@ -294,7 +310,7 @@ just setup-bedrock      # Local Bedrock dev (optional)
 
 # SSO login
 aws sso login --profile robosystems-sso
-export AWS_PROFILE=robosystems-sso
+export AWS_PROFILE=robosystems-sso  # or use direnv (automatic)
 
 # Generate keys
 just generate-key       # Single key
