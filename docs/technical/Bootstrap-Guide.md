@@ -47,9 +47,35 @@ RoboSystems uses GitHub OIDC federation for AWS authentication. No AWS credentia
 - AWS IAM Identity Center (SSO) enabled
 - SSO account with admin permissions
 - AWS CLI v2 installed
-- GitHub CLI installed and authenticated (`gh auth login`)
+- GitHub CLI installed and authenticated (see below)
 - `jq` installed (JSON parser - `brew install jq` or `apt install jq`)
 - `direnv` installed (optional but recommended - `brew install direnv`)
+
+### GitHub CLI Authentication
+
+The bootstrap process uses `gh` to set repository variables and secrets. You need:
+
+```bash
+# Install GitHub CLI
+brew install gh
+
+# Authenticate with a PAT that has repo admin access
+gh auth login
+```
+
+**Required scopes for your GitHub token:**
+- `repo` - Full repository access
+- `admin:org` - For org-level secrets (if using)
+- `workflow` - To trigger workflows
+
+**For forks:** Ensure you're authenticated to an account with admin access to the forked repository. The `gh` CLI will set variables on whatever repo the current directory points to.
+
+```bash
+# Verify you have access to the correct repo
+gh repo view
+
+# Should show your fork, e.g.: HarbingerFinLab/robosystems
+```
 
 ## Bootstrap Steps
 
@@ -61,11 +87,26 @@ aws configure sso --profile robosystems-sso
 just bootstrap
 ```
 
+**For forks with a different AWS account:**
+
+```bash
+# 1. Configure SSO with a custom profile name
+aws configure sso --profile my-fork-sso
+
+# 2. Run bootstrap with your profile (and optionally region)
+just bootstrap my-fork-sso              # Custom profile, default region (us-east-1)
+just bootstrap my-fork-sso eu-west-1    # Custom profile AND region
+
+# The profile and region are auto-exported for the session
+# and saved to .envrc for future use
+```
+
 This will:
-1. Verify SSO authentication
-2. Deploy `bootstrap-oidc.yaml` CloudFormation stack
-3. Set GitHub variables (including `AWS_ROLE_ARN`)
-4. Optionally create AWS Secrets Manager secrets
+1. Create/update `.envrc` with your AWS profile and region
+2. Verify SSO authentication
+3. Deploy `bootstrap-oidc.yaml` CloudFormation stack
+4. Set GitHub variables (including `AWS_ROLE_ARN`)
+5. Run `setup-gha` to configure essential variables (auto-detected)
 
 ## What Gets Created
 
@@ -84,6 +125,25 @@ This will:
 - Variable: `AWS_ROLE_ARN` (frontend role ARN)
 - Variable: `AWS_ACCOUNT_ID`
 - Variable: `AWS_REGION`
+
+## Configuration Levels
+
+When running `just bootstrap` or `just setup-gha`, you choose a configuration level:
+
+| Level | Variables | Best For |
+|-------|-----------|----------|
+| **Essential** (recommended) | 5 variables | New deployments, forks, testing |
+| **Full** | ~80 variables | Production customization, specific sizing |
+
+**Essential mode** auto-detects:
+- Repository name (from git remote)
+- AWS account ID (from current credentials)
+- ECR repository name (derived from repo name)
+- AWS region (from environment or default)
+
+Only domain requires input, and it's optional for VPC-only deployments. All other settings (database sizes, scaling limits, feature flags) use sensible defaults defined as fallbacks in the workflows and in `.github/configs/graph.yml` for graph infrastructure.
+
+**Full mode** gives explicit control over every variable, useful when you need specific instance sizes, custom scaling policies, or non-default feature configurations.
 
 ## Multi-Repository Setup
 
@@ -136,18 +196,19 @@ aws sts get-caller-identity
 
 ### Automatic Profile Selection with direnv
 
-The bootstrap creates a `.envrc` file that automatically sets `AWS_PROFILE` when you enter the directory:
+The bootstrap creates a `.envrc` file that automatically sets `AWS_PROFILE` and `AWS_REGION` when you enter the directory:
 
 ```bash
 # After bootstrap, allow direnv to load the .envrc
 direnv allow
 
-# Now AWS_PROFILE is automatically set when you cd into the repo
+# Now AWS_PROFILE and AWS_REGION are automatically set when you cd into the repo
 cd robosystems
 echo $AWS_PROFILE  # robosystems-sso
+echo $AWS_REGION   # us-east-1
 ```
 
-This prevents accidentally running commands against the wrong AWS account when working across multiple repositories or forks. Each fork can have its own `.envrc` with the appropriate profile.
+This prevents accidentally running commands against the wrong AWS account when working across multiple repositories or forks. Each fork can have its own `.envrc` with the appropriate profile and region.
 
 ## GitHub Secrets
 
@@ -165,6 +226,17 @@ Secrets can be set at **repository level** or **organization level**. Org-level 
 - `ANTHROPIC_API_KEY` enables `create-pr.yml` and `tag-release.yml` workflows in all repos
 - Backend AI inference uses AWS Bedrock (separate from `ANTHROPIC_API_KEY`)
 - The bootstrap scripts check both repo and org-level secrets
+
+**Graceful Degradation:**
+
+All workflows work without optional secrets - they degrade gracefully instead of failing:
+
+| Missing Secret | Behavior |
+|----------------|----------|
+| `ACTIONS_TOKEN` | Core CI/CD works. Auto-deploy after release disabled. Workflow summary shows manual deploy commands. |
+| `ANTHROPIC_API_KEY` | PR and release workflows use basic descriptions (commit stats) instead of AI-generated summaries. |
+
+This design allows forks to deploy immediately without configuring optional integrations.
 
 ## AWS Secrets Manager
 
@@ -214,7 +286,22 @@ aws configure sso --profile robosystems-sso
 just bootstrap
 ```
 
-### Phase 2: Deploy
+### Phase 2: Create Application Secrets
+
+```bash
+# Create secrets in AWS Secrets Manager (required before first deploy)
+just setup-aws
+```
+
+This creates `robosystems/prod` and `robosystems/staging` secrets containing:
+- JWT signing keys (auto-generated)
+- Encryption keys (auto-generated)
+- Feature flags (sensible defaults)
+- Integration placeholders (QuickBooks, Plaid, etc.)
+
+**Note:** Edit `bin/setup/aws.sh` before running if you need to customize integration credentials.
+
+### Phase 3: Deploy
 
 ```bash
 # Deploy to production (~20-30 min for initial setup)
@@ -225,17 +312,25 @@ Initial deployment creates all infrastructure (VPC, databases, ECS services, etc
 
 ## Domain Configuration
 
-RoboSystems supports two deployment modes:
+RoboSystems supports two deployment modes. During `just bootstrap`, you can simply press Enter to skip domain configuration for VPC-only deployments.
 
-### Internal-Only Mode (Default)
+### VPC-Only Mode (Default)
 
-No custom domain required. The API is accessible via the AWS load balancer URL:
+No custom domain required. The API is accessible via:
+- **Bastion tunnel**: SSH tunnel through the bastion host for secure access
+- **Internal load balancer**: Direct access within the VPC
 
+```bash
+# Access via bastion tunnel
+just bastion-tunnel
+
+# API is now accessible at http://localhost:8000
 ```
-http://robosystems-api-123456789.us-east-1.elb.amazonaws.com
-```
 
-This is the default when `API_DOMAIN_NAME_ROOT` is not set. The backend API can be consumed as a microservice by your own applications - build your own frontend or integrate with existing systems.
+This is the default when `API_DOMAIN_NAME_ROOT` is empty. Perfect for:
+- Internal microservice architectures
+- Development and testing environments
+- Private deployments behind corporate networks
 
 ### Custom Domain Mode
 
@@ -270,6 +365,18 @@ Ensure your SSO user has permission sets assigned to accounts.
 aws configure sso --profile robosystems-sso
 ```
 
+### AWS CLI: "You must specify a region"
+
+If you see this error, ensure `AWS_REGION` is set. The bootstrap script should have added this to your `.envrc`, but if not:
+
+```bash
+# Add to .envrc
+echo 'export AWS_REGION=us-east-1' >> .envrc
+direnv allow
+```
+
+Or add `region = us-east-1` to your profile in `~/.aws/config`.
+
 ### OIDC: "Not authorized to perform sts:AssumeRoleWithWebIdentity"
 
 Check that:
@@ -302,10 +409,15 @@ This creates an IAM user with Bedrock permissions and updates `.env` with creden
 ## Quick Reference
 
 ```bash
-# Bootstrap
-just bootstrap          # Sets up OIDC federation
-just setup-gha          # GitHub variables only
-just setup-aws          # AWS Secrets Manager
+# Bootstrap (run in order for fresh setup)
+just bootstrap                    # 1. OIDC + variables (default profile/region)
+just bootstrap my-sso             # 1. Custom SSO profile
+just bootstrap my-sso eu-west-1   # 1. Custom profile AND region
+just setup-aws                    # 2. AWS Secrets Manager (required before deploy!)
+just deploy prod                  # 3. Deploy to production (~20-30 min initial)
+
+# Individual commands
+just setup-gha          # GitHub variables only (already run by bootstrap)
 just setup-bedrock      # Local Bedrock dev (optional)
 
 # SSO login
@@ -322,7 +434,7 @@ gh secret list
 aws sts get-caller-identity
 
 # Deploy
-just deploy prod        # Deploy to production (~20-30 min initial)
+just deploy prod        # Deploy to production
 just deploy staging     # Deploy to staging
 ```
 
