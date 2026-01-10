@@ -126,24 +126,24 @@ This will:
 - Variable: `AWS_ACCOUNT_ID`
 - Variable: `AWS_REGION`
 
-## Configuration Levels
+## Variable Configuration
 
-When running `just bootstrap` or `just setup-gha`, you choose a configuration level:
+Bootstrap sets only the essential variables needed for OIDC authentication:
+- `AWS_ROLE_ARN` - IAM role for GitHub Actions
+- `AWS_ACCOUNT_ID` - Your AWS account
+- `AWS_REGION` - Deployment region
 
-| Level | Variables | Best For |
-|-------|-----------|----------|
-| **Essential** (recommended) | 5 variables | New deployments, forks, testing |
-| **Full** | ~80 variables | Production customization, specific sizing |
+**All other variables have sensible defaults** in workflows and `.github/configs/graph.yml`. Basic deployments work immediately after bootstrap.
 
-**Essential mode** auto-detects:
-- Repository name (from git remote)
-- AWS account ID (from current credentials)
-- ECR repository name (derived from repo name)
-- AWS region (from environment or default)
+### Optional: Full Variable Control
 
-Only domain requires input, and it's optional for VPC-only deployments. All other settings (database sizes, scaling limits, feature flags) use sensible defaults defined as fallbacks in the workflows and in `.github/configs/graph.yml` for graph infrastructure.
+For production customization (custom domains, specific instance sizes, scaling policies):
 
-**Full mode** gives explicit control over every variable, useful when you need specific instance sizes, custom scaling policies, or non-default feature configurations.
+```bash
+just setup-gha    # Sets ~80 variables for explicit control
+```
+
+This is optional - only run it if you need to override workflow defaults.
 
 ## Multi-Repository Setup
 
@@ -282,26 +282,25 @@ Creates:
 # Configure SSO profile
 aws configure sso --profile robosystems-sso
 
-# Run bootstrap
+# Run bootstrap (interactive - prompts for secrets creation)
 just bootstrap
 ```
 
-### Phase 2: Create Application Secrets
+Bootstrap handles:
+1. OIDC federation setup
+2. GitHub variables (AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION)
+3. Application secrets & feature flags - prompts `(Y/n)`, required for deploy
+4. Full variable setup - prompts `(y/N)`, optional for customization
 
-```bash
-# Create secrets in AWS Secrets Manager (required before first deploy)
-just setup-aws
-```
-
-This creates `robosystems/prod` and `robosystems/staging` secrets containing:
+The secrets step creates `robosystems/prod` and `robosystems/staging` with:
 - JWT signing keys (auto-generated)
 - Encryption keys (auto-generated)
 - Feature flags (sensible defaults)
 - Integration placeholders (QuickBooks, Plaid, etc.)
 
-**Note:** Edit `bin/setup/aws.sh` before running if you need to customize integration credentials.
+**Note:** Existing secrets are never overwritten. Safe to re-run bootstrap.
 
-### Phase 3: Deploy
+### Phase 2: Deploy
 
 ```bash
 # Deploy to production (~20-30 min for initial setup)
@@ -409,15 +408,17 @@ This creates an IAM user with Bedrock permissions and updates `.env` with creden
 ## Quick Reference
 
 ```bash
-# Bootstrap (run in order for fresh setup)
-just bootstrap                    # 1. OIDC + variables (default profile/region)
-just bootstrap my-sso             # 1. Custom SSO profile
-just bootstrap my-sso eu-west-1   # 1. Custom profile AND region
-just setup-aws                    # 2. AWS Secrets Manager (required before deploy!)
-just deploy prod                  # 3. Deploy to production (~20-30 min initial)
+# Bootstrap (interactive - handles everything)
+just bootstrap                    # Default profile/region
+just bootstrap my-sso             # Custom SSO profile
+just bootstrap my-sso eu-west-1   # Custom profile AND region
 
-# Individual commands
-just setup-gha          # GitHub variables only (already run by bootstrap)
+# Then deploy
+just deploy prod                  # Deploy to production (~20-30 min initial)
+
+# Optional customization
+just setup-gha          # Full variable control (~80 vars) - not required for basic deploys
+just setup-aws          # Application secrets & feature flags (if skipped)
 just setup-bedrock      # Local Bedrock dev (optional)
 
 # SSO login
