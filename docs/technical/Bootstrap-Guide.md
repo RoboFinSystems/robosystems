@@ -6,20 +6,13 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 
 - [How It Works](#how-it-works)
 - [Prerequisites](#prerequisites)
-- [Bootstrap Steps](#bootstrap-steps)
-- [What Gets Created](#what-gets-created)
-- [Fork-Specific Configuration](#fork-specific-configuration)
+- [Fresh AWS Account Setup](#fresh-aws-account-setup)
+- [Bootstrap](#bootstrap)
+- [Deploy](#deploy)
 - [Multi-Repository Setup](#multi-repository-setup)
-- [Allowed Branches](#allowed-branches)
-- [CLI Access](#cli-access)
-- [GitHub Secrets](#github-secrets)
-- [AWS Secrets Manager](#aws-secrets-manager)
-- [Fresh AWS Account Checklist](#fresh-aws-account-checklist)
-- [Domain Configuration](#domain-configuration)
+- [API Access Modes](#api-access-modes)
 - [Troubleshooting](#troubleshooting)
-- [Local Development (Optional)](#local-development-optional)
 - [Quick Reference](#quick-reference)
-- [CloudFormation Templates](#cloudformation-templates)
 
 ## How It Works
 
@@ -45,434 +38,224 @@ RoboSystems uses GitHub OIDC federation for AWS authentication. No AWS credentia
 
 ## Prerequisites
 
-- AWS IAM Identity Center (SSO) enabled
-- SSO account with admin permissions
-- AWS CLI v2 installed
-- GitHub CLI installed and authenticated (see below)
-- `jq` installed (JSON parser - `brew install jq` or `apt install jq`)
-- `direnv` installed (optional but recommended - `brew install direnv`)
+- AWS IAM Identity Center (SSO) enabled with admin permissions
+- `aws` CLI v2 (`brew install awscli`)
+- `gh` CLI authenticated (`brew install gh && gh auth login`)
+- `jq` (`brew install jq`)
+- `direnv` (optional - `brew install direnv`)
 
-### GitHub CLI Authentication
+**GitHub token scopes:** `repo`, `admin:org`, `workflow`
 
-The bootstrap process uses `gh` to set repository variables and secrets. You need:
-
+Verify you have access to the correct repo:
 ```bash
-# Install GitHub CLI
-brew install gh
-
-# Authenticate with a PAT that has repo admin access
-gh auth login
-```
-
-**Required scopes for your GitHub token:**
-- `repo` - Full repository access
-- `admin:org` - For org-level secrets (if using)
-- `workflow` - To trigger workflows
-
-**For forks:** Ensure you're authenticated to an account with admin access to the forked repository. The `gh` CLI will set variables on whatever repo the current directory points to.
-
-```bash
-# Verify you have access to the correct repo
 gh repo view
-
 # Should show your fork, e.g.: HarbingerFinLab/robosystems
 ```
 
-## Bootstrap Steps
+## Fresh AWS Account Setup
+
+Skip this section if your AWS account already has IAM Identity Center configured.
+
+1. Log in as root user and enable MFA
+2. Enable IAM Identity Center (SSO)
+3. Create Permission Set:
+   - IAM Identity Center → Permission sets → Create
+   - Select "Predefined permission set" → "AdministratorAccess"
+4. Create SSO admin user:
+   - IAM Identity Center → Users → Add user
+   - Complete details and set up MFA
+5. Assign permissions:
+   - Users → [your user] → Assign AWS accounts
+   - Select account(s) → AdministratorAccess permission set
+
+## Bootstrap
 
 ```bash
-# 1. Configure AWS CLI to use SSO (if not already done)
+# 1. Configure AWS CLI to use SSO
 aws configure sso --profile robosystems-sso
 
-# 2. Run the bootstrap (does everything)
-just bootstrap
+# 2. Run the bootstrap
+just bootstrap                              # Default profile/region
+just bootstrap robosystems-sso              # Custom profile
+just bootstrap robosystems-sso eu-west-1    # Custom profile AND region
 ```
 
-**For forks with a different AWS account:**
+Bootstrap handles everything:
+1. Deploys OIDC federation CloudFormation stack
+2. Sets GitHub variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`)
+3. Creates ECR repository for Docker images
+4. Creates `.envrc` for automatic profile/region selection
+5. Runs `setup-aws` to create application secrets (see below)
 
-```bash
-# 1. Configure SSO with a custom profile name
-aws configure sso --profile my-fork-sso
-
-# 2. Run bootstrap with your profile (and optionally region)
-just bootstrap my-fork-sso              # Custom profile, default region (us-east-1)
-just bootstrap my-fork-sso eu-west-1    # Custom profile AND region
-
-# The profile and region are auto-exported for the session
-# and saved to .envrc for future use
-```
-
-This will:
-1. Create/update `.envrc` with your AWS profile and region
-2. Verify SSO authentication
-3. Deploy `bootstrap-oidc.yaml` CloudFormation stack
-4. Set GitHub variables (AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION)
-5. Create ECR repository for Docker images
-6. Prompt for application secrets & feature flags
-7. Prompt for full variable setup (optional)
-
-## What Gets Created
-
-**In AWS:**
+**What gets created in AWS:**
 - OIDC Identity Provider for GitHub Actions
-- IAM Role: `RoboSystemsGitHubActionsRole` (backend - full permissions)
-- IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend apps - limited permissions)
-- ECR Repository for Docker images (with lifecycle policy)
-- Secrets Manager entries for prod/staging (if confirmed)
+- IAM Role: `RoboSystemsGitHubActionsRole` (backend)
+- IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend apps)
+- ECR Repository with lifecycle policy
 
-**In GitHub (robosystems repo):**
-- Variable: `AWS_ROLE_ARN` (backend role ARN)
-- Variable: `AWS_ACCOUNT_ID`
-- Variable: `AWS_REGION`
-- Plus ~80 configuration variables (if full setup selected)
+### Application Secrets (`just setup-aws`)
 
-**In GitHub (frontend repos):**
-- Variable: `AWS_ROLE_ARN` (frontend role ARN)
-- Variable: `AWS_ACCOUNT_ID`
-- Variable: `AWS_REGION`
+Creates `robosystems/prod` and `robosystems/staging` in AWS Secrets Manager with:
 
-## Fork-Specific Configuration
+- **Auto-generated keys**: JWT signing, connection encryption, backup encryption
+- **Feature flags**: billing, rate limiting, registration, SSE, etc.
+- **Integration placeholders**: QuickBooks, Plaid, SEC, Turnstile (configure later)
 
-Forks automatically adapt to avoid resource collisions with the main deployment.
-
-### S3 Bucket Namespacing
-
-S3 bucket names are globally unique across all AWS accounts. Forks automatically use their AWS account ID as a namespace:
-
-| Deployment | Bucket Pattern |
-|------------|----------------|
-| Main repo | `robosystems-shared-raw-prod` |
-| Fork (account 123456789012) | `robosystems-123456789012-shared-raw-prod` |
-
-This is auto-detected during bootstrap - no configuration needed.
-
-### Observability (Optional)
-
-Prometheus and Grafana are **disabled by default** for forks. To enable:
+Safe to re-run - existing secrets are never overwritten. To customize later:
 
 ```bash
-gh variable set OBSERVABILITY_ENABLED_PROD --body "true"
-gh variable set OBSERVABILITY_ENABLED_STAGING --body "true"
+# View current values
+aws secretsmanager get-secret-value --secret-id robosystems/prod --query SecretString --output text | jq .
+
+# Update values
+aws secretsmanager put-secret-value --secret-id robosystems/prod --secret-string "$(cat updated.json)"
 ```
 
-The API works fine without observability - no telemetry errors or crashes.
+**Fork-specific:** S3 bucket names automatically include your account ID to avoid collisions.
 
-### Important: Separate AWS Account Required
-
-Forks **must deploy to a different AWS account** than the main repo. Deploying a fork to the same account would cause CloudFormation stack name collisions.
-
-## Variable Configuration
-
-Bootstrap sets only the essential variables needed for OIDC authentication:
-- `AWS_ROLE_ARN` - IAM role for GitHub Actions
-- `AWS_ACCOUNT_ID` - Your AWS account
-- `AWS_REGION` - Deployment region
-
-**All other variables have sensible defaults** in workflows and `.github/configs/graph.yml`. Basic deployments work immediately after bootstrap.
-
-### Optional: Full Variable Control
-
-For production customization (custom domains, specific instance sizes, scaling policies):
+## Deploy
 
 ```bash
-just setup-gha    # Sets ~80 variables for explicit control
+just deploy prod    # ~20-30 min for initial setup
 ```
 
-This is optional - only run it if you need to override workflow defaults.
+Initial deployment creates all infrastructure (VPC, databases, ECS services). Subsequent deploys only update changed resources.
+
+**Verify deployment:**
+```bash
+just bastion-tunnel prod all    # Connect to all services
+# API at http://localhost:8000
+# Dagster at http://localhost:3003
+```
 
 ## Multi-Repository Setup
 
-The OIDC stack creates two roles with hardcoded repository names for security:
+The OIDC stack creates two roles:
 
 | Role | Repositories | Permissions |
 |------|--------------|-------------|
-| `RoboSystemsGitHubActionsRole` | `robosystems` (backend) | Full infrastructure access |
-| `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app` | Limited frontend deployment access |
+| `RoboSystemsGitHubActionsRole` | `robosystems` | Full infrastructure |
+| `RoboSystemsGitHubActionsFrontendRole` | `robosystems-app`, `roboledger-app`, `roboinvestor-app` | Limited frontend |
 
-Only the GitHub organization is parameterized - repository names are hardcoded in the CloudFormation template.
-
-### Setting Up Frontend Apps
-
-After bootstrapping the main repo, run the lightweight bootstrap in each frontend repo:
+After bootstrapping the backend, set up frontend apps:
 
 ```bash
 # In robosystems-app, roboledger-app, or roboinvestor-app
 npm run setup:bootstrap
 ```
 
-This will:
-1. Auto-detect the repository from git remote
-2. Verify the OIDC infrastructure exists (created by main bootstrap)
-3. Set `AWS_ROLE_ARN` to the **frontend role** (limited permissions)
-4. Set `AWS_ACCOUNT_ID` and `AWS_REGION`
-5. Check for required secrets (repo and org level)
-6. Optionally run the full variable setup (`npm run setup:gha`)
+**Allowed deployment branches:** `main`, `release/*`, `v*` tags
 
-## Allowed Branches
+## API Access Modes
 
-The OIDC role only allows deployments from:
+RoboSystems supports three API access modes, configured via `API_ACCESS_MODE_PROD` / `API_ACCESS_MODE_STAGING`:
 
-| Source | Pattern | Use Case |
-|--------|---------|----------|
-| `main` branch | `refs/heads/main` | Production deploys |
-| `release/*` branches | `refs/heads/release/*` | Hotfix deploys |
-| `v*` tags | `refs/tags/v*` | Release tag deploys |
+| Mode | ALB Scheme | TLS | Domain Required | Use Case |
+|------|------------|-----|-----------------|----------|
+| `internal` | Internal | No | No | Development, testing, private deployments |
+| `public-http` | Internet-facing | No | No | Quick public access without domain setup |
+| `public` | Internet-facing | Yes | Yes | Production with custom domain |
 
-## CLI Access
+### Internal Mode (Default)
+
+No custom domain required. Access via bastion tunnel:
 
 ```bash
-# Login via SSO (opens browser)
-aws sso login --profile robosystems-sso
-
-# Use the profile
-export AWS_PROFILE=robosystems-sso
-aws sts get-caller-identity
+just bastion-tunnel prod all
+# API at http://localhost:8000
 ```
 
-### Automatic Profile Selection with direnv
+This is the default - no GitHub variables needed. The ALB is internal (not internet-accessible) and you connect through SSM port forwarding.
 
-The bootstrap creates a `.envrc` file that automatically sets `AWS_PROFILE` and `AWS_REGION` when you enter the directory:
+### Public HTTP Mode
 
-```bash
-# After bootstrap, allow direnv to load the .envrc
-direnv allow
-
-# Now AWS_PROFILE and AWS_REGION are automatically set when you cd into the repo
-cd robosystems
-echo $AWS_PROFILE  # robosystems-sso
-echo $AWS_REGION   # us-east-1
-```
-
-This prevents accidentally running commands against the wrong AWS account when working across multiple repositories or forks. Each fork can have its own `.envrc` with the appropriate profile and region.
-
-## GitHub Secrets
-
-Secrets can be set at **repository level** or **organization level**. Org-level secrets are inherited by all repos.
-
-| Secret | Required | Scope | Description |
-|--------|----------|-------|-------------|
-| `ACTIONS_TOKEN` | No | Org or Repo | GitHub PAT for workflow automations |
-| `ANTHROPIC_API_KEY` | No | Org or Repo | For Claude-powered PR/release workflows |
-| `DOCKERHUB_TOKEN` | No | Repo | For publishing to Docker Hub |
-
-**Notes:**
-- With OIDC, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are **not needed**
-- `ACTIONS_TOKEN` enables additional automations (deploy after release, gh CLI in workflows, cross-workflow triggers) - not required for core CI/CD
-- `ANTHROPIC_API_KEY` enables `create-pr.yml` and `tag-release.yml` workflows in all repos
-- Backend AI inference uses AWS Bedrock (separate from `ANTHROPIC_API_KEY`)
-- The bootstrap scripts check both repo and org-level secrets
-
-**Graceful Degradation:**
-
-All workflows work without optional secrets - they degrade gracefully instead of failing:
-
-| Missing Secret | Behavior |
-|----------------|----------|
-| `ACTIONS_TOKEN` | Core CI/CD works. Auto-deploy after release disabled. Workflow summary shows manual deploy commands. |
-| `ANTHROPIC_API_KEY` | PR and release workflows use basic descriptions (commit stats) instead of AI-generated summaries. |
-
-This design allows forks to deploy immediately without configuring optional integrations.
-
-## AWS Secrets Manager
-
-Application secrets are stored in AWS Secrets Manager:
+Internet-facing ALB without TLS. Useful for testing or when you don't have a domain:
 
 ```bash
-just setup-aws
-```
-
-Creates:
-- `robosystems/prod` - Production secrets
-- `robosystems/staging` - Staging secrets
-
-**Edit `bin/setup/aws.sh` first** to replace placeholders:
-- `JWT_SECRET_KEY` - Generate with `just generate-key`
-- `CONNECTION_CREDENTIALS_KEY` - Generate with `just generate-key`
-- Integration credentials (QuickBooks, Plaid, etc.)
-
-## Fresh AWS Account Checklist
-
-### Phase 0: Account Setup (AWS Console)
-
-1. [ ] Log in as root user
-2. [ ] Enable MFA on root
-3. [ ] Enable IAM Identity Center (SSO)
-4. [ ] Create Permission Set:
-   - Go to IAM Identity Center → Permission sets → Create permission set
-   - Select "Predefined permission set" → "AdministratorAccess"
-   - Click Next → Create
-5. [ ] Create SSO admin user:
-   - Go to IAM Identity Center → Users → Add user
-   - Complete user details and set up MFA
-6. [ ] Assign permissions to user:
-   - Go to Users → [your user] → Assign AWS accounts
-   - Select your AWS account(s)
-   - Click Next, select the AdministratorAccess permission set
-   - Submit
-7. [ ] Configure AWS CLI locally
-
-### Phase 1: Bootstrap
-
-```bash
-# Configure SSO profile
-aws configure sso --profile robosystems-sso
-
-# Run bootstrap (interactive - prompts for secrets creation)
-just bootstrap
-```
-
-Bootstrap handles:
-1. OIDC federation setup
-2. GitHub variables (AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION)
-3. ECR repository creation (for Docker images)
-4. Application secrets & feature flags - prompts `(Y/n)`, required for deploy
-5. Full variable setup - prompts `(y/N)`, optional for customization
-
-The secrets step creates `robosystems/prod` and `robosystems/staging` with:
-- JWT signing keys (auto-generated)
-- Encryption keys (auto-generated)
-- Feature flags (sensible defaults)
-- Integration placeholders (QuickBooks, Plaid, etc.)
-
-**Note:** Existing secrets are never overwritten. Safe to re-run bootstrap.
-
-### Phase 2: Deploy
-
-```bash
-# Deploy to production (~20-30 min for initial setup)
+gh variable set API_ACCESS_MODE_PROD --body "public-http"
 just deploy prod
 ```
 
-Initial deployment creates all infrastructure (VPC, databases, ECS services, etc.). Subsequent deployments are faster as they only update changed resources.
+After deployment, access via the ALB DNS name (shown in CloudFormation outputs).
 
-## Domain Configuration
+**Limitations:**
+- No TLS encryption (credentials sent in plain text)
+- OAuth integrations (Google, QuickBooks) won't work (require HTTPS redirect URLs)
+- Not recommended for production with sensitive data
 
-RoboSystems supports two deployment modes. During `just bootstrap`, you can simply press Enter to skip domain configuration for VPC-only deployments.
+### Public Mode (Custom Domain)
 
-### VPC-Only Mode (Default)
+Full production setup with HTTPS and custom domain:
 
-No custom domain required. The API is accessible via:
-- **Bastion tunnel**: SSH tunnel through the bastion host for secure access
-- **Internal load balancer**: Direct access within the VPC
+1. Domain must be hosted in Route53
+2. Configure variables:
+   ```bash
+   gh variable set API_ACCESS_MODE_PROD --body "public"
+   gh variable set API_DOMAIN_NAME_ROOT --body "yourdomain.com"
+   gh variable set API_DOMAIN_NAME_PROD --body "api.yourdomain.com"
+   ```
+3. Deploy - ACM certificates and DNS records created automatically
+
+### Switching Modes
+
+You can switch modes at any time:
 
 ```bash
-# Access via bastion tunnel
-just bastion-tunnel
+# Switch from internal to public-http
+gh variable set API_ACCESS_MODE_PROD --body "public-http"
+just deploy prod
 
-# API is now accessible at http://localhost:8000
+# Switch to full public with domain
+gh variable set API_ACCESS_MODE_PROD --body "public"
+gh variable set API_DOMAIN_NAME_ROOT --body "yourdomain.com"
+gh variable set API_DOMAIN_NAME_PROD --body "api.yourdomain.com"
+just deploy prod
 ```
 
-This is the default when `API_DOMAIN_NAME_ROOT` is empty. Perfect for:
-- Internal microservice architectures
-- Development and testing environments
-- Private deployments behind corporate networks
-
-### Custom Domain Mode
-
-For production deployments with a custom domain (e.g., `api.robosystems.ai`):
-
-1. **Set the domain variable** before deploying:
-   ```bash
-   gh variable set API_DOMAIN_NAME_ROOT --body "robosystems.ai"
-   ```
-
-2. **Prerequisites:**
-   - Domain registered and DNS hosted in Route53 (or external DNS)
-   - ACM certificate for `*.robosystems.ai` in the deployment region
-   - The deployment will create Route53 records automatically if using Route53
-
-3. **Result:**
-   - API accessible at `https://api.robosystems.ai`
-   - Automatic HTTPS redirect
-   - SSL/TLS termination at the load balancer
-
-**Note:** You can switch between modes by setting or clearing `API_DOMAIN_NAME_ROOT` and redeploying.
+**Note:** Switching between internal and internet-facing modes will replace the ALB (causes brief downtime).
 
 ## Troubleshooting
 
 ### SSO: "No accounts found"
-
 Ensure your SSO user has permission sets assigned to accounts.
 
 ### SSO: "Profile not found"
-
 ```bash
 aws configure sso --profile robosystems-sso
 ```
 
 ### AWS CLI: "You must specify a region"
-
-If you see this error, ensure `AWS_REGION` is set. The bootstrap script should have added this to your `.envrc`, but if not:
-
 ```bash
-# Add to .envrc
-echo 'export AWS_REGION=us-east-1' >> .envrc
-direnv allow
+echo 'export AWS_REGION=us-east-1' >> .envrc && direnv allow
 ```
-
-Or add `region = us-east-1` to your profile in `~/.aws/config`.
 
 ### OIDC: "Not authorized to perform sts:AssumeRoleWithWebIdentity"
-
-Check that:
-1. The OIDC stack was deployed successfully
-2. The repository/branch matches the allowed conditions (main, release/*, v* tags)
-3. The workflow has `permissions: id-token: write`
-
-### OIDC: "Could not assume role"
-
-Verify the role ARN is correct:
-```bash
-gh variable get AWS_ROLE_ARN
-aws iam get-role --role-name RoboSystemsGitHubActionsRole --profile robosystems-sso
-```
-
-## Local Development (Optional)
-
-### Bedrock Access for Docker
-
-If you need to test AI/Bedrock features locally in Docker, run:
-
-```bash
-just setup-bedrock
-```
-
-This creates an IAM user with Bedrock permissions and updates `.env` with credentials. Docker containers can't access host SSO sessions, so this provides a workaround.
-
-**Note:** Production uses IAM role credentials via ECS task roles - no stored credentials needed.
+1. Verify OIDC stack deployed successfully
+2. Check branch matches allowed conditions (main, release/*, v* tags)
+3. Ensure workflow has `permissions: id-token: write`
 
 ## Quick Reference
 
 ```bash
-# Bootstrap (interactive - handles everything)
+# Bootstrap
 just bootstrap                    # Default profile/region
-just bootstrap my-sso             # Custom SSO profile
 just bootstrap my-sso eu-west-1   # Custom profile AND region
 
-# Then deploy
-just deploy prod                  # Deploy to production (~20-30 min initial)
-
-# Optional customization
-just setup-gha          # Full variable control (~80 vars) - not required for basic deploys
-just setup-aws          # Application secrets & feature flags (if skipped)
-just setup-bedrock      # Local Bedrock dev (optional)
-
-# SSO login
-aws sso login --profile robosystems-sso
-export AWS_PROFILE=robosystems-sso  # or use direnv (automatic)
-
-# Generate keys
-just generate-key       # Single key
-just generate-keys      # All required keys
-
-# Verify setup
-gh variable list
-gh secret list
-aws sts get-caller-identity
-
 # Deploy
-just deploy prod        # Deploy to production
-just deploy staging     # Deploy to staging
+just deploy prod                  # Production (~20-30 min initial)
+just deploy staging               # Staging
+
+# Connect
+just bastion-tunnel prod all      # All tunnels (postgres, valkey, dagster, api)
+
+# Optional / Re-run individually
+just setup-aws                    # Application secrets & feature flags
+just setup-gha                    # Full GitHub variable control (~120 vars)
+just setup-bedrock                # Local AI/Bedrock development
+
+# Verify
+gh variable list
+aws sts get-caller-identity
 ```
 
 ## CloudFormation Templates
@@ -489,19 +272,8 @@ just deploy staging     # Deploy to staging
 | `graph-*.yaml` | GitHub Actions | LadybugDB infrastructure |
 | `bastion.yaml` | GitHub Actions | SSM bastion host |
 
-Note: `bootstrap-oidc.yaml` is deployed locally because GitHub Actions needs it to exist before it can authenticate to AWS.
-
 ## Related Documentation
 
-**Wiki Guides:**
-- [Architecture Overview](Architecture-Overview) - System architecture and components
-- [Getting Started](Home) - Initial setup and development
-
-**Codebase:**
+- [Architecture Overview](Architecture-Overview) - System architecture
 - [CloudFormation Templates](https://github.com/RoboFinSystems/robosystems/tree/main/cloudformation) - Infrastructure as code
-- [Setup Scripts](https://github.com/RoboFinSystems/robosystems/tree/main/bin/setup) - Bootstrap and setup scripts
-
-## Support
-
-- [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
+- [Setup Scripts](https://github.com/RoboFinSystems/robosystems/tree/main/bin/setup) - Bootstrap scripts
