@@ -8,6 +8,7 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 - [Prerequisites](#prerequisites)
 - [Bootstrap Steps](#bootstrap-steps)
 - [What Gets Created](#what-gets-created)
+- [Fork-Specific Configuration](#fork-specific-configuration)
 - [Multi-Repository Setup](#multi-repository-setup)
 - [Allowed Branches](#allowed-branches)
 - [CLI Access](#cli-access)
@@ -105,8 +106,10 @@ This will:
 1. Create/update `.envrc` with your AWS profile and region
 2. Verify SSO authentication
 3. Deploy `bootstrap-oidc.yaml` CloudFormation stack
-4. Set GitHub variables (including `AWS_ROLE_ARN`)
-5. Run `setup-gha` to configure essential variables (auto-detected)
+4. Set GitHub variables (AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION)
+5. Create ECR repository for Docker images
+6. Prompt for application secrets & feature flags
+7. Prompt for full variable setup (optional)
 
 ## What Gets Created
 
@@ -114,17 +117,49 @@ This will:
 - OIDC Identity Provider for GitHub Actions
 - IAM Role: `RoboSystemsGitHubActionsRole` (backend - full permissions)
 - IAM Role: `RoboSystemsGitHubActionsFrontendRole` (frontend apps - limited permissions)
+- ECR Repository for Docker images (with lifecycle policy)
+- Secrets Manager entries for prod/staging (if confirmed)
 
 **In GitHub (robosystems repo):**
 - Variable: `AWS_ROLE_ARN` (backend role ARN)
 - Variable: `AWS_ACCOUNT_ID`
 - Variable: `AWS_REGION`
-- Plus ~80 configuration variables (via `setup-gha`)
+- Plus ~80 configuration variables (if full setup selected)
 
 **In GitHub (frontend repos):**
 - Variable: `AWS_ROLE_ARN` (frontend role ARN)
 - Variable: `AWS_ACCOUNT_ID`
 - Variable: `AWS_REGION`
+
+## Fork-Specific Configuration
+
+Forks automatically adapt to avoid resource collisions with the main deployment.
+
+### S3 Bucket Namespacing
+
+S3 bucket names are globally unique across all AWS accounts. Forks automatically use their AWS account ID as a namespace:
+
+| Deployment | Bucket Pattern |
+|------------|----------------|
+| Main repo | `robosystems-shared-raw-prod` |
+| Fork (account 123456789012) | `robosystems-123456789012-shared-raw-prod` |
+
+This is auto-detected during bootstrap - no configuration needed.
+
+### Observability (Optional)
+
+Prometheus and Grafana are **disabled by default** for forks. To enable:
+
+```bash
+gh variable set OBSERVABILITY_ENABLED_PROD --body "true"
+gh variable set OBSERVABILITY_ENABLED_STAGING --body "true"
+```
+
+The API works fine without observability - no telemetry errors or crashes.
+
+### Important: Separate AWS Account Required
+
+Forks **must deploy to a different AWS account** than the main repo. Deploying a fork to the same account would cause CloudFormation stack name collisions.
 
 ## Variable Configuration
 
@@ -289,8 +324,9 @@ just bootstrap
 Bootstrap handles:
 1. OIDC federation setup
 2. GitHub variables (AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION)
-3. Application secrets & feature flags - prompts `(Y/n)`, required for deploy
-4. Full variable setup - prompts `(y/N)`, optional for customization
+3. ECR repository creation (for Docker images)
+4. Application secrets & feature flags - prompts `(Y/n)`, required for deploy
+5. Full variable setup - prompts `(y/N)`, optional for customization
 
 The secrets step creates `robosystems/prod` and `robosystems/staging` with:
 - JWT signing keys (auto-generated)
