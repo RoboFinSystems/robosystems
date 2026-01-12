@@ -44,8 +44,8 @@ RoboSystems is built on a modern, scalable architecture designed for enterprise 
 └─────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────┐
-│               Graph Database Backends                   │
-│               (Ladybug Primary Backend)                 │
+│                      LadybugDB                          │
+│         (Embedded Columnar Graph Database)              │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -65,14 +65,30 @@ The FastAPI backend provides a RESTful API with:
 
 ### MCP Server
 
-**Location**: `/robosystems/middleware/mcp/`
+**Server Location**: `/robosystems/routers/graphs/mcp/`
+**Middleware Location**: `/robosystems/middleware/mcp/`
 
-Model Context Protocol server for AI integration via the FastAPI Backend:
+Model Context Protocol server for AI integration:
 
-- **Claude Integration**: Native support for Claude Desktop
-- **Natural Language Queries**: Convert user intent to Cypher
-- **Financial Analysis**: Specialized tools for financial data exploration
-- **Tool Registry**: Discover available graph operations
+- **MCP Endpoints**: FastAPI router exposing MCP-compliant tool endpoints
+- **Specialized Tools**: Cypher queries, schema introspection, fact grids, workspace management
+- **Streaming Support**: SSE for memory-efficient large result processing
+- **Query Validation**: Complexity scoring and timeout enforcement
+
+**Client Integration**: External MCP client (`@robosystems/mcp` npm package) connects Claude Desktop to the server.
+
+**See**: [MCP Middleware Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/mcp/README.md) in codebase
+
+### Agent Interface
+
+**Location**: `/robosystems/routers/graphs/agent/`
+
+AI agent execution system for natural language graph interactions:
+
+- **Text-to-Cypher**: Convert natural language queries to Cypher
+- **Automatic Strategy Selection**: Choose optimal execution approach based on query intent
+- **Streaming Responses**: SSE support for real-time progress monitoring
+- **Background Processing**: Queue integration for extended analysis operations
 
 ### Dagster Orchestration
 
@@ -128,20 +144,30 @@ See [Dagster CloudFormation](https://github.com/RoboFinSystems/robosystems/blob/
 
 ## Graph Database System
 
-### Pluggable Backend Architecture
+### LadybugDB - Primary Graph Database
 
-RoboSystems supports multiple graph database backends:
+RoboSystems is built on **LadybugDB**, a high-performance embedded graph database purpose-built for financial knowledge graphs:
 
-**Active Backends:**
-- **Ladybug**: Primary backend - high-performance embedded graph database with columnar storage
-  - Optimized for analytical workloads
-  - Native DuckDB integration for bulk ingestion
+**Core Capabilities:**
+- **Columnar Storage**: Optimized for analytical queries over financial time-series data
+- **Native DuckDB Integration**: Direct staging-to-graph materialization via database extensions
+- **Embedded Architecture**: No external database server - runs alongside the API for minimal latency
+- **XBRL-Native**: First-class support for SEC financial filing schemas and multi-dimensional facts
 
-**Optional Backends:**
-- **Neo4j Community**: Client-server architecture with advanced query features
-- **Neo4j Enterprise**: Clustering and advanced security features
+**Performance Features:**
+- **Bulk Ingestion**: S3 Parquet → DuckDB staging → LadybugDB graph pipeline
+- **Streaming Results**: NDJSON support for memory-efficient large query responses
+- **Connection Pooling**: Efficient resource management per database
+- **Admission Control**: CPU/memory backpressure to prevent overload
 
-The system is currently **Ladybug-first** with Neo4j available as opt-in tiers.
+**Enterprise Features:**
+- **Multi-Tenant Isolation**: Separate databases per customer with memory and storage isolation
+- **Subgraph Support**: Isolated workspaces within a parent graph for development, testing, and team collaboration (see [Subgraphs](#subgraphs-workspaces))
+- **Automated Backups**: EBS snapshots with configurable retention
+- **Auto-Scaling**: EC2 writer clusters scale based on demand
+
+**Pluggable Architecture:**
+The backend abstraction layer allows alternative implementations. Neo4j support exists in the codebase but is experimental and disabled by default.
 
 ### Graph API
 
@@ -149,7 +175,7 @@ The system is currently **Ladybug-first** with Neo4j available as opt-in tiers.
 
 FastAPI microservice providing unified interface for all backends:
 
-- **HTTP REST Interface**: Port 8001 (default) or 8002 (optional Neo4j instances)
+- **HTTP REST Interface**: Port 8001 (default)
 - **Backend Abstraction**: Consistent API regardless of backend
 - **Multi-Database Management**: Multiple databases per instance
 - **Connection Pooling**: Efficient resource management
@@ -164,7 +190,7 @@ FastAPI microservice providing unified interface for all backends:
 
 The backend factory provides pluggable graph database backends with a unified interface:
 
-- **Backend Abstraction**: Common interface for Ladybug and Neo4j implementations
+- **Backend Abstraction**: Common interface with pluggable backend implementations
 - **Factory Pattern**: Dynamic backend selection based on configuration (`GRAPH_BACKEND_TYPE`)
 - **Backend-Specific Optimizations**: Each backend implements optimal patterns for their architecture
 - **Connection Management**: Backend-appropriate connection pooling and lifecycle management
@@ -179,7 +205,7 @@ The backend factory provides pluggable graph database backends with a unified in
 
 The client factory layer provides intelligent routing between application code and graph database infrastructure:
 
-- **Backend-Agnostic**: Works seamlessly with both Ladybug and Neo4j backends
+- **Backend-Agnostic**: Works seamlessly with any configured backend
 - **Automatic Discovery**: Finds database instances via DynamoDB registry
 - **Redis Caching**: Caches instance locations to reduce lookups
 - **Circuit Breakers**: Prevents cascading failures with automatic recovery
@@ -192,13 +218,14 @@ The client factory layer provides intelligent routing between application code a
 
 **Location**: `/robosystems/graph_api/core/duckdb/`
 
-High-performance data ingestion via intermediate staging:
+High-performance data ingestion pipeline bridging raw data to LadybugDB:
 
-- **Staging Tables**: DuckDB materialized tables for data preparation
-- **File-Based Workflow**: Users upload Parquet → DuckDB validates → Graph ingests
-- **Direct Integration**: Native DuckDB → Ladybug via extensions
+- **Staging Tables**: DuckDB materialized tables for data validation and transformation
+- **File-Based Workflow**: Users upload Parquet → DuckDB validates → LadybugDB ingests
+- **Native Integration**: Direct DuckDB → LadybugDB materialization via database extensions (no intermediate files)
 - **Schema-Driven**: Tables auto-created from graph schema DDL
 - **S3 Integration**: Direct S3 file access via httpfs extension
+- **SQL Preview**: Query staged data with full SQL before graph materialization
 
 ### Infrastructure Design
 
@@ -213,17 +240,47 @@ High-performance data ingestion via intermediate staging:
 
 The platform offers multiple tiers with different isolation levels and capabilities:
 
-- **ladybug-standard**: Multi-tenant, cost-optimized entry tier
-- **ladybug-large**: Dedicated instance with subgraph support
-- **ladybug-xlarge**: Maximum performance and scale
-- **ladybug-shared**: Public data repositories (SEC, industry, economic)
-- **neo4j-community-large**: Optional Neo4j backend (disabled by default)
-- **neo4j-enterprise-xlarge**: Optional Neo4j Enterprise (disabled by default)
+| Tier | Commercial Name | Isolation | Subgraphs | Description |
+|------|-----------------|-----------|-----------|-------------|
+| `ladybug-standard` | Standard | Multi-tenant | 0 | Cost-optimized entry tier, single database |
+| `ladybug-large` | Professional | Dedicated | 10 max | Dedicated instance for team collaboration |
+| `ladybug-xlarge` | Enterprise | Dedicated | 25 max | Maximum performance and scale |
+| `ladybug-shared` | — | Platform | — | Public repositories (SEC, industry, economic) |
+
+*Note: Neo4j backend tiers exist in the codebase but are experimental and disabled by default.*
+
+### Subgraphs (Workspaces)
+
+Subgraphs provide isolated database environments within a parent graph, available on Professional and Enterprise tiers:
+
+**Use Cases:**
+- **Development**: Test schema changes or new data pipelines without affecting production
+- **Experimentation**: Explore "what-if" scenarios with copied or synthetic data
+- **Team Collaboration**: Give teams isolated workspaces that share the parent's infrastructure
+- **Staging**: Validate data before promoting to the main graph
+
+**How Subgraphs Work:**
+- Created on the same EC2 instance as the parent graph (no additional infrastructure cost)
+- Share the parent's credit pool and subscription limits
+- Inherit schema from parent, with optional extensions
+- Fully isolated data - queries cannot cross subgraph boundaries
+- Independent backup and restore capabilities
+
+**Naming & Identification:**
+- Subgraph names must be alphanumeric, 1-20 characters (no hyphens or underscores)
+- Full ID format: `{parent_graph_id}_{subgraph_name}` (e.g., `kg123abc_dev`)
+- Switch between parent and subgraphs via MCP tools or API
+
+**Limits by Tier:**
+| Tier | Max Subgraphs | Total Databases |
+|------|---------------|-----------------|
+| Standard | 0 | 1 (parent only) |
+| Professional | 10 | 11 (1 parent + 10 subgraphs) |
+| Enterprise | 25 | 26 (1 parent + 25 subgraphs) |
 
 For current tier specifications including instance types, memory allocation, subgraph limits, and pricing, see:
 - **[Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** - Infrastructure specifications
-- **[Credits Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/credits.py)** - Credit allocations
-- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/core.py)** - Pricing and plans
+- **[Billing Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/config/billing/)** - Subscription plans, AI costs, and pricing
 
 ## Data Processing Layer
 
@@ -306,20 +363,40 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 **Location**: `/robosystems/middleware/`
 
 **Graph Middleware** (`/middleware/graph/`):
-- Graph Router: Intelligent cluster selection
-- Allocation Manager: Database allocation via DynamoDB
-- Query Queue: Admission control and long polling
+- Graph Router: Intelligent cluster selection and routing
+- Allocation Manager: Database allocation via DynamoDB registry
+- Query Queue: Admission control with backpressure
+- Repository Access: Shared repository subscription management
 
-**Security & Robustness**:
-- Authentication & authorization
-- Rate limiting (burst-focused, 1-minute windows)
-- Credit tracking and billing
-- Circuit breakers and retry policies
+**Authentication & Authorization** (`/middleware/auth/`):
+- JWT token validation and refresh
+- API key authentication
+- SSO integration (Google, GitHub)
+- Permission enforcement
 
-**Observability**:
+**Billing & Credits** (`/middleware/billing/`):
+- Credit consumption tracking for AI operations
+- Usage metering and analytics
+- Subscription enforcement
+
+**Rate Limiting** (`/middleware/rate_limits/`):
+- Burst-focused rate limiting (1-minute windows)
+- Tier-based multipliers
+- Per-graph and per-user limits
+
+**Robustness** (`/middleware/robustness/`):
+- Circuit breakers for external services
+- Retry policies with exponential backoff
+- Graceful degradation patterns
+
+**Observability** (`/middleware/otel/`):
 - OpenTelemetry integration
-- Request tracing
-- Performance metrics
+- Distributed request tracing
+- Performance metrics collection
+
+**Real-time** (`/middleware/sse/`):
+- Server-sent events for streaming responses
+- Progress tracking for long-running operations
 
 ### Models
 
@@ -342,14 +419,15 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 ## Data Storage
 
-### Graph Databases
+### Graph Databases (LadybugDB)
 
-**Purpose**: Financial knowledge graphs with relationships
+**Purpose**: Financial knowledge graphs with entity relationships and multi-dimensional facts
 
-- **Ladybug**: Primary embedded graph database backend
-- **Neo4j**: Optional managed graph database (disabled by default)
-- **Multi-tenant**: Separate database per entity (`kg12345abc`)
-- **Shared repositories**: SEC, industry, economic data in dedicated clusters
+- **Primary Backend**: LadybugDB embedded graph database with columnar storage
+- **Multi-Tenant**: Separate database per entity (`kg12345abc`) with memory/storage isolation
+- **Shared Repositories**: SEC, industry, economic data in dedicated read-optimized clusters
+- **Subgraphs**: Isolated workspaces for teams and environments (see [Subgraphs](#subgraphs-workspaces))
+- **Cypher Queries**: Full Cypher query language support for graph traversal and analytics
 
 ### DuckDB
 
@@ -433,8 +511,8 @@ s3://robosystems-user-{env}/
 
 **Compute**:
 - **ECS Fargate**: API and Dagster (webserver, daemon, run workers) on ARM64/Graviton
-- **EC2**: Graph database writers (ARM64/Graviton auto-scaling groups)
-- **Lambda**: Management functions (monitoring, rotation, volume management)
+- **EC2**: LadybugDB writer clusters (ARM64/Graviton auto-scaling groups with EBS persistence)
+- **Lambda**: Infrastructure management (instance monitoring, secret rotation, volume lifecycle)
 
 **Database & Cache**:
 - **RDS PostgreSQL**: Primary database (auto-scaling storage)
@@ -526,13 +604,12 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 - **`waf.yaml`**: AWS Web Application Firewall for protecting the API from web exploits
 - **`dagster.yaml`**: Dagster webserver, daemon, and run workers for pipeline orchestration
 
-#### Graph Database Infrastructure
+#### LadybugDB Infrastructure
 
-- **`graph-infra.yaml`**: Base infrastructure for graph database clusters (security groups, roles, registries)
-- **`graph-volumes.yaml`**: EBS volume management and snapshot automation for graph databases
-- **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters (LadybugDB backend)
-- **`graph-ladybug-replicas.yaml`**: Read replica clusters for LadybugDB
-- **`graph-neo4j.yaml`**: Auto-scaling EC2 writer clusters (Neo4j backend)
+- **`graph-infra.yaml`**: Base infrastructure (DynamoDB registries, security groups, IAM roles, SNS alerts)
+- **`graph-volumes.yaml`**: EBS volume lifecycle management (auto-expansion, snapshots, retention)
+- **`graph-ladybug.yaml`**: Auto-scaling EC2 writer clusters for LadybugDB (multi-tenant and dedicated tiers)
+- **`graph-ladybug-replicas.yaml`**: Read replica fleet for shared repositories (SEC, industry, economic)
 
 #### Observability
 
