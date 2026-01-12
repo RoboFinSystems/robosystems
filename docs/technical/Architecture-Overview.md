@@ -122,8 +122,7 @@ dagster/
 - **Local Development**: `just sec-load NVDA 2025` triggers pipeline via Docker CLI
 
 **Infrastructure (AWS):**
-- **Fargate**: Daemon + Webserver - always on, lightweight
-- **EC2 Run Workers**: Scale to zero when no jobs running
+- **ECS Fargate**: Daemon, Webserver, and Run Workers - all serverless
 
 See [Dagster CloudFormation](https://github.com/RoboFinSystems/robosystems/blob/main/cloudformation/dagster.yaml) for current infrastructure configuration.
 
@@ -379,6 +378,7 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 - **Subscription Management**: Plans, billing, credits
 - **File Registry**: Track uploaded files per table (GraphFile, GraphTable)
 - **Schema Registry**: Graph schema definitions (GraphSchema)
+- **Dagster Orchestration**: Job runs, schedules, sensors, and asset metadata
 - **Audit Logs**: Security and compliance tracking
 
 ### Valkey (Redis)
@@ -432,8 +432,8 @@ s3://robosystems-user-{env}/
 ### AWS Services
 
 **Compute**:
-- **ECS Fargate**: API and Dagster webserver/daemon (ARM64/Graviton)
-- **EC2**: Graph database writers and Dagster run workers (ARM64/Graviton auto-scaling groups)
+- **ECS Fargate**: API and Dagster (webserver, daemon, run workers) on ARM64/Graviton
+- **EC2**: Graph database writers (ARM64/Graviton auto-scaling groups)
 - **Lambda**: Management functions (monitoring, rotation, volume management)
 
 **Database & Cache**:
@@ -464,6 +464,31 @@ s3://robosystems-user-{env}/
 
 ## CI/CD & Deployment
 
+### GitHub OIDC Authentication
+
+RoboSystems uses GitHub OIDC federation for AWS authentication - no AWS credentials are stored in GitHub:
+
+```
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│  GitHub Action  │─────▶│  OIDC Token     │─────▶│     AWS STS     │
+│  Workflow       │      │  (I am repo X)  │      │  (temp creds)   │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
+                                                          │
+                                                          ▼
+                                                  ┌─────────────────┐
+                                                  │  Deploy to AWS  │
+                                                  │  (1hr session)  │
+                                                  └─────────────────┘
+```
+
+**Bootstrap process** (`just bootstrap`):
+1. Deploys OIDC federation CloudFormation stack
+2. Sets GitHub variables (`AWS_ROLE_ARN`, `AWS_ACCOUNT_ID`, `AWS_REGION`)
+3. Creates ECR repository for Docker images
+4. Creates application secrets in AWS Secrets Manager
+
+See **[Bootstrap Guide](Bootstrap-Guide)** for complete setup instructions.
+
 ### GitHub Actions Workflows
 
 All deployments automated through GitHub Actions. Key workflows include:
@@ -481,7 +506,11 @@ See [.github/workflows/](https://github.com/RoboFinSystems/robosystems/tree/main
 
 ### CloudFormation Templates
 
-All infrastructure is managed through CloudFormation templates in `/cloudformation/`:
+All infrastructure is managed through CloudFormation templates in `/cloudformation/`. See **[CloudFormation README](https://github.com/RoboFinSystems/robosystems/blob/main/cloudformation/README.md)** for detailed template documentation including parameters, exports, and deployment order. For initial setup, see the **[Bootstrap Guide](Bootstrap-Guide)**.
+
+#### Bootstrap
+
+- **`bootstrap-oidc.yaml`**: GitHub OIDC federation for CI/CD authentication (deployed locally via `just bootstrap`)
 
 #### Core Infrastructure
 
@@ -531,10 +560,10 @@ Environment variables are managed through:
 
 ### Infrastructure Setup
 
-```bash
-just setup-gha     # Interactive GitHub secrets/variables setup
-just setup-aws     # Interactive AWS secrets manager setup
-```
+See **[Bootstrap Guide](Bootstrap-Guide)** for complete setup instructions including:
+- AWS OIDC federation (`just bootstrap`)
+- GitHub variables and secrets (`just setup-gha`)
+- AWS Secrets Manager configuration (`just setup-aws`)
 
 ## External Integrations
 
@@ -565,10 +594,11 @@ just setup-aws     # Interactive AWS secrets manager setup
 - Account balance tracking
 - Multi-institution support
 
-### Anthropic Claude
+### Anthropic Claude (via AWS Bedrock)
 
 **Purpose**: AI-powered financial analysis
 
+- AWS Bedrock as the interface to Claude models
 - Natural language queries
 - GraphRAG-enabled responses
 - Token-based billing
@@ -614,6 +644,7 @@ just setup-aws     # Interactive AWS secrets manager setup
 ## Related Documentation
 
 **Wiki Guides:**
+- **[Bootstrap Guide](Bootstrap-Guide)** - Set up a fresh fork with AWS OIDC authentication
 - **[SEC XBRL Pipeline](SEC-XBRL-Pipeline)** - Load and query SEC financial filings
 - **[Accounting Demo](Accounting-Demo)** - Interactive demo of graph-based accounting
 - **[Custom Graph Schema](Custom-Graph-Schema)** - Design and build custom graph databases
