@@ -1,6 +1,6 @@
 # Welcome to the RoboSystems Wiki!
 
-RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial data into actionable intelligence through graph-based analytics and AI-powered insights.
+RoboSystems is an enterprise-grade financial knowledge graph platform that transforms complex financial and operational data into actionable intelligence through graph-based analytics and AI-powered insights.
 
 ## Getting Started
 

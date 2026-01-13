@@ -240,18 +240,19 @@ High-performance data ingestion pipeline bridging raw data to LadybugDB:
 
 The platform offers multiple tiers with different isolation levels and capabilities:
 
-| Tier | Commercial Name | Isolation | Subgraphs | Description |
-|------|-----------------|-----------|-----------|-------------|
-| `ladybug-standard` | Standard | Multi-tenant | 0 | Cost-optimized entry tier, single database |
-| `ladybug-large` | Professional | Dedicated | 10 max | Dedicated instance for team collaboration |
-| `ladybug-xlarge` | Enterprise | Dedicated | 25 max | Maximum performance and scale |
+
+| Tier | Display Name | Isolation | Subgraphs | Description |
+|------|--------------|-----------|-----------|-------------|
+| `ladybug-standard` | LadybugDB Standard | Multi-tenant | 0 | Cost-optimized entry tier, single database |
+| `ladybug-large` | LadybugDB Large | Dedicated r7g.large | 10 max | Dedicated instance for team collaboration |
+| `ladybug-xlarge` | LadybugDB XLarge | Dedicated r7g.xlarge | 25 max | Maximum performance and scale |
 | `ladybug-shared` | — | Platform | — | Public repositories (SEC, industry, economic) |
 
 *Note: Neo4j backend tiers exist in the codebase but are experimental and disabled by default.*
 
 ### Subgraphs (Workspaces)
 
-Subgraphs provide isolated database environments within a parent graph, available on Professional and Enterprise tiers:
+Subgraphs provide isolated database environments within a parent graph, available on Large and XLarge tiers:
 
 **Use Cases:**
 - **Development**: Test schema changes or new data pipelines without affecting production
@@ -275,8 +276,8 @@ Subgraphs provide isolated database environments within a parent graph, availabl
 | Tier | Max Subgraphs | Total Databases |
 |------|---------------|-----------------|
 | Standard | 0 | 1 (parent only) |
-| Professional | 10 | 11 (1 parent + 10 subgraphs) |
-| Enterprise | 25 | 26 (1 parent + 25 subgraphs) |
+| Large | 10 | 11 (1 parent + 10 subgraphs) |
+| XLarge | 25 | 26 (1 parent + 25 subgraphs) |
 
 For current tier specifications including instance types, memory allocation, subgraph limits, and pricing, see:
 - **[Graph Configuration](https://github.com/RoboFinSystems/robosystems/blob/main/.github/configs/graph.yml)** - Infrastructure specifications
