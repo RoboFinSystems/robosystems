@@ -11,6 +11,7 @@ This guide walks you through bootstrapping a fresh fork of RoboSystems.
 - [Deploy](#deploy)
 - [Multi-Repository Setup](#multi-repository-setup)
 - [API Access Modes](#api-access-modes)
+- [Frontend App Access Modes](#frontend-app-access-modes)
 - [Troubleshooting](#troubleshooting)
 - [Quick Reference](#quick-reference)
 
@@ -215,6 +216,80 @@ just deploy prod
 ```
 
 **Note:** Switching between internal and internet-facing modes will replace the ALB (causes brief downtime).
+
+## Frontend App Access Modes
+
+Frontend apps (robosystems-app, roboledger-app, roboinvestor-app) support the same three access modes, configured via `APP_ACCESS_MODE_PROD` / `APP_ACCESS_MODE_STAGING`:
+
+| Mode | CloudFront | ALB Scheme | TLS | Domain Required | Use Case |
+|------|------------|------------|-----|-----------------|----------|
+| `internal` | No | Internal | No | No | Development via bastion tunnel |
+| `public-http` | Yes (AWS DNS) | Internet-facing | Yes* | No | Testing without custom domain |
+| `public` | Yes | Internet-facing | Yes | Yes | Production with custom domain |
+
+*CloudFront provides HTTPS on its default domain (`d123.cloudfront.net`)
+
+### Internal Mode
+
+No CloudFront or custom domain. Access via bastion tunnel:
+
+```bash
+just bastion-tunnel prod app
+# App at http://localhost:3000
+```
+
+The ALB is internal (not internet-accessible) and you connect through SSM port forwarding. Static assets are served directly from ECS (no S3/CloudFront).
+
+### Public HTTP Mode
+
+CloudFront with AWS-provided domain. Useful for testing or when you don't have a domain:
+
+```bash
+gh variable set APP_ACCESS_MODE_PROD --body "public-http"
+just deploy prod
+```
+
+After deployment, access via the CloudFront domain (shown in CloudFormation outputs, e.g., `d123abc.cloudfront.net`).
+
+**Benefits over internal mode:**
+- Public access without custom domain
+- HTTPS via CloudFront's default certificate
+- CDN caching for static assets
+
+**Limitations:**
+- No custom domain - uses CloudFront's auto-generated domain
+- Some OAuth providers may require a custom domain for callbacks
+
+### Public Mode (Custom Domain)
+
+Full production setup with custom domain and HTTPS:
+
+1. Domain must be hosted in Route53
+2. Configure variables:
+   ```bash
+   gh variable set APP_ACCESS_MODE_PROD --body "public"
+   gh variable set DOMAIN_NAME_ROOT --body "yourdomain.com"
+   gh variable set DOMAIN_NAME_PROD --body "app.yourdomain.com"
+   ```
+3. Deploy - ACM certificates and DNS records created automatically
+
+### Switching Modes
+
+You can switch modes at any time:
+
+```bash
+# Switch from internal to public-http
+gh variable set APP_ACCESS_MODE_PROD --body "public-http"
+just deploy prod
+
+# Switch to full public with domain
+gh variable set APP_ACCESS_MODE_PROD --body "public"
+gh variable set DOMAIN_NAME_ROOT --body "yourdomain.com"
+gh variable set DOMAIN_NAME_PROD --body "app.yourdomain.com"
+just deploy prod
+```
+
+**Note:** Switching between internal and internet-facing modes will replace the ALB (causes brief downtime). Switching to/from internal mode also adds/removes CloudFront (may take 10-15 minutes to propagate).
 
 ## Troubleshooting
 
