@@ -152,7 +152,6 @@ RoboSystems is built on **LadybugDB**, a high-performance embedded graph databas
 - **Columnar Storage**: Optimized for analytical queries over financial time-series data
 - **Native DuckDB Integration**: Direct staging-to-graph materialization via database extensions
 - **Embedded Architecture**: No external database server - runs alongside the API for minimal latency
-- **XBRL-Native**: First-class support for SEC financial filing schemas and multi-dimensional facts
 
 **Performance Features:**
 - **Bulk Ingestion**: S3 Parquet → DuckDB staging → LadybugDB graph pipeline
@@ -162,7 +161,7 @@ RoboSystems is built on **LadybugDB**, a high-performance embedded graph databas
 
 **Enterprise Features:**
 - **Multi-Tenant Isolation**: Separate databases per customer with memory and storage isolation
-- **Subgraph Support**: Isolated workspaces within a parent graph for development, testing, and team collaboration (see [Subgraphs](#subgraphs-workspaces))
+- **Subgraph Support**: Isolated workspaces within a parent graph for AI memory, testing, and team collaboration (see [Subgraphs](#subgraphs-workspaces))
 - **Automated Backups**: EBS snapshots with configurable retention
 - **Auto-Scaling**: EC2 writer clusters scale based on demand
 
@@ -184,21 +183,6 @@ FastAPI microservice providing unified interface for all backends:
 
 **See**: [Graph API Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md) in codebase
 
-### Backend Factory System
-
-**Location**: `/robosystems/graph_api/backends/`
-
-The backend factory provides pluggable graph database backends with a unified interface:
-
-- **Backend Abstraction**: Common interface with pluggable backend implementations
-- **Factory Pattern**: Dynamic backend selection based on configuration (`GRAPH_BACKEND_TYPE`)
-- **Backend-Specific Optimizations**: Each backend implements optimal patterns for their architecture
-- **Connection Management**: Backend-appropriate connection pooling and lifecycle management
-- **Query Translation**: Cypher query execution with backend-specific optimizations
-- **Ingestion Strategies**: Parquet-optimized bulk data loading for each backend type
-
-**See**: [Backend Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/backends/README.md) in codebase
-
 ### Client Factory System
 
 **Location**: `/robosystems/graph_api/client/`
@@ -213,6 +197,21 @@ The client factory layer provides intelligent routing between application code a
 - **Retry Logic**: Exponential backoff with jitter for transient errors
 
 **See**: [Client Factory Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/client/README.md) in codebase
+
+### Backend Factory System
+
+**Location**: `/robosystems/graph_api/backends/`
+
+The backend factory provides pluggable graph database backends with a unified interface:
+
+- **Backend Abstraction**: Common interface with pluggable backend implementations
+- **Factory Pattern**: Dynamic backend selection based on configuration (`GRAPH_BACKEND_TYPE`)
+- **Backend-Specific Optimizations**: Each backend implements optimal patterns for their architecture
+- **Connection Management**: Backend-appropriate connection pooling and lifecycle management
+- **Query Translation**: Cypher query execution with backend-specific optimizations
+- **Ingestion Strategies**: Parquet-optimized bulk data loading for each backend type
+
+**See**: [Backend Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/backends/README.md) in codebase
 
 ### DuckDB Staging System
 
@@ -255,22 +254,21 @@ The platform offers multiple tiers with different isolation levels and capabilit
 Subgraphs provide isolated database environments within a parent graph, available on Large and XLarge tiers:
 
 **Use Cases:**
+- **AI Memory Layer**: Create graphs for storing and querying AI generated memories 
 - **Development**: Test schema changes or new data pipelines without affecting production
-- **Experimentation**: Explore "what-if" scenarios with copied or synthetic data
 - **Team Collaboration**: Give teams isolated workspaces that share the parent's infrastructure
 - **Staging**: Validate data before promoting to the main graph
 
 **How Subgraphs Work:**
 - Created on the same EC2 instance as the parent graph (no additional infrastructure cost)
 - Share the parent's credit pool and subscription limits
-- Inherit schema from parent, with optional extensions
+- Inherit schema from parent, with optional extensions or custom schemas
 - Fully isolated data - queries cannot cross subgraph boundaries
-- Independent backup and restore capabilities
 
 **Naming & Identification:**
 - Subgraph names must be alphanumeric, 1-20 characters (no hyphens or underscores)
 - Full ID format: `{parent_graph_id}_{subgraph_name}` (e.g., `kg123abc_dev`)
-- Switch between parent and subgraphs via MCP tools or API
+- Switch between parent and subgraphs via MCP tools
 
 **Limits by Tier:**
 | Tier | Max Subgraphs | Total Databases |
@@ -427,7 +425,7 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 - **Primary Backend**: LadybugDB embedded graph database with columnar storage
 - **Multi-Tenant**: Separate database per entity (`kg12345abc`) with memory/storage isolation
 - **Shared Repositories**: SEC, industry, economic data in dedicated read-optimized clusters
-- **Subgraphs**: Isolated workspaces for teams and environments (see [Subgraphs](#subgraphs-workspaces))
+- **Subgraphs**: Isolated workspaces for teams, AI memory, and environments (see [Subgraphs](#subgraphs-workspaces))
 - **Cypher Queries**: Full Cypher query language support for graph traversal and analytics
 
 ### DuckDB
@@ -453,12 +451,11 @@ This enables `git pull upstream main` without merge conflicts on your custom ada
 
 **Purpose**: Primary relational database
 
-- **Identity & Access Management**: Users, permissions, graphs
+- **Identity & Access Management**: Users, orgs, permissions, graphs
 - **Subscription Management**: Plans, billing, credits
 - **File Registry**: Track uploaded files per table (GraphFile, GraphTable)
 - **Schema Registry**: Graph schema definitions (GraphSchema)
 - **Dagster Orchestration**: Job runs, schedules, sensors, and asset metadata
-- **Audit Logs**: Security and compliance tracking
 
 ### Valkey (Redis)
 
@@ -516,7 +513,7 @@ s3://robosystems-user-{env}/
 - **Lambda**: Infrastructure management (instance monitoring, secret rotation, volume lifecycle)
 
 **Database & Cache**:
-- **RDS PostgreSQL**: Primary database (auto-scaling storage)
+- **RDS (Aurora) PostgreSQL**: Primary database (auto-scaling storage)
 - **ElastiCache**: Valkey/Redis cache
 - **DynamoDB**: Service registries (on-demand pricing)
 
