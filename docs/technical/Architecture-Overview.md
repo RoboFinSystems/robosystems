@@ -730,14 +730,9 @@ See **[Bootstrap Guide](Bootstrap-Guide)** for complete setup instructions inclu
 - **[Graph API](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graph_api/README.md)** - Graph database abstraction layer
 - **[Operations](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/operations/README.md)** - Business workflow orchestration
 
-**API Documentation:**
-- Local: [http://localhost:8000/docs](http://localhost:8000/docs)
-- Production: [https://api.robosystems.ai/docs](https://api.robosystems.ai/docs)
-- Dagster UI: [http://localhost:3003](http://localhost:3003) (local development)
-
 ## Support
 
 - [Issues](https://github.com/RoboFinSystems/robosystems/issues)
-- [Discussions](https://github.com/RoboFinSystems/robosystems/discussions)
-- [Projects](https://github.com/RoboFinSystems/robosystems/projects)
 - [Wiki](https://github.com/RoboFinSystems/robosystems/wiki)
+- [Projects](https://github.com/orgs/RoboFinSystems/projects)
+- [Discussions](https://github.com/orgs/RoboFinSystems/discussions)
