@@ -17,6 +17,7 @@ New to RoboSystems? Start here:
 ### Infrastructure & Operations
 
 - **[Bootstrap Guide](Bootstrap-Guide)** - Set up AWS OIDC federation and GitHub Actions
+- **[Pipeline Guide](Pipeline-Guide)** - Data pipelines, Dagster architecture, and custom adapters
 
 ### User Guides
 
