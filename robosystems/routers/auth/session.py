@@ -27,6 +27,7 @@ from ...middleware.rate_limits.rate_limiting import jwt_refresh_rate_limit_depen
 from ...models.api.auth import AuthResponse
 from ...models.api.common import ErrorResponse
 from ...models.iam import User
+from ...security import SecurityAuditLogger, SecurityEventType
 from ...security.device_fingerprinting import extract_device_fingerprint
 
 # Create router for session endpoints
@@ -197,19 +198,33 @@ async def refresh_session(
               detail="Token verification failed - not expired",
             )
 
-          # CRITICAL SECURITY: Always validate device fingerprint in grace period
+          # Soft validation of device fingerprint - log changes but allow refresh
+          # The new token will be issued with the CURRENT fingerprint, updating the binding
           from ...security.device_fingerprinting import create_device_hash
 
           stored_device_hash = payload.get("device_hash")
           if stored_device_hash:
             current_device_hash = create_device_hash(device_fingerprint)
             if current_device_hash != stored_device_hash:
-              logger.warning(
-                f"Device hash mismatch during refresh for user {payload.get('user_id')}: stored={stored_device_hash[:8]}... current={current_device_hash[:8]}..."
+              # Log for security monitoring but allow the refresh to proceed
+              # New token will have the updated fingerprint
+              logger.info(
+                f"Device fingerprint changed during refresh for user {payload.get('user_id')} - issuing new token with updated fingerprint"
               )
-              raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Device changes detected. Please re-authenticate.",
+              SecurityAuditLogger.log_security_event(
+                event_type=SecurityEventType.TOKEN_REFRESH,
+                user_id=payload.get("user_id"),
+                ip_address=fastapi_request.client.host
+                if fastapi_request.client
+                else None,
+                user_agent=fastapi_request.headers.get("user-agent"),
+                details={
+                  "action": "fingerprint_updated_on_refresh",
+                  "reason": "Browser headers changed - updating token binding",
+                  "old_hash": stored_device_hash[:16] + "...",
+                  "new_hash": current_device_hash[:16] + "...",
+                },
+                risk_level="low",
               )
 
           # CRITICAL SECURITY: Always check revocation status in grace period
@@ -260,8 +275,6 @@ async def refresh_session(
     new_jwt_token = create_jwt_token(user.id, device_fingerprint)
 
     # Log successful refresh for security monitoring
-    from ...security import SecurityAuditLogger, SecurityEventType
-
     SecurityAuditLogger.log_security_event(
       event_type=SecurityEventType.TOKEN_REFRESH,
       user_id=user.id,

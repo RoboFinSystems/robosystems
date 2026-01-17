@@ -68,7 +68,7 @@ Parameters:
     Type: Number
     Default: 20
     MinValue: 1
-    MaxValue: 50
+    MaxValue: 200
     Description: Maximum concurrent Dagster runs (QueuedRunCoordinator)
 
   # Capacity Provider Configuration (Spot vs On-Demand)

@@ -19,6 +19,7 @@ from ...config.valkey_registry import (
   create_async_redis_client,
   create_redis_client,
 )
+from ...security.audit_logger import SecurityAuditLogger, SecurityEventType
 from ...security.device_fingerprinting import create_device_hash
 
 logger = get_logger("robosystems.auth.jwt")
@@ -124,18 +125,34 @@ def verify_jwt_token(
       audience=env.JWT_AUDIENCE,
     )
 
-    # Verify device fingerprint if both token and request fingerprint are available
+    # Soft validation of device fingerprint - log changes but don't reject
+    # This allows legitimate browser updates/changes while still tracking suspicious activity
     if device_fingerprint and payload.get("device_hash"):
-      from ...security.device_fingerprinting import create_device_hash
-
       current_device_hash = create_device_hash(device_fingerprint)
       stored_device_hash = payload.get("device_hash")
 
       if current_device_hash != stored_device_hash:
-        logger.warning(
-          f"JWT token verification failed: device fingerprint mismatch for user {payload.get('user_id')}"
+        # Log the fingerprint change for security monitoring, but allow the request
+        # Real attackers can spoof headers anyway; this catches accidental misuse
+        user_id = payload.get("user_id")
+        logger.info(
+          f"Device fingerprint changed for user {user_id} - logging for audit"
         )
-        return None
+        SecurityAuditLogger.log_security_event(
+          event_type=SecurityEventType.SUSPICIOUS_ACTIVITY,
+          user_id=user_id,
+          details={
+            "action": "device_fingerprint_changed",
+            "reason": "Browser headers changed since token was issued",
+            "old_hash": stored_device_hash[:16] + "...",
+            "new_hash": current_device_hash[:16] + "...",
+            "fingerprint_components": {
+              k: v[:50] + "..." if len(str(v)) > 50 else v
+              for k, v in device_fingerprint.items()
+            },
+          },
+          risk_level="low",  # Low risk - likely legitimate browser update
+        )
 
     return payload.get("user_id")
 
