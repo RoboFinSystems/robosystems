@@ -36,6 +36,7 @@ from robosystems.dagster.assets import (
   # User graph operations (external assets for API direct execution)
   user_graph_creation_source,
   user_graph_file_staging_source,
+  user_graph_materialized_source,
   # User repository provisioning
   user_repository_provisioning_source,
   user_subgraph_creation_source,
@@ -205,6 +206,7 @@ all_sensors = [
 all_assets = [
   # User graph operations (external assets for API direct execution)
   user_graph_file_staging_source,
+  user_graph_materialized_source,
   user_graph_creation_source,
   user_subgraph_creation_source,
   # User repository provisioning

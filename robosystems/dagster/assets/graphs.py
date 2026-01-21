@@ -1,4 +1,4 @@
-"""External asset specs for direct graph operations.
+"""External asset specs for user graph operations.
 
 These asset definitions allow AssetMaterializations reported from the API
 (via direct execution) to appear in the Dagster UI's Assets tab.
@@ -6,9 +6,17 @@ These asset definitions allow AssetMaterializations reported from the API
 Direct graph operations bypass Dagster job orchestration for performance
 (eliminating 30-60s ECS cold start), but report materializations for
 observability.
+
+Asset categories:
+- Lifecycle: Graph creation, subgraph creation, repository provisioning
+- Data pipeline: File staging (DuckDB), graph materialization (LadybugDB)
 """
 
 from dagster import AssetSpec
+
+# ============================================================================
+# Lifecycle Assets (graph/repository provisioning)
+# ============================================================================
 
 # External asset for user graph creation (unified)
 # Materializations are reported from direct_monitor.py
@@ -56,4 +64,42 @@ user_subgraph_creation_source = AssetSpec(
     "stage": "subgraph_creation",
   },
   kinds={"provision"},
+)
+
+# ============================================================================
+# Data Pipeline Assets (staging → materialization)
+# ============================================================================
+
+# External asset for user graph file staging
+# Materializations reported from direct_staging.py
+user_graph_file_staging_source = AssetSpec(
+  key="user_graph_file_staging",
+  description=(
+    "User files staged directly to DuckDB via the API. "
+    "These files bypass Dagster orchestration for performance but "
+    "report materializations here for observability."
+  ),
+  group_name="graphs",
+  metadata={
+    "pipeline": "graphs",
+    "stage": "staging",
+  },
+  kinds={"duckdb"},
+)
+
+# External asset for user graph materialization (DuckDB → LadybugDB)
+# Materializations reported from materialize_graph_job
+user_graph_materialized_source = AssetSpec(
+  key="user_graph_materialized",
+  description=(
+    "User graph data materialized from DuckDB staging to LadybugDB. "
+    "Tracks full graph rebuilds and incremental materializations."
+  ),
+  group_name="graphs",
+  deps=["user_graph_file_staging"],
+  metadata={
+    "pipeline": "graphs",
+    "stage": "materialization",
+  },
+  kinds={"ladybug"},
 )
