@@ -22,7 +22,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import UTC, datetime
 
 from robosystems_client import AuthenticatedClient
 from robosystems_client.api.views import save_view
@@ -51,7 +51,7 @@ async def save_report_metadata(report_id: str, workspace_id: str, response_data:
     metadata = {
         "report_id": report_id,
         "workspace_id": workspace_id,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "parquet_prefix": report_id,
         "fact_count": response_data.get("fact_count", 0),
         "presentation_count": response_data.get("presentation_count", 0),

@@ -15,8 +15,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from dagster import (
+  AssetKey,
+  AssetMaterialization,
   Config,
   Failure,
+  MetadataValue,
   OpExecutionContext,
   Out,
   job,
@@ -1203,6 +1206,22 @@ def materialize_graph_tables(
         "rebuild": config.rebuild,
         "message": f"Graph materialized successfully from {len(tables_materialized)} tables",
       }
+
+      # Report AssetMaterialization for observability in Dagster UI
+      context.log_event(
+        AssetMaterialization(
+          asset_key=AssetKey("user_graph_materialized"),
+          description=f"Materialized {len(tables_materialized)} tables to graph {graph_id}",
+          metadata={
+            "graph_id": MetadataValue.text(graph_id),
+            "tables_materialized": MetadataValue.int(len(tables_materialized)),
+            "total_rows": MetadataValue.int(total_rows),
+            "duration_ms": MetadataValue.float(execution_time_ms),
+            "rebuild": MetadataValue.bool(config.rebuild),
+            "materialization_method": MetadataValue.text("dagster_job"),
+          },
+        )
+      )
 
       if config.operation_id:
         _emit_graph_result_to_sse(context, config.operation_id, result)
