@@ -256,7 +256,7 @@ class DuckDBConnectionPool:
     Get DuckDB memory limit based on tier configuration.
 
     Priority:
-    1. Tier-specific config from graph.yml (via CLUSTER_TIER or LBUG_NODE_TYPE)
+    1. Tier-specific config from graph.yml (via CLUSTER_TIER)
     2. DUCKDB_MEMORY_LIMIT environment variable
     3. Default: "2GB"
 
@@ -268,19 +268,8 @@ class DuckDBConnectionPool:
     try:
       from robosystems.config.graph_tier import GraphTierConfig
 
-      # Get tier from environment (CLUSTER_TIER or LBUG_NODE_TYPE)
-      tier = env.CLUSTER_TIER or env.LBUG_NODE_TYPE
-
-      # Map node types to tiers (same mapping as env.get_lbug_tier_config)
-      node_type_to_tier = {
-        "shared_master": "ladybug-shared",
-        "shared_replica": "ladybug-shared",
-        "shared_repository": "ladybug-shared",
-        "writer": "ladybug-standard",
-      }
-
-      if tier in node_type_to_tier:
-        tier = node_type_to_tier[tier]
+      # Get tier from environment (set by CloudFormation)
+      tier = env.CLUSTER_TIER
 
       if tier:
         memory_limit = GraphTierConfig.get_duckdb_memory_limit(tier)
@@ -289,7 +278,7 @@ class DuckDBConnectionPool:
         )
         return memory_limit
     except Exception as e:
-      logger.debug(f"Could not load tier-based DuckDB memory config: {e}")
+      logger.warning(f"Could not load tier-based DuckDB memory config: {e}")
 
     # Fall back to environment variable or default
     memory_limit = env.DUCKDB_MEMORY_LIMIT

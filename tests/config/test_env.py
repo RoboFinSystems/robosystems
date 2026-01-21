@@ -158,7 +158,7 @@ def test_get_lbug_tier_config_uses_tier_config_overrides(monkeypatch):
       "max_subgraphs": 6,
     }
 
-  monkeypatch.setattr(EnvConfig, "CLUSTER_TIER", "shared_master", raising=False)
+  monkeypatch.setattr(EnvConfig, "CLUSTER_TIER", "ladybug-shared", raising=False)
   monkeypatch.setattr(EnvConfig, "LBUG_NODE_TYPE", "", raising=False)
   monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "prod", raising=False)
   monkeypatch.setattr(EnvConfig, "LBUG_MAX_MEMORY_MB", 2048, raising=False)
