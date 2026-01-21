@@ -251,6 +251,51 @@ class DuckDBConnectionPool:
       logger.error(f"Path validation failed for DuckDB graph_id {graph_id}: {e}")
       raise ValueError(f"Invalid graph_id: {e!s}") from e
 
+  def _get_duckdb_memory_limit(self) -> str:
+    """
+    Get DuckDB memory limit based on tier configuration.
+
+    Priority:
+    1. Tier-specific config from graph.yml (via CLUSTER_TIER or LBUG_NODE_TYPE)
+    2. DUCKDB_MEMORY_LIMIT environment variable
+    3. Default: "2GB"
+
+    Returns:
+        Memory limit string (e.g., "2GB", "8GB", "12GB")
+    """
+    from robosystems.config import env
+
+    try:
+      from robosystems.config.graph_tier import GraphTierConfig
+
+      # Get tier from environment (CLUSTER_TIER or LBUG_NODE_TYPE)
+      tier = env.CLUSTER_TIER or env.LBUG_NODE_TYPE
+
+      # Map node types to tiers (same mapping as env.get_lbug_tier_config)
+      node_type_to_tier = {
+        "shared_master": "ladybug-shared",
+        "shared_replica": "ladybug-shared",
+        "shared_repository": "ladybug-shared",
+        "writer": "ladybug-standard",
+      }
+
+      if tier in node_type_to_tier:
+        tier = node_type_to_tier[tier]
+
+      if tier:
+        memory_limit = GraphTierConfig.get_duckdb_memory_limit(tier)
+        logger.info(
+          f"Using tier-based DuckDB memory limit: {memory_limit} (tier={tier})"
+        )
+        return memory_limit
+    except Exception as e:
+      logger.debug(f"Could not load tier-based DuckDB memory config: {e}")
+
+    # Fall back to environment variable or default
+    memory_limit = env.DUCKDB_MEMORY_LIMIT
+    logger.info(f"Using default DuckDB memory limit: {memory_limit}")
+    return memory_limit
+
   def _configure_connection(self, conn: duckdb.DuckDBPyConnection):
     """Configure a DuckDB connection with extensions and settings."""
     from robosystems.config import env
@@ -302,11 +347,14 @@ class DuckDBConnectionPool:
 
       # Performance settings (configurable via environment variables)
       conn.execute(f"SET threads TO {env.DUCKDB_MAX_THREADS}")
-      conn.execute(f"SET memory_limit='{env.DUCKDB_MEMORY_LIMIT}'")
+
+      # Get tier-based DuckDB memory limit
+      memory_limit = self._get_duckdb_memory_limit()
+      conn.execute(f"SET memory_limit='{memory_limit}'")
 
       logger.debug(
         f"Configured DuckDB connection with S3 access, extensions, "
-        f"threads={env.DUCKDB_MAX_THREADS}, memory_limit={env.DUCKDB_MEMORY_LIMIT}"
+        f"threads={env.DUCKDB_MAX_THREADS}, memory_limit={memory_limit}"
       )
 
     except Exception as e:

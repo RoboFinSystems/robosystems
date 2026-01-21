@@ -166,6 +166,21 @@ class GraphTierConfig:
     return instance_config.get("max_memory_mb", 2048)
 
   @classmethod
+  def get_duckdb_memory_limit(cls, tier: str, environment: str | None = None) -> str:
+    """Get DuckDB memory limit for a tier.
+
+    Args:
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        DuckDB memory limit string (e.g., "2GB", "8GB", "12GB")
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    instance_config = tier_config.get("instance", {})
+    return instance_config.get("duckdb_memory_limit", "2GB")
+
+  @classmethod
   def get_chunk_size(cls, tier: str, environment: str | None = None) -> int:
     """Get chunk size for a tier.
 
