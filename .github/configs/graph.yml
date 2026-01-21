@@ -60,6 +60,9 @@ production:
         ingestion_batch_size: 1000 # Batch size for data ingestion
         connection_pool_size: 10 # Max concurrent connections per database
 
+        # DuckDB staging configuration
+        duckdb_memory_limit: "2GB" # Conservative for multi-tenant (shared instance resources)
+
       # Deployment configuration
       deployment:
         enable_var: LBUG_STANDARD_ENABLED_PROD
@@ -111,6 +114,9 @@ production:
         max_query_length: 25000 # Support more complex queries
         ingestion_batch_size: 2500 # Faster ingestion with dedicated resources
         connection_pool_size: 25 # Higher concurrency for team usage
+
+        # DuckDB staging configuration
+        duckdb_memory_limit: "4GB" # More memory for dedicated instance staging
 
       # Deployment configuration
       deployment:
@@ -164,6 +170,9 @@ production:
         ingestion_batch_size: 5000 # Fast bulk ingestion
         connection_pool_size: 50 # High concurrency for enterprise applications
 
+        # DuckDB staging configuration
+        duckdb_memory_limit: "8GB" # Large memory for enterprise staging workloads
+
       # Deployment configuration
       deployment:
         enable_var: LBUG_XLARGE_ENABLED_PROD
@@ -215,6 +224,9 @@ production:
         max_query_length: 100000 # Very large queries supported for analytics
         ingestion_batch_size: 10000 # Fast bulk loading for public data updates
         connection_pool_size: 100 # High concurrency - many users accessing public data
+
+        # DuckDB staging configuration (SEC needs large memory for Element/Label tables)
+        duckdb_memory_limit: "12GB" # Large allocation for massive SEC data staging
 
       # Deployment configuration
       deployment:
@@ -398,6 +410,7 @@ staging:
         max_query_length: 10000
         ingestion_batch_size: 750
         connection_pool_size: 10
+        duckdb_memory_limit: "1GB" # Conservative for staging multi-tenant
 
       deployment:
         enable_var: LBUG_STANDARD_ENABLED_STAGING
@@ -438,6 +451,7 @@ staging:
         max_query_length: 25000
         ingestion_batch_size: 1500
         connection_pool_size: 15
+        duckdb_memory_limit: "2GB" # Moderate for staging dedicated
 
       deployment:
         enable_var: LBUG_LARGE_ENABLED_STAGING
@@ -477,6 +491,7 @@ staging:
         max_query_length: 50000
         ingestion_batch_size: 3000
         connection_pool_size: 30
+        duckdb_memory_limit: "4GB" # More memory for staging xlarge
 
       deployment:
         enable_var: LBUG_XLARGE_ENABLED_STAGING
@@ -517,6 +532,7 @@ staging:
         max_query_length: 100000
         ingestion_batch_size: 5000
         connection_pool_size: 50
+        duckdb_memory_limit: "4GB" # Needs extra memory for SEC staging tests
 
       deployment:
         enable_var: LBUG_SHARED_ENABLED_STAGING
@@ -679,6 +695,7 @@ development:
         max_query_length: 10000
         ingestion_batch_size: 750
         connection_pool_size: 10
+        duckdb_memory_limit: "2GB" # Default for local development
 
       deployment:
         always_enabled: true

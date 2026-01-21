@@ -990,21 +990,7 @@ class EnvConfig:
 
       # Determine tier from environment
       # CLUSTER_TIER is set by CloudFormation to the actual tier (e.g., "ladybug-standard")
-      # LBUG_NODE_TYPE is the node role ("writer", "shared_master") - only used as fallback
-      tier = cls.CLUSTER_TIER or cls.LBUG_NODE_TYPE
-
-      # Map NODE TYPES to tiers (when CLUSTER_TIER is not set)
-      # This is for cases where only LBUG_NODE_TYPE is available
-      node_type_to_tier = {
-        "shared_master": "ladybug-shared",
-        "shared_replica": "ladybug-shared",
-        "shared_repository": "ladybug-shared",
-        "writer": "ladybug-standard",  # Default writer tier
-      }
-
-      # If we got a node type instead of a tier, map it
-      if tier in node_type_to_tier:
-        tier = node_type_to_tier[tier]
+      tier = cls.CLUSTER_TIER
 
       if tier:
         # Get instance config from graph.yml
