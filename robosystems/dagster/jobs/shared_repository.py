@@ -323,7 +323,17 @@ def refresh_replica_instances(
 # ============================================================================
 
 
-@job(tags={"dagster/priority": "-1"})
+@job(
+  tags={
+    "dagster/priority": "-1",
+    # Critical infrastructure - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def shared_repository_snapshot_job():
   """Create snapshot of shared master and update replicas.
 
@@ -341,7 +351,17 @@ def shared_repository_snapshot_job():
   refresh_replica_instances(lt_update)
 
 
-@job(tags={"dagster/priority": "-1"})
+@job(
+  tags={
+    "dagster/priority": "-1",
+    # Critical infrastructure - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def shared_repository_snapshot_only_job():
   """Create snapshot without updating replicas.
 
@@ -363,7 +383,17 @@ def get_current_launch_template_info(context: OpExecutionContext) -> dict[str, A
   }
 
 
-@job(tags={"dagster/priority": "-1"})
+@job(
+  tags={
+    "dagster/priority": "-1",
+    # Critical infrastructure - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def shared_repository_refresh_replicas_job():
   """Refresh replicas with current launch template.
 

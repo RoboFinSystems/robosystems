@@ -124,7 +124,16 @@ sec_stage_job = define_asset_job(
   name="sec_stage",
   description="Stage SEC files to persistent DuckDB (no graph ingestion).",
   selection=AssetSelection.assets(sec_duckdb_staged),
-  tags={"pipeline": "sec", "phase": "stage"},
+  tags={
+    "pipeline": "sec",
+    "phase": "stage",
+    # Long-running job (2+ hours) - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
 )
 
 # Stage 2: LadybugDB Materialization
@@ -134,7 +143,16 @@ sec_materialize_job = define_asset_job(
   name="sec_materialize",
   description="Materialize SEC graph from DuckDB staging (retry-safe).",
   selection=AssetSelection.assets(sec_graph_materialized),
-  tags={"pipeline": "sec", "phase": "materialize"},
+  tags={
+    "pipeline": "sec",
+    "phase": "materialize",
+    # Long-running job - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
 )
 
 # Combined: Run both stages in sequence
@@ -143,7 +161,16 @@ sec_staged_materialize_job = define_asset_job(
   name="sec_staged_materialize",
   description="Full SEC pipeline: stage to DuckDB then materialize to LadybugDB.",
   selection=AssetSelection.assets(sec_duckdb_staged, sec_graph_materialized),
-  tags={"pipeline": "sec", "phase": "full"},
+  tags={
+    "pipeline": "sec",
+    "phase": "full",
+    # Long-running job (2+ hours) - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
 )
 
 
