@@ -34,8 +34,7 @@ BASE_NODES = [
       Property(name="category", type="STRING"),  # Large accelerated filer, etc.
       Property(name="state_of_incorporation", type="STRING"),
       Property(name="fiscal_year_end", type="STRING"),
-      Property(name="ein", type="STRING"),  # Employer Identification Number
-      Property(name="tax_id", type="STRING"),
+      Property(name="tax_id", type="STRING"),  # Tax ID (EIN for US entities)
       Property(name="lei", type="STRING"),  # Legal Entity Identifier (ISO 17442)
       Property(name="phone", type="STRING"),  # Main phone number
       Property(name="website", type="STRING"),
@@ -58,27 +57,25 @@ BASE_NODES = [
         name="identifier", type="STRING", is_primary_key=True
       ),  # Report-specific identifier
       Property(name="uri", type="STRING"),  # Time period URI
-      Property(name="instant_date", type="STRING"),  # DEPRECATED - use end_date instead
       Property(
         name="start_date", type="STRING"
-      ),  # NULL for instant, populated for duration
+      ),  # NULL for instant/forever, populated for duration
       Property(
         name="end_date", type="STRING"
-      ),  # Always populated (instant or duration end)
+      ),  # Always populated except forever (instant date or duration end)
       Property(
-        name="forever_date", type="BOOLEAN"
-      ),  # Changed to BOOLEAN to match actual usage
-      Property(name="fiscal_year", type="INT32"),  # Fiscal year for easier filtering
-      Property(name="fiscal_quarter", type="STRING"),  # Q1-Q4, H1-H2, M9, etc.
-      Property(name="is_annual", type="BOOLEAN"),  # True for ~1 year periods
-      Property(name="is_quarterly", type="BOOLEAN"),  # True for ~3 month periods
-      Property(name="days_in_period", type="INT32"),  # Actual duration in days
+        name="calendar_year", type="INT32"
+      ),  # Calendar year from end_date (not entity fiscal year)
+      Property(
+        name="calendar_quarter", type="STRING"
+      ),  # Q1-Q4, H1-H2, M9, FY based on calendar months (not entity fiscal quarter)
+      Property(name="days_in_period", type="INT32"),  # Actual duration in days (0 for instant)
       Property(
         name="period_type", type="STRING"
-      ),  # quarterly, semi_annual, nine_months, annual, other
+      ),  # instant, quarterly, semi_annual, nine_months, annual, forever, other
       Property(
-        name="is_ytd", type="BOOLEAN"
-      ),  # True for cumulative year-to-date periods
+        name="calendar_period_key", type="STRING"
+      ),  # Normalized calendar key for cross-company matching (e.g., "2024", "2024Q4", "2024-12-31")
     ],
   ),
   Node(

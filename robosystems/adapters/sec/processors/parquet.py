@@ -356,7 +356,6 @@ class ParquetWriter:
         "filing_date",
         "report_date",
         "acceptance_date",
-        "period_end_date",
       ]
       for col in string_columns:
         if col in df.columns:
@@ -383,7 +382,6 @@ class ParquetWriter:
     """
     if "Entity" in filename:
       string_columns = [
-        "ein",
         "tax_id",
         "ticker",
         "exchange",
@@ -409,7 +407,7 @@ class ParquetWriter:
       ]
       for col in string_columns:
         if col in df.columns:
-          if col in ["ein", "tax_id"]:
+          if col == "tax_id":
             df[col] = df[col].apply(
               lambda x: str(int(x)).zfill(9)
               if pd.notna(x) and str(x).strip() != ""
@@ -435,7 +433,6 @@ class ParquetWriter:
         "filing_date",
         "report_date",
         "acceptance_date",
-        "period_end_date",
         "updated_at",
       ]
       for col in string_columns:

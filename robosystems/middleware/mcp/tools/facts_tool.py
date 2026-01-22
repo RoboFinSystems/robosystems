@@ -50,7 +50,14 @@ class FactsTool(BaseTool):
 - Find revenue by segment across periods
 - Discover geographic breakdowns
 - Identify dimensional reporting patterns
-- Understand fact completeness by period""",
+- Understand fact completeness by period
+
+**⚠️ CRITICAL - Dimensional Facts:**
+~40% of facts have dimensional breakdowns (segments, geography, products).
+To get CONSOLIDATED TOTALS only (avoiding duplicates), always filter:
+- `WHERE f.has_dimensions = false` (recommended - uses indexed property)
+- `WHERE NOT (f)-[:FACT_HAS_DIMENSION]->()` (alternative pattern)
+Without this filter, revenue queries return segment breakdowns + totals mixed together!""",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -223,13 +230,26 @@ class FactsTool(BaseTool):
       result["sample_queries"].extend(
         [
           {
-            "name": "Single-Dimension Revenue Analysis (Safe)",
+            "name": "⭐ CONSOLIDATED Revenue (Recommended)",
+            "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
+MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
+WHERE e.qname = 'us-gaap:Revenues'
+  AND f.has_dimensions = false
+  AND f.numeric_value IS NOT NULL
+RETURN p.end_date, p.period_type, f.numeric_value as revenue
+ORDER BY p.end_date DESC LIMIT 10""",
+            "explanation": "Total revenue WITHOUT segment breakdowns - use has_dimensions=false!",
+          },
+          {
+            "name": "Revenue BY Segment (Dimensional)",
             "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
 MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
-WHERE e.qname CONTAINS 'Revenue' AND f.numeric_value IS NOT NULL
+WHERE e.qname CONTAINS 'Revenue'
+  AND f.has_dimensions = true
+  AND f.numeric_value IS NOT NULL
 RETURN d.axis_uri, d.member_uri, sum(f.numeric_value) as total
 ORDER BY total DESC LIMIT 10""",
-            "explanation": "Revenue by segment with safe aggregation",
+            "explanation": "Revenue by segment - use has_dimensions=true for breakdowns",
           },
           {
             "name": "Multi-Dimension Warning Query",
@@ -246,13 +266,13 @@ RETURN count(f) as multi_dimensional_facts""",
         result["sample_queries"].extend(
           [
             {
-              "name": "Total Values (No Dimensions)",
+              "name": "⭐ Consolidated Totals (Recommended)",
               "query": f"""MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-WHERE e.qname = '{element_filter}' 
+WHERE e.qname = '{element_filter}'
   AND f.numeric_value IS NOT NULL
-  AND NOT EXISTS((f)-[:FACT_HAS_DIMENSION]->())
+  AND f.has_dimensions = false
 RETURN sum(f.numeric_value) as total, count(f) as fact_count""",
-              "explanation": "Total for element without dimensional breakdown",
+              "explanation": "Total for element WITHOUT segment breakdowns - use has_dimensions=false!",
             },
             {
               "name": "Time Series for Element",
@@ -280,10 +300,12 @@ LIMIT 10""",
       # Add tips
       result["tips"].extend(
         [
+          "⚠️ ALWAYS use has_dimensions=false for consolidated totals (avoids segment duplicates)",
           "Start with single elements before complex dimensional queries",
           "Use IS NOT NULL filters for numeric analysis",
           "Period nodes provide time context for facts",
           "FactDimension nodes enable segment analysis",
+          "Without dimensional filtering, you'll get both totals AND breakdowns mixed together",
         ]
       )
 

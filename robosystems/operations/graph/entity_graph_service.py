@@ -526,8 +526,7 @@ class EntityGraphService:
       "category": entity_data.category,
       "state_of_incorporation": entity_data.state_of_incorporation,
       "fiscal_year_end": entity_data.fiscal_year_end,
-      "ein": entity_data.ein,
-      "tax_id": None,
+      "tax_id": entity_data.ein,  # EIN is the tax_id for US entities
       "lei": None,
       "phone": None,
       "website": entity_data.uri,
@@ -589,7 +588,6 @@ class EntityGraphService:
         ("category", pa.string()),
         ("state_of_incorporation", pa.string()),
         ("fiscal_year_end", pa.string()),
-        ("ein", pa.string()),
         ("tax_id", pa.string()),
         ("lei", pa.string()),
         ("phone", pa.string()),
@@ -683,7 +681,7 @@ class EntityGraphService:
         category=entity_row["category"],
         state_of_incorporation=entity_row["state_of_incorporation"],
         fiscal_year_end=entity_row["fiscal_year_end"],
-        ein=entity_row["ein"],
+        ein=entity_row["tax_id"],  # tax_id is the EIN for US entities
         created_at=entity_row["created_at"],
         updated_at=entity_row["updated_at"],
       )

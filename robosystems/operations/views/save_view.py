@@ -156,7 +156,6 @@ async def create_report_node(
         name: $name,
         uri: $uri,
         report_date: $report_date,
-        period_end_date: $period_end_date,
         updated_at: $updated_at,
         processed: true,
         failed: false
@@ -170,7 +169,6 @@ async def create_report_node(
     "name": f"{report_type} - {entity_name}",
     "uri": f"internal:{report_id}",
     "report_date": period_end,
-    "period_end_date": period_end,
     "updated_at": datetime.utcnow().isoformat(),
   }
   results = await repository.execute_query(query, params)
@@ -191,7 +189,6 @@ async def update_report_metadata(
     MATCH (r:Report {identifier: $report_id})
     SET r.name = $name,
         r.report_date = $report_date,
-        r.period_end_date = $period_end_date,
         r.updated_at = $updated_at
     RETURN r.identifier as report_id
     """
@@ -201,7 +198,6 @@ async def update_report_metadata(
     "report_id": report_id,
     "name": f"{report_type} - {entity_name}",
     "report_date": period_end,
-    "period_end_date": period_end,
     "updated_at": datetime.utcnow().isoformat(),
   }
   results = await repository.execute_query(query, params)

@@ -142,7 +142,6 @@ class AccountingDataGenerator:
       "category": ["Professional Services"],
       "state_of_incorporation": [None],
       "fiscal_year_end": [None],
-      "ein": [None],
       "tax_id": [None],
       "lei": [None],
       "phone": [None],
@@ -438,7 +437,6 @@ class AccountingDataGenerator:
           "filing_date": month_end.strftime("%Y-%m-%d"),
           "report_date": month_end.strftime("%Y-%m-%d"),
           "acceptance_date": month_end.strftime("%Y-%m-%d"),
-          "period_end_date": month_end.strftime("%Y-%m-%d"),
           "is_inline_xbrl": False,
           "xbrl_processor_version": "1.0.0",
           "processed": True,
@@ -447,21 +445,18 @@ class AccountingDataGenerator:
         }
       )
 
+      calendar_quarter = f"Q{((month_start.month - 1) // 3) + 1}"
       periods.append(
         {
           "identifier": period_id,
           "uri": f"http://www.w3.org/2001/XMLSchema#dateTime#{month_start.strftime('%Y-%m-%d')}/{month_end.strftime('%Y-%m-%d')}",
-          "instant_date": None,
           "start_date": month_start.strftime("%Y-%m-%d"),
           "end_date": month_end.strftime("%Y-%m-%d"),
-          "forever_date": False,
-          "fiscal_year": month_start.year,
-          "fiscal_quarter": f"Q{((month_start.month - 1) // 3) + 1}",
-          "is_annual": False,
-          "is_quarterly": False,
+          "calendar_year": month_start.year,
+          "calendar_quarter": calendar_quarter,
           "days_in_period": 30,
           "period_type": "monthly",
-          "is_ytd": False,
+          "calendar_period_key": f"{month_start.year}{calendar_quarter}",
         }
       )
 

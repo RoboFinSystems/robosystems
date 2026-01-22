@@ -493,7 +493,7 @@ class GraphQueryValidator:
     if "report" in query_lower:
       if not any(
         term in query_lower
-        for term in ["report_date", "filing_date", "period_end_date", "filed_date"]
+        for term in ["report_date", "filing_date", "filed_date"]
       ):
         warnings.append("💡 Consider filtering reports by date to limit results")
 

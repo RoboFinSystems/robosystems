@@ -174,11 +174,11 @@ class LadybugSchemaManager:
         # Determine data type (simplified - you may need more mappings)
         data_type = "STRING"  # Default
 
-        if col in ["created_at", "updated_at", "filing_date", "period_end_date"]:
+        if col in ["created_at", "updated_at", "filing_date"]:
           data_type = "TIMESTAMP"
         elif col in ["amount", "value", "shares", "shares_outstanding"]:
           data_type = "DOUBLE"
-        elif col in ["fiscal_year", "fiscal_period"]:
+        elif col in ["calendar_year", "fiscal_year_focus", "fiscal_year_end_month"]:
           data_type = "INT64"
         elif col in ["processed", "failed", "is_extension"]:
           data_type = "BOOLEAN"

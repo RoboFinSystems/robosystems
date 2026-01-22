@@ -602,7 +602,6 @@ class TestReportCreation:
     assert processor.report_data["filing_date"] == "2023-11-03"
     assert processor.report_data["report_date"] == "2023-09-30"
     assert processor.report_data["acceptance_date"] == "2023-11-03"
-    assert processor.report_data["period_end_date"] == "2023-09-30"
     assert processor.report_data["is_inline_xbrl"] is True
 
   @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")

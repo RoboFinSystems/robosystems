@@ -115,12 +115,11 @@ def processor(temp_dir, mock_schema_config):
           "identifier",
           "start_date",
           "end_date",
-          "instant",
           "period_type",
-          "fiscal_year",
-          "fiscal_quarter",
+          "calendar_year",
+          "calendar_quarter",
           "days_in_period",
-          "is_ytd",
+          "calendar_period_key",
         ]
       ),
       "elements_df": pd.DataFrame(
@@ -512,10 +511,8 @@ class TestMakePeriod:
     assert period["end_date"] == "2023-12-30"
     assert period["start_date"] is None
     assert period["period_type"] == "instant"
-    assert period["fiscal_year"] == 2023
-    assert period["fiscal_quarter"] == "Q4"
-    assert period["is_annual"]
-    assert period["is_quarterly"]
+    assert period["calendar_year"] == 2023
+    assert period["calendar_quarter"] == "Q4"
     assert period["days_in_period"] == 0
 
   def test_make_period_instant_q1(self, processor):
@@ -534,9 +531,7 @@ class TestMakePeriod:
     assert len(processor.periods_df) == 1
     period = processor.periods_df.iloc[0]
 
-    assert period["fiscal_quarter"] == "Q1"
-    assert not period["is_annual"]
-    assert period["is_quarterly"]
+    assert period["calendar_quarter"] == "Q1"
 
   def test_make_period_start_end_quarterly(self, processor):
     """Test processing quarterly duration period."""
@@ -559,9 +554,9 @@ class TestMakePeriod:
     assert period["start_date"] == "2023-07-01"
     assert period["end_date"] == "2023-09-30"
     assert period["period_type"] == "quarterly"
-    assert period["fiscal_quarter"] == "Q3"
+    assert period["calendar_quarter"] == "Q3"
     assert period["days_in_period"] == 92
-    assert not period["is_ytd"]
+    assert period["calendar_period_key"] == "2023Q3"
 
   def test_make_period_start_end_annual(self, processor):
     """Test processing annual duration period."""
@@ -582,9 +577,10 @@ class TestMakePeriod:
     period = processor.periods_df.iloc[0]
 
     assert period["period_type"] == "annual"
-    assert period["fiscal_year"] == 2023
+    assert period["calendar_year"] == 2023
+    assert period["calendar_quarter"] == "FY"
     assert period["days_in_period"] == 365  # 2024-01-01 - 2023-01-01 = 365 days
-    assert not period["is_ytd"]
+    assert period["calendar_period_key"] == "2023"  # Annual periods use just the year
 
   def test_make_period_start_end_nine_months(self, processor):
     """Test processing nine-month YTD period."""
@@ -605,8 +601,8 @@ class TestMakePeriod:
     period = processor.periods_df.iloc[0]
 
     assert period["period_type"] == "nine_months"
-    assert period["is_ytd"]
     assert period["days_in_period"] == 273
+    assert period["calendar_period_key"] == "2023M9"
 
   def test_make_period_duplicate_prevention(self, processor):
     """Test that duplicate periods are not created."""

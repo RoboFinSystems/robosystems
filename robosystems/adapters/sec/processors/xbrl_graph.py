@@ -201,6 +201,9 @@ class XBRLGraphProcessor:
       logger.debug("Initializing Arelle controller")
       self.arelle_cntlr = ArelleClient().controller(self.instance_path)
 
+      logger.info("Extracting DEI fiscal context from cover page")
+      self.extract_dei_fiscal_info()
+
       logger.info("Processing DTS (Discoverable Taxonomy Set)")
       self.make_dts()
 
@@ -268,7 +271,6 @@ class XBRLGraphProcessor:
       "category": None,
       "state_of_incorporation": None,
       "fiscal_year_end": None,
-      "ein": None,
       "tax_id": None,
       "website": None,
       "status": "active",
@@ -292,14 +294,13 @@ class XBRLGraphProcessor:
       entity_data["category"] = self.sec_filer.get("category")
       entity_data["state_of_incorporation"] = self.sec_filer.get("stateOfIncorporation")
       entity_data["fiscal_year_end"] = self.sec_filer.get("fiscalYearEnd")
-      # Ensure EIN is properly formatted as a string with leading zeros
+      # Ensure EIN/tax_id is properly formatted as a string with leading zeros
       ein_value = self.sec_filer.get("ein")
       if ein_value is not None and ein_value != "":
         # Convert to string and pad with zeros if needed (EINs are 9 digits)
-        entity_data["ein"] = str(ein_value).zfill(9)
+        entity_data["tax_id"] = str(ein_value).zfill(9)
       else:
-        entity_data["ein"] = None
-      entity_data["tax_id"] = entity_data["ein"]  # EIN is the tax ID
+        entity_data["tax_id"] = None
 
       # Additional fields from submissions data
       entity_data["entity_type"] = self.sec_filer.get("entityType")  # operating, etc.
@@ -357,16 +358,17 @@ class XBRLGraphProcessor:
       "name": None,
       "accession_number": None,
       "form": None,
-      "filing_date": None,  # Use None for null dates
-      "report_date": None,
+      "filing_date": None,
+      "report_date": None,  # Period end date for the report
       "acceptance_date": None,
-      "period_of_report": None,
-      "period_start_date": None,
-      "period_end_date": None,
       "is_inline_xbrl": False,
       "xbrl_processor_version": XBRL_GRAPH_PROCESSOR_VERSION,
       "processed": False,
       "failed": False,
+      # Fiscal context - populated later from DEI cover page facts
+      "fiscal_year_focus": None,
+      "fiscal_period_focus": None,
+      "fiscal_year_end_month": None,
     }
 
     if self.sec_report:
@@ -404,17 +406,6 @@ class XBRLGraphProcessor:
           )
           report_data["acceptance_date"] = None
 
-      # Add period_end_date if available
-      if self.sec_report.get("periodOfReport"):
-        try:
-          report_data["period_end_date"] = datetime.strptime(
-            self.sec_report["periodOfReport"], "%Y-%m-%d"
-          ).strftime("%Y-%m-%d")  # Convert to string format
-        except ValueError:
-          logger.warning(
-            f"Invalid periodOfReport format: {self.sec_report['periodOfReport']}"
-          )
-          report_data["period_end_date"] = None
       report_data["is_inline_xbrl"] = self.sec_report.get("isInlineXBRL", False)
       logger.info(f"Report {report_data['name']} data prepared")
 
@@ -452,6 +443,76 @@ class XBRLGraphProcessor:
     self.report_data = report_data
 
     # Note: instance_path will be set from report_uri in the main process method
+
+  def extract_dei_fiscal_info(self):
+    """Extract fiscal context from DEI cover page facts in the Arelle model.
+
+    This method parses through the in-memory XBRL facts to find DEI elements
+    that provide fiscal year/period context. Must be called after Arelle is initialized.
+
+    Extracts:
+    - dei:DocumentFiscalYearFocus -> fiscal_year_focus (e.g., 2024)
+    - dei:DocumentFiscalPeriodFocus -> fiscal_period_focus (e.g., "Q3", "FY")
+    - dei:CurrentFiscalYearEndDate -> fiscal_year_end_month (e.g., 12 for December)
+    """
+    if not self.arelle_cntlr:
+      logger.warning("Arelle not initialized, cannot extract DEI fiscal info")
+      return
+
+    fiscal_year_focus = None
+    fiscal_period_focus = None
+    fiscal_year_end_month = None
+
+    for xfact in self.arelle_cntlr.facts:
+      if xfact.concept is None or xfact.concept.qname is None:
+        continue
+
+      qname_str = str(xfact.concept.qname)
+
+      if qname_str == "dei:DocumentFiscalYearFocus":
+        try:
+          fiscal_year_focus = int(xfact.value)
+          logger.debug(f"Extracted fiscal_year_focus: {fiscal_year_focus}")
+        except (ValueError, TypeError):
+          logger.warning(f"Could not parse fiscal year focus: {xfact.value}")
+
+      elif qname_str == "dei:DocumentFiscalPeriodFocus":
+        fiscal_period_focus = str(xfact.value) if xfact.value else None
+        logger.debug(f"Extracted fiscal_period_focus: {fiscal_period_focus}")
+
+      elif qname_str == "dei:CurrentFiscalYearEndDate":
+        # Format is "--MM-DD" (e.g., "--12-31" for December 31)
+        try:
+          value = str(xfact.value) if xfact.value else ""
+          if value.startswith("--") and len(value) >= 5:
+            fiscal_year_end_month = int(value[2:4])
+            logger.debug(f"Extracted fiscal_year_end_month: {fiscal_year_end_month}")
+        except (ValueError, TypeError):
+          logger.warning(f"Could not parse fiscal year end date: {xfact.value}")
+
+    # Update report_data and reports_df with fiscal info
+    if self.report_data:
+      self.report_data["fiscal_year_focus"] = fiscal_year_focus
+      self.report_data["fiscal_period_focus"] = fiscal_period_focus
+      self.report_data["fiscal_year_end_month"] = fiscal_year_end_month
+
+      # Update the DataFrame row
+      if hasattr(self, "reports_df") and not self.reports_df.empty:
+        report_id = self.report_data["identifier"]
+        self.reports_df.loc[
+          self.reports_df["identifier"] == report_id, "fiscal_year_focus"
+        ] = fiscal_year_focus
+        self.reports_df.loc[
+          self.reports_df["identifier"] == report_id, "fiscal_period_focus"
+        ] = fiscal_period_focus
+        self.reports_df.loc[
+          self.reports_df["identifier"] == report_id, "fiscal_year_end_month"
+        ] = fiscal_year_end_month
+
+      logger.info(
+        f"Report fiscal context: FY{fiscal_year_focus} {fiscal_period_focus} "
+        f"(year-end month: {fiscal_year_end_month})"
+      )
 
   def fetch_filing(self, cik, accno, is_inline_xbrl):
     logger.info(f"Fetching filing for CIK: {cik}, Accession Number: {accno}")
@@ -610,6 +671,11 @@ class XBRLGraphProcessor:
       else:
         logger.warning("Failed to queue large value, storing inline")
 
+    # Determine dimensional qualifiers (segments, geography, etc.)
+    # Facts without dimensions represent consolidated totals
+    dimension_count = len(xfact.context.qnameDims)
+    has_dimensions = dimension_count > 0
+
     fact_data = {
       "identifier": identifier,
       "uri": fact_uri,
@@ -619,6 +685,8 @@ class XBRLGraphProcessor:
       "decimals": xfact.decimals if xfact.unit is not None else None,
       "value_type": value_type,  # NEW: Indicates inline vs external storage
       "content_type": content_type,  # NEW: MIME type for externalized content
+      "has_dimensions": has_dimensions,  # True if fact has dimensional breakdowns
+      "dimension_count": dimension_count,  # Number of dimensions (0=consolidated, 1=single, 2+=complex)
     }
 
     logger.debug(f"Created new fact: {fact_uri}")
@@ -1084,41 +1152,32 @@ class XBRLGraphProcessor:
         self.periods_df["identifier"] == period_identifier
       ]
       if existing_period.empty:
-        # Compute fiscal year and other time series fields (Claude Opus recommendation)
+        # Compute calendar year and quarter
         instant_dt = datetime.strptime(instant_date, "%Y-%m-%d")
-        fiscal_year = instant_dt.year
+        calendar_year = instant_dt.year
 
-        # Determine fiscal quarter based on instant date
+        # Determine calendar quarter based on instant date month
+        # Note: This is calendar quarter, NOT entity fiscal quarter
         instant_month = instant_dt.month
-        fiscal_quarter = None
         if instant_month in [1, 2, 3]:
-          fiscal_quarter = "Q1"
+          calendar_quarter = "Q1"
         elif instant_month in [4, 5, 6]:
-          fiscal_quarter = "Q2"
+          calendar_quarter = "Q2"
         elif instant_month in [7, 8, 9]:
-          fiscal_quarter = "Q3"
-        elif instant_month in [10, 11, 12]:
-          fiscal_quarter = "Q4"
-
-        # Determine if this is a typical reporting date
-        # Common quarter-end dates: 3/31, 6/30, 9/30, 12/31 (±a few days for weekends)
-        is_quarter_end = instant_dt.day >= 28 and instant_month in [3, 6, 9, 12]
-        is_year_end = instant_dt.day >= 28 and instant_month == 12
+          calendar_quarter = "Q3"
+        else:
+          calendar_quarter = "Q4"
 
         period_data = {
           "identifier": period_identifier,
           "uri": period_uri,
-          "instant_date": instant_date,  # Keep for backward compatibility (deprecated)
           "start_date": None,  # NULL for instant periods
-          "end_date": instant_date,  # Use end_date for instant values
-          "forever_date": False,
-          "fiscal_year": fiscal_year,  # For easier time series queries
-          "fiscal_quarter": fiscal_quarter,  # Q1-Q4 based on instant date
-          "is_annual": is_year_end,  # True if Dec 28-31 (typical year-end)
-          "is_quarterly": is_quarter_end,  # True if quarter-end date
+          "end_date": instant_date,  # Instant date stored in end_date
+          "calendar_year": calendar_year,
+          "calendar_quarter": calendar_quarter,
           "days_in_period": 0,  # 0 for instant (point-in-time)
-          "period_type": "instant",  # Clearly identify as instant
-          "is_ytd": False,  # Instant values are not cumulative
+          "period_type": "instant",
+          "calendar_period_key": instant_date,  # For instants, just the date
         }
         new_period_df = pd.DataFrame([period_data])
         self.periods_df = self.safe_concat(self.periods_df, new_period_df)
@@ -1138,71 +1197,70 @@ class XBRLGraphProcessor:
         self.periods_df["identifier"] == period_identifier
       ]
       if existing_period.empty:
-        # Compute fiscal year, quarter and duration analysis (Claude Opus recommendation)
+        # Compute calendar year, quarter and duration analysis
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        fiscal_year = end_dt.year  # Use end date for fiscal year
+        calendar_year = end_dt.year
         days_in_period = (end_dt - start_dt).days + 1
 
-        # Determine period type - handle variable fiscal periods
-        is_quarterly = 80 <= days_in_period <= 100  # ~3 months (Q1, Q2, Q3, Q4)
-        is_semi_annual = 170 <= days_in_period <= 190  # ~6 months (H1, H2)
-        is_nine_months = 260 <= days_in_period <= 280  # ~9 months (YTD through Q3)
-        is_annual = 350 <= days_in_period <= 380  # ~1 year (FY)
-
-        # Determine period type for aggregation
-        period_type = None
-        is_ytd = False  # Year-to-date flag for cumulative periods
+        # Determine period type based on duration
+        is_quarterly = 80 <= days_in_period <= 100  # ~3 months
+        is_semi_annual = 170 <= days_in_period <= 190  # ~6 months (YTD)
+        is_nine_months = 260 <= days_in_period <= 280  # ~9 months (YTD)
+        is_annual = 350 <= days_in_period <= 380  # ~1 year
 
         if is_quarterly:
           period_type = "quarterly"
         elif is_semi_annual:
           period_type = "semi_annual"
-          is_ytd = True  # 6-month periods are typically YTD
         elif is_nine_months:
           period_type = "nine_months"
-          is_ytd = True  # 9-month periods are always YTD
         elif is_annual:
           period_type = "annual"
         else:
           period_type = "other"
 
-        # Estimate fiscal quarter/period based on end date and duration
-        fiscal_quarter = None
+        # Determine calendar quarter based on end date and period type
+        # Note: This is calendar quarter, NOT entity fiscal quarter
+        calendar_quarter = None
+        end_month = end_dt.month
         if is_quarterly:
-          end_month = end_dt.month
           if end_month in [1, 2, 3]:
-            fiscal_quarter = "Q1"
+            calendar_quarter = "Q1"
           elif end_month in [4, 5, 6]:
-            fiscal_quarter = "Q2"
+            calendar_quarter = "Q2"
           elif end_month in [7, 8, 9]:
-            fiscal_quarter = "Q3"
-          elif end_month in [10, 11, 12]:
-            fiscal_quarter = "Q4"
-        elif is_semi_annual:
-          # For 6-month periods, determine if H1 or H2
-          end_month = end_dt.month
-          if end_month in [4, 5, 6, 7]:
-            fiscal_quarter = "H1"  # First half
+            calendar_quarter = "Q3"
           else:
-            fiscal_quarter = "H2"  # Second half
+            calendar_quarter = "Q4"
+        elif is_semi_annual:
+          if end_month in [4, 5, 6, 7]:
+            calendar_quarter = "H1"
+          else:
+            calendar_quarter = "H2"
         elif is_nine_months:
-          fiscal_quarter = "M9"  # 9 months (through Q3)
+          calendar_quarter = "M9"
+        elif is_annual:
+          calendar_quarter = "FY"
+
+        # Generate calendar_period_key
+        if is_annual:
+          calendar_period_key = str(calendar_year)
+        elif calendar_quarter:
+          calendar_period_key = f"{calendar_year}{calendar_quarter}"
+        else:
+          calendar_period_key = f"{start_date}/{end_date}"
 
         period_data = {
           "identifier": period_identifier,
           "uri": period_uri,
-          "instant_date": None,
           "start_date": start_date,
           "end_date": end_date,
-          "forever_date": False,
-          "fiscal_year": fiscal_year,  # For easier time series queries
-          "fiscal_quarter": fiscal_quarter,  # Q1-Q4, H1-H2, M9, etc.
-          "is_annual": is_annual,  # True for ~1 year periods
-          "is_quarterly": is_quarterly,  # True for ~3 month periods
-          "days_in_period": days_in_period,  # Actual duration
-          "period_type": period_type,  # NEW: quarterly, semi_annual, nine_months, annual, other
-          "is_ytd": is_ytd,  # NEW: True for cumulative YTD periods
+          "calendar_year": calendar_year,
+          "calendar_quarter": calendar_quarter,
+          "days_in_period": days_in_period,
+          "period_type": period_type,
+          "calendar_period_key": calendar_period_key,
         }
         new_period_df = pd.DataFrame([period_data])
         self.periods_df = self.safe_concat(self.periods_df, new_period_df)
@@ -1223,17 +1281,13 @@ class XBRLGraphProcessor:
         period_data = {
           "identifier": period_identifier,
           "uri": period_uri,
-          "instant_date": None,
           "start_date": None,
           "end_date": None,
-          "forever_date": True,
-          "fiscal_year": None,  # Forever has no specific year
-          "fiscal_quarter": None,  # Forever has no quarter
-          "is_annual": False,  # Forever is not annual
-          "is_quarterly": False,  # Forever is not quarterly
-          "days_in_period": None,  # Forever has infinite duration
-          "period_type": "forever",  # NEW: Clearly identify as forever
-          "is_ytd": False,  # Forever is not YTD
+          "calendar_year": None,
+          "calendar_quarter": None,
+          "days_in_period": None,
+          "period_type": "forever",
+          "calendar_period_key": "forever",
         }
         new_period_df = pd.DataFrame([period_data])
         self.periods_df = self.safe_concat(self.periods_df, new_period_df)
@@ -1245,7 +1299,6 @@ class XBRLGraphProcessor:
 
       # Make period identifier global/idempotent
       report_id = self.report_data["identifier"] if self.report_data else "unknown"
-      # Use deterministic period ID for the report context
       period_identifier = create_period_id(f"{report_id}#{period_uri}")
 
       existing_period = self.periods_df[
@@ -1255,10 +1308,13 @@ class XBRLGraphProcessor:
         period_data = {
           "identifier": period_identifier,
           "uri": period_uri,
-          "instant_date": None,
           "start_date": None,
           "end_date": None,
-          "forever_date": False,
+          "calendar_year": None,
+          "calendar_quarter": None,
+          "days_in_period": None,
+          "period_type": "unknown",
+          "calendar_period_key": "unknown",
         }
         new_period_df = pd.DataFrame([period_data])
         self.periods_df = self.safe_concat(self.periods_df, new_period_df)

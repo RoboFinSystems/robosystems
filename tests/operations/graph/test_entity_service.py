@@ -76,7 +76,7 @@ class TestEntityGraphService:
     assert result["category"] == "Finance"
     assert result["state_of_incorporation"] == "DE"
     assert result["fiscal_year_end"] == "1231"
-    assert result["ein"] == "123456789"
+    assert result["tax_id"] == "123456789"  # EIN is mapped to tax_id
     assert result["website"] == "http://test.com"
     assert result["status"] == "active"
     assert "created_at" in result
