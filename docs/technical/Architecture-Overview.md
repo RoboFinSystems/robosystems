@@ -11,6 +11,7 @@ RoboSystems is built on a modern, scalable architecture designed for enterprise 
 - [Data Storage](#data-storage)
 - [Infrastructure](#infrastructure)
 - [CI/CD & Deployment](#cicd--deployment)
+- [Frontend Applications](#frontend-applications)
 - [External Integrations](#external-integrations)
 
 ## High-Level Architecture
@@ -639,6 +640,79 @@ See **[Bootstrap Guide](Bootstrap-Guide)** for complete setup instructions inclu
 - AWS OIDC federation (`just bootstrap`)
 - GitHub variables and secrets (`just setup-gha`)
 - AWS Secrets Manager configuration (`just setup-aws`)
+
+## Frontend Applications
+
+RoboSystems has multiple Next.js frontend applications that interface with the FastAPI backend:
+
+| Application | Domain | Purpose |
+|-------------|--------|---------|
+| **robosystems-app** | robosystems.ai | Main platform dashboard, authentication, settings |
+| **roboledger-app** | roboledger.ai | Accounting and financial management interface |
+| **roboinvestor-app** | roboinvestor.ai | Investment analysis and portfolio tools |
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         CloudFront CDN                          │
+│              (SSL termination, caching, routing)                │
+└─────────────────────────────────────────────────────────────────┘
+                    │                           │
+         ┌──────────┴──────────┐    ┌──────────┴──────────┐
+         │   Static Assets     │    │   Dynamic Content   │
+         │   (S3 Bucket)       │    │   (App Runner)      │
+         │   /_next/static/*   │    │   /* (default)      │
+         │   /images/*         │    │   /api/*            │
+         └─────────────────────┘    └─────────────────────┘
+                                              │
+                                              ▼
+                                    ┌─────────────────────┐
+                                    │  RoboSystems API    │
+                                    │  (FastAPI Backend)  │
+                                    └─────────────────────┘
+```
+
+### Infrastructure
+
+**AWS App Runner**:
+- Serverless container hosting with automatic scaling
+- No load balancer management required
+- Health checks via `/api/utilities/health`
+
+**CloudFront Distribution**:
+- Global edge caching for static assets
+- SSL/TLS termination with ACM certificates
+- Origin routing: S3 for static files, App Runner for dynamic content
+- www-to-apex redirect via CloudFront Function
+
+**S3 Static Assets**:
+- Next.js build artifacts (`/_next/static/*`)
+- Public images and assets (`/images/*`)
+- Optimized for high-throughput delivery
+
+### Backend Integration
+
+Frontend applications communicate with the RoboSystems API via:
+
+1. **RoboSystems Client SDK** (`@robosystems/client`)
+   - TypeScript/JavaScript client for API calls
+   - Automatic authentication token management
+   - Type-safe API responses
+
+2. **Authentication Flow**
+   - JWT tokens from RoboSystems API
+   - Automatic token refresh
+
+### Deployment
+
+Frontends deploy via GitHub Actions:
+- **Trigger**: Deploy from `main` branch
+- **Build**: Docker image → ECR
+- **Deploy**: CloudFormation → App Runner + CloudFront
+- **Auth**: GitHub OIDC (no stored AWS credentials)
+
+See individual app repositories for specific deployment workflows.
 
 ## External Integrations
 
