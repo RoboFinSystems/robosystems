@@ -90,6 +90,14 @@ class LadybugBackend(GraphBackend):
 
     # Then delete the physical files
     db_path = self.data_path / f"{database_name}.lbug"
+    wal_path = self.data_path / f"{database_name}.lbug.wal"
+
+    # Delete WAL file first (if it exists)
+    if wal_path.exists():
+      wal_path.unlink()
+      logger.debug(f"Deleted WAL file for {database_name}")
+
+    # Delete main database file/directory
     if db_path.exists():
       if db_path.is_file():
         db_path.unlink()
