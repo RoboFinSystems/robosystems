@@ -70,11 +70,6 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
             "type": "string",
             "description": "Optional: Filter to specific element qname (e.g., 'us-gaap:Revenues')",
           },
-          "include_samples": {
-            "type": "boolean",
-            "description": "Include sample fact values with all aspects",
-            "default": True,
-          },
           "limit": {
             "type": "integer",
             "description": "Number of patterns to return",
@@ -92,16 +87,14 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
 
     focus = arguments.get("focus", "all")
     element_filter = arguments.get("element_filter")
-    include_samples = arguments.get("include_samples", True)
     limit = arguments.get("limit", 10)
 
-    return await self._discover_facts(focus, element_filter, include_samples, limit)
+    return await self._discover_facts(focus, element_filter, limit)
 
   async def _discover_facts(
     self,
     focus: str = "all",
     element_filter: str | None = None,
-    include_samples: bool = True,
     limit: int = 10,
   ) -> dict[str, Any]:
     """
@@ -110,7 +103,6 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
     Args:
         focus: Area to focus on (dimensional, temporal, completeness, all)
         element_filter: Optional element qname to filter to
-        include_samples: Whether to include sample values
         limit: Number of patterns to return
 
     Returns:
@@ -140,9 +132,10 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
 
       result["total_facts"] = count_result[0]["count"]
 
-      # Analyze fact types
+      # Analyze fact types (sample 500K facts to avoid full scan)
       fact_types_query = """
             MATCH (f:Fact)
+            WITH f LIMIT 500000
             RETURN
                 count(CASE WHEN f.numeric_value IS NOT NULL THEN 1 END) as numeric_facts,
                 count(CASE WHEN f.fact_type = 'Nonnumeric' THEN 1 END) as text_facts,
@@ -151,18 +144,20 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
       fact_types_result = await self.client.execute_query(fact_types_query)
       if fact_types_result:
         result["fact_types"] = fact_types_result[0]
+        result["fact_types"]["note"] = "Sampled from 500K facts"
 
       # Element filter clause
       element_clause = ""
       if element_filter:
         element_clause = f"AND e.qname = '{element_filter}'"
 
-      # Dimensional analysis
+      # Dimensional analysis (sample 500K facts to avoid full scan)
       if focus in ["all", "dimensional"]:
         dim_query = f"""
                 MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
                 OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
                 WHERE f.numeric_value IS NOT NULL {element_clause}
+                WITH f, e, d LIMIT 500000
                 RETURN e.qname as element, d.axis_uri as dim_type,
                        d.member_uri as dim_value, count(f) as fact_count
                 ORDER BY fact_count DESC
@@ -178,29 +173,15 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
               "dimension_value": row["dim_value"],
               "fact_count": row["fact_count"],
             }
-
-            if include_samples:
-              sample_query = f"""
-                            MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-                            MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
-                            OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
-                            WHERE e.qname = '{row["element"]}'
-                              AND d.axis_uri = '{row["dim_type"]}'
-                              AND f.numeric_value IS NOT NULL
-                            RETURN f.numeric_value as value, u.value as currency
-                            LIMIT 3
-                            """
-              samples = await self.client.execute_query(sample_query)
-              pattern["sample_values"] = samples
-
             result["dimensional_patterns"].append(pattern)
 
-      # Temporal analysis
+      # Temporal analysis (sample 500K facts to avoid full scan)
       if focus in ["all", "temporal"]:
         temporal_query = f"""
                 MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
                 MATCH (f)-[:FACT_HAS_ELEMENT]->(e:Element)
                 WHERE f.numeric_value IS NOT NULL {element_clause}
+                WITH f, p, e LIMIT 500000
                 RETURN p.end_date as period, e.qname as element, count(f) as fact_count
                 ORDER BY period DESC
                 LIMIT {limit}
@@ -208,13 +189,14 @@ Without this filter, revenue queries return segment breakdowns + totals mixed to
         temporal_result = await self.client.execute_query(temporal_query)
         result["temporal_coverage"] = temporal_result
 
-      # Common aspect combinations
+      # Common aspect combinations (sample 500K facts to avoid full scan)
       aspect_query = f"""
             MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
             OPTIONAL MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
             OPTIONAL MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
             OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
             WHERE f.numeric_value IS NOT NULL {element_clause}
+            WITH f, e, p, d, u LIMIT 500000
             RETURN e.qname as element,
                    count(DISTINCT p) as periods,
                    count(DISTINCT d) as dimensions,

@@ -60,11 +60,6 @@ Use the discovered qnames in your Fact queries to get actual values.""",
             "description": "Filter by element category: 'us-gaap', 'ifrs', 'qb', 'robo', 'custom', or 'all'",
             "default": "all",
           },
-          "include_samples": {
-            "type": "boolean",
-            "description": "Include sample fact values for each element",
-            "default": True,
-          },
         },
         "additionalProperties": False,
       },
@@ -76,12 +71,11 @@ Use the discovered qnames in your Fact queries to get actual values.""",
 
     limit = min(arguments.get("limit", 20), 100)
     category = arguments.get("category", "all")
-    include_samples = arguments.get("include_samples", True)
 
-    return await self._discover_common_elements(limit, category, include_samples)
+    return await self._discover_common_elements(limit, category)
 
   async def _discover_common_elements(
-    self, limit: int = 20, category: str = "all", include_samples: bool = True
+    self, limit: int = 20, category: str = "all"
   ) -> dict[str, Any]:
     """
     Discover commonly used Element nodes in the graph.
@@ -89,7 +83,6 @@ Use the discovered qnames in your Fact queries to get actual values.""",
     Args:
         limit: Number of elements to return
         category: Element category filter
-        include_samples: Whether to include sample values
 
     Returns:
         Dictionary with element discovery results
@@ -130,12 +123,13 @@ Use the discovered qnames in your Fact queries to get actual values.""",
         elif category == "custom":
           where_clause = "WHERE NOT (e.qname STARTS WITH 'us-gaap:' OR e.qname STARTS WITH 'ifrs:' OR e.qname STARTS WITH 'qb:' OR e.qname STARTS WITH 'robo:')"
 
-      # Get most common elements
+      # Get most common elements by sampling facts (avoids full table scan)
       # Note: Labels are separate nodes, not properties of Element
       elements_query = f"""
-            MATCH (e:Element)<-[:FACT_HAS_ELEMENT]-(f:Fact)
+            MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
             {where_clause}
-            RETURN e.qname as qname, e.name as name, 
+            WITH f, e LIMIT 500000
+            RETURN e.qname as qname, e.name as name,
                    count(f) as fact_count
             ORDER BY fact_count DESC
             LIMIT {limit}
@@ -158,18 +152,6 @@ Use the discovered qnames in your Fact queries to get actual values.""",
           "fact_count": elem["fact_count"],
           "category": self._categorize_element(elem["qname"]),
         }
-
-        # Get sample facts if requested
-        if include_samples:
-          sample_query = f"""
-                    MATCH (e:Element)<-[:FACT_HAS_ELEMENT]-(f:Fact)
-                    OPTIONAL MATCH (f)-[:FACT_HAS_UNIT]->(u:Unit)
-                    WHERE e.qname = '{elem["qname"]}' AND f.numeric_value IS NOT NULL
-                    RETURN f.numeric_value as value, u.value as currency
-                    LIMIT 3
-                    """
-          samples = await self.client.execute_query(sample_query)
-          element_info["sample_values"] = samples
 
         result["common_elements"].append(element_info)
 
