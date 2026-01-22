@@ -70,6 +70,14 @@ class LadybugBackend(GraphBackend):
     return await self.execute_query(graph_id, cypher, parameters, database)
 
   async def create_database(self, database_name: str) -> bool:
+    # Clean up any orphaned WAL file before creating
+    # Only if the main database doesn't exist (WAL without database = orphaned)
+    db_path = self.data_path / f"{database_name}.lbug"
+    wal_path = self.data_path / f"{database_name}.lbug.wal"
+    if not db_path.exists() and wal_path.exists():
+      wal_path.unlink()
+      logger.info(f"Cleaned up orphaned WAL file for {database_name}")
+
     # Simply getting a connection will create the database if it doesn't exist
     with self.connection_pool.get_connection(database_name, read_only=False) as conn:
       # Test connection

@@ -155,6 +155,13 @@ class LadybugDatabaseManager:
         detail=f"Database {request.graph_id} already exists",
       )
 
+    # Clean up any orphaned WAL file before creating
+    # This can happen if a previous deletion didn't clean up properly
+    wal_path = self.base_path / f"{request.graph_id}.lbug.wal"
+    if wal_path.exists():
+      wal_path.unlink()
+      logger.info(f"Cleaned up orphaned WAL file for {request.graph_id}")
+
     try:
       logger.info(f"Creating database: {request.graph_id}")
 
