@@ -108,7 +108,9 @@ class StructureTool(BaseTool):
         description += "To get consolidated totals only, filter with:\n"
         description += "- `WHERE f.has_dimensions = false` (recommended)\n"
         description += "- `WHERE NOT (f)-[:FACT_HAS_DIMENSION]->()`\n"
-        description += "Without this filter, you'll get duplicate values for the same metric.\n"
+        description += (
+          "Without this filter, you'll get duplicate values for the same metric.\n"
+        )
 
         return description
 

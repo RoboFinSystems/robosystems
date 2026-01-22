@@ -13,6 +13,7 @@ Usage:
     uv run main.py                              # Load NVDA 2025, run queries
     uv run main.py --ticker AAPL --year 2024    # Load specific ticker and year
     uv run main.py --skip-queries               # Skip running example queries
+    uv run main.py --subscribe-only             # Only create subscription (no data loading)
 """
 
 import argparse
@@ -27,16 +28,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from robosystems_client.client import AuthenticatedClient
 from robosystems_client.api.subscriptions.create_repository_subscription import (
     sync_detailed as api_create_subscription,
 )
+from robosystems_client.client import AuthenticatedClient
 from robosystems_client.models.create_repository_subscription_request import (
     CreateRepositorySubscriptionRequest,
 )
+
 from examples.credentials.utils import (
-    ensure_user_credentials,
     CredentialContext,
+    ensure_user_credentials,
 )
 
 DEMO_DIR = Path(__file__).parent
@@ -117,7 +119,7 @@ def create_sec_subscription(api_key: str, base_url: str, plan_name: str = "sec-s
         )
 
         if response.status_code == 201:
-            print(f"   ✅ SEC subscription created successfully")
+            print("   ✅ SEC subscription created successfully")
             if response.parsed:
                 subscription_data = response.parsed.to_dict() if hasattr(response.parsed, 'to_dict') else response.parsed
                 print(f"   Subscription ID: {subscription_data.get('id', 'unknown')}")
@@ -125,7 +127,7 @@ def create_sec_subscription(api_key: str, base_url: str, plan_name: str = "sec-s
                 print(f"   Status: {subscription_data.get('status', 'unknown')}")
             return True
         elif response.status_code == 409:
-            print(f"   ℹ️  Subscription already exists")
+            print("   ℹ️  Subscription already exists")
             return True
         else:
             print(f"   ❌ Failed to create subscription: HTTP {response.status_code}")
@@ -161,13 +163,21 @@ def main():
         default="sec-starter",
         help="SEC subscription plan (default: sec-starter)",
     )
+    parser.add_argument(
+        "--subscribe-only",
+        action="store_true",
+        help="Only create subscription (skip data loading pipeline)",
+    )
 
     args = parser.parse_args()
 
     print("\n📊 SEC Repository Demo Setup")
     print("=" * 70)
-    print(f"Ticker: {args.ticker}")
-    print(f"Year: {args.year}")
+    if args.subscribe_only:
+        print("Mode: Subscribe only (no data loading)")
+    else:
+        print(f"Ticker: {args.ticker}")
+        print(f"Year: {args.year}")
     print(f"Plan: {args.plan}")
     print("=" * 70)
 
@@ -188,21 +198,25 @@ def main():
 
     print(f"User ID: {user_id}\n")
 
-    # Step 1: Load SEC data
-    print("📥 Step 1: Loading SEC data...")
-    run_just_command(f"sec-load {args.ticker} {args.year}")
-
-    # Brief pause to let graph settle
-    time.sleep(2)
+    # Step 1: Load SEC data (skip if subscribe-only)
+    if args.subscribe_only:
+        print("📥 Step 1: Skipping data loading (subscribe-only mode)")
+    else:
+        print("📥 Step 1: Loading SEC data...")
+        run_just_command(f"sec-load {args.ticker} {args.year}")
+        # Brief pause to let graph settle
+        time.sleep(2)
 
     # Step 2: Create repository subscription via API
-    print("\n🔑 Step 2: Creating SEC repository subscription...")
+    step_num = 1 if args.subscribe_only else 2
+    print(f"\n🔑 Step {step_num}: Creating SEC repository subscription...")
     if not create_sec_subscription(api_key, args.base_url, args.plan):
         print("\n❌ Failed to create SEC subscription")
         sys.exit(1)
 
     # Step 3: Update config.json to add sec graph
-    print("\n💾 Step 3: Updating credentials config...")
+    step_num = 2 if args.subscribe_only else 3
+    print(f"\n💾 Step {step_num}: Updating credentials config...")
 
     # Add sec to graphs section
     if "graphs" not in credentials:
@@ -218,22 +232,30 @@ def main():
     update_credentials(credentials)
 
     print("\n" + "=" * 70)
-    print("✅ SEC Repository Setup Complete!")
+    if args.subscribe_only:
+        print("✅ SEC Repository Subscription Complete!")
+    else:
+        print("✅ SEC Repository Setup Complete!")
     print("=" * 70)
-    print(f"\nYou can now query SEC data:")
-    print(
-        f"  just graph-query sec \"MATCH (e:Entity {{ticker: '{args.ticker}'}}) RETURN e.name, e.ticker LIMIT 5\""
-    )
-    print(f"\nOr explore with preset queries:")
-    print(f"  uv run examples/sec_demo/query_examples.py --list")
-    print(f"  uv run examples/sec_demo/query_examples.py --preset entities")
-    print(f"  uv run examples/sec_demo/query_examples.py --all")
+    print("\nYou can now query SEC data:")
+    if args.subscribe_only:
+        print(
+            '  just graph-query sec "MATCH (e:Entity) RETURN e.name, e.ticker LIMIT 5"'
+        )
+    else:
+        print(
+            f"  just graph-query sec \"MATCH (e:Entity {{ticker: '{args.ticker}'}}) RETURN e.name, e.ticker LIMIT 5\""
+        )
+    print("\nOr explore with preset queries:")
+    print("  uv run examples/sec_demo/query_examples.py --list")
+    print("  uv run examples/sec_demo/query_examples.py --preset entities")
+    print("  uv run examples/sec_demo/query_examples.py --all")
     print(
         f"\nOr via API with the credentials in {CREDENTIALS_FILE.relative_to(PROJECT_ROOT)}"
     )
     print("=" * 70 + "\n")
 
-    if not args.skip_queries:
+    if not args.skip_queries and not args.subscribe_only:
         print("\n" + "=" * 70)
         print("📊 Running Example Queries")
         print("=" * 70 + "\n")

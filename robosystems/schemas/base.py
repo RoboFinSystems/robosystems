@@ -69,7 +69,9 @@ BASE_NODES = [
       Property(
         name="calendar_quarter", type="STRING"
       ),  # Q1-Q4, H1-H2, M9, FY based on calendar months (not entity fiscal quarter)
-      Property(name="days_in_period", type="INT32"),  # Actual duration in days (0 for instant)
+      Property(
+        name="days_in_period", type="INT32"
+      ),  # Actual duration in days (0 for instant)
       Property(
         name="period_type", type="STRING"
       ),  # instant, quarterly, semi_annual, nine_months, annual, forever, other
