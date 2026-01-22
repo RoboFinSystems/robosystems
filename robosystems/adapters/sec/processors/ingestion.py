@@ -489,6 +489,7 @@ class XBRLDuckDBGraphProcessor:
             If False (default), preserve DuckDB for incremental/retry scenarios.
     """
     from robosystems.database import SessionFactory
+    from robosystems.graph_api.client.exceptions import GraphClientError
     from robosystems.models.iam import GraphSchema
 
     logger.info(
@@ -500,15 +501,21 @@ class XBRLDuckDBGraphProcessor:
       # preserve_duckdb=True keeps DuckDB for retry/incremental scenarios
       # preserve_duckdb=False (reset_staging=True) deletes both for fresh start
       preserve_duckdb = not reset_staging
-      await client.delete_database(self.graph_id, preserve_duckdb=preserve_duckdb)
-      if reset_staging:
-        logger.info(
-          f"Deleted LadybugDB and DuckDB staging: {self.graph_id} (fresh start)"
-        )
-      else:
-        logger.info(
-          f"Deleted LadybugDB database: {self.graph_id} (DuckDB staging preserved)"
-        )
+      try:
+        await client.delete_database(self.graph_id, preserve_duckdb=preserve_duckdb)
+        if reset_staging:
+          logger.info(
+            f"Deleted LadybugDB and DuckDB staging: {self.graph_id} (fresh start)"
+          )
+        else:
+          logger.info(
+            f"Deleted LadybugDB database: {self.graph_id} (DuckDB staging preserved)"
+          )
+      except GraphClientError as e:
+        if "not found" in str(e).lower():
+          logger.info(f"Database {self.graph_id} does not exist, will create fresh")
+        else:
+          raise
 
       schema = GraphSchema.get_active_schema(self.graph_id, db)
       if not schema:
