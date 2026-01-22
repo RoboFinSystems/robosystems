@@ -455,7 +455,17 @@ def fork_parent_to_subgraph(
   return result
 
 
-@job(tags={"dagster/priority": "1"})
+@job(
+  tags={
+    "dagster/priority": "1",
+    # Subgraph fork can be long-running for large parent graphs - use on-demand
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def create_subgraph_job():
   """Create a new subgraph with optional data fork from parent."""
   result = create_subgraph_database()
@@ -593,7 +603,17 @@ def create_backup(
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(
+  tags={
+    "dagster/priority": "1",
+    # Backup operations can be long-running - use on-demand
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def backup_graph_job():
   """Create a backup of a graph database."""
   create_backup()
@@ -715,7 +735,17 @@ def restore_backup(
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(
+  tags={
+    "dagster/priority": "1",
+    # Restore operations can be long-running - use on-demand
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def restore_graph_job():
   """Restore a graph database from backup."""
   restore_backup()
@@ -872,7 +902,17 @@ def materialize_file_to_graph(
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(
+  tags={
+    "dagster/priority": "1",
+    # User data operations can be long-running - use on-demand
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def stage_file_job():
   """Stage a file in DuckDB with optional graph materialization."""
   result = stage_file_in_duckdb()
@@ -949,7 +989,17 @@ def materialize_staged_file(
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(
+  tags={
+    "dagster/priority": "1",
+    # User data operations can be long-running - use on-demand
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def materialize_file_job():
   """Materialize a staged file to graph database."""
   materialize_staged_file()
@@ -1232,7 +1282,17 @@ def materialize_graph_tables(
       loop.close()
 
 
-@job(tags={"dagster/priority": "1"})
+@job(
+  tags={
+    "dagster/priority": "1",
+    # User data operations can be long-running - use on-demand
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  }
+)
 def materialize_graph_job():
   """Materialize all DuckDB staging tables to graph database."""
   materialize_graph_tables()
