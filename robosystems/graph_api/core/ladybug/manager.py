@@ -275,6 +275,12 @@ class LadybugDatabaseManager:
       # Close any connections in the pool for this database
       self.connection_pool.close_database_connections(graph_id)
 
+      # Remove WAL file first (if it exists)
+      wal_path = self.base_path / f"{graph_id}.lbug.wal"
+      if wal_path.exists():
+        wal_path.unlink()
+        logger.debug(f"Deleted WAL file for {graph_id}")
+
       # Remove database file (single file in LadybugDB)
       if db_path.is_file():
         db_path.unlink()
