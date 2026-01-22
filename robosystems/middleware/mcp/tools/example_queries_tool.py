@@ -112,18 +112,34 @@ List of example queries with explanations, tailored to the actual schema present
             },
             {
               "category": "financial",
-              "description": "Find financial facts with values",
+              "description": "⭐ CONSOLIDATED Revenue (use has_dimensions=false!)",
               "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
-WHERE f.numeric_value IS NOT NULL
-RETURN e.name as metric, f.numeric_value as value
+MATCH (f)-[:FACT_HAS_PERIOD]->(p:Period)
+WHERE e.qname = 'us-gaap:Revenues'
+  AND f.has_dimensions = false
+  AND f.numeric_value IS NOT NULL
+RETURN p.end_date, p.period_type, f.numeric_value as revenue
+ORDER BY p.end_date DESC LIMIT 10""",
+              "explanation": "⚠️ CRITICAL: has_dimensions=false filters out segment breakdowns to get TOTALS only",
+            },
+            {
+              "category": "financial",
+              "description": "Revenue BY Segment (dimensional breakdown)",
+              "query": """MATCH (f:Fact)-[:FACT_HAS_ELEMENT]->(e:Element)
+MATCH (f)-[:FACT_HAS_DIMENSION]->(d:FactDimension)
+WHERE e.qname = 'us-gaap:Revenues'
+  AND f.has_dimensions = true
+  AND f.numeric_value IS NOT NULL
+RETURN d.axis_uri, d.member_uri, f.numeric_value
 LIMIT 10""",
-              "explanation": "Facts are linked to Elements that define the metric",
+              "explanation": "Use has_dimensions=true when you WANT segment/geography breakdowns",
             },
             {
               "category": "financial",
               "description": "Get facts for a specific period",
               "query": """MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE p.end_date >= '2024-01-01'
+  AND f.has_dimensions = false
 RETURN f.identifier, f.numeric_value, p.end_date
 LIMIT 10""",
               "explanation": "Facts are linked to Period nodes for time analysis",

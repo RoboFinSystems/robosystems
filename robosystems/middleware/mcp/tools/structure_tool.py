@@ -102,6 +102,16 @@ class StructureTool(BaseTool):
         description += "- Facts may have Dimensions (segments/breakdowns)\n"
         description += "- Facts include Units (currency, shares, etc.)\n"
 
+        # Add critical warning about dimensional facts
+        description += "\n**⚠️ IMPORTANT - Dimensional Facts:**\n"
+        description += "~40% of facts have dimensional breakdowns (by segment, geography, product line).\n"
+        description += "To get consolidated totals only, filter with:\n"
+        description += "- `WHERE f.has_dimensions = false` (recommended)\n"
+        description += "- `WHERE NOT (f)-[:FACT_HAS_DIMENSION]->()`\n"
+        description += (
+          "Without this filter, you'll get duplicate values for the same metric.\n"
+        )
+
         return description
 
       else:

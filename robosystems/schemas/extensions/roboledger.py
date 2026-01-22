@@ -49,19 +49,28 @@ REPORTING_NODES = [
       Property(name="accession_number", type="STRING"),
       Property(name="form", type="STRING"),
       Property(name="filing_date", type="STRING"),
-      Property(name="report_date", type="STRING"),
+      Property(name="report_date", type="STRING"),  # Period end date for the report
       Property(name="acceptance_date", type="STRING"),
-      Property(name="period_end_date", type="STRING"),
       Property(name="is_inline_xbrl", type="BOOLEAN"),
       Property(name="xbrl_processor_version", type="STRING"),
       Property(name="processed", type="BOOLEAN"),
       Property(name="failed", type="BOOLEAN"),
       Property(name="updated_at", type="STRING"),
+      # Fiscal context from DEI cover page (enables fiscal-aware queries)
+      Property(
+        name="fiscal_year_focus", type="INT32"
+      ),  # From dei:DocumentFiscalYearFocus (e.g., 2024, 2025)
+      Property(
+        name="fiscal_period_focus", type="STRING"
+      ),  # From dei:DocumentFiscalPeriodFocus (FY, Q1, Q2, Q3)
+      Property(
+        name="fiscal_year_end_month", type="INT32"
+      ),  # Parsed from dei:CurrentFiscalYearEndDate (1-12, e.g., 12 for Dec year-end)
     ],
   ),
   Node(
     name="Fact",
-    description="Individual fact/data point from financial reports",
+    description="Individual fact/data point from financial reports. Facts may have dimensional breakdowns (segments, geography, products). Use has_dimensions=false or NOT (f)-[:FACT_HAS_DIMENSION]->() to get consolidated totals only.",
     properties=[
       Property(name="identifier", type="STRING", is_primary_key=True),
       Property(name="uri", type="STRING"),
@@ -75,6 +84,12 @@ REPORTING_NODES = [
       Property(
         name="content_type", type="STRING"
       ),  # MIME type for externalized content
+      Property(
+        name="has_dimensions", type="BOOLEAN"
+      ),  # True if fact has dimensional breakdowns (segments, geography, etc.)
+      Property(
+        name="dimension_count", type="INT64"
+      ),  # Number of dimensional qualifiers (0=consolidated, 1=single breakdown, 2+=complex)
     ],
   ),
   Node(

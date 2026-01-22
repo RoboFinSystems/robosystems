@@ -277,6 +277,10 @@ demo-sec ticker="NVDA" year="2025" skip_queries="false":
         --year {{year}} \
         {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
 
+# Create SEC subscription only (no data loading) - for connecting to existing SEC graph
+demo-sec-subscribe plan="sec-starter":
+    uv run examples/sec_demo/main.py --subscribe-only --plan {{plan}}
+
 # Run SEC demo preset queries
 demo-sec-query all="false":
     uv run examples/sec_demo/query_examples.py {{ if all == "true" { "--all" } else { "" } }}

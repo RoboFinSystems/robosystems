@@ -217,7 +217,7 @@ class TestFixColumnTypesBySchema:
       {
         "identifier": ["1", "2"],
         "name": ["Company A", "Company B"],
-        "ein": [123456789, 987654321],
+        "tax_id": [123456789, 987654321],
         "ticker": ["AAPL", "GOOGL"],
       }
     )
@@ -227,19 +227,19 @@ class TestFixColumnTypesBySchema:
     # String columns now use pyarrow-backed string dtype for proper Parquet type handling
     expected_dtype = pd.ArrowDtype(pa.string())
     assert result["name"].dtype == expected_dtype
-    assert result["ein"].dtype == expected_dtype
+    assert result["tax_id"].dtype == expected_dtype
     assert result["ticker"].dtype == expected_dtype
-    assert result["ein"].iloc[0] == "123456789"
+    assert result["tax_id"].iloc[0] == "123456789"
 
-  def test_entity_ein_padding(self, mock_dependencies):
+  def test_entity_tax_id_padding(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
     writer = ParquetWriter(Path("/test"), schema_adapter, ingest_adapter, df_manager)
 
-    df = pd.DataFrame({"identifier": ["1"], "ein": [123456]})
+    df = pd.DataFrame({"identifier": ["1"], "tax_id": [123456]})
 
     result = writer._fix_column_types_by_schema(df, "Entity")
 
-    assert result["ein"].iloc[0] == "000123456"
+    assert result["tax_id"].iloc[0] == "000123456"
 
   def test_unit_column_types(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
@@ -311,7 +311,7 @@ class TestFixColumnTypesByFilename:
       {
         "identifier": ["1"],
         "name": ["Company A"],
-        "ein": [123456],
+        "tax_id": [123456],
         "ticker": ["AAPL"],
       }
     )
@@ -319,8 +319,8 @@ class TestFixColumnTypesByFilename:
     result = writer._fix_column_types_by_filename(df, "Entity.parquet")
 
     assert result["name"].dtype == "object"
-    assert result["ein"].dtype == "object"
-    assert result["ein"].iloc[0] == "000123456"
+    assert result["tax_id"].dtype == "object"
+    assert result["tax_id"].iloc[0] == "000123456"
 
   def test_unit_filename(self, mock_dependencies):
     schema_adapter, ingest_adapter, df_manager = mock_dependencies
