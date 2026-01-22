@@ -182,8 +182,16 @@ async def materialize_table(
         else:
           copy_query = f"COPY {table_name} FROM duck.{temp_table_name}"
 
-        logger.info(f"Executing: {copy_query}")
-        result = conn.execute(copy_query)
+        # Set extended timeout for COPY operations (30 minutes)
+        # Default connection timeout is 120s, but large tables like Fact
+        # can take 2-3 minutes with millions of rows
+        try:
+          conn.execute("CALL timeout=1800000")  # 30 minutes
+          logger.info(f"Executing: {copy_query}")
+          result = conn.execute(copy_query)
+        finally:
+          # Always reset timeout to default after COPY
+          conn.execute("CALL timeout=120000")  # 2 minutes
 
       rows_ingested = 0
       if result and hasattr(result, "get_as_arrow"):
@@ -440,7 +448,13 @@ async def fork_from_parent_duckdb(
               copy_query = f"COPY {table_name} FROM parent_duck.{temp_table}"
 
             logger.info(f"Copying {table_name} from parent to subgraph")
-            result = conn.execute(copy_query)
+            # Set extended timeout for COPY operations (30 minutes)
+            try:
+              conn.execute("CALL timeout=1800000")  # 30 minutes
+              result = conn.execute(copy_query)
+            finally:
+              # Always reset timeout to default after COPY
+              conn.execute("CALL timeout=120000")  # 2 minutes
 
             rows_ingested = 0
             if result and hasattr(result, "get_as_arrow"):

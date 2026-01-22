@@ -286,6 +286,7 @@ class XBRLDuckDBGraphProcessor:
   async def materialize_from_duckdb(
     self,
     table_names: list[str] | None = None,
+    rebuild: bool = False,
   ) -> MaterializeResult:
     """
     Materialize LadybugDB graph from existing DuckDB staging.
@@ -304,6 +305,9 @@ class XBRLDuckDBGraphProcessor:
     Args:
         table_names: Optional list of specific tables to materialize.
                      If None, materializes all tables from the schema.
+        rebuild: If True, delete and recreate the LadybugDB database with
+                 the roboledger SEC schema before materializing.
+                 DuckDB staging is preserved for retry scenarios.
 
     Returns:
         MaterializeResult with rows ingested per table
@@ -344,21 +348,32 @@ class XBRLDuckDBGraphProcessor:
           error=f"Graph client initialization failed: {client_err!s}",
         )
 
-      # Step 3: Ensure LadybugDB database exists with schema
-      # This handles retry scenarios where LadybugDB was deleted but DuckDB preserved
-      # Uses ensure_shared_repository_exists for production-compatible routing
-      logger.info("Step 3: Ensuring LadybugDB database exists with schema...")
-      from robosystems.config import env
-      from robosystems.operations.graph.shared_repository_service import (
-        ensure_shared_repository_exists,
-      )
+      # Step 3: Rebuild or ensure LadybugDB database exists
+      if rebuild:
+        # Rebuild: Delete and recreate the LadybugDB database with schema
+        # DuckDB staging is preserved for retry scenarios
+        logger.info(
+          "Step 3: Rebuilding LadybugDB database (DuckDB staging preserved)..."
+        )
+        await self._rebuild_ladybug_database(client, reset_staging=False)
+        logger.info("LadybugDB database rebuilt with roboledger SEC schema")
+      else:
+        # Ensure: Create database if it doesn't exist (for retry scenarios)
+        # Uses ensure_shared_repository_exists for production-compatible routing
+        logger.info("Step 3: Ensuring LadybugDB database exists with schema...")
+        from robosystems.config import env
+        from robosystems.operations.graph.shared_repository_service import (
+          ensure_shared_repository_exists,
+        )
 
-      repo_result = await ensure_shared_repository_exists(
-        repository_name=self.graph_id,
-        created_by="system",
-        instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
-      )
-      logger.info(f"Repository ensure result: {repo_result.get('status', 'unknown')}")
+        repo_result = await ensure_shared_repository_exists(
+          repository_name=self.graph_id,
+          created_by="system",
+          instance_id="local-dev"
+          if env.ENVIRONMENT == "dev"
+          else "ladybug-shared-prod",
+        )
+        logger.info(f"Repository ensure result: {repo_result.get('status', 'unknown')}")
 
       # Step 4: Trigger ingestion for each table
       logger.info("Step 4: Triggering graph ingestion...")

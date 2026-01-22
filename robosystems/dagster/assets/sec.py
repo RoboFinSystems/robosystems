@@ -312,9 +312,16 @@ class SECMaterializeConfig(Config):
 
   Use this config with sec_graph_materialized asset to materialize
   from DuckDB staging to LadybugDB.
+
+  Options:
+    graph_id: Target graph ID (default: "sec")
+    rebuild_graph: If True, delete and recreate the LadybugDB database
+                   with the roboledger SEC schema before materializing.
+                   DuckDB staging is preserved for retry. (default: False)
   """
 
   graph_id: str = "sec"  # Target graph ID
+  rebuild_graph: bool = False  # Rebuild LadybugDB before materialization
 
 
 # ============================================================================
@@ -1106,11 +1113,13 @@ def sec_graph_materialized(
   from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
 
   context.log.info(f"Materializing graph from DuckDB staging: {config.graph_id}")
+  if config.rebuild_graph:
+    context.log.info("Rebuild requested - will delete and recreate LadybugDB database")
 
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
   async def run_materialization():
-    result = await processor.materialize_from_duckdb()
+    result = await processor.materialize_from_duckdb(rebuild=config.rebuild_graph)
     return result
 
   result = asyncio.run(run_materialization())
@@ -1133,6 +1142,7 @@ def sec_graph_materialized(
   return MaterializeResult(
     metadata={
       "graph_id": config.graph_id,
+      "rebuild_graph": config.rebuild_graph,
       "status": result.status,
       "rows_ingested": result.total_rows_ingested,
       "execution_time_ms": result.total_time_ms,
