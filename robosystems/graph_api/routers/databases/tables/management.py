@@ -148,6 +148,9 @@ async def perform_table_creation(
       request: Table creation request with graph_id, table_name, s3_pattern
       timeout_seconds: Maximum time allowed for table creation (default 30 min)
   """
+  # Import inside function to avoid circular dependency with pool initialization
+  from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
+
   try:
     # Update task status to running
     await staging_task_manager.update_task(
@@ -169,6 +172,20 @@ async def perform_table_creation(
         timeout=timeout_seconds,
       )
     except TimeoutError:
+      # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
+      # asyncio.wait_for() raises TimeoutError but the thread keeps running
+      # We must interrupt the connection to cancel the in-progress query
+      try:
+        pool = get_duckdb_pool()
+        interrupted = pool.interrupt_connections(request.graph_id)
+        logger.warning(
+          f"[Task {task_id}] Timeout - interrupted {interrupted} DuckDB connection(s)"
+        )
+      except Exception as interrupt_err:
+        logger.error(
+          f"[Task {task_id}] Failed to interrupt connections: {interrupt_err}"
+        )
+
       raise TimeoutError(
         f"Table creation timed out after {timeout_seconds}s "
         f"({timeout_seconds // 60} minutes)"
@@ -221,6 +238,9 @@ async def perform_table_insert(
       request: Table creation request with graph_id, table_name, s3_pattern
       timeout_seconds: Maximum time allowed for insert (default 30 min)
   """
+  # Import inside function to avoid circular dependency with pool initialization
+  from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
+
   try:
     # Update task status to running
     await staging_task_manager.update_task(
@@ -241,6 +261,18 @@ async def perform_table_insert(
         timeout=timeout_seconds,
       )
     except TimeoutError:
+      # CRITICAL: Interrupt the DuckDB query to prevent zombie threads
+      try:
+        pool = get_duckdb_pool()
+        interrupted = pool.interrupt_connections(request.graph_id)
+        logger.warning(
+          f"[Task {task_id}] Timeout - interrupted {interrupted} DuckDB connection(s)"
+        )
+      except Exception as interrupt_err:
+        logger.error(
+          f"[Task {task_id}] Failed to interrupt connections: {interrupt_err}"
+        )
+
       raise TimeoutError(
         f"Table insert timed out after {timeout_seconds}s "
         f"({timeout_seconds // 60} minutes)"

@@ -1,0 +1,88 @@
+"""Tests for staging timeout configuration in SEC ingestion processor."""
+
+import pytest
+
+from robosystems.adapters.sec.processors.ingestion import (
+  DEFAULT_STAGING_TIMEOUT,
+  LARGE_STAGING_TABLES,
+  LARGE_TABLE_STAGING_TIMEOUT,
+  _get_staging_timeout,
+)
+
+
+class TestStagingTimeoutConfiguration:
+  """Tests for the staging timeout configuration constants and helper."""
+
+  def test_timeout_constants_values(self):
+    """Test that timeout constants have expected values."""
+    assert DEFAULT_STAGING_TIMEOUT == 1800  # 30 minutes
+    assert LARGE_TABLE_STAGING_TIMEOUT == 7200  # 2 hours
+
+  def test_large_staging_tables_contents(self):
+    """Test that large staging tables set contains expected tables."""
+    expected_tables = {
+      "Fact",
+      "Label",
+      "Element",
+      "FactDimension",
+      "FACT_HAS_DIMENSION",
+      "FACT_REPORTS_ELEMENT",
+    }
+    assert expected_tables == LARGE_STAGING_TABLES
+
+  def test_large_staging_tables_is_immutable(self):
+    """Test that LARGE_STAGING_TABLES is a frozenset (immutable)."""
+    assert isinstance(LARGE_STAGING_TABLES, frozenset)
+
+
+class TestGetStagingTimeout:
+  """Tests for _get_staging_timeout helper function."""
+
+  @pytest.mark.parametrize(
+    "table_name",
+    [
+      "Fact",
+      "Label",
+      "Element",
+      "FactDimension",
+      "FACT_HAS_DIMENSION",
+      "FACT_REPORTS_ELEMENT",
+    ],
+  )
+  def test_large_tables_get_extended_timeout(self, table_name: str):
+    """Test that all large tables get the extended timeout."""
+    assert _get_staging_timeout(table_name) == LARGE_TABLE_STAGING_TIMEOUT
+
+  @pytest.mark.parametrize(
+    "table_name",
+    [
+      "Entity",
+      "Period",
+      "Unit",
+      "Report",
+      "Taxonomy",
+      "Reference",
+      "Structure",
+      "ENTITY_HAS_REPORT",
+      "REPORT_HAS_FACT",
+    ],
+  )
+  def test_regular_tables_get_default_timeout(self, table_name: str):
+    """Test that regular tables get the default timeout."""
+    assert _get_staging_timeout(table_name) == DEFAULT_STAGING_TIMEOUT
+
+  def test_unknown_table_gets_default_timeout(self):
+    """Test that unknown table names get the default timeout."""
+    assert _get_staging_timeout("UnknownTable") == DEFAULT_STAGING_TIMEOUT
+    assert _get_staging_timeout("") == DEFAULT_STAGING_TIMEOUT
+    assert _get_staging_timeout("random_table_name") == DEFAULT_STAGING_TIMEOUT
+
+  def test_case_sensitivity(self):
+    """Test that table name matching is case-sensitive."""
+    # Exact case should match
+    assert _get_staging_timeout("Fact") == LARGE_TABLE_STAGING_TIMEOUT
+
+    # Different case should NOT match (gets default timeout)
+    assert _get_staging_timeout("fact") == DEFAULT_STAGING_TIMEOUT
+    assert _get_staging_timeout("FACT") == DEFAULT_STAGING_TIMEOUT
+    assert _get_staging_timeout("fAcT") == DEFAULT_STAGING_TIMEOUT

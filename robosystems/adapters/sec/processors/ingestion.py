@@ -53,6 +53,31 @@ from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 
+# Table-specific timeouts for DuckDB staging (seconds)
+# Large tables with millions of rows need extended timeouts
+# Default: 1800s (30 min), Large: 7200s (2 hours)
+DEFAULT_STAGING_TIMEOUT = 1800  # 30 minutes
+LARGE_TABLE_STAGING_TIMEOUT = 7200  # 2 hours
+
+# Tables known to have millions of rows requiring extended timeouts
+LARGE_STAGING_TABLES = frozenset(
+  {
+    "Fact",  # 10-20M+ rows (hundreds of facts per filing)
+    "Label",  # 2M+ rows (multiple labels per element)
+    "Element",  # 1M+ rows (all XBRL elements across taxonomies)
+    "FactDimension",  # Dimensional breakdowns of facts
+    "FACT_HAS_DIMENSION",  # Relationship linking facts to dimensions
+    "FACT_REPORTS_ELEMENT",  # High-cardinality relationship
+  }
+)
+
+
+def _get_staging_timeout(table_name: str) -> int:
+  """Get appropriate staging timeout for a table based on expected size."""
+  if table_name in LARGE_STAGING_TABLES:
+    return LARGE_TABLE_STAGING_TIMEOUT
+  return DEFAULT_STAGING_TIMEOUT
+
 
 class XBRLDuckDBGraphProcessor:
   """
@@ -763,7 +788,11 @@ class XBRLDuckDBGraphProcessor:
         f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
       )
 
-      logger.info(f"Creating DuckDB table: {table_name} (glob: {s3_pattern})")
+      # Get appropriate timeout for this table (large tables get extended timeout)
+      timeout = _get_staging_timeout(table_name)
+      logger.info(
+        f"Creating DuckDB table: {table_name} (glob: {s3_pattern}, timeout={timeout}s)"
+      )
 
       try:
         # Use graph client to call Graph API's table creation endpoint
@@ -772,7 +801,7 @@ class XBRLDuckDBGraphProcessor:
           graph_id=self.graph_id,
           table_name=table_name,
           s3_pattern=s3_pattern,  # Glob pattern, not a file list
-          timeout=1800,  # 30 minutes for large file sets
+          timeout=timeout,
         )
 
         # Handle SSE-based response format
@@ -894,7 +923,11 @@ class XBRLDuckDBGraphProcessor:
         f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
       )
 
-      logger.info(f"Inserting into DuckDB table: {table_name} (glob: {s3_pattern})")
+      # Get appropriate timeout for this table (large tables get extended timeout)
+      timeout = _get_staging_timeout(table_name)
+      logger.info(
+        f"Inserting into DuckDB table: {table_name} (glob: {s3_pattern}, timeout={timeout}s)"
+      )
 
       try:
         # Use graph client to call Graph API's insert_into_table endpoint
@@ -902,7 +935,7 @@ class XBRLDuckDBGraphProcessor:
           graph_id=self.graph_id,
           table_name=table_name,
           s3_pattern=s3_pattern,
-          timeout=1800,  # 30 minutes for large file sets
+          timeout=timeout,
         )
 
         # Handle SSE-based response format
