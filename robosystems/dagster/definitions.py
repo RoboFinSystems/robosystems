@@ -96,6 +96,14 @@ from robosystems.dagster.jobs.sec import (
   sec_stage_job,
   sec_staged_materialize_job,
 )
+
+# Import shared repository jobs
+from robosystems.dagster.jobs.shared_repository import (
+  shared_repository_refresh_replicas_job,
+  shared_repository_snapshot_job,
+  shared_repository_snapshot_only_job,
+  weekly_shared_repository_snapshot_schedule,
+)
 from robosystems.dagster.resources import (
   DatabaseResource,
   GraphResource,
@@ -109,14 +117,6 @@ from robosystems.dagster.sensors import (
   sec_incremental_staging_schedule,
   sec_post_materialize_snapshot_sensor,
   sec_processing_sensor,
-)
-
-# Import shared repository jobs
-from robosystems.dagster.jobs.shared_repository import (
-  shared_repository_refresh_replicas_job,
-  shared_repository_snapshot_job,
-  shared_repository_snapshot_only_job,
-  weekly_shared_repository_snapshot_schedule,
 )
 
 # ============================================================================

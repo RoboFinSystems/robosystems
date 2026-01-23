@@ -24,6 +24,7 @@ from dagster import (
   DefaultScheduleStatus,
   DefaultSensorStatus,
   RunRequest,
+  RunsFilter,
   RunStatusSensorContext,
   ScheduleEvaluationContext,
   SensorEvaluationContext,
@@ -38,7 +39,11 @@ from robosystems.config.storage.shared import (
   DataSourceType,
   get_raw_key,
 )
-from robosystems.dagster.jobs.sec import sec_materialize_job, sec_process_job, sec_stage_job
+from robosystems.dagster.jobs.sec import (
+  sec_materialize_job,
+  sec_process_job,
+  sec_stage_job,
+)
 from robosystems.dagster.jobs.shared_repository import shared_repository_snapshot_job
 
 
@@ -520,6 +525,20 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
   # Only trigger for SEC shared repository materialization
   if graph_id != "sec":
     context.log.info(f"Skipping snapshot - graph_id '{graph_id}' is not 'sec'")
+    return
+
+  # Check if a snapshot job is already running to prevent concurrent executions
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="shared_repository_snapshot_job",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Snapshot job already running (run_id={active_runs[0].run_id}), skipping"
+    )
     return
 
   context.log.info(

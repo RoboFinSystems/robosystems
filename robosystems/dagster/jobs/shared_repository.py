@@ -74,7 +74,7 @@ def get_shared_master_volume(
   dynamodb = boto3.client("dynamodb", region_name=env.AWS_REGION)
 
   # Query instance registry for shared master
-  table_name = f"robosystems-graph-{env.ENVIRONMENT}-instances"
+  table_name = env.INSTANCE_REGISTRY_TABLE
   context.log.info(f"Querying {table_name} for shared_master instance")
 
   response = dynamodb.scan(
