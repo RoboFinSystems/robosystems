@@ -7,6 +7,7 @@ Architecture:
 - Phase 1 (Downloads): sec_raw_filings downloads ZIPs to S3 (quarterly partitions)
 - Phase 2 (Processing): This sensor triggers sec_process_job for each filing
 - Phase 3 (Materialization): sec_materialize_job ingests to graph (sequential)
+- Phase 4 (Snapshot): After materialization, trigger shared replica snapshot
 
 The sensor scans S3 year-by-year (newest first), comparing against Dagster's
 materialization tracking to find unprocessed filings.
@@ -19,12 +20,16 @@ import boto3
 from botocore.exceptions import ClientError
 from dagster import (
   AssetKey,
+  DagsterRunStatus,
   DefaultScheduleStatus,
   DefaultSensorStatus,
   RunRequest,
+  RunsFilter,
+  RunStatusSensorContext,
   ScheduleEvaluationContext,
   SensorEvaluationContext,
   SkipReason,
+  run_status_sensor,
   schedule,
   sensor,
 )
@@ -34,7 +39,12 @@ from robosystems.config.storage.shared import (
   DataSourceType,
   get_raw_key,
 )
-from robosystems.dagster.jobs.sec import sec_process_job, sec_stage_job
+from robosystems.dagster.jobs.sec import (
+  sec_materialize_job,
+  sec_process_job,
+  sec_stage_job,
+)
+from robosystems.dagster.jobs.shared_repository import shared_repository_snapshot_job
 
 
 def _get_s3_client():
@@ -457,3 +467,106 @@ def sec_incremental_staging_schedule(context: ScheduleEvaluationContext):
       f"Error in SEC incremental staging schedule: {type(e).__name__}: {e}"
     )
     raise
+
+
+# ============================================================================
+# SEC Post-Materialization Snapshot Sensor
+# ============================================================================
+
+# Sensor status controlled by environment variable
+# Enable via SHARED_REPO_SNAPSHOT_SENSOR_ENABLED=true after verifying manual runs work
+SEC_SNAPSHOT_SENSOR_STATUS = (
+  DefaultSensorStatus.RUNNING
+  if env.SHARED_REPO_SNAPSHOT_SENSOR_ENABLED
+  else DefaultSensorStatus.STOPPED
+)
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[sec_materialize_job],
+  request_job=shared_repository_snapshot_job,
+  default_status=SEC_SNAPSHOT_SENSOR_STATUS,
+  minimum_interval_seconds=60,
+  description="Trigger shared replica snapshot after SEC materialization completes",
+)
+def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
+  """Trigger shared repository snapshot after SEC materialization succeeds.
+
+  This sensor watches for successful completion of sec_materialize_job
+  and triggers shared_repository_snapshot_job to:
+  1. Create EBS snapshot of shared master's data volume
+  2. Update replica launch template with new snapshot
+  3. Trigger rolling refresh of replica fleet
+
+  This ensures replicas are updated with the latest SEC data after each
+  nightly materialization run.
+
+  Enable via: SHARED_REPO_SNAPSHOT_SENSOR_ENABLED=true
+
+  Note: Only triggers for jobs on the "sec" graph_id (shared repository).
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping snapshot sensor in dev environment")
+    return
+
+  # Get the run that triggered this sensor
+  dagster_run = context.dagster_run
+  run_config = dagster_run.run_config or {}
+
+  # Extract graph_id from run config to verify it's the SEC shared repository
+  try:
+    ops_config = run_config.get("ops", {})
+    materialize_config = ops_config.get("sec_graph_materialized", {}).get("config", {})
+    graph_id = materialize_config.get("graph_id", "sec")
+  except (KeyError, TypeError, AttributeError):
+    graph_id = "sec"  # Default to sec if not found
+
+  # Only trigger for SEC shared repository materialization
+  if graph_id != "sec":
+    context.log.info(f"Skipping snapshot - graph_id '{graph_id}' is not 'sec'")
+    return
+
+  # Check if a snapshot job is already running to prevent concurrent executions
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="shared_repository_snapshot_job",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Snapshot job already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  context.log.info(
+    f"SEC materialization completed (run_id={dagster_run.run_id}). "
+    "Triggering shared repository snapshot."
+  )
+
+  # Create unique run key to prevent duplicate triggers
+  today = datetime.now(UTC).strftime("%Y-%m-%d")
+  run_key = f"sec-post-materialize-snapshot-{today}-{dagster_run.run_id[:8]}"
+
+  yield RunRequest(
+    run_key=run_key,
+    run_config={
+      "ops": {
+        "get_shared_master_volume": {
+          "config": {
+            "graph_id": "sec",
+            "wait_for_completion": True,
+            "description_prefix": "SEC post-materialize",
+          }
+        },
+        "refresh_replica_instances": {
+          "config": {
+            "min_healthy_percentage": 50,
+            "instance_warmup_seconds": 300,
+          }
+        },
+      }
+    },
+  )

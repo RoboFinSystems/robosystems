@@ -96,6 +96,14 @@ from robosystems.dagster.jobs.sec import (
   sec_stage_job,
   sec_staged_materialize_job,
 )
+
+# Import shared repository jobs
+from robosystems.dagster.jobs.shared_repository import (
+  shared_repository_refresh_replicas_job,
+  shared_repository_snapshot_job,
+  shared_repository_snapshot_only_job,
+  weekly_shared_repository_snapshot_schedule,
+)
 from robosystems.dagster.resources import (
   DatabaseResource,
   GraphResource,
@@ -107,6 +115,7 @@ from robosystems.dagster.sensors import (
   pending_repository_sensor,
   pending_subscription_sensor,
   sec_incremental_staging_schedule,
+  sec_post_materialize_snapshot_sensor,
   sec_processing_sensor,
 )
 
@@ -160,6 +169,10 @@ all_jobs = [
   sec_stage_job,  # Stage to persistent DuckDB (full or incremental mode)
   sec_materialize_job,  # Materialize from DuckDB to LadybugDB (retry-safe)
   sec_staged_materialize_job,  # Full pipeline: stage + materialize
+  # Shared repository jobs
+  shared_repository_snapshot_job,  # Full: snapshot + update template + refresh replicas
+  shared_repository_snapshot_only_job,  # Snapshot only (no replica refresh)
+  shared_repository_refresh_replicas_job,  # Refresh replicas with existing snapshot
   # Notification jobs
   send_email_job,
 ]
@@ -187,6 +200,8 @@ all_schedules = [
   sec_daily_download_schedule,
   sec_nightly_materialize_schedule,
   sec_incremental_staging_schedule,
+  # Shared repository schedules
+  weekly_shared_repository_snapshot_schedule,
 ]
 
 # ============================================================================
@@ -197,6 +212,7 @@ all_sensors = [
   pending_subscription_sensor,
   pending_repository_sensor,
   sec_processing_sensor,
+  sec_post_materialize_snapshot_sensor,
 ]
 
 # ============================================================================

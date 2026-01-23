@@ -1,0 +1,373 @@
+name: Deploy Graph Shared Replicas
+
+# Deploys read-only replica fleet for shared repositories (SEC, industry, economic)
+# Replicas boot from EBS snapshots of the shared master's data volume
+# Snapshot ID is updated via Dagster's shared_repository_snapshot job
+
+on:
+  workflow_call:
+    inputs:
+      # Stack & Environment Configuration
+      stack_name:
+        description: "CloudFormation stack name"
+        required: true
+        type: string
+      environment:
+        description: "Environment to deploy to (prod or staging)"
+        required: true
+        type: string
+
+      # GHA Runner Configuration
+      runner_config:
+        description: "GitHub Actions runner configuration (JSON array)"
+        required: false
+        type: string
+        default: '["ubuntu-latest"]'
+
+      # AWS Configuration
+      aws_region:
+        description: "AWS region for deployment"
+        required: true
+        type: string
+      vpc_id:
+        description: "VPC ID for deployment"
+        required: true
+        type: string
+      vpc_cidr:
+        description: "VPC CIDR block"
+        required: false
+        type: string
+        default: "10.0.0.0/16"
+      subnet_ids:
+        description: "Comma-separated list of private subnet IDs (multiple AZs for HA)"
+        required: true
+        type: string
+
+      # Instance Configuration
+      ami_id:
+        description: "Amazon Linux 2023 ARM64 AMI ID"
+        required: true
+        type: string
+      instance_type:
+        description: "EC2 instance type for replicas"
+        required: false
+        type: string
+        default: "r7g.medium"
+
+      # Auto-scaling Configuration
+      min_instances:
+        description: "Minimum number of replica instances"
+        required: false
+        type: string
+        default: "2"
+      max_instances:
+        description: "Maximum number of replica instances"
+        required: false
+        type: string
+        default: "10"
+      desired_capacity:
+        description: "Desired number of replica instances"
+        required: false
+        type: string
+        default: "2"
+
+      # Docker Configuration
+      ecr_image_tag:
+        description: "Docker image tag for Graph API"
+        required: false
+        type: string
+        default: "latest"
+
+      # Notification Configuration
+      aws_sns_alert_email:
+        description: "Email address for SNS alerts and notifications"
+        required: true
+        type: string
+
+    outputs:
+      alb_dns_name:
+        description: "DNS name of the shared replicas ALB"
+        value: ${{ jobs.deploy.outputs.alb_dns_name }}
+      alb_endpoint:
+        description: "Full endpoint URL for Graph API via ALB"
+        value: ${{ jobs.deploy.outputs.alb_endpoint }}
+      asg_name:
+        description: "Name of the Auto Scaling Group"
+        value: ${{ jobs.deploy.outputs.asg_name }}
+      launch_template_name:
+        description: "Name of the Launch Template"
+        value: ${{ jobs.deploy.outputs.launch_template_name }}
+
+    secrets:
+      ACTIONS_TOKEN:
+        description: "GitHub token for checkout (optional - falls back to github.token)"
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ${{ fromJSON(inputs.runner_config) }}
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      alb_dns_name: ${{ steps.get-outputs.outputs.alb_dns_name }}
+      alb_endpoint: ${{ steps.get-outputs.outputs.alb_endpoint }}
+      asg_name: ${{ steps.get-outputs.outputs.asg_name }}
+      launch_template_name: ${{ steps.get-outputs.outputs.launch_template_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          token: ${{ secrets.ACTIONS_TOKEN || github.token }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Get S3 Bucket Configuration
+        id: s3_config
+        run: |
+          # Determine S3 stack name based on environment
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            S3_STACK_NAME="RoboSystemsS3Prod"
+          else
+            S3_STACK_NAME="RoboSystemsS3Staging"
+          fi
+
+          # Query S3 stack outputs for bucket ARN
+          S3_OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "$S3_STACK_NAME" \
+            --query 'Stacks[0].Outputs' \
+            --output json)
+
+          DEPLOYMENT_BUCKET_ARN=$(echo "$S3_OUTPUTS" | jq -r '.[] | select(.OutputKey=="DeploymentBucketArn") | .OutputValue')
+
+          echo "deployment_bucket_arn=$DEPLOYMENT_BUCKET_ARN" >> $GITHUB_OUTPUT
+          echo "📦 Deployment Bucket: $DEPLOYMENT_BUCKET_ARN"
+
+      - name: Get ECR Configuration
+        id: ecr_config
+        run: |
+          # Get ECR repository URL from existing graph infrastructure
+          ECR_STACK_NAME="RoboSystemsECR${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}"
+
+          ECR_URL=$(aws cloudformation describe-stacks \
+            --stack-name "$ECR_STACK_NAME" \
+            --query 'Stacks[0].Outputs[?OutputKey==`GraphApiRepositoryUrl`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+          # Fallback: construct from account ID
+          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "None" ]; then
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            ECR_URL="${ACCOUNT_ID}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/robosystems-graph-api"
+          fi
+
+          echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
+          echo "🐳 ECR Repository: $ECR_URL"
+
+      - name: Resolve Snapshot ID
+        id: snapshot
+        run: |
+          # Look up latest completed snapshot by tags
+          # Dagster jobs tag snapshots with GraphId=sec, Environment, AllRepositories=true
+          echo "🔍 Looking up latest snapshot by tags..."
+          LATEST_SNAPSHOT=$(aws ec2 describe-snapshots \
+            --filters \
+              "Name=tag:GraphId,Values=sec" \
+              "Name=tag:Environment,Values=${{ inputs.environment }}" \
+              "Name=status,Values=completed" \
+            --query 'Snapshots | sort_by(@, &StartTime) | [-1].SnapshotId' \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$LATEST_SNAPSHOT" ] && [ "$LATEST_SNAPSHOT" != "None" ] && [ "$LATEST_SNAPSHOT" != "null" ]; then
+            # Get snapshot details for logging
+            SNAPSHOT_TIME=$(aws ec2 describe-snapshots \
+              --snapshot-ids "$LATEST_SNAPSHOT" \
+              --query 'Snapshots[0].StartTime' \
+              --output text 2>/dev/null || echo "unknown")
+            echo "📸 Found latest snapshot: $LATEST_SNAPSHOT (created: $SNAPSHOT_TIME)"
+            echo "snapshot_id=$LATEST_SNAPSHOT" >> $GITHUB_OUTPUT
+            echo "source=aws_lookup" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Priority 3: Get snapshot from existing launch template (if stack exists)
+          echo "🔍 No tagged snapshot found, checking existing launch template..."
+          LT_NAME="robosystems-shared-replicas-${{ inputs.environment }}"
+          EXISTING_SNAPSHOT=$(aws ec2 describe-launch-template-versions \
+            --launch-template-name "$LT_NAME" \
+            --versions '$Latest' \
+            --query 'LaunchTemplateVersions[0].LaunchTemplateData.BlockDeviceMappings[?DeviceName==`/dev/xvdf`].Ebs.SnapshotId' \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_SNAPSHOT" ] && [ "$EXISTING_SNAPSHOT" != "None" ]; then
+            echo "📸 Using existing launch template snapshot: $EXISTING_SNAPSHOT"
+            echo "snapshot_id=$EXISTING_SNAPSHOT" >> $GITHUB_OUTPUT
+            echo "source=launch_template" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # No snapshot found anywhere
+          echo "❌ No snapshot found."
+          echo ""
+          echo "   Run Dagster shared_repository_snapshot_only_job to create one."
+          echo "   The job will tag the snapshot with GraphId=sec and Environment=${{ inputs.environment }}"
+          echo "   so it can be auto-discovered on future deployments."
+          exit 1
+
+      - name: Deploy Shared Replicas CloudFormation Stack
+        id: deploy-stack
+        run: |
+          # Check if stack exists
+          if aws cloudformation describe-stacks --stack-name ${{ inputs.stack_name }} 2>&1 | grep -q 'does not exist'; then
+            STACK_ACTION="create-stack"
+            echo "📦 Creating new stack: ${{ inputs.stack_name }}"
+            echo "is_new_stack=true" >> $GITHUB_OUTPUT
+          else
+            STACK_ACTION="update-stack"
+            echo "🔄 Updating existing stack: ${{ inputs.stack_name }}"
+            echo "is_new_stack=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Build parameters
+          STACK_PARAMS="ParameterKey=Environment,ParameterValue=${{ inputs.environment }} \
+            ParameterKey=VpcId,ParameterValue=${{ inputs.vpc_id }} \
+            ParameterKey=VpcCidr,ParameterValue=${{ inputs.vpc_cidr }} \
+            ParameterKey=SubnetIds,ParameterValue=\"${{ inputs.subnet_ids }}\" \
+            ParameterKey=AmiId,ParameterValue=${{ inputs.ami_id }} \
+            ParameterKey=InstanceType,ParameterValue=${{ inputs.instance_type }} \
+            ParameterKey=SnapshotId,ParameterValue=${{ steps.snapshot.outputs.snapshot_id }} \
+            ParameterKey=MinInstances,ParameterValue=${{ inputs.min_instances }} \
+            ParameterKey=MaxInstances,ParameterValue=${{ inputs.max_instances }} \
+            ParameterKey=DesiredCapacity,ParameterValue=${{ inputs.desired_capacity }} \
+            ParameterKey=DeploymentBucketArn,ParameterValue=${{ steps.s3_config.outputs.deployment_bucket_arn }} \
+            ParameterKey=ECRRepositoryUrl,ParameterValue=${{ steps.ecr_config.outputs.ecr_url }} \
+            ParameterKey=ECRImageTag,ParameterValue=${{ inputs.ecr_image_tag }} \
+            ParameterKey=SNSAlertEmail,ParameterValue=${{ inputs.aws_sns_alert_email }} \
+            ParameterKey=ServiceTag,ParameterValue=RoboSystems \
+            ParameterKey=ComponentTag,ParameterValue=SharedReplica"
+
+          # Deploy or update the stack
+          if [ "$STACK_ACTION" = "create-stack" ]; then
+            aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/graph-ladybug-replicas.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=SharedReplica \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions
+          else
+            # Update existing stack, handling "No updates" gracefully
+            UPDATE_OUTPUT=$(aws cloudformation $STACK_ACTION \
+              --stack-name ${{ inputs.stack_name }} \
+              --template-body file://cloudformation/graph-ladybug-replicas.yaml \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --parameters $STACK_PARAMS \
+              --tags \
+                Key=Environment,Value=${{ inputs.environment }} \
+                Key=Service,Value=RoboSystems \
+                Key=Component,Value=SharedReplica \
+                Key=Repository,Value=${{ github.repository }} \
+                Key=CreatedBy,Value=GitHubActions 2>&1) || true
+
+            if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+              echo "✅ Stack is already up to date - no changes needed"
+            elif echo "$UPDATE_OUTPUT" | grep -q "error"; then
+              echo "❌ Error updating stack: $UPDATE_OUTPUT"
+              exit 1
+            else
+              echo "✅ Stack update initiated successfully"
+            fi
+          fi
+
+      - name: Monitor Stack Deployment
+        uses: ./.github/actions/monitor-stack-deployment
+        with:
+          stack-name: ${{ inputs.stack_name }}
+          timeout: "1800"
+          interval: "10"
+
+      - name: Get Stack Outputs
+        id: get-outputs
+        run: |
+          STACK_OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "${{ inputs.stack_name }}" \
+            --query 'Stacks[0].Outputs' \
+            --output json)
+
+          ALB_DNS_NAME=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="ALBDNSName") | .OutputValue // empty')
+          ALB_ENDPOINT=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="ALBEndpoint") | .OutputValue // empty')
+          ASG_NAME=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="AutoScalingGroupName") | .OutputValue // empty')
+          LT_NAME=$(echo "$STACK_OUTPUTS" | jq -r '.[] | select(.OutputKey=="LaunchTemplateName") | .OutputValue // empty')
+
+          echo "alb_dns_name=$ALB_DNS_NAME" >> $GITHUB_OUTPUT
+          echo "alb_endpoint=$ALB_ENDPOINT" >> $GITHUB_OUTPUT
+          echo "asg_name=$ASG_NAME" >> $GITHUB_OUTPUT
+          echo "launch_template_name=$LT_NAME" >> $GITHUB_OUTPUT
+
+          echo ""
+          echo "📊 Shared Replicas Deployment Complete:"
+          echo "  ALB DNS: $ALB_DNS_NAME"
+          echo "  ALB Endpoint: $ALB_ENDPOINT"
+          echo "  ASG Name: $ASG_NAME"
+          echo "  Launch Template: $LT_NAME"
+
+      - name: Verify Replica Health
+        if: inputs.min_instances != '0'
+        run: |
+          echo "🏥 Checking replica health..."
+
+          ASG_NAME="${{ steps.get-outputs.outputs.asg_name }}"
+
+          # Wait for instances to be InService
+          for i in {1..30}; do
+            HEALTHY=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$ASG_NAME" \
+              --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`] | length(@)' \
+              --output text)
+
+            DESIRED=${{ inputs.min_instances }}
+
+            if [ "$HEALTHY" -ge "$DESIRED" ]; then
+              echo "✅ $HEALTHY/$DESIRED replicas healthy"
+              break
+            fi
+
+            echo "⏳ Waiting for replicas... ($HEALTHY/$DESIRED healthy)"
+            sleep 10
+          done
+
+          # Check ALB target health
+          TARGET_GROUP_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "${{ inputs.stack_name }}" \
+            --query 'Stacks[0].Outputs[?OutputKey==`TargetGroupArn`].OutputValue' \
+            --output text)
+
+          if [ -n "$TARGET_GROUP_ARN" ]; then
+            HEALTHY_TARGETS=$(aws elbv2 describe-target-health \
+              --target-group-arn "$TARGET_GROUP_ARN" \
+              --query 'TargetHealthDescriptions[?TargetHealth.State==`healthy`] | length(@)' \
+              --output text)
+
+            echo "🎯 ALB Target Health: $HEALTHY_TARGETS targets healthy"
+          fi
+
+      - name: Update Deployment Status
+        if: always()
+        run: |
+          if [ "${{ steps.deploy-stack.outputs.is_new_stack }}" == "true" ]; then
+            echo "✅ Shared Replicas stack creation completed"
+          else
+            echo "✅ Shared Replicas stack update completed"
+          fi

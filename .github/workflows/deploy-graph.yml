@@ -115,6 +115,33 @@ on:
         description: Shared tier maximum instances
         default: ""
 
+      # Shared Replicas Configuration
+      shared_replicas_enabled:
+        required: false
+        type: string
+        description: Enable shared repository replicas (read-only fleet)
+        default: ""
+      shared_replicas_min_instances:
+        required: false
+        type: string
+        description: Shared replicas minimum instances
+        default: "2"
+      shared_replicas_max_instances:
+        required: false
+        type: string
+        description: Shared replicas maximum instances
+        default: "10"
+      shared_replicas_desired_capacity:
+        required: false
+        type: string
+        description: Shared replicas desired capacity
+        default: "2"
+      shared_replicas_instance_type:
+        required: false
+        type: string
+        description: Shared replicas instance type
+        default: "r7g.medium"
+
       # AMI Configuration
       ami_id:
         description: "Amazon Linux 2023 ARM64 AMI ID for graph instances (looked up if not provided)"
@@ -132,6 +159,11 @@ on:
       ACTIONS_TOKEN:
         description: "GitHub token for checkout (optional - falls back to github.token)"
         required: false
+
+    outputs:
+      shared_replica_alb_url:
+        description: "ALB endpoint URL for shared repository replicas (empty if not deployed)"
+        value: ${{ jobs.deploy-shared-replicas.outputs.alb_endpoint }}
 
 jobs:
   # Step 0: Resolve AMI (lookup latest if not provided)
@@ -442,6 +474,37 @@ jobs:
       # Volume Management
       volume_detachment_topic_arn: ${{ inputs.volume_detachment_topic_arn }}
       volume_manager_function_arn: ${{ inputs.volume_manager_function_arn }}
+      aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
+    secrets:
+      ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}
+
+  # Step 3: Deploy Shared Replicas (Read-Only Fleet)
+  # Deploys after shared writers to ensure master exists for snapshotting
+  deploy-shared-replicas:
+    needs: [deploy-graph-ladybug, resolve-ami, prepare-writer-matrix]
+    # Only deploy if:
+    # 1. Shared replicas are explicitly enabled, AND
+    # 2. LadybugDB writers were deployed (to ensure shared master exists)
+    if: |
+      inputs.shared_replicas_enabled == 'true' &&
+      fromJson(needs.prepare-writer-matrix.outputs.lbug_matrix).include[0] != null
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/deploy-graph-replicas.yml
+    with:
+      stack_name: RoboSystemsGraphSharedReplicas${{ inputs.environment == 'prod' && 'Prod' || 'Staging' }}
+      environment: ${{ inputs.environment }}
+      runner_config: ${{ inputs.runner_config }}
+      aws_region: ${{ inputs.aws_region }}
+      vpc_id: ${{ inputs.vpc_id }}
+      subnet_ids: ${{ inputs.subnet_ids }}
+      ami_id: ${{ needs.resolve-ami.outputs.ami_id }}
+      instance_type: ${{ inputs.shared_replicas_instance_type }}
+      min_instances: ${{ inputs.shared_replicas_min_instances }}
+      max_instances: ${{ inputs.shared_replicas_max_instances }}
+      desired_capacity: ${{ inputs.shared_replicas_desired_capacity }}
+      ecr_image_tag: ${{ inputs.ecr_image_tag }}
       aws_sns_alert_email: ${{ inputs.aws_sns_alert_email }}
     secrets:
       ACTIONS_TOKEN: ${{ secrets.ACTIONS_TOKEN || github.token }}

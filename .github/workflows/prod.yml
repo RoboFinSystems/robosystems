@@ -426,6 +426,12 @@ jobs:
       lbug_xlarge_max_instances: ${{ vars.LBUG_XLARGE_MAX_INSTANCES_PROD }}
       lbug_shared_min_instances: ${{ vars.LBUG_SHARED_MIN_INSTANCES_PROD }}
       lbug_shared_max_instances: ${{ vars.LBUG_SHARED_MAX_INSTANCES_PROD }}
+      # Shared Replicas Configuration
+      shared_replicas_enabled: ${{ vars.SHARED_REPLICAS_ENABLED_PROD }}
+      shared_replicas_min_instances: ${{ vars.SHARED_REPLICAS_MIN_INSTANCES_PROD || '2' }}
+      shared_replicas_max_instances: ${{ vars.SHARED_REPLICAS_MAX_INSTANCES_PROD || '10' }}
+      shared_replicas_desired_capacity: ${{ vars.SHARED_REPLICAS_DESIRED_CAPACITY_PROD || '2' }}
+      shared_replicas_instance_type: ${{ vars.SHARED_REPLICAS_INSTANCE_TYPE_PROD || 'r7g.medium' }}
       # Other Configuration
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
     secrets:
@@ -494,6 +500,8 @@ jobs:
       shared_processed_bucket_arn: ${{ needs.deploy-s3.outputs.shared_processed_bucket_arn }}
       deployment_bucket_arn: ${{ needs.deploy-s3.outputs.deployment_bucket_arn }}
       user_data_bucket_arn: ${{ needs.deploy-s3.outputs.user_data_bucket_arn }}
+      # Shared Replicas Configuration (from deploy-graph outputs)
+      shared_replica_alb_url: ${{ needs.deploy-graph.outputs.shared_replica_alb_url || '' }}
       # Other Configuration
       prometheus_stack_name: ${{ needs.deploy-prometheus.outputs.prometheus_stack_name || '' }}
       aws_sns_alert_email: ${{ vars.AWS_SNS_ALERT_EMAIL }}
