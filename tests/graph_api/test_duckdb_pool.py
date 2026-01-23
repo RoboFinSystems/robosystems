@@ -427,6 +427,66 @@ class TestDuckDBConnectionPool:
     assert not db_path.exists()
     assert len(pool._pools.get("test_graph", {})) == 0
 
+  @patch("duckdb.connect")
+  def test_interrupt_connections(self, mock_connect):
+    """Test interrupting connections for a graph."""
+    mock_conn = MagicMock()
+    mock_connect.return_value = mock_conn
+
+    # Mock successful health check
+    mock_result = MagicMock()
+    mock_result.__getitem__.return_value = 1
+    mock_conn.execute.return_value.fetchone.return_value = mock_result
+
+    pool = DuckDBConnectionPool(base_path=self.base_path)
+
+    # Create a connection
+    with pool.get_connection("test_graph"):
+      pass
+
+    # Verify connection is healthy before interrupt
+    conn_info = next(iter(pool._pools["test_graph"].values()))
+    assert conn_info.is_healthy is True
+
+    # Interrupt connections
+    interrupted_count = pool.interrupt_connections("test_graph")
+
+    # Verify interrupt was called and connection marked unhealthy
+    assert interrupted_count == 1
+    mock_conn.interrupt.assert_called_once()
+    assert conn_info.is_healthy is False
+
+  @patch("duckdb.connect")
+  def test_interrupt_connections_nonexistent_graph(self, mock_connect):
+    """Test interrupting connections for a graph that doesn't exist."""
+    pool = DuckDBConnectionPool(base_path=self.base_path)
+
+    # Should return 0 and not raise
+    interrupted_count = pool.interrupt_connections("nonexistent_graph")
+    assert interrupted_count == 0
+
+  @patch("duckdb.connect")
+  def test_interrupt_connections_handles_interrupt_failure(self, mock_connect):
+    """Test that interrupt failures are handled gracefully."""
+    mock_conn = MagicMock()
+    mock_conn.interrupt.side_effect = Exception("Interrupt failed")
+    mock_connect.return_value = mock_conn
+
+    # Mock successful health check
+    mock_result = MagicMock()
+    mock_result.__getitem__.return_value = 1
+    mock_conn.execute.return_value.fetchone.return_value = mock_result
+
+    pool = DuckDBConnectionPool(base_path=self.base_path)
+
+    # Create a connection
+    with pool.get_connection("test_graph"):
+      pass
+
+    # Interrupt should not raise, but return 0 (no successful interrupts)
+    interrupted_count = pool.interrupt_connections("test_graph")
+    assert interrupted_count == 0
+
 
 class TestConnectionPoolGlobals:
   """Test global connection pool functions."""

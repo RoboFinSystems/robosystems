@@ -157,8 +157,10 @@ class DuckDBConnectionPool:
 
       return self._create_new_connection(graph_id)
 
-  def _release_connection(self, graph_id: str, connection_info: DuckDBConnectionInfo):
+  def _release_connection(self, graph_id: str, _connection_info: DuckDBConnectionInfo):
     """Release a connection back to the pool."""
+    # _connection_info is available for future use (e.g., metrics, cleanup)
+    # but currently we just log the release
     logger.debug(f"Released DuckDB connection for {graph_id}")
 
   def _get_database_lock(self, graph_id: str) -> threading.RLock:
@@ -178,7 +180,7 @@ class DuckDBConnectionPool:
     best_connection = None
     oldest_time = datetime.now(UTC)
 
-    for conn_id, conn_info in pool.items():
+    for conn_info in pool.values():
       if (
         conn_info.is_healthy
         and conn_info.last_used < oldest_time
@@ -581,6 +583,9 @@ class DuckDBConnectionPool:
     This is used to cancel long-running queries when a timeout occurs.
     DuckDB's interrupt() method cancels any in-progress query on the connection.
 
+    After interruption, connections are marked as unhealthy to prevent reuse
+    of potentially corrupted connections.
+
     Args:
         graph_id: Graph database identifier
 
@@ -590,9 +595,14 @@ class DuckDBConnectionPool:
     interrupted_count = 0
     with self._get_database_lock(graph_id):
       if graph_id in self._pools:
-        for conn_id, conn_info in self._pools[graph_id].items():
+        # Create snapshot to avoid RuntimeError if pool is modified during iteration
+        pool_items = list(self._pools[graph_id].items())
+        for conn_id, conn_info in pool_items:
           try:
             conn_info.connection.interrupt()
+            # Mark as unhealthy to prevent reuse - interrupted connections
+            # may be in an undefined state
+            conn_info.is_healthy = False
             interrupted_count += 1
             logger.info(f"Interrupted DuckDB connection {conn_id} for {graph_id}")
           except Exception as e:

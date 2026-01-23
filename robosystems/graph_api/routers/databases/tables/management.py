@@ -148,6 +148,7 @@ async def perform_table_creation(
       request: Table creation request with graph_id, table_name, s3_pattern
       timeout_seconds: Maximum time allowed for table creation (default 30 min)
   """
+  # Import inside function to avoid circular dependency with pool initialization
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
   try:
@@ -237,6 +238,7 @@ async def perform_table_insert(
       request: Table creation request with graph_id, table_name, s3_pattern
       timeout_seconds: Maximum time allowed for insert (default 30 min)
   """
+  # Import inside function to avoid circular dependency with pool initialization
   from robosystems.graph_api.core.duckdb.pool import get_duckdb_pool
 
   try:
