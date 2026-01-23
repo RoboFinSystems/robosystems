@@ -574,6 +574,36 @@ class DuckDBConnectionPool:
 
         logger.info(f"Closed all DuckDB connections for {graph_id}")
 
+  def interrupt_connections(self, graph_id: str) -> int:
+    """
+    Interrupt all running queries on connections for a specific database.
+
+    This is used to cancel long-running queries when a timeout occurs.
+    DuckDB's interrupt() method cancels any in-progress query on the connection.
+
+    Args:
+        graph_id: Graph database identifier
+
+    Returns:
+        Number of connections interrupted
+    """
+    interrupted_count = 0
+    with self._get_database_lock(graph_id):
+      if graph_id in self._pools:
+        for conn_id, conn_info in self._pools[graph_id].items():
+          try:
+            conn_info.connection.interrupt()
+            interrupted_count += 1
+            logger.info(f"Interrupted DuckDB connection {conn_id} for {graph_id}")
+          except Exception as e:
+            logger.warning(f"Failed to interrupt connection {conn_id}: {e}")
+
+    if interrupted_count > 0:
+      logger.info(
+        f"Interrupted {interrupted_count} DuckDB connection(s) for {graph_id}"
+      )
+    return interrupted_count
+
   def has_active_connections(self, graph_id: str) -> bool:
     """Check if there are any active connections for a database."""
     with self._get_database_lock(graph_id):
