@@ -419,6 +419,22 @@ function setup_full_config() {
         gh variable set LBUG_SHARED_MAX_INSTANCES_STAGING --body "2"
     fi
 
+    # Shared Replicas Configuration - Read-Only Fleet
+    # Workflow auto-discovers snapshots by tags (GraphId=sec, Environment=prod/staging)
+    # Just run Dagster shared_repository_snapshot_only_job once, then enable replicas
+    gh variable set SHARED_REPLICAS_ENABLED_PROD --body "false"
+    gh variable set SHARED_REPLICAS_MIN_INSTANCES_PROD --body "2"
+    gh variable set SHARED_REPLICAS_MAX_INSTANCES_PROD --body "10"
+    gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_PROD --body "2"
+    gh variable set SHARED_REPLICAS_INSTANCE_TYPE_PROD --body "r7g.medium"
+    if $setup_staging; then
+        gh variable set SHARED_REPLICAS_ENABLED_STAGING --body "false"
+        gh variable set SHARED_REPLICAS_MIN_INSTANCES_STAGING --body "1"
+        gh variable set SHARED_REPLICAS_MAX_INSTANCES_STAGING --body "3"
+        gh variable set SHARED_REPLICAS_DESIRED_CAPACITY_STAGING --body "1"
+        gh variable set SHARED_REPLICAS_INSTANCE_TYPE_STAGING --body "r7g.medium"
+    fi
+
     # Neo4j Writer Configuration (optional backend)
     gh variable set NEO4J_COMMUNITY_LARGE_ENABLED_PROD --body "false"
     gh variable set NEO4J_ENTERPRISE_XLARGE_ENABLED_PROD --body "false"

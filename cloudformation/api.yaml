@@ -206,6 +206,12 @@ Parameters:
     Type: String
     Description: ARN of user data bucket (from S3 stack output)
 
+  # Shared Replicas Configuration (optional - for horizontal read scaling)
+  SharedReplicaAlbUrl:
+    Type: String
+    Description: ALB endpoint URL for shared repository replicas (e.g., http://alb-dns:8001). Leave empty if replicas not deployed.
+    Default: ""
+
 Conditions:
   HasObservabilityStack: !Not [!Equals [!Ref PrometheusStackName, ""]]
   IsProduction: !Equals [!Ref Environment, "prod"]
@@ -670,6 +676,9 @@ Resources:
                 - HasDomain
                 - !Sub "https://${DomainName}"
                 - !Sub "http://${ApiALB.DNSName}"
+            # Shared Replicas Configuration (for horizontal read scaling of public repositories)
+            - Name: SHARED_REPLICA_ALB_URL
+              Value: !Ref SharedReplicaAlbUrl
             # JWT Configuration: Handled by application via secrets_manager.py
             # Defaults: JWT_ISSUER=api.robosystems.ai, JWT_AUDIENCE=robosystems.ai,roboledger.ai,roboinvestor.ai
             # Override via AWS Secrets Manager (robosystems/{env}) for forks/custom deployments

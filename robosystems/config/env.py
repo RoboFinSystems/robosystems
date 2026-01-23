@@ -378,6 +378,14 @@ class EnvConfig:
     bool(get_secret_value("SHARED_REPO_SCHEDULE_ENABLED", "false").lower() == "true"),
   )
 
+  # Shared repository snapshot sensor: trigger snapshot after SEC materialization
+  SHARED_REPO_SNAPSHOT_SENSOR_ENABLED = get_bool_env(
+    "SHARED_REPO_SNAPSHOT_SENSOR_ENABLED",
+    bool(
+      get_secret_value("SHARED_REPO_SNAPSHOT_SENSOR_ENABLED", "false").lower() == "true"
+    ),
+  )
+
   # Graph backup encryption and compression are always enabled for security and efficiency
 
   # Graph Operations Feature Flags
