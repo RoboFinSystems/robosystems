@@ -12,7 +12,7 @@ def test_get_plan_details_returns_plan_metadata():
 
   assert details is not None
   assert details["price_cents"] == 9900
-  assert "AI agent credits" in details["features"][0]
+  assert "Everything in Starter" in details["features"][0]
 
 
 def test_get_plan_details_returns_none_for_unknown():
@@ -23,7 +23,7 @@ def test_get_plan_details_returns_none_for_unknown():
   "repository,plan,expected_key",
   [
     (SharedRepository.SEC, RepositoryPlan.STARTER, "queries_per_hour"),
-    (SharedRepository.SEC, RepositoryPlan.UNLIMITED, "agent_calls_per_day"),
+    (SharedRepository.SEC, RepositoryPlan.ADVANCED, "agent_calls_per_day"),
   ],
 )
 def test_get_rate_limits_returns_config(repository, plan, expected_key):

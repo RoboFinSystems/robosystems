@@ -52,30 +52,20 @@ class OfferingFeatureGenerator:
 
   @staticmethod
   def _get_sec_features(plan_type: str, plan_config: dict[str, Any]) -> list[str]:
-    """Get features for SEC repository plans."""
+    """Get features for SEC repository plans.
+
+    Note: This is a fallback. Primary features come from REPOSITORY_PLANS in config.
+    """
     base_features = [
-      f"{plan_config['monthly_credits']:,} credits per month",
-      "Read-only access to SEC filings",
-      "Query company financial data",
-      "Access via API and MCP tools",
+      "Full SEC data (all companies, all history)",
+      "API access",
+      "MCP tools for Claude Desktop",
     ]
 
-    if plan_type == "basic":
-      return base_features
+    if plan_type == "starter":
+      return [*base_features, "Standard rate limits"]
     elif plan_type == "advanced":
-      return [
-        *base_features,
-        "Priority query processing",
-        "Advanced analytics endpoints",
-      ]
-    elif plan_type == "unlimited":
-      return [
-        *base_features,
-        "Priority query processing",
-        "Advanced analytics endpoints",
-        "Bulk export capabilities",
-        "Dedicated support",
-      ]
+      return [*base_features, "5x higher rate limits", "Production-ready throughput"]
     else:
       return base_features
 
@@ -95,11 +85,10 @@ class OfferingFeatureGenerator:
   def _get_default_features(plan_config: dict[str, Any]) -> list[str]:
     """Get default features for any repository."""
     return [
-      f"{plan_config['monthly_credits']:,} credits per month",
-      f"${plan_config['price_monthly']}/month",
-      "Read-only access",
-      "Query via Cypher",
+      "Full data access",
       "API access",
+      "MCP tools for Claude Desktop",
+      "Query via Cypher",
     ]
 
 
