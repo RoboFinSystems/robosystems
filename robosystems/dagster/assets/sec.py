@@ -339,8 +339,8 @@ class SECMaterializeConfig(Config):
     "stage": "extraction",
   },
   # Limit concurrent SEC downloads to avoid rate limiting
-  # Max 4 partitions (quarters) download at a time
-  op_tags={"dagster/concurrency_key": "sec_download", "dagster/max_concurrent": "4"},
+  # Sequential execution (1 partition at a time) to prevent SEC rate limiting during backfills
+  op_tags={"dagster/concurrency_key": "sec_download", "dagster/max_concurrent": "1"},
 )
 def sec_raw_filings(
   context: AssetExecutionContext,
@@ -355,7 +355,7 @@ def sec_raw_filings(
   EFTS has a 10k result limit per query. Quarterly partitions typically return
   5-7k filings, safely under the limit.
 
-  Concurrency limited to 4 via dagster/concurrency_key to avoid SEC rate limiting.
+  Concurrency limited to 1 via dagster/concurrency_key to avoid SEC rate limiting.
 
   Returns:
       MaterializeResult with download statistics
