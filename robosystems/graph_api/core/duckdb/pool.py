@@ -287,6 +287,43 @@ class DuckDBConnectionPool:
     logger.info(f"Using default DuckDB memory limit: {memory_limit}")
     return memory_limit
 
+  def _get_duckdb_max_threads(self) -> int:
+    """
+    Get DuckDB max threads based on tier configuration.
+
+    Priority:
+    1. Tier-specific config from graph.yml (via CLUSTER_TIER)
+    2. DUCKDB_MAX_THREADS environment variable
+    3. Default: 4
+
+    Thread counts are aligned with instance vCPU counts:
+    - r7g.medium (1 vCPU): 2 threads
+    - r7g.large (2 vCPU): 2 threads
+    - r7g.xlarge (4 vCPU): 4 threads
+
+    Returns:
+        Max threads for DuckDB (e.g., 2, 4)
+    """
+    from robosystems.config import env
+
+    try:
+      from robosystems.config.graph_tier import GraphTierConfig
+
+      # Get tier from environment (set by CloudFormation)
+      tier = env.CLUSTER_TIER
+
+      if tier:
+        max_threads = GraphTierConfig.get_duckdb_max_threads(tier)
+        logger.info(f"Using tier-based DuckDB max threads: {max_threads} (tier={tier})")
+        return max_threads
+    except Exception as e:
+      logger.warning(f"Could not load tier-based DuckDB thread config: {e}")
+
+    # Fall back to environment variable or default
+    max_threads = env.DUCKDB_MAX_THREADS
+    logger.info(f"Using default DuckDB max threads: {max_threads}")
+    return max_threads
+
   def _configure_connection(self, conn: duckdb.DuckDBPyConnection):
     """Configure a DuckDB connection with extensions and settings."""
     from robosystems.config import env
@@ -336,8 +373,9 @@ class DuckDBConnectionPool:
           f"Configured DuckDB to use S3 endpoint: {endpoint} (from {env.AWS_ENDPOINT_URL})"
         )
 
-      # Performance settings (configurable via environment variables)
-      conn.execute(f"SET threads TO {env.DUCKDB_MAX_THREADS}")
+      # Performance settings (tier-aware configuration)
+      max_threads = self._get_duckdb_max_threads()
+      conn.execute(f"SET threads TO {max_threads}")
 
       # Get tier-based DuckDB memory limit
       memory_limit = self._get_duckdb_memory_limit()
@@ -345,7 +383,7 @@ class DuckDBConnectionPool:
 
       logger.debug(
         f"Configured DuckDB connection with S3 access, extensions, "
-        f"threads={env.DUCKDB_MAX_THREADS}, memory_limit={memory_limit}"
+        f"threads={max_threads}, memory_limit={memory_limit}"
       )
 
     except Exception as e:

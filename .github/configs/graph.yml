@@ -62,6 +62,7 @@ production:
 
         # DuckDB staging configuration
         duckdb_memory_limit: "2GB" # Conservative for multi-tenant (shared instance resources)
+        duckdb_max_threads: 2 # Conservative for multi-tenant (2 vCPU shared)
 
       # Deployment configuration
       deployment:
@@ -117,6 +118,7 @@ production:
 
         # DuckDB staging configuration
         duckdb_memory_limit: "4GB" # More memory for dedicated instance staging
+        duckdb_max_threads: 2 # Match vCPU count (r7g.large = 2 vCPU)
 
       # Deployment configuration
       deployment:
@@ -172,6 +174,7 @@ production:
 
         # DuckDB staging configuration
         duckdb_memory_limit: "8GB" # Large memory for enterprise staging workloads
+        duckdb_max_threads: 4 # Match vCPU count (r7g.xlarge = 4 vCPU)
 
       # Deployment configuration
       deployment:
@@ -227,6 +230,7 @@ production:
 
         # DuckDB staging configuration (SEC needs large memory for Element/Label tables)
         duckdb_memory_limit: "12GB" # Large allocation for massive SEC data staging
+        duckdb_max_threads: 4 # Match vCPU count (r7g.xlarge = 4 vCPU)
 
       # Deployment configuration
       deployment:
@@ -411,6 +415,7 @@ staging:
         ingestion_batch_size: 750
         connection_pool_size: 10
         duckdb_memory_limit: "1GB" # Conservative for staging multi-tenant
+        duckdb_max_threads: 2 # Conservative for multi-tenant (1 vCPU but allow 2 for DuckDB efficiency)
 
       deployment:
         enable_var: LBUG_STANDARD_ENABLED_STAGING
@@ -452,6 +457,7 @@ staging:
         ingestion_batch_size: 1500
         connection_pool_size: 15
         duckdb_memory_limit: "2GB" # Moderate for staging dedicated
+        duckdb_max_threads: 2 # r7g.medium = 1 vCPU, allow 2 for DuckDB efficiency
 
       deployment:
         enable_var: LBUG_LARGE_ENABLED_STAGING
@@ -492,6 +498,7 @@ staging:
         ingestion_batch_size: 3000
         connection_pool_size: 30
         duckdb_memory_limit: "4GB" # More memory for staging xlarge
+        duckdb_max_threads: 2 # r7g.large = 2 vCPU
 
       deployment:
         enable_var: LBUG_XLARGE_ENABLED_STAGING
@@ -533,6 +540,7 @@ staging:
         ingestion_batch_size: 5000
         connection_pool_size: 50
         duckdb_memory_limit: "4GB" # Needs extra memory for SEC staging tests
+        duckdb_max_threads: 2 # r7g.medium = 1 vCPU, allow 2 for DuckDB efficiency
 
       deployment:
         enable_var: LBUG_SHARED_ENABLED_STAGING
@@ -696,6 +704,7 @@ development:
         ingestion_batch_size: 750
         connection_pool_size: 10
         duckdb_memory_limit: "2GB" # Default for local development
+        duckdb_max_threads: 4 # Local dev can use more threads
 
       deployment:
         always_enabled: true
