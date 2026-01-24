@@ -20,8 +20,8 @@ class RepositoryPlan(str, Enum):
   """Repository access plans (subscription required)."""
 
   STARTER = "starter"  # Basic access
-  ADVANCED = "advanced"  # Professional access
-  UNLIMITED = "unlimited"  # Enterprise access
+  ADVANCED = "advanced"  # Professional access (displayed as "Pro", 5x rate limits)
+  # UNLIMITED removed from launch - may reintroduce when usage patterns are understood
 
 
 class RepositoryBillingConfig:
@@ -63,108 +63,78 @@ class RepositoryBillingConfig:
 
   # Repository subscription tiers (monthly pricing)
   # NOTE: Stripe prices are auto-created from this config on first checkout
-  # This is the SINGLE SOURCE OF TRUTH for repository pricing and credits
-  # NOTE: MCP tool access is unlimited - credits only apply to in-house AI agents
+  # This is the SINGLE SOURCE OF TRUTH for repository pricing
   #
-  # CREDIT VALUE ANCHOR: 1 credit = 1 GB/day of storage = ~$0.00333
-  # ~38 credits per typical agent call
+  # LAUNCH STRATEGY: MCP tool access is the primary value driver.
+  # AI credits exist in infrastructure but are not marketed until
+  # custom reports and AI analysis features ship.
+  #
+  # Rate limits are enforced but not published. Pro = 5x Starter.
   REPOSITORY_PLANS = {
     RepositoryPlan.STARTER: {
       "name": "Starter",
       "price_cents": 2900,  # $29/month
       "price_monthly": 29.0,  # For display/calculations
       "price_display": "$29/month",
-      "monthly_credits": 5000,  # ~130 agent calls/month
+      "monthly_credits": 0,  # AI credits coming soon
       "access_level": "READ",  # Read-only access
-      "description": "Basic access for individuals and small teams",
+      "description": "Full SEC data access for individuals",
       "features": [
-        "5,000 AI agent credits per month",
-        "Unlimited MCP tool access",
-        "500 queries per hour",
-        "CSV export",
-        "2 years historical data",
+        "Full SEC data (all companies, all history)",
+        "API access",
+        "MCP tools for Claude Desktop",
+        "Standard rate limits",
+        "AI credits (coming soon)",
       ],
     },
     RepositoryPlan.ADVANCED: {
-      "name": "Advanced",
+      "name": "Pro",  # Display name (internal enum remains ADVANCED for DB compat)
       "price_cents": 9900,  # $99/month
       "price_monthly": 99.0,
       "price_display": "$99/month",
-      "monthly_credits": 17000,  # ~450 agent calls/month
-      "access_level": "WRITE",  # Write access for contributions
-      "description": "Professional access for analysts and researchers",
+      "monthly_credits": 0,  # AI credits coming soon
+      "access_level": "READ",  # Read-only access
+      "description": "Higher throughput for production workloads",
       "features": [
-        "17,000 AI agent credits per month",
-        "Unlimited MCP tool access",
-        "2,000 queries per hour",
-        "Priority support",
-        "CSV/JSON export",
-        "5 years historical data",
-      ],
-    },
-    RepositoryPlan.UNLIMITED: {
-      "name": "Unlimited",
-      "price_cents": 49900,  # $499/month
-      "price_monthly": 499.0,
-      "price_display": "$499/month",
-      "monthly_credits": 85000,  # ~2,200 agent calls/month
-      "access_level": "ADMIN",  # Full admin access
-      "description": "Enterprise access with no limits",
-      "features": [
-        "85,000 AI agent credits per month",
-        "Unlimited MCP tool access",
-        "Unlimited queries",
-        "Dedicated support",
-        "Bulk export capabilities",
-        "Full historical archive",
+        "Everything in Starter",
+        "5x higher rate limits",
+        "Production-ready throughput",
       ],
     },
   }
 
   # Rate limits by repository and plan
+  # Pro = 5x Starter (marketed as "5x higher rate limits")
+  # These numbers are tunable - not published externally
   RATE_LIMITS = {
     SharedRepository.SEC: {
       RepositoryPlan.STARTER: {
-        # Query limits
-        "queries_per_minute": 30,
-        "queries_per_hour": 500,
-        "queries_per_day": 5000,
+        # Query limits (base tier)
+        "queries_per_minute": 10,
+        "queries_per_hour": 200,
+        "queries_per_day": 2000,
         # MCP limits (AI assistants querying)
-        "mcp_queries_per_minute": 10,
-        "mcp_queries_per_hour": 200,
-        "mcp_queries_per_day": 2000,
-        # AI agent limits
-        "agent_calls_per_minute": 5,
-        "agent_calls_per_hour": 50,
-        "agent_calls_per_day": 500,
+        "mcp_queries_per_minute": 5,
+        "mcp_queries_per_hour": 100,
+        "mcp_queries_per_day": 1000,
+        # AI agent limits (reserved for future)
+        "agent_calls_per_minute": 2,
+        "agent_calls_per_hour": 20,
+        "agent_calls_per_day": 200,
       },
       RepositoryPlan.ADVANCED: {
-        # Query limits
-        "queries_per_minute": 100,
-        "queries_per_hour": 2000,
-        "queries_per_day": 20000,
-        # MCP limits
-        "mcp_queries_per_minute": 50,
-        "mcp_queries_per_hour": 1000,
-        "mcp_queries_per_day": 10000,
-        # AI agent limits
-        "agent_calls_per_minute": 20,
-        "agent_calls_per_hour": 200,
-        "agent_calls_per_day": 2000,
-      },
-      RepositoryPlan.UNLIMITED: {
-        # Query limits - very high but not infinite for safety
-        "queries_per_minute": 1000,
-        "queries_per_hour": 20000,
-        "queries_per_day": -1,  # Unlimited
-        # MCP limits
-        "mcp_queries_per_minute": 500,
-        "mcp_queries_per_hour": -1,
-        "mcp_queries_per_day": -1,
-        # AI agent limits
-        "agent_calls_per_minute": 100,
-        "agent_calls_per_hour": -1,
-        "agent_calls_per_day": -1,
+        # Query limits (5x Starter)
+        "queries_per_minute": 50,
+        "queries_per_hour": 1000,
+        "queries_per_day": 10000,
+        # MCP limits (5x Starter)
+        "mcp_queries_per_minute": 25,
+        "mcp_queries_per_hour": 500,
+        "mcp_queries_per_day": 5000,
+        # AI agent limits (5x Starter, reserved for future)
+        "agent_calls_per_minute": 10,
+        "agent_calls_per_hour": 100,
+        "agent_calls_per_day": 1000,
       },
     },
     # Future repositories can be added here

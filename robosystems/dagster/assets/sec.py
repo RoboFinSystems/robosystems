@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 
 from dagster import (
   AssetExecutionContext,
+  BackfillPolicy,
   Config,
   DynamicPartitionsDefinition,
   MaterializeResult,
@@ -338,9 +339,8 @@ class SECMaterializeConfig(Config):
     "pipeline": "sec",
     "stage": "extraction",
   },
-  # Limit concurrent SEC downloads to avoid rate limiting
-  # Sequential execution (1 partition at a time) to prevent SEC rate limiting during backfills
-  op_tags={"dagster/concurrency_key": "sec_download", "dagster/max_concurrent": "1"},
+  # Run all partitions sequentially in a single run to prevent SEC rate limiting
+  backfill_policy=BackfillPolicy.single_run(),
 )
 def sec_raw_filings(
   context: AssetExecutionContext,
@@ -355,7 +355,8 @@ def sec_raw_filings(
   EFTS has a 10k result limit per query. Quarterly partitions typically return
   5-7k filings, safely under the limit.
 
-  Concurrency limited to 1 via dagster/concurrency_key to avoid SEC rate limiting.
+  Uses BackfillPolicy.single_run() to run all partitions sequentially in a single
+  run, preventing SEC rate limiting during backfills.
 
   Returns:
       MaterializeResult with download statistics

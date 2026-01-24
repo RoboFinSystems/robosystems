@@ -100,7 +100,6 @@ class TestUserRepository:
     """Test RepositoryPlan enum values."""
     assert RepositoryPlan.STARTER.value == "starter"
     assert RepositoryPlan.ADVANCED.value == "advanced"
-    assert RepositoryPlan.UNLIMITED.value == "unlimited"
 
   def test_create_user_repository(self):
     """Test creating a UserRepository instance."""
@@ -413,7 +412,7 @@ class TestUserRepository:
       repository_type=RepositoryType.SEC,
       repository_name="sec",
       access_level=RepositoryAccessLevel.ADMIN,
-      repository_plan=RepositoryPlan.UNLIMITED,
+      repository_plan=RepositoryPlan.ADVANCED,
       session=self.session,
     )
 
@@ -676,11 +675,9 @@ class TestUserRepository:
     config = access.get_repository_plan_config()
 
     assert config["name"] == "Starter"
-    assert (
-      config["monthly_credits"] == 5000
-    )  # SEC Starter allocation (~130 agent calls)
+    assert config["monthly_credits"] == 0  # AI credits coming soon
     assert config["price_monthly"] == 29.0
-    assert config["access_level"] == RepositoryAccessLevel.READ
+    assert config["access_level"] == "read"
 
   def test_is_repository_enabled(self):
     """Test checking if repository type is enabled."""

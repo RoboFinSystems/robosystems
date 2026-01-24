@@ -106,7 +106,7 @@ class TestCreditRaceConditions:
       repository_type=RepositoryType.SEC,
       repository_name="sec_overflow",
       access_level=RepositoryAccessLevel.READ,
-      repository_plan=RepositoryPlan.UNLIMITED,
+      repository_plan=RepositoryPlan.ADVANCED,
       session=db_session,
       monthly_credits=999999,  # Near max
     )
