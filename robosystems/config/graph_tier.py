@@ -181,6 +181,26 @@ class GraphTierConfig:
     return instance_config.get("duckdb_memory_limit", "2GB")
 
   @classmethod
+  def get_duckdb_max_threads(cls, tier: str, environment: str | None = None) -> int:
+    """Get DuckDB max threads for a tier.
+
+    Thread counts are aligned with instance vCPU counts to prevent oversubscription:
+    - r7g.medium (1 vCPU): 2 threads (DuckDB benefits from slight oversubscription)
+    - r7g.large (2 vCPU): 2 threads
+    - r7g.xlarge (4 vCPU): 4 threads
+
+    Args:
+        tier: The tier name (ladybug-standard, ladybug-large, ladybug-xlarge, ladybug-shared)
+        environment: Environment (defaults to current env)
+
+    Returns:
+        DuckDB max threads (default: 4)
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    instance_config = tier_config.get("instance", {})
+    return instance_config.get("duckdb_max_threads", 4)
+
+  @classmethod
   def get_chunk_size(cls, tier: str, environment: str | None = None) -> int:
     """Get chunk size for a tier.
 
