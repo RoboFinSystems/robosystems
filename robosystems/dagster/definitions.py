@@ -30,7 +30,7 @@ from robosystems.dagster.assets import (
   # SEC pipeline - two-stage materialization
   sec_duckdb_staged,
   sec_graph_materialized,
-  # SEC pipeline - dynamic partition processing
+  # SEC pipeline - single filing processing (SourceFile-driven, parallel via ECS)
   sec_process_filing,
   sec_raw_filings,
   # User graph operations (external assets for API direct execution)
@@ -229,7 +229,7 @@ all_assets = [
   user_repository_provisioning_source,
   # SEC pipeline - download phase (EFTS-based discovery)
   sec_raw_filings,
-  # SEC pipeline - dynamic partition processing (sensor handles discovery)
+  # SEC pipeline - batch processing (SourceFile-driven)
   sec_process_filing,
   # SEC pipeline - two-stage materialization
   sec_duckdb_staged,  # DuckDB staging (full or incremental mode)

@@ -379,15 +379,16 @@ duckdb-query-i graph_id env=_local_env:
 # Examples:
 #   just sec-load NVDA 2024
 #   just sec-download 50 2024
-#   just sec-process 2024
+#   just sec-process all=1                    # Process all pending files
+#   just sec-process reset_errors=1           # Retry failed files
 #   just sec-pipeline 50 2024
 
 # --- Full Pipeline (convenience) ---
 
 # Full pipeline: download → process → materialize (top N companies by market cap)
-sec-pipeline count="10" year="2025" limit="":
+sec-pipeline count="10" year="2025":
     @just sec-download {{count}} {{year}}
-    @just sec-process {{year}} {{limit}}
+    @just sec-process all=1
     @just sec-materialize
 
 # Load single ticker end-to-end (download + process + materialize)
@@ -406,12 +407,15 @@ sec-download count="10" year="" env=_local_env:
 
 # --- Phase 2: Process ---
 
-# Process downloaded filings to parquet (parallel)
-sec-process year="" limit="" concurrency="2" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline process-parallel \
-        {{ if year != "" { "--year " + year } else { "" } }} \
+# Process pending filings (per-filing, sensor-driven in prod)
+# In local dev, this triggers individual sec_process runs. In prod, enable the sensor.
+# Use --all to process all pending files, --reset-errors to retry failed files
+sec-process all="" reset_errors="" limit="" batch_size="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline process \
+        {{ if all != "" { "--all" } else { "" } }} \
+        {{ if reset_errors != "" { "--reset-errors" } else { "" } }} \
         {{ if limit != "" { "--limit " + limit } else { "" } }} \
-        --concurrency {{concurrency}}
+        {{ if batch_size != "" { "--batch-size " + batch_size } else { "" } }}
 
 # --- Phase 3: Materialize ---
 

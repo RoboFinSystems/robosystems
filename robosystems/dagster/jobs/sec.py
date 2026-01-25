@@ -6,10 +6,14 @@ Pipeline Architecture (3 phases, run independently):
     sec_download_job: sec_raw_filings
     Uses SEC EFTS API to discover and download XBRL ZIPs to S3.
     Quarterly partitions (e.g., 2024-Q1) to stay under EFTS 10k result limit.
+    Creates SourceFile records in PostgreSQL for processing tracking.
 
-  Phase 2 - Process (sensor-triggered or manual):
-    sec_process_job: sec_process_filing (dynamic partitions)
-    Parallel processing - one partition per filing.
+  Phase 2 - Process (SourceFile-driven, parallel via ECS):
+    sec_process_job: sec_process_filing (single filing per run)
+    Each run processes one filing in its own ECS container.
+    Sensor discovers pending files, yields RunRequests for each.
+    Dagster's run coordinator controls concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
+    SourceFile tracks status (pending → processing → success/error).
 
   Phase 3 - Materialize (two-stage pipeline):
     sec_stage_job: sec_duckdb_staged (DuckDB staging - full or incremental mode)
@@ -19,7 +23,7 @@ Pipeline Architecture (3 phases, run independently):
 
 Workflow:
   just sec-download 10 2024    # Download top 10 companies (all 4 quarters)
-  just sec-process 2024        # Process in parallel
+  # Enable sec_processing_sensor in Dagster UI to auto-process
   just sec-materialize         # Stage to DuckDB + Materialize to LadybugDB
 
   # Decoupled (for checkpointing/retry):
@@ -49,7 +53,6 @@ from robosystems.config import env
 from robosystems.dagster.assets import (
   SECDownloadConfig,
   sec_duckdb_staged,
-  sec_filing_partitions,
   sec_graph_materialized,
   sec_process_filing,
   sec_quarter_partitions,
@@ -76,18 +79,17 @@ sec_download_job = define_asset_job(
 )
 
 
-# Phase 2: Process (dynamic partitions per filing)
-# NOTE: This job only includes sec_process_filing. Discovery is done by
-# the sec_processing_sensor which registers partitions and triggers runs.
+# Phase 2: Process (SourceFile-driven, parallel via ECS)
+# Each run processes one filing in its own container. Sensor triggers runs.
+# Dagster's run coordinator limits concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
 #
-# Uses Fargate Spot (100% Spot, On-Demand fallback only if unavailable):
-# - Short-running jobs (1-5 min) minimize interruption risk
-# - Retry policy on asset handles Spot interruptions
-# - Sensor re-triggers failed partitions automatically
-# - ~70% cost savings at scale (10,000+ filings)
+# Uses Fargate Spot for cost efficiency:
+# - Short jobs (2-3 min) minimize Spot interruption risk
+# - SourceFile.attempts tracking enables retry
+# - ~70% cost savings at scale
 sec_process_job = define_asset_job(
   name="sec_process",
-  description="Process SEC filings to parquet. One partition per filing.",
+  description="Process a single SEC filing (sensor triggers per-file runs).",
   selection=AssetSelection.assets(
     sec_process_filing,
   ),
@@ -105,7 +107,6 @@ sec_process_job = define_asset_job(
       ],
     },
   },
-  partitions_def=sec_filing_partitions,
 )
 
 

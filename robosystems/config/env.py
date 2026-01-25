@@ -357,7 +357,7 @@ class EnvConfig:
     ),
   )
 
-  # SEC parallel processing sensor: auto-triggers parallel filing processing
+  # SEC processing sensor: auto-triggers batch filing processing from SourceFile queue
   SEC_PARALLEL_SENSOR_ENABLED = get_bool_env(
     "SEC_PARALLEL_SENSOR_ENABLED",
     bool(get_secret_value("SEC_PARALLEL_SENSOR_ENABLED", "false").lower() == "true"),

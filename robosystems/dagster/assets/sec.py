@@ -3,10 +3,12 @@
 Pipeline stages (run independently via separate jobs):
 
 1. DOWNLOAD (sec_download job):
-   - sec_raw_filings - Discover via EFTS, download XBRL ZIPs (year-partitioned)
+   - sec_raw_filings - Discover via EFTS, download XBRL ZIPs (quarterly partitions)
+   - Creates SourceFile records in PostgreSQL for processing tracking
 
 2. PROCESS (sec_process job, sensor-triggered):
-   - sec_process_filing - Process single filing to parquet (dynamic partitions)
+   - sec_process_filings - Process pending filings from SourceFile queue (batch)
+   - Replaces per-filing partitions to eliminate 100k+ partition scaling issues
 
 3. MATERIALIZE (two-stage pipeline):
    - sec_stage job: sec_duckdb_staged - Stage processed files to persistent DuckDB
@@ -22,9 +24,9 @@ The pipeline leverages existing adapters:
 
 Architecture Notes:
 - EFTS-based O(1) discovery replaces per-company iteration
-- Year partitioning for downloads
-- Dynamic partitioning for processing (one partition per filing, parallel)
-- Sensor discovers unprocessed filings and triggers processing
+- Quarterly partitioning for downloads (to stay under EFTS 10k limit)
+- SourceFile table tracks processing state (pending/processing/success/error)
+- Batch processing with single-active-job constraint via sensor
 - Graph materialization always rebuilds from all processed data
 """
 
@@ -34,9 +36,7 @@ from dagster import (
   AssetExecutionContext,
   BackfillPolicy,
   Config,
-  DynamicPartitionsDefinition,
   MaterializeResult,
-  RetryPolicy,
   StaticPartitionsDefinition,
   asset,
 )
@@ -47,7 +47,8 @@ from robosystems.config.storage.shared import (
   get_processed_key,
   get_raw_key,
 )
-from robosystems.dagster.resources import S3Resource
+from robosystems.dagster.resources import DatabaseResource, S3Resource
+from robosystems.models.iam import Graph, SourceFile
 
 # In-memory cache for SEC submissions during a single run
 _sec_submissions_cache: dict[str, dict] = {}
@@ -246,11 +247,6 @@ SEC_QUARTERS = [
 ]
 sec_quarter_partitions = StaticPartitionsDefinition(SEC_QUARTERS)
 
-# Dynamic partitions for individual filing processing
-# Partition key format: {year}_{cik}_{accession}
-# Note: S3 storage uses year-based paths regardless of quarterly download partitions
-sec_filing_partitions = DynamicPartitionsDefinition(name="sec_filings")
-
 
 # ============================================================================
 # Configuration Classes
@@ -282,11 +278,15 @@ class SECDownloadConfig(Config):
   download_concurrency: int = 10  # Max concurrent downloads
 
 
-class SECSingleFilingConfig(Config):
-  """Configuration for single filing processing."""
+class SECProcessConfig(Config):
+  """Configuration for single filing processing.
 
-  # No config needed - partition key contains all info
-  pass
+  Each Dagster run processes one filing, allowing parallel execution
+  across multiple ECS containers. The sensor discovers pending files
+  from SourceFile and triggers individual runs.
+  """
+
+  source_file_id: str  # SourceFile ID to process (required)
 
 
 class SECStageConfig(Config):
@@ -346,6 +346,7 @@ def sec_raw_filings(
   context: AssetExecutionContext,
   config: SECDownloadConfig,
   s3: S3Resource,
+  db: DatabaseResource,
 ) -> MaterializeResult:
   """Download SEC XBRL filings for a specific quarter using EFTS discovery.
 
@@ -621,8 +622,11 @@ def sec_raw_filings(
     no_xbrl_filings: list[str] = []  # Track which filings lack XBRL
     failed = 0
 
+    # Track files for SourceFile creation
+    source_file_records: list[dict] = []
+
     async def download_filing(hit: EFTSHit) -> bool:
-      nonlocal downloaded, skipped, no_xbrl, failed
+      nonlocal downloaded, skipped, no_xbrl, failed, source_file_records
 
       # Construct S3 key
       s3_key = get_raw_key(
@@ -635,8 +639,18 @@ def sec_raw_filings(
       # Skip if exists
       if config.skip_existing:
         try:
-          s3.client.head_object(Bucket=bucket, Key=s3_key)
+          head_response = s3.client.head_object(Bucket=bucket, Key=s3_key)
           skipped += 1
+          # Track for SourceFile creation (existing file)
+          partition_key = f"{year}_{hit.cik}_{hit.accession_number}"
+          source_file_records.append(
+            {
+              "storage_key": s3_key,
+              "source_id": hit.accession_number,
+              "partition_key": partition_key,
+              "file_size_bytes": head_response.get("ContentLength"),
+            }
+          )
           return True
         except Exception:
           pass  # File doesn't exist, continue to download
@@ -686,6 +700,16 @@ def sec_raw_filings(
           ContentType="application/zip",
         )
         downloaded += 1
+        # Track for SourceFile creation (newly downloaded)
+        partition_key = f"{year}_{hit.cik}_{hit.accession_number}"
+        source_file_records.append(
+          {
+            "storage_key": s3_key,
+            "source_id": hit.accession_number,
+            "partition_key": partition_key,
+            "file_size_bytes": len(content),
+          }
+        )
         return True
       except Exception as e:
         context.log.warning(f"S3 upload failed for {hit.accession_number}: {e}")
@@ -723,6 +747,7 @@ def sec_raw_filings(
       "no_xbrl": no_xbrl,
       "failed": failed,
       "dry_run": False,
+      "source_file_records": source_file_records,
     }
 
   # Run async code in sync Dagster context
@@ -739,6 +764,45 @@ def sec_raw_filings(
       f"{result.get('no_xbrl', 0)} no XBRL, {result['failed']} failed"
     )
 
+  # Create SourceFile records for downloaded/cached files
+  source_file_records = result.get("source_file_records", [])
+  source_files_created = 0
+  source_files_existed = 0
+  if source_file_records and not result.get("dry_run"):
+    context.log.info(f"Creating {len(source_file_records)} SourceFile records...")
+    with db.get_session() as session:
+      # Ensure SEC graph exists (SourceFile has FK to graphs table)
+      Graph.find_or_create_repository(
+        graph_id="sec",
+        graph_name="SEC EDGAR Filings",
+        repository_type="sec",
+        session=session,
+        base_schema="sec",
+        data_source_type="sec_edgar",
+        data_source_url="https://www.sec.gov/cgi-bin/browse-edgar",
+        sync_frequency="daily",
+      )
+      for record in source_file_records:
+        _, created = SourceFile.get_or_create(
+          graph_id="sec",
+          storage_key=record["storage_key"],
+          file_type="xbrl_filing",
+          session=session,
+          file_size_bytes=record.get("file_size_bytes"),
+          source_id=record.get("source_id"),
+          partition_key=record.get("partition_key"),
+          commit=False,
+        )
+        if created:
+          source_files_created += 1
+        else:
+          source_files_existed += 1
+      session.commit()
+    context.log.info(
+      f"SourceFile records: {source_files_created} created, "
+      f"{source_files_existed} already existed"
+    )
+
   return MaterializeResult(
     metadata={
       "year": year,
@@ -750,77 +814,72 @@ def sec_raw_filings(
       "filings_no_xbrl": result.get("no_xbrl", 0),
       "errors": result["failed"],
       "dry_run": result.get("dry_run", False),
+      "source_files_created": source_files_created,
+      "source_files_existed": source_files_existed,
     }
   )
 
 
 # ============================================================================
-# Dynamic Partition Assets (per-filing processing)
+# Batch Processing Asset (SourceFile-driven)
 # ============================================================================
 
 
-@asset(
-  group_name="sec_pipeline",
-  description="Process a single SEC filing to parquet format",
-  kinds={"transform"},
-  partitions_def=sec_filing_partitions,
-  # No deps - sensor handles discovery and triggers runs directly
-  metadata={
-    "pipeline": "sec",
-    "stage": "processing",
-  },
-  # Retry once on failure (handles transient OOM on large filings)
-  retry_policy=RetryPolicy(max_retries=1),
-  # No concurrency limit - scales with infrastructure
-  # Each filing processes independently
-)
-def sec_process_filing(
+def _process_single_filing(
   context: AssetExecutionContext,
-  config: SECSingleFilingConfig,
+  storage_key: str,
+  partition_key: str,
   s3: S3Resource,
-) -> MaterializeResult:
-  """Process a single SEC filing to parquet format.
+  db: DatabaseResource,
+  raw_bucket: str,
+  processed_bucket: str,
+) -> tuple[bool, int, str | None]:
+  """Process a single filing from SourceFile.
 
-  Takes partition key in format {year}_{cik}_{accession} and processes
-  the corresponding raw ZIP file to parquet output.
+  Args:
+      context: Dagster execution context
+      storage_key: S3 key of the raw file
+      partition_key: Partition key (year_cik_accession)
+      s3: S3 resource
+      db: Database resource
+      raw_bucket: S3 bucket for raw files
+      processed_bucket: S3 bucket for processed files
 
   Returns:
-      MaterializeResult with processing statistics
+      Tuple of (success, files_uploaded, error_reason)
   """
-  from robosystems.adapters.sec import XBRLGraphProcessor
-
-  # Parse partition key: {year}_{cik}_{accession}
-  partition_key = context.partition_key
-  parts = partition_key.split("_", 2)  # Split into 3 parts max
-  if len(parts) != 3:
-    context.log.error(f"Invalid partition key format: {partition_key}")
-    return MaterializeResult(
-      metadata={"status": "error", "reason": f"Invalid partition key: {partition_key}"}
-    )
-
-  year, cik, accession = parts
-  context.log.info(f"Processing filing: year={year}, cik={cik}, accession={accession}")
-
-  raw_bucket = env.SHARED_RAW_BUCKET
-  processed_bucket = env.SHARED_PROCESSED_BUCKET
-
-  # Download raw ZIP from shared bucket
-  raw_key = get_raw_key(DataSourceType.SEC, f"year={year}", cik, f"{accession}.zip")
-
   import os
   import tempfile
   import zipfile
   from io import BytesIO
 
+  from robosystems.adapters.sec import SEC_BASE_URL, XBRLGraphProcessor
+
+  # Parse partition key to get year, cik, accession
+  parts = partition_key.split("_", 2)
+  if len(parts) != 3:
+    return False, 0, f"Invalid partition key: {partition_key}"
+
+  year, cik, accession = parts
+
+  # Mark as processing
+  with db.get_session() as session:
+    sf = SourceFile.get_by_storage_key(storage_key, session)
+    if sf:
+      sf.mark_processing(session)
+
+  # Download raw ZIP
   try:
     buffer = BytesIO()
-    s3.client.download_fileobj(raw_bucket, raw_key, buffer)
+    s3.client.download_fileobj(raw_bucket, storage_key, buffer)
     buffer.seek(0)
   except Exception as e:
-    context.log.error(f"Failed to download {raw_key}: {e}")
-    return MaterializeResult(
-      metadata={"status": "error", "reason": f"Download failed: {e}"}
-    )
+    error = f"Download failed: {e}"
+    with db.get_session() as session:
+      sf = SourceFile.get_by_storage_key(storage_key, session)
+      if sf:
+        sf.mark_error(session, error)
+    return False, 0, error
 
   # Extract and process
   try:
@@ -848,15 +907,19 @@ def sec_process_filing(
         )
 
       if not xbrl_files:
-        context.log.warning(f"No XBRL instance files found in {raw_key}")
-        return MaterializeResult(
-          metadata={"status": "error", "reason": "No XBRL files found"}
-        )
+        error = "No XBRL files found"
+        with db.get_session() as session:
+          sf = SourceFile.get_by_storage_key(storage_key, session)
+          if sf:
+            sf.mark_error(session, error)
+        return False, 0, error
 
       # Build report URL
-      from robosystems.adapters.sec import SEC_BASE_URL
-
-      report_url = f"{SEC_BASE_URL}/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{xbrl_files[0]}"
+      cik_int = int(cik)
+      accno_clean = accession.replace("-", "")
+      report_url = (
+        f"{SEC_BASE_URL}/Archives/edgar/data/{cik_int}/{accno_clean}/{xbrl_files[0]}"
+      )
 
       # Schema config
       schema_config = {
@@ -866,11 +929,10 @@ def sec_process_filing(
         "extensions": ["roboledger"],
       }
 
-      # Fetch full SEC metadata from S3 snapshot (stored during download)
+      # Fetch full SEC metadata from S3 snapshot
       sec_filer, sec_report = _get_sec_metadata(
         cik, accession, s3_client=s3.client, bucket=raw_bucket
       )
-      # Ensure primaryDocument is set from local files if not in API response
       if not sec_report.get("primaryDocument"):
         sec_report["primaryDocument"] = xbrl_files[0]
 
@@ -888,15 +950,9 @@ def sec_process_filing(
       processor.process()
 
       # Upload parquet files to S3
-      # Use filing date for partition (filed=YYYY-MM-DD) instead of year
-      # This enables date-range filtering for incremental loads
       filing_date = sec_report.get("filingDate", "unknown")
-      if filing_date == "unknown":
-        context.log.warning(
-          f"No filingDate found for {partition_key}, using 'unknown' partition"
-        )
-
       files_uploaded = 0
+
       for entity_type in ["nodes", "relationships"]:
         entity_dir = os.path.join(tmpdir, entity_type)
         if os.path.exists(entity_dir):
@@ -917,26 +973,103 @@ def sec_process_filing(
                 s3.client.upload_fileobj(f, processed_bucket, s3_key)
               files_uploaded += 1
 
-      context.log.info(f"Processed {partition_key}: {files_uploaded} files uploaded")
+      # Mark success
+      with db.get_session() as session:
+        sf = SourceFile.get_by_storage_key(storage_key, session)
+        if sf:
+          sf.mark_success(session)
 
+      return True, files_uploaded, None
+
+  except Exception as e:
+    error = str(e)
+    with db.get_session() as session:
+      sf = SourceFile.get_by_storage_key(storage_key, session)
+      if sf:
+        sf.mark_error(session, error)
+    return False, 0, error
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Process a single SEC filing from SourceFile queue",
+  kinds={"transform"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "processing",
+  },
+)
+def sec_process_filing(
+  context: AssetExecutionContext,
+  config: SECProcessConfig,
+  s3: S3Resource,
+  db: DatabaseResource,
+) -> MaterializeResult:
+  """Process a single SEC filing.
+
+  Takes a source_file_id from config, looks up the SourceFile record,
+  and processes it to parquet output. Each run processes exactly one filing,
+  allowing parallel execution across multiple ECS containers.
+
+  The sensor discovers pending files and triggers individual runs.
+  Dagster's run coordinator controls concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
+
+  Returns:
+      MaterializeResult with processing statistics
+  """
+  raw_bucket = env.SHARED_RAW_BUCKET
+  processed_bucket = env.SHARED_PROCESSED_BUCKET
+
+  # Look up SourceFile by ID
+  with db.get_session() as session:
+    source_file = (
+      session.query(SourceFile).filter(SourceFile.id == config.source_file_id).first()
+    )
+
+    if not source_file:
+      context.log.error(f"SourceFile not found: {config.source_file_id}")
       return MaterializeResult(
         metadata={
-          "partition_key": partition_key,
-          "year": year,
-          "cik": cik,
-          "accession": accession,
-          "files_uploaded": files_uploaded,
-          "status": "success",
+          "status": "error",
+          "source_file_id": config.source_file_id,
+          "error": "SourceFile not found",
         }
       )
 
-  except Exception as e:
-    context.log.error(f"Processing failed for {partition_key}: {e}")
+    # Extract data while session is open
+    storage_key = source_file.storage_key
+    partition_key = source_file.partition_key or storage_key
+    source_id = source_file.source_id
+
+  context.log.info(
+    f"Processing filing: {partition_key} (source_file={config.source_file_id})"
+  )
+
+  # Process the filing
+  success, files_uploaded, error = _process_single_filing(
+    context, storage_key, partition_key, s3, db, raw_bucket, processed_bucket
+  )
+
+  if success:
+    context.log.info(f"Success: {files_uploaded} parquet files uploaded")
     return MaterializeResult(
       metadata={
+        "status": "success",
+        "source_file_id": config.source_file_id,
         "partition_key": partition_key,
+        "source_id": source_id,
+        "parquet_files_uploaded": files_uploaded,
+      }
+    )
+  else:
+    context.log.error(f"Failed: {error}")
+    return MaterializeResult(
+      metadata={
         "status": "error",
-        "reason": str(e),
+        "source_file_id": config.source_file_id,
+        "partition_key": partition_key,
+        "source_id": source_id,
+        "error": error,
       }
     )
 
