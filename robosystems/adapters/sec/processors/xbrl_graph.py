@@ -1559,6 +1559,9 @@ class XBRLGraphProcessor:
         )
 
   def make_element(self, xconcept):
+    if xconcept is None:
+      logger.debug("Concept is None, skipping element creation")
+      return None
     if xconcept.qname is None:
       logger.debug("Concept has no qname, skipping element creation")
       return None
