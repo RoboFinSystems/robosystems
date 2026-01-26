@@ -168,6 +168,11 @@ def main():
         action="store_true",
         help="Only create subscription (skip data loading pipeline)",
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Use fast mode (direct Python, no Dagster) for quicker local demos",
+    )
 
     args = parser.parse_args()
 
@@ -202,8 +207,10 @@ def main():
     if args.subscribe_only:
         print("📥 Step 1: Skipping data loading (subscribe-only mode)")
     else:
-        print("📥 Step 1: Loading SEC data...")
-        run_just_command(f"sec-load {args.ticker} {args.year}")
+        mode_str = " (fast mode)" if args.fast else ""
+        print(f"📥 Step 1: Loading SEC data{mode_str}...")
+        fast_arg = " fast=1" if args.fast else ""
+        run_just_command(f"sec-load {args.ticker} {args.year}{fast_arg}")
         # Brief pause to let graph settle
         time.sleep(2)
 

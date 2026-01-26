@@ -10,9 +10,10 @@ This script manages SEC XBRL data processing through 3 independent phases:
     Years are automatically converted to quarters (e.g., 2024 -> 2024-Q1..Q4).
     Creates SourceFile records in PostgreSQL for processing tracking.
 
-  Phase 2 - Process: sec_process job (per-filing, sensor-driven)
-    The sec_processing_sensor discovers pending SourceFile records and triggers
-    one Dagster run per filing. Each filing runs in its own ECS container.
+  Phase 2 - Process: sec_process job (quarterly batch, sensor-driven)
+    The sec_processing_sensor discovers quarters with pending SourceFile records
+    and triggers one Dagster run per quarter. Each quarter's filings are processed
+    together, with output consolidated by filing date (filed=YYYY-MM-DD).
     Dagster's QueuedRunCoordinator controls concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
 
     In production: Enable sec_processing_sensor in Dagster UI (auto-disabled in dev).
@@ -375,23 +376,15 @@ class SECPipeline:
         else:
           logger.warning(f"  Issues: {result.error}")
 
-    # Phase 2: Process pending files (per-filing, sensor-driven in prod)
+    # Phase 2: Process pending files (quarterly batch, sensor-driven in prod)
     if not self.skip_download and not self.skip_processing:
       logger.info(f"\n{'=' * 60}")
-      logger.info("PROCESSING (Per-Filing)")
+      logger.info("PROCESSING (Quarterly Batch)")
       logger.info(f"{'=' * 60}")
-      # Run per-filing processing until all pending files are done
-      while True:
-        process_result = self._run_per_filing_processing(limit=10)
-        if process_result:
-          all_results.append(process_result)
-          # Check if more pending files remain
-          pending, _ = self._get_source_file_counts()
-          if pending == 0 or not process_result.success:
-            break
-          logger.info(f"\n  {pending} files remaining, continuing...")
-        else:
-          break
+      # Run quarterly batch processing for all quarters with pending files
+      process_result = self._run_quarterly_batch_processing()
+      if process_result:
+        all_results.append(process_result)
 
     # Phase 3: DuckDB Staging & Materialization (decoupled)
     if not self.skip_processing:
@@ -470,6 +463,249 @@ class SECPipeline:
       "total_stages": len(all_results),
       "successful": successful,
       "failed": failed,
+      "duration_seconds": overall_duration,
+      "companies": self.tickers,
+      "years": self.years,
+    }
+
+  def run_fast(self) -> dict[str, Any]:
+    """Run the full pipeline in fast mode (direct Python calls, no Dagster).
+
+    This bypasses Dagster job execution and calls the tested processing functions
+    directly. Much faster for local development/demos but no Dagster UI visibility.
+    """
+    import asyncio
+
+    import boto3
+
+    from robosystems.adapters.sec import SECClient, XBRLDuckDBGraphProcessor
+    from robosystems.adapters.sec.client import EFTSClient
+    from robosystems.config import env
+    from robosystems.config.storage.shared import (
+      DataSourceType,
+      get_processed_key,
+      get_raw_key,
+    )
+    from robosystems.dagster.assets.sec import (
+      _consolidate_parquet_tables_by_date,
+      _process_single_filing_to_memory,
+    )
+
+    quarters = years_to_quarters(self.years)
+
+    logger.info("=" * 60)
+    logger.info("SEC Pipeline (FAST MODE)")
+    logger.info("=" * 60)
+    logger.info(f"Companies: {', '.join(self.tickers)}")
+    logger.info(f"Years: {', '.join(self.years)}")
+    logger.info(f"Quarters: {len(quarters)} partitions")
+    logger.info("=" * 60)
+
+    overall_start = time.time()
+    stats = {
+      "downloaded": 0,
+      "processed": 0,
+      "errors": 0,
+    }
+
+    # Reset database first
+    if not self.skip_reset:
+      logger.info("\n[SETUP] Resetting SEC database...")
+      if not self._reset_database():
+        logger.error("Database reset failed - aborting")
+        return {"status": "error", "reason": "Database reset failed"}
+    else:
+      logger.info("\n[SETUP] Skipping database reset (additive mode)")
+
+    # Create S3 client once
+    s3_client = boto3.client(
+      "s3",
+      endpoint_url=env.AWS_ENDPOINT_URL,
+      region_name=env.AWS_REGION or "us-east-1",
+    )
+    raw_bucket = env.SHARED_RAW_BUCKET or "robosystems-shared-raw"
+    processed_bucket = env.SHARED_PROCESSED_BUCKET or "robosystems-shared-processed"
+
+    # Phase 1 & 2: Download and process each quarter
+    all_results = []
+
+    if not self.skip_download:
+      logger.info(f"\n{'=' * 60}")
+      logger.info("DOWNLOAD & PROCESS (Fast Mode)")
+      logger.info(f"{'=' * 60}")
+
+      # Resolve tickers to CIKs once (not per quarter)
+      cik_filter = None
+      if self.tickers:
+        sec_client = SECClient()
+        companies_raw = sec_client.get_companies()
+        cik_filter = []
+        for _, company in companies_raw.items():
+          ticker = company.get("ticker", "")
+          if ticker.upper() in [t.upper() for t in self.tickers]:
+            cik = str(company.get("cik_str", company.get("cik", "")))
+            cik_filter.append(cik)
+        logger.info(f"Resolved {len(self.tickers)} tickers to {len(cik_filter)} CIKs")
+
+      for quarter in quarters:
+        logger.info(f"\n[QUARTER {quarter}]")
+        quarter_start = time.time()
+
+        # Parse quarter
+        year_str, q_str = quarter.split("-Q")
+        year = int(year_str)
+        q = int(q_str)
+
+        # Query EFTS for filings
+        async def query_efts():
+          async with EFTSClient() as efts_client:
+            return await efts_client.query_by_quarter(
+              year=year,
+              quarter=q,
+              form_types=["10-K", "10-Q"],
+              ciks=cik_filter,
+            )
+
+        filings = asyncio.run(query_efts())
+
+        if not filings:
+          logger.info(f"  No filings found for {quarter}")
+          continue
+
+        logger.info(f"  Found {len(filings)} filings")
+
+        # Download each filing to S3 raw bucket, then process
+        for filing in filings:
+          cik_no_zeros = str(int(filing.cik))
+          accno_no_dash = filing.accession_number.replace("-", "")
+
+          # S3 raw key (same format as Dagster asset)
+          storage_key = get_raw_key(
+            DataSourceType.SEC,
+            f"year={year}",
+            filing.cik,
+            f"{filing.accession_number}.zip",
+          )
+          partition_key = f"{year}-Q{q}_{filing.cik}_{filing.accession_number}"
+
+          logger.info(f"  {filing.cik}/{filing.accession_number}...")
+
+          # Download from SEC
+          zip_url = f"https://www.sec.gov/Archives/edgar/data/{cik_no_zeros}/{accno_no_dash}/{filing.accession_number}-xbrl.zip"
+
+          try:
+            async def download_zip():
+              import httpx
+              async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(zip_url, headers={"User-Agent": "RoboSystems sec-demo contact@robosystems.io"})
+                if resp.status_code == 404:
+                  return None  # No XBRL for this filing
+                resp.raise_for_status()
+                return resp.content
+
+            zip_content = asyncio.run(download_zip())
+            if not zip_content:
+              logger.info("    No XBRL (skipped)")
+              continue
+
+            # Upload to S3 raw bucket
+            s3_client.put_object(Bucket=raw_bucket, Key=storage_key, Body=zip_content)
+            stats["downloaded"] += 1
+
+            # Process using the tested Dagster function
+            result = _process_single_filing_to_memory(
+              storage_key=storage_key,
+              partition_key=partition_key,
+              source_file_id=f"fast-{partition_key}",  # Fake ID for fast mode
+              s3_client=s3_client,
+              raw_bucket=raw_bucket,
+              log_fn=lambda msg: logger.info(f"    {msg}"),
+            )
+
+            if result.success:
+              all_results.append(result)
+              stats["processed"] += 1
+              logger.info(f"    Processed ({len(result.tables)} tables)")
+            else:
+              stats["errors"] += 1
+              logger.warning(f"    Failed: {result.error}")
+
+          except Exception as e:
+            logger.error(f"    Error: {e}")
+            stats["errors"] += 1
+            continue
+
+        quarter_duration = time.time() - quarter_start
+        logger.info(f"  Quarter complete ({quarter_duration:.1f}s)")
+
+      # Consolidate and upload to processed bucket
+      if all_results:
+        logger.info(f"\n[CONSOLIDATING] {len(all_results)} filings...")
+        consolidated = _consolidate_parquet_tables_by_date(all_results)
+
+        for filing_date, tables in consolidated.items():
+          for table_key, parquet_bytes in tables.items():
+            # table_key is like "nodes/Entity" or "relationships/FACT_HAS_ELEMENT"
+            s3_key = get_processed_key(
+              DataSourceType.SEC,
+              "processed",
+              f"filed={filing_date}",
+              table_key + ".parquet",
+            )
+            s3_client.put_object(Bucket=processed_bucket, Key=s3_key, Body=parquet_bytes)
+
+        logger.info(f"  Uploaded {sum(len(t) for t in consolidated.values())} consolidated tables")
+
+    # Phase 3: DuckDB Staging & Materialization
+    if not self.skip_processing:
+      logger.info(f"\n{'=' * 60}")
+      logger.info("STAGING & MATERIALIZATION (Fast Mode)")
+      logger.info(f"{'=' * 60}")
+
+      stage_start = time.time()
+      processor = XBRLDuckDBGraphProcessor(graph_id="sec")
+
+      # Stage to DuckDB
+      logger.info("\n[STAGING] Loading parquet to DuckDB...")
+      try:
+        stage_result = asyncio.run(
+          processor.stage_to_duckdb(rebuild=True, reset_staging=False)
+        )
+        logger.info(f"  Staged {stage_result.total_rows:,} rows")
+      except Exception as e:
+        logger.error(f"  Staging failed: {e}")
+        return {"status": "error", "reason": f"Staging failed: {e}"}
+
+      # Materialize to LadybugDB
+      logger.info("\n[MATERIALIZING] DuckDB → LadybugDB...")
+      try:
+        mat_result = asyncio.run(
+          processor.materialize_from_duckdb()
+        )
+        logger.info(f"  Materialized: {mat_result}")
+      except Exception as e:
+        logger.error(f"  Materialization failed: {e}")
+        return {"status": "error", "reason": f"Materialization failed: {e}"}
+
+      stage_duration = time.time() - stage_start
+      logger.info(f"  Stage & Materialize complete ({stage_duration:.1f}s)")
+
+    # Summary
+    overall_duration = time.time() - overall_start
+
+    logger.info(f"\n{'=' * 60}")
+    logger.info("SUMMARY (Fast Mode)")
+    logger.info(f"{'=' * 60}")
+    logger.info(f"Downloaded: {stats['downloaded']}")
+    logger.info(f"Processed: {stats['processed']}")
+    logger.info(f"Errors: {stats['errors']}")
+    logger.info(f"Duration: {overall_duration:.1f}s ({overall_duration / 60:.1f} min)")
+
+    return {
+      "status": "success" if stats["errors"] == 0 else "partial_failure",
+      "downloaded": stats["downloaded"],
+      "processed": stats["processed"],
+      "errors": stats["errors"],
       "duration_seconds": overall_duration,
       "companies": self.tickers,
       "years": self.years,
@@ -581,84 +817,54 @@ class SECPipeline:
       except Exception as e:
         logger.warning(f"    Error clearing {bucket}/{prefix}/: {e}")
 
-  def _run_per_filing_processing(self, limit: int = 10) -> StageResult | None:
-    """Trigger per-filing processing runs for pending SourceFiles.
+  def _run_quarterly_batch_processing(self) -> StageResult | None:
+    """Trigger quarterly batch processing for all quarters with pending SourceFiles.
 
     In production, the sec_processing_sensor handles this automatically.
     This method is for local development where the sensor is disabled.
 
-    Args:
-        limit: Maximum number of files to process in this batch
+    Each quarter's filings are processed together with output consolidated
+    by filing date (filed=YYYY-MM-DD/nodes/Table.parquet).
 
     Returns:
         StageResult with processing outcome
     """
     start_time = time.time()
 
-    # Query SourceFile for pending files
-    pending_files = self._get_pending_source_files(limit=limit)
-    pending_count = len(pending_files)
-    _, error_count = self._get_source_file_counts()
+    # Get quarters with pending files and counts
+    quarters_with_pending = self._get_quarters_with_pending_files()
+    pending_count, error_count = self._get_source_file_counts()
 
-    if pending_count == 0:
+    if not quarters_with_pending:
       if error_count > 0:
-        logger.info(f"  No pending filings ({error_count} in error state)")
+        logger.info(f"  No pending quarters ({error_count} files in error state)")
         logger.info("  Use 'just sec-process --reset-errors' to retry failed files")
       else:
         logger.info("  No pending filings to process")
       return StageResult(
-        stage="process_per_filing",
+        stage="process_quarterly_batch",
         year="all",
         success=True,
         duration_seconds=time.time() - start_time,
-        metadata={"pending": 0, "errors": error_count},
+        metadata={"pending": 0, "errors": error_count, "quarters": 0},
       )
 
     logger.info(
-      f"  Found {pending_count} pending filings to process, {error_count} in error state"
+      f"  Found {len(quarters_with_pending)} quarters with {pending_count} pending files"
     )
+    logger.info(f"  Quarters: {', '.join(sorted(quarters_with_pending))}")
+    if error_count > 0:
+      logger.info(f"  ({error_count} files in error state)")
 
-    # Trigger individual runs for each pending file
+    # Process each quarter
     success_count = 0
     failure_count = 0
     last_error = None
 
-    for source_file_id, partition_key in pending_files:
-      logger.info(f"  Processing {source_file_id} ({partition_key})...")
+    for quarter in sorted(quarters_with_pending):
+      logger.info(f"\n  Processing quarter {quarter}...")
 
-      # Create config for this specific file
-      config_yaml = f"""ops:
-  sec_process_filing:
-    config:
-      source_file_id: "{source_file_id}"
-"""
-      # Write config to temp file (must close before docker cp can read it)
-      import os
-
-      with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(config_yaml)
-        config_path = f.name
-      # File is closed here, make readable for container
-      os.chmod(config_path, 0o644)
-
-      # Copy to container
-      timestamp = int(time.time() * 1000)
-      container_path = f"/tmp/sec_process_{timestamp}.yaml"
-      try:
-        subprocess.run(
-          [
-            "docker",
-            "cp",
-            config_path,
-            f"robosystems-dagster-webserver:{container_path}",
-          ],
-          check=True,
-          capture_output=True,
-        )
-      finally:
-        Path(config_path).unlink()
-
-      # Execute the job
+      # Execute the job with partition key
       cmd = [
         "docker",
         "compose",
@@ -672,40 +878,42 @@ class SECPipeline:
         "robosystems.dagster",
         "--job",
         "sec_process",
-        "-c",
-        container_path,
+        "--tags",
+        json.dumps({"dagster/partition": quarter}),
       ]
 
-      success, stdout, stderr = self._exec_docker(cmd, timeout=600)  # 10 min per file
+      # Use longer timeout for batch processing (30 min per quarter)
+      success, stdout, stderr = self._exec_docker(cmd, timeout=1800)
 
       if success:
         success_count += 1
-        logger.info("    Success")
+        logger.info(f"    Quarter {quarter} complete")
       else:
         failure_count += 1
-        last_error = stderr[:100] if stderr else "Unknown error"
-        logger.warning(f"    Failed: {last_error}")
+        last_error = stderr[:200] if stderr else "Unknown error"
+        logger.warning(f"    Quarter {quarter} failed: {last_error}")
 
     duration = time.time() - start_time
     logger.info(
-      f"  Processed {success_count} successfully, {failure_count} failed ({duration:.1f}s)"
+      f"\n  Processed {success_count} quarters successfully, "
+      f"{failure_count} failed ({duration:.1f}s)"
     )
 
     return StageResult(
-      stage="process_per_filing",
+      stage="process_quarterly_batch",
       year="all",
       success=failure_count == 0,
       duration_seconds=duration,
       metadata={
-        "processed": success_count,
-        "failed": failure_count,
-        "initial_pending": pending_count,
+        "quarters_processed": success_count,
+        "quarters_failed": failure_count,
+        "initial_quarters": len(quarters_with_pending),
       },
       error=last_error if failure_count > 0 else None,
     )
 
-  def _get_pending_source_files(self, limit: int = 10) -> list[tuple[str, str]]:
-    """Get pending SourceFile IDs and partition keys."""
+  def _get_quarters_with_pending_files(self) -> list[str]:
+    """Get list of quarters that have pending SourceFiles."""
     cmd = [
       "docker",
       "compose",
@@ -714,17 +922,26 @@ class SECPipeline:
       "dagster-webserver",
       "python",
       "-c",
-      f"""
+      """
 from robosystems.database import session as SessionLocal
 from robosystems.models.iam import SourceFile
 session = SessionLocal()
 try:
-    files = session.query(SourceFile).filter(
+    # Get all partition keys for pending files
+    files = session.query(SourceFile.partition_key).filter(
         SourceFile.graph_id == "sec",
-        SourceFile.status == "pending"
-    ).order_by(SourceFile.discovered_at.asc()).limit({limit}).all()
-    for f in files:
-        print(f"{{f.id}}|{{f.partition_key or f.storage_key}}")
+        SourceFile.status == "pending",
+        SourceFile.partition_key.isnot(None),
+    ).all()
+    # Extract unique quarters from partition keys (format: "2024-Q1_cik_accession")
+    quarters = set()
+    for (partition_key,) in files:
+        if partition_key and "_" in partition_key:
+            quarter = partition_key.split("_")[0]
+            if "-Q" in quarter:
+                quarters.add(quarter)
+    for q in sorted(quarters):
+        print(q)
 finally:
     session.close()
 """,
@@ -732,12 +949,12 @@ finally:
 
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if result.returncode == 0:
-      files = []
+      quarters = []
       for line in result.stdout.strip().split("\n"):
-        if "|" in line:
-          parts = line.split("|", 1)
-          files.append((parts[0], parts[1]))
-      return files
+        line = line.strip()
+        if line and "-Q" in line:
+          quarters.append(line)
+      return quarters
 
     return []
 
@@ -852,7 +1069,11 @@ def cmd_run(args):
       f"Materialize timeout: {args.materialize_timeout}s ({args.materialize_timeout / 3600:.1f}h)"
     )
 
-  results = pipeline.run()
+  # Use fast mode if requested (direct Python calls, no Dagster)
+  if args.fast:
+    results = pipeline.run_fast()
+  else:
+    results = pipeline.run()
 
   if args.json:
     print(json.dumps(results, indent=2))
@@ -1103,17 +1324,17 @@ def cmd_materialize_graph(args):
 
 
 def cmd_process(args):
-  """Process pending filings via SourceFile queue (per-filing processing).
+  """Process pending filings via SourceFile queue (quarterly batch processing).
 
-  This command triggers individual sec_process runs for pending SourceFiles.
+  This command triggers sec_process runs for quarters with pending SourceFiles.
   In production, the sec_processing_sensor handles this automatically.
   This command is for local development where the sensor is disabled.
 
-  Each filing runs as a separate Dagster job execution, matching how
-  production works (one ECS container per filing).
+  Each quarter runs as a separate Dagster job execution, processing all
+  filings for that quarter together with output consolidated by filing date.
   """
   logger.info("=" * 60)
-  logger.info("SEC Per-Filing Processing (Phase 2)")
+  logger.info("SEC Quarterly Batch Processing (Phase 2)")
   logger.info("=" * 60)
   logger.info("Note: In production, enable sec_processing_sensor in Dagster UI")
   logger.info("=" * 60)
@@ -1136,7 +1357,9 @@ def cmd_process(args):
 
   # Get initial counts
   pending_count, error_count = pipeline._get_source_file_counts()
+  quarters = pipeline._get_quarters_with_pending_files()
   logger.info(f"SourceFile queue: {pending_count} pending, {error_count} errors")
+  logger.info(f"Quarters with pending: {len(quarters)}")
 
   if pending_count == 0:
     if error_count > 0:
@@ -1145,53 +1368,13 @@ def cmd_process(args):
       logger.info("No files to process.")
     return 0
 
-  # Process files
-  total_processed = 0
-  total_failed = 0
-  batch_count = 0
-  batch_size = args.batch_size or 10
+  # Process quarters
   start_time = time.time()
+  result = pipeline._run_quarterly_batch_processing()
 
-  while True:
-    batch_count += 1
-    logger.info(f"\n{'=' * 60}")
-    logger.info(f"BATCH {batch_count} (up to {batch_size} files)")
-    logger.info(f"{'=' * 60}")
-
-    result = pipeline._run_per_filing_processing(limit=batch_size)
-
-    if not result:
-      logger.error("Processing returned no result")
-      break
-
-    # Track results
-    processed_this_batch = result.metadata.get("processed", 0)
-    failed_this_batch = result.metadata.get("failed", 0)
-    total_processed += processed_this_batch
-    total_failed += failed_this_batch
-
-    logger.info(
-      f"Batch {batch_count}: {processed_this_batch} processed, {failed_this_batch} failed"
-    )
-
-    # Get updated counts
-    new_pending, new_errors = pipeline._get_source_file_counts()
-
-    # Check if we should continue
-    if new_pending == 0:
-      logger.info("All pending files processed!")
-      break
-
-    if not args.all:
-      logger.info(f"Remaining: {new_pending} pending, {new_errors} errors")
-      logger.info("Use --all to process all pending files in one run")
-      break
-
-    if args.limit and batch_count >= args.limit:
-      logger.info(f"Reached batch limit ({args.limit})")
-      break
-
-    logger.info(f"{new_pending} files remaining, continuing...")
+  if not result:
+    logger.error("Processing returned no result")
+    return 1
 
   # Summary
   duration = time.time() - start_time
@@ -1200,9 +1383,8 @@ def cmd_process(args):
   logger.info(f"\n{'=' * 60}")
   logger.info("SUMMARY")
   logger.info(f"{'=' * 60}")
-  logger.info(f"Batches run: {batch_count}")
-  logger.info(f"Total processed: {total_processed}")
-  logger.info(f"Total failed: {total_failed}")
+  logger.info(f"Quarters processed: {result.metadata.get('quarters_processed', 0)}")
+  logger.info(f"Quarters failed: {result.metadata.get('quarters_failed', 0)}")
   logger.info(f"Remaining: {final_pending} pending, {final_errors} errors")
   logger.info(f"Duration: {duration:.1f}s ({duration / 60:.1f} min)")
 
@@ -1211,9 +1393,8 @@ def cmd_process(args):
       json.dumps(
         {
           "status": "success" if final_pending == 0 else "partial",
-          "batches": batch_count,
-          "processed": total_processed,
-          "failed": total_failed,
+          "quarters_processed": result.metadata.get("quarters_processed", 0),
+          "quarters_failed": result.metadata.get("quarters_failed", 0),
           "remaining_pending": final_pending,
           "remaining_errors": final_errors,
           "duration_seconds": duration,
@@ -1222,7 +1403,7 @@ def cmd_process(args):
       )
     )
 
-  return 0 if final_pending == 0 else 1
+  return 0 if result.success else 1
 
 
 def main():
@@ -1257,6 +1438,11 @@ def main():
   )
   run_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
   run_parser.add_argument("--json", action="store_true", help="JSON output")
+  run_parser.add_argument(
+    "--fast",
+    action="store_true",
+    help="Fast mode: direct Python calls, no Dagster (faster but no UI visibility)",
+  )
   run_parser.add_argument(
     "--download-timeout",
     type=int,
@@ -1357,24 +1543,10 @@ def main():
   )
   mat_graph_parser.add_argument("--json", action="store_true", help="JSON output")
 
-  # Process command (per-filing processing via SourceFile queue)
+  # Process command (quarterly batch processing via SourceFile queue)
   process_parser = subparsers.add_parser(
     "process",
-    help="Process pending filings (Phase 2) - for local dev, sensor handles prod",
-  )
-  process_parser.add_argument(
-    "--all",
-    action="store_true",
-    help="Process all pending files (run batches until done)",
-  )
-  process_parser.add_argument(
-    "--batch-size",
-    type=int,
-    default=10,
-    help="Number of files to process per batch (default: 10)",
-  )
-  process_parser.add_argument(
-    "--limit", type=int, default=0, help="Limit number of batches to process"
+    help="Process pending filings by quarter (Phase 2) - for local dev, sensor handles prod",
   )
   process_parser.add_argument(
     "--reset-errors",
