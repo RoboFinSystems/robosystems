@@ -90,10 +90,14 @@ class DuckDBTableManager:
     use_list: bool,
   ) -> str:
     """
-    Build CREATE TABLE SQL statement with deduplication logic.
+    Build CREATE TABLE SQL statement for staging.
 
-    This helper eliminates code duplication between list and pattern branches.
-    Uses DuckDB-compatible window functions instead of PostgreSQL's DISTINCT ON.
+    NO DEDUPLICATION in DuckDB - LadybugDB handles duplicate primary keys via
+    COPY ... (ignore_errors=true) during materialization. This allows DuckDB to
+    stream parquet data without memory-intensive window functions.
+
+    See: https://docs.kuzudb.com/import/#skippable-errors-by-source
+    - Duplicate/Null/Missing Primary-Key errors are skippable for all sources
 
     Args:
         quoted_table: Quoted table name (e.g., '"table_name"')
@@ -102,25 +106,22 @@ class DuckDBTableManager:
         use_list: Whether using list (placeholder) or pattern (parameter binding)
 
     Returns:
-        SQL statement with proper deduplication
+        SQL statement for table creation (streaming, no dedup)
     """
     # Use placeholder for list (will be replaced) or ? for parameter binding
     read_pattern = "__FILES_PLACEHOLDER__" if use_list else "?"
 
     if has_identifier:
-      # Node table: deduplicate on identifier using window function
-      # union_by_name=true handles schema variations between files (different filings may have different columns)
+      # Node table: stream directly, LadybugDB deduplicates on identifier during COPY
+      # union_by_name=true handles schema variations between files
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
-        SELECT * EXCLUDE (rn)
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY identifier ORDER BY identifier) AS rn
-          FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
-        )
-        WHERE rn = 1
+        SELECT *
+        FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
       """
     elif has_from_to:
-      # Relationship table: deduplicate on (from, to) and rename to src/dst
+      # Relationship table: rename from/to to src/dst for LadybugDB
+      # LadybugDB deduplicates on (src, dst) during COPY
       # IMPORTANT: LadybugDB expects columns in order: src, dst, then properties
       # union_by_name=true handles schema variations between files
       return f"""
@@ -128,15 +129,11 @@ class DuckDBTableManager:
         SELECT
           "from" as src,
           "to" as dst,
-          * EXCLUDE ("from", "to", rn)
-        FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY "from", "to" ORDER BY "from", "to") AS rn
-          FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
-        )
-        WHERE rn = 1
+          * EXCLUDE ("from", "to")
+        FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
       """
     else:
-      # Unknown table type: just read without deduplication
+      # Unknown table type: just read without transformation
       # union_by_name=true handles schema variations between files
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS

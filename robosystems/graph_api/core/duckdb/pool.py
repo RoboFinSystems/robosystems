@@ -381,9 +381,19 @@ class DuckDBConnectionPool:
       memory_limit = self._get_duckdb_memory_limit()
       conn.execute(f"SET memory_limit='{memory_limit}'")
 
+      # Disable insertion order preservation for staging operations
+      # This significantly reduces memory usage when creating large tables
+      # (e.g., SEC Element table with millions of rows)
+      conn.execute("SET preserve_insertion_order=false")
+
+      # Configure spill-to-disk for larger-than-memory operations
+      # This allows DuckDB to use disk when memory limit is exceeded
+      # Uses /tmp which has space on EC2 instances (EBS-backed)
+      conn.execute("SET temp_directory='/tmp/duckdb_spill'")
+
       logger.debug(
         f"Configured DuckDB connection with S3 access, extensions, "
-        f"threads={max_threads}, memory_limit={memory_limit}"
+        f"threads={max_threads}, memory_limit={memory_limit}, spill=/tmp/duckdb_spill"
       )
 
     except Exception as e:

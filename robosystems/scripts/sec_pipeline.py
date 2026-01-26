@@ -594,10 +594,15 @@ class SECPipeline:
           zip_url = f"https://www.sec.gov/Archives/edgar/data/{cik_no_zeros}/{accno_no_dash}/{filing.accession_number}-xbrl.zip"
 
           try:
+
             async def download_zip():
               import httpx
+
               async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.get(zip_url, headers={"User-Agent": "RoboSystems sec-demo contact@robosystems.io"})
+                resp = await client.get(
+                  zip_url,
+                  headers={"User-Agent": "RoboSystems sec-demo contact@robosystems.io"},
+                )
                 if resp.status_code == 404:
                   return None  # No XBRL for this filing
                 resp.raise_for_status()
@@ -652,9 +657,13 @@ class SECPipeline:
               f"filed={filing_date}",
               table_key + ".parquet",
             )
-            s3_client.put_object(Bucket=processed_bucket, Key=s3_key, Body=parquet_bytes)
+            s3_client.put_object(
+              Bucket=processed_bucket, Key=s3_key, Body=parquet_bytes
+            )
 
-        logger.info(f"  Uploaded {sum(len(t) for t in consolidated.values())} consolidated tables")
+        logger.info(
+          f"  Uploaded {sum(len(t) for t in consolidated.values())} consolidated tables"
+        )
 
     # Phase 3: DuckDB Staging & Materialization
     if not self.skip_processing:
@@ -679,9 +688,7 @@ class SECPipeline:
       # Materialize to LadybugDB
       logger.info("\n[MATERIALIZING] DuckDB → LadybugDB...")
       try:
-        mat_result = asyncio.run(
-          processor.materialize_from_duckdb()
-        )
+        mat_result = asyncio.run(processor.materialize_from_duckdb())
         logger.info(f"  Materialized: {mat_result}")
       except Exception as e:
         logger.error(f"  Materialization failed: {e}")
