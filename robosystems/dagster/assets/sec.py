@@ -7,7 +7,7 @@ Pipeline stages (run independently via separate jobs):
    - Creates SourceFile records in PostgreSQL for processing tracking
 
 2. PROCESS (sec_process job, quarterly partitions):
-   - sec_process_quarter - Process entire quarter's filings as batch
+   - sec_processed_filings - Process entire quarter's filings as batch
    - Outputs consolidated parquet files (one per table per quarter)
    - Individual failures tracked in SourceFile; job continues processing
    - Parallel across quarters via DAGSTER_MAX_CONCURRENT_RUNS
@@ -34,6 +34,7 @@ Architecture Notes:
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from dagster import (
   AssetExecutionContext,
@@ -290,6 +291,11 @@ class SECProcessConfig(Config):
 
   Individual filing failures are tracked in SourceFile records,
   but the job continues processing remaining filings.
+
+  Memory Management:
+  - Parquet data is written to local disk (ECS ephemeral storage) as processed
+  - Periodically flushed to S3 based on flush_threshold
+  - Only marks SourceFiles as "success" after S3 upload completes
   """
 
   # Max filings to process per quarter (0 = unlimited)
@@ -299,6 +305,19 @@ class SECProcessConfig(Config):
   # Continue processing even if some filings fail
   # If False, job fails on first error (for debugging)
   continue_on_error: bool = True
+
+  # Number of filings to accumulate before flushing to S3
+  # Lower = more S3 uploads but safer against crashes
+  # Higher = fewer uploads but more data at risk if crash
+  # 500 balances DuckDB performance (~10 part files) with crash resilience
+  flush_threshold: int = 500
+
+  # Partition output by actual filing date (for incremental daily processing)
+  # False (default): All filings output to quarter-end date (2024-03-31 for Q1)
+  #   - Best for backfills: large consolidated files, efficient DuckDB ingest
+  # True: Each filing outputs to its actual filing date (2024-01-15, 2024-01-16, etc.)
+  #   - Best for incremental: new filings stage to their specific dates
+  use_filing_date_partition: bool = False
 
 
 class SECStageConfig(Config):
@@ -376,8 +395,23 @@ def sec_raw_filings(
   """
   import asyncio
 
+  # Get all partition keys (handles both single partition and backfill ranges)
+  partition_keys = context.partition_keys
+
+  # Multi-partition backfills are not supported - process one quarter at a time
+  if len(partition_keys) > 1:
+    context.log.warning(
+      f"Multi-partition backfill not supported. Selected {len(partition_keys)} partitions: {partition_keys}. "
+      "Please run each quarter as a separate materialization."
+    )
+    raise ValueError(
+      f"Multi-partition backfill not supported. Please select one quarter at a time. "
+      f"Selected: {partition_keys}"
+    )
+
+  partition_key = partition_keys[0]
+
   # Parse partition key: "2024-Q1" -> year=2024, quarter=1
-  partition_key = context.partition_key
   year, quarter_str = partition_key.split("-Q")
   year = int(year)
   quarter = int(quarter_str)
@@ -1025,6 +1059,9 @@ def _consolidate_parquet_tables_by_date(
   Takes a list of ProcessedFilingResult objects and merges all tables
   of the same type into single consolidated parquet files, organized by filing date.
 
+  Note: This function is used by the local sec_pipeline.py script for development/testing.
+  The Dagster asset uses disk-buffered processing instead for memory efficiency at scale.
+
   Args:
       results: List of successful ProcessedFilingResult objects
 
@@ -1077,9 +1114,79 @@ def _consolidate_parquet_tables_by_date(
   return consolidated
 
 
+def _get_quarter_end_date(year: int, quarter: int) -> str:
+  """Get the last day of a quarter as YYYY-MM-DD string.
+
+  Used for backfill partitioning - all filings in a quarter get the same
+  partition date (end of quarter) for simpler S3 organization.
+
+  Args:
+      year: Calendar year
+      quarter: Quarter number (1-4)
+
+  Returns:
+      Date string like "2024-03-31" for Q1 2024
+  """
+  quarter_end_days = {
+    1: f"{year}-03-31",
+    2: f"{year}-06-30",
+    3: f"{year}-09-30",
+    4: f"{year}-12-31",
+  }
+  return quarter_end_days[quarter]
+
+
+def _consolidate_parquet_from_disk(
+  work_dir: Path,
+  table_key: str,
+) -> bytes:
+  """Consolidate all parquet files for a table from disk into single bytes.
+
+  Args:
+      work_dir: Directory containing parquet files
+      table_key: Table key like "nodes/Entity"
+
+  Returns:
+      Consolidated parquet bytes
+  """
+  from io import BytesIO
+
+  import pyarrow as pa
+  import pyarrow.parquet as pq
+
+  table_dir = work_dir / table_key
+  if not table_dir.exists():
+    return b""
+
+  parquet_files = list(table_dir.glob("*.parquet"))
+  if not parquet_files:
+    return b""
+
+  # Read all parquet files into PyArrow tables
+  tables = []
+  for pq_file in parquet_files:
+    try:
+      table = pq.read_table(pq_file)
+      tables.append(table)
+    except Exception:
+      # Skip corrupted files
+      continue
+
+  if not tables:
+    return b""
+
+  # Concatenate all tables
+  combined = pa.concat_tables(tables, promote_options="permissive")
+
+  # Write to bytes
+  buffer = BytesIO()
+  pq.write_table(combined, buffer)
+  return buffer.getvalue()
+
+
 @asset(
   group_name="sec_pipeline",
-  description="Process entire quarter's SEC filings as batch with daily consolidated output",
+  description="Process entire quarter's SEC filings with disk-buffered consolidation",
   kinds={"transform"},
   partitions_def=sec_quarter_partitions,
   metadata={
@@ -1089,7 +1196,7 @@ def _consolidate_parquet_tables_by_date(
   # Run all partitions sequentially in a single run to prevent memory exhaustion
   backfill_policy=BackfillPolicy.single_run(),
 )
-def sec_process_quarter(
+def sec_processed_filings(
   context: AssetExecutionContext,
   config: SECProcessConfig,
   s3: S3Resource,
@@ -1098,24 +1205,35 @@ def sec_process_quarter(
   """Process an entire quarter's worth of SEC filings.
 
   This asset processes all pending SourceFiles for a given quarter,
-  producing daily consolidated parquet files (one per table per filing date).
-  This approach scales better than per-filing processing because:
+  producing consolidated parquet files.
 
-  1. Consolidated output: Fewer, larger parquet files for faster DuckDB staging
-  2. Batch efficiency: One job per quarter instead of thousands per quarter
-  3. Parallelism: Multiple quarters can run in parallel (via DAGSTER_MAX_CONCURRENT_RUNS)
-  4. Fault tolerance: Individual filing failures tracked in SourceFile, job continues
-  5. Aligned with incremental: Same output structure for backfill and daily processing
+  Memory Management:
+  - Each filing's parquet output is written to local disk (not accumulated in memory)
+  - Periodically flushes to S3 based on flush_threshold
+  - SourceFiles only marked "success" after S3 upload completes
+  - If job crashes, only loses unflushed filings (not entire quarter)
 
-  Output structure (daily consolidated files):
-    s3://bucket/sec/processed/filed=2024-01-15/nodes/Entity.parquet
-    s3://bucket/sec/processed/filed=2024-01-15/nodes/Fact.parquet
-    s3://bucket/sec/processed/filed=2024-01-15/relationships/REPORT_HAS_FACT.parquet
-    ...
+  Output Structure (controlled by use_filing_date_partition config):
+  - Backfill mode (default, use_filing_date_partition=False):
+    s3://bucket/sec/processed/filed=2024-03-31/nodes/Entity/part-001.parquet
+    All filings in quarter → quarter-end date → large consolidated files
+  - Daily mode (use_filing_date_partition=True):
+    s3://bucket/sec/processed/filed=2024-01-15/nodes/Entity/part-001.parquet
+    Each filing → its actual filing date → consolidated per-date files
+
+  Benefits:
+  1. Memory bounded: Only one filing in memory at a time during processing
+  2. Crash resilient: Periodic flushes save progress
+  3. Backfill mode: Large consolidated files for efficient DuckDB ingest
+  4. Daily mode: Incremental staging can pick up new dates
 
   Returns:
       MaterializeResult with processing statistics
   """
+  import shutil
+  import tempfile
+  import time as time_module
+
   from sqlalchemy import and_
 
   raw_bucket = env.SHARED_RAW_BUCKET
@@ -1127,7 +1245,18 @@ def sec_process_quarter(
   year = int(year)
   quarter = int(quarter_str)
 
-  context.log.info(f"Processing SEC filings for {year}-Q{quarter}")
+  # Determine partition mode
+  use_daily = config.use_filing_date_partition
+  partition_mode = "daily" if use_daily else "quarterly"
+
+  # For quarterly mode, use end-of-quarter date as partition
+  # For daily mode, we'll use each filing's actual filing date
+  default_partition_date = _get_quarter_end_date(year, quarter)
+
+  context.log.info(
+    f"Processing SEC filings for {year}-Q{quarter} "
+    f"(partition_mode={partition_mode}, default={default_partition_date})"
+  )
 
   # Query pending SourceFiles for this quarter
   # Partition keys are stored as "YYYY-QN_cik_accession" format
@@ -1164,6 +1293,8 @@ def sec_process_quarter(
       metadata={
         "year": year,
         "quarter": quarter,
+        "partition_mode": partition_mode,
+        "default_partition_date": default_partition_date,
         "status": "no_pending_files",
         "filings_processed": 0,
         "filings_succeeded": 0,
@@ -1172,131 +1303,263 @@ def sec_process_quarter(
     )
 
   context.log.info(
-    f"Found {len(files_to_process)} pending filings for {year}-Q{quarter}"
+    f"Found {len(files_to_process)} pending filings for {year}-Q{quarter}, "
+    f"flush_threshold={config.flush_threshold}, partition_mode={partition_mode}"
   )
 
-  # Process each filing and collect results
-  results: list[ProcessedFilingResult] = []
+  # Create work directory for disk-buffered processing
+  work_dir = Path(tempfile.mkdtemp(prefix=f"sec_processing_{year}Q{quarter}_"))
+  context.log.info(f"Work directory: {work_dir}")
+
+  # Track processing state
   succeeded = 0
   failed = 0
   failed_ids: list[str] = []
-
-  import time as time_module
-
-  for i, file_info in enumerate(files_to_process):
-    source_file_id = file_info["id"]
-    storage_key = file_info["storage_key"]
-    file_partition_key = file_info["partition_key"]
-
-    # Log filing start
-    context.log.info(
-      f"[{i + 1}/{len(files_to_process)}] Processing: {file_partition_key}"
-    )
-    filing_start = time_module.time()
-
-    # Mark as processing
-    with db.get_session() as session:
-      sf = SourceFile.get_by_storage_key(storage_key, session)
-      if sf:
-        sf.mark_processing(session)
-
-    # Process filing
-    result = _process_single_filing_to_memory(
-      storage_key=storage_key,
-      partition_key=file_partition_key,
-      source_file_id=source_file_id,
-      s3_client=s3.client,
-      raw_bucket=raw_bucket,
-    )
-
-    results.append(result)
-    filing_duration = time_module.time() - filing_start
-
-    # Update SourceFile status and log result
-    with db.get_session() as session:
-      sf = SourceFile.get_by_storage_key(storage_key, session)
-      if sf:
-        if result.success:
-          sf.mark_success(session)
-          succeeded += 1
-          # Log success with table counts
-          table_summary = ", ".join(
-            f"{k.split('/')[-1]}:{len(v) // 1024}KB"
-            for k, v in sorted(result.tables.items())[:5]
-          )
-          if len(result.tables) > 5:
-            table_summary += f", +{len(result.tables) - 5} more"
-          context.log.info(
-            f"[{i + 1}/{len(files_to_process)}] Success: {file_partition_key} "
-            f"({filing_duration:.1f}s, {len(result.tables)} tables: {table_summary})"
-          )
-        else:
-          sf.mark_error(session, result.error or "Unknown error")
-          failed += 1
-          failed_ids.append(source_file_id)
-          context.log.warning(
-            f"[{i + 1}/{len(files_to_process)}] Failed: {file_partition_key} - {result.error}"
-          )
-
-          if not config.continue_on_error:
-            context.log.error(f"Stopping on error: {result.error}")
-            break
-
-    # Batch progress summary every 25 filings
-    if (i + 1) % 25 == 0:
-      context.log.info(
-        f"Batch progress: {i + 1}/{len(files_to_process)} "
-        f"({succeeded} succeeded, {failed} failed)"
-      )
-
-  # Consolidate successful results into daily parquet files (one per table per filing date)
-  context.log.info(f"Consolidating {succeeded} successful filings by filing date...")
-  successful_results = [r for r in results if r.success]
-  consolidated_by_date = _consolidate_parquet_tables_by_date(successful_results)
-
-  # Upload consolidated parquet files to S3, organized by filing date
-  # Output structure: filed=YYYY-MM-DD/nodes/Table.parquet
+  # Track pending filings with their filing dates for daily mode
+  pending_flush: list[dict] = []  # [{...file_info, "filing_date": "2024-01-15"}, ...]
+  total_flushed = 0
   files_uploaded = 0
-  filing_dates_output: list[str] = []
+  flush_number = 0  # Counter for part file naming
+  output_dates: set[str] = set()  # Track which dates received output
 
-  for filing_date, tables in sorted(consolidated_by_date.items()):
-    filing_dates_output.append(filing_date)
-    for table_key, parquet_bytes in tables.items():
-      # table_key is like "nodes/Entity" or "relationships/REPORT_HAS_FACT"
-      entity_type, table_name = table_key.split("/", 1)
-      s3_key = get_processed_key(
-        DataSourceType.SEC,
-        "processed",
-        f"filed={filing_date}",
-        entity_type,
-        f"{table_name}.parquet",
+  def flush_to_s3() -> int:
+    """Consolidate disk buffer and upload to S3, mark filings as success."""
+    nonlocal files_uploaded, total_flushed, flush_number
+
+    if not pending_flush:
+      return 0
+
+    flush_number += 1
+
+    if use_daily:
+      # Daily mode: group by filing_date and upload to respective partitions
+      # Disk structure: work_dir/{filing_date}/nodes/Entity/...
+      date_dirs = [d for d in work_dir.iterdir() if d.is_dir() and d.name.startswith("20")]
+      context.log.info(
+        f"Flush #{flush_number}: {len(pending_flush)} filings to {len(date_dirs)} dates..."
       )
 
-      s3.client.put_object(
-        Bucket=processed_bucket,
-        Key=s3_key,
-        Body=parquet_bytes,
-        ContentType="application/octet-stream",
-      )
-      files_uploaded += 1
-      context.log.debug(f"Uploaded: {s3_key} ({len(parquet_bytes):,} bytes)")
+      for date_dir in date_dirs:
+        partition_date = date_dir.name
+        output_dates.add(partition_date)
 
+        # Find table keys for this date
+        table_keys = set()
+        for pq_file in date_dir.rglob("*.parquet"):
+          rel_path = pq_file.relative_to(date_dir)
+          if len(rel_path.parts) >= 2:
+            table_key = f"{rel_path.parts[0]}/{rel_path.parts[1]}"
+            table_keys.add(table_key)
+
+        for table_key in sorted(table_keys):
+          parquet_bytes = _consolidate_parquet_from_disk(date_dir, table_key)
+          if not parquet_bytes:
+            continue
+
+          entity_type, table_name = table_key.split("/", 1)
+          part_filename = f"part-{flush_number:03d}.parquet"
+          s3_key = get_processed_key(
+            DataSourceType.SEC,
+            "processed",
+            f"filed={partition_date}",
+            entity_type,
+            table_name,
+            part_filename,
+          )
+
+          s3.client.put_object(
+            Bucket=processed_bucket,
+            Key=s3_key,
+            Body=parquet_bytes,
+            ContentType="application/octet-stream",
+          )
+          files_uploaded += 1
+          context.log.debug(f"Uploaded: {s3_key} ({len(parquet_bytes):,} bytes)")
+    else:
+      # Quarterly mode: all files go to default_partition_date
+      # Disk structure: work_dir/nodes/Entity/...
+      output_dates.add(default_partition_date)
+      context.log.info(
+        f"Flush #{flush_number}: {len(pending_flush)} filings to S3 "
+        f"(partition: filed={default_partition_date})..."
+      )
+
+      # Find all table directories in work_dir
+      table_keys = set()
+      for subdir in work_dir.rglob("*.parquet"):
+        rel_path = subdir.relative_to(work_dir)
+        if len(rel_path.parts) >= 2:
+          table_key = f"{rel_path.parts[0]}/{rel_path.parts[1]}"
+          table_keys.add(table_key)
+
+      for table_key in sorted(table_keys):
+        parquet_bytes = _consolidate_parquet_from_disk(work_dir, table_key)
+        if not parquet_bytes:
+          continue
+
+        entity_type, table_name = table_key.split("/", 1)
+        part_filename = f"part-{flush_number:03d}.parquet"
+        s3_key = get_processed_key(
+          DataSourceType.SEC,
+          "processed",
+          f"filed={default_partition_date}",
+          entity_type,
+          table_name,
+          part_filename,
+        )
+
+        s3.client.put_object(
+          Bucket=processed_bucket,
+          Key=s3_key,
+          Body=parquet_bytes,
+          ContentType="application/octet-stream",
+        )
+        files_uploaded += 1
+        context.log.debug(f"Uploaded: {s3_key} ({len(parquet_bytes):,} bytes)")
+
+    # Mark all pending filings as success (data is now safely in S3)
+    with db.get_session() as session:
+      for file_info in pending_flush:
+        sf = SourceFile.get_by_storage_key(file_info["storage_key"], session)
+        if sf:
+          sf.mark_success(session)
+
+    flushed_count = len(pending_flush)
+    total_flushed += flushed_count
+    context.log.info(
+      f"Flushed {flushed_count} filings, {files_uploaded} total parquet files uploaded"
+    )
+
+    # Clear disk buffer and pending list
+    for item in work_dir.iterdir():
+      if item.is_dir():
+        shutil.rmtree(item)
+      else:
+        item.unlink()
+    pending_flush.clear()
+
+    return flushed_count
+
+  # Process each filing
+  try:
+    for i, file_info in enumerate(files_to_process):
+      source_file_id = file_info["id"]
+      storage_key = file_info["storage_key"]
+      file_partition_key = file_info["partition_key"]
+
+      # Log filing start
+      context.log.info(
+        f"[{i + 1}/{len(files_to_process)}] Processing: {file_partition_key}"
+      )
+      filing_start = time_module.time()
+
+      # Mark as processing
+      with db.get_session() as session:
+        sf = SourceFile.get_by_storage_key(storage_key, session)
+        if sf:
+          sf.mark_processing(session)
+
+      # Process filing
+      result = _process_single_filing_to_memory(
+        storage_key=storage_key,
+        partition_key=file_partition_key,
+        source_file_id=source_file_id,
+        s3_client=s3.client,
+        raw_bucket=raw_bucket,
+      )
+
+      filing_duration = time_module.time() - filing_start
+
+      if result.success:
+        # Determine the base directory for this filing's output
+        # Daily mode: work_dir/{filing_date}/nodes/Entity/...
+        # Quarterly mode: work_dir/nodes/Entity/...
+        filing_date = result.filing_date or default_partition_date
+        if use_daily:
+          base_dir = work_dir / filing_date
+        else:
+          base_dir = work_dir
+
+        # Write parquet files to disk (not memory accumulation)
+        for table_key, parquet_bytes in result.tables.items():
+          table_dir = base_dir / table_key
+          table_dir.mkdir(parents=True, exist_ok=True)
+          parquet_path = table_dir / f"{source_file_id}.parquet"
+          parquet_path.write_bytes(parquet_bytes)
+
+        succeeded += 1
+        # Include filing_date for tracking
+        pending_flush.append({**file_info, "filing_date": filing_date})
+
+        # Log success with table counts
+        table_summary = ", ".join(
+          f"{k.split('/')[-1]}:{len(v) // 1024}KB"
+          for k, v in sorted(result.tables.items())[:5]
+        )
+        if len(result.tables) > 5:
+          table_summary += f", +{len(result.tables) - 5} more"
+        context.log.info(
+          f"[{i + 1}/{len(files_to_process)}] Written to disk: {file_partition_key} "
+          f"({filing_duration:.1f}s, {len(result.tables)} tables: {table_summary})"
+        )
+      else:
+        # Mark failed immediately
+        with db.get_session() as session:
+          sf = SourceFile.get_by_storage_key(storage_key, session)
+          if sf:
+            sf.mark_error(session, result.error or "Unknown error")
+        failed += 1
+        failed_ids.append(source_file_id)
+        context.log.warning(
+          f"[{i + 1}/{len(files_to_process)}] Failed: {file_partition_key} - {result.error}"
+        )
+
+        if not config.continue_on_error:
+          context.log.error(f"Stopping on error: {result.error}")
+          break
+
+      # Flush to S3 when threshold reached
+      if len(pending_flush) >= config.flush_threshold:
+        flush_to_s3()
+
+      # Batch progress summary every 100 filings
+      if (i + 1) % 100 == 0:
+        context.log.info(
+          f"Progress: {i + 1}/{len(files_to_process)} processed, "
+          f"{succeeded} succeeded, {failed} failed, {total_flushed} flushed to S3"
+        )
+
+    # Final flush for remaining filings
+    if pending_flush:
+      context.log.info(f"Final flush of {len(pending_flush)} remaining filings...")
+      flush_to_s3()
+
+  finally:
+    # Cleanup work directory
+    if work_dir.exists():
+      shutil.rmtree(work_dir)
+      context.log.debug(f"Cleaned up work directory: {work_dir}")
+
+  dates_summary = sorted(output_dates)
   context.log.info(
     f"Complete: {succeeded}/{len(files_to_process)} filings succeeded, "
-    f"{files_uploaded} parquet files uploaded across {len(filing_dates_output)} filing dates"
+    f"{files_uploaded} parquet files uploaded to {len(dates_summary)} partition(s)"
   )
 
   return MaterializeResult(
     metadata={
       "year": year,
       "quarter": quarter,
+      "partition_mode": partition_mode,
+      "output_dates": dates_summary,
       "status": "success" if failed == 0 else "partial",
       "filings_processed": len(files_to_process),
       "filings_succeeded": succeeded,
       "filings_failed": failed,
+      "filings_flushed": total_flushed,
       "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
-      "filing_dates_output": filing_dates_output,
       "parquet_files_uploaded": files_uploaded,
+      "flush_threshold": config.flush_threshold,
     }
   )
 

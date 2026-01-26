@@ -790,9 +790,10 @@ class XBRLDuckDBGraphProcessor:
     and lets DuckDB handle file discovery internally.
 
     Partition structure:
-      sec/processed/filed=YYYY-MM-DD/nodes/TABLE.parquet
-      - One consolidated file per table per filing date
-      - Works for both backfill and incremental daily staging
+      sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+      - Part files (part-001.parquet, part-002.parquet, etc.) per table per date
+      - Each flush during processing creates a new part file
+      - DuckDB reads all part files as a single dataset
 
     Args:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
@@ -809,8 +810,8 @@ class XBRLDuckDBGraphProcessor:
     skipped_tables: list[str] = []
 
     # Build partition patterns for glob
-    # Uses filed=YYYY-MM-DD partition structure with daily consolidated files
-    # Pattern: sec/processed/filed=YYYY-MM-DD/nodes/Table.parquet
+    # Uses filed=YYYY-MM-DD partition structure with part files
+    # Pattern: sec/processed/filed=YYYY-MM-DD/nodes/Table/*.parquet
     if filing_date:
       # Exact date for incremental staging
       filed_pattern = f"filed={filing_date}"
@@ -829,11 +830,12 @@ class XBRLDuckDBGraphProcessor:
 
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
-      # Build glob pattern for daily consolidated output:
-      # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
+      # Build glob pattern for part file output structure:
+      # s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
+      # Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
+        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
       )
 
       # Get appropriate timeout for this table (large tables get extended timeout)
@@ -953,10 +955,11 @@ class XBRLDuckDBGraphProcessor:
     CREATE TABLE, it uses INSERT INTO to append new data to existing tables.
 
     Used for incremental daily staging after the initial full staging has been done.
-    Each filing date has one consolidated file per table.
+    Each filing date may have multiple part files per table.
 
     Partition structure:
-      sec/processed/filed=YYYY-MM-DD/nodes/TABLE.parquet
+      sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+      Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
 
     Args:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
@@ -993,11 +996,12 @@ class XBRLDuckDBGraphProcessor:
 
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
-      # Build glob pattern for daily consolidated output:
-      # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
+      # Build glob pattern for part file output structure:
+      # s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
+      # Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
+        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
       )
 
       # Get appropriate timeout for this table (large tables get extended timeout)

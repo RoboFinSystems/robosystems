@@ -148,17 +148,38 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     f"Quarters: {sorted(quarters_with_pending)}"
   )
 
+  # Determine current quarter for partition mode selection
+  now = datetime.now(UTC)
+  current_quarter = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
+  context.log.info(f"Current quarter: {current_quarter} (will use daily partitioning)")
+
   # Yield RunRequest for each quarter with pending files
   for quarter in sorted(quarters_with_pending):
     run_key = f"sec-quarter-{quarter}"
 
+    # Use daily partitioning for current quarter (incremental processing)
+    # Use quarterly partitioning for historical quarters (backfill)
+    use_daily = quarter == current_quarter
+    mode = "daily" if use_daily else "quarterly"
+    context.log.info(f"Triggering {quarter} with {mode} partitioning")
+
     yield RunRequest(
       run_key=run_key,
       partition_key=quarter,  # Use Dagster's partition system
+      run_config={
+        "ops": {
+          "sec_processed_filings": {
+            "config": {
+              "use_filing_date_partition": use_daily,
+            }
+          }
+        }
+      },
       tags={
         "quarter": quarter,
         "pipeline": "sec",
         "phase": "process",
+        "partition_mode": mode,
       },
     )
 
