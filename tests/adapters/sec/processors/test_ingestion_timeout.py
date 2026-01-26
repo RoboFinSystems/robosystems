@@ -25,8 +25,11 @@ class TestStagingTimeoutConfiguration:
       "Label",
       "Element",
       "FactDimension",
+      "Association",
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
+      "ELEMENT_HAS_LABEL",
+      "TAXONOMY_HAS_LABEL",
     }
     assert expected_tables == LARGE_STAGING_TABLES
 
@@ -45,8 +48,11 @@ class TestGetStagingTimeout:
       "Label",
       "Element",
       "FactDimension",
+      "Association",
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
+      "ELEMENT_HAS_LABEL",
+      "TAXONOMY_HAS_LABEL",
     ],
   )
   def test_large_tables_get_extended_timeout(self, table_name: str):
