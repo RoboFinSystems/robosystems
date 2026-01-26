@@ -857,7 +857,6 @@ def _process_single_filing_to_memory(
   source_file_id: str,
   s3_client,
   raw_bucket: str,
-  log_fn=None,
 ) -> ProcessedFilingResult:
   """Process a single filing and return parquet data in memory.
 
@@ -873,7 +872,6 @@ def _process_single_filing_to_memory(
       source_file_id: SourceFile ID for tracking
       s3_client: boto3 S3 client
       raw_bucket: S3 bucket for raw files
-      log_fn: Optional logging function
 
   Returns:
       ProcessedFilingResult with parquet data or error
@@ -884,10 +882,6 @@ def _process_single_filing_to_memory(
   from io import BytesIO
 
   from robosystems.adapters.sec import SEC_BASE_URL, XBRLGraphProcessor
-
-  def log(msg):
-    if log_fn:
-      log_fn(msg)
 
   # Parse partition key to get year, cik, accession
   parts = partition_key.split("_", 2)
@@ -1187,10 +1181,18 @@ def sec_process_quarter(
   failed = 0
   failed_ids: list[str] = []
 
+  import time as time_module
+
   for i, file_info in enumerate(files_to_process):
     source_file_id = file_info["id"]
     storage_key = file_info["storage_key"]
     file_partition_key = file_info["partition_key"]
+
+    # Log filing start
+    context.log.info(
+      f"[{i + 1}/{len(files_to_process)}] Processing: {file_partition_key}"
+    )
+    filing_start = time_module.time()
 
     # Mark as processing
     with db.get_session() as session:
@@ -1205,31 +1207,45 @@ def sec_process_quarter(
       source_file_id=source_file_id,
       s3_client=s3.client,
       raw_bucket=raw_bucket,
-      log_fn=lambda msg: context.log.debug(msg),
     )
 
     results.append(result)
+    filing_duration = time_module.time() - filing_start
 
-    # Update SourceFile status
+    # Update SourceFile status and log result
     with db.get_session() as session:
       sf = SourceFile.get_by_storage_key(storage_key, session)
       if sf:
         if result.success:
           sf.mark_success(session)
           succeeded += 1
+          # Log success with table counts
+          table_summary = ", ".join(
+            f"{k.split('/')[-1]}:{len(v) // 1024}KB"
+            for k, v in sorted(result.tables.items())[:5]
+          )
+          if len(result.tables) > 5:
+            table_summary += f", +{len(result.tables) - 5} more"
+          context.log.info(
+            f"[{i + 1}/{len(files_to_process)}] Success: {file_partition_key} "
+            f"({filing_duration:.1f}s, {len(result.tables)} tables: {table_summary})"
+          )
         else:
           sf.mark_error(session, result.error or "Unknown error")
           failed += 1
           failed_ids.append(source_file_id)
+          context.log.warning(
+            f"[{i + 1}/{len(files_to_process)}] Failed: {file_partition_key} - {result.error}"
+          )
 
           if not config.continue_on_error:
             context.log.error(f"Stopping on error: {result.error}")
             break
 
-    # Progress logging
-    if (i + 1) % 50 == 0 or (i + 1) == len(files_to_process):
+    # Batch progress summary every 25 filings
+    if (i + 1) % 25 == 0:
       context.log.info(
-        f"Progress: {i + 1}/{len(files_to_process)} "
+        f"Batch progress: {i + 1}/{len(files_to_process)} "
         f"({succeeded} succeeded, {failed} failed)"
       )
 
@@ -1351,6 +1367,10 @@ def sec_duckdb_staged(
 
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
+  # Progress callback for Dagster logging (visible in Dagster UI)
+  def dagster_progress(msg: str) -> None:
+    context.log.info(msg)
+
   async def run_staging():
     if not is_incremental:
       # Full mode: ensure repository exists
@@ -1362,13 +1382,14 @@ def sec_duckdb_staged(
       )
       context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
 
-    # Run staging with appropriate parameters
+    # Run staging with appropriate parameters and progress callback
     result = await processor.stage_to_duckdb(
       rebuild=False if is_incremental else config.rebuild_graph,
       year=None if is_incremental else config.year,
       reset_staging=False if is_incremental else config.reset_staging,
       filing_date=config.filing_date if is_incremental else None,
       incremental=is_incremental,
+      progress_callback=dagster_progress,
     )
     return result
 
@@ -1463,8 +1484,15 @@ def sec_graph_materialized(
 
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
+  # Progress callback for Dagster logging (visible in Dagster UI)
+  def dagster_progress(msg: str) -> None:
+    context.log.info(msg)
+
   async def run_materialization():
-    result = await processor.materialize_from_duckdb(rebuild=config.rebuild_graph)
+    result = await processor.materialize_from_duckdb(
+      rebuild=config.rebuild_graph,
+      progress_callback=dagster_progress,
+    )
     return result
 
   result = asyncio.run(run_materialization())

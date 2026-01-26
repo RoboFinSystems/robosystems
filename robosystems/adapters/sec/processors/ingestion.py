@@ -36,6 +36,7 @@ Status: Production - enables independent retry of failed materialization.
 """
 
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -52,6 +53,10 @@ from robosystems.graph_api.client.factory import get_graph_client
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.schemas.extensions.roboledger import RoboLedgerContext
+
+# Progress callback type for Dagster logging integration
+# Accepts a message string, called during staging/materialization for per-table progress
+ProgressCallback = Callable[[str], None]
 
 # Table-specific timeouts for DuckDB staging (seconds)
 # Large tables with millions of rows need extended timeouts
@@ -120,6 +125,7 @@ class XBRLDuckDBGraphProcessor:
     reset_staging: bool = False,
     use_glob: bool = True,
     incremental: bool = False,
+    progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
     Stage processed Parquet files to persistent DuckDB.
@@ -150,11 +156,19 @@ class XBRLDuckDBGraphProcessor:
             If False, use explicit file lists (legacy behavior, slower for many files).
         incremental: If True, append to existing tables instead of recreating them.
             Default: False.
+        progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
+            Called with message strings during per-table staging operations.
 
     Returns:
         StagingResult with table counts and file counts
     """
     start_time = time.time()
+
+    # Helper to log both to logger and optional callback (Dagster)
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
 
     # Determine date filter for logging
     date_filter = filing_date or (f"{year}-*" if year else "all")
@@ -244,21 +258,31 @@ class XBRLDuckDBGraphProcessor:
       # Step 3: Create or append to DuckDB staging tables via Graph API
       if incremental and use_glob:
         # Incremental mode: INSERT INTO existing tables
-        logger.info("Step 3: Inserting into DuckDB staging tables (incremental)...")
+        log_progress("Step 3: Inserting into DuckDB staging tables (incremental)...")
         (
           successful_tables,
           table_infos,
         ) = await self._insert_into_duckdb_tables_with_glob(
-          tables_by_type, client, year=year, filing_date=filing_date
+          tables_by_type,
+          client,
+          year=year,
+          filing_date=filing_date,
+          progress_callback=log_progress,
         )
       elif use_glob:
         # Full mode: CREATE TABLE
-        logger.info("Step 3: Creating DuckDB staging tables via glob patterns...")
+        log_progress(f"Step 3: Creating {len(tables_by_type)} DuckDB staging tables...")
         successful_tables, table_infos = await self._create_duckdb_tables_with_glob(
-          tables_by_type, client, year=year, filing_date=filing_date
+          tables_by_type,
+          client,
+          year=year,
+          filing_date=filing_date,
+          progress_callback=log_progress,
         )
       else:
-        logger.info("Step 3: Creating DuckDB staging tables via file lists (legacy)...")
+        log_progress(
+          "Step 3: Creating DuckDB staging tables via file lists (legacy)..."
+        )
         successful_tables, table_infos = await self._create_duckdb_tables_with_info(
           tables_info, client
         )
@@ -315,6 +339,7 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_names: list[str] | None = None,
     rebuild: bool = False,
+    progress_callback: ProgressCallback | None = None,
   ) -> MaterializeResult:
     """
     Materialize LadybugDB graph from existing DuckDB staging.
@@ -336,13 +361,21 @@ class XBRLDuckDBGraphProcessor:
         rebuild: If True, delete and recreate the LadybugDB database with
                  the roboledger SEC schema before materializing.
                  DuckDB staging is preserved for retry scenarios.
+        progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
+            Called with message strings during per-table materialization.
 
     Returns:
         MaterializeResult with rows ingested per table
     """
     start_time = time.time()
 
-    logger.info(f"Starting materialization from DuckDB for graph {self.graph_id}")
+    # Helper to log both to logger and optional callback (Dagster)
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
+
+    log_progress(f"Starting materialization from DuckDB for graph {self.graph_id}")
 
     try:
       # Step 1: Determine which tables to materialize (schema-driven)
@@ -404,16 +437,16 @@ class XBRLDuckDBGraphProcessor:
         logger.info(f"Repository ensure result: {repo_result.get('status', 'unknown')}")
 
       # Step 4: Trigger ingestion for each table
-      logger.info("Step 4: Triggering graph ingestion...")
+      log_progress(f"Step 4: Materializing {len(table_names)} tables to LadybugDB...")
       ingestion_results = await self._trigger_ingestion(
-        table_names, client, rebuild=False
+        table_names, client, rebuild=False, progress_callback=log_progress
       )
 
       duration = time.time() - start_time
 
-      logger.info(
+      log_progress(
         f"Materialization complete in {duration:.2f}s: "
-        f"{ingestion_results.get('total_rows_ingested', 0)} rows ingested"
+        f"{ingestion_results.get('total_rows_ingested', 0):,} rows ingested"
       )
       return MaterializeResult(
         status="success",
@@ -748,6 +781,7 @@ class XBRLDuckDBGraphProcessor:
     graph_client,
     year: int | None = None,
     filing_date: str | None = None,
+    progress_callback: ProgressCallback | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables using glob patterns (efficient for many files).
@@ -787,7 +821,14 @@ class XBRLDuckDBGraphProcessor:
       # All dates for full staging
       filed_pattern = "filed=*"
 
-    for table_name, entity_type in tables.items():
+    # Helper for progress logging (both logger and optional callback)
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
+
+    total_tables = len(tables)
+    for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       # Build glob pattern for daily consolidated output:
       # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
       s3_pattern = (
@@ -797,8 +838,10 @@ class XBRLDuckDBGraphProcessor:
 
       # Get appropriate timeout for this table (large tables get extended timeout)
       timeout = _get_staging_timeout(table_name)
-      logger.info(
-        f"Creating DuckDB table: {table_name} (glob: {s3_pattern}, timeout={timeout}s)"
+      is_large = table_name in LARGE_STAGING_TABLES
+      size_hint = " (large table)" if is_large else ""
+      log_progress(
+        f"[{i}/{total_tables}] Staging {table_name}{size_hint} (timeout={timeout}s)..."
       )
 
       try:
@@ -816,7 +859,9 @@ class XBRLDuckDBGraphProcessor:
           error = response.get("error", "Unknown error")
           # "No files found" is expected for optional tables (e.g., ENTITY_EVOLVED_FROM)
           if "No files found" in error:
-            logger.info(f"Skipped {table_name}: no files found (optional table)")
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
+            )
             skipped_tables.append(table_name)
             successful_tables.append(table_name)
             table_infos[table_name] = TableInfo(
@@ -827,6 +872,8 @@ class XBRLDuckDBGraphProcessor:
             )
             continue
           logger.error(f"Failed to create DuckDB table {table_name}: {error}")
+          if progress_callback:
+            progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
           failed_tables.append((table_name, error))
           continue
 
@@ -835,7 +882,9 @@ class XBRLDuckDBGraphProcessor:
         duration = response.get("duration_seconds", result.get("duration_seconds", 0))
         row_count = result.get("row_count", 0)
 
-        logger.info(f"Staged {table_name}: {row_count:,} rows in {duration:.1f}s")
+        log_progress(
+          f"[{i}/{total_tables}] Staged {table_name}: {row_count:,} rows in {duration:.1f}s"
+        )
 
         successful_tables.append(table_name)
         table_infos[table_name] = TableInfo(
@@ -849,7 +898,9 @@ class XBRLDuckDBGraphProcessor:
         error_str = str(e)
         # Also handle "No files found" from exceptions
         if "No files found" in error_str:
-          logger.info(f"Skipped {table_name}: no files found (optional table)")
+          log_progress(
+            f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
+          )
           skipped_tables.append(table_name)
           successful_tables.append(table_name)
           table_infos[table_name] = TableInfo(
@@ -860,6 +911,8 @@ class XBRLDuckDBGraphProcessor:
           )
           continue
         logger.error(f"Failed to create DuckDB table {table_name}: {e}")
+        if progress_callback:
+          progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {e}")
         failed_tables.append((table_name, error_str))
         continue
 
@@ -891,6 +944,7 @@ class XBRLDuckDBGraphProcessor:
     graph_client,
     year: int | None = None,
     filing_date: str | None = None,
+    progress_callback: ProgressCallback | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Insert into existing DuckDB staging tables using glob patterns (incremental append).
@@ -909,6 +963,7 @@ class XBRLDuckDBGraphProcessor:
         graph_client: Graph API client instance
         year: Optional year filter. If provided, uses filed=YYYY-* pattern.
         filing_date: Optional exact date filter (YYYY-MM-DD). Uses filed= pattern.
+        progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info)
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
@@ -917,6 +972,12 @@ class XBRLDuckDBGraphProcessor:
     table_infos: dict[str, TableInfo] = {}
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
+
+    # Helper for progress logging (both logger and optional callback)
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
 
     # Build partition patterns for glob
     # Uses filed=YYYY-MM-DD partition structure with daily consolidated files
@@ -930,7 +991,8 @@ class XBRLDuckDBGraphProcessor:
       # All dates for full staging
       filed_pattern = "filed=*"
 
-    for table_name, entity_type in tables.items():
+    total_tables = len(tables)
+    for i, (table_name, entity_type) in enumerate(tables.items(), 1):
       # Build glob pattern for daily consolidated output:
       # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
       s3_pattern = (
@@ -940,8 +1002,10 @@ class XBRLDuckDBGraphProcessor:
 
       # Get appropriate timeout for this table (large tables get extended timeout)
       timeout = _get_staging_timeout(table_name)
-      logger.info(
-        f"Inserting into DuckDB table: {table_name} (glob: {s3_pattern}, timeout={timeout}s)"
+      is_large = table_name in LARGE_STAGING_TABLES
+      size_hint = " (large table)" if is_large else ""
+      log_progress(
+        f"[{i}/{total_tables}] Inserting {table_name}{size_hint} (timeout={timeout}s)..."
       )
 
       try:
@@ -958,7 +1022,9 @@ class XBRLDuckDBGraphProcessor:
           error = response.get("error", "Unknown error")
           # "No files found" is expected for optional tables
           if "No files found" in error:
-            logger.info(f"Skipped {table_name}: no files found (optional table)")
+            log_progress(
+              f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
+            )
             skipped_tables.append(table_name)
             successful_tables.append(table_name)
             table_infos[table_name] = TableInfo(
@@ -969,6 +1035,8 @@ class XBRLDuckDBGraphProcessor:
             )
             continue
           logger.error(f"Failed to insert into DuckDB table {table_name}: {error}")
+          if progress_callback:
+            progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
           failed_tables.append((table_name, error))
           continue
 
@@ -977,8 +1045,8 @@ class XBRLDuckDBGraphProcessor:
         duration = response.get("duration_seconds", result.get("duration_seconds", 0))
         row_count = result.get("row_count", 0)
 
-        logger.info(
-          f"Appended to {table_name}: {row_count:,} rows total in {duration:.1f}s"
+        log_progress(
+          f"[{i}/{total_tables}] Appended {table_name}: {row_count:,} rows in {duration:.1f}s"
         )
 
         successful_tables.append(table_name)
@@ -993,7 +1061,9 @@ class XBRLDuckDBGraphProcessor:
         error_str = str(e)
         # Also handle "No files found" from exceptions
         if "No files found" in error_str:
-          logger.info(f"Skipped {table_name}: no files found (optional table)")
+          log_progress(
+            f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
+          )
           skipped_tables.append(table_name)
           successful_tables.append(table_name)
           table_infos[table_name] = TableInfo(
@@ -1004,6 +1074,8 @@ class XBRLDuckDBGraphProcessor:
           )
           continue
         logger.error(f"Failed to insert into DuckDB table {table_name}: {e}")
+        if progress_callback:
+          progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {e}")
         failed_tables.append((table_name, error_str))
         continue
 
@@ -1203,7 +1275,8 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_names: list[str],
     graph_client,
-    rebuild: bool = False,
+    rebuild: bool = False,  # Kept for API compatibility
+    progress_callback: ProgressCallback | None = None,
   ) -> dict[str, Any]:
     """
     Trigger ingestion for all tables into LadybugDB graph via Graph API.
@@ -1212,16 +1285,27 @@ class XBRLDuckDBGraphProcessor:
         table_names: List of table names to ingest
         graph_client: Graph API client instance
         rebuild: Ignored - rebuild is now handled in process_files before table creation
+        progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info)
 
     Returns:
         Ingestion results with statistics
     """
+
+    # Helper for progress logging
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
+
     total_rows = 0
     total_time_ms = 0.0
     results = []
+    total_tables = len(table_names)
 
-    for table_name in table_names:
-      logger.info(f"Materializing table: {table_name}")
+    for i, table_name in enumerate(table_names, 1):
+      is_large = table_name in LARGE_STAGING_TABLES
+      size_hint = " (large table)" if is_large else ""
+      log_progress(f"[{i}/{total_tables}] Materializing {table_name}{size_hint}...")
 
       try:
         response = await graph_client.materialize_table(
@@ -1230,25 +1314,28 @@ class XBRLDuckDBGraphProcessor:
           ignore_errors=True,
         )
 
-        total_rows += response.get("rows_ingested", 0)
-        total_time_ms += response.get("execution_time_ms", 0)
+        rows_ingested = response.get("rows_ingested", 0)
+        exec_time_ms = response.get("execution_time_ms", 0)
+        total_rows += rows_ingested
+        total_time_ms += exec_time_ms
 
         results.append(
           {
             "table_name": table_name,
-            "rows_ingested": response.get("rows_ingested", 0),
+            "rows_ingested": rows_ingested,
             "status": response.get("status", "success"),
           }
         )
 
-        logger.info(
-          f"✓ Materialized {table_name}: "
-          f"{response.get('rows_ingested', 0)} rows in "
-          f"{response.get('execution_time_ms', 0):.2f}ms"
+        log_progress(
+          f"[{i}/{total_tables}] Materialized {table_name}: "
+          f"{rows_ingested:,} rows in {exec_time_ms:.0f}ms"
         )
 
       except Exception as e:
         logger.error(f"Failed to materialize table {table_name}: {e}")
+        if progress_callback:
+          progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {e}")
         results.append(
           {
             "table_name": table_name,
