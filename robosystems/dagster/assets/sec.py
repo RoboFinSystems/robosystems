@@ -6,9 +6,11 @@ Pipeline stages (run independently via separate jobs):
    - sec_raw_filings - Discover via EFTS, download XBRL ZIPs (quarterly partitions)
    - Creates SourceFile records in PostgreSQL for processing tracking
 
-2. PROCESS (sec_process job, sensor-triggered):
-   - sec_process_filings - Process pending filings from SourceFile queue (batch)
-   - Replaces per-filing partitions to eliminate 100k+ partition scaling issues
+2. PROCESS (sec_process job, quarterly partitions):
+   - sec_process_quarter - Process entire quarter's filings as batch
+   - Outputs consolidated parquet files (one per table per quarter)
+   - Individual failures tracked in SourceFile; job continues processing
+   - Parallel across quarters via DAGSTER_MAX_CONCURRENT_RUNS
 
 3. MATERIALIZE (two-stage pipeline):
    - sec_stage job: sec_duckdb_staged - Stage processed files to persistent DuckDB
@@ -24,12 +26,13 @@ The pipeline leverages existing adapters:
 
 Architecture Notes:
 - EFTS-based O(1) discovery replaces per-company iteration
-- Quarterly partitioning for downloads (to stay under EFTS 10k limit)
+- Quarterly partitioning for downloads AND processing
 - SourceFile table tracks processing state (pending/processing/success/error)
-- Batch processing with single-active-job constraint via sensor
+- Consolidated parquet output for efficient DuckDB staging
 - Graph materialization always rebuilds from all processed data
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from dagster import (
@@ -279,14 +282,23 @@ class SECDownloadConfig(Config):
 
 
 class SECProcessConfig(Config):
-  """Configuration for single filing processing.
+  """Configuration for batch filing processing by quarter.
 
-  Each Dagster run processes one filing, allowing parallel execution
-  across multiple ECS containers. The sensor discovers pending files
-  from SourceFile and triggers individual runs.
+  Each Dagster run processes an entire quarter's worth of filings,
+  outputting consolidated parquet files. Parallel execution is achieved
+  by running multiple quarters concurrently (controlled by DAGSTER_MAX_CONCURRENT_RUNS).
+
+  Individual filing failures are tracked in SourceFile records,
+  but the job continues processing remaining filings.
   """
 
-  source_file_id: str  # SourceFile ID to process (required)
+  # Max filings to process per quarter (0 = unlimited)
+  # Useful for testing or incremental processing
+  max_filings: int = 0
+
+  # Continue processing even if some filings fail
+  # If False, job fails on first error (for debugging)
+  continue_on_error: bool = True
 
 
 class SECStageConfig(Config):
@@ -642,7 +654,8 @@ def sec_raw_filings(
           head_response = s3.client.head_object(Bucket=bucket, Key=s3_key)
           skipped += 1
           # Track for SourceFile creation (existing file)
-          partition_key = f"{year}_{hit.cik}_{hit.accession_number}"
+          # Include quarter in partition_key for accurate batch processing
+          partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession_number}"
           source_file_records.append(
             {
               "storage_key": s3_key,
@@ -701,7 +714,8 @@ def sec_raw_filings(
         )
         downloaded += 1
         # Track for SourceFile creation (newly downloaded)
-        partition_key = f"{year}_{hit.cik}_{hit.accession_number}"
+        # Include quarter in partition_key for accurate batch processing
+        partition_key = f"{year}-Q{quarter}_{hit.cik}_{hit.accession_number}"
         source_file_records.append(
           {
             "storage_key": s3_key,
@@ -825,28 +839,44 @@ def sec_raw_filings(
 # ============================================================================
 
 
-def _process_single_filing(
-  context: AssetExecutionContext,
+@dataclass
+class ProcessedFilingResult:
+  """Result from processing a single filing."""
+
+  success: bool
+  source_file_id: str
+  partition_key: str
+  tables: dict[str, bytes]  # table_name -> parquet bytes
+  filing_date: str | None = None  # YYYY-MM-DD from SEC metadata
+  error: str | None = None
+
+
+def _process_single_filing_to_memory(
   storage_key: str,
   partition_key: str,
-  s3: S3Resource,
-  db: DatabaseResource,
+  source_file_id: str,
+  s3_client,
   raw_bucket: str,
-  processed_bucket: str,
-) -> tuple[bool, int, str | None]:
-  """Process a single filing from SourceFile.
+  log_fn=None,
+) -> ProcessedFilingResult:
+  """Process a single filing and return parquet data in memory.
+
+  This function processes a filing but does NOT write to S3 or update SourceFile status.
+  The caller is responsible for:
+  - Consolidating results from multiple filings
+  - Writing consolidated parquet files
+  - Updating SourceFile status
 
   Args:
-      context: Dagster execution context
       storage_key: S3 key of the raw file
       partition_key: Partition key (year_cik_accession)
-      s3: S3 resource
-      db: Database resource
+      source_file_id: SourceFile ID for tracking
+      s3_client: boto3 S3 client
       raw_bucket: S3 bucket for raw files
-      processed_bucket: S3 bucket for processed files
+      log_fn: Optional logging function
 
   Returns:
-      Tuple of (success, files_uploaded, error_reason)
+      ProcessedFilingResult with parquet data or error
   """
   import os
   import tempfile
@@ -855,31 +885,36 @@ def _process_single_filing(
 
   from robosystems.adapters.sec import SEC_BASE_URL, XBRLGraphProcessor
 
+  def log(msg):
+    if log_fn:
+      log_fn(msg)
+
   # Parse partition key to get year, cik, accession
   parts = partition_key.split("_", 2)
   if len(parts) != 3:
-    return False, 0, f"Invalid partition key: {partition_key}"
+    return ProcessedFilingResult(
+      success=False,
+      source_file_id=source_file_id,
+      partition_key=partition_key,
+      tables={},
+      error=f"Invalid partition key: {partition_key}",
+    )
 
   year, cik, accession = parts
-
-  # Mark as processing
-  with db.get_session() as session:
-    sf = SourceFile.get_by_storage_key(storage_key, session)
-    if sf:
-      sf.mark_processing(session)
 
   # Download raw ZIP
   try:
     buffer = BytesIO()
-    s3.client.download_fileobj(raw_bucket, storage_key, buffer)
+    s3_client.download_fileobj(raw_bucket, storage_key, buffer)
     buffer.seek(0)
   except Exception as e:
-    error = f"Download failed: {e}"
-    with db.get_session() as session:
-      sf = SourceFile.get_by_storage_key(storage_key, session)
-      if sf:
-        sf.mark_error(session, error)
-    return False, 0, error
+    return ProcessedFilingResult(
+      success=False,
+      source_file_id=source_file_id,
+      partition_key=partition_key,
+      tables={},
+      error=f"Download failed: {e}",
+    )
 
   # Extract and process
   try:
@@ -907,12 +942,13 @@ def _process_single_filing(
         )
 
       if not xbrl_files:
-        error = "No XBRL files found"
-        with db.get_session() as session:
-          sf = SourceFile.get_by_storage_key(storage_key, session)
-          if sf:
-            sf.mark_error(session, error)
-        return False, 0, error
+        return ProcessedFilingResult(
+          success=False,
+          source_file_id=source_file_id,
+          partition_key=partition_key,
+          tables={},
+          error="No XBRL files found",
+        )
 
       # Build report URL
       cik_int = int(cik)
@@ -931,7 +967,7 @@ def _process_single_filing(
 
       # Fetch full SEC metadata from S3 snapshot
       sec_filer, sec_report = _get_sec_metadata(
-        cik, accession, s3_client=s3.client, bucket=raw_bucket
+        cik, accession, s3_client=s3_client, bucket=raw_bucket
       )
       if not sec_report.get("primaryDocument"):
         sec_report["primaryDocument"] = xbrl_files[0]
@@ -949,9 +985,11 @@ def _process_single_filing(
 
       processor.process()
 
-      # Upload parquet files to S3
-      filing_date = sec_report.get("filingDate", "unknown")
-      files_uploaded = 0
+      # Extract filing date from SEC metadata for output partitioning
+      filing_date = sec_report.get("filingDate")
+
+      # Collect parquet files as bytes (don't write to S3 yet)
+      tables: dict[str, bytes] = {}
 
       for entity_type in ["nodes", "relationships"]:
         entity_dir = os.path.join(tmpdir, entity_type)
@@ -960,118 +998,291 @@ def _process_single_filing(
             if parquet_file.endswith(".parquet"):
               local_path = os.path.join(entity_dir, parquet_file)
               table_name = parquet_file.replace(".parquet", "")
-              s3_key = get_processed_key(
-                DataSourceType.SEC,
-                "processed",
-                f"filed={filing_date}",
-                entity_type,
-                table_name,
-                f"{cik}_{accession}.parquet",
-              )
-
+              # Key format: "nodes/TableName" or "relationships/RelName"
+              key = f"{entity_type}/{table_name}"
               with open(local_path, "rb") as f:
-                s3.client.upload_fileobj(f, processed_bucket, s3_key)
-              files_uploaded += 1
+                tables[key] = f.read()
 
-      # Mark success
-      with db.get_session() as session:
-        sf = SourceFile.get_by_storage_key(storage_key, session)
-        if sf:
-          sf.mark_success(session)
-
-      return True, files_uploaded, None
+      return ProcessedFilingResult(
+        success=True,
+        source_file_id=source_file_id,
+        partition_key=partition_key,
+        tables=tables,
+        filing_date=filing_date,
+        error=None,
+      )
 
   except Exception as e:
-    error = str(e)
-    with db.get_session() as session:
-      sf = SourceFile.get_by_storage_key(storage_key, session)
-      if sf:
-        sf.mark_error(session, error)
-    return False, 0, error
+    return ProcessedFilingResult(
+      success=False,
+      source_file_id=source_file_id,
+      partition_key=partition_key,
+      tables={},
+      filing_date=None,
+      error=str(e),
+    )
+
+
+def _consolidate_parquet_tables_by_date(
+  results: list[ProcessedFilingResult],
+) -> dict[str, dict[str, bytes]]:
+  """Consolidate parquet tables from multiple filing results, grouped by filing date.
+
+  Takes a list of ProcessedFilingResult objects and merges all tables
+  of the same type into single consolidated parquet files, organized by filing date.
+
+  Args:
+      results: List of successful ProcessedFilingResult objects
+
+  Returns:
+      Dict mapping filing_date -> table_key -> consolidated parquet bytes
+      Example: {"2024-01-15": {"nodes/Entity": bytes, "nodes/Fact": bytes, ...}}
+  """
+  from io import BytesIO
+
+  import pyarrow as pa
+  import pyarrow.parquet as pq
+
+  # Group results by filing date, then by table type
+  # Structure: {filing_date: {table_key: [pa.Table, ...]}}
+  tables_by_date_and_key: dict[str, dict[str, list[pa.Table]]] = {}
+
+  for result in results:
+    if not result.success:
+      continue
+
+    # Use filing_date from SEC metadata, fallback to "unknown" if missing
+    filing_date = result.filing_date or "unknown"
+
+    if filing_date not in tables_by_date_and_key:
+      tables_by_date_and_key[filing_date] = {}
+
+    for key, parquet_bytes in result.tables.items():
+      if key not in tables_by_date_and_key[filing_date]:
+        tables_by_date_and_key[filing_date][key] = []
+      # Read parquet bytes into PyArrow table
+      reader = pq.ParquetFile(BytesIO(parquet_bytes))
+      table = reader.read()
+      tables_by_date_and_key[filing_date][key].append(table)
+
+  # Consolidate each table type for each filing date
+  consolidated: dict[str, dict[str, bytes]] = {}
+
+  for filing_date, tables_by_key in tables_by_date_and_key.items():
+    consolidated[filing_date] = {}
+    for key, tables in tables_by_key.items():
+      if not tables:
+        continue
+      # Concatenate all tables of this type for this date
+      combined = pa.concat_tables(tables, promote_options="permissive")
+      # Write to bytes
+      buffer = BytesIO()
+      pq.write_table(combined, buffer)
+      consolidated[filing_date][key] = buffer.getvalue()
+
+  return consolidated
 
 
 @asset(
   group_name="sec_pipeline",
-  description="Process a single SEC filing from SourceFile queue",
+  description="Process entire quarter's SEC filings as batch with daily consolidated output",
   kinds={"transform"},
+  partitions_def=sec_quarter_partitions,
   metadata={
     "pipeline": "sec",
     "stage": "processing",
   },
+  # Run all partitions sequentially in a single run to prevent memory exhaustion
+  backfill_policy=BackfillPolicy.single_run(),
 )
-def sec_process_filing(
+def sec_process_quarter(
   context: AssetExecutionContext,
   config: SECProcessConfig,
   s3: S3Resource,
   db: DatabaseResource,
 ) -> MaterializeResult:
-  """Process a single SEC filing.
+  """Process an entire quarter's worth of SEC filings.
 
-  Takes a source_file_id from config, looks up the SourceFile record,
-  and processes it to parquet output. Each run processes exactly one filing,
-  allowing parallel execution across multiple ECS containers.
+  This asset processes all pending SourceFiles for a given quarter,
+  producing daily consolidated parquet files (one per table per filing date).
+  This approach scales better than per-filing processing because:
 
-  The sensor discovers pending files and triggers individual runs.
-  Dagster's run coordinator controls concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
+  1. Consolidated output: Fewer, larger parquet files for faster DuckDB staging
+  2. Batch efficiency: One job per quarter instead of thousands per quarter
+  3. Parallelism: Multiple quarters can run in parallel (via DAGSTER_MAX_CONCURRENT_RUNS)
+  4. Fault tolerance: Individual filing failures tracked in SourceFile, job continues
+  5. Aligned with incremental: Same output structure for backfill and daily processing
+
+  Output structure (daily consolidated files):
+    s3://bucket/sec/processed/filed=2024-01-15/nodes/Entity.parquet
+    s3://bucket/sec/processed/filed=2024-01-15/nodes/Fact.parquet
+    s3://bucket/sec/processed/filed=2024-01-15/relationships/REPORT_HAS_FACT.parquet
+    ...
 
   Returns:
       MaterializeResult with processing statistics
   """
+  from sqlalchemy import and_
+
   raw_bucket = env.SHARED_RAW_BUCKET
   processed_bucket = env.SHARED_PROCESSED_BUCKET
 
-  # Look up SourceFile by ID
+  # Parse partition key: "2024-Q1" -> year=2024, quarter=1
+  partition_key = context.partition_key
+  year, quarter_str = partition_key.split("-Q")
+  year = int(year)
+  quarter = int(quarter_str)
+
+  context.log.info(f"Processing SEC filings for {year}-Q{quarter}")
+
+  # Query pending SourceFiles for this quarter
+  # Partition keys are stored as "YYYY-QN_cik_accession" format
+  quarter_prefix = f"{year}-Q{quarter}_"
+
   with db.get_session() as session:
-    source_file = (
-      session.query(SourceFile).filter(SourceFile.id == config.source_file_id).first()
+    query = session.query(SourceFile).filter(
+      and_(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "pending",
+        SourceFile.partition_key.like(f"{quarter_prefix}%"),
+      )
     )
 
-    if not source_file:
-      context.log.error(f"SourceFile not found: {config.source_file_id}")
-      return MaterializeResult(
-        metadata={
-          "status": "error",
-          "source_file_id": config.source_file_id,
-          "error": "SourceFile not found",
-        }
-      )
+    # Apply max_filings limit if specified
+    if config.max_filings > 0:
+      query = query.limit(config.max_filings)
 
-    # Extract data while session is open
-    storage_key = source_file.storage_key
-    partition_key = source_file.partition_key or storage_key
-    source_id = source_file.source_id
+    pending_files = query.order_by(SourceFile.discovered_at.asc()).all()
+
+    # Extract data while session is open (avoid DetachedInstanceError)
+    files_to_process = [
+      {
+        "id": sf.id,
+        "storage_key": sf.storage_key,
+        "partition_key": sf.partition_key or sf.storage_key,
+      }
+      for sf in pending_files
+    ]
+
+  if not files_to_process:
+    context.log.info(f"No pending files for {year}-Q{quarter}")
+    return MaterializeResult(
+      metadata={
+        "year": year,
+        "quarter": quarter,
+        "status": "no_pending_files",
+        "filings_processed": 0,
+        "filings_succeeded": 0,
+        "filings_failed": 0,
+      }
+    )
 
   context.log.info(
-    f"Processing filing: {partition_key} (source_file={config.source_file_id})"
+    f"Found {len(files_to_process)} pending filings for {year}-Q{quarter}"
   )
 
-  # Process the filing
-  success, files_uploaded, error = _process_single_filing(
-    context, storage_key, partition_key, s3, db, raw_bucket, processed_bucket
+  # Process each filing and collect results
+  results: list[ProcessedFilingResult] = []
+  succeeded = 0
+  failed = 0
+  failed_ids: list[str] = []
+
+  for i, file_info in enumerate(files_to_process):
+    source_file_id = file_info["id"]
+    storage_key = file_info["storage_key"]
+    file_partition_key = file_info["partition_key"]
+
+    # Mark as processing
+    with db.get_session() as session:
+      sf = SourceFile.get_by_storage_key(storage_key, session)
+      if sf:
+        sf.mark_processing(session)
+
+    # Process filing
+    result = _process_single_filing_to_memory(
+      storage_key=storage_key,
+      partition_key=file_partition_key,
+      source_file_id=source_file_id,
+      s3_client=s3.client,
+      raw_bucket=raw_bucket,
+      log_fn=lambda msg: context.log.debug(msg),
+    )
+
+    results.append(result)
+
+    # Update SourceFile status
+    with db.get_session() as session:
+      sf = SourceFile.get_by_storage_key(storage_key, session)
+      if sf:
+        if result.success:
+          sf.mark_success(session)
+          succeeded += 1
+        else:
+          sf.mark_error(session, result.error or "Unknown error")
+          failed += 1
+          failed_ids.append(source_file_id)
+
+          if not config.continue_on_error:
+            context.log.error(f"Stopping on error: {result.error}")
+            break
+
+    # Progress logging
+    if (i + 1) % 50 == 0 or (i + 1) == len(files_to_process):
+      context.log.info(
+        f"Progress: {i + 1}/{len(files_to_process)} "
+        f"({succeeded} succeeded, {failed} failed)"
+      )
+
+  # Consolidate successful results into daily parquet files (one per table per filing date)
+  context.log.info(f"Consolidating {succeeded} successful filings by filing date...")
+  successful_results = [r for r in results if r.success]
+  consolidated_by_date = _consolidate_parquet_tables_by_date(successful_results)
+
+  # Upload consolidated parquet files to S3, organized by filing date
+  # Output structure: filed=YYYY-MM-DD/nodes/Table.parquet
+  files_uploaded = 0
+  filing_dates_output: list[str] = []
+
+  for filing_date, tables in sorted(consolidated_by_date.items()):
+    filing_dates_output.append(filing_date)
+    for table_key, parquet_bytes in tables.items():
+      # table_key is like "nodes/Entity" or "relationships/REPORT_HAS_FACT"
+      entity_type, table_name = table_key.split("/", 1)
+      s3_key = get_processed_key(
+        DataSourceType.SEC,
+        "processed",
+        f"filed={filing_date}",
+        entity_type,
+        f"{table_name}.parquet",
+      )
+
+      s3.client.put_object(
+        Bucket=processed_bucket,
+        Key=s3_key,
+        Body=parquet_bytes,
+        ContentType="application/octet-stream",
+      )
+      files_uploaded += 1
+      context.log.debug(f"Uploaded: {s3_key} ({len(parquet_bytes):,} bytes)")
+
+  context.log.info(
+    f"Complete: {succeeded}/{len(files_to_process)} filings succeeded, "
+    f"{files_uploaded} parquet files uploaded across {len(filing_dates_output)} filing dates"
   )
 
-  if success:
-    context.log.info(f"Success: {files_uploaded} parquet files uploaded")
-    return MaterializeResult(
-      metadata={
-        "status": "success",
-        "source_file_id": config.source_file_id,
-        "partition_key": partition_key,
-        "source_id": source_id,
-        "parquet_files_uploaded": files_uploaded,
-      }
-    )
-  else:
-    context.log.error(f"Failed: {error}")
-    return MaterializeResult(
-      metadata={
-        "status": "error",
-        "source_file_id": config.source_file_id,
-        "partition_key": partition_key,
-        "source_id": source_id,
-        "error": error,
-      }
-    )
+  return MaterializeResult(
+    metadata={
+      "year": year,
+      "quarter": quarter,
+      "status": "success" if failed == 0 else "partial",
+      "filings_processed": len(files_to_process),
+      "filings_succeeded": succeeded,
+      "filings_failed": failed,
+      "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
+      "filing_dates_output": filing_dates_output,
+      "parquet_files_uploaded": files_uploaded,
+    }
+  )
 
 
 # ============================================================================

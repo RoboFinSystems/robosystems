@@ -1,8 +1,8 @@
 """Tests for SEC processing sensor.
 
-The sec_processing_sensor discovers pending SourceFile records and yields
-one RunRequest per file. Dagster's QueuedRunCoordinator controls concurrency
-via DAGSTER_MAX_CONCURRENT_RUNS. Run deduplication is handled by run_key.
+The sec_processing_sensor discovers quarters with pending SourceFile records
+and yields one RunRequest per quarter. Dagster's QueuedRunCoordinator controls
+concurrency across quarters via DAGSTER_MAX_CONCURRENT_RUNS.
 """
 
 from unittest.mock import MagicMock, patch
@@ -13,7 +13,7 @@ from robosystems.dagster.sensors.sec import sec_processing_sensor
 
 
 class TestSecProcessingSensor:
-  """Tests for sec_processing_sensor (per-filing model)."""
+  """Tests for sec_processing_sensor (quarterly batch model)."""
 
   @patch("robosystems.dagster.sensors.sec.env")
   def test_skips_in_dev_environment(self, mock_env):
@@ -37,10 +37,8 @@ class TestSecProcessingSensor:
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
-    mock_query.order_by.return_value = mock_query
-    mock_query.limit.return_value = mock_query
     mock_query.all.return_value = []  # No pending files
-    mock_query.count.return_value = 0  # Both pending and error counts
+    mock_query.scalar.return_value = 0  # No errors
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
@@ -49,76 +47,47 @@ class TestSecProcessingSensor:
 
     assert len(result) == 1
     assert isinstance(result[0], SkipReason)
-    assert "No pending files" in str(result[0])
+    assert "No quarters with pending files" in str(result[0])
 
   @patch("robosystems.database.session")
   @patch("robosystems.dagster.sensors.sec.env")
-  def test_yields_run_request_per_pending_file(self, mock_env, mock_session_factory):
-    """Test sensor yields one RunRequest per pending file."""
+  def test_yields_run_request_per_quarter(self, mock_env, mock_session_factory):
+    """Test sensor yields one RunRequest per quarter with pending files."""
     mock_env.ENVIRONMENT = "prod"
 
-    # Create mock SourceFile objects
-    mock_files = []
-    for i in range(3):
-      mock_file = MagicMock()
-      mock_file.id = f"sf-{i}"
-      mock_file.attempts = 0
-      mock_file.partition_key = f"2024-Q{i + 1}"
-      mock_file.storage_key = f"sec/raw/filed=2024-01-0{i}/0001234567-24-00000{i}.zip"
-      mock_files.append(mock_file)
-
-    # Mock session with pending files
-    mock_session = MagicMock()
-    mock_query = MagicMock()
-    mock_query.filter.return_value = mock_query
-    mock_query.order_by.return_value = mock_query
-    mock_query.limit.return_value = mock_query
-    mock_query.all.return_value = mock_files
-    mock_query.count.side_effect = [3, 0]  # 3 pending, 0 errors
-    mock_session.query.return_value = mock_query
-    mock_session_factory.return_value = mock_session
-
-    context = build_sensor_context()
-    result = list(sec_processing_sensor(context))
-
-    # Should yield 3 RunRequests (one per file)
-    assert len(result) == 3
-    for i, run_request in enumerate(result):
-      assert isinstance(run_request, RunRequest)
-      assert run_request.run_key == f"sec-sf-{i}-0"
-      assert run_request.tags["source_file_id"] == f"sf-{i}"
-      assert run_request.tags["partition_key"] == f"2024-Q{i + 1}"
-
-  @patch("robosystems.database.session")
-  @patch("robosystems.dagster.sensors.sec.env")
-  def test_run_key_includes_attempts_for_retry(self, mock_env, mock_session_factory):
-    """Test run_key includes attempts count for retry deduplication."""
-    mock_env.ENVIRONMENT = "prod"
-
-    # Create mock SourceFile with attempts > 0 (retry scenario)
-    mock_file = MagicMock()
-    mock_file.id = "sf-retry"
-    mock_file.attempts = 2  # Already tried twice
-    mock_file.partition_key = "2024-Q1"
-    mock_file.storage_key = "sec/raw/filed=2024-01-01/test.zip"
+    # Create mock partition_key results for different quarters
+    mock_pending_files = [
+      ("2024-Q1_1234567890_0001234567-24-000001",),
+      ("2024-Q1_1234567890_0001234567-24-000002",),  # Same quarter
+      ("2024-Q2_1234567890_0001234567-24-000003",),  # Different quarter
+      ("2024-Q3_1234567890_0001234567-24-000004",),  # Another quarter
+    ]
 
     # Mock session
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
-    mock_query.order_by.return_value = mock_query
-    mock_query.limit.return_value = mock_query
-    mock_query.all.return_value = [mock_file]
-    mock_query.count.side_effect = [1, 0]  # 1 pending, 0 errors
+    mock_query.all.return_value = mock_pending_files
+    mock_query.scalar.return_value = 0  # No errors
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
     context = build_sensor_context()
     result = list(sec_processing_sensor(context))
 
-    assert len(result) == 1
-    # run_key should include attempts=2 for deduplication
-    assert result[0].run_key == "sec-sf-retry-2"
+    # Should yield 3 RunRequests (one per unique quarter: Q1, Q2, Q3)
+    assert len(result) == 3
+    quarters_found = set()
+    for run_request in result:
+      assert isinstance(run_request, RunRequest)
+      assert run_request.run_key.startswith("sec-quarter-")
+      # Extract quarter from run_key
+      quarter = run_request.run_key.replace("sec-quarter-", "")
+      quarters_found.add(quarter)
+      assert run_request.partition_key == quarter
+      assert run_request.tags["quarter"] == quarter
+
+    assert quarters_found == {"2024-Q1", "2024-Q2", "2024-Q3"}
 
   @patch("robosystems.database.session")
   @patch("robosystems.dagster.sensors.sec.env")
@@ -130,11 +99,8 @@ class TestSecProcessingSensor:
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
-    mock_query.order_by.return_value = mock_query
-    mock_query.limit.return_value = mock_query
     mock_query.all.return_value = []  # No pending files
-    # First count for pending (after .all()), second for total pending, third for errors
-    mock_query.count.side_effect = [0, 10]  # 0 pending, 10 errors
+    mock_query.scalar.return_value = 10  # 10 errors
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
@@ -143,7 +109,7 @@ class TestSecProcessingSensor:
 
     assert len(result) == 1
     assert isinstance(result[0], SkipReason)
-    assert "10 in error state" in str(result[0])
+    assert "10 files in error state" in str(result[0])
 
   @patch("robosystems.database.session")
   @patch("robosystems.dagster.sensors.sec.env")
@@ -163,35 +129,57 @@ class TestSecProcessingSensor:
 
   @patch("robosystems.database.session")
   @patch("robosystems.dagster.sensors.sec.env")
-  def test_limits_files_per_tick(self, mock_env, mock_session_factory):
-    """Test sensor limits files per tick to prevent slow ticks."""
+  def test_handles_malformed_partition_keys(self, mock_env, mock_session_factory):
+    """Test sensor handles malformed partition keys gracefully."""
     mock_env.ENVIRONMENT = "prod"
 
-    # Create 150 mock files (more than MAX_FILES_PER_TICK=100)
-    mock_files = []
-    for i in range(100):  # Only 100 will be returned due to limit
-      mock_file = MagicMock()
-      mock_file.id = f"sf-{i}"
-      mock_file.attempts = 0
-      mock_file.partition_key = "2024-Q1"
-      mock_file.storage_key = f"sec/raw/filed=2024-01-01/test-{i}.zip"
-      mock_files.append(mock_file)
+    # Mix of valid and invalid partition keys
+    mock_pending_files = [
+      ("2024-Q1_1234567890_0001234567-24-000001",),  # Valid
+      ("invalid_key",),  # Invalid - no quarter format
+      (None,),  # None value
+      ("2024-Q2_1234567890_0001234567-24-000002",),  # Valid
+      ("no-quarter-here",),  # Invalid - no -Q in key
+    ]
 
-    # Mock session
     mock_session = MagicMock()
     mock_query = MagicMock()
     mock_query.filter.return_value = mock_query
-    mock_query.order_by.return_value = mock_query
-    mock_query.limit.return_value = mock_query
-    mock_query.all.return_value = mock_files  # Returns up to limit
-    mock_query.count.side_effect = [150, 0]  # Total pending is 150, 0 errors
+    mock_query.all.return_value = mock_pending_files
+    mock_query.scalar.return_value = 0
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
     context = build_sensor_context()
     result = list(sec_processing_sensor(context))
 
-    # Should yield 100 RunRequests (limited per tick)
-    assert len(result) == 100
-    # Verify limit was applied in query
-    mock_query.limit.assert_called()
+    # Should only yield RunRequests for valid quarters (Q1, Q2)
+    assert len(result) == 2
+    quarters = {r.partition_key for r in result}
+    assert quarters == {"2024-Q1", "2024-Q2"}
+
+  @patch("robosystems.database.session")
+  @patch("robosystems.dagster.sensors.sec.env")
+  def test_deduplicates_quarters(self, mock_env, mock_session_factory):
+    """Test sensor deduplicates multiple files from the same quarter."""
+    mock_env.ENVIRONMENT = "prod"
+
+    # Many files all from the same quarter
+    mock_pending_files = [
+      (f"2024-Q1_123456789{i}_0001234567-24-00000{i}",) for i in range(100)
+    ]
+
+    mock_session = MagicMock()
+    mock_query = MagicMock()
+    mock_query.filter.return_value = mock_query
+    mock_query.all.return_value = mock_pending_files
+    mock_query.scalar.return_value = 0
+    mock_session.query.return_value = mock_query
+    mock_session_factory.return_value = mock_session
+
+    context = build_sensor_context()
+    result = list(sec_processing_sensor(context))
+
+    # Should only yield 1 RunRequest (all files are from Q1)
+    assert len(result) == 1
+    assert result[0].partition_key == "2024-Q1"

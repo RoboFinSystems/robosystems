@@ -21,7 +21,6 @@ from dagster import (
   DagsterRunStatus,
   DefaultScheduleStatus,
   DefaultSensorStatus,
-  RunConfig,
   RunRequest,
   RunsFilter,
   RunStatusSensorContext,
@@ -34,7 +33,6 @@ from dagster import (
 )
 
 from robosystems.config import env
-from robosystems.dagster.assets import SECProcessConfig
 from robosystems.dagster.jobs.sec import (
   sec_materialize_job,
   sec_process_job,
@@ -60,34 +58,34 @@ SEC_PROCESSING_SENSOR_STATUS = (
   else DefaultSensorStatus.STOPPED
 )
 
-# Max files to queue per sensor tick (prevents slow ticks and run queue explosion)
-MAX_FILES_PER_TICK = 100
-
 
 @sensor(
   job=sec_process_job,
-  minimum_interval_seconds=30,
+  minimum_interval_seconds=300,  # Check every 5 minutes
   default_status=SEC_PROCESSING_SENSOR_STATUS,
-  description="Discover pending SourceFiles and trigger per-filing processing runs",
+  description="Discover quarters with pending SourceFiles and trigger batch processing runs",
 )
 def sec_processing_sensor(context: SensorEvaluationContext):
-  """Discover pending SEC filings and trigger processing runs.
+  """Discover quarters with pending SEC filings and trigger batch processing.
 
-  Each pending SourceFile becomes a separate Dagster run, enabling parallel
-  processing across multiple ECS containers. Dagster's run coordinator
-  controls actual concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
+  With batch processing, each Dagster run processes an entire quarter's worth
+  of filings. This sensor discovers which quarters have pending files and
+  triggers runs for them.
+
+  Parallelism across quarters is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
+  Individual filing failures are tracked in SourceFile; jobs continue processing.
 
   Flow:
-  1. Query SourceFile for pending files (limit per tick to avoid slow ticks)
-  2. For each file, yield RunRequest with source_file_id in config
-  3. run_key includes attempts count for deduplication + retry support
-  4. Dagster queues runs, run coordinator executes up to max_concurrent
+  1. Query distinct quarters from pending SourceFiles
+  2. Yield one RunRequest per quarter with pending files
+  3. Dagster's run coordinator controls concurrent quarter processing
 
   Deduplication:
-  - run_key = "sec-{source_file_id}-{attempts}" ensures:
-    - Same file won't be queued twice (Dagster skips duplicate run_keys)
-    - Retries work because attempts increments during processing
+  - run_key = "sec-quarter-{quarter}" ensures same quarter won't be queued twice
+  - After a quarter is processed, its files are no longer pending
   """
+  from sqlalchemy import func
+
   from robosystems.database import session as SessionLocal
   from robosystems.models.iam import SourceFile
 
@@ -96,38 +94,37 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     yield SkipReason("Skipped in dev - use Dagster UI to trigger sec_process manually")
     return
 
-  # Query for pending files
+  # Query for distinct quarters with pending files
   session = None
   try:
     session = SessionLocal()
 
-    # Get pending files (limited per tick)
+    # Extract quarter from partition_key (format: "YYYY-QN_cik_accession")
+    # Group by quarter prefix to find which quarters have pending files
     pending_files = (
-      session.query(SourceFile)
+      session.query(SourceFile.partition_key)
       .filter(
         SourceFile.graph_id == "sec",
         SourceFile.status == "pending",
+        SourceFile.partition_key.isnot(None),
       )
-      .order_by(SourceFile.discovered_at.asc())
-      .limit(MAX_FILES_PER_TICK)
       .all()
     )
 
-    # Extract data while session is open (avoid DetachedInstanceError)
-    files_to_process = [
-      (sf.id, sf.attempts, sf.partition_key or sf.storage_key) for sf in pending_files
-    ]
+    # Extract unique quarters from partition keys
+    quarters_with_pending: set[str] = set()
+    for (partition_key,) in pending_files:
+      if partition_key and "_" in partition_key:
+        # Format: "2024-Q1_cik_accession" -> "2024-Q1"
+        quarter = partition_key.split("_")[0]
+        if "-Q" in quarter:
+          quarters_with_pending.add(quarter)
 
-    # Get counts for logging
-    total_pending = (
-      session.query(SourceFile)
-      .filter(SourceFile.graph_id == "sec", SourceFile.status == "pending")
-      .count()
-    )
+    # Get error count for logging
     error_count = (
-      session.query(SourceFile)
+      session.query(func.count(SourceFile.id))
       .filter(SourceFile.graph_id == "sec", SourceFile.status == "error")
-      .count()
+      .scalar()
     )
 
   except Exception as e:
@@ -138,35 +135,30 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     if session:
       session.close()
 
-  if not files_to_process:
+  if not quarters_with_pending:
     if error_count > 0:
-      yield SkipReason(f"No pending files ({error_count} in error state)")
+      yield SkipReason(f"No pending quarters ({error_count} files in error state)")
     else:
-      yield SkipReason("No pending files to process")
+      yield SkipReason("No quarters with pending files")
     return
 
   context.log.info(
-    f"Found {total_pending} pending files, {error_count} errors. "
-    f"Queuing {len(files_to_process)} runs this tick."
+    f"Found {len(quarters_with_pending)} quarters with pending files, "
+    f"{error_count} total files in error state. "
+    f"Quarters: {sorted(quarters_with_pending)}"
   )
 
-  # Yield RunRequest for each pending file
-  for source_file_id, attempts, partition_key in files_to_process:
-    # run_key includes attempts for deduplication + retry support
-    run_key = f"sec-{source_file_id}-{attempts}"
+  # Yield RunRequest for each quarter with pending files
+  for quarter in sorted(quarters_with_pending):
+    run_key = f"sec-quarter-{quarter}"
 
     yield RunRequest(
       run_key=run_key,
-      run_config=RunConfig(
-        ops={
-          "sec_process_filing": SECProcessConfig(
-            source_file_id=source_file_id,
-          )
-        }
-      ),
+      partition_key=quarter,  # Use Dagster's partition system
       tags={
-        "source_file_id": source_file_id,
-        "partition_key": partition_key,
+        "quarter": quarter,
+        "pipeline": "sec",
+        "phase": "process",
       },
     )
 

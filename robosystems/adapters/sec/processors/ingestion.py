@@ -750,17 +750,18 @@ class XBRLDuckDBGraphProcessor:
     Create DuckDB staging tables using glob patterns (efficient for many files).
 
     Instead of passing explicit file lists, this method constructs glob patterns
-    and lets DuckDB handle file discovery internally. This is much faster for
-    large file counts (17K+ files).
+    and lets DuckDB handle file discovery internally.
 
-    Uses the new filed=YYYY-MM-DD partition structure:
-    sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+    Partition structure:
+      sec/processed/filed=YYYY-MM-DD/nodes/TABLE.parquet
+      - One consolidated file per table per filing date
+      - Works for both backfill and incremental daily staging
 
     Args:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
         graph_client: Graph API client instance
         year: Optional year filter. If provided, uses filed=YYYY-* pattern.
-        filing_date: Optional exact date filter (YYYY-MM-DD). Takes precedence over year.
+        filing_date: Optional exact date filter (YYYY-MM-DD). Uses filed= pattern.
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
@@ -770,22 +771,25 @@ class XBRLDuckDBGraphProcessor:
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
 
-    # Build filed= pattern for glob
-    # - filing_date: exact date (filed=2025-01-15)
-    # - year: year prefix (filed=2025-*)
-    # - neither: all dates (filed=*)
+    # Build partition patterns for glob
+    # Uses filed=YYYY-MM-DD partition structure with daily consolidated files
+    # Pattern: sec/processed/filed=YYYY-MM-DD/nodes/Table.parquet
     if filing_date:
+      # Exact date for incremental staging
       filed_pattern = f"filed={filing_date}"
     elif year:
+      # Year filter for partial backfill (matches all dates in that year)
       filed_pattern = f"filed={year}-*"
     else:
+      # All dates for full staging
       filed_pattern = "filed=*"
 
     for table_name, entity_type in tables.items():
-      # Build glob pattern: s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
+      # Build glob pattern for daily consolidated output:
+      # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
+        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
       )
 
       # Get appropriate timeout for this table (large tables get extended timeout)
@@ -891,14 +895,17 @@ class XBRLDuckDBGraphProcessor:
     This is the incremental version of _create_duckdb_tables_with_glob(). Instead of
     CREATE TABLE, it uses INSERT INTO to append new data to existing tables.
 
-    Uses the new filed=YYYY-MM-DD partition structure:
-    sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+    Used for incremental daily staging after the initial full staging has been done.
+    Each filing date has one consolidated file per table.
+
+    Partition structure:
+      sec/processed/filed=YYYY-MM-DD/nodes/TABLE.parquet
 
     Args:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
         graph_client: Graph API client instance
         year: Optional year filter. If provided, uses filed=YYYY-* pattern.
-        filing_date: Optional exact date filter (YYYY-MM-DD). Takes precedence over year.
+        filing_date: Optional exact date filter (YYYY-MM-DD). Uses filed= pattern.
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
@@ -908,19 +915,24 @@ class XBRLDuckDBGraphProcessor:
     failed_tables: list[tuple[str, str]] = []
     skipped_tables: list[str] = []
 
-    # Build filed= pattern for glob
+    # Build partition patterns for glob
+    # Uses filed=YYYY-MM-DD partition structure with daily consolidated files
     if filing_date:
+      # Exact date for incremental staging
       filed_pattern = f"filed={filing_date}"
     elif year:
+      # Year filter for partial backfill (matches all dates in that year)
       filed_pattern = f"filed={year}-*"
     else:
+      # All dates for full staging
       filed_pattern = "filed=*"
 
     for table_name, entity_type in tables.items():
-      # Build glob pattern: s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
+      # Build glob pattern for daily consolidated output:
+      # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
+        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
       )
 
       # Get appropriate timeout for this table (large tables get extended timeout)

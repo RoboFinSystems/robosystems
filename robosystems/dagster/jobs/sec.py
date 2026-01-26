@@ -8,12 +8,12 @@ Pipeline Architecture (3 phases, run independently):
     Quarterly partitions (e.g., 2024-Q1) to stay under EFTS 10k result limit.
     Creates SourceFile records in PostgreSQL for processing tracking.
 
-  Phase 2 - Process (SourceFile-driven, parallel via ECS):
-    sec_process_job: sec_process_filing (single filing per run)
-    Each run processes one filing in its own ECS container.
-    Sensor discovers pending files, yields RunRequests for each.
-    Dagster's run coordinator controls concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
-    SourceFile tracks status (pending → processing → success/error).
+  Phase 2 - Process (quarterly batch with consolidated output):
+    sec_process_job: sec_process_quarter
+    Each run processes an entire quarter's worth of filings.
+    Outputs consolidated parquet files (one per table per quarter).
+    Individual filing failures tracked in SourceFile; job continues processing.
+    Parallel across quarters via DAGSTER_MAX_CONCURRENT_RUNS.
 
   Phase 3 - Materialize (two-stage pipeline):
     sec_stage_job: sec_duckdb_staged (DuckDB staging - full or incremental mode)
@@ -23,15 +23,15 @@ Pipeline Architecture (3 phases, run independently):
 
 Workflow:
   just sec-download 10 2024    # Download top 10 companies (all 4 quarters)
-  # Enable sec_processing_sensor in Dagster UI to auto-process
+  # Enable sec_processing_sensor in Dagster UI to auto-process quarters
   just sec-materialize         # Stage to DuckDB + Materialize to LadybugDB
 
   # Decoupled (for checkpointing/retry):
   just sec-stage               # Stage 1: Stage to DuckDB only (full mode)
   just sec-materialize-graph   # Stage 2: Materialize to LadybugDB (retry-safe)
 
-  # Incremental (after initial full staging, via Dagster UI):
-  # Launch sec_stage job with config: {"mode": "incremental", "filing_date": "2026-01-15"}
+  # Manual quarter processing (via Dagster UI):
+  # Launch sec_process job with partition_key: "2024-Q1"
 
   # Or all-in-one for demos:
   just sec-load NVDA 2024      # Chains all steps for single company
@@ -54,7 +54,7 @@ from robosystems.dagster.assets import (
   SECDownloadConfig,
   sec_duckdb_staged,
   sec_graph_materialized,
-  sec_process_filing,
+  sec_process_quarter,
   sec_quarter_partitions,
   sec_raw_filings,
 )
@@ -79,31 +79,29 @@ sec_download_job = define_asset_job(
 )
 
 
-# Phase 2: Process (SourceFile-driven, parallel via ECS)
-# Each run processes one filing in its own container. Sensor triggers runs.
-# Dagster's run coordinator limits concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
+# Phase 2: Process (quarterly batch processing)
+# Each run processes an entire quarter's worth of filings, outputting
+# consolidated parquet files. Parallel execution across quarters is controlled
+# by DAGSTER_MAX_CONCURRENT_RUNS.
 #
-# Uses Fargate Spot for cost efficiency:
-# - Short jobs (2-3 min) minimize Spot interruption risk
-# - SourceFile.attempts tracking enables retry
-# - ~70% cost savings at scale
+# Uses On-Demand Fargate for reliability:
+# - Long-running jobs (30+ min for large quarters) need stability
+# - SourceFile tracks individual filing failures
+# - Consolidated output scales better than per-filing approach
 sec_process_job = define_asset_job(
   name="sec_process",
-  description="Process a single SEC filing (sensor triggers per-file runs).",
+  description="Process an entire quarter's SEC filings with consolidated output.",
   selection=AssetSelection.assets(
-    sec_process_filing,
+    sec_process_quarter,
   ),
+  partitions_def=sec_quarter_partitions,
   tags={
     "pipeline": "sec",
     "phase": "process",
-    # Low priority (-1) so other jobs run first when queue is full
-    "dagster/priority": "-1",
-    # ECS Spot capacity provider override
-    # 99% Spot with 1% On-Demand fallback for guaranteed availability
+    # Long-running job - use on-demand for reliability
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE_SPOT", "weight": 99, "base": 0},
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 0},
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
       ],
     },
   },
