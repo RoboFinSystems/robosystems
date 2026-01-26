@@ -66,8 +66,11 @@ LARGE_STAGING_TABLES = frozenset(
     "Label",  # 2M+ rows (multiple labels per element)
     "Element",  # 1M+ rows (all XBRL elements across taxonomies)
     "FactDimension",  # Dimensional breakdowns of facts
+    "Association",  # XBRL associations (millions of rows)
     "FACT_HAS_DIMENSION",  # Relationship linking facts to dimensions
     "FACT_REPORTS_ELEMENT",  # High-cardinality relationship
+    "ELEMENT_HAS_LABEL",  # Links Element to Label (2M+ labels)
+    "TAXONOMY_HAS_LABEL",  # Links Taxonomy to Label (2M+ labels)
   }
 )
 

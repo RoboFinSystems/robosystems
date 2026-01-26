@@ -1177,6 +1177,7 @@ class GraphClient(BaseGraphClient):
         "graph_id": graph_id,
         "table_name": table_name,
         "s3_pattern": s3_pattern,
+        "timeout_seconds": timeout,  # Pass timeout to server for background task
       }
       if file_id_map is not None:
         json_data["file_id_map"] = file_id_map
@@ -1245,6 +1246,7 @@ class GraphClient(BaseGraphClient):
         "graph_id": graph_id,
         "table_name": table_name,
         "s3_pattern": s3_pattern,
+        "timeout_seconds": timeout,  # Pass timeout to server for background task
       }
 
       start_response = await self._request(
