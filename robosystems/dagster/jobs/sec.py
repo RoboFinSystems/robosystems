@@ -9,7 +9,7 @@ Pipeline Architecture (3 phases, run independently):
     Creates SourceFile records in PostgreSQL for processing tracking.
 
   Phase 2 - Process (quarterly batch with consolidated output):
-    sec_process_job: sec_process_quarter
+    sec_process_job: sec_processed_filings
     Each run processes an entire quarter's worth of filings.
     Outputs consolidated parquet files (one per table per quarter).
     Individual filing failures tracked in SourceFile; job continues processing.
@@ -54,7 +54,7 @@ from robosystems.dagster.assets import (
   SECDownloadConfig,
   sec_duckdb_staged,
   sec_graph_materialized,
-  sec_process_quarter,
+  sec_processed_filings,
   sec_quarter_partitions,
   sec_raw_filings,
 )
@@ -92,7 +92,7 @@ sec_process_job = define_asset_job(
   name="sec_process",
   description="Process an entire quarter's SEC filings with consolidated output.",
   selection=AssetSelection.assets(
-    sec_process_quarter,
+    sec_processed_filings,
   ),
   partitions_def=sec_quarter_partitions,
   tags={

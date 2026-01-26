@@ -53,6 +53,8 @@ class TestSecProcessingSensor:
   @patch("robosystems.dagster.sensors.sec.env")
   def test_yields_run_request_per_quarter(self, mock_env, mock_session_factory):
     """Test sensor yields one RunRequest per quarter with pending files."""
+    from dagster import DagsterInstance
+
     mock_env.ENVIRONMENT = "prod"
 
     # Create mock partition_key results for different quarters
@@ -72,8 +74,11 @@ class TestSecProcessingSensor:
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
-    context = build_sensor_context()
-    result = list(sec_processing_sensor(context))
+    # Use ephemeral instance and patch get_runs to return empty list (no active runs)
+    with DagsterInstance.ephemeral() as instance:
+      with patch.object(instance, "get_runs", return_value=[]):
+        context = build_sensor_context(instance=instance)
+        result = list(sec_processing_sensor(context))
 
     # Should yield 3 RunRequests (one per unique quarter: Q1, Q2, Q3)
     assert len(result) == 3
@@ -131,6 +136,8 @@ class TestSecProcessingSensor:
   @patch("robosystems.dagster.sensors.sec.env")
   def test_handles_malformed_partition_keys(self, mock_env, mock_session_factory):
     """Test sensor handles malformed partition keys gracefully."""
+    from dagster import DagsterInstance
+
     mock_env.ENVIRONMENT = "prod"
 
     # Mix of valid and invalid partition keys
@@ -150,8 +157,11 @@ class TestSecProcessingSensor:
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
-    context = build_sensor_context()
-    result = list(sec_processing_sensor(context))
+    # Use ephemeral instance and patch get_runs to return empty list (no active runs)
+    with DagsterInstance.ephemeral() as instance:
+      with patch.object(instance, "get_runs", return_value=[]):
+        context = build_sensor_context(instance=instance)
+        result = list(sec_processing_sensor(context))
 
     # Should only yield RunRequests for valid quarters (Q1, Q2)
     assert len(result) == 2
@@ -162,6 +172,8 @@ class TestSecProcessingSensor:
   @patch("robosystems.dagster.sensors.sec.env")
   def test_deduplicates_quarters(self, mock_env, mock_session_factory):
     """Test sensor deduplicates multiple files from the same quarter."""
+    from dagster import DagsterInstance
+
     mock_env.ENVIRONMENT = "prod"
 
     # Many files all from the same quarter
@@ -177,8 +189,11 @@ class TestSecProcessingSensor:
     mock_session.query.return_value = mock_query
     mock_session_factory.return_value = mock_session
 
-    context = build_sensor_context()
-    result = list(sec_processing_sensor(context))
+    # Use ephemeral instance and patch get_runs to return empty list (no active runs)
+    with DagsterInstance.ephemeral() as instance:
+      with patch.object(instance, "get_runs", return_value=[]):
+        context = build_sensor_context(instance=instance)
+        result = list(sec_processing_sensor(context))
 
     # Should only yield 1 RunRequest (all files are from Q1)
     assert len(result) == 1

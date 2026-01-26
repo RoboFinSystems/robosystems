@@ -180,6 +180,9 @@ class XBRLDuckDBGraphProcessor:
 
     duckdb_path = get_staging_duckdb_path(self.graph_id)
 
+    # Track dates for progress recording (discovered upfront for full mode)
+    staged_dates_for_progress: list[str] | None = None
+
     try:
       # Get graph client for API calls
       try:
@@ -196,7 +199,15 @@ class XBRLDuckDBGraphProcessor:
           duration_seconds=time.time() - start_time,
         )
 
-      # Step 0: Check if already staged (incremental mode only)
+      # Step 0a: Discover dates upfront for full mode progress tracking
+      # This ensures we only record dates that exist at staging start time,
+      # avoiding race conditions with concurrent writes to S3.
+      if not incremental:
+        logger.info("Discovering filing dates from S3 for progress tracking...")
+        staged_dates_for_progress = await self._discover_filed_dates(year=year)
+        logger.info(f"Found {len(staged_dates_for_progress)} filing dates to stage")
+
+      # Step 0b: Check if already staged (incremental mode only)
       # This prevents duplicate inserts if the same date is re-run
       if incremental and filing_date:
         try:
@@ -307,6 +318,7 @@ class XBRLDuckDBGraphProcessor:
           incremental=incremental,
           table_count=len(successful_tables),
           total_rows=total_rows,
+          staged_dates=staged_dates_for_progress,
         )
 
       duration = time.time() - start_time
@@ -790,9 +802,10 @@ class XBRLDuckDBGraphProcessor:
     and lets DuckDB handle file discovery internally.
 
     Partition structure:
-      sec/processed/filed=YYYY-MM-DD/nodes/TABLE.parquet
-      - One consolidated file per table per filing date
-      - Works for both backfill and incremental daily staging
+      sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+      - Part files (part-001.parquet, part-002.parquet, etc.) per table per date
+      - Each flush during processing creates a new part file
+      - DuckDB reads all part files as a single dataset
 
     Args:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
@@ -809,8 +822,8 @@ class XBRLDuckDBGraphProcessor:
     skipped_tables: list[str] = []
 
     # Build partition patterns for glob
-    # Uses filed=YYYY-MM-DD partition structure with daily consolidated files
-    # Pattern: sec/processed/filed=YYYY-MM-DD/nodes/Table.parquet
+    # Uses filed=YYYY-MM-DD partition structure with part files
+    # Pattern: sec/processed/filed=YYYY-MM-DD/nodes/Table/*.parquet
     if filing_date:
       # Exact date for incremental staging
       filed_pattern = f"filed={filing_date}"
@@ -829,11 +842,12 @@ class XBRLDuckDBGraphProcessor:
 
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
-      # Build glob pattern for daily consolidated output:
-      # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
+      # Build glob pattern for part file output structure:
+      # s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
+      # Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
+        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
       )
 
       # Get appropriate timeout for this table (large tables get extended timeout)
@@ -953,10 +967,11 @@ class XBRLDuckDBGraphProcessor:
     CREATE TABLE, it uses INSERT INTO to append new data to existing tables.
 
     Used for incremental daily staging after the initial full staging has been done.
-    Each filing date has one consolidated file per table.
+    Each filing date may have multiple part files per table.
 
     Partition structure:
-      sec/processed/filed=YYYY-MM-DD/nodes/TABLE.parquet
+      sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+      Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
 
     Args:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
@@ -993,11 +1008,12 @@ class XBRLDuckDBGraphProcessor:
 
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
-      # Build glob pattern for daily consolidated output:
-      # s3://bucket/sec/processed/filed=*/nodes/Entity.parquet
+      # Build glob pattern for part file output structure:
+      # s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
+      # Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}.parquet"
+        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
       )
 
       # Get appropriate timeout for this table (large tables get extended timeout)
@@ -1358,12 +1374,14 @@ class XBRLDuckDBGraphProcessor:
     incremental: bool,
     table_count: int,
     total_rows: int,
+    staged_dates: list[str] | None = None,
   ) -> None:
     """
     Record staging progress to the DuckDB progress table.
 
     For incremental staging (single filing_date): Records that specific date.
-    For full staging: Discovers all filed= dates from S3 and records them.
+    For full staging: Records the explicitly provided staged_dates, or
+    discovers dates from S3 if staged_dates not provided (legacy behavior).
 
     Args:
         client: Graph API client instance
@@ -1372,6 +1390,9 @@ class XBRLDuckDBGraphProcessor:
         incremental: Whether this is incremental mode
         table_count: Number of tables staged
         total_rows: Total rows inserted
+        staged_dates: Explicit list of dates that were staged in this run.
+            If provided, only these dates will be recorded as complete.
+            If None (legacy), discovers dates from S3 (may include stale data).
     """
     try:
       if incremental and filing_date:
@@ -1384,16 +1405,43 @@ class XBRLDuckDBGraphProcessor:
           total_rows=total_rows,
           status="complete",
         )
+      elif staged_dates is not None:
+        # Explicit dates provided - only record these (safest approach)
+        if not staged_dates:
+          logger.info("No staged dates provided, skipping progress recording")
+          return
+
+        logger.info(
+          f"Recording progress for {len(staged_dates)} explicitly staged dates"
+        )
+        rows_per_date = total_rows // len(staged_dates) if staged_dates else 0
+
+        for staged_date in staged_dates:
+          await client.record_staging_progress(
+            graph_id=self.graph_id,
+            filing_date=staged_date,
+            table_count=table_count,
+            total_rows=rows_per_date,
+            status="complete",
+          )
+
+        logger.info(f"Recorded staging progress for {len(staged_dates)} dates")
       else:
-        # Full staging: discover all filed= dates and record them
-        logger.info("Discovering filed= dates from S3 for progress tracking...")
+        # Legacy behavior: discover all filed= dates from S3
+        # WARNING: This may include dates from previous failed runs
+        logger.warning(
+          "Discovering dates from S3 for progress tracking. "
+          "This may include stale data from previous runs."
+        )
         filed_dates = await self._discover_filed_dates(year=year)
 
         if not filed_dates:
           logger.warning("No filed= dates discovered, skipping progress recording")
           return
 
-        logger.info(f"Recording progress for {len(filed_dates)} filing dates")
+        logger.info(
+          f"Recording progress for {len(filed_dates)} discovered filing dates"
+        )
 
         # Record each date (rows are distributed across dates, so we estimate)
         rows_per_date = total_rows // len(filed_dates) if filed_dates else 0
