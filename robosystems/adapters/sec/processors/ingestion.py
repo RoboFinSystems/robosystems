@@ -180,6 +180,9 @@ class XBRLDuckDBGraphProcessor:
 
     duckdb_path = get_staging_duckdb_path(self.graph_id)
 
+    # Track dates for progress recording (discovered upfront for full mode)
+    staged_dates_for_progress: list[str] | None = None
+
     try:
       # Get graph client for API calls
       try:
@@ -196,7 +199,15 @@ class XBRLDuckDBGraphProcessor:
           duration_seconds=time.time() - start_time,
         )
 
-      # Step 0: Check if already staged (incremental mode only)
+      # Step 0a: Discover dates upfront for full mode progress tracking
+      # This ensures we only record dates that exist at staging start time,
+      # avoiding race conditions with concurrent writes to S3.
+      if not incremental:
+        logger.info("Discovering filing dates from S3 for progress tracking...")
+        staged_dates_for_progress = await self._discover_filed_dates(year=year)
+        logger.info(f"Found {len(staged_dates_for_progress)} filing dates to stage")
+
+      # Step 0b: Check if already staged (incremental mode only)
       # This prevents duplicate inserts if the same date is re-run
       if incremental and filing_date:
         try:
@@ -307,6 +318,7 @@ class XBRLDuckDBGraphProcessor:
           incremental=incremental,
           table_count=len(successful_tables),
           total_rows=total_rows,
+          staged_dates=staged_dates_for_progress,
         )
 
       duration = time.time() - start_time
