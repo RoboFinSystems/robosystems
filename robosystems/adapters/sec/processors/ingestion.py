@@ -1362,12 +1362,14 @@ class XBRLDuckDBGraphProcessor:
     incremental: bool,
     table_count: int,
     total_rows: int,
+    staged_dates: list[str] | None = None,
   ) -> None:
     """
     Record staging progress to the DuckDB progress table.
 
     For incremental staging (single filing_date): Records that specific date.
-    For full staging: Discovers all filed= dates from S3 and records them.
+    For full staging: Records the explicitly provided staged_dates, or
+    discovers dates from S3 if staged_dates not provided (legacy behavior).
 
     Args:
         client: Graph API client instance
@@ -1376,6 +1378,9 @@ class XBRLDuckDBGraphProcessor:
         incremental: Whether this is incremental mode
         table_count: Number of tables staged
         total_rows: Total rows inserted
+        staged_dates: Explicit list of dates that were staged in this run.
+            If provided, only these dates will be recorded as complete.
+            If None (legacy), discovers dates from S3 (may include stale data).
     """
     try:
       if incremental and filing_date:
@@ -1388,16 +1393,43 @@ class XBRLDuckDBGraphProcessor:
           total_rows=total_rows,
           status="complete",
         )
+      elif staged_dates is not None:
+        # Explicit dates provided - only record these (safest approach)
+        if not staged_dates:
+          logger.info("No staged dates provided, skipping progress recording")
+          return
+
+        logger.info(
+          f"Recording progress for {len(staged_dates)} explicitly staged dates"
+        )
+        rows_per_date = total_rows // len(staged_dates) if staged_dates else 0
+
+        for staged_date in staged_dates:
+          await client.record_staging_progress(
+            graph_id=self.graph_id,
+            filing_date=staged_date,
+            table_count=table_count,
+            total_rows=rows_per_date,
+            status="complete",
+          )
+
+        logger.info(f"Recorded staging progress for {len(staged_dates)} dates")
       else:
-        # Full staging: discover all filed= dates and record them
-        logger.info("Discovering filed= dates from S3 for progress tracking...")
+        # Legacy behavior: discover all filed= dates from S3
+        # WARNING: This may include dates from previous failed runs
+        logger.warning(
+          "Discovering dates from S3 for progress tracking. "
+          "This may include stale data from previous runs."
+        )
         filed_dates = await self._discover_filed_dates(year=year)
 
         if not filed_dates:
           logger.warning("No filed= dates discovered, skipping progress recording")
           return
 
-        logger.info(f"Recording progress for {len(filed_dates)} filing dates")
+        logger.info(
+          f"Recording progress for {len(filed_dates)} discovered filing dates"
+        )
 
         # Record each date (rows are distributed across dates, so we estimate)
         rows_per_date = total_rows // len(filed_dates) if filed_dates else 0

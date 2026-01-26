@@ -77,17 +77,31 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 
   Flow:
   1. Query distinct quarters from pending SourceFiles
-  2. Yield one RunRequest per quarter with pending files
-  3. Dagster's run coordinator controls concurrent quarter processing
+  2. Skip quarters that already have in-progress runs
+  3. Yield one RunRequest per quarter with pending files
+  4. Dagster's run coordinator controls concurrent quarter processing
+
+  Partition Mode Selection:
+  - Current quarter: use_filing_date_partition=True (daily mode)
+    Each filing outputs to its actual filing date for incremental staging.
+  - Historical quarters: use_filing_date_partition=False (quarterly mode)
+    All filings output to quarter-end date for efficient backfill.
 
   Deduplication:
   - run_key = "sec-quarter-{quarter}" ensures same quarter won't be queued twice
+  - Active run check prevents re-triggering quarters already being processed
   - After a quarter is processed, its files are no longer pending
   """
+  import re
+
   from sqlalchemy import func
 
   from robosystems.database import session as SessionLocal
   from robosystems.models.iam import SourceFile
+
+  # Regex pattern for robust partition key parsing
+  # Format: "2024-Q1_cik_accession" -> captures "2024-Q1"
+  quarter_pattern = re.compile(r"^(\d{4}-Q[1-4])_")
 
   # Skip in dev - use manual job triggers for testing
   if env.ENVIRONMENT == "dev":
@@ -111,14 +125,13 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       .all()
     )
 
-    # Extract unique quarters from partition keys
+    # Extract unique quarters from partition keys using regex for robust parsing
     quarters_with_pending: set[str] = set()
     for (partition_key,) in pending_files:
-      if partition_key and "_" in partition_key:
-        # Format: "2024-Q1_cik_accession" -> "2024-Q1"
-        quarter = partition_key.split("_")[0]
-        if "-Q" in quarter:
-          quarters_with_pending.add(quarter)
+      if partition_key:
+        match = quarter_pattern.match(partition_key)
+        if match:
+          quarters_with_pending.add(match.group(1))
 
     # Get error count for logging
     error_count = (
@@ -155,6 +168,19 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 
   # Yield RunRequest for each quarter with pending files
   for quarter in sorted(quarters_with_pending):
+    # Check for in-progress runs to prevent duplicate processing triggers
+    active_runs = context.instance.get_runs(
+      filters=RunsFilter(
+        job_name="sec_process",
+        statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+        tags={"quarter": quarter},
+      ),
+      limit=1,
+    )
+    if active_runs:
+      context.log.info(f"Skipping {quarter} - already has an active run")
+      continue
+
     run_key = f"sec-quarter-{quarter}"
 
     # Use daily partitioning for current quarter (incremental processing)

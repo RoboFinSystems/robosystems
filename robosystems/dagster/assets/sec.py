@@ -1334,7 +1334,9 @@ def sec_processed_filings(
     if use_daily:
       # Daily mode: group by filing_date and upload to respective partitions
       # Disk structure: work_dir/{filing_date}/nodes/Entity/...
-      date_dirs = [d for d in work_dir.iterdir() if d.is_dir() and d.name.startswith("20")]
+      date_dirs = [
+        d for d in work_dir.iterdir() if d.is_dir() and d.name.startswith("20")
+      ]
       context.log.info(
         f"Flush #{flush_number}: {len(pending_flush)} filings to {len(date_dirs)} dates..."
       )
