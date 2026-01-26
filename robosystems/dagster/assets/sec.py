@@ -400,7 +400,7 @@ def sec_raw_filings(
     SEC_BASE_URL = SEC_CONFIG["base_url"]
     SEC_HEADERS = SEC_CONFIG["headers"]
 
-    # Step 1: Discover filings via EFTS
+    # Phase 1: Discover filings via EFTS
     context.log.info("Phase 1: Discovering filings via EFTS...")
 
     async with EFTSClient(requests_per_second=5.0) as efts:
@@ -441,11 +441,11 @@ def sec_raw_filings(
         "dry_run": config.dry_run,
       }
 
-    # Step 1.5: Fetch submissions data for unique CIKs (parallel with rate limiting)
+    # Phase 2: Fetch submissions data for unique CIKs (parallel with rate limiting)
     # This provides company metadata (name, SIC, fiscal year end, etc.)
     unique_ciks = list({hit.cik for hit in hits})
     context.log.info(
-      f"Phase 1.5: Fetching submissions for {len(unique_ciks)} unique companies..."
+      f"Phase 2: Fetching submissions for {len(unique_ciks)} unique companies..."
     )
 
     # Filter to only CIKs that need fetching
@@ -621,8 +621,8 @@ def sec_raw_filings(
         "dry_run": True,
       }
 
-    # Step 2: Download filings with async rate limiting
-    context.log.info(f"Phase 2: Downloading {len(hits)} filings...")
+    # Phase 3: Download filings with async rate limiting
+    context.log.info(f"Phase 3: Downloading {len(hits)} filings...")
 
     limiter = AsyncRateLimiter(rate=config.download_rate)
     monitor = RateMonitor()
