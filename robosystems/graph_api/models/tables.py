@@ -31,6 +31,12 @@ class TableCreateRequest(BaseModel):
     default=None,
     description="Optional map of s3_key -> file_id for provenance tracking",
   )
+  timeout_seconds: int = Field(
+    default=1800,
+    ge=60,
+    le=14400,
+    description="Timeout for table creation in seconds (default 30 min, max 4 hours)",
+  )
 
   @field_validator("s3_pattern")
   @classmethod
