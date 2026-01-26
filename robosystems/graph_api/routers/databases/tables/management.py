@@ -349,11 +349,12 @@ async def create_table(
     file_count=file_count,
   )
 
-  # Add background task
+  # Add background task with client-specified timeout
   background_tasks.add_task(
     perform_table_creation,
     task_id=task_id,
     request=request,
+    timeout_seconds=request.timeout_seconds,
   )
 
   logger.info(
@@ -409,11 +410,12 @@ async def insert_into_table(
     file_count=file_count,
   )
 
-  # Add background task
+  # Add background task with client-specified timeout
   background_tasks.add_task(
     perform_table_insert,
     task_id=task_id,
     request=request,
+    timeout_seconds=request.timeout_seconds,
   )
 
   logger.info(f"Started background insert task {task_id} for table {table_name}")
