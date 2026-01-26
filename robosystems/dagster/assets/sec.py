@@ -1262,6 +1262,29 @@ def sec_processed_filings(
   # Partition keys are stored as "YYYY-QN_cik_accession" format
   quarter_prefix = f"{year}-Q{quarter}_"
 
+  # Reset any stale "processing" files back to "pending" before starting.
+  # This handles recovery from crashed runs. Safe because the sensor ensures
+  # only one worker runs per partition at a time.
+  with db.get_session() as session:
+    stale_processing = (
+      session.query(SourceFile)
+      .filter(
+        and_(
+          SourceFile.graph_id == "sec",
+          SourceFile.status == "processing",
+          SourceFile.partition_key.like(f"{quarter_prefix}%"),
+        )
+      )
+      .all()
+    )
+    if stale_processing:
+      context.log.info(
+        f"Resetting {len(stale_processing)} stale 'processing' files to 'pending'"
+      )
+      for sf in stale_processing:
+        sf.status = "pending"
+      session.commit()
+
   with db.get_session() as session:
     query = session.query(SourceFile).filter(
       and_(
@@ -1322,6 +1345,10 @@ def sec_processed_filings(
   flush_number = 0  # Counter for part file naming
   output_dates: set[str] = set()  # Track which dates received output
 
+  # Use run_id prefix for unique part filenames to avoid collisions from crashed runs.
+  # Format: part-{run_id[:8]}-{flush_number:03d}.parquet
+  run_id_prefix = context.run_id[:8] if context.run_id else "local"
+
   def flush_to_s3() -> int:
     """Consolidate disk buffer and upload to S3, mark filings as success."""
     nonlocal files_uploaded, total_flushed, flush_number
@@ -1359,7 +1386,7 @@ def sec_processed_filings(
             continue
 
           entity_type, table_name = table_key.split("/", 1)
-          part_filename = f"part-{flush_number:03d}.parquet"
+          part_filename = f"part-{run_id_prefix}-{flush_number:03d}.parquet"
           s3_key = get_processed_key(
             DataSourceType.SEC,
             "processed",
@@ -1400,7 +1427,7 @@ def sec_processed_filings(
           continue
 
         entity_type, table_name = table_key.split("/", 1)
-        part_filename = f"part-{flush_number:03d}.parquet"
+        part_filename = f"part-{run_id_prefix}-{flush_number:03d}.parquet"
         s3_key = get_processed_key(
           DataSourceType.SEC,
           "processed",
