@@ -92,8 +92,10 @@ class DuckDBTableManager:
     """
     Build CREATE TABLE SQL statement with deduplication logic.
 
-    This helper eliminates code duplication between list and pattern branches.
-    Uses DuckDB-compatible window functions instead of PostgreSQL's DISTINCT ON.
+    NOTE: Deduplication is required here because LadybugDB's ignore_errors=true
+    only works for COPY FROM files, NOT for COPY FROM attached DuckDB tables.
+
+    Uses DuckDB-compatible window functions for deduplication.
 
     Args:
         quoted_table: Quoted table name (e.g., '"table_name"')

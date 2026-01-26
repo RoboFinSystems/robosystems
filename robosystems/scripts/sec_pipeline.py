@@ -8,9 +8,17 @@ This script manages SEC XBRL data processing through 3 independent phases:
   Phase 1 - Download: sec_download job
     Downloads raw XBRL ZIPs to S3 (quarterly partitions).
     Years are automatically converted to quarters (e.g., 2024 -> 2024-Q1..Q4).
+    Creates SourceFile records in PostgreSQL for processing tracking.
 
-  Phase 2 - Process: sec_process job (parallel)
-    Processes each filing to parquet via dynamic partitions.
+  Phase 2 - Process: sec_process job (quarterly batch, sensor-driven)
+    The sec_processing_sensor discovers quarters with pending SourceFile records
+    and triggers one Dagster run per quarter. Each quarter's filings are processed
+    together, with output consolidated by filing date (filed=YYYY-MM-DD).
+    Dagster's QueuedRunCoordinator controls concurrency via DAGSTER_MAX_CONCURRENT_RUNS.
+
+    In production: Enable sec_processing_sensor in Dagster UI (auto-disabled in dev).
+    In development: Use Dagster UI to manually launch sec_process runs, or use
+    'just sec-process' to trigger runs via this script.
 
   Phase 3 - Materialize (decoupled for retry safety):
     sec_stage job: Stage to persistent DuckDB (2+ hours for full SEC)
@@ -24,13 +32,18 @@ Usage:
     just sec-pipeline 5 2024       # Top 5 companies, all 4 quarters
 
     # Step-by-step (for production use):
-    just sec-download 10 2024      # Phase 1: Download (4 quarterly partitions)
-    just sec-process 2024          # Phase 2: Process in parallel
+    just sec-download 10 2024      # Phase 1: Download (creates SourceFile records)
+    # Enable sec_processing_sensor in Dagster UI for Phase 2
     just sec-materialize           # Phase 3: Stage to DuckDB + Materialize to LadybugDB
+
+    # Local development (sensor disabled):
+    just sec-download 1 2024       # Phase 1: Download
+    just sec-process               # Phase 2: Trigger processing runs manually
+    just sec-materialize           # Phase 3: Materialize
 
     # Decoupled materialization (for checkpointing/retry):
     just sec-stage                 # Stage 1: Stage to DuckDB only
-    just sec-materialize-graph    # Stage 2: Materialize to LadybugDB (retry-safe)
+    just sec-materialize-graph     # Stage 2: Materialize to LadybugDB (retry-safe)
 
     # Reset database
     just sec-reset
@@ -48,10 +61,8 @@ from typing import Any
 
 import yaml
 
-from robosystems.config import env
 from robosystems.config.storage.shared import (
   DataSourceType,
-  get_processed_key,
   get_raw_key,
 )
 from robosystems.logger import logger
@@ -365,12 +376,13 @@ class SECPipeline:
         else:
           logger.warning(f"  Issues: {result.error}")
 
-    # Phase 2: Process in parallel
+    # Phase 2: Process pending files (quarterly batch, sensor-driven in prod)
     if not self.skip_download and not self.skip_processing:
       logger.info(f"\n{'=' * 60}")
-      logger.info("PROCESSING (Parallel)")
+      logger.info("PROCESSING (Quarterly Batch)")
       logger.info(f"{'=' * 60}")
-      process_result = self._run_parallel_processing()
+      # Run quarterly batch processing for all quarters with pending files
+      process_result = self._run_quarterly_batch_processing()
       if process_result:
         all_results.append(process_result)
 
@@ -451,6 +463,256 @@ class SECPipeline:
       "total_stages": len(all_results),
       "successful": successful,
       "failed": failed,
+      "duration_seconds": overall_duration,
+      "companies": self.tickers,
+      "years": self.years,
+    }
+
+  def run_fast(self) -> dict[str, Any]:
+    """Run the full pipeline in fast mode (direct Python calls, no Dagster).
+
+    This bypasses Dagster job execution and calls the tested processing functions
+    directly. Much faster for local development/demos but no Dagster UI visibility.
+    """
+    import asyncio
+
+    import boto3
+
+    from robosystems.adapters.sec import SECClient, XBRLDuckDBGraphProcessor
+    from robosystems.adapters.sec.client import EFTSClient
+    from robosystems.config import env
+    from robosystems.config.storage.shared import (
+      DataSourceType,
+      get_processed_key,
+      get_raw_key,
+    )
+    from robosystems.dagster.assets.sec import (
+      _consolidate_parquet_tables_by_date,
+      _process_single_filing_to_memory,
+    )
+
+    quarters = years_to_quarters(self.years)
+
+    logger.info("=" * 60)
+    logger.info("SEC Pipeline (FAST MODE)")
+    logger.info("=" * 60)
+    logger.info(f"Companies: {', '.join(self.tickers)}")
+    logger.info(f"Years: {', '.join(self.years)}")
+    logger.info(f"Quarters: {len(quarters)} partitions")
+    logger.info("=" * 60)
+
+    overall_start = time.time()
+    stats = {
+      "downloaded": 0,
+      "processed": 0,
+      "errors": 0,
+    }
+
+    # Reset database first
+    if not self.skip_reset:
+      logger.info("\n[SETUP] Resetting SEC database...")
+      if not self._reset_database():
+        logger.error("Database reset failed - aborting")
+        return {"status": "error", "reason": "Database reset failed"}
+    else:
+      logger.info("\n[SETUP] Skipping database reset (additive mode)")
+
+    # Create S3 client once
+    s3_client = boto3.client(
+      "s3",
+      endpoint_url=env.AWS_ENDPOINT_URL,
+      region_name=env.AWS_REGION or "us-east-1",
+    )
+    raw_bucket = env.SHARED_RAW_BUCKET or "robosystems-shared-raw"
+    processed_bucket = env.SHARED_PROCESSED_BUCKET or "robosystems-shared-processed"
+
+    # Phase 1 & 2: Download and process each quarter
+    all_results = []
+
+    if not self.skip_download:
+      logger.info(f"\n{'=' * 60}")
+      logger.info("DOWNLOAD & PROCESS (Fast Mode)")
+      logger.info(f"{'=' * 60}")
+
+      # Resolve tickers to CIKs once (not per quarter)
+      cik_filter = None
+      if self.tickers:
+        sec_client = SECClient()
+        companies_raw = sec_client.get_companies()
+        cik_filter = []
+        for _, company in companies_raw.items():
+          ticker = company.get("ticker", "")
+          if ticker.upper() in [t.upper() for t in self.tickers]:
+            cik = str(company.get("cik_str", company.get("cik", "")))
+            cik_filter.append(cik)
+        logger.info(f"Resolved {len(self.tickers)} tickers to {len(cik_filter)} CIKs")
+
+      for quarter in quarters:
+        logger.info(f"\n[QUARTER {quarter}]")
+        quarter_start = time.time()
+
+        # Parse quarter
+        year_str, q_str = quarter.split("-Q")
+        year = int(year_str)
+        q = int(q_str)
+
+        # Query EFTS for filings
+        async def query_efts():
+          async with EFTSClient() as efts_client:
+            return await efts_client.query_by_quarter(
+              year=year,
+              quarter=q,
+              form_types=["10-K", "10-Q"],
+              ciks=cik_filter,
+            )
+
+        filings = asyncio.run(query_efts())
+
+        if not filings:
+          logger.info(f"  No filings found for {quarter}")
+          continue
+
+        logger.info(f"  Found {len(filings)} filings")
+
+        # Download each filing to S3 raw bucket, then process
+        for filing in filings:
+          cik_no_zeros = str(int(filing.cik))
+          accno_no_dash = filing.accession_number.replace("-", "")
+
+          # S3 raw key (same format as Dagster asset)
+          storage_key = get_raw_key(
+            DataSourceType.SEC,
+            f"year={year}",
+            filing.cik,
+            f"{filing.accession_number}.zip",
+          )
+          partition_key = f"{year}-Q{q}_{filing.cik}_{filing.accession_number}"
+
+          logger.info(f"  {filing.cik}/{filing.accession_number}...")
+
+          # Download from SEC
+          zip_url = f"https://www.sec.gov/Archives/edgar/data/{cik_no_zeros}/{accno_no_dash}/{filing.accession_number}-xbrl.zip"
+
+          try:
+
+            async def download_zip():
+              import httpx
+
+              async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(
+                  zip_url,
+                  headers={"User-Agent": "RoboSystems sec-demo contact@robosystems.io"},
+                )
+                if resp.status_code == 404:
+                  return None  # No XBRL for this filing
+                resp.raise_for_status()
+                return resp.content
+
+            zip_content = asyncio.run(download_zip())
+            if not zip_content:
+              logger.info("    No XBRL (skipped)")
+              continue
+
+            # Upload to S3 raw bucket
+            s3_client.put_object(Bucket=raw_bucket, Key=storage_key, Body=zip_content)
+            stats["downloaded"] += 1
+
+            # Process using the tested Dagster function
+            result = _process_single_filing_to_memory(
+              storage_key=storage_key,
+              partition_key=partition_key,
+              source_file_id=f"fast-{partition_key}",  # Fake ID for fast mode
+              s3_client=s3_client,
+              raw_bucket=raw_bucket,
+              log_fn=lambda msg: logger.info(f"    {msg}"),
+            )
+
+            if result.success:
+              all_results.append(result)
+              stats["processed"] += 1
+              logger.info(f"    Processed ({len(result.tables)} tables)")
+            else:
+              stats["errors"] += 1
+              logger.warning(f"    Failed: {result.error}")
+
+          except Exception as e:
+            logger.error(f"    Error: {e}")
+            stats["errors"] += 1
+            continue
+
+        quarter_duration = time.time() - quarter_start
+        logger.info(f"  Quarter complete ({quarter_duration:.1f}s)")
+
+      # Consolidate and upload to processed bucket
+      if all_results:
+        logger.info(f"\n[CONSOLIDATING] {len(all_results)} filings...")
+        consolidated = _consolidate_parquet_tables_by_date(all_results)
+
+        for filing_date, tables in consolidated.items():
+          for table_key, parquet_bytes in tables.items():
+            # table_key is like "nodes/Entity" or "relationships/FACT_HAS_ELEMENT"
+            s3_key = get_processed_key(
+              DataSourceType.SEC,
+              "processed",
+              f"filed={filing_date}",
+              table_key + ".parquet",
+            )
+            s3_client.put_object(
+              Bucket=processed_bucket, Key=s3_key, Body=parquet_bytes
+            )
+
+        logger.info(
+          f"  Uploaded {sum(len(t) for t in consolidated.values())} consolidated tables"
+        )
+
+    # Phase 3: DuckDB Staging & Materialization
+    if not self.skip_processing:
+      logger.info(f"\n{'=' * 60}")
+      logger.info("STAGING & MATERIALIZATION (Fast Mode)")
+      logger.info(f"{'=' * 60}")
+
+      stage_start = time.time()
+      processor = XBRLDuckDBGraphProcessor(graph_id="sec")
+
+      # Stage to DuckDB
+      logger.info("\n[STAGING] Loading parquet to DuckDB...")
+      try:
+        stage_result = asyncio.run(
+          processor.stage_to_duckdb(rebuild=True, reset_staging=False)
+        )
+        logger.info(f"  Staged {stage_result.total_rows:,} rows")
+      except Exception as e:
+        logger.error(f"  Staging failed: {e}")
+        return {"status": "error", "reason": f"Staging failed: {e}"}
+
+      # Materialize to LadybugDB
+      logger.info("\n[MATERIALIZING] DuckDB → LadybugDB...")
+      try:
+        mat_result = asyncio.run(processor.materialize_from_duckdb())
+        logger.info(f"  Materialized: {mat_result}")
+      except Exception as e:
+        logger.error(f"  Materialization failed: {e}")
+        return {"status": "error", "reason": f"Materialization failed: {e}"}
+
+      stage_duration = time.time() - stage_start
+      logger.info(f"  Stage & Materialize complete ({stage_duration:.1f}s)")
+
+    # Summary
+    overall_duration = time.time() - overall_start
+
+    logger.info(f"\n{'=' * 60}")
+    logger.info("SUMMARY (Fast Mode)")
+    logger.info(f"{'=' * 60}")
+    logger.info(f"Downloaded: {stats['downloaded']}")
+    logger.info(f"Processed: {stats['processed']}")
+    logger.info(f"Errors: {stats['errors']}")
+    logger.info(f"Duration: {overall_duration:.1f}s ({overall_duration / 60:.1f} min)")
+
+    return {
+      "status": "success" if stats["errors"] == 0 else "partial_failure",
+      "downloaded": stats["downloaded"],
+      "processed": stats["processed"],
+      "errors": stats["errors"],
       "duration_seconds": overall_duration,
       "companies": self.tickers,
       "years": self.years,
@@ -562,90 +824,104 @@ class SECPipeline:
       except Exception as e:
         logger.warning(f"    Error clearing {bucket}/{prefix}/: {e}")
 
-  def _run_parallel_processing(self) -> StageResult | None:
-    """Run parallel processing for downloaded filings.
+  def _run_quarterly_batch_processing(self) -> StageResult | None:
+    """Trigger quarterly batch processing for all quarters with pending SourceFiles.
 
-    Discovers unprocessed filings in S3 and triggers parallel Dagster jobs.
+    In production, the sec_processing_sensor handles this automatically.
+    This method is for local development where the sensor is disabled.
+
+    Each quarter's filings are processed together with output consolidated
+    by filing date (filed=YYYY-MM-DD/nodes/Table.parquet).
+
+    Returns:
+        StageResult with processing outcome
     """
-    import boto3
-
-    from robosystems.config import env as app_env
-
     start_time = time.time()
 
-    raw_bucket = app_env.SHARED_RAW_BUCKET
-    processed_bucket = app_env.SHARED_PROCESSED_BUCKET
+    # Get quarters with pending files and counts
+    quarters_with_pending = self._get_quarters_with_pending_files()
+    pending_count, error_count = self._get_source_file_counts()
 
-    if not raw_bucket or not processed_bucket:
-      logger.error("  Missing SHARED_RAW_BUCKET or SHARED_PROCESSED_BUCKET")
-      return None
-
-    # Create S3 client (with LocalStack support)
-    s3_kwargs = {"region_name": app_env.AWS_REGION or "us-east-1"}
-    if app_env.AWS_ENDPOINT_URL:
-      s3_kwargs["endpoint_url"] = app_env.AWS_ENDPOINT_URL
-    s3_client = boto3.client("s3", **s3_kwargs)
-
-    # Get SEC prefix from shared_data.py
-    sec_prefix = f"{get_raw_key(DataSourceType.SEC)}/"  # "sec/"
-
-    # Discover unprocessed filings
-    raw_files = []
-    paginator = s3_client.get_paginator("list_objects_v2")
-
-    for page in paginator.paginate(Bucket=raw_bucket, Prefix=sec_prefix):
-      for obj in page.get("Contents", []):
-        key = obj["Key"]
-        if key.endswith(".zip"):
-          raw_files.append(key)
-
-    if not raw_files:
-      logger.info("  No raw filings found")
-      return None
-
-    # Check which need processing
-    unprocessed = []
-    for raw_key in raw_files:
-      # Parse: sec/year=2024/320193/0000320193-24-000081.zip
-      parts = raw_key.split("/")
-      if len(parts) < 4:
-        continue
-
-      year_part = parts[1].replace("year=", "")
-      cik = parts[2]
-      accession = parts[-1].replace(".zip", "")
-      partition_key = f"{year_part}_{cik}_{accession}"
-
-      # Check if already processed using shared_data.py helper
-      processed_key = get_processed_key(
-        DataSourceType.SEC,
-        f"year={year_part}",
-        "nodes",
-        "Entity",
-        f"{cik}_{accession}.parquet",
-      )
-      try:
-        s3_client.head_object(Bucket=processed_bucket, Key=processed_key)
-        continue  # Already processed
-      except Exception:
-        pass
-
-      unprocessed.append(partition_key)
-
-    if not unprocessed:
-      logger.info("  All filings already processed")
+    if not quarters_with_pending:
+      if error_count > 0:
+        logger.info(f"  No pending quarters ({error_count} files in error state)")
+        logger.info("  Use 'just sec-process --reset-errors' to retry failed files")
+      else:
+        logger.info("  No pending filings to process")
       return StageResult(
-        stage="process_parallel",
+        stage="process_quarterly_batch",
         year="all",
         success=True,
         duration_seconds=time.time() - start_time,
+        metadata={"pending": 0, "errors": error_count, "quarters": 0},
       )
 
-    logger.info(f"  Found {len(unprocessed)} unprocessed filings")
+    logger.info(
+      f"  Found {len(quarters_with_pending)} quarters with {pending_count} pending files"
+    )
+    logger.info(f"  Quarters: {', '.join(sorted(quarters_with_pending))}")
+    if error_count > 0:
+      logger.info(f"  ({error_count} files in error state)")
 
-    # Register dynamic partitions
-    partitions_json = json.dumps(unprocessed)
-    register_cmd = [
+    # Process each quarter
+    success_count = 0
+    failure_count = 0
+    last_error = None
+
+    for quarter in sorted(quarters_with_pending):
+      logger.info(f"\n  Processing quarter {quarter}...")
+
+      # Execute the job with partition key
+      cmd = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "dagster-webserver",
+        "dagster",
+        "job",
+        "execute",
+        "-m",
+        "robosystems.dagster",
+        "--job",
+        "sec_process",
+        "--tags",
+        json.dumps({"dagster/partition": quarter}),
+      ]
+
+      # Use longer timeout for batch processing (30 min per quarter)
+      success, stdout, stderr = self._exec_docker(cmd, timeout=1800)
+
+      if success:
+        success_count += 1
+        logger.info(f"    Quarter {quarter} complete")
+      else:
+        failure_count += 1
+        last_error = stderr[:200] if stderr else "Unknown error"
+        logger.warning(f"    Quarter {quarter} failed: {last_error}")
+
+    duration = time.time() - start_time
+    logger.info(
+      f"\n  Processed {success_count} quarters successfully, "
+      f"{failure_count} failed ({duration:.1f}s)"
+    )
+
+    return StageResult(
+      stage="process_quarterly_batch",
+      year="all",
+      success=failure_count == 0,
+      duration_seconds=duration,
+      metadata={
+        "quarters_processed": success_count,
+        "quarters_failed": failure_count,
+        "initial_quarters": len(quarters_with_pending),
+      },
+      error=last_error if failure_count > 0 else None,
+    )
+
+  def _get_quarters_with_pending_files(self) -> list[str]:
+    """Get list of quarters that have pending SourceFiles."""
+    cmd = [
       "docker",
       "compose",
       "exec",
@@ -653,87 +929,115 @@ class SECPipeline:
       "dagster-webserver",
       "python",
       "-c",
-      f"""
-from dagster import DagsterInstance
-instance = DagsterInstance.get()
-partitions = {partitions_json}
-instance.add_dynamic_partitions(
-    partitions_def_name="sec_filings",
-    partition_keys=partitions,
-)
-print(f"Registered {{len(partitions)}} partitions")
+      """
+from robosystems.database import session as SessionLocal
+from robosystems.models.iam import SourceFile
+session = SessionLocal()
+try:
+    # Get all partition keys for pending files
+    files = session.query(SourceFile.partition_key).filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "pending",
+        SourceFile.partition_key.isnot(None),
+    ).all()
+    # Extract unique quarters from partition keys (format: "2024-Q1_cik_accession")
+    quarters = set()
+    for (partition_key,) in files:
+        if partition_key and "_" in partition_key:
+            quarter = partition_key.split("_")[0]
+            if "-Q" in quarter:
+                quarters.add(quarter)
+    for q in sorted(quarters):
+        print(q)
+finally:
+    session.close()
 """,
     ]
 
-    result = subprocess.run(register_cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-      logger.error(f"  Failed to register partitions: {result.stderr}")
-      return StageResult(
-        stage="process_parallel",
-        year="all",
-        success=False,
-        duration_seconds=time.time() - start_time,
-        error=f"Failed to register partitions: {result.stderr[:200]}",
-      )
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode == 0:
+      quarters = []
+      for line in result.stdout.strip().split("\n"):
+        line = line.strip()
+        if line and "-Q" in line:
+          quarters.append(line)
+      return quarters
 
-    logger.info(f"  {result.stdout.strip()}")
+    return []
 
-    # Trigger parallel jobs (configurable via env var, default 2)
-    concurrency = env.SEC_PARALLEL_CONCURRENCY
-    triggered = 0
-    failed = 0
+  def _get_source_file_counts(self) -> tuple[int, int]:
+    """Get pending and error counts from SourceFile table."""
+    cmd = [
+      "docker",
+      "compose",
+      "exec",
+      "-T",
+      "dagster-webserver",
+      "python",
+      "-c",
+      """
+from robosystems.database import session as SessionLocal
+from robosystems.models.iam import SourceFile
+session = SessionLocal()
+try:
+    pending = session.query(SourceFile).filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "pending"
+    ).count()
+    errors = session.query(SourceFile).filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "error"
+    ).count()
+    print(f"{pending},{errors}")
+finally:
+    session.close()
+""",
+    ]
 
-    for i in range(0, len(unprocessed), concurrency):
-      batch = unprocessed[i : i + concurrency]
-      processes = []
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode == 0:
+      try:
+        parts = result.stdout.strip().split(",")
+        return int(parts[0]), int(parts[1])
+      except (ValueError, IndexError):
+        pass
 
-      for partition_key in batch:
-        cmd = [
-          "docker",
-          "compose",
-          "exec",
-          "-T",
-          "dagster-webserver",
-          "dagster",
-          "job",
-          "execute",
-          "-m",
-          "robosystems.dagster",
-          "--job",
-          "sec_process",
-          "--tags",
-          json.dumps({"dagster/partition": partition_key}),
-        ]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        processes.append((partition_key, proc))
+    return 0, 0
 
-      for partition_key, proc in processes:
-        try:
-          stdout, stderr = proc.communicate(timeout=600)
-          if proc.returncode == 0 or "RUN_SUCCESS" in stdout.decode():
-            triggered += 1
-            if self.verbose:
-              logger.info(f"    [OK] {partition_key}")
-          else:
-            failed += 1
-            logger.warning(f"    [FAIL] {partition_key}")
-        except subprocess.TimeoutExpired:
-          proc.kill()
-          proc.communicate()  # Clean up to prevent zombie processes
-          failed += 1
-          logger.warning(f"    [TIMEOUT] {partition_key}")
+  def _reset_error_files(self) -> int:
+    """Reset all error status files to pending for retry."""
+    cmd = [
+      "docker",
+      "compose",
+      "exec",
+      "-T",
+      "dagster-webserver",
+      "python",
+      "-c",
+      """
+from robosystems.database import session as SessionLocal
+from robosystems.models.iam import SourceFile
+session = SessionLocal()
+try:
+    updated = session.query(SourceFile).filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "error"
+    ).update({"status": "pending", "error_reason": None})
+    session.commit()
+    print(f"{updated}")
+finally:
+    session.close()
+""",
+    ]
 
-    duration = time.time() - start_time
-    logger.info(f"  Processed: {triggered} OK, {failed} failed ({duration:.1f}s)")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode == 0:
+      try:
+        return int(result.stdout.strip())
+      except ValueError:
+        pass
 
-    return StageResult(
-      stage="process_parallel",
-      year="all",
-      success=failed == 0,
-      duration_seconds=duration,
-      metadata={"triggered": triggered, "failed": failed},
-      error=f"{failed} filings failed" if failed > 0 else None,
-    )
+    return 0
 
 
 def cmd_run(args):
@@ -772,7 +1076,11 @@ def cmd_run(args):
       f"Materialize timeout: {args.materialize_timeout}s ({args.materialize_timeout / 3600:.1f}h)"
     )
 
-  results = pipeline.run()
+  # Use fast mode if requested (direct Python calls, no Dagster)
+  if args.fast:
+    results = pipeline.run_fast()
+  else:
+    results = pipeline.run()
 
   if args.json:
     print(json.dumps(results, indent=2))
@@ -1022,210 +1330,87 @@ def cmd_materialize_graph(args):
   return 0 if result.success else 1
 
 
-def cmd_process_parallel(args):
-  """Process filings in parallel via Dagster dynamic partitions.
+def cmd_process(args):
+  """Process pending filings via SourceFile queue (quarterly batch processing).
 
-  This command:
-  1. Lists raw XBRL ZIPs in S3
-  2. Checks which don't have corresponding parquet output
-  3. Registers dynamic partitions for unprocessed filings
-  4. Triggers parallel processing via dagster job execute
+  This command triggers sec_process runs for quarters with pending SourceFiles.
+  In production, the sec_processing_sensor handles this automatically.
+  This command is for local development where the sensor is disabled.
 
-  Unlike sec_batch_process which processes sequentially in one task,
-  this spawns multiple parallel Dagster runs.
+  Each quarter runs as a separate Dagster job execution, processing all
+  filings for that quarter together with output consolidated by filing date.
   """
-  import boto3
-
-  from robosystems.config import env as app_env
-
   logger.info("=" * 60)
-  logger.info("SEC Parallel Processing (Phase 2)")
+  logger.info("SEC Quarterly Batch Processing (Phase 2)")
+  logger.info("=" * 60)
+  logger.info("Note: In production, enable sec_processing_sensor in Dagster UI")
   logger.info("=" * 60)
 
-  raw_bucket = app_env.SHARED_RAW_BUCKET
-  processed_bucket = app_env.SHARED_PROCESSED_BUCKET
+  # Create minimal pipeline for processing
+  pipeline = SECPipeline(
+    tickers=[],
+    years=[],
+    skip_download=True,
+    skip_processing=False,
+    skip_reset=True,
+    verbose=args.verbose,
+  )
 
-  if not raw_bucket or not processed_bucket:
-    logger.error("Missing SHARED_RAW_BUCKET or SHARED_PROCESSED_BUCKET")
-    return 1
+  # Reset error files if requested
+  if args.reset_errors:
+    logger.info("Resetting error files to pending...")
+    reset_count = pipeline._reset_error_files()
+    logger.info(f"  Reset {reset_count} files")
 
-  # Create S3 client (with LocalStack support)
-  s3_kwargs = {"region_name": app_env.AWS_REGION or "us-east-1"}
-  if app_env.AWS_ENDPOINT_URL:
-    s3_kwargs["endpoint_url"] = app_env.AWS_ENDPOINT_URL
-  s3_client = boto3.client("s3", **s3_kwargs)
+  # Get initial counts
+  pending_count, error_count = pipeline._get_source_file_counts()
+  quarters = pipeline._get_quarters_with_pending_files()
+  logger.info(f"SourceFile queue: {pending_count} pending, {error_count} errors")
+  logger.info(f"Quarters with pending: {len(quarters)}")
 
-  # Get SEC prefix from shared_data.py
-  sec_prefix = get_raw_key(DataSourceType.SEC)  # "sec"
-
-  # List raw filings
-  logger.info(f"Scanning S3 bucket: {raw_bucket}")
-  paginator = s3_client.get_paginator("list_objects_v2")
-
-  # Filter by year if specified
-  prefix = f"{sec_prefix}/year={args.year}/" if args.year else f"{sec_prefix}/"
-  raw_files = []
-
-  for page in paginator.paginate(Bucket=raw_bucket, Prefix=prefix):
-    for obj in page.get("Contents", []):
-      key = obj["Key"]
-      if key.endswith(".zip"):
-        raw_files.append(key)
-
-  if not raw_files:
-    logger.warning(f"No raw filings found in {raw_bucket}/{prefix}")
+  if pending_count == 0:
+    if error_count > 0:
+      logger.info("No pending files. Use --reset-errors to retry failed files.")
+    else:
+      logger.info("No files to process.")
     return 0
 
-  logger.info(f"Found {len(raw_files)} raw filings")
+  # Process quarters
+  start_time = time.time()
+  result = pipeline._run_quarterly_batch_processing()
 
-  # Check which need processing
-  unprocessed = []
-  for raw_key in raw_files:
-    # Parse: sec/year=2024/320193/0000320193-24-000081.zip
-    parts = raw_key.split("/")
-    if len(parts) < 4:
-      continue
-
-    year_part = parts[1].replace("year=", "")
-    cik = parts[2]
-    accession = parts[-1].replace(".zip", "")
-    partition_key = f"{year_part}_{cik}_{accession}"
-
-    # Check if already processed using shared_data.py helper
-    processed_key = get_processed_key(
-      DataSourceType.SEC,
-      f"year={year_part}",
-      "nodes",
-      "Entity",
-      f"{cik}_{accession}.parquet",
-    )
-    try:
-      s3_client.head_object(Bucket=processed_bucket, Key=processed_key)
-      continue  # Already processed
-    except Exception:
-      pass
-
-    unprocessed.append(partition_key)
-
-  if not unprocessed:
-    logger.info("All filings already processed")
-    return 0
-
-  logger.info(f"Found {len(unprocessed)} unprocessed filings")
-
-  # Limit if specified
-  if args.limit and args.limit > 0:
-    unprocessed = unprocessed[: args.limit]
-    logger.info(f"Limited to {len(unprocessed)} filings")
-
-  # Register dynamic partitions and trigger jobs
-  logger.info(f"\n{'=' * 60}")
-  logger.info("TRIGGERING PARALLEL PROCESSING")
-  logger.info(f"{'=' * 60}")
-
-  # Use Dagster CLI to trigger runs for each partition
-  # First, register the dynamic partitions
-  logger.info("Registering dynamic partitions...")
-
-  partitions_json = json.dumps(unprocessed)
-  register_cmd = [
-    "docker",
-    "compose",
-    "exec",
-    "-T",
-    "dagster-webserver",
-    "python",
-    "-c",
-    f"""
-from dagster import DagsterInstance
-instance = DagsterInstance.get()
-partitions = {partitions_json}
-instance.add_dynamic_partitions(
-    partitions_def_name="sec_filings",
-    partition_keys=partitions,
-)
-print(f"Registered {{len(partitions)}} partitions")
-""",
-  ]
-
-  result = subprocess.run(register_cmd, capture_output=True, text=True)
-  if result.returncode != 0:
-    logger.error(f"Failed to register partitions: {result.stderr}")
+  if not result:
+    logger.error("Processing returned no result")
     return 1
-  logger.info(result.stdout.strip())
-
-  # Trigger jobs in parallel (up to concurrency limit)
-  concurrency = args.concurrency or 2
-  logger.info(f"Triggering jobs with concurrency: {concurrency}")
-
-  triggered = 0
-  failed = 0
-
-  # Process in batches to control local concurrency
-  for i in range(0, len(unprocessed), concurrency):
-    batch = unprocessed[i : i + concurrency]
-
-    processes = []
-    for partition_key in batch:
-      cmd = [
-        "docker",
-        "compose",
-        "exec",
-        "-T",
-        "dagster-webserver",
-        "dagster",
-        "job",
-        "execute",
-        "-m",
-        "robosystems.dagster",
-        "--job",
-        "sec_process",
-        "--tags",
-        json.dumps({"dagster/partition": partition_key}),
-      ]
-
-      # Run in background
-      proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-      processes.append((partition_key, proc))
-
-    # Wait for batch to complete
-    for partition_key, proc in processes:
-      try:
-        stdout, stderr = proc.communicate(timeout=600)
-        if proc.returncode == 0 or "RUN_SUCCESS" in stdout.decode():
-          triggered += 1
-          logger.info(f"  [OK] {partition_key}")
-        else:
-          failed += 1
-          logger.warning(f"  [FAIL] {partition_key}: {stderr.decode()[:100]}")
-      except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.communicate()  # Clean up to prevent zombie processes
-        failed += 1
-        logger.warning(f"  [TIMEOUT] {partition_key}")
 
   # Summary
+  duration = time.time() - start_time
+  final_pending, final_errors = pipeline._get_source_file_counts()
+
   logger.info(f"\n{'=' * 60}")
   logger.info("SUMMARY")
   logger.info(f"{'=' * 60}")
-  logger.info(f"Total filings: {len(unprocessed)}")
-  logger.info(f"Triggered: {triggered}")
-  logger.info(f"Failed: {failed}")
+  logger.info(f"Quarters processed: {result.metadata.get('quarters_processed', 0)}")
+  logger.info(f"Quarters failed: {result.metadata.get('quarters_failed', 0)}")
+  logger.info(f"Remaining: {final_pending} pending, {final_errors} errors")
+  logger.info(f"Duration: {duration:.1f}s ({duration / 60:.1f} min)")
 
   if args.json:
     print(
       json.dumps(
         {
-          "status": "success" if failed == 0 else "partial_failure",
-          "total": len(unprocessed),
-          "triggered": triggered,
-          "failed": failed,
+          "status": "success" if final_pending == 0 else "partial",
+          "quarters_processed": result.metadata.get("quarters_processed", 0),
+          "quarters_failed": result.metadata.get("quarters_failed", 0),
+          "remaining_pending": final_pending,
+          "remaining_errors": final_errors,
+          "duration_seconds": duration,
         },
         indent=2,
       )
     )
 
-  return 0 if failed == 0 else 1
+  return 0 if result.success else 1
 
 
 def main():
@@ -1260,6 +1445,11 @@ def main():
   )
   run_parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
   run_parser.add_argument("--json", action="store_true", help="JSON output")
+  run_parser.add_argument(
+    "--fast",
+    action="store_true",
+    help="Fast mode: direct Python calls, no Dagster (faster but no UI visibility)",
+  )
   run_parser.add_argument(
     "--download-timeout",
     type=int,
@@ -1360,24 +1550,20 @@ def main():
   )
   mat_graph_parser.add_argument("--json", action="store_true", help="JSON output")
 
-  # Process-parallel command
-  parallel_parser = subparsers.add_parser(
-    "process-parallel", help="Process filings in parallel (Phase 2 only)"
+  # Process command (quarterly batch processing via SourceFile queue)
+  process_parser = subparsers.add_parser(
+    "process",
+    help="Process pending filings by quarter (Phase 2) - for local dev, sensor handles prod",
   )
-  parallel_parser.add_argument("--year", type=str, help="Filter to specific year")
-  parallel_parser.add_argument(
-    "--limit", type=int, default=0, help="Limit number of filings to process"
+  process_parser.add_argument(
+    "--reset-errors",
+    action="store_true",
+    help="Reset error files to pending for retry",
   )
-  parallel_parser.add_argument(
-    "--concurrency",
-    type=int,
-    default=2,
-    help="Number of parallel jobs to run locally (default: 2)",
-  )
-  parallel_parser.add_argument(
+  process_parser.add_argument(
     "-v", "--verbose", action="store_true", help="Verbose output"
   )
-  parallel_parser.add_argument("--json", action="store_true", help="JSON output")
+  process_parser.add_argument("--json", action="store_true", help="JSON output")
 
   args = parser.parse_args()
 
@@ -1391,8 +1577,8 @@ def main():
     sys.exit(cmd_stage(args))
   elif args.command == "materialize-graph":
     sys.exit(cmd_materialize_graph(args))
-  elif args.command == "process-parallel":
-    sys.exit(cmd_process_parallel(args))
+  elif args.command == "process":
+    sys.exit(cmd_process(args))
   else:
     parser.print_help()
     sys.exit(0)

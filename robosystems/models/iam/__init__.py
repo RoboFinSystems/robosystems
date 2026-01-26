@@ -16,6 +16,7 @@ from .graph_user import GraphUser
 from .org import Org, OrgType
 from .org_limits import OrgLimits
 from .org_user import OrgRole, OrgUser
+from .source_file import SourceFile
 from .user import User
 from .user_api_key import UserAPIKey
 from .user_repository import (
@@ -54,6 +55,7 @@ __all__ = [
   "OrgUser",
   "RepositoryPlan",
   "RepositoryType",
+  "SourceFile",
   "UsageEventType",
   "User",
   "UserAPIKey",

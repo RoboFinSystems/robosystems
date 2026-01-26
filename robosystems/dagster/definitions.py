@@ -30,8 +30,8 @@ from robosystems.dagster.assets import (
   # SEC pipeline - two-stage materialization
   sec_duckdb_staged,
   sec_graph_materialized,
-  # SEC pipeline - dynamic partition processing
-  sec_process_filing,
+  # SEC pipeline - quarterly batch processing with consolidated output
+  sec_process_quarter,
   sec_raw_filings,
   # User graph operations (external assets for API direct execution)
   user_graph_creation_source,
@@ -229,8 +229,8 @@ all_assets = [
   user_repository_provisioning_source,
   # SEC pipeline - download phase (EFTS-based discovery)
   sec_raw_filings,
-  # SEC pipeline - dynamic partition processing (sensor handles discovery)
-  sec_process_filing,
+  # SEC pipeline - quarterly batch processing with consolidated output
+  sec_process_quarter,
   # SEC pipeline - two-stage materialization
   sec_duckdb_staged,  # DuckDB staging (full or incremental mode)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)

@@ -271,11 +271,12 @@ demo-user *args="":
     uv run examples/credentials/main.py {{args}}
 
 # Setup SEC repository demo - loads data, grants access, updates config
-demo-sec ticker="NVDA" year="2025" skip_queries="false":
+demo-sec ticker="NVDA" year="2025" skip_queries="false" fast="true":
     uv run examples/sec_demo/main.py \
         --ticker {{ticker}} \
         --year {{year}} \
-        {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
+        {{ if skip_queries == "true" { "--skip-queries" } else { "" } }} \
+        {{ if fast == "true" { "--fast" } else { "" } }}
 
 # Create SEC subscription only (no data loading) - for connecting to existing SEC graph
 demo-sec-subscribe plan="sec-starter":
@@ -379,22 +380,24 @@ duckdb-query-i graph_id env=_local_env:
 # Examples:
 #   just sec-load NVDA 2024
 #   just sec-download 50 2024
-#   just sec-process 2024
+#   just sec-process all=1                    # Process all pending files
+#   just sec-process reset_errors=1           # Retry failed files
 #   just sec-pipeline 50 2024
 
 # --- Full Pipeline (convenience) ---
 
 # Full pipeline: download → process → materialize (top N companies by market cap)
-sec-pipeline count="10" year="2025" limit="":
+sec-pipeline count="10" year="2025":
     @just sec-download {{count}} {{year}}
-    @just sec-process {{year}} {{limit}}
+    @just sec-process
     @just sec-materialize
 
 # Load single ticker end-to-end (download + process + materialize)
-sec-load ticker year="" env=_local_env:
+sec-load ticker year="" fast="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run \
         --tickers {{ticker}} \
-        {{ if year != "" { "--year " + year } else { "" } }}
+        {{ if year != "" { "--year " + year } else { "" } }} \
+        {{ if fast != "" { "--fast" } else { "" } }}
 
 # --- Phase 1: Download ---
 
@@ -406,12 +409,12 @@ sec-download count="10" year="" env=_local_env:
 
 # --- Phase 2: Process ---
 
-# Process downloaded filings to parquet (parallel)
-sec-process year="" limit="" concurrency="2" env=_local_env:
-    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline process-parallel \
-        {{ if year != "" { "--year " + year } else { "" } }} \
-        {{ if limit != "" { "--limit " + limit } else { "" } }} \
-        --concurrency {{concurrency}}
+# Process pending filings by quarter (sensor-driven in prod)
+# In local dev, this triggers sec_process runs for each quarter with pending files.
+# In prod, enable the sec_processing_sensor. Use --reset-errors to retry failed files.
+sec-process reset_errors="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline process \
+        {{ if reset_errors != "" { "--reset-errors" } else { "" } }}
 
 # --- Phase 3: Materialize ---
 
