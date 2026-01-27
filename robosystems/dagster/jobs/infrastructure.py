@@ -69,7 +69,7 @@ def cleanup_expired_api_keys(context: OpExecutionContext, db: DatabaseResource) 
     }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def hourly_auth_cleanup_job():
   """Hourly auth cleanup job."""
   cleanup_expired_api_keys()
@@ -188,7 +188,7 @@ def aggregate_health_results(
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def weekly_health_check_job():
   """Weekly health check job for credit systems."""
   shared = check_shared_credit_allocation_health()
@@ -250,7 +250,7 @@ def check_instance_health(context: OpExecutionContext) -> dict[str, Any]:
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def instance_health_check_job():
   """Hourly health check for Graph EC2 instances."""
   check_instance_health()
@@ -279,7 +279,7 @@ def collect_instance_metrics(context: OpExecutionContext) -> dict[str, Any]:
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def instance_metrics_collection_job():
   """Collect cluster metrics every 5 minutes for auto-scaling."""
   collect_instance_metrics()
@@ -307,7 +307,7 @@ def cleanup_stale_registry_entries(context: OpExecutionContext) -> dict[str, Any
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def instance_registry_cleanup_job():
   """Daily cleanup of stale instance registry entries."""
   cleanup_stale_registry_entries()
@@ -340,7 +340,7 @@ def cleanup_stale_volume_entries(context: OpExecutionContext) -> dict[str, Any]:
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def volume_registry_cleanup_job():
   """Daily cleanup of stale volume registry entries."""
   cleanup_stale_volume_entries()
@@ -407,7 +407,7 @@ def run_full_instance_maintenance(context: OpExecutionContext) -> dict[str, Any]
   }
 
 
-@job(tags={"dagster/priority": "1"})
+@job(tags={"dagster/priority": "1", "dagster/max_retries": 3})
 def full_instance_maintenance_job():
   """Run all instance maintenance tasks (weekly)."""
   run_full_instance_maintenance()

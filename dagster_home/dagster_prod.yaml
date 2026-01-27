@@ -100,6 +100,12 @@ run_coordinator:
 telemetry:
   enabled: false
 
+# Run retries - automatically retry failed runs (including ECS Spot capacity failures)
+# Jobs can override with dagster/max_retries tag. Without the tag, no retries occur.
+# This enables the feature; individual jobs opt-in via their tags.
+run_retries:
+  enabled: true
+
 # Run monitoring for long-running jobs
 # Note: max_resume_run_attempts must be 0 because EcsRunLauncher doesn't support resuming runs
 # Timeouts increased to handle ECS deployment gaps (daemon replacement can take several minutes)
