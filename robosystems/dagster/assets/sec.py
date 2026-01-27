@@ -900,6 +900,7 @@ def _process_single_filing_to_memory(
   Returns:
       ProcessedFilingResult with parquet data or error
   """
+  import gc
   import os
   import tempfile
   import zipfile
@@ -935,6 +936,7 @@ def _process_single_filing_to_memory(
     )
 
   # Extract and process
+  processor = None
   try:
     with tempfile.TemporaryDirectory() as tmpdir:
       with zipfile.ZipFile(buffer, "r") as zf:
@@ -1039,6 +1041,13 @@ def _process_single_filing_to_memory(
       filing_date=None,
       error=str(e),
     )
+  finally:
+    # Always close the buffer to release memory
+    buffer.close()
+    # Clean up processor if it was created (releases DataFrames, etc.)
+    if processor is not None:
+      del processor
+    gc.collect()
 
 
 def _consolidate_parquet_tables_by_date(
