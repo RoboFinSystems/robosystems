@@ -181,16 +181,16 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       context.log.info(f"Skipping {quarter} - already has an active run")
       continue
 
-    run_key = f"sec-quarter-{quarter}"
-
     # Use daily partitioning for current quarter (incremental processing)
     # Use quarterly partitioning for historical quarters (backfill)
     use_daily = quarter == current_quarter
     mode = "daily" if use_daily else "quarterly"
+
     context.log.info(f"Triggering {quarter} with {mode} partitioning")
 
+    # No run_key - rely on active runs check to prevent concurrent runs.
+    # This allows re-triggering after failures when pending files remain.
     yield RunRequest(
-      run_key=run_key,
       partition_key=quarter,  # Use Dagster's partition system
       run_config={
         "ops": {
