@@ -285,32 +285,31 @@ class SECDownloadConfig(Config):
 class SECProcessConfig(Config):
   """Configuration for batch filing processing by quarter.
 
-  Each Dagster run processes an entire quarter's worth of filings,
-  outputting consolidated parquet files. Parallel execution is achieved
-  by running multiple quarters concurrently (controlled by DAGSTER_MAX_CONCURRENT_RUNS).
+  Each Dagster run processes up to batch_limit filings and then exits.
+  The sensor will trigger another run if pending files remain, enabling
+  natural memory release between batches and better crash resilience.
 
   Individual filing failures are tracked in SourceFile records,
-  but the job continues processing remaining filings.
+  but the job continues processing remaining filings in the batch.
 
   Memory Management:
-  - Parquet data is written to local disk (ECS ephemeral storage) as processed
-  - Periodically flushed to S3 based on flush_threshold
-  - Only marks SourceFiles as "success" after S3 upload completes
+  - Each job processes at most batch_limit filings (configurable via env/secrets)
+  - Job exits gracefully after batch, releasing all memory
+  - Sensor re-triggers if more pending files exist
+  - This prevents memory accumulation across thousands of filings
+
+  Environment Variables (can be set in AWS Secrets Manager):
+  - SEC_PROCESS_BATCH_LIMIT: Max filings per job run (default: 500)
   """
 
-  # Max filings to process per quarter (0 = unlimited)
-  # Useful for testing or incremental processing
-  max_filings: int = 0
+  # Max filings to process per job run before exiting gracefully.
+  # Sensor will re-trigger if more pending files exist.
+  # Configurable via SEC_PROCESS_BATCH_LIMIT env var or Secrets Manager.
+  batch_limit: int = env.SEC_PROCESS_BATCH_LIMIT
 
   # Continue processing even if some filings fail
   # If False, job fails on first error (for debugging)
   continue_on_error: bool = True
-
-  # Number of filings to accumulate before flushing to S3
-  # Lower = more S3 uploads but safer against crashes
-  # Higher = fewer uploads but more data at risk if crash
-  # 500 balances DuckDB performance (~10 part files) with crash resilience
-  flush_threshold: int = 500
 
   # Partition output by actual filing date (for incremental daily processing)
   # False (default): All filings output to quarter-end date (2024-03-31 for Q1)
@@ -1185,7 +1184,7 @@ def _consolidate_parquet_from_disk(
 
 @asset(
   group_name="sec_pipeline",
-  description="Process entire quarter's SEC filings with disk-buffered consolidation",
+  description="Process batch of SEC filings with disk-buffered consolidation",
   kinds={"transform"},
   partitions_def=sec_quarter_partitions,
   metadata={
@@ -1201,16 +1200,23 @@ def sec_processed_filings(
   s3: S3Resource,
   db: DatabaseResource,
 ) -> MaterializeResult:
-  """Process an entire quarter's worth of SEC filings.
+  """Process a batch of SEC filings (up to batch_limit per run).
 
-  This asset processes all pending SourceFiles for a given quarter,
-  producing consolidated parquet files.
+  This asset processes up to batch_limit pending SourceFiles (default 500),
+  then exits gracefully. The sensor will trigger another run if pending
+  files remain, enabling natural memory release between batches.
+
+  Batch Processing Model:
+  - Each job processes at most batch_limit filings (default 500)
+  - Job exits after batch, container terminates, memory released
+  - Sensor detects remaining pending files, triggers next batch
+  - Continues until all filings are processed
 
   Memory Management:
-  - Each filing's parquet output is written to local disk (not accumulated in memory)
-  - Periodically flushes to S3 based on flush_threshold
-  - SourceFiles only marked "success" after S3 upload completes
-  - If job crashes, only loses unflushed filings (not entire quarter)
+  - Bounded to batch_limit filings per container lifecycle
+  - Each filing's parquet written to local disk, not accumulated in memory
+  - Container exit between batches releases all memory naturally
+  - Much safer than processing thousands of filings in one container
 
   Output Structure (controlled by use_filing_date_partition config):
   - Backfill mode (default, use_filing_date_partition=False):
@@ -1219,12 +1225,6 @@ def sec_processed_filings(
   - Daily mode (use_filing_date_partition=True):
     s3://bucket/sec/processed/filed=2024-01-15/nodes/Entity/part-001.parquet
     Each filing → its actual filing date → consolidated per-date files
-
-  Benefits:
-  1. Memory bounded: Only one filing in memory at a time during processing
-  2. Crash resilient: Periodic flushes save progress
-  3. Backfill mode: Large consolidated files for efficient DuckDB ingest
-  4. Daily mode: Incremental staging can pick up new dates
 
   Returns:
       MaterializeResult with processing statistics
@@ -1293,9 +1293,9 @@ def sec_processed_filings(
       )
     )
 
-    # Apply max_filings limit if specified
-    if config.max_filings > 0:
-      query = query.limit(config.max_filings)
+    # Apply batch_limit - process only this many filings per job run.
+    # Sensor will re-trigger if more pending files exist.
+    query = query.limit(config.batch_limit)
 
     pending_files = query.order_by(SourceFile.discovered_at.asc()).all()
 
@@ -1325,8 +1325,8 @@ def sec_processed_filings(
     )
 
   context.log.info(
-    f"Found {len(files_to_process)} pending filings for {year}-Q{quarter}, "
-    f"flush_threshold={config.flush_threshold}, partition_mode={partition_mode}"
+    f"Processing batch of {len(files_to_process)} filings for {year}-Q{quarter} "
+    f"(batch_limit={config.batch_limit}, partition_mode={partition_mode})"
   )
 
   # Create work directory for disk-buffered processing
@@ -1546,20 +1546,16 @@ def sec_processed_filings(
           context.log.error(f"Stopping on error: {result.error}")
           break
 
-      # Flush to S3 when threshold reached
-      if len(pending_flush) >= config.flush_threshold:
-        flush_to_s3()
-
       # Batch progress summary every 100 filings
       if (i + 1) % 100 == 0:
         context.log.info(
           f"Progress: {i + 1}/{len(files_to_process)} processed, "
-          f"{succeeded} succeeded, {failed} failed, {total_flushed} flushed to S3"
+          f"{succeeded} succeeded, {failed} failed"
         )
 
-    # Final flush for remaining filings
+    # Flush all processed filings to S3 at end of batch
     if pending_flush:
-      context.log.info(f"Final flush of {len(pending_flush)} remaining filings...")
+      context.log.info(f"Flushing {len(pending_flush)} filings to S3...")
       flush_to_s3()
 
   finally:
@@ -1574,6 +1570,26 @@ def sec_processed_filings(
     f"{files_uploaded} parquet files uploaded to {len(dates_summary)} partition(s)"
   )
 
+  # Check if more pending files exist (sensor will trigger another run)
+  with db.get_session() as session:
+    remaining_count = (
+      session.query(SourceFile)
+      .filter(
+        and_(
+          SourceFile.graph_id == "sec",
+          SourceFile.status == "pending",
+          SourceFile.partition_key.like(f"{quarter_prefix}%"),
+        )
+      )
+      .count()
+    )
+
+  if remaining_count > 0:
+    context.log.info(
+      f"Batch complete. {remaining_count} pending files remain - "
+      "sensor will trigger next batch."
+    )
+
   return MaterializeResult(
     metadata={
       "year": year,
@@ -1587,7 +1603,8 @@ def sec_processed_filings(
       "filings_flushed": total_flushed,
       "failed_source_file_ids": failed_ids[:20],  # Limit to first 20
       "parquet_files_uploaded": files_uploaded,
-      "flush_threshold": config.flush_threshold,
+      "batch_limit": config.batch_limit,
+      "remaining_pending": remaining_count,
     }
   )
 

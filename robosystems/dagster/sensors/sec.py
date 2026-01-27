@@ -68,9 +68,15 @@ SEC_PROCESSING_SENSOR_STATUS = (
 def sec_processing_sensor(context: SensorEvaluationContext):
   """Discover quarters with pending SEC filings and trigger batch processing.
 
-  With batch processing, each Dagster run processes an entire quarter's worth
-  of filings. This sensor discovers which quarters have pending files and
-  triggers runs for them.
+  Each Dagster run processes up to 500 filings (batch_limit) then exits.
+  This sensor continuously triggers new runs while pending files remain,
+  enabling natural memory release between batches.
+
+  Batch Processing Model:
+  1. Job processes up to 500 filings, exits gracefully
+  2. Sensor runs every 5 minutes, detects remaining pending files
+  3. Triggers another batch if pending files exist and no active run
+  4. Repeats until all files processed
 
   Parallelism across quarters is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
   Individual filing failures are tracked in SourceFile; jobs continue processing.
@@ -88,9 +94,9 @@ def sec_processing_sensor(context: SensorEvaluationContext):
     All filings output to quarter-end date for efficient backfill.
 
   Deduplication:
-  - run_key = "sec-quarter-{quarter}" ensures same quarter won't be queued twice
-  - Active run check prevents re-triggering quarters already being processed
-  - After a quarter is processed, its files are no longer pending
+  - No run_key used - allows retries after failures
+  - Active run check prevents concurrent runs for same quarter
+  - After batch completes, sensor re-triggers if pending files remain
   """
   import re
 
@@ -181,16 +187,16 @@ def sec_processing_sensor(context: SensorEvaluationContext):
       context.log.info(f"Skipping {quarter} - already has an active run")
       continue
 
-    run_key = f"sec-quarter-{quarter}"
-
     # Use daily partitioning for current quarter (incremental processing)
     # Use quarterly partitioning for historical quarters (backfill)
     use_daily = quarter == current_quarter
     mode = "daily" if use_daily else "quarterly"
+
     context.log.info(f"Triggering {quarter} with {mode} partitioning")
 
+    # No run_key - rely on active runs check to prevent concurrent runs.
+    # This allows re-triggering after failures when pending files remain.
     yield RunRequest(
-      run_key=run_key,
       partition_key=quarter,  # Use Dagster's partition system
       run_config={
         "ops": {

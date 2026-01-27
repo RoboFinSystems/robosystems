@@ -85,11 +85,11 @@ class TestSecProcessingSensor:
     quarters_found = set()
     for run_request in result:
       assert isinstance(run_request, RunRequest)
-      assert run_request.run_key.startswith("sec-quarter-")
-      # Extract quarter from run_key
-      quarter = run_request.run_key.replace("sec-quarter-", "")
+      # No run_key - we rely on active runs check for deduplication
+      # This allows retries when pending files remain after failures
+      assert run_request.run_key is None
+      quarter = run_request.partition_key
       quarters_found.add(quarter)
-      assert run_request.partition_key == quarter
       assert run_request.tags["quarter"] == quarter
 
     assert quarters_found == {"2024-Q1", "2024-Q2", "2024-Q3"}
