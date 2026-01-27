@@ -806,6 +806,15 @@ class EnvConfig:
   # Parallel processing concurrency (for local sec-process-parallel command)
   SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
 
+  # SEC batch processing configuration
+  # Each job processes up to batch_limit filings then exits; sensor triggers next batch
+  # Lower = better memory isolation, more Dagster runs
+  # Higher = fewer runs, but more memory accumulation per container
+  SEC_PROCESS_BATCH_LIMIT = get_int_env(
+    "SEC_PROCESS_BATCH_LIMIT",
+    int(get_secret_value("SEC_PROCESS_BATCH_LIMIT", "500")),
+  )
+
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")
   OPENFIGI_RETRY_MIN_WAIT = get_int_env(
