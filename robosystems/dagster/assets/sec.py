@@ -936,6 +936,7 @@ def _process_single_filing_to_memory(
     )
 
   # Extract and process
+  processor = None
   try:
     with tempfile.TemporaryDirectory() as tmpdir:
       with zipfile.ZipFile(buffer, "r") as zf:
@@ -1022,10 +1023,6 @@ def _process_single_filing_to_memory(
               with open(local_path, "rb") as f:
                 tables[key] = f.read()
 
-      # Clean up processor to release memory (DataFrames, etc.)
-      del processor
-      gc.collect()
-
       return ProcessedFilingResult(
         success=True,
         source_file_id=source_file_id,
@@ -1047,6 +1044,10 @@ def _process_single_filing_to_memory(
   finally:
     # Always close the buffer to release memory
     buffer.close()
+    # Clean up processor if it was created (releases DataFrames, etc.)
+    if processor is not None:
+      del processor
+    gc.collect()
 
 
 def _consolidate_parquet_tables_by_date(
