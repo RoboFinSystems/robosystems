@@ -1285,19 +1285,21 @@ def sec_processed_filings(
       session.commit()
 
   with db.get_session() as session:
-    query = session.query(SourceFile).filter(
-      and_(
-        SourceFile.graph_id == "sec",
-        SourceFile.status == "pending",
-        SourceFile.partition_key.like(f"{quarter_prefix}%"),
+    # Query pending files, ordered by discovery time, limited to batch_limit.
+    # Sensor will re-trigger if more pending files exist after this batch.
+    pending_files = (
+      session.query(SourceFile)
+      .filter(
+        and_(
+          SourceFile.graph_id == "sec",
+          SourceFile.status == "pending",
+          SourceFile.partition_key.like(f"{quarter_prefix}%"),
+        )
       )
+      .order_by(SourceFile.discovered_at.asc())
+      .limit(config.batch_limit)
+      .all()
     )
-
-    # Apply batch_limit - process only this many filings per job run.
-    # Sensor will re-trigger if more pending files exist.
-    query = query.limit(config.batch_limit)
-
-    pending_files = query.order_by(SourceFile.discovered_at.asc()).all()
 
     # Extract data while session is open (avoid DetachedInstanceError)
     files_to_process = [
