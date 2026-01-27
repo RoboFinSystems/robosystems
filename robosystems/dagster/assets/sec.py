@@ -482,25 +482,15 @@ def sec_raw_filings(
       f"Phase 2: Fetching submissions for {len(unique_ciks)} unique companies..."
     )
 
-    # Filter to only CIKs that need fetching
-    ciks_to_fetch = []
-    submissions_skipped = 0
-    for cik in unique_ciks:
-      submissions_key = get_raw_key(DataSourceType.SEC, "submissions", f"{cik}.json")
-      if config.skip_existing:
-        try:
-          s3.client.head_object(Bucket=bucket, Key=submissions_key)
-          submissions_skipped += 1
-          continue
-        except Exception:
-          pass
-      ciks_to_fetch.append(cik)
+    # Always refresh submissions for CIKs with discovered filings.
+    # The skip_existing flag controls ZIP downloads, not submissions metadata.
+    # New filings discovered via EFTS may not be in stale submissions snapshots,
+    # so we always do an incremental update (or full build if no existing file).
+    ciks_to_fetch = unique_ciks
 
-    context.log.info(
-      f"Submissions: {submissions_skipped} cached, {len(ciks_to_fetch)} to fetch"
-    )
+    context.log.info(f"Submissions: {len(ciks_to_fetch)} to refresh")
 
-    submissions_fetched = submissions_skipped
+    submissions_fetched = 0
     submissions_failed = 0
 
     if ciks_to_fetch:
