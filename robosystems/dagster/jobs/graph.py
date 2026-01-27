@@ -606,6 +606,7 @@ def create_backup(
 @job(
   tags={
     "dagster/priority": "1",
+    "dagster/max_retries": 3,
     # Backup operations can be long-running - use on-demand
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -738,6 +739,7 @@ def restore_backup(
 @job(
   tags={
     "dagster/priority": "1",
+    "dagster/max_retries": 3,
     # Restore operations can be long-running - use on-demand
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [

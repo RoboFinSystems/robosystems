@@ -73,3 +73,8 @@ run_coordinator:
 # Telemetry - disable for privacy
 telemetry:
   enabled: false
+
+# Run retries - automatically retry failed runs
+# Jobs can override with dagster/max_retries tag. Without the tag, no retries occur.
+run_retries:
+  enabled: true

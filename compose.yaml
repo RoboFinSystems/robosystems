@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=api
@@ -37,6 +38,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=ladybug-writer
@@ -77,6 +79,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=dagster
@@ -107,6 +110,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=dagster-daemon
@@ -236,6 +240,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=neo4j-writer

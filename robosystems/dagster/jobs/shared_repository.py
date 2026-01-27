@@ -326,6 +326,7 @@ def refresh_replica_instances(
 @job(
   tags={
     "dagster/priority": "-1",
+    "dagster/max_retries": 3,
     # Critical infrastructure - use on-demand to avoid Spot interruptions
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -354,6 +355,7 @@ def shared_repository_snapshot_job():
 @job(
   tags={
     "dagster/priority": "-1",
+    "dagster/max_retries": 3,
     # Critical infrastructure - use on-demand to avoid Spot interruptions
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -386,6 +388,7 @@ def get_current_launch_template_info(context: OpExecutionContext) -> dict[str, A
 @job(
   tags={
     "dagster/priority": "-1",
+    "dagster/max_retries": 3,
     # Critical infrastructure - use on-demand to avoid Spot interruptions
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
