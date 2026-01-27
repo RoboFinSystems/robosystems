@@ -1,3 +1,4 @@
+import gc
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -197,9 +198,11 @@ class XBRLGraphProcessor:
       logger.warning("Not outputting parquet files for failed report - file not found")
       return
 
+    arelle_client = None
     try:
       logger.debug("Initializing Arelle controller")
-      self.arelle_cntlr = ArelleClient().controller(self.instance_path)
+      arelle_client = ArelleClient()
+      self.arelle_cntlr = arelle_client.controller(self.instance_path)
 
       logger.info("Extracting DEI fiscal context from cover page")
       self.extract_dei_fiscal_info()
@@ -219,6 +222,22 @@ class XBRLGraphProcessor:
 
       logger.error(f"Traceback: {traceback.format_exc()}")
       raise e
+    finally:
+      # Critical: Clean up Arelle resources to prevent memory leaks
+      # ModelXbrl and the controller accumulate memory across filings
+      if self.arelle_cntlr is not None:
+        try:
+          self.arelle_cntlr.close()
+        except Exception as e:
+          logger.warning(f"Error closing ModelXbrl: {e}")
+        self.arelle_cntlr = None
+      if arelle_client is not None:
+        try:
+          arelle_client.close()
+        except Exception as e:
+          logger.warning(f"Error closing ArelleClient: {e}")
+      # Force garbage collection to release Arelle's C extension objects
+      gc.collect()
 
   async def process_async(self):
     """Async version of process method for use in async contexts."""
