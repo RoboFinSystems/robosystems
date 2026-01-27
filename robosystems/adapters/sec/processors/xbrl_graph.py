@@ -625,6 +625,11 @@ class XBRLGraphProcessor:
     identifier = create_fact_id(fact_uri)
     logger.debug(f"Processing fact: {fact_uri}")
 
+    # Skip facts with missing context (malformed XBRL)
+    if xfact.context is None:
+      logger.warning(f"Skipping fact with missing context: {fact_uri}")
+      return
+
     # Check if fact already exists to prevent duplicates
     existing_fact = self.facts_df[self.facts_df["identifier"] == identifier]
     if not existing_fact.empty:
@@ -1134,13 +1139,39 @@ class XBRLGraphProcessor:
 
       return element_data
 
+  def _validate_and_format_date(self, dt, description: str) -> str | None:
+    """Validate and format a datetime to YYYY-MM-DD string.
+
+    Some XBRL filings have malformed dates (e.g., '202-05-31' instead of '2022-05-31').
+    This helper validates the date is reasonable and returns None for invalid dates.
+    """
+    try:
+      date_str = dt.strftime("%Y-%m-%d")
+      # Validate the formatted date has a 4-digit year (catches truncated years)
+      if len(date_str) < 10 or not date_str[:4].isdigit():
+        logger.warning(f"Malformed {description}: {date_str}")
+        return None
+      # Validate year is reasonable (1900-2100)
+      year = int(date_str[:4])
+      if year < 1900 or year > 2100:
+        logger.warning(f"Unreasonable year in {description}: {date_str}")
+        return None
+      return date_str
+    except Exception as e:
+      logger.warning(f"Failed to format {description}: {e}")
+      return None
+
   def make_period(self, fact_data, xfact):
     logger.debug("Processing period for fact")
     period_uri = None
     period_data = None
 
     if xfact.context.isInstantPeriod:
-      instant_date = (xfact.context.instantDatetime - timedelta(1)).strftime("%Y-%m-%d")
+      instant_date = self._validate_and_format_date(
+        xfact.context.instantDatetime - timedelta(1), "instant date"
+      )
+      if instant_date is None:
+        return None  # Skip fact with invalid period
       period_uri = f"{ISO_8601_URI}#{instant_date}"
       logger.debug(f"Processing instant period: {period_uri}")
 
@@ -1184,8 +1215,14 @@ class XBRLGraphProcessor:
         logger.debug(f"Created new instant period: {period_uri}")
 
     elif xfact.context.isStartEndPeriod:
-      start_date = xfact.context.startDatetime.strftime("%Y-%m-%d")
-      end_date = (xfact.context.endDatetime - timedelta(1)).strftime("%Y-%m-%d")
+      start_date = self._validate_and_format_date(
+        xfact.context.startDatetime, "start date"
+      )
+      end_date = self._validate_and_format_date(
+        xfact.context.endDatetime - timedelta(1), "end date"
+      )
+      if start_date is None or end_date is None:
+        return None  # Skip fact with invalid period
       period_uri = f"{ISO_8601_URI}#{start_date}/{end_date}"
       logger.debug(f"Processing start-end period: {period_uri}")
 
