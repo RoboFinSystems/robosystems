@@ -366,15 +366,13 @@ services:
     profiles: ["observability"]
 
   # RoboSystems App Frontend
-  # Option 1: Build from local source (for development)
-  # Option 2: Use Docker Hub image (uncomment 'image' and remove 'build'):
-  #   image: robofinsystems/robosystems-app:latest
   robosystems-app:
     container_name: robosystems-app
+    image: ${ROBOSYSTEMS_APP_IMAGE:-robosystems-app-local}
+    pull_policy: ${ROBOSYSTEMS_APP_PULL_POLICY:-never}
     build:
       context: ../robosystems-app
       dockerfile: Dockerfile
-    # image: robofinsystems/robosystems-app:latest  # Alternative: use pre-built image
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev
@@ -402,15 +400,13 @@ services:
     profiles: ["robosystems-app", "apps", "all"]
 
   # RoboLedger App Frontend
-  # Option 1: Build from local source (for development)
-  # Option 2: Use Docker Hub image (uncomment 'image' and remove 'build'):
-  #   image: robofinsystems/roboledger-app:latest
   roboledger-app:
     container_name: roboledger-app
+    image: ${ROBOLEDGER_APP_IMAGE:-roboledger-app-local}
+    pull_policy: ${ROBOLEDGER_APP_PULL_POLICY:-never}
     build:
       context: ../roboledger-app
       dockerfile: Dockerfile
-    # image: robofinsystems/roboledger-app:latest  # Alternative: use pre-built image
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev
@@ -438,15 +434,13 @@ services:
     profiles: ["roboledger-app", "apps", "all"]
 
   # RoboInvestor App Frontend
-  # Option 1: Build from local source (for development)
-  # Option 2: Use Docker Hub image (uncomment 'image' and remove 'build'):
-  #   image: robofinsystems/roboinvestor-app:latest
   roboinvestor-app:
     container_name: roboinvestor-app
+    image: ${ROBOINVESTOR_APP_IMAGE:-roboinvestor-app-local}
+    pull_policy: ${ROBOINVESTOR_APP_PULL_POLICY:-never}
     build:
       context: ../roboinvestor-app
       dockerfile: Dockerfile
-    # image: robofinsystems/roboinvestor-app:latest  # Alternative: use pre-built image
     environment:
       - NODE_ENV=development
       - ENVIRONMENT=dev

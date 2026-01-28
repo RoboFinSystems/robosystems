@@ -24,25 +24,20 @@ default:
 ## Docker ##
 
 # Start service
-start profile="robosystems" build="--build" detached="--detach":
-    @just compose-up {{profile}} {{build}} {{detached}}
+start profile="robosystems" build="":
+    @test -f {{_env}} || cp .env.example {{_env}}
+    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
+        {{ if build != "" { "--build" } else { "" } }} --detach
 
 # Stop service
 stop profile="robosystems":
-    @just compose-down {{profile}}
-
-# Docker commands
-compose-up profile="robosystems" build="--build" detached="--detach" env=_env:
-    @test -f {{env}} || cp .env.example {{env}}
-    docker compose -f compose.yaml --env-file {{env}} --profile {{profile}} up {{build}} {{detached}}
-
-compose-down profile="robosystems":
     docker compose -f compose.yaml --profile {{profile}} down
 
-# Rebuild containers (rebuilds images and restarts - for package/env changes)
+# Rebuild containers (rebuilds images and force recreates - for package/env changes)
 rebuild profile="robosystems":
     @test -f {{_env}} || cp .env.example {{_env}}
-    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up --build --force-recreate --detach
+    docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
+        --build --force-recreate --detach
 
 # Quick restart containers to pick up code changes via volume mounts (no rebuild)
 restart profile="robosystems":
@@ -52,17 +47,22 @@ restart profile="robosystems":
 restart-container container="worker":
     docker compose -f compose.yaml restart robosystems-{{container}}
 
-# Docker logs (without follow to prevent hanging)
-logs container="worker" lines="100":
-    docker logs robosystems-{{container}} --tail {{lines}}
+# Show running containers
+ps:
+    docker compose -f compose.yaml ps
 
-# Docker logs with follow (tail -f style)
-logs-follow container="worker":
-    docker logs -f robosystems-{{container}}
+# Docker logs (use follow=1 for tail -f style)
+logs container="worker" lines="100" follow="":
+    docker logs robosystems-{{container}} --tail {{lines}} \
+        {{ if follow != "" { "--follow" } else { "" } }}
 
 # Docker logs with grep filter
 logs-grep container="worker" pattern="ERROR" lines="100":
     docker logs robosystems-{{container}} --tail {{lines}} | grep -E "{{pattern}}"
+
+# Shell into a container
+exec container="api" shell="bash":
+    docker exec -it robosystems-{{container}} {{shell}}
 
 # Clone frontend app repositories
 clone-apps:
