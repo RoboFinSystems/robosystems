@@ -4,14 +4,19 @@ Centralized environment variable configuration.
 This module provides a single source of truth for all environment variables,
 with type conversions, validation, and default values.
 
-Organization:
+Organization (mirrors .env file section order):
 - Helper functions for type-safe env var access
-- Core application settings
-- Database configuration (PostgreSQL, LadybugDB)
-- External service integrations
-- Security and authentication
+- Core application configuration (env, encryption, service URLs, JWT, email, CAPTCHA)
+- Feature flags (security, graph ops, connections, shared repos, org, platform)
+- Graph databases (backend selection, API config, resiliency, tiers, LadybugDB, Neo4j)
+- PostgreSQL
+- Valkey/Redis
+- Dagster configuration
+- AWS configuration
+- External service API keys
 - Performance and scaling
-- Feature flags and toggles
+- XBRL and Arelle
+- Observability
 """
 
 import os
@@ -218,12 +223,12 @@ class EnvConfig:
   """
   Centralized environment variable configuration.
 
-  Variables are organized into logical groups for easier maintenance.
+  Variables are organized into logical groups matching the .env file layout.
   All variables use type-safe helper functions for consistent behavior.
   """
 
   # ==========================================================================
-  # CORE APPLICATION SETTINGS
+  # 1. CORE APPLICATION CONFIGURATION
   # ==========================================================================
 
   # Environment and debugging
@@ -238,6 +243,10 @@ class EnvConfig:
   HOST = get_str_env("HOST", "0.0.0.0")
   PORT = get_int_env("PORT", 8000)
 
+  # Encryption Keys
+  CONNECTION_CREDENTIALS_KEY = get_secret_value("CONNECTION_CREDENTIALS_KEY", "")
+  GRAPH_BACKUP_ENCRYPTION_KEY = get_secret_value("GRAPH_BACKUP_ENCRYPTION_KEY", "")
+
   # Service URLs
   # ROBOSYSTEMS_API_URL is set by CloudFormation based on access mode (domain or ALB DNS)
   ROBOSYSTEMS_API_URL = get_str_env("ROBOSYSTEMS_API_URL", "https://api.robosystems.ai")
@@ -246,41 +255,110 @@ class EnvConfig:
   ROBOINVESTOR_URL = get_secret_value("ROBOINVESTOR_URL", "https://roboinvestor.ai")
   ROBOSYSTEMS_URL = get_secret_value("ROBOSYSTEMS_URL", "https://robosystems.ai")
 
+  # JWT configuration
+  JWT_SECRET_KEY = get_secret_value("JWT_SECRET_KEY", "")
+  JWT_EXPIRY_HOURS = get_float_env("JWT_EXPIRY_HOURS", 0.5)  # Default 30 minutes
+
+  # JWT Issuer and Audience - configurable for different deployments
+  # Default JWT_ISSUER is derived from ROBOSYSTEMS_API_URL (strips protocol)
+  # Override via Secrets Manager for custom deployments:
+  # - internal mode: set JWT_ISSUER=localhost (access via bastion tunnel)
+  # - public-http mode: uses ALB DNS automatically, or set custom value
+  # Derive default JWT issuer/audience from ROBOSYSTEMS_API_URL, stripping protocol
+  _jwt_default_domain = (
+    os.getenv("ROBOSYSTEMS_API_URL", "https://api.robosystems.ai")
+    .replace("https://", "")
+    .replace("http://", "")
+  )
+  JWT_ISSUER = get_secret_value("JWT_ISSUER", _jwt_default_domain)
+  JWT_AUDIENCE = get_secret_list_value("JWT_AUDIENCE", _jwt_default_domain)
+
+  # Authentication Security Settings (configurable per environment)
+  TOKEN_GRACE_PERIOD_MINUTES = get_int_env("TOKEN_GRACE_PERIOD_MINUTES", 5)
+
+  # Authentication Rate Limiting (overrides for defaults in constants.py)
+  JWT_REFRESH_RATE_LIMIT = get_int_env("JWT_REFRESH_RATE_LIMIT", 20)
+  AUTH_RATE_LIMIT_LOGIN = get_int_env("AUTH_RATE_LIMIT_LOGIN", 5)
+  AUTH_RATE_LIMIT_REGISTER = get_int_env("AUTH_RATE_LIMIT_REGISTER", 3)
+
+  # Email service configuration
+  EMAIL_FROM_ADDRESS = get_str_env(
+    "EMAIL_FROM_ADDRESS",
+    get_secret_value("EMAIL_FROM_ADDRESS", "noreply@robosystems.ai"),
+  )
+  EMAIL_FROM_NAME = get_str_env(
+    "EMAIL_FROM_NAME",
+    get_secret_value("EMAIL_FROM_NAME", "RoboSystems"),
+  )
+
+  # Token expiry configuration
+  EMAIL_TOKEN_EXPIRY_HOURS = get_int_env("EMAIL_TOKEN_EXPIRY_HOURS", 24)
+  PASSWORD_RESET_TOKEN_EXPIRY_HOURS = get_int_env(
+    "PASSWORD_RESET_TOKEN_EXPIRY_HOURS", 1
+  )
+
+  # Cloudflare Turnstile (CAPTCHA)
+  TURNSTILE_SECRET_KEY = get_secret_value("TURNSTILE_SECRET_KEY", "")
+  TURNSTILE_SITE_KEY = get_secret_value("TURNSTILE_SITE_KEY", "")
+
   # ==========================================================================
-  # FEATURE FLAGS
+  # 2. FEATURE FLAGS
   # ==========================================================================
 
-  # Core Feature Flags
+  # --- Security & Auth ---
   USER_REGISTRATION_ENABLED = get_bool_env(
     "USER_REGISTRATION_ENABLED",
     bool(get_secret_value("USER_REGISTRATION_ENABLED", "false").lower() == "true"),
   )
-  RATE_LIMIT_ENABLED = get_bool_env(
-    "RATE_LIMIT_ENABLED",
-    bool(get_secret_value("RATE_LIMIT_ENABLED", "true").lower() == "true"),
+  SECURITY_AUDIT_ENABLED = get_bool_env(
+    "SECURITY_AUDIT_ENABLED",
+    bool(get_secret_value("SECURITY_AUDIT_ENABLED", "true").lower() == "true"),
   )
-  SSE_ENABLED = get_bool_env(
-    "SSE_ENABLED",
-    bool(get_secret_value("SSE_ENABLED", "true").lower() == "true"),
+  EMAIL_VERIFICATION_ENABLED = get_bool_env(
+    "EMAIL_VERIFICATION_ENABLED",
+    bool(get_secret_value("EMAIL_VERIFICATION_ENABLED", "true").lower() == "true")
+    if get_str_env("ENVIRONMENT", "dev") in ["prod", "staging"]
+    else False,
   )
-  OTEL_ENABLED = get_bool_env(
-    "OTEL_ENABLED",
-    bool(get_secret_value("OTEL_ENABLED", "false").lower() == "true"),
+  CAPTCHA_ENABLED = get_bool_env(
+    "CAPTCHA_ENABLED",
+    bool(get_secret_value("CAPTCHA_ENABLED", "true").lower() == "true")
+    if get_str_env("ENVIRONMENT", "dev") in ["prod", "staging"]
+    else False,
   )
-  LOAD_SHEDDING_ENABLED = get_bool_env(
-    "LOAD_SHEDDING_ENABLED",
-    bool(get_secret_value("LOAD_SHEDDING_ENABLED", "true").lower() == "true"),
-  )
+  CORS_ALLOW_CREDENTIALS = get_bool_env("CORS_ALLOW_CREDENTIALS", True)
   CSP_TRUSTED_TYPES_ENABLED = get_bool_env(
     "CSP_TRUSTED_TYPES_ENABLED",
     bool(get_secret_value("CSP_TRUSTED_TYPES_ENABLED", "true").lower() == "true"),
   )
-  ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
-    "ORG_MEMBER_INVITATIONS_ENABLED",
-    bool(get_secret_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true"),
+
+  # --- Graph Operations ---
+  DIRECT_GRAPH_PROVISIONING_ENABLED = get_bool_env(
+    "DIRECT_GRAPH_PROVISIONING_ENABLED",
+    bool(
+      get_secret_value("DIRECT_GRAPH_PROVISIONING_ENABLED", "true").lower() == "true"
+    ),
+  )
+  DIRECT_GRAPH_MATERIALIZATION_ENABLED = get_bool_env(
+    "DIRECT_GRAPH_MATERIALIZATION_ENABLED",
+    bool(
+      get_secret_value("DIRECT_GRAPH_MATERIALIZATION_ENABLED", "true").lower() == "true"
+    ),
+  )
+  SUBGRAPH_CREATION_ENABLED = get_bool_env(
+    "SUBGRAPH_CREATION_ENABLED",
+    bool(get_secret_value("SUBGRAPH_CREATION_ENABLED", "true").lower() == "true"),
+  )
+  BACKUP_CREATION_ENABLED = get_bool_env(
+    "BACKUP_CREATION_ENABLED",
+    bool(get_secret_value("BACKUP_CREATION_ENABLED", "true").lower() == "true"),
+  )
+  AGENT_POST_ENABLED = get_bool_env(
+    "AGENT_POST_ENABLED",
+    bool(get_secret_value("AGENT_POST_ENABLED", "true").lower() == "true"),
   )
 
-  # Connection Feature Flags
+  # --- Connection Providers ---
   CONNECTION_SEC_ENABLED = get_bool_env(
     "CONNECTION_SEC_ENABLED",
     bool(get_secret_value("CONNECTION_SEC_ENABLED", "false").lower() == "true"),
@@ -294,26 +372,7 @@ class EnvConfig:
     bool(get_secret_value("CONNECTION_PLAID_ENABLED", "false").lower() == "true"),
   )
 
-  # Billing Feature Flags
-  # For forked/self-hosted deployments: Set BILLING_ENABLED=false in AWS Secrets Manager
-  # This disables payment requirements since you're paying for your own infrastructure
-  BILLING_ENABLED = get_bool_env(
-    "BILLING_ENABLED",
-    bool(get_secret_value("BILLING_ENABLED", "true").lower() == "true"),
-  )
-
-  # Security Feature Flags
-  SECURITY_AUDIT_ENABLED = get_bool_env(
-    "SECURITY_AUDIT_ENABLED",
-    bool(get_secret_value("SECURITY_AUDIT_ENABLED", "true").lower() == "true"),
-  )
-  CORS_ALLOW_CREDENTIALS = get_bool_env("CORS_ALLOW_CREDENTIALS", True)
-
-  # Graph Infrastructure Feature Flags (applies to all backends)
-  GRAPH_CIRCUIT_BREAKERS_ENABLED = get_bool_env("GRAPH_CIRCUIT_BREAKERS_ENABLED", True)
-  GRAPH_REDIS_CACHE_ENABLED = get_bool_env("GRAPH_REDIS_CACHE_ENABLED", True)
-  GRAPH_RETRY_LOGIC_ENABLED = get_bool_env("GRAPH_RETRY_LOGIC_ENABLED", True)
-  GRAPH_HEALTH_CHECKS_ENABLED = get_bool_env("GRAPH_HEALTH_CHECKS_ENABLED", True)
+  # --- Shared Repository Operations ---
   SHARED_MASTER_READS_ENABLED = get_bool_env(
     "SHARED_MASTER_READS_ENABLED",
     bool(get_secret_value("SHARED_MASTER_READS_ENABLED", "true").lower() == "true"),
@@ -325,22 +384,13 @@ class EnvConfig:
   # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
   SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
 
-  # ==========================================================================
-  # Dagster Schedule Feature Flags
-  # All default to false - enable in AWS Secrets Manager for production.
-  # This ensures forked repos don't accidentally run production schedules.
-  # ==========================================================================
-
-  # Billing schedules: credit allocation, storage billing, usage collection
-  BILLING_SCHEDULES_ENABLED = get_bool_env(
-    "BILLING_SCHEDULES_ENABLED",
-    bool(get_secret_value("BILLING_SCHEDULES_ENABLED", "false").lower() == "true"),
-  )
-
-  # Instance infrastructure schedules: health checks, metrics, registry cleanup
-  INSTANCE_SCHEDULES_ENABLED = get_bool_env(
-    "INSTANCE_SCHEDULES_ENABLED",
-    bool(get_secret_value("INSTANCE_SCHEDULES_ENABLED", "false").lower() == "true"),
+  # SEC batch processing configuration
+  # Each job processes up to batch_limit filings then exits; sensor triggers next batch
+  # Lower = better memory isolation, more Dagster runs
+  # Higher = fewer runs, but more memory accumulation per container
+  SEC_PROCESS_BATCH_LIMIT = get_int_env(
+    "SEC_PROCESS_BATCH_LIMIT",
+    int(get_secret_value("SEC_PROCESS_BATCH_LIMIT", "500")),
   )
 
   # SEC download schedule: daily fetch of new filings
@@ -386,88 +436,66 @@ class EnvConfig:
     ),
   )
 
-  # Graph backup encryption and compression are always enabled for security and efficiency
+  # Shared repositories list for infrastructure/deployment (used by userdata scripts)
+  # This configures which repositories should be deployed on shared writer instances
+  # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES
+  SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
-  # Graph Operations Feature Flags
-  SUBGRAPH_CREATION_ENABLED = get_bool_env(
-    "SUBGRAPH_CREATION_ENABLED",
-    bool(get_secret_value("SUBGRAPH_CREATION_ENABLED", "true").lower() == "true"),
+  # --- Organization ---
+  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env(
+    "ORG_GRAPHS_DEFAULT_LIMIT",
+    int(get_secret_value("ORG_GRAPHS_DEFAULT_LIMIT", "100")),
   )
-  BACKUP_CREATION_ENABLED = get_bool_env(
-    "BACKUP_CREATION_ENABLED",
-    bool(get_secret_value("BACKUP_CREATION_ENABLED", "true").lower() == "true"),
-  )
-  AGENT_POST_ENABLED = get_bool_env(
-    "AGENT_POST_ENABLED",
-    bool(get_secret_value("AGENT_POST_ENABLED", "true").lower() == "true"),
-  )
-
-  # Direct Graph Provisioning Feature Flag
-  # When enabled, graph creation and provisioning operations run directly
-  # in the API process instead of via Dagster jobs.
-  # This eliminates ECS cold start latency (60s -> 3s).
-  # Disable to fall back to Dagster job execution for debugging.
-  DIRECT_GRAPH_PROVISIONING_ENABLED = get_bool_env(
-    "DIRECT_GRAPH_PROVISIONING_ENABLED",
-    bool(
-      get_secret_value("DIRECT_GRAPH_PROVISIONING_ENABLED", "true").lower() == "true"
-    ),
+  ORG_MEMBER_INVITATIONS_ENABLED = get_bool_env(
+    "ORG_MEMBER_INVITATIONS_ENABLED",
+    bool(get_secret_value("ORG_MEMBER_INVITATIONS_ENABLED", "false").lower() == "true"),
   )
 
-  # Direct Graph Materialization Feature Flag
-  # When enabled, materialization runs directly in the API process instead
-  # of via Dagster jobs. Eliminates cold start overhead (5-15s+).
-  # Disable to fall back to Dagster job execution for debugging.
-  DIRECT_GRAPH_MATERIALIZATION_ENABLED = get_bool_env(
-    "DIRECT_GRAPH_MATERIALIZATION_ENABLED",
-    bool(
-      get_secret_value("DIRECT_GRAPH_MATERIALIZATION_ENABLED", "true").lower() == "true"
-    ),
+  # --- Platform Operations ---
+  # For forked/self-hosted deployments: Set BILLING_ENABLED=false in AWS Secrets Manager
+  # This disables payment requirements since you're paying for your own infrastructure
+  BILLING_ENABLED = get_bool_env(
+    "BILLING_ENABLED",
+    bool(get_secret_value("BILLING_ENABLED", "true").lower() == "true"),
+  )
+  SSE_ENABLED = get_bool_env(
+    "SSE_ENABLED",
+    bool(get_secret_value("SSE_ENABLED", "true").lower() == "true"),
+  )
+  RATE_LIMIT_ENABLED = get_bool_env(
+    "RATE_LIMIT_ENABLED",
+    bool(get_secret_value("RATE_LIMIT_ENABLED", "true").lower() == "true"),
+  )
+  LOAD_SHEDDING_ENABLED = get_bool_env(
+    "LOAD_SHEDDING_ENABLED",
+    bool(get_secret_value("LOAD_SHEDDING_ENABLED", "true").lower() == "true"),
+  )
+  OTEL_ENABLED = get_bool_env(
+    "OTEL_ENABLED",
+    bool(get_secret_value("OTEL_ENABLED", "false").lower() == "true"),
   )
 
-  # Maximum staged data size (MB) for direct materialization.
-  # Graphs with staged data above this threshold automatically route to
-  # Dagster even when DIRECT_GRAPH_MATERIALIZATION_ENABLED=true.
-  # This prevents long-running materializations from tying up API workers.
-  DIRECT_MATERIALIZATION_THRESHOLD_MB = get_int_env(
-    "DIRECT_MATERIALIZATION_THRESHOLD_MB", 500
+  # Dagster Schedule Feature Flags
+  # All default to false - enable in AWS Secrets Manager for production.
+  # This ensures forked repos don't accidentally run production schedules.
+
+  # Billing schedules: credit allocation, storage billing, usage collection
+  BILLING_SCHEDULES_ENABLED = get_bool_env(
+    "BILLING_SCHEDULES_ENABLED",
+    bool(get_secret_value("BILLING_SCHEDULES_ENABLED", "false").lower() == "true"),
   )
 
-  # Registration and Verification Feature Flags
-  EMAIL_VERIFICATION_ENABLED = get_bool_env(
-    "EMAIL_VERIFICATION_ENABLED",
-    bool(get_secret_value("EMAIL_VERIFICATION_ENABLED", "true").lower() == "true")
-    if get_str_env("ENVIRONMENT", "dev") in ["prod", "staging"]
-    else False,
-  )
-
-  # Email service configuration
-  EMAIL_FROM_ADDRESS = get_str_env(
-    "EMAIL_FROM_ADDRESS",
-    get_secret_value("EMAIL_FROM_ADDRESS", "noreply@robosystems.ai"),
-  )
-  EMAIL_FROM_NAME = get_str_env(
-    "EMAIL_FROM_NAME",
-    get_secret_value("EMAIL_FROM_NAME", "RoboSystems"),
-  )
-
-  # Token expiry configuration
-  EMAIL_TOKEN_EXPIRY_HOURS = get_int_env("EMAIL_TOKEN_EXPIRY_HOURS", 24)
-  PASSWORD_RESET_TOKEN_EXPIRY_HOURS = get_int_env(
-    "PASSWORD_RESET_TOKEN_EXPIRY_HOURS", 1
-  )
-  CAPTCHA_ENABLED = get_bool_env(
-    "CAPTCHA_ENABLED",
-    bool(get_secret_value("CAPTCHA_ENABLED", "true").lower() == "true")
-    if get_str_env("ENVIRONMENT", "dev") in ["prod", "staging"]
-    else False,
+  # Instance infrastructure schedules: health checks, metrics, registry cleanup
+  INSTANCE_SCHEDULES_ENABLED = get_bool_env(
+    "INSTANCE_SCHEDULES_ENABLED",
+    bool(get_secret_value("INSTANCE_SCHEDULES_ENABLED", "false").lower() == "true"),
   )
 
   # ==========================================================================
-  # DATABASE CONFIGURATION - GRAPH DATABASES (MULTI-BACKEND: LADYBUGDB AND NEO4J)
+  # 3. GRAPH DATABASES - MULTI-BACKEND (LADYBUGDB AND NEO4J)
   # ==========================================================================
 
-  # Graph Backend Selection
+  # --- Backend Selection ---
   GRAPH_BACKEND_TYPE = get_str_env(
     "GRAPH_BACKEND_TYPE", "ladybug"
   )  # Options: ladybug, neo4j_community, neo4j_enterprise
@@ -481,39 +509,10 @@ class EnvConfig:
   GRAPH_API_URL = get_str_env("GRAPH_API_URL", "http://localhost:8001")
   GRAPH_API_KEY = get_secret_value("GRAPH_API_KEY", "")
 
-  # Dagster Configuration (for job orchestration)
-  DAGSTER_HOST = get_str_env("DAGSTER_HOST", "dagster-webserver")
-  DAGSTER_PORT = get_int_env("DAGSTER_PORT", 3000)
-
   # Shared repository backend selection (dev/local only)
   # In AWS environments, backend is determined by graph.yml tier configuration
   # Values: "ladybug" or "neo4j"
   GRAPH_SHARED_REPOSITORY_BACKEND = get_str_env("GRAPH_SHARED_REPOSITORY_BACKEND", "")
-
-  # Graph API Timeouts and Limits
-  GRAPH_HTTP_TIMEOUT = get_int_env("GRAPH_HTTP_TIMEOUT", DEFAULT_HTTP_TIMEOUT)
-  GRAPH_QUERY_TIMEOUT = get_int_env("GRAPH_QUERY_TIMEOUT", DEFAULT_QUERY_TIMEOUT)
-  GRAPH_MAX_QUERY_LENGTH = get_int_env("GRAPH_MAX_QUERY_LENGTH", MAX_QUERY_LENGTH)
-  GRAPH_MAX_REQUEST_SIZE = get_int_env("GRAPH_MAX_REQUEST_SIZE", GRAPH_MAX_REQUEST_SIZE)
-  GRAPH_CONNECT_TIMEOUT = get_float_env("GRAPH_CONNECT_TIMEOUT", GRAPH_CONNECT_TIMEOUT)
-  GRAPH_READ_TIMEOUT = get_float_env("GRAPH_READ_TIMEOUT", GRAPH_READ_TIMEOUT)
-
-  # Graph Resiliency and Circuit Breaker Configuration (applies to all backends)
-  GRAPH_INSTANCE_CACHE_TTL = get_int_env(
-    "GRAPH_INSTANCE_CACHE_TTL", GRAPH_INSTANCE_CACHE_TTL
-  )
-  GRAPH_CIRCUIT_BREAKER_THRESHOLD = get_int_env(
-    "GRAPH_CIRCUIT_BREAKER_THRESHOLD", GRAPH_CIRCUIT_BREAKER_THRESHOLD
-  )
-  GRAPH_CIRCUIT_BREAKER_TIMEOUT = get_int_env(
-    "GRAPH_CIRCUIT_BREAKER_TIMEOUT", GRAPH_CIRCUIT_BREAKER_TIMEOUT
-  )
-  GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
-    "GRAPH_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
-  )
-
-  # Graph Backup Configuration (applies to all backends)
-  GRAPH_BACKUP_ENCRYPTION_KEY = get_secret_value("GRAPH_BACKUP_ENCRYPTION_KEY", "")
 
   # Graph Registry Tables (DynamoDB - applies to all backends)
   # These tables track graph allocations, instance health, and volume management
@@ -527,27 +526,47 @@ class EnvConfig:
     "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
   )
 
-  # ===========================================================================
-  # BACKEND-SPECIFIC CONFIGURATION
-  # ===========================================================================
+  # Instance Metadata (applies to all backends)
+  EC2_INSTANCE_ID = get_str_env("INSTANCE_ID", "")
+  INSTANCE_ID = get_str_env("INSTANCE_ID", "")
+  CLUSTER_TIER = get_str_env("CLUSTER_TIER", "")
 
-  # LadybugDB-Specific Configuration (when GRAPH_BACKEND_TYPE=ladybug)
-  LBUG_DATABASE_PATH = get_str_env("LBUG_DATABASE_PATH", "./data/lbug-dbs")
-  LBUG_ACCESS_PATTERN = get_str_env("LBUG_ACCESS_PATTERN", "api_auto")
-  LBUG_NODE_TYPE = get_str_env("LBUG_NODE_TYPE", "writer")
+  # Graph API Timeouts and Limits
+  GRAPH_HTTP_TIMEOUT = get_int_env("GRAPH_HTTP_TIMEOUT", DEFAULT_HTTP_TIMEOUT)
+  GRAPH_QUERY_TIMEOUT = get_int_env("GRAPH_QUERY_TIMEOUT", DEFAULT_QUERY_TIMEOUT)
+  GRAPH_MAX_QUERY_LENGTH = get_int_env("GRAPH_MAX_QUERY_LENGTH", MAX_QUERY_LENGTH)
+  GRAPH_MAX_REQUEST_SIZE = get_int_env("GRAPH_MAX_REQUEST_SIZE", GRAPH_MAX_REQUEST_SIZE)
+  GRAPH_CONNECT_TIMEOUT = get_float_env("GRAPH_CONNECT_TIMEOUT", GRAPH_CONNECT_TIMEOUT)
+  GRAPH_READ_TIMEOUT = get_float_env("GRAPH_READ_TIMEOUT", GRAPH_READ_TIMEOUT)
 
-  # DuckDB Staging Configuration (for data ingestion/materialization)
-  DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
+  # --- Graph Resiliency and Circuit Breaker Configuration ---
+  GRAPH_CIRCUIT_BREAKERS_ENABLED = get_bool_env("GRAPH_CIRCUIT_BREAKERS_ENABLED", True)
+  GRAPH_REDIS_CACHE_ENABLED = get_bool_env("GRAPH_REDIS_CACHE_ENABLED", True)
+  GRAPH_RETRY_LOGIC_ENABLED = get_bool_env("GRAPH_RETRY_LOGIC_ENABLED", True)
+  GRAPH_HEALTH_CHECKS_ENABLED = get_bool_env("GRAPH_HEALTH_CHECKS_ENABLED", True)
 
-  # LadybugDB Capacity and Performance
-  LBUG_MAX_DATABASES_PER_NODE = get_int_env(
-    "LBUG_MAX_DATABASES_PER_NODE", MAX_DATABASES_PER_NODE
+  # Maximum staged data size (MB) for direct materialization.
+  # Graphs with staged data above this threshold automatically route to
+  # Dagster even when DIRECT_GRAPH_MATERIALIZATION_ENABLED=true.
+  # This prevents long-running materializations from tying up API workers.
+  GRAPH_MATERIALIZATION_THRESHOLD_MB = get_int_env(
+    "GRAPH_MATERIALIZATION_THRESHOLD_MB", 500
   )
 
-  # LadybugDB Memory Configuration (can be overridden per-tier)
-  LBUG_MAX_MEMORY_MB = get_int_env("LBUG_MAX_MEMORY_MB", 2048)
-  LBUG_MAX_MEMORY_PER_DB_MB = get_int_env("LBUG_MAX_MEMORY_PER_DB_MB", 0)
+  GRAPH_INSTANCE_CACHE_TTL = get_int_env(
+    "GRAPH_INSTANCE_CACHE_TTL", GRAPH_INSTANCE_CACHE_TTL
+  )
+  GRAPH_CIRCUIT_BREAKER_THRESHOLD = get_int_env(
+    "GRAPH_CIRCUIT_BREAKER_THRESHOLD", GRAPH_CIRCUIT_BREAKER_THRESHOLD
+  )
+  GRAPH_CIRCUIT_BREAKER_TIMEOUT = get_int_env(
+    "GRAPH_CIRCUIT_BREAKER_TIMEOUT", GRAPH_CIRCUIT_BREAKER_TIMEOUT
+  )
+  GRAPH_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
+    "GRAPH_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
+  )
 
+  # --- Tier-Specific Memory and Performance Overrides ---
   # Tier-specific memory allocations (with environment variable overrides)
   GRAPH_STANDARD_MAX_MEMORY_MB_OVERRIDE = get_int_env(
     "GRAPH_STANDARD_MAX_MEMORY_MB", GRAPH_STANDARD_MAX_MEMORY_MB
@@ -579,11 +598,49 @@ class EnvConfig:
     "GRAPH_XLARGE_CHUNK_SIZE", GRAPH_XLARGE_CHUNK_SIZE
   )
 
+  # ===========================================================================
+  # BACKEND-SPECIFIC CONFIGURATION
+  # ===========================================================================
+
+  # --- LadybugDB-Specific Configuration (when GRAPH_BACKEND_TYPE=ladybug) ---
+  LBUG_DATABASE_PATH = get_str_env("LBUG_DATABASE_PATH", "./data/lbug-dbs")
+  LBUG_ACCESS_PATTERN = get_str_env("LBUG_ACCESS_PATTERN", "api_auto")
+  LBUG_NODE_TYPE = get_str_env("LBUG_NODE_TYPE", "writer")
+
+  # DuckDB Staging Configuration (for data ingestion/materialization)
+  DUCKDB_STAGING_PATH = get_str_env("DUCKDB_STAGING_PATH", "./data/staging")
+
+  # LadybugDB Capacity and Performance
+  LBUG_MAX_DATABASES_PER_NODE = get_int_env(
+    "LBUG_MAX_DATABASES_PER_NODE", MAX_DATABASES_PER_NODE
+  )
+
+  # LadybugDB Memory Configuration (can be overridden per-tier)
+  LBUG_MAX_MEMORY_MB = get_int_env("LBUG_MAX_MEMORY_MB", 2048)
+  LBUG_MAX_MEMORY_PER_DB_MB = get_int_env("LBUG_MAX_MEMORY_PER_DB_MB", 0)
+
+  # LadybugDB Connection Management
+  LBUG_MAX_CONNECTIONS_PER_DB = get_int_env("LBUG_MAX_CONNECTIONS_PER_DB", 10)
+  LBUG_CONNECTION_TTL_MINUTES = get_float_env(
+    "LBUG_CONNECTION_TTL_MINUTES", 30.0
+  )  # 30 minutes default
+  LBUG_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
+    "LBUG_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
+  )  # 5 minutes default
+
+  # LadybugDB Admission Control
+  LBUG_ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  )
+  LBUG_ADMISSION_CPU_THRESHOLD = get_float_env(
+    "LBUG_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
+  )
+
   # DuckDB Configuration (with environment variable overrides)
   DUCKDB_MAX_THREADS = get_int_env("DUCKDB_MAX_THREADS", DUCKDB_MAX_THREADS)
   DUCKDB_MEMORY_LIMIT = os.getenv("DUCKDB_MEMORY_LIMIT", DUCKDB_MEMORY_LIMIT)
 
-  # Neo4j-Specific Configuration (when GRAPH_BACKEND_TYPE=neo4j_*)
+  # --- Neo4j-Specific Configuration (when GRAPH_BACKEND_TYPE=neo4j_*) ---
   NEO4J_URI = get_str_env("NEO4J_URI", "bolt://localhost:7687")
   NEO4J_USERNAME = get_str_env("NEO4J_USERNAME", "neo4j")
   NEO4J_PASSWORD = get_secret_value("NEO4J_PASSWORD", "")
@@ -594,18 +651,8 @@ class EnvConfig:
   )
   NEO4J_MAX_CONNECTION_LIFETIME = get_int_env("NEO4J_MAX_CONNECTION_LIFETIME", 3600)
 
-  # Organization Graph Creation Limits (safety valve)
-  ORG_GRAPHS_DEFAULT_LIMIT = get_int_env(
-    "ORG_GRAPHS_DEFAULT_LIMIT",
-    int(get_secret_value("ORG_GRAPHS_DEFAULT_LIMIT", "100")),
-  )
-
-  # Instance Metadata (applies to all backends)
-  EC2_INSTANCE_ID = get_str_env("INSTANCE_ID", "")
-  INSTANCE_ID = get_str_env("INSTANCE_ID", "")
-  CLUSTER_TIER = get_str_env("CLUSTER_TIER", "")
   # ==========================================================================
-  # DATABASE CONFIGURATION - POSTGRESQL
+  # 4. DATABASE CONFIGURATION - POSTGRESQL
   # ==========================================================================
 
   DATABASE_URL = get_secret_value(
@@ -618,7 +665,7 @@ class EnvConfig:
   DATABASE_ECHO = get_bool_env("DATABASE_ECHO", False)
 
   # ==========================================================================
-  # CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
+  # 5. CACHE AND QUEUE CONFIGURATION (VALKEY/REDIS)
   # ==========================================================================
 
   # Valkey/Redis URLs
@@ -647,72 +694,14 @@ class EnvConfig:
   INGESTION_LOCK_TTL = get_int_env("INGESTION_LOCK_TTL", 3600)  # 1 hour
 
   # ==========================================================================
-  # PERFORMANCE AND SCALING
+  # 6. DAGSTER CONFIGURATION
   # ==========================================================================
 
-  # Query queue configuration
-  QUERY_QUEUE_MAX_SIZE = get_int_env("QUERY_QUEUE_MAX_SIZE", DEFAULT_QUEUE_SIZE)
-  QUERY_QUEUE_MAX_CONCURRENT = get_int_env(
-    "QUERY_QUEUE_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT
-  )
-  QUERY_QUEUE_MAX_PER_USER = get_int_env(
-    "QUERY_QUEUE_MAX_PER_USER", QUERY_QUEUE_MAX_PER_USER
-  )
-  QUERY_QUEUE_TIMEOUT = get_int_env("QUERY_QUEUE_TIMEOUT", QUERY_QUEUE_TIMEOUT)
-  QUERY_DEFAULT_PRIORITY = get_int_env("QUERY_DEFAULT_PRIORITY", QUERY_DEFAULT_PRIORITY)
-  QUERY_PRIORITY_BOOST_PREMIUM = get_int_env(
-    "QUERY_PRIORITY_BOOST_PREMIUM", QUERY_PRIORITY_BOOST_PREMIUM
-  )
-
-  # Admission control
-  ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
-  )
-  ADMISSION_CPU_THRESHOLD = get_float_env(
-    "ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
-  )
-  ADMISSION_QUEUE_THRESHOLD = get_float_env(
-    "ADMISSION_QUEUE_THRESHOLD", ADMISSION_QUEUE_THRESHOLD_DEFAULT
-  )
-  ADMISSION_CHECK_INTERVAL = get_float_env(
-    "ADMISSION_CHECK_INTERVAL", ADMISSION_CHECK_INTERVAL
-  )
-
-  # LadybugDB-specific admission control (can override general settings)
-  LBUG_ADMISSION_MEMORY_THRESHOLD = get_float_env(
-    "LBUG_ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD
-  )
-  LBUG_ADMISSION_CPU_THRESHOLD = get_float_env(
-    "LBUG_ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD
-  )
-  LBUG_MAX_CONNECTIONS_PER_DB = get_int_env("LBUG_MAX_CONNECTIONS_PER_DB", 10)
-  LBUG_CONNECTION_TTL_MINUTES = get_float_env(
-    "LBUG_CONNECTION_TTL_MINUTES", 30.0
-  )  # 30 minutes default
-  LBUG_HEALTH_CHECK_INTERVAL_MINUTES = get_float_env(
-    "LBUG_HEALTH_CHECK_INTERVAL_MINUTES", 5.0
-  )  # 5 minutes default
-
-  # Load shedding
-  LOAD_SHED_START_PRESSURE = get_float_env(
-    "LOAD_SHED_START_PRESSURE", LOAD_SHED_START_PRESSURE_DEFAULT
-  )
-  LOAD_SHED_STOP_PRESSURE = get_float_env(
-    "LOAD_SHED_STOP_PRESSURE", LOAD_SHED_STOP_PRESSURE_DEFAULT
-  )
-
-  # SSE (Server-Sent Events)
-  MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
-  SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
-  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
-  # SSE Rate limiting
-  RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
-  RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
-    "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
-  )
+  DAGSTER_HOST = get_str_env("DAGSTER_HOST", "dagster-webserver")
+  DAGSTER_PORT = get_int_env("DAGSTER_PORT", 3000)
 
   # ==========================================================================
-  # AWS CONFIGURATION
+  # 7. AWS CONFIGURATION
   # ==========================================================================
 
   # AWS Region configuration (credentials come from IAM roles in ECS/EC2)
@@ -752,44 +741,7 @@ class EnvConfig:
   PUBLIC_DATA_CDN_URL = get_str_env("PUBLIC_DATA_CDN_URL", "")
 
   # ==========================================================================
-  # SECURITY AND AUTHENTICATION
-  # ==========================================================================
-
-  # JWT configuration
-  JWT_SECRET_KEY = get_secret_value("JWT_SECRET_KEY", "")
-  JWT_EXPIRY_HOURS = get_float_env("JWT_EXPIRY_HOURS", 0.5)  # Default 30 minutes
-
-  # JWT Issuer and Audience - configurable for different deployments
-  # Default JWT_ISSUER is derived from ROBOSYSTEMS_API_URL (strips protocol)
-  # Override via Secrets Manager for custom deployments:
-  # - internal mode: set JWT_ISSUER=localhost (access via bastion tunnel)
-  # - public-http mode: uses ALB DNS automatically, or set custom value
-  # Derive default JWT issuer/audience from ROBOSYSTEMS_API_URL, stripping protocol
-  _jwt_default_domain = (
-    os.getenv("ROBOSYSTEMS_API_URL", "https://api.robosystems.ai")
-    .replace("https://", "")
-    .replace("http://", "")
-  )
-  JWT_ISSUER = get_secret_value("JWT_ISSUER", _jwt_default_domain)
-  JWT_AUDIENCE = get_secret_list_value("JWT_AUDIENCE", _jwt_default_domain)
-
-  # Authentication Security Settings (configurable per environment)
-  TOKEN_GRACE_PERIOD_MINUTES = get_int_env("TOKEN_GRACE_PERIOD_MINUTES", 5)
-
-  # Rate Limiting Configuration (overrides for defaults in constants.py)
-  JWT_REFRESH_RATE_LIMIT = get_int_env("JWT_REFRESH_RATE_LIMIT", 20)
-  AUTH_RATE_LIMIT_LOGIN = get_int_env("AUTH_RATE_LIMIT_LOGIN", 5)
-  AUTH_RATE_LIMIT_REGISTER = get_int_env("AUTH_RATE_LIMIT_REGISTER", 3)
-
-  # API key configuration
-  CONNECTION_CREDENTIALS_KEY = get_secret_value("CONNECTION_CREDENTIALS_KEY", "")
-
-  # Cloudflare Turnstile (CAPTCHA)
-  TURNSTILE_SECRET_KEY = get_secret_value("TURNSTILE_SECRET_KEY", "")
-  TURNSTILE_SITE_KEY = get_secret_value("TURNSTILE_SITE_KEY", "")
-
-  # ==========================================================================
-  # EXTERNAL SERVICE INTEGRATIONS
+  # 8. EXTERNAL SERVICE API KEYS
   # ==========================================================================
 
   # QuickBooks/Intuit
@@ -825,15 +777,6 @@ class EnvConfig:
   # Parallel processing concurrency (for local sec-process-parallel command)
   SEC_PARALLEL_CONCURRENCY = get_int_env("SEC_PARALLEL_CONCURRENCY", 2)
 
-  # SEC batch processing configuration
-  # Each job processes up to batch_limit filings then exits; sensor triggers next batch
-  # Lower = better memory isolation, more Dagster runs
-  # Higher = fewer runs, but more memory accumulation per container
-  SEC_PROCESS_BATCH_LIMIT = get_int_env(
-    "SEC_PROCESS_BATCH_LIMIT",
-    int(get_secret_value("SEC_PROCESS_BATCH_LIMIT", "500")),
-  )
-
   # OpenFIGI (financial identifiers)
   OPENFIGI_API_KEY = get_secret_value("OPENFIGI_API_KEY", "")
   OPENFIGI_RETRY_MIN_WAIT = get_int_env(
@@ -850,7 +793,66 @@ class EnvConfig:
   STRIPE_API_VERSION = get_secret_value("STRIPE_API_VERSION", "2025-10-29.clover")
 
   # ==========================================================================
-  # DATA PROCESSING CONFIGURATION
+  # 9. PERFORMANCE AND SCALING
+  # ==========================================================================
+
+  # Query queue configuration
+  QUERY_QUEUE_MAX_SIZE = get_int_env("QUERY_QUEUE_MAX_SIZE", DEFAULT_QUEUE_SIZE)
+  QUERY_QUEUE_MAX_CONCURRENT = get_int_env(
+    "QUERY_QUEUE_MAX_CONCURRENT", DEFAULT_MAX_CONCURRENT
+  )
+  QUERY_QUEUE_MAX_PER_USER = get_int_env(
+    "QUERY_QUEUE_MAX_PER_USER", QUERY_QUEUE_MAX_PER_USER
+  )
+  QUERY_QUEUE_TIMEOUT = get_int_env("QUERY_QUEUE_TIMEOUT", QUERY_QUEUE_TIMEOUT)
+  QUERY_DEFAULT_PRIORITY = get_int_env("QUERY_DEFAULT_PRIORITY", QUERY_DEFAULT_PRIORITY)
+  QUERY_PRIORITY_BOOST_PREMIUM = get_int_env(
+    "QUERY_PRIORITY_BOOST_PREMIUM", QUERY_PRIORITY_BOOST_PREMIUM
+  )
+
+  # Admission control
+  ADMISSION_MEMORY_THRESHOLD = get_float_env(
+    "ADMISSION_MEMORY_THRESHOLD", ADMISSION_MEMORY_THRESHOLD_DEFAULT
+  )
+  ADMISSION_CPU_THRESHOLD = get_float_env(
+    "ADMISSION_CPU_THRESHOLD", ADMISSION_CPU_THRESHOLD_DEFAULT
+  )
+  ADMISSION_QUEUE_THRESHOLD = get_float_env(
+    "ADMISSION_QUEUE_THRESHOLD", ADMISSION_QUEUE_THRESHOLD_DEFAULT
+  )
+  ADMISSION_CHECK_INTERVAL = get_float_env(
+    "ADMISSION_CHECK_INTERVAL", ADMISSION_CHECK_INTERVAL
+  )
+
+  # Load shedding
+  LOAD_SHED_START_PRESSURE = get_float_env(
+    "LOAD_SHED_START_PRESSURE", LOAD_SHED_START_PRESSURE_DEFAULT
+  )
+  LOAD_SHED_STOP_PRESSURE = get_float_env(
+    "LOAD_SHED_STOP_PRESSURE", LOAD_SHED_STOP_PRESSURE_DEFAULT
+  )
+
+  # SSE (Server-Sent Events)
+  MAX_SSE_CONNECTIONS_PER_USER = get_int_env("MAX_SSE_CONNECTIONS_PER_USER", 5)
+  SSE_QUEUE_SIZE = get_int_env("SSE_QUEUE_SIZE", 100)
+  SSE_MAX_REDIS_FAILURES = get_int_env("SSE_MAX_REDIS_FAILURES", 3)
+  # SSE Rate limiting
+  RATE_LIMIT_SSE_CONNECTIONS = get_int_env("RATE_LIMIT_SSE_CONNECTIONS", 10)
+  RATE_LIMIT_SSE_CONNECTIONS_WINDOW = get_int_env(
+    "RATE_LIMIT_SSE_CONNECTIONS_WINDOW", 60
+  )
+
+  # MCP (Model Context Protocol)
+  MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
+  MCP_MAX_RESULT_ROWS = get_int_env("MCP_MAX_RESULT_ROWS", DEFAULT_QUERY_LIMIT)
+  MCP_MAX_RESULT_SIZE_MB = get_float_env("MCP_MAX_RESULT_SIZE_MB", 5.0)
+
+  # Credit allocation schedule
+  CREDIT_ALLOCATION_DAY = get_int_env("CREDIT_ALLOCATION_DAY", CREDIT_ALLOCATION_DAY)
+  CREDIT_ALLOCATION_HOUR = get_int_env("CREDIT_ALLOCATION_HOUR", CREDIT_ALLOCATION_HOUR)
+
+  # ==========================================================================
+  # 10. XBRL AND ARELLE CONFIGURATION
   # ==========================================================================
 
   # Arelle (XBRL processing)
@@ -880,21 +882,8 @@ class EnvConfig:
   # These tables contain millions of rows and consume significant memory
   XBRL_GRAPH_LARGE_NODES = XBRL_GRAPH_LARGE_NODES
 
-  # MCP (Model Context Protocol)
-  MCP_AUTO_LIMIT_ENABLED = get_bool_env("MCP_AUTO_LIMIT_ENABLED", True)
-  MCP_MAX_RESULT_ROWS = get_int_env("MCP_MAX_RESULT_ROWS", DEFAULT_QUERY_LIMIT)
-  MCP_MAX_RESULT_SIZE_MB = get_float_env("MCP_MAX_RESULT_SIZE_MB", 5.0)
-
   # ==========================================================================
-  # BILLING AND SUBSCRIPTIONS
-  # ==========================================================================
-
-  # Credit allocation schedule
-  CREDIT_ALLOCATION_DAY = get_int_env("CREDIT_ALLOCATION_DAY", CREDIT_ALLOCATION_DAY)
-  CREDIT_ALLOCATION_HOUR = get_int_env("CREDIT_ALLOCATION_HOUR", CREDIT_ALLOCATION_HOUR)
-
-  # ==========================================================================
-  # OBSERVABILITY
+  # 11. OBSERVABILITY
   # ==========================================================================
 
   # OpenTelemetry configuration
@@ -904,15 +893,6 @@ class EnvConfig:
   )
   OTEL_RESOURCE_ATTRIBUTES = get_str_env("OTEL_RESOURCE_ATTRIBUTES", "")
   OTEL_CONSOLE_EXPORT = get_bool_env("OTEL_CONSOLE_EXPORT", False)
-
-  # ==========================================================================
-  # SHARED REPOSITORIES CONFIGURATION
-  # ==========================================================================
-
-  # Shared repositories list for infrastructure/deployment (used by userdata scripts)
-  # This configures which repositories should be deployed on shared writer instances
-  # For application logic (checking if a graph is a shared repo), use GraphTypeRegistry.SHARED_REPOSITORIES
-  SHARED_REPOSITORIES = get_list_env("SHARED_REPOSITORIES", "")
 
   # ==========================================================================
   # HELPER METHODS

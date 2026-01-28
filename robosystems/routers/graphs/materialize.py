@@ -25,9 +25,14 @@ Use Cases:
 - Recovery from partial ingestion failures
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import UTC
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+  from robosystems.middleware.auth.distributed_lock import DistributedLock
 
 from fastapi import (
   APIRouter,
@@ -531,7 +536,7 @@ def _should_use_direct_materialization(db: Session, graph_id: str) -> bool:
 
   Uses the direct path when:
   - DIRECT_GRAPH_MATERIALIZATION_ENABLED is true AND
-  - Total staged data size is below DIRECT_MATERIALIZATION_THRESHOLD_MB
+  - Total staged data size is below GRAPH_MATERIALIZATION_THRESHOLD_MB
 
   Large graphs automatically route to Dagster regardless of the flag,
   since API worker background tasks aren't suited for long-running work.
@@ -556,7 +561,7 @@ def _should_use_direct_materialization(db: Session, graph_id: str) -> bool:
   )
 
   total_mb = (result or 0) / (1024 * 1024)
-  threshold_mb = env.DIRECT_MATERIALIZATION_THRESHOLD_MB
+  threshold_mb = env.GRAPH_MATERIALIZATION_THRESHOLD_MB
 
   if total_mb > threshold_mb:
     logger.info(
@@ -579,7 +584,7 @@ async def _run_direct_materialization(
   rebuild: bool,
   ignore_errors: bool,
   operation_id: str,
-  lock: Any | None,
+  lock: DistributedLock | None,
 ) -> None:
   """Background task wrapper for direct materialization with lock management."""
   from robosystems.operations.lbug.direct_materialization import (
@@ -604,7 +609,7 @@ async def _run_dagster_materialization(
   job_name: str,
   operation_id: str,
   run_config: dict,
-  lock: Any | None,
+  lock: DistributedLock | None,
 ) -> None:
   """Background task wrapper for Dagster materialization with lock management."""
   from robosystems.middleware.sse import run_and_monitor_dagster_job
