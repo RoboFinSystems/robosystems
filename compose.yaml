@@ -2,10 +2,11 @@ services:
   # Robosystems API
   api:
     container_name: robosystems-api
+    image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
     build:
       context: .
       dockerfile: Dockerfile
-    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=api
@@ -35,10 +36,11 @@ services:
   # Graph API - Default LadybugDB Backend
   graph-api:
     container_name: robosystems-graph-api
+    image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
     build:
       context: .
       dockerfile: Dockerfile
-    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=ladybug-writer
@@ -76,10 +78,11 @@ services:
   # Dagster Webserver - Orchestration UI
   dagster-webserver:
     container_name: robosystems-dagster-webserver
+    image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
     build:
       context: .
       dockerfile: Dockerfile
-    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=dagster
@@ -107,10 +110,11 @@ services:
   # Dagster Daemon - Schedules, Sensors, and Run Coordination
   dagster-daemon:
     container_name: robosystems-dagster-daemon
+    image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
     build:
       context: .
       dockerfile: Dockerfile
-    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=dagster-daemon
@@ -237,10 +241,11 @@ services:
   # Graph API (Neo4j) - Alternative Neo4j Backend (Optional)
   graph-api-neo4j:
     container_name: robosystems-graph-api-neo4j
+    image: ${ROBOSYSTEMS_IMAGE:-robosystems-local}
+    pull_policy: ${ROBOSYSTEMS_PULL_POLICY:-never}
     build:
       context: .
       dockerfile: Dockerfile
-    # image: robofinsystems/robosystems:latest  # Alternative: use pre-built image
     command: /app/bin/entrypoint.sh
     environment:
       - DOCKER_PROFILE=neo4j-writer
