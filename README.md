@@ -35,8 +35,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install rust-just
 uv tool update-shell  # Adds ~/.local/bin to PATH (restart terminal after)
 
-# Start all services (includes automatic migrations and seeds)
+# Start robosystems backend api
 just start
+
+# Start robosystems with frontend apps (robosystems-app, roboledger-app, roboinvestor-app)
+just start all
 ```
 
 This initializes the `.env` file and starts the complete RoboSystems stack with:
@@ -46,6 +49,22 @@ This initializes the `.env` file and starts the complete RoboSystems stack with:
 - PostgreSQL for graph metadata, IAM and Dagster
 - Valkey for caching, SSE messaging, and rate limiting
 - Localstack for S3 and DynamoDB emulation
+
+**Service URLs:**
+
+| Service    | URL                   |
+| ---------- | --------------------- |
+| Main API   | http://localhost:8000 |
+| Graph API  | http://localhost:8001 |
+| Dagster UI | http://localhost:3003 |
+
+With `just start all` (frontend apps):
+
+| App              | URL                   |
+| ---------------- | --------------------- |
+| RoboSystems App  | http://localhost:3000 |
+| RoboLedger App   | http://localhost:3001 |
+| RoboInvestor App | http://localhost:3002 |
 
 ### Local Development
 
@@ -84,10 +103,10 @@ just test-cov               # Tests with coverage
 ### Log Monitoring
 
 ```bash
-just logs api 200                    # View API logs
-just logs dagster-webserver 200      # View Dagster logs
+just logs api                        # View API logs (last 100 lines)
+just logs api lines=200              # View more lines
+just logs api follow=1               # Tail API logs
 just logs-grep api "pipeline" 500    # Search API logs
-just logs-follow dagster-webserver   # Tail Dagster logs
 ```
 
 **See [justfile](justfile) for 50+ development commands** including database migrations, CloudFormation linting, graph operations, administration, and more.
