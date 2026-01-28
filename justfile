@@ -64,12 +64,6 @@ logs-grep container="worker" pattern="ERROR" lines="100":
 exec container="api" shell="bash":
     docker exec -it robosystems-{{container}} {{shell}}
 
-# Clone frontend app repositories
-clone-apps:
-    @test -d ../robosystems-app || git clone https://github.com/RoboFinSystems/robosystems-app.git ../robosystems-app
-    @test -d ../roboledger-app || git clone https://github.com/RoboFinSystems/roboledger-app.git ../roboledger-app
-    @test -d ../roboinvestor-app || git clone https://github.com/RoboFinSystems/roboinvestor-app.git ../roboinvestor-app
-
 
 ## Development Environment ##
 
@@ -94,11 +88,6 @@ install:
 update:
     uv lock --upgrade
     uv sync --all-extras --dev
-
-# Forward Stripe webhook events to local API (requires: brew install stripe/stripe-cli/stripe)
-# Run this in a separate terminal when testing subscription flows
-stripe-webhook url="http://localhost:8000":
-    stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe
 
 
 ## Bootstrap ##
@@ -452,6 +441,16 @@ sec-health verbose="" json="" api_url="http://localhost:8001" env=_local_env:
 
 
 ## Misc ##
+
+# Forward Stripe webhook events to local API (requires: brew install stripe/stripe-cli/stripe)
+stripe-webhook url="http://localhost:8000":
+    stripe listen --forward-to {{url}}/admin/v1/webhooks/stripe
+
+# Clone frontend app repositories
+clone-apps:
+    @test -d ../robosystems-app || git clone https://github.com/RoboFinSystems/robosystems-app.git ../robosystems-app
+    @test -d ../roboledger-app || git clone https://github.com/RoboFinSystems/roboledger-app.git ../roboledger-app
+    @test -d ../roboinvestor-app || git clone https://github.com/RoboFinSystems/roboinvestor-app.git ../roboinvestor-app
 
 # Clean up development artifacts
 clean:

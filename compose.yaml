@@ -15,7 +15,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./robosystems:/app/robosystems # Mount code for hot reload
+      - ./robosystems:/app/robosystems
     healthcheck:
       test: ["CMD", "curl", "-f", "http://robosystems-api:8000/v1/status"]
       interval: 30s
@@ -55,9 +55,9 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./robosystems:/app/robosystems # Mount code for hot reload
-      - ./data/lbug-dbs:/app/data/lbug-dbs # LadybugDB embedded database for graph storage
-      - ./data/staging:/app/data/staging # DuckDB embedded database for staging tables
+      - ./robosystems:/app/robosystems
+      - ./data/lbug-dbs:/app/data/lbug-dbs
+      - ./data/staging:/app/data/staging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -205,7 +205,7 @@ services:
     container_name: robosystems-localstack
     image: localstack/localstack:3.0
     ports:
-      - "4566:4566" # LocalStack edge port
+      - "4566:4566"
     environment:
       # LocalStack configuration
       - SERVICES=s3,secretsmanager,iam,dynamodb
@@ -257,8 +257,8 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ./robosystems:/app/robosystems # Mount code for hot reload
-      - ./data/staging:/app/data/staging # DuckDB embedded database for staging tables
+      - ./robosystems:/app/robosystems
+      - ./data/staging:/app/data/staging
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 30s
@@ -385,9 +385,9 @@ services:
     ports:
       - 3000:3000
     volumes:
-      - ../robosystems-app/src:/app/src:ro # Mount source code for hot reload
-      - ../robosystems-app/public:/app/public:ro # Mount public assets
-      - ../robosystems-app/package.json:/app/package.json:ro # Mount package.json
+      - ../robosystems-app/src:/app/src:ro
+      - ../robosystems-app/public:/app/public:ro
+      - ../robosystems-app/package.json:/app/package.json:ro
     restart: always
     deploy:
       resources:
@@ -419,9 +419,9 @@ services:
     ports:
       - 3001:3000
     volumes:
-      - ../roboledger-app/src:/app/src:ro # Mount source code for hot reload
-      - ../roboledger-app/public:/app/public:ro # Mount public assets
-      - ../roboledger-app/package.json:/app/package.json:ro # Mount package.json
+      - ../roboledger-app/src:/app/src:ro
+      - ../roboledger-app/public:/app/public:ro
+      - ../roboledger-app/package.json:/app/package.json:ro
     restart: always
     deploy:
       resources:
@@ -453,9 +453,9 @@ services:
     ports:
       - 3002:3000
     volumes:
-      - ../roboinvestor-app/src:/app/src:ro # Mount source code for hot reload
-      - ../roboinvestor-app/public:/app/public:ro # Mount public assets
-      - ../roboinvestor-app/package.json:/app/package.json:ro # Mount package.json
+      - ../roboinvestor-app/src:/app/src:ro
+      - ../roboinvestor-app/public:/app/public:ro
+      - ../roboinvestor-app/package.json:/app/package.json:ro
     restart: always
     deploy:
       resources:
