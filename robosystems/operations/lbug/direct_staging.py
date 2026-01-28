@@ -113,12 +113,29 @@ async def stage_file_directly(
     )
 
     try:
-      staging_result = await client.create_table(
-        graph_id=graph_id,
-        table_name=table.table_name,
-        s3_pattern=s3_files,
-        file_id_map=file_id_map,
-      )
+      # Check if the DuckDB table already exists to use incremental INSERT INTO
+      existing_tables = await client.list_tables(graph_id)
+      existing_table_names = [t["table_name"] for t in existing_tables]
+
+      if table.table_name in existing_table_names:
+        # Table exists - use INSERT INTO for just the new file (incremental)
+        new_file_s3 = f"s3://{bucket}/{s3_key}"
+        logger.info(
+          f"Table {table.table_name} exists, using INSERT INTO for file {s3_key}"
+        )
+        staging_result = await client.insert_into_table(
+          graph_id=graph_id,
+          table_name=table.table_name,
+          s3_pattern=[new_file_s3],
+        )
+      else:
+        # Table does not exist - create with all files (first-file path)
+        staging_result = await client.create_table(
+          graph_id=graph_id,
+          table_name=table.table_name,
+          s3_pattern=s3_files,
+          file_id_map=file_id_map,
+        )
       logger.debug(f"DuckDB staging result: {staging_result}")
     finally:
       await client.close()

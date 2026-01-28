@@ -414,6 +414,25 @@ class EnvConfig:
     ),
   )
 
+  # Direct Graph Materialization Feature Flag
+  # When enabled, materialization runs directly in the API process instead
+  # of via Dagster jobs. Eliminates cold start overhead (5-15s+).
+  # Disable to fall back to Dagster job execution for debugging.
+  DIRECT_GRAPH_MATERIALIZATION_ENABLED = get_bool_env(
+    "DIRECT_GRAPH_MATERIALIZATION_ENABLED",
+    bool(
+      get_secret_value("DIRECT_GRAPH_MATERIALIZATION_ENABLED", "true").lower() == "true"
+    ),
+  )
+
+  # Maximum staged data size (MB) for direct materialization.
+  # Graphs with staged data above this threshold automatically route to
+  # Dagster even when DIRECT_GRAPH_MATERIALIZATION_ENABLED=true.
+  # This prevents long-running materializations from tying up API workers.
+  DIRECT_MATERIALIZATION_THRESHOLD_MB = get_int_env(
+    "DIRECT_MATERIALIZATION_THRESHOLD_MB", 500
+  )
+
   # Registration and Verification Feature Flags
   EMAIL_VERIFICATION_ENABLED = get_bool_env(
     "EMAIL_VERIFICATION_ENABLED",
