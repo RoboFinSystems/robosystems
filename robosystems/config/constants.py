@@ -214,6 +214,12 @@ XBRL_GRAPH_LARGE_NODES = "Fact,Element,Label,Association,Structure,FactDimension
 # SEC API Rate Limiting
 SEC_RATE_LIMIT = 10  # requests per second (SEC.gov requirement)
 
+# SEC Processing Batch Limit
+# Fixed at 10,000 - the maximum EFTS can return per quarterly partition.
+# The heavy job profile (16 vCPU, 64 GB) is sized to handle full quarters.
+# If more filings need to be fetched, switch to monthly partitioning.
+SEC_PROCESS_BATCH_LIMIT = 10000
+
 # =============================================================================
 # FIXED BUSINESS RULES
 # =============================================================================

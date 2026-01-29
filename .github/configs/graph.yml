@@ -230,8 +230,9 @@ production:
 
         # DuckDB staging configuration
         # Fact table cannot be deduplicated and requires substantial memory
-        # Instance has 64GB total, allocate 50GB to DuckDB leaving 14GB for OS + LadybugDB
-        duckdb_memory_limit: "50GB"
+        # Instance has 64GB total. Master has no read traffic (replicas serve queries),
+        # so allocate 58GB to DuckDB, leaving 6GB for OS + LadybugDB writes
+        duckdb_memory_limit: "58GB"
         duckdb_max_threads: 4 # r7g.2xlarge = 8 vCPU, use 4 for DuckDB
 
       # Deployment configuration

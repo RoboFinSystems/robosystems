@@ -80,15 +80,16 @@ sec_download_job = define_asset_job(
 
 
 # Phase 2: Process (quarterly batch processing)
-# Each run processes an entire quarter's worth of filings, outputting
-# consolidated parquet files. Parallel execution across quarters is controlled
-# by DAGSTER_MAX_CONCURRENT_RUNS.
+# Each run processes an entire quarter's worth of filings (up to 10,000),
+# outputting consolidated parquet files. Parallel execution across quarters
+# is controlled by DAGSTER_MAX_CONCURRENT_RUNS.
 #
-# Uses Compute profile (4 vCPU, 16 GB) for CPU-intensive XBRL processing.
-# Uses On-Demand Fargate for reliability (long-running jobs need stability).
+# Uses Heavy profile (16 vCPU, 64 GB) - sized to handle full quarterly batches.
+# EFTS returns max 10k filings per quarterly partition, so batch_limit=10000
+# matches the theoretical maximum. Uses On-Demand Fargate for reliability.
 sec_process_job = define_asset_job(
   name="sec_process",
-  description="Process an entire quarter's SEC filings with consolidated output.",
+  description="Process an entire quarter's SEC filings (up to 10k) with heavy resources.",
   selection=AssetSelection.assets(
     sec_processed_filings,
   ),
@@ -96,32 +97,7 @@ sec_process_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "process",
-    # Compute profile: 4 vCPU, 16 GB - for CPU-intensive XBRL processing
-    "ecs/task_definition": f"robosystems-dagster-run-compute-{env.ENVIRONMENT}",
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-
-
-# Phase 2 (Heavy): Process with large batch for backfills
-# Uses Heavy profile (16 vCPU, 64 GB) for processing large batches (8000+ filings).
-# Useful for quarterly backfills where you want to process everything at once.
-sec_process_heavy_job = define_asset_job(
-  name="sec_process_heavy",
-  description="Process SEC filings with heavy resources (16 vCPU, 64 GB) for large batches.",
-  selection=AssetSelection.assets(
-    sec_processed_filings,
-  ),
-  partitions_def=sec_quarter_partitions,
-  tags={
-    "pipeline": "sec",
-    "phase": "process",
-    "profile": "heavy",
-    # Heavy profile: 16 vCPU, 64 GB - for large batch backfills (batch_limit=8000+)
+    # Heavy profile: 16 vCPU, 64 GB - sized for full quarterly batches (10k filings max)
     "ecs/task_definition": f"robosystems-dagster-run-heavy-{env.ENVIRONMENT}",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [

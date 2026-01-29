@@ -92,7 +92,6 @@ from robosystems.dagster.jobs.sec import (
   sec_download_job,
   sec_materialize_job,
   sec_nightly_materialize_schedule,
-  sec_process_heavy_job,
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
@@ -166,8 +165,7 @@ all_jobs = [
   materialize_graph_job,
   # SEC pipeline jobs
   sec_download_job,  # Download raw filings to S3
-  sec_process_job,  # Per-filing processing (compute profile: 4 vCPU, 16 GB)
-  sec_process_heavy_job,  # Heavy processing for backfills (heavy profile: 16 vCPU, 64 GB)
+  sec_process_job,  # Process quarter's filings (heavy profile: 16 vCPU, 64 GB for 10k batch)
   sec_stage_job,  # Stage to persistent DuckDB (standard profile: 2 vCPU, 8 GB)
   sec_materialize_job,  # Materialize from DuckDB to LadybugDB (standard profile)
   sec_staged_materialize_job,  # Full pipeline: stage + materialize (standard profile)

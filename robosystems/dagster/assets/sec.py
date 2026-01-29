@@ -46,6 +46,7 @@ from dagster import (
 )
 
 from robosystems.config import env
+from robosystems.config.constants import SEC_PROCESS_BATCH_LIMIT
 from robosystems.config.storage.shared import (
   DataSourceType,
   get_processed_key,
@@ -293,19 +294,19 @@ class SECProcessConfig(Config):
   but the job continues processing remaining filings in the batch.
 
   Memory Management:
-  - Each job processes at most batch_limit filings (configurable via env/secrets)
+  - Each job processes at most batch_limit filings (hardcoded at 10,000)
   - Job exits gracefully after batch, releasing all memory
   - Sensor re-triggers if more pending files exist
   - This prevents memory accumulation across thousands of filings
 
-  Environment Variables (can be set in AWS Secrets Manager):
-  - SEC_PROCESS_BATCH_LIMIT: Max filings per job run (default: 500)
+  Note: batch_limit is fixed at 10,000 - the maximum EFTS returns per
+  quarterly partition. The heavy job profile (16 vCPU, 64 GB) handles this.
   """
 
   # Max filings to process per job run before exiting gracefully.
-  # Sensor will re-trigger if more pending files exist.
-  # Configurable via SEC_PROCESS_BATCH_LIMIT env var or Secrets Manager.
-  batch_limit: int = env.SEC_PROCESS_BATCH_LIMIT
+  # Fixed at 10,000 - the max EFTS can return per quarterly partition.
+  # The heavy job profile (16 vCPU, 64 GB) is sized to handle full quarters.
+  batch_limit: int = SEC_PROCESS_BATCH_LIMIT
 
   # Continue processing even if some filings fail
   # If False, job fails on first error (for debugging)

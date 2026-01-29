@@ -51,64 +51,44 @@ Parameters:
     Default: "1024"
     Description: Memory in MiB for Dagster webserver
     AllowedValues: ["1024", "2048", "4096"]
-  # Run Job Profiles (Fargate)
-  # Four tiers to match workload requirements:
-  #   Light   (0.5 vCPU / 2 GB)  - sensors, simple jobs, most runs
-  #   Standard (2 vCPU / 8 GB)   - normal ETL, moderate processing
-  #   Compute  (4 vCPU / 16 GB)  - daily SEC processing, staging
-  #   Heavy   (16 vCPU / 64 GB)  - SEC backfills, batch_limit=8000+
-  #
-  # Valid Fargate CPU/Memory combinations:
-  #   512:  1024-4096 MB   | 1024:  2048-8192 MB   | 2048:  4096-16384 MB
-  #   4096: 8192-30720 MB  | 8192: 16384-61440 MB  | 16384: 32768-122880 MB
-
-  # Light profile (default) - most Dagster jobs
+  # Run Job Profiles (Fargate) - Fixed resource allocations per profile
+  # Profile name = fixed resources (hardcoded in deploy-dagster.yml)
+  #   Light:    0.5 vCPU /  2 GB  - sensors, simple jobs, most runs
+  #   Standard:   2 vCPU /  8 GB  - normal ETL, moderate processing
+  #   Compute:    4 vCPU / 16 GB  - daily SEC processing, staging
+  #   Heavy:     16 vCPU / 64 GB  - SEC backfills, batch_limit=8000+
   LightRunJobCpu:
     Type: String
     Default: "512"
-    Description: CPU units for light run jobs (512 = 0.5 vCPU)
-    AllowedValues: ["256", "512", "1024"]
+    Description: CPU units for light run jobs (0.5 vCPU)
   LightRunJobMemory:
     Type: String
     Default: "2048"
-    Description: Memory in MiB for light run jobs
-    AllowedValues: ["1024", "2048", "4096"]
-
-  # Standard profile - moderate workloads
+    Description: Memory in MiB for light run jobs (2 GB)
   StandardRunJobCpu:
     Type: String
     Default: "2048"
-    Description: CPU units for standard run jobs (2048 = 2 vCPU)
-    AllowedValues: ["1024", "2048", "4096"]
+    Description: CPU units for standard run jobs (2 vCPU)
   StandardRunJobMemory:
     Type: String
     Default: "8192"
-    Description: Memory in MiB for standard run jobs
-    AllowedValues: ["4096", "8192", "16384"]
-
-  # Compute profile - daily SEC processing, staging
+    Description: Memory in MiB for standard run jobs (8 GB)
   ComputeRunJobCpu:
     Type: String
     Default: "4096"
-    Description: CPU units for compute run jobs (4096 = 4 vCPU)
-    AllowedValues: ["2048", "4096", "8192"]
+    Description: CPU units for compute run jobs (4 vCPU)
   ComputeRunJobMemory:
     Type: String
     Default: "16384"
-    Description: Memory in MiB for compute run jobs
-    AllowedValues: ["8192", "16384", "30720"]
-
-  # Heavy profile - SEC backfills, large batches
+    Description: Memory in MiB for compute run jobs (16 GB)
   HeavyRunJobCpu:
     Type: String
     Default: "16384"
-    Description: CPU units for heavy run jobs (16384 = 16 vCPU)
-    AllowedValues: ["8192", "16384"]
+    Description: CPU units for heavy run jobs (16 vCPU)
   HeavyRunJobMemory:
     Type: String
     Default: "65536"
     Description: Memory in MiB for heavy run jobs (64 GB)
-    AllowedValues: ["32768", "65536", "122880"]
 
   MaxConcurrentRuns:
     Type: Number
