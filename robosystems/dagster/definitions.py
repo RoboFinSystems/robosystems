@@ -88,10 +88,8 @@ from robosystems.dagster.jobs.provisioning import (
   provision_repository_job,
 )
 from robosystems.dagster.jobs.sec import (
-  sec_daily_download_schedule,
   sec_download_job,
   sec_materialize_job,
-  sec_nightly_materialize_schedule,
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
@@ -114,8 +112,11 @@ from robosystems.dagster.resources import (
 from robosystems.dagster.sensors import (
   pending_repository_sensor,
   pending_subscription_sensor,
-  sec_incremental_staging_schedule,
+  # Incremental pipeline (automated chain, disabled by default)
+  sec_download_to_process_sensor,
+  sec_incremental_download_schedule,
   sec_post_materialize_snapshot_sensor,
+  sec_process_to_stage_materialize_sensor,
   sec_processing_sensor,
 )
 
@@ -196,10 +197,8 @@ all_schedules = [
   instance_registry_cleanup_schedule,
   volume_registry_cleanup_schedule,
   full_instance_maintenance_schedule,
-  # SEC pipeline schedules
-  sec_daily_download_schedule,
-  sec_nightly_materialize_schedule,
-  sec_incremental_staging_schedule,
+  # SEC incremental pipeline (automated chain, disabled by default)
+  sec_incremental_download_schedule,
   # Shared repository schedules
   weekly_shared_repository_snapshot_schedule,
 ]
@@ -211,8 +210,12 @@ all_schedules = [
 all_sensors = [
   pending_subscription_sensor,
   pending_repository_sensor,
+  # SEC legacy/manual sensors
   sec_processing_sensor,
   sec_post_materialize_snapshot_sensor,
+  # SEC incremental pipeline chain sensors (disabled by default)
+  sec_download_to_process_sensor,
+  sec_process_to_stage_materialize_sensor,
 ]
 
 # ============================================================================
@@ -232,7 +235,7 @@ all_assets = [
   # SEC pipeline - quarterly batch processing with consolidated output
   sec_processed_filings,
   # SEC pipeline - two-stage materialization
-  sec_duckdb_staged,  # DuckDB staging (full or incremental mode)
+  sec_duckdb_staged,  # DuckDB staging (full rebuild)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
   # QuickBooks pipeline assets
   qb_accounts,

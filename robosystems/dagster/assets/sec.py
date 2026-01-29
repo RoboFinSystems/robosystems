@@ -321,22 +321,17 @@ class SECProcessConfig(Config):
 
 
 class SECStageConfig(Config):
-  """Configuration for DuckDB staging.
+  """Configuration for DuckDB staging (full rebuild).
 
-  Supports both full staging (mode="full") and incremental staging (mode="incremental").
+  Creates DuckDB tables from scratch using all S3 parquet files.
 
-  Full mode: Creates tables from scratch, optionally rebuilding graph.
-  Incremental mode: Appends new filings to existing tables (requires initial full staging).
+  Note: This step only stages data to DuckDB. LadybugDB rebuild is handled
+  by the materialize step (sec_graph_materialized) via SECMaterializeConfig.rebuild_graph.
   """
 
   graph_id: str = "sec"  # Target graph ID
-  mode: str = "full"  # "full" or "incremental"
-  rebuild_graph: bool = (
-    True  # Whether to rebuild LadybugDB before staging (full mode only)
-  )
-  year: int | None = None  # Optional year filter (full mode only)
-  reset_staging: bool = False  # Delete DuckDB staging too (full mode only)
-  filing_date: str | None = None  # YYYY-MM-DD date filter (incremental mode)
+  year: int | None = None  # Optional year filter
+  reset_staging: bool = False  # Delete DuckDB file before staging (fresh start)
 
 
 class SECMaterializeConfig(Config):
@@ -1688,25 +1683,17 @@ def sec_duckdb_staged(
   context: AssetExecutionContext,
   config: SECStageConfig,
 ) -> MaterializeResult:
-  """Stage SEC processed files to persistent DuckDB.
+  """Stage SEC processed files to persistent DuckDB (full rebuild).
 
-  Supports two modes:
-  - full: Creates tables from scratch, discovers all processed files
-  - incremental: Appends new filings to existing tables (INSERT INTO)
+  Creates DuckDB tables from scratch using all S3 parquet files.
+  Persists to disk so materialization can run independently.
 
-  Full mode (default):
-  - Persists DuckDB to disk (survives job restarts)
-  - Writes manifest for tracking staged tables
-  - Can optionally rebuild graph and reset staging
-
-  Incremental mode:
-  - Requires initial full staging to exist
-  - Uses filing_date filter for targeted updates
-  - Records progress to _sec_staging_progress table
+  Options:
+  - reset_staging: Delete existing DuckDB file before staging (fresh start)
+  - year: Optional year filter for partial staging
 
   Run with:
-    just dagster-materialize sec_duckdb_staged  # full mode
-    # incremental via Dagster UI with config: {"mode": "incremental", "filing_date": "2026-01-15"}
+    just dagster-materialize sec_duckdb_staged
 
   Returns:
       MaterializeResult with staging statistics
@@ -1718,15 +1705,20 @@ def sec_duckdb_staged(
     ensure_shared_repository_exists,
   )
 
-  is_incremental = config.mode == "incremental"
-  mode_str = "incremental" if is_incremental else "full"
+  context.log.info(f"Staging SEC data to DuckDB for graph: {config.graph_id}")
+  if config.year:
+    context.log.info(f"Year filter: {config.year}")
+  if config.reset_staging:
+    context.log.info("Reset staging enabled - will delete DuckDB file first")
 
-  context.log.info(
-    f"Staging SEC data to DuckDB for graph: {config.graph_id} (mode={mode_str})"
-  )
+  # Boost DuckDB memory before staging (only applies to ladybug-shared tier)
+  try:
+    from robosystems.graph_api.client.factory import boost_graph_memory
 
-  if is_incremental:
-    context.log.info(f"Filing date filter: {config.filing_date or 'none'}")
+    boost_result = asyncio.run(boost_graph_memory(config.graph_id, target="duckdb"))
+    context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
+  except Exception as boost_err:
+    context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
 
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
@@ -1735,23 +1727,19 @@ def sec_duckdb_staged(
     context.log.info(msg)
 
   async def run_staging():
-    if not is_incremental:
-      # Full mode: ensure repository exists
-      context.log.info("Ensuring SEC repository metadata exists...")
-      repo_result = await ensure_shared_repository_exists(
-        repository_name=config.graph_id,
-        created_by="system",
-        instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
-      )
-      context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
+    # Ensure repository exists
+    context.log.info("Ensuring SEC repository metadata exists...")
+    repo_result = await ensure_shared_repository_exists(
+      repository_name=config.graph_id,
+      created_by="system",
+      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+    )
+    context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
 
-    # Run staging with appropriate parameters and progress callback
+    # Run full staging from all S3 parquet files
     result = await processor.stage_to_duckdb(
-      rebuild=False if is_incremental else config.rebuild_graph,
-      year=None if is_incremental else config.year,
-      reset_staging=False if is_incremental else config.reset_staging,
-      filing_date=config.filing_date if is_incremental else None,
-      incremental=is_incremental,
+      year=config.year,
+      reset_staging=config.reset_staging,
       progress_callback=dagster_progress,
     )
     return result
@@ -1763,37 +1751,20 @@ def sec_duckdb_staged(
     return MaterializeResult(
       metadata={
         "graph_id": config.graph_id,
-        "mode": mode_str,
         "status": "error",
         "error": result.error,
         "duration_seconds": result.duration_seconds,
       }
     )
 
-  if result.status == "already_staged":
-    context.log.info(
-      f"Filing date {config.filing_date} already staged - skipped to prevent duplicates"
-    )
-    return MaterializeResult(
-      metadata={
-        "graph_id": config.graph_id,
-        "mode": mode_str,
-        "status": "already_staged",
-        "filing_date": config.filing_date,
-        "message": "Date already staged, skipped to prevent duplicates",
-        "duration_seconds": result.duration_seconds,
-      }
-    )
-
   context.log.info(
-    f"Staging complete ({mode_str}): {len(result.table_names)} tables, "
+    f"Staging complete: {len(result.table_names)} tables, "
     f"{result.total_files} files, {result.duration_seconds:.2f}s"
   )
 
   return MaterializeResult(
     metadata={
       "graph_id": config.graph_id,
-      "mode": mode_str,
       "status": result.status,
       "tables_staged": len(result.table_names),
       "table_names": result.table_names,
@@ -1845,6 +1816,15 @@ def sec_graph_materialized(
   if config.rebuild_graph:
     context.log.info("Rebuild requested - will delete and recreate LadybugDB database")
 
+  # Boost LadybugDB memory before materialization (only applies to ladybug-shared tier)
+  try:
+    from robosystems.graph_api.client.factory import boost_graph_memory
+
+    boost_result = asyncio.run(boost_graph_memory(config.graph_id, target="ladybug"))
+    context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
+  except Exception as boost_err:
+    context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
+
   processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
 
   # Progress callback for Dagster logging (visible in Dagster UI)
@@ -1874,6 +1854,17 @@ def sec_graph_materialized(
     f"Materialization complete: {result.total_rows_ingested} rows, "
     f"{result.total_time_ms:.2f}ms"
   )
+
+  # Restore memory to defaults after materialization
+  # This releases the temporarily boosted DuckDB and LadybugDB memory
+  try:
+    from robosystems.graph_api.client.factory import restore_graph_memory
+
+    restore_result = asyncio.run(restore_graph_memory(config.graph_id))
+    context.log.info(f"Memory restored: {restore_result.get('message', 'done')}")
+  except Exception as restore_err:
+    # Don't fail the job if restore fails - materialization succeeded
+    context.log.warning(f"Could not restore memory (non-fatal): {restore_err}")
 
   return MaterializeResult(
     metadata={

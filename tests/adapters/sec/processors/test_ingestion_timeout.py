@@ -15,19 +15,27 @@ class TestStagingTimeoutConfiguration:
 
   def test_timeout_constants_values(self):
     """Test that timeout constants have expected values."""
-    assert DEFAULT_STAGING_TIMEOUT == 1800  # 30 minutes
-    assert LARGE_TABLE_STAGING_TIMEOUT == 7200  # 2 hours
+    assert DEFAULT_STAGING_TIMEOUT == 300  # 5 minutes
+    assert LARGE_TABLE_STAGING_TIMEOUT == 1800  # 30 minutes
 
   def test_large_staging_tables_contents(self):
     """Test that large staging tables set contains expected tables."""
     expected_tables = {
+      # Large node tables
       "Fact",
       "Label",
       "Element",
       "FactDimension",
       "Association",
+      # Large relationship tables (fact-related)
+      "REPORT_HAS_FACT",
+      "FACT_HAS_ELEMENT",
+      "FACT_HAS_ENTITY",
+      "FACT_HAS_PERIOD",
+      "FACT_HAS_UNIT",
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
+      # Large relationship tables (shared reference)
       "ELEMENT_HAS_LABEL",
       "TAXONOMY_HAS_LABEL",
     }
@@ -44,13 +52,21 @@ class TestGetStagingTimeout:
   @pytest.mark.parametrize(
     "table_name",
     [
+      # Large node tables
       "Fact",
       "Label",
       "Element",
       "FactDimension",
       "Association",
+      # Large relationship tables (fact-related)
+      "REPORT_HAS_FACT",
+      "FACT_HAS_ELEMENT",
+      "FACT_HAS_ENTITY",
+      "FACT_HAS_PERIOD",
+      "FACT_HAS_UNIT",
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
+      # Large relationship tables (shared reference)
       "ELEMENT_HAS_LABEL",
       "TAXONOMY_HAS_LABEL",
     ],
@@ -70,7 +86,6 @@ class TestGetStagingTimeout:
       "Reference",
       "Structure",
       "ENTITY_HAS_REPORT",
-      "REPORT_HAS_FACT",
     ],
   )
   def test_regular_tables_get_default_timeout(self, table_name: str):

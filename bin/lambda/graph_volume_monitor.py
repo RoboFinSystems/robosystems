@@ -221,16 +221,33 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
     usage_percent = data_volume.get("usage_percent", 0)  # Already a decimal from API
     current_size = int(data_volume.get("volume_size_gb", 50))  # Ensure it's an int
 
-    # Get the actual EBS volume ID from EC2 (since API doesn't provide it)
-    volume_id = get_data_volume_id(instance["instance_id"])
+    # Get the actual EBS volume ID and size from EC2
+    volume_id, ebs_size_gb = get_data_volume_info(instance["instance_id"])
+
+    # Check if filesystem needs to be grown (EBS larger than filesystem)
+    # This can happen if a previous expansion succeeded but filesystem growth failed
+    if ebs_size_gb and ebs_size_gb > current_size:
+      logger.warning(
+        f"EBS volume ({ebs_size_gb}GB) larger than filesystem ({current_size}GB) - "
+        "filesystem growth may have failed previously, triggering growth now"
+      )
+      grow_result = trigger_filesystem_growth(instance)
+      result["action"] = "filesystem_growth_recovery"
+      result["filesystem_grown"] = grow_result.get("success", False)
+      result["reason"] = f"EBS ({ebs_size_gb}GB) > filesystem ({current_size}GB)"
+      result["ebs_size_gb"] = ebs_size_gb
+      return result
 
     # Determine if expansion is needed
     threshold = 0.7 if expand_immediately else EXPANSION_THRESHOLD
 
-    # Log the current status
+    # Log the current status (include EBS size if different from filesystem)
+    ebs_info = (
+      f", EBS={ebs_size_gb}GB" if ebs_size_gb and ebs_size_gb != current_size else ""
+    )
     logger.info(
       f"Instance {instance['instance_id']}: "
-      f"Usage={usage_percent:.1%}, Size={current_size}GB, "
+      f"Usage={usage_percent:.1%}, Size={current_size}GB{ebs_info}, "
       f"Volume={volume_id}, Threshold={threshold:.0%}"
     )
 
@@ -238,6 +255,7 @@ def check_and_expand_volume(instance: dict, expand_immediately: bool = False) ->
     result["metrics"] = {
       "usage_percent": usage_percent,
       "current_size_gb": current_size,
+      "ebs_size_gb": ebs_size_gb,
       "volume_id": volume_id,
       "threshold": threshold,
     }
@@ -420,6 +438,57 @@ def get_data_volume_id(instance_id: str) -> str | None:
     return None
 
 
+def get_data_volume_info(instance_id: str) -> tuple[str | None, int | None]:
+  """Get the data volume ID and actual EBS size for a Graph instance.
+
+  Returns:
+      Tuple of (volume_id, size_gb). Either can be None if not found.
+  """
+
+  try:
+    # Get volumes attached to the instance
+    response = ec2.describe_volumes(
+      Filters=[
+        {"Name": "attachment.instance-id", "Values": [instance_id]},
+        {
+          "Name": "attachment.device",
+          "Values": ["/dev/xvdf", "/dev/sdf"],
+        },  # Data volume device
+      ]
+    )
+
+    if response["Volumes"]:
+      volume = response["Volumes"][0]
+      return volume["VolumeId"], volume["Size"]
+
+    # If not found at standard device, check DynamoDB registry
+    if VOLUME_REGISTRY_TABLE:
+      table = dynamodb.Table(VOLUME_REGISTRY_TABLE)
+      scan_response = table.scan(
+        FilterExpression="instance_id = :instance_id AND #status = :status",
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues={
+          ":instance_id": instance_id,
+          ":status": "attached",
+        },
+      )
+
+      if scan_response["Items"]:
+        volume_id = scan_response["Items"][0]["volume_id"]
+        # Get the actual size from EC2
+        vol_response = ec2.describe_volumes(VolumeIds=[volume_id])
+        if vol_response["Volumes"]:
+          return volume_id, vol_response["Volumes"][0]["Size"]
+        return volume_id, None
+
+    logger.warning(f"No data volume found for instance {instance_id}")
+    return None, None
+
+  except Exception as e:
+    logger.error(f"Failed to get volume info for {instance_id}: {e}")
+    return None, None
+
+
 def get_volume_metrics_from_instance(instance: dict) -> dict | None:
   """Query Graph API for volume metrics"""
 
@@ -478,8 +547,34 @@ def perform_volume_expansion(
     # Call EC2 modify_volume
     response = ec2.modify_volume(VolumeId=volume_id, Size=new_size)
 
-    modification_id = response["VolumeModification"]["VolumeModificationId"]
-    modification_state = response["VolumeModification"]["ModificationState"]
+    # Parse response with error handling - the modify_volume call may succeed
+    # but the response structure could vary
+    try:
+      modification_id = response["VolumeModification"]["VolumeModificationId"]
+      modification_state = response["VolumeModification"]["ModificationState"]
+    except (KeyError, TypeError) as parse_error:
+      # Response parsing failed - check if modification actually started
+      logger.warning(
+        f"Failed to parse modify_volume response for {volume_id}: {parse_error}. "
+        "Checking if modification started anyway..."
+      )
+
+      # Query the current modification state
+      try:
+        mod_response = ec2.describe_volumes_modifications(VolumeIds=[volume_id])
+        if mod_response.get("VolumesModifications"):
+          mod = mod_response["VolumesModifications"][0]
+          modification_id = mod.get("VolumeModificationId", "unknown")
+          modification_state = mod.get("ModificationState", "unknown")
+          logger.info(
+            f"Modification found despite parse error: state={modification_state}, id={modification_id}"
+          )
+        else:
+          # No modification found - the expansion truly failed
+          raise ValueError(f"No modification found for volume {volume_id}")
+      except Exception as check_error:
+        logger.error(f"Failed to verify modification state: {check_error}")
+        raise parse_error  # Re-raise original error
 
     logger.info(
       f"Volume {volume_id} expansion initiated: {current_size}GB -> {new_size}GB (ID: {modification_id})"

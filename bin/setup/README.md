@@ -213,9 +213,8 @@ just setup-aws
   // Schedule Flags (all disabled - enable as needed)
   "BILLING_SCHEDULES_ENABLED": "true",
   "INSTANCE_SCHEDULES_ENABLED": "true",
-  "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
-  "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
   "SEC_PARALLEL_SENSOR_ENABLED": "false",
+  "SEC_INCREMENTAL_PIPELINE_ENABLED": "false",
   "SHARED_REPO_SCHEDULE_ENABLED": "false",
 
   // Integration Placeholders (update with real values)

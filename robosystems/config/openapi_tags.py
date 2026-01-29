@@ -127,16 +127,20 @@ GRAPH_API_TAGS = [
     "description": "📋 Graph schema - Retrieve and install graph schemas",
   },
   {
-    "name": "Tables",
+    "name": "Staging Tables",
     "description": "🗃️ Tables - Create and query DuckDB staging tables, ingest to graph",
+  },
+  {
+    "name": "Backup",
+    "description": "💽 Graph Backup - Create production-ready graph backups with multiple formats",
   },
   {
     "name": "Copy",
     "description": "📥 Graph Copy - Copy data from S3, URLs, and other sources into graph databases",
   },
   {
-    "name": "Backup",
-    "description": "💽 Graph Backup - Create production-ready graph backups with multiple formats",
+    "name": "Memory",
+    "description": "🧠 Memory management - Temporarily boost memory allocation for staging and materialization",
   },
   {
     "name": "Metrics",

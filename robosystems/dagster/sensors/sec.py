@@ -15,8 +15,6 @@ Dagster's run coordinator (DAGSTER_MAX_CONCURRENT_RUNS) controls concurrency.
 
 from datetime import UTC, datetime
 
-import boto3
-from botocore.exceptions import ClientError
 from dagster import (
   DagsterRunStatus,
   DefaultScheduleStatus,
@@ -24,7 +22,6 @@ from dagster import (
   RunRequest,
   RunsFilter,
   RunStatusSensorContext,
-  ScheduleEvaluationContext,
   SensorEvaluationContext,
   SkipReason,
   run_status_sensor,
@@ -34,22 +31,12 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.jobs.sec import (
+  sec_download_job,
   sec_materialize_job,
   sec_process_job,
-  sec_stage_job,
+  sec_staged_materialize_job,
 )
 from robosystems.dagster.jobs.shared_repository import shared_repository_snapshot_job
-
-
-def _get_s3_client():
-  """Create S3 client with LocalStack support for dev."""
-  kwargs = {
-    "region_name": env.AWS_REGION or "us-east-1",
-  }
-  if env.AWS_ENDPOINT_URL:
-    kwargs["endpoint_url"] = env.AWS_ENDPOINT_URL
-  return boto3.client("s3", **kwargs)
-
 
 # Sensor status controlled by environment variable
 SEC_PROCESSING_SENSOR_STATUS = (
@@ -217,180 +204,6 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 
 
 # ============================================================================
-# SEC Incremental Staging Schedule
-# ============================================================================
-
-
-def _list_s3_filed_dates(s3_client, bucket: str, prefix: str) -> list[str]:
-  """List all filed= partition dates from S3 processed bucket.
-
-  Args:
-      s3_client: boto3 S3 client
-      bucket: S3 bucket name
-      prefix: Prefix to search (e.g., "sec/processed")
-
-  Returns:
-      Sorted list of filing dates (YYYY-MM-DD strings)
-  """
-  filed_dates: list[str] = []
-
-  paginator = s3_client.get_paginator("list_objects_v2")
-  pages = paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/", Delimiter="/")
-
-  for page in pages:
-    if "CommonPrefixes" in page:
-      for prefix_info in page["CommonPrefixes"]:
-        prefix_path = prefix_info["Prefix"]
-        if "filed=" in prefix_path:
-          try:
-            # Extract date from "sec/processed/filed=2026-01-15/"
-            filed_part = prefix_path.split("filed=")[1].rstrip("/")
-            # Validate date format (YYYY-MM-DD)
-            datetime.strptime(filed_part, "%Y-%m-%d")
-            filed_dates.append(filed_part)
-          except (IndexError, ValueError):
-            # Skip malformed partitions
-            continue
-
-  filed_dates.sort()
-  return filed_dates
-
-
-async def _get_staged_dates_from_graph_api(graph_id: str) -> list[str]:
-  """Query Graph API for already-staged filing dates.
-
-  Args:
-      graph_id: Graph database identifier
-
-  Returns:
-      List of filing dates that have been staged
-  """
-  from robosystems.graph_api.client.factory import get_graph_client
-
-  try:
-    client = await get_graph_client(graph_id=graph_id, operation_type="read")
-    return await client.get_staged_dates(graph_id)
-  except Exception as e:
-    # If no progress table exists, return empty list
-    if "no_progress_table" in str(e).lower() or "does not exist" in str(e).lower():
-      return []
-    raise
-
-
-SEC_INCREMENTAL_STAGING_SCHEDULE_STATUS = (
-  DefaultScheduleStatus.RUNNING
-  if env.SEC_INCREMENTAL_STAGING_SCHEDULE_ENABLED
-  else DefaultScheduleStatus.STOPPED
-)
-
-
-@schedule(
-  job=sec_stage_job,
-  cron_schedule="0 5 * * *",  # 5am UTC = 12am EST (after processing, before materialize)
-  default_status=SEC_INCREMENTAL_STAGING_SCHEDULE_STATUS,
-  execution_timezone="UTC",
-)
-def sec_incremental_staging_schedule(context: ScheduleEvaluationContext):
-  """Run SEC incremental staging at 5am UTC daily.
-
-  Pipeline timing (all UTC):
-  - 3am: Download new filings (sec_daily_download_schedule)
-  - 3am-5am: Processing sensor processes downloaded filings
-  - 5am: This schedule stages processed parquet to DuckDB (incremental mode)
-  - 6am: Materialization (sec_nightly_materialize_schedule)
-
-  Logic:
-  1. Lists all filed=YYYY-MM-DD partitions in S3 processed bucket
-  2. Queries Graph API for dates already staged (from _sec_staging_progress table)
-  3. Triggers sec_stage job with mode="incremental" for each unstaged date
-
-  Enable via: SEC_INCREMENTAL_STAGING_SCHEDULE_ENABLED=true
-  Requires initial full staging to create _sec_staging_progress table.
-  """
-  import asyncio
-
-  processed_bucket = env.SHARED_PROCESSED_BUCKET
-  if not processed_bucket:
-    context.log.warning("Missing SHARED_PROCESSED_BUCKET configuration")
-    return []
-
-  graph_id = "sec"
-  s3_prefix = "sec/processed"
-  run_requests = []
-
-  try:
-    s3_client = _get_s3_client()
-
-    # Step 1: List all filed= dates in S3
-    s3_dates = _list_s3_filed_dates(s3_client, processed_bucket, s3_prefix)
-    context.log.info(f"Found {len(s3_dates)} filing dates in S3")
-
-    if not s3_dates:
-      context.log.info("No filed= partitions found in S3")
-      return []
-
-    # Step 2: Get already-staged dates from Graph API
-    try:
-      staged_dates = asyncio.get_event_loop().run_until_complete(
-        _get_staged_dates_from_graph_api(graph_id)
-      )
-    except RuntimeError:
-      staged_dates = asyncio.run(_get_staged_dates_from_graph_api(graph_id))
-
-    staged_dates_set = set(staged_dates)
-    context.log.info(f"Found {len(staged_dates_set)} dates already staged")
-
-    if not staged_dates_set:
-      context.log.warning(
-        "No staging progress found. Run full sec_duckdb_staged job first."
-      )
-      return []
-
-    # Step 3: Find unstaged dates
-    unstaged_dates = sorted([d for d in s3_dates if d not in staged_dates_set])
-
-    if not unstaged_dates:
-      context.log.info(
-        f"All {len(s3_dates)} S3 filing dates already staged (up to {max(s3_dates)})"
-      )
-      return []
-
-    context.log.info(f"Found {len(unstaged_dates)} unstaged dates to process")
-
-    # Step 4: Create run request for each unstaged date (chronological order)
-    for filing_date in unstaged_dates:
-      run_requests.append(
-        RunRequest(
-          run_key=f"sec-incremental-stage-{filing_date}",
-          run_config={
-            "ops": {
-              "sec_duckdb_staged": {
-                "config": {
-                  "graph_id": graph_id,
-                  "mode": "incremental",
-                  "filing_date": filing_date,
-                }
-              }
-            }
-          },
-        )
-      )
-
-    context.log.info(f"Yielding {len(run_requests)} incremental staging runs")
-    return run_requests
-
-  except ClientError as e:
-    error_code = e.response.get("Error", {}).get("Code", "Unknown")
-    context.log.error(f"S3 error ({error_code}): {e}")
-    raise
-  except Exception as e:
-    context.log.error(
-      f"Error in SEC incremental staging schedule: {type(e).__name__}: {e}"
-    )
-    raise
-
-
-# ============================================================================
 # SEC Post-Materialization Snapshot Sensor
 # ============================================================================
 
@@ -489,5 +302,326 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
           }
         },
       }
+    },
+  )
+
+
+# ============================================================================
+# SEC Incremental Pipeline (Automated Chain)
+# ============================================================================
+# When SEC_INCREMENTAL_PIPELINE_ENABLED=true, this enables a fully automated
+# pipeline that runs every 3 hours:
+#   download → process → stage → materialize → snapshot
+#
+# Each step is chained via run_status_sensor, only proceeding on success.
+# Keep disabled during backfills; enable for production incremental updates.
+# ============================================================================
+
+SEC_INCREMENTAL_PIPELINE_STATUS = (
+  DefaultSensorStatus.RUNNING
+  if env.SEC_INCREMENTAL_PIPELINE_ENABLED
+  else DefaultSensorStatus.STOPPED
+)
+
+SEC_INCREMENTAL_SCHEDULE_STATUS = (
+  DefaultScheduleStatus.RUNNING
+  if env.SEC_INCREMENTAL_PIPELINE_ENABLED
+  else DefaultScheduleStatus.STOPPED
+)
+
+
+def _get_quarters_to_scan() -> list[str]:
+  """Get quarters to scan for incremental download.
+
+  Always scans current quarter. Also scans previous quarter during the first
+  few days of a new quarter to catch late-indexed filings (filings submitted
+  on the last day of a quarter may not appear in EFTS until the next day).
+
+  Returns:
+      List of partition keys like ["2025-Q1"] or ["2025-Q1", "2024-Q4"]
+  """
+  now = datetime.now(UTC)
+  current_quarter = (now.month - 1) // 3 + 1
+  current_year = now.year
+
+  quarters = [f"{current_year}-Q{current_quarter}"]
+
+  # Quarter start months: Q1=Jan, Q2=Apr, Q3=Jul, Q4=Oct
+  quarter_start_month = (current_quarter - 1) * 3 + 1
+
+  # Scan previous quarter for first 3 days of new quarter
+  # This catches filings submitted late on quarter-end that get indexed next day
+  if now.month == quarter_start_month and now.day <= 3:
+    if current_quarter == 1:
+      quarters.append(f"{current_year - 1}-Q4")
+    else:
+      quarters.append(f"{current_year}-Q{current_quarter - 1}")
+
+  return quarters
+
+
+@schedule(
+  job=sec_download_job,
+  cron_schedule="0 */3 * * *",  # Every 3 hours
+  default_status=SEC_INCREMENTAL_SCHEDULE_STATUS,
+  execution_timezone="UTC",
+)
+def sec_incremental_download_schedule(context):
+  """Incremental SEC download every 3 hours.
+
+  Part of the automated incremental pipeline. Downloads new filings for
+  current quarter (and previous quarter at quarter boundaries).
+
+  Chain: download → process → stage → materialize → snapshot
+
+  Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  """
+  from robosystems.dagster.assets import SECDownloadConfig
+
+  quarters = _get_quarters_to_scan()
+  context.log.info(f"Incremental download for quarters: {quarters}")
+
+  # Generate batch_id to track all jobs from this schedule tick
+  # Used by downstream sensors to wait for all quarters to complete
+  batch_id = context.scheduled_execution_time.strftime("%Y%m%d-%H")
+
+  for partition_key in quarters:
+    yield RunRequest(
+      run_key=f"sec-incremental-{partition_key}-{batch_id}",
+      partition_key=partition_key,
+      run_config={
+        "ops": {
+          "sec_raw_filings": SECDownloadConfig(
+            skip_existing=True,
+            form_types=["10-K", "10-Q"],
+          ),
+        }
+      },
+      tags={
+        "pipeline": "sec",
+        "phase": "download",
+        "mode": "incremental",
+        "batch_id": batch_id,  # Track jobs from same schedule tick
+      },
+    )
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[sec_download_job],
+  request_job=sec_process_job,
+  default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
+  minimum_interval_seconds=60,
+  description="Chain: download success → trigger processing",
+)
+def sec_download_to_process_sensor(context: RunStatusSensorContext):
+  """Trigger SEC processing after download completes successfully.
+
+  Part of the automated incremental pipeline. When a download job succeeds,
+  this triggers processing for the same partition (quarter).
+
+  Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping chain sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+
+  # Only chain incremental pipeline runs (tagged with mode=incremental)
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Skipping - not an incremental pipeline run")
+    return
+
+  # Get partition from the completed download run
+  partition_key = dagster_run.tags.get("dagster/partition")
+  if not partition_key:
+    context.log.warning("No partition key found on download run")
+    return
+
+  # Check for already running process job for this partition
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_process",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+      tags={"dagster/partition": partition_key},
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(f"Process job already running for {partition_key}, skipping")
+    return
+
+  # Propagate batch_id for downstream batch tracking
+  batch_id = run_tags.get("batch_id")
+
+  context.log.info(
+    f"Download completed for {partition_key} (batch={batch_id}), triggering processing"
+  )
+
+  # Determine partition mode (daily for current quarter, quarterly for historical)
+  now = datetime.now(UTC)
+  current_quarter = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
+  use_daily = partition_key == current_quarter
+
+  yield RunRequest(
+    run_key=f"sec-process-chain-{partition_key}-{dagster_run.run_id[:8]}",
+    partition_key=partition_key,
+    run_config={
+      "ops": {
+        "sec_processed_filings": {
+          "config": {
+            "use_filing_date_partition": use_daily,
+          }
+        }
+      }
+    },
+    tags={
+      "pipeline": "sec",
+      "phase": "process",
+      "mode": "incremental",
+      "quarter": partition_key,
+      "batch_id": batch_id,  # Propagate for batch tracking
+    },
+  )
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[sec_process_job],
+  request_job=sec_staged_materialize_job,
+  default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
+  minimum_interval_seconds=60,
+  description="Chain: process success → trigger stage + materialize (waits for batch)",
+)
+def sec_process_to_stage_materialize_sensor(context: RunStatusSensorContext):
+  """Trigger full staging and materialization after ALL processing in batch completes.
+
+  Part of the automated incremental pipeline. At quarter boundaries, multiple
+  quarters may be downloaded and processed. This sensor waits for ALL process
+  jobs in the same batch to complete before triggering stage+materialize.
+
+  Batch tracking:
+  - Jobs from the same schedule tick share a batch_id tag
+  - Sensor queries all process jobs with same batch_id
+  - Only triggers when all are complete (SUCCESS or FAILURE)
+  - Uses batch_id in run_key for deduplication (Dagster prevents duplicate runs)
+
+  Note: Uses sec_staged_materialize_job which does both staging and
+  materialization in sequence, ensuring atomicity.
+
+  Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping chain sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+
+  # Only chain incremental pipeline runs
+  run_tags = dagster_run.tags or {}
+  if run_tags.get("mode") != "incremental":
+    context.log.info("Skipping - not an incremental pipeline run")
+    return
+
+  # Get batch_id for batch tracking
+  batch_id = run_tags.get("batch_id")
+  if not batch_id:
+    context.log.warning("No batch_id found on process run, skipping batch tracking")
+    return
+
+  # Query all process jobs in this batch
+  batch_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_process",
+      tags={"batch_id": batch_id, "mode": "incremental"},
+    ),
+  )
+
+  if not batch_runs:
+    context.log.warning(f"No process jobs found for batch {batch_id}")
+    return
+
+  # Check if all jobs in batch are complete (SUCCESS or FAILURE)
+  terminal_statuses = {DagsterRunStatus.SUCCESS, DagsterRunStatus.FAILURE}
+  incomplete = [r for r in batch_runs if r.status not in terminal_statuses]
+
+  if incomplete:
+    incomplete_quarters = [r.tags.get("quarter", "?") for r in incomplete]
+    context.log.info(
+      f"Waiting for {len(incomplete)} more process job(s) in batch {batch_id}: "
+      f"{incomplete_quarters}"
+    )
+    return
+
+  # All jobs complete - check if any succeeded
+  succeeded = [r for r in batch_runs if r.status == DagsterRunStatus.SUCCESS]
+  if not succeeded:
+    context.log.warning(
+      f"All {len(batch_runs)} process jobs in batch {batch_id} failed, "
+      "skipping stage+materialize"
+    )
+    return
+
+  succeeded_quarters = [r.tags.get("quarter", "?") for r in succeeded]
+  context.log.info(
+    f"All process jobs in batch {batch_id} complete. "
+    f"Succeeded: {succeeded_quarters}. Triggering stage+materialize."
+  )
+
+  # Check for already running stage/materialize job
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="sec_staged_materialize",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Stage/materialize job already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  # Also check for separate stage or materialize jobs
+  for job_name in ["sec_stage", "sec_materialize"]:
+    active = context.instance.get_runs(
+      filters=RunsFilter(
+        job_name=job_name,
+        statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+      ),
+      limit=1,
+    )
+    if active:
+      context.log.info(f"{job_name} job already running, skipping")
+      return
+
+  # Use batch_id in run_key for deduplication
+  # If sensor fires multiple times (once per completed job in batch),
+  # Dagster's run_key deduplication ensures only one stage+materialize runs
+  yield RunRequest(
+    run_key=f"sec-stage-materialize-batch-{batch_id}",
+    run_config={
+      "ops": {
+        "sec_duckdb_staged": {
+          "config": {
+            "graph_id": "sec",
+            "reset_staging": True,  # Fresh DuckDB file each run
+          }
+        },
+        "sec_graph_materialized": {
+          "config": {
+            "graph_id": "sec",
+            "rebuild_graph": True,  # Delete and rebuild LadybugDB from fresh DuckDB staging
+          }
+        },
+      }
+    },
+    tags={
+      "pipeline": "sec",
+      "phase": "stage_materialize",
+      "mode": "incremental",
+      "batch_id": batch_id,
     },
   )

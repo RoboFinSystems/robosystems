@@ -200,22 +200,22 @@ class SECPipeline:
     skip_existing: bool = True,
     job_type: str = "download_only",
     graph_id: str = "sec",
-    rebuild_graph: bool = True,
     reset_staging: bool = False,
+    rebuild_graph: bool = False,
   ) -> str:
     """Create YAML config for Dagster job.
 
     Args:
         job_type: "download_only", "stage", or "materialize_duckdb"
         graph_id: Graph ID for staging/materialization jobs
-        rebuild_graph: Whether to rebuild LadybugDB (stage job only)
-        reset_staging: Whether to delete DuckDB staging too (fresh start)
+        reset_staging: Whether to delete DuckDB file before staging (fresh start)
+        rebuild_graph: Whether to rebuild LadybugDB (materialize job only)
     """
     if job_type == "stage":
       # sec_stage job - stages to persistent DuckDB only (Stage 1)
+      # Note: staging doesn't touch LadybugDB - rebuild is handled by materialize
       stage_config: dict[str, Any] = {
         "graph_id": graph_id,
-        "rebuild_graph": rebuild_graph,
         "reset_staging": reset_staging,
       }
       if year:
@@ -226,10 +226,15 @@ class SECPipeline:
         }
       }
     elif job_type == "materialize_duckdb":
-      # sec_materialize job - materializes from DuckDB to LadybugDB (retry-safe)
+      # sec_materialize job - materializes from DuckDB to LadybugDB
       config = {
         "ops": {
-          "sec_graph_materialized": {"config": {"graph_id": graph_id}},
+          "sec_graph_materialized": {
+            "config": {
+              "graph_id": graph_id,
+              "rebuild_graph": rebuild_graph,
+            }
+          },
         }
       }
     else:
@@ -981,10 +986,8 @@ def cmd_stage(args):
   # Log settings
   if args.year:
     logger.info(f"Year filter: {args.year}")
-  if not args.rebuild:
-    logger.info("Rebuild disabled - appending to existing database")
   if args.reset_staging:
-    logger.info("Reset staging enabled - will delete DuckDB staging for fresh start")
+    logger.info("Reset staging enabled - will delete DuckDB file for fresh start")
 
   # Create minimal pipeline for staging
   pipeline = SECPipeline(
@@ -997,13 +1000,12 @@ def cmd_stage(args):
     materialize_timeout=args.timeout,
   )
 
-  # Run stage job
+  # Run stage job (DuckDB only - LadybugDB rebuild is handled by materialize)
   config_path = pipeline._create_job_config(
     tickers=[],
     year=args.year,
     job_type="stage",
     graph_id=args.graph_id,
-    rebuild_graph=args.rebuild,
     reset_staging=args.reset_staging,
   )
 
@@ -1049,6 +1051,8 @@ def cmd_materialize_graph(args):
   logger.info("SEC LadybugDB Materialization (Decoupled Stage 2)")
   logger.info("=" * 60)
   logger.info("Materializing from existing DuckDB staging to LadybugDB")
+  if args.rebuild_graph:
+    logger.info("Rebuild enabled - will delete and recreate LadybugDB")
   logger.info("=" * 60)
 
   # Create minimal pipeline for materialization
@@ -1068,6 +1072,7 @@ def cmd_materialize_graph(args):
     year=None,
     job_type="materialize_duckdb",
     graph_id=args.graph_id,
+    rebuild_graph=args.rebuild_graph,
   )
 
   result = pipeline.run_stage(
@@ -1275,15 +1280,9 @@ def main():
   )
   stage_parser.add_argument("--year", type=str, help="Optional year filter")
   stage_parser.add_argument(
-    "--no-rebuild",
-    action="store_false",
-    dest="rebuild",
-    help="Don't rebuild LadybugDB (append to existing)",
-  )
-  stage_parser.add_argument(
     "--reset-staging",
     action="store_true",
-    help="Delete DuckDB staging too (fresh start, not just LadybugDB)",
+    help="Delete DuckDB file before staging (fresh start)",
   )
   stage_parser.add_argument(
     "--timeout",
@@ -1303,6 +1302,11 @@ def main():
   )
   mat_graph_parser.add_argument(
     "--graph-id", type=str, default="sec", help="Graph ID (default: sec)"
+  )
+  mat_graph_parser.add_argument(
+    "--rebuild-graph",
+    action="store_true",
+    help="Delete and rebuild LadybugDB before materializing (default: append)",
   )
   mat_graph_parser.add_argument(
     "--timeout",
