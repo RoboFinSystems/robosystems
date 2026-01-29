@@ -65,6 +65,12 @@ ProgressCallback = Callable[[str], None]
 DEFAULT_STAGING_TIMEOUT = 300  # 5 minutes
 LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes
 
+# Table-specific timeouts for LadybugDB materialization (seconds)
+# Materialization is typically faster than staging, but billion-row tables need more time
+# Default: 600s (10 min), Large: 1800s (30 min)
+DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
+LARGE_MATERIALIZATION_TIMEOUT = 1800  # 30 minutes
+
 # Tables known to have millions of rows requiring extended timeouts
 LARGE_STAGING_TABLES = frozenset(
   {
@@ -126,6 +132,13 @@ def _get_staging_timeout(table_name: str) -> int:
   if table_name in LARGE_STAGING_TABLES:
     return LARGE_TABLE_STAGING_TIMEOUT
   return DEFAULT_STAGING_TIMEOUT
+
+
+def _get_materialization_timeout(table_name: str) -> float:
+  """Get appropriate materialization timeout for a table based on expected size."""
+  if table_name in LARGE_STAGING_TABLES:
+    return float(LARGE_MATERIALIZATION_TIMEOUT)
+  return float(DEFAULT_MATERIALIZATION_TIMEOUT)
 
 
 def _group_dates_by_quarter(dates: list[str]) -> dict[str, list[str]]:
@@ -1219,7 +1232,8 @@ class XBRLDuckDBGraphProcessor:
 
     for i, table_name in enumerate(table_names, 1):
       is_large = table_name in LARGE_STAGING_TABLES
-      size_hint = " (large table)" if is_large else ""
+      timeout = _get_materialization_timeout(table_name)
+      size_hint = f" (large table, timeout={timeout:.0f}s)" if is_large else ""
       log_progress(f"[{i}/{total_tables}] Materializing {table_name}{size_hint}...")
 
       try:
@@ -1227,6 +1241,7 @@ class XBRLDuckDBGraphProcessor:
           graph_id=self.graph_id,
           table_name=table_name,
           ignore_errors=True,
+          timeout=timeout,
         )
 
         rows_ingested = response.get("rows_ingested", 0)
