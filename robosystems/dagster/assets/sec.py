@@ -352,7 +352,9 @@ class SECMaterializeConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   rebuild_graph: bool = False  # Rebuild LadybugDB before materialization
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables to reduce storage
+  skip_taxonomy_relationships: bool = (
+    False  # Skip taxonomy structure tables to reduce storage
+  )
 
 
 # ============================================================================

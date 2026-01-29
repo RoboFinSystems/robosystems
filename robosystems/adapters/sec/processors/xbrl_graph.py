@@ -8,7 +8,6 @@ from arelle import XbrlConst
 
 from robosystems.adapters.sec import SEC_BASE_URL, SECClient
 from robosystems.adapters.sec.client.arelle import ArelleClient
-from robosystems.config import env
 from robosystems.adapters.sec.processors import (
   DataFrameManager,
   ParquetWriter,
@@ -31,6 +30,7 @@ from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaAdapter,
   XBRLSchemaConfigGenerator,
 )
+from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.utils import (
@@ -651,7 +651,9 @@ class XBRLGraphProcessor:
     # Skip textblock facts entirely if configured (saves storage for historical data)
     # This takes precedence over externalization - fact is not created at all
     if env.XBRL_SKIP_TEXTBLOCK_FACTS and xfact.concept and xfact.concept.isTextBlock:
-      logger.debug(f"Skipping textblock fact (XBRL_SKIP_TEXTBLOCK_FACTS=true): {fact_uri}")
+      logger.debug(
+        f"Skipping textblock fact (XBRL_SKIP_TEXTBLOCK_FACTS=true): {fact_uri}"
+      )
       return
 
     # Check if fact already exists to prevent duplicates
