@@ -331,7 +331,7 @@ class SECStageConfig(Config):
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Optional year filter
-  reset_staging: bool = False  # Delete DuckDB file before staging (fresh start)
+  reset_staging: bool = False  # Clear all DuckDB tables first (use True if schema changed or DuckDB corrupted)
 
 
 class SECMaterializeConfig(Config):

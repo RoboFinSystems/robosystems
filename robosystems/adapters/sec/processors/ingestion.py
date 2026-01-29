@@ -270,6 +270,44 @@ class XBRLDuckDBGraphProcessor:
           duration_seconds=time.time() - start_time,
         )
 
+      # Reset staging if requested - delete all DuckDB tables before staging new ones
+      if reset_staging:
+        log_progress("Resetting DuckDB staging - clearing existing tables...")
+        try:
+          existing_tables = await client.list_tables(self.graph_id)
+          if existing_tables:
+            for table_info in existing_tables:
+              table_name = (
+                table_info.get("name")
+                if isinstance(table_info, dict)
+                else getattr(table_info, "name", None)
+              )
+              if table_name:
+                await client.delete_table(self.graph_id, table_name)
+                logger.debug(f"Deleted staging table: {table_name}")
+            log_progress(f"Cleared {len(existing_tables)} existing staging tables")
+          else:
+            log_progress("No existing staging tables to clear")
+        except Exception as reset_err:
+          # Non-fatal - tables might not exist yet
+          logger.warning(f"Could not reset staging tables: {reset_err}")
+          log_progress(f"Reset skipped (tables may not exist): {reset_err}")
+
+      # Refresh client connection after reset
+      try:
+        client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
+      except Exception as client_err:
+        logger.error(
+          f"Failed to initialize graph client for {self.graph_id}: {client_err}",
+          exc_info=True,
+        )
+        return StagingResult(
+          status="error",
+          table_names=[],
+          error=f"Graph client initialization failed: {client_err!s}",
+          duration_seconds=time.time() - start_time,
+        )
+
       # Step 1: Get table names from schema (no S3 discovery needed for glob mode)
       # Initialize variables for type checker
       tables_by_type: dict[str, str] = {}
