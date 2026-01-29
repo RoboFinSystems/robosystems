@@ -835,8 +835,9 @@ async def execute_cypher_query(
       detail=str(e),
     )
 
-  except HTTPException:
-    circuit_breaker.record_failure(graph_id, "cypher_query")
+  except HTTPException as exc:
+    if exc.status_code >= 500:
+      circuit_breaker.record_failure(graph_id, "cypher_query")
     raise
 
   except Exception as e:
@@ -884,6 +885,7 @@ async def _check_shared_repository_limits(
   Check dual-layer rate limits for shared repositories.
 
   Direct API queries are included (no credits consumed) but still rate limited.
+  Skipped when RATE_LIMIT_ENABLED is False (dev environments).
 
   Args:
       graph_id: The graph/repository ID
@@ -894,6 +896,11 @@ async def _check_shared_repository_limits(
   Raises:
       HTTPException: If rate limits are exceeded or access is denied
   """
+  from robosystems.config import env
+
+  if not env.RATE_LIMIT_ENABLED:
+    return
+
   from robosystems.config.billing.repositories import SharedRepository
   from robosystems.config.valkey_registry import (
     ValkeyDatabase,

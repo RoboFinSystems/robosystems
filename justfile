@@ -260,12 +260,11 @@ demo-user *args="":
     uv run examples/credentials/main.py {{args}}
 
 # Setup SEC repository demo - loads data, grants access, updates config
-demo-sec ticker="NVDA" year="2025" skip_queries="false" fast="true":
+demo-sec ticker="NVDA" year="2025" skip_queries="false":
     uv run examples/sec_demo/main.py \
         --ticker {{ticker}} \
         --year {{year}} \
-        {{ if skip_queries == "true" { "--skip-queries" } else { "" } }} \
-        {{ if fast == "true" { "--fast" } else { "" } }}
+        {{ if skip_queries == "true" { "--skip-queries" } else { "" } }}
 
 # Create SEC subscription only (no data loading) - for connecting to existing SEC graph
 demo-sec-subscribe plan="sec-starter":
@@ -382,11 +381,10 @@ sec-pipeline count="10" year="2025":
     @just sec-materialize
 
 # Load single ticker end-to-end (download + process + materialize)
-sec-load ticker year="" fast="" env=_local_env:
+sec-load ticker year="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline run \
         --tickers {{ticker}} \
-        {{ if year != "" { "--year " + year } else { "" } }} \
-        {{ if fast != "" { "--fast" } else { "" } }}
+        {{ if year != "" { "--year " + year } else { "" } }}
 
 # --- Phase 1: Download ---
 
