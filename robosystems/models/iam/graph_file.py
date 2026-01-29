@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Optional
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session, relationship
 
 from ...database import Base
 from ...utils.ulid import generate_prefixed_ulid
+
+logger = logging.getLogger(__name__)
 
 
 class GraphFile(Base):
@@ -159,3 +162,60 @@ class GraphFile(Base):
     self.graph_status = "failed"
     session.commit()
     session.refresh(self)
+
+  @classmethod
+  def recover_stale_files(
+    cls,
+    graph_id: str,
+    session: Session,
+    stale_hours: int = 1,
+  ) -> list[str]:
+    """
+    Find files stuck in uploaded/pending state due to mid-staging crashes.
+
+    Files can get stuck when the API crashes mid-staging, leaving them with
+    upload_status='uploaded' and duckdb_status='pending' permanently.
+
+    Returns the IDs of stale files so callers can re-stage them.
+
+    Args:
+        graph_id: Graph database identifier
+        session: SQLAlchemy session
+        stale_hours: Hours after which a pending file is considered stale
+
+    Returns:
+        List of stale file IDs to be re-staged by the caller
+    """
+    from datetime import timedelta
+
+    stale_cutoff = datetime.now(UTC) - timedelta(hours=stale_hours)
+
+    stale_files = (
+      session.query(cls)
+      .filter(
+        cls.graph_id == graph_id,
+        cls.upload_status == "uploaded",
+        cls.duckdb_status == "pending",
+        cls.created_at < stale_cutoff,
+      )
+      .all()
+    )
+
+    if not stale_files:
+      return []
+
+    recovered_ids = []
+    for f in stale_files:
+      logger.warning(
+        f"Stale file detected: {f.id} ({f.file_name}) "
+        f"created at {f.created_at}, resetting for re-staging"
+      )
+      recovered_ids.append(f.id)
+
+    if recovered_ids:
+      logger.warning(
+        f"Found {len(recovered_ids)} stale files for graph {graph_id} "
+        f"(older than {stale_hours}h). Files will be re-staged during materialization."
+      )
+
+    return recovered_ids

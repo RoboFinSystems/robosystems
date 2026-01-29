@@ -835,8 +835,9 @@ async def execute_cypher_query(
       detail=str(e),
     )
 
-  except HTTPException:
-    circuit_breaker.record_failure(graph_id, "cypher_query")
+  except HTTPException as exc:
+    if exc.status_code >= 500:
+      circuit_breaker.record_failure(graph_id, "cypher_query")
     raise
 
   except Exception as e:
@@ -881,9 +882,10 @@ async def _check_shared_repository_limits(
   graph_id: str, user: User, session: Session, endpoint: str = "query"
 ) -> None:
   """
-  Check dual-layer rate limits for shared repositories.
+  Check access and rate limits for shared repositories.
 
-  Direct API queries are included (no credits consumed) but still rate limited.
+  Access control is ALWAYS checked (user must have UserRepository record).
+  Rate limiting is only applied when RATE_LIMIT_ENABLED is True.
 
   Args:
       graph_id: The graph/repository ID
@@ -892,19 +894,37 @@ async def _check_shared_repository_limits(
       endpoint: The endpoint being called
 
   Raises:
-      HTTPException: If rate limits are exceeded or access is denied
+      HTTPException: If access is denied or rate limits are exceeded
   """
+  from robosystems.config import env
   from robosystems.config.billing.repositories import SharedRepository
-  from robosystems.config.valkey_registry import (
-    ValkeyDatabase,
-    create_async_redis_client,
-  )
-  from robosystems.middleware.rate_limits import DualLayerRateLimiter
   from robosystems.models.iam.user_repository import UserRepository
 
   # Only apply to shared repositories
   if graph_id not in [repo.value for repo in SharedRepository]:
     return
+
+  # ALWAYS check access (authorization) - this is not gated by rate limiting
+  repo_access = UserRepository.get_by_user_and_repository(user.id, graph_id, session)
+  if not repo_access:
+    logger.warning(
+      f"User {user.id} attempted to access shared repository {graph_id} without access"
+    )
+    raise HTTPException(
+      status_code=http_status.HTTP_403_FORBIDDEN,
+      detail=f"You don't have access to the '{graph_id}' repository. "
+      "Subscribe at https://roboledger.ai/upgrade",
+    )
+
+  # Rate limiting is optional - skip if disabled (dev environments)
+  if not env.RATE_LIMIT_ENABLED:
+    return
+
+  from robosystems.config.valkey_registry import (
+    ValkeyDatabase,
+    create_async_redis_client,
+  )
+  from robosystems.middleware.rate_limits import DualLayerRateLimiter
 
   # Get Redis client for rate limiting with proper ElastiCache support
   redis_client = create_async_redis_client(ValkeyDatabase.RATE_LIMITING)
@@ -915,8 +935,7 @@ async def _check_shared_repository_limits(
     # Get user's subscription tier (for burst protection)
     user_tier = getattr(user, "subscription_tier", "ladybug-standard")
 
-    # Get user's repository access plan
-    repo_access = UserRepository.get_by_user_and_repository(user.id, graph_id, session)
+    # repo_access already fetched above for access check
     repo_plan = repo_access.repository_plan if repo_access else None
 
     # Check both rate limit layers

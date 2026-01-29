@@ -25,8 +25,14 @@ Use Cases:
 - Recovery from partial ingestion failures
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import UTC
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+  from robosystems.middleware.auth.distributed_lock import DistributedLock
 
 from fastapi import (
   APIRouter,
@@ -385,12 +391,17 @@ async def materialize_graph(
   """
   Materialize complete graph from DuckDB staging tables.
 
-  Submits materialization job to Dagster for execution with SSE progress tracking.
-  Returns immediately with operation_id for monitoring.
+  Uses direct materialization (fast path) when enabled, falling back to
+  Dagster job execution. Both paths support SSE progress tracking.
 
   Rebuilds entire graph from current DuckDB state, treating graph database as a
   materialized view of the mutable DuckDB data lake.
   """
+  from robosystems.config import env
+  from robosystems.config.valkey_registry import ValkeyDatabase, create_redis_client
+  from robosystems.middleware.auth.distributed_lock import DistributedLock
+  from robosystems.middleware.sse.event_storage import get_event_storage
+
   circuit_breaker.check_circuit(graph_id, "graph_materialization")
 
   # Check for shared repository access
@@ -411,59 +422,204 @@ async def materialize_graph(
       detail=f"Graph {graph_id} not found",
     )
 
-  # Create SSE operation for progress tracking
-  from robosystems.middleware.sse import (
-    build_graph_job_config,
-    run_and_monitor_dagster_job,
-  )
-  from robosystems.middleware.sse.event_storage import get_event_storage
+  # Acquire distributed lock to prevent concurrent materialization
+  try:
+    redis_client = create_redis_client(ValkeyDatabase.DISTRIBUTED_LOCKS)
+    lock = DistributedLock(
+      redis_client, f"graph_materialize:{graph_id}", ttl_seconds=env.INGESTION_LOCK_TTL
+    )
+    lock_result = lock.acquire(blocking=False)
+    if not lock_result.acquired:
+      raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Materialization already in progress for this graph",
+      )
+  except HTTPException:
+    raise
+  except Exception as e:
+    logger.warning(f"Could not acquire distributed lock for {graph_id}: {e}")
+    # Proceed without lock if Redis is unavailable (degraded mode)
+    lock = None
 
-  operation_id = str(uuid.uuid4())
-  event_storage = get_event_storage()
-  await event_storage.create_operation(
-    operation_id=operation_id,
-    operation_type="graph_materialization",
-    user_id=current_user.id,
-    graph_id=graph_id,
+  # Everything after lock acquisition must release the lock on failure,
+  # since the background task (which normally releases it) won't be dispatched.
+  try:
+    # Create SSE operation for progress tracking
+    operation_id = str(uuid.uuid4())
+    event_storage = get_event_storage()
+    await event_storage.create_operation(
+      operation_id=operation_id,
+      operation_type="graph_materialization",
+      user_id=current_user.id,
+      graph_id=graph_id,
+    )
+
+    # Decide materialization method: direct (fast) vs Dagster (reliable for large data)
+    use_direct = _should_use_direct_materialization(db, graph_id)
+
+    api_logger.info(
+      "Materialization job queued",
+      extra={
+        "component": "materialize_api",
+        "action": "job_queued",
+        "user_id": str(current_user.id),
+        "graph_id": graph_id,
+        "operation_id": operation_id,
+        "force": request.force,
+        "rebuild": request.rebuild,
+        "ignore_errors": request.ignore_errors,
+        "method": "direct" if use_direct else "dagster",
+      },
+    )
+
+    if use_direct:
+      # Direct materialization fast path
+      background_tasks.add_task(
+        _run_direct_materialization,
+        db=db,
+        graph_id=graph_id,
+        force=request.force,
+        rebuild=request.rebuild,
+        ignore_errors=request.ignore_errors,
+        operation_id=operation_id,
+        lock=lock,
+      )
+
+      return MaterializeResponse(
+        status="queued",
+        graph_id=graph_id,
+        operation_id=operation_id,
+        message="Materialization started (direct). Monitor progress via SSE stream at "
+        f"/v1/operations/{operation_id}/stream",
+      )
+
+    else:
+      # Dagster path for large graphs or when direct is disabled
+      from robosystems.middleware.sse import build_graph_job_config
+
+      run_config = build_graph_job_config(
+        "materialize_graph_job",
+        graph_id=graph_id,
+        user_id=str(current_user.id),
+        force=request.force,
+        rebuild=request.rebuild,
+        ignore_errors=request.ignore_errors,
+        operation_id=operation_id,
+      )
+
+      background_tasks.add_task(
+        _run_dagster_materialization,
+        job_name="materialize_graph_job",
+        operation_id=operation_id,
+        run_config=run_config,
+        lock=lock,
+      )
+
+      return MaterializeResponse(
+        status="queued",
+        graph_id=graph_id,
+        operation_id=operation_id,
+        message="Materialization queued (Dagster). Monitor progress via SSE stream at "
+        f"/v1/operations/{operation_id}/stream",
+      )
+
+  except Exception:
+    # Release lock if background task was never dispatched
+    if lock is not None:
+      lock.release()
+    raise
+
+
+def _should_use_direct_materialization(db: Session, graph_id: str) -> bool:
+  """
+  Decide whether to use the direct fast path or Dagster for materialization.
+
+  Uses the direct path when:
+  - DIRECT_GRAPH_MATERIALIZATION_ENABLED is true AND
+  - Total staged data size is below GRAPH_MATERIALIZATION_THRESHOLD_MB
+
+  Large graphs automatically route to Dagster regardless of the flag,
+  since API worker background tasks aren't suited for long-running work.
+  """
+  from sqlalchemy import func
+
+  from robosystems.config import env
+  from robosystems.models.iam import GraphFile, GraphTable
+
+  if not env.DIRECT_GRAPH_MATERIALIZATION_ENABLED:
+    return False
+
+  # Sum file sizes for all staged (not yet materialized) files in this graph
+  result = (
+    db.query(func.coalesce(func.sum(GraphFile.file_size_bytes), 0))
+    .join(GraphTable, GraphFile.table_id == GraphTable.id)
+    .filter(
+      GraphTable.graph_id == graph_id,
+      GraphFile.duckdb_status == "staged",
+    )
+    .scalar()
   )
 
-  api_logger.info(
-    "Materialization job queued",
-    extra={
-      "component": "materialize_api",
-      "action": "job_queued",
-      "user_id": str(current_user.id),
-      "graph_id": graph_id,
-      "operation_id": operation_id,
-      "force": request.force,
-      "rebuild": request.rebuild,
-      "ignore_errors": request.ignore_errors,
-    },
+  total_mb = (result or 0) / (1024 * 1024)
+  threshold_mb = env.GRAPH_MATERIALIZATION_THRESHOLD_MB
+
+  if total_mb > threshold_mb:
+    logger.info(
+      f"Graph {graph_id} staged data is {total_mb:.1f}MB "
+      f"(threshold: {threshold_mb}MB) - routing to Dagster"
+    )
+    return False
+
+  logger.info(
+    f"Graph {graph_id} staged data is {total_mb:.1f}MB "
+    f"(threshold: {threshold_mb}MB) - using direct materialization"
+  )
+  return True
+
+
+async def _run_direct_materialization(
+  db: Session,
+  graph_id: str,
+  force: bool,
+  rebuild: bool,
+  ignore_errors: bool,
+  operation_id: str,
+  lock: DistributedLock | None,
+) -> None:
+  """Background task wrapper for direct materialization with lock management."""
+  from robosystems.operations.lbug.direct_materialization import (
+    materialize_graph_directly,
   )
 
-  # Build Dagster job config
-  run_config = build_graph_job_config(
-    "materialize_graph_job",
-    graph_id=graph_id,
-    user_id=str(current_user.id),
-    force=request.force,
-    rebuild=request.rebuild,
-    ignore_errors=request.ignore_errors,
-    operation_id=operation_id,
-  )
+  try:
+    await materialize_graph_directly(
+      db=db,
+      graph_id=graph_id,
+      force=force,
+      rebuild=rebuild,
+      ignore_errors=ignore_errors,
+      operation_id=operation_id,
+    )
+  finally:
+    if lock is not None:
+      lock.release()
 
-  # Submit job to Dagster with SSE monitoring in background
-  background_tasks.add_task(
-    run_and_monitor_dagster_job,
-    job_name="materialize_graph_job",
-    operation_id=operation_id,
-    run_config=run_config,
-  )
 
-  return MaterializeResponse(
-    status="queued",
-    graph_id=graph_id,
-    operation_id=operation_id,
-    message="Materialization queued. Monitor progress via SSE stream at "
-    f"/v1/operations/{operation_id}/stream",
-  )
+async def _run_dagster_materialization(
+  job_name: str,
+  operation_id: str,
+  run_config: dict,
+  lock: DistributedLock | None,
+) -> None:
+  """Background task wrapper for Dagster materialization with lock management."""
+  from robosystems.middleware.sse import run_and_monitor_dagster_job
+
+  try:
+    await run_and_monitor_dagster_job(
+      job_name=job_name,
+      operation_id=operation_id,
+      run_config=run_config,
+    )
+  finally:
+    if lock is not None:
+      lock.release()

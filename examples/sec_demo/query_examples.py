@@ -124,9 +124,9 @@ LIMIT 20
     "query": """
 MATCH (f:Fact)-[:FACT_HAS_PERIOD]->(p:Period)
 WHERE p.end_date IS NOT NULL
-WITH p.fiscal_year AS year, p.end_date AS period_end, count(f) AS fact_count
+WITH p.calendar_year AS year, p.end_date AS period_end, count(f) AS fact_count
 RETURN
-    year AS fiscal_year,
+    year AS calendar_year,
     period_end AS period_end,
     fact_count
 ORDER BY year DESC, period_end DESC
@@ -180,7 +180,7 @@ RETURN
     r.report_date AS report_date,
     e.name AS element,
     f.numeric_value AS value,
-    p.fiscal_year AS fiscal_year,
+    p.calendar_year AS calendar_year,
     p.start_date AS period_start,
     p.end_date AS period_end,
     u.measure AS unit
@@ -198,7 +198,7 @@ RETURN
     r.report_date AS report_date,
     e.name AS element,
     f.numeric_value AS value,
-    p.fiscal_year AS fiscal_year,
+    p.calendar_year AS calendar_year,
     fd.axis_uri AS dimension_axis,
     fd.member_uri AS dimension_member
 ORDER BY r.report_date DESC, e.name

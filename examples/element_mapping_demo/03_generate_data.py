@@ -435,6 +435,9 @@ class AccountingDataGenerator:
           "processed": True,
           "failed": False,
           "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+          "fiscal_year_focus": month_start.year,
+          "fiscal_period_focus": f"Q{((month_start.month - 1) // 3) + 1}",
+          "fiscal_year_end_month": 12,
         }
       )
 
@@ -482,6 +485,8 @@ class AccountingDataGenerator:
               "decimals": "2",
               "value_type": "inline",
               "content_type": None,
+              "has_dimensions": False,
+              "dimension_count": 0,
               "report_id": report_id,
               "element_id": element_id,
               "period_id": period_id,
@@ -503,6 +508,8 @@ class AccountingDataGenerator:
               "decimals": "2",
               "value_type": "inline",
               "content_type": None,
+              "has_dimensions": False,
+              "dimension_count": 0,
               "report_id": report_id,
               "element_id": element_id,
               "period_id": period_id,
@@ -524,6 +531,8 @@ class AccountingDataGenerator:
               "decimals": "2",
               "value_type": "inline",
               "content_type": None,
+              "has_dimensions": False,
+              "dimension_count": 0,
               "report_id": report_id,
               "element_id": element_id,
               "period_id": period_id,

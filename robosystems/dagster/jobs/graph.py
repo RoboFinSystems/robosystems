@@ -1013,6 +1013,51 @@ def materialize_file_job():
 # ============================================================================
 
 
+def _restage_stale_files_sync(
+  context,
+  session,
+  graph_id: str,
+  file_ids: list[str],
+) -> None:
+  """Re-stage stale files synchronously for Dagster op context."""
+  import asyncio
+
+  from robosystems.models.iam import GraphFile
+  from robosystems.operations.lbug.direct_staging import stage_file_directly
+
+  loop = asyncio.new_event_loop()
+  try:
+    for file_id in file_ids:
+      graph_file = GraphFile.get_by_id(file_id, session)
+      if not graph_file:
+        context.log.warning(f"Stale file {file_id} not found during recovery, skipping")
+        continue
+
+      context.log.info(f"Re-staging stale file {file_id} ({graph_file.file_name})")
+      try:
+        result = loop.run_until_complete(
+          stage_file_directly(
+            db=session,
+            file_id=file_id,
+            graph_id=graph_id,
+            table_id=graph_file.table_id,
+            s3_key=graph_file.s3_key,
+            file_size_bytes=graph_file.file_size_bytes,
+            row_count=graph_file.row_count,
+          )
+        )
+        if result.get("status") == "success":
+          context.log.info(f"Successfully re-staged stale file {file_id}")
+        else:
+          context.log.warning(
+            f"Re-staging stale file {file_id} returned: {result.get('status')}"
+          )
+      except Exception as e:
+        context.log.error(f"Failed to re-stage stale file {file_id}: {e}")
+  finally:
+    loop.close()
+
+
 @op(out={"materialize_result": Out(dict)})
 def materialize_graph_tables(
   context: OpExecutionContext,
@@ -1046,6 +1091,14 @@ def materialize_graph_tables(
         description=f"Graph {graph_id} not found",
         metadata={"graph_id": graph_id},
       )
+
+    # Recover stale files (uploaded to S3 but never staged to DuckDB)
+    recovered_ids = GraphFile.recover_stale_files(graph_id, session)
+    if recovered_ids:
+      context.log.info(
+        f"Recovered {len(recovered_ids)} stale files for graph {graph_id}"
+      )
+      _restage_stale_files_sync(context, session, graph_id, recovered_ids)
 
     # Check staleness
     was_stale = graph_record.graph_stale or False
@@ -1171,10 +1224,13 @@ def materialize_graph_tables(
           _emit_graph_result_to_sse(context, config.operation_id, result)
         return result
 
-      # Sort tables: nodes before relationships
-      table_names = [t.table_name for t in tables_with_staged_data]
-      node_tables = [t for t in table_names if not t.isupper()]
-      rel_tables = [t for t in table_names if t.isupper()]
+      # Sort tables: nodes before relationships (using table_type field)
+      node_tables = [
+        t.table_name for t in tables_with_staged_data if t.table_type == "node"
+      ]
+      rel_tables = [
+        t.table_name for t in tables_with_staged_data if t.table_type == "relationship"
+      ]
       ordered_tables = node_tables + rel_tables
 
       context.log.info(

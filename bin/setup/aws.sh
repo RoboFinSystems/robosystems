@@ -96,50 +96,67 @@ function create_production_secret() {
     fi
 
     # Set Production Secret Values
+    # Organization mirrors env.py sections for easy cross-referencing
     aws secretsmanager put-secret-value \
         --secret-id "robosystems/prod" \
         --secret-string '{
         '"${jwt_entries}"'
-        "BILLING_ENABLED": "false",
+
         "CONNECTION_CREDENTIALS_KEY": "'"$PROD_CONNECTION_KEY"'",
-        "CONNECTION_PLAID_ENABLED": "false",
-        "CONNECTION_QUICKBOOKS_ENABLED": "false",
+        "JWT_SECRET_KEY": "'"$PROD_JWT_SECRET"'",
+        "GRAPH_BACKUP_ENCRYPTION_KEY": "'"$PROD_BACKUP_KEY"'",
+        "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
+        "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
+
+        "USER_REGISTRATION_ENABLED": "true",
+        "SECURITY_AUDIT_ENABLED": "false",
+        "EMAIL_VERIFICATION_ENABLED": "false",
+        "CAPTCHA_ENABLED": "false",
+        "CSP_TRUSTED_TYPES_ENABLED": "false",
+
+        "DIRECT_GRAPH_PROVISIONING_ENABLED": "true",
+        "DIRECT_GRAPH_MATERIALIZATION_ENABLED": "true",
+        "SUBGRAPH_CREATION_ENABLED": "true",
+        "BACKUP_CREATION_ENABLED": "true",
+        "AGENT_POST_ENABLED": "true",
+
         "CONNECTION_SEC_ENABLED": "false",
+        "CONNECTION_QUICKBOOKS_ENABLED": "false",
+        "CONNECTION_PLAID_ENABLED": "false",
+
+        "SHARED_MASTER_READS_ENABLED": "true",
+        "SEC_PROCESS_BATCH_LIMIT": "500",
+        "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
+        "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
+        "SEC_PARALLEL_SENSOR_ENABLED": "false",
+        "SEC_INCREMENTAL_STAGING_SCHEDULE_ENABLED": "false",
+        "SHARED_REPO_SCHEDULE_ENABLED": "false",
+        "SHARED_REPO_SNAPSHOT_SENSOR_ENABLED": "false",
+
+        "ORG_GRAPHS_DEFAULT_LIMIT": "10",
+        "ORG_MEMBER_INVITATIONS_ENABLED": "false",
+
+        "BILLING_ENABLED": "false",
+        "SSE_ENABLED": "true",
+        "RATE_LIMIT_ENABLED": "false",
+        "LOAD_SHEDDING_ENABLED": "true",
+        "OTEL_ENABLED": "false",
+        "BILLING_SCHEDULES_ENABLED": "true",
+        "INSTANCE_SCHEDULES_ENABLED": "true",
+
         "INTUIT_CLIENT_ID": "Intuit.ipp.application.your_client_id",
         "INTUIT_CLIENT_SECRET": "your_quickbooks_client_secret_here",
         "INTUIT_ENVIRONMENT": "production",
         "INTUIT_REDIRECT_URI": "https://your-api-domain.example.com/auth/callback",
-        "JWT_SECRET_KEY": "'"$PROD_JWT_SECRET"'",
-        "GRAPH_BACKUP_ENCRYPTION_KEY": "'"$PROD_BACKUP_KEY"'",
-        "LOAD_SHEDDING_ENABLED": "true",
-        "ORG_GRAPHS_DEFAULT_LIMIT": "10",
-        "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
-        "OTEL_ENABLED": "false",
         "PLAID_CLIENT_ID": "your_plaid_client_id_here",
         "PLAID_CLIENT_SECRET": "your_plaid_client_secret_here",
         "PLAID_ENVIRONMENT": "production",
-        "RATE_LIMIT_ENABLED": "false",
-        "CAPTCHA_ENABLED": "false",
-        "EMAIL_VERIFICATION_ENABLED": "false",
         "SEC_GOV_USER_AGENT": "YourCompany/1.0 (your-email@example.com)",
-        "SECURITY_AUDIT_ENABLED": "false",
-        "SSE_ENABLED": "true",
-        "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
-        "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
-        "USER_REGISTRATION_ENABLED": "true",
-        "AGENT_POST_ENABLED": "true",
-        "BACKUP_CREATION_ENABLED": "true",
-        "CSP_TRUSTED_TYPES_ENABLED": "false",
-        "DIRECT_GRAPH_PROVISIONING_ENABLED": "true",
-        "ORG_MEMBER_INVITATIONS_ENABLED": "false",
-        "SHARED_MASTER_READS_ENABLED": "true",
-        "SUBGRAPH_CREATION_ENABLED": "true",
-        "BILLING_SCHEDULES_ENABLED": "true",
-        "INSTANCE_SCHEDULES_ENABLED": "true",
-        "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
-        "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
-        "SEC_PARALLEL_SENSOR_ENABLED": "false",
-        "SHARED_REPO_SCHEDULE_ENABLED": "false"
+        "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
+        "STRIPE_SECRET_KEY": "sk_live_your_stripe_secret_key_here",
+        "STRIPE_PUBLISHABLE_KEY": "pk_live_your_stripe_publishable_key_here",
+        "STRIPE_WEBHOOK_SECRET": "whsec_your_stripe_webhook_secret_here",
+        "STRIPE_API_VERSION": "2025-10-29.clover"
     }'
 
     echo "Production secret created successfully!"
@@ -177,50 +194,67 @@ function create_staging_secret() {
     fi
 
     # Set Staging Secret Values
+    # Organization mirrors env.py sections for easy cross-referencing
     aws secretsmanager put-secret-value \
         --secret-id "robosystems/staging" \
         --secret-string '{
         '"${jwt_entries}"'
-        "BILLING_ENABLED": "false",
+
         "CONNECTION_CREDENTIALS_KEY": "'"$STAGING_CONNECTION_KEY"'",
-        "CONNECTION_PLAID_ENABLED": "false",
-        "CONNECTION_QUICKBOOKS_ENABLED": "false",
+        "JWT_SECRET_KEY": "'"$STAGING_JWT_SECRET"'",
+        "GRAPH_BACKUP_ENCRYPTION_KEY": "'"$STAGING_BACKUP_KEY"'",
+        "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
+        "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
+
+        "USER_REGISTRATION_ENABLED": "true",
+        "SECURITY_AUDIT_ENABLED": "false",
+        "EMAIL_VERIFICATION_ENABLED": "false",
+        "CAPTCHA_ENABLED": "false",
+        "CSP_TRUSTED_TYPES_ENABLED": "false",
+
+        "DIRECT_GRAPH_PROVISIONING_ENABLED": "true",
+        "DIRECT_GRAPH_MATERIALIZATION_ENABLED": "true",
+        "SUBGRAPH_CREATION_ENABLED": "true",
+        "BACKUP_CREATION_ENABLED": "true",
+        "AGENT_POST_ENABLED": "true",
+
         "CONNECTION_SEC_ENABLED": "false",
+        "CONNECTION_QUICKBOOKS_ENABLED": "false",
+        "CONNECTION_PLAID_ENABLED": "false",
+
+        "SHARED_MASTER_READS_ENABLED": "true",
+        "SEC_PROCESS_BATCH_LIMIT": "500",
+        "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
+        "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
+        "SEC_PARALLEL_SENSOR_ENABLED": "false",
+        "SEC_INCREMENTAL_STAGING_SCHEDULE_ENABLED": "false",
+        "SHARED_REPO_SCHEDULE_ENABLED": "false",
+        "SHARED_REPO_SNAPSHOT_SENSOR_ENABLED": "false",
+
+        "ORG_GRAPHS_DEFAULT_LIMIT": "10",
+        "ORG_MEMBER_INVITATIONS_ENABLED": "false",
+
+        "BILLING_ENABLED": "false",
+        "SSE_ENABLED": "true",
+        "RATE_LIMIT_ENABLED": "false",
+        "LOAD_SHEDDING_ENABLED": "true",
+        "OTEL_ENABLED": "false",
+        "BILLING_SCHEDULES_ENABLED": "true",
+        "INSTANCE_SCHEDULES_ENABLED": "true",
+
         "INTUIT_CLIENT_ID": "Intuit.ipp.application.your_sandbox_client_id",
         "INTUIT_CLIENT_SECRET": "your_quickbooks_sandbox_client_secret_here",
         "INTUIT_ENVIRONMENT": "sandbox",
         "INTUIT_REDIRECT_URI": "https://your-staging-api-domain.example.com/auth/callback",
-        "JWT_SECRET_KEY": "'"$STAGING_JWT_SECRET"'",
-        "GRAPH_BACKUP_ENCRYPTION_KEY": "'"$STAGING_BACKUP_KEY"'",
-        "LOAD_SHEDDING_ENABLED": "true",
-        "ORG_GRAPHS_DEFAULT_LIMIT": "10",
-        "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
-        "OTEL_ENABLED": "false",
         "PLAID_CLIENT_ID": "your_plaid_sandbox_client_id_here",
         "PLAID_CLIENT_SECRET": "your_plaid_sandbox_client_secret_here",
         "PLAID_ENVIRONMENT": "sandbox",
-        "RATE_LIMIT_ENABLED": "false",
-        "CAPTCHA_ENABLED": "false",
-        "EMAIL_VERIFICATION_ENABLED": "false",
         "SEC_GOV_USER_AGENT": "YourCompany-Staging/1.0 (your-email@example.com)",
-        "SECURITY_AUDIT_ENABLED": "false",
-        "SSE_ENABLED": "true",
-        "TURNSTILE_SECRET_KEY": "your_cloudflare_turnstile_secret_key",
-        "TURNSTILE_SITE_KEY": "your_cloudflare_turnstile_site_key",
-        "USER_REGISTRATION_ENABLED": "true",
-        "AGENT_POST_ENABLED": "true",
-        "BACKUP_CREATION_ENABLED": "true",
-        "CSP_TRUSTED_TYPES_ENABLED": "false",
-        "DIRECT_GRAPH_PROVISIONING_ENABLED": "true",
-        "ORG_MEMBER_INVITATIONS_ENABLED": "false",
-        "SHARED_MASTER_READS_ENABLED": "true",
-        "SUBGRAPH_CREATION_ENABLED": "true",
-        "BILLING_SCHEDULES_ENABLED": "true",
-        "INSTANCE_SCHEDULES_ENABLED": "true",
-        "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
-        "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
-        "SEC_PARALLEL_SENSOR_ENABLED": "false",
-        "SHARED_REPO_SCHEDULE_ENABLED": "false"
+        "OPENFIGI_API_KEY": "your_openfigi_api_key_here",
+        "STRIPE_SECRET_KEY": "sk_test_your_stripe_test_secret_key_here",
+        "STRIPE_PUBLISHABLE_KEY": "pk_test_your_stripe_test_publishable_key_here",
+        "STRIPE_WEBHOOK_SECRET": "whsec_your_stripe_test_webhook_secret_here",
+        "STRIPE_API_VERSION": "2025-10-29.clover"
     }'
 
     echo "Staging secret created successfully!"
