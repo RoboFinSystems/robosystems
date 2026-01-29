@@ -3,7 +3,7 @@ from fastapi import APIRouter
 from . import management, materialize, query
 
 router = APIRouter(
-  tags=["StagingTables"],
+  tags=["Tables"],
   responses={
     400: {"description": "Invalid request"},
     404: {"description": "Graph or table not found"},

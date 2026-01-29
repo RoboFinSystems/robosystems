@@ -127,8 +127,8 @@ GRAPH_API_TAGS = [
     "description": "📋 Graph schema - Retrieve and install graph schemas",
   },
   {
-    "name": "Staging Tables",
-    "description": "🗃️ Tables - Create and query DuckDB staging tables, ingest to graph",
+    "name": "Tables",
+    "description": "🗃️ Staging Tables - Create and query DuckDB staging tables, ingest to graph",
   },
   {
     "name": "Backup",
