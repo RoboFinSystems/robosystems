@@ -384,17 +384,13 @@ class EnvConfig:
   # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
   SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
 
-  # SEC download schedule: daily fetch of new filings
-  SEC_DOWNLOAD_SCHEDULE_ENABLED = get_bool_env(
-    "SEC_DOWNLOAD_SCHEDULE_ENABLED",
-    bool(get_secret_value("SEC_DOWNLOAD_SCHEDULE_ENABLED", "false").lower() == "true"),
-  )
-
-  # SEC materialize schedule: nightly graph rebuild (OFF by default)
-  SEC_MATERIALIZE_SCHEDULE_ENABLED = get_bool_env(
-    "SEC_MATERIALIZE_SCHEDULE_ENABLED",
+  # SEC incremental pipeline: automated chain of download → process → stage → materialize → snapshot
+  # When enabled, runs every 3 hours and chains all steps automatically.
+  # Keep disabled during backfills (run steps manually), enable for production incremental updates.
+  SEC_INCREMENTAL_PIPELINE_ENABLED = get_bool_env(
+    "SEC_INCREMENTAL_PIPELINE_ENABLED",
     bool(
-      get_secret_value("SEC_MATERIALIZE_SCHEDULE_ENABLED", "false").lower() == "true"
+      get_secret_value("SEC_INCREMENTAL_PIPELINE_ENABLED", "false").lower() == "true"
     ),
   )
 
@@ -402,15 +398,6 @@ class EnvConfig:
   SEC_PARALLEL_SENSOR_ENABLED = get_bool_env(
     "SEC_PARALLEL_SENSOR_ENABLED",
     bool(get_secret_value("SEC_PARALLEL_SENSOR_ENABLED", "false").lower() == "true"),
-  )
-
-  # SEC incremental staging schedule: runs at 5am UTC daily (after processing, before materialize)
-  SEC_INCREMENTAL_STAGING_SCHEDULE_ENABLED = get_bool_env(
-    "SEC_INCREMENTAL_STAGING_SCHEDULE_ENABLED",
-    bool(
-      get_secret_value("SEC_INCREMENTAL_STAGING_SCHEDULE_ENABLED", "false").lower()
-      == "true"
-    ),
   )
 
   # Shared repository schedule: weekly snapshot + replica refresh

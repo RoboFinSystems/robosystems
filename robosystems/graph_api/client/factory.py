@@ -1021,3 +1021,93 @@ async def get_graph_client_for_sec_ingestion() -> GraphClient:
   client._purpose = "sec_ingestion"
 
   return client
+
+
+async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, Any]:
+  """
+  Boost memory for staging (DuckDB) or materialization (LadybugDB) operations.
+
+  Call this before starting a batch of staging or materialization operations.
+  The boost will remain active until restore_graph_memory is called.
+
+  Args:
+      graph_id: Graph database identifier
+      target: Which system to boost - "duckdb", "ladybug", or "both"
+
+  Returns:
+      Dictionary with boost status
+
+  Example:
+      # Before staging
+      await boost_graph_memory("sec", target="duckdb")
+      # ... run staging ...
+
+      # Before materialization
+      await boost_graph_memory("sec", target="ladybug")
+      # ... run materialization ...
+
+      # After completion
+      await restore_graph_memory("sec")
+  """
+  client = await get_graph_client(graph_id, operation_type="write")
+
+  try:
+    response = await client._client.post(
+      f"/databases/{graph_id}/memory/boost",
+      json={"target": target},
+      timeout=30.0,
+    )
+    response.raise_for_status()
+    result = response.json()
+    logger.info(f"Memory boost for {graph_id}: {result.get('message', 'done')}")
+    return result
+  except Exception as e:
+    logger.warning(f"Failed to boost memory for {graph_id}: {e}")
+    # Don't raise - boost failure shouldn't block the operation
+    return {
+      "graph_id": graph_id,
+      "target": target,
+      "duckdb_boosted": False,
+      "ladybug_boosted": False,
+      "message": f"Boost failed: {e}",
+    }
+
+
+async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
+  """
+  Restore memory to defaults after staging/materialization operations.
+
+  This should be called after a batch of staging or materialization operations
+  completes to release the temporarily boosted memory allocation.
+
+  Args:
+      graph_id: Graph database identifier
+
+  Returns:
+      Dictionary with restore status (duckdb_restored, ladybug_restored, message)
+
+  Example:
+      # After materialization completes
+      result = await restore_graph_memory("sec")
+      logger.info(f"Memory restored: {result['message']}")
+  """
+  client = await get_graph_client(graph_id, operation_type="write")
+
+  try:
+    response = await client._client.post(
+      f"/databases/{graph_id}/memory/restore",
+      timeout=30.0,
+    )
+    response.raise_for_status()
+    result = response.json()
+    logger.info(f"Memory restore for {graph_id}: {result.get('message', 'done')}")
+    return result
+  except Exception as e:
+    logger.warning(f"Failed to restore memory for {graph_id}: {e}")
+    # Don't raise - this is cleanup, shouldn't fail the main operation
+    return {
+      "graph_id": graph_id,
+      "duckdb_restored": False,
+      "ladybug_restored": False,
+      "message": f"Restore failed: {e}",
+    }

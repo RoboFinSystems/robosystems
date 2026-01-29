@@ -664,6 +664,33 @@ class LadybugConnectionPool:
         return len(self._pools[database_name]) > 0
       return False
 
+  def recreate_database(self, database_name: str) -> None:
+    """
+    Close and remove a database so it will be recreated with current settings.
+
+    This is used to apply new memory configuration (via set_ladybug_memory_override)
+    to an existing database. The database will be recreated on next connection
+    with the current memory settings from get_database_memory_config().
+
+    Args:
+        database_name: Name of the database to recreate
+
+    Example:
+        from robosystems.graph_api.core.ladybug.config import set_ladybug_memory_override
+
+        # Boost memory for materialization
+        old_limit = set_ladybug_memory_override(50000)  # 50GB
+        pool.recreate_database("sec")  # Close existing, will recreate with 50GB
+
+        # ... perform materialization ...
+
+        # Restore default memory
+        set_ladybug_memory_override(old_limit)
+        pool.recreate_database("sec")  # Recreate with restored limit
+    """
+    logger.info(f"Recreating database {database_name} to apply new memory settings")
+    self.close_database_connections(database_name)
+
   def close_all_connections(self):
     """Close all connections in the pool."""
     self._cleanup_all_connections()

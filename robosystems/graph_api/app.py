@@ -236,6 +236,9 @@ def create_app() -> FastAPI:
     databases.copy.router
   )  # Direct S3 → LadybugDB copy (legacy/internal for SEC workers)
   app.include_router(databases.metrics.router)
+  app.include_router(
+    databases.memory.router
+  )  # Memory management for staging/materialization
 
   # Task management (generic for all task types)
   app.include_router(tasks.router)

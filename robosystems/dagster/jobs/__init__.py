@@ -29,10 +29,8 @@ from robosystems.dagster.jobs.provisioning import (
   provision_repository_job,
 )
 from robosystems.dagster.jobs.sec import (
-  sec_daily_download_schedule,
   sec_download_job,
   sec_materialize_job,
-  sec_nightly_materialize_schedule,
   sec_process_job,
   sec_stage_job,
   sec_staged_materialize_job,
@@ -55,10 +53,8 @@ __all__ = [
   "process_stripe_webhook_job",
   "provision_graph_job",
   "provision_repository_job",
-  "sec_daily_download_schedule",
   "sec_download_job",
   "sec_materialize_job",
-  "sec_nightly_materialize_schedule",
   "sec_process_job",
   "sec_stage_job",
   "sec_staged_materialize_job",

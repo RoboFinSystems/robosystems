@@ -201,6 +201,46 @@ class GraphTierConfig:
     return instance_config.get("duckdb_max_threads", 4)
 
   @classmethod
+  def get_duckdb_memory_boost(
+    cls, tier: str, environment: str | None = None
+  ) -> str | None:
+    """Get DuckDB memory boost limit for staging operations.
+
+    During DuckDB staging (creating external tables from parquet), memory needs
+    are high. This returns the boosted memory limit to use temporarily.
+
+    Args:
+        tier: The tier name
+        environment: Environment (defaults to current env)
+
+    Returns:
+        DuckDB memory boost string (e.g., "55GB") or None if not configured
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    instance_config = tier_config.get("instance", {})
+    return instance_config.get("duckdb_memory_boost")
+
+  @classmethod
+  def get_ladybug_memory_boost_mb(
+    cls, tier: str, environment: str | None = None
+  ) -> int | None:
+    """Get LadybugDB memory boost limit for materialization operations.
+
+    During LadybugDB materialization (COPY FROM DuckDB), memory needs are high
+    for the buffer pool. This returns the boosted memory limit in MB.
+
+    Args:
+        tier: The tier name
+        environment: Environment (defaults to current env)
+
+    Returns:
+        LadybugDB memory boost in MB (e.g., 51200 for 50GB) or None if not configured
+    """
+    tier_config = cls.get_tier_config(tier, environment)
+    instance_config = tier_config.get("instance", {})
+    return instance_config.get("ladybug_memory_boost_mb")
+
+  @classmethod
   def get_chunk_size(cls, tier: str, environment: str | None = None) -> int:
     """Get chunk size for a tier.
 

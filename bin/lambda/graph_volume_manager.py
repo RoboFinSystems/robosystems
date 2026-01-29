@@ -36,11 +36,13 @@ GRAPH_REGISTRY_TABLE = os.environ.get(
   "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
 )
 ALERT_TOPIC = os.environ["ALERT_TOPIC_ARN"]
-DEFAULT_SIZE = int(os.environ.get("DEFAULT_VOLUME_SIZE", "50"))
-DEFAULT_TYPE = os.environ.get("DEFAULT_VOLUME_TYPE", "gp3")
-DEFAULT_IOPS = int(os.environ.get("DEFAULT_VOLUME_IOPS", "3000"))
-DEFAULT_THROUGHPUT = int(os.environ.get("DEFAULT_VOLUME_THROUGHPUT", "125"))
 RETENTION_DAYS = int(os.environ.get("SNAPSHOT_RETENTION_DAYS", "7"))
+
+# Volume defaults (used as fallback when tier not found in tier_config)
+DEFAULT_SIZE = 50  # GB
+DEFAULT_TYPE = "gp3"
+DEFAULT_IOPS = 3000
+DEFAULT_THROUGHPUT = 125  # MB/s
 
 # DynamoDB tables
 table = dynamodb.Table(TABLE_NAME)  # Volume registry

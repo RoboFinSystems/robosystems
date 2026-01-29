@@ -258,14 +258,21 @@ class DuckDBConnectionPool:
     Get DuckDB memory limit based on tier configuration.
 
     Priority:
-    1. Tier-specific config from graph.yml (via CLUSTER_TIER)
-    2. DUCKDB_MEMORY_LIMIT environment variable
-    3. Default: "2GB"
+    1. Temporary override (for staging operations that need high memory)
+    2. Tier-specific config from graph.yml (via CLUSTER_TIER)
+    3. DUCKDB_MEMORY_LIMIT environment variable
+    4. Default: "2GB"
 
     Returns:
         Memory limit string (e.g., "2GB", "8GB", "12GB")
     """
     from robosystems.config import env
+
+    # Check for temporary override first (used during staging)
+    override = get_duckdb_memory_override()
+    if override:
+      logger.info(f"Using DuckDB memory override: {override}")
+      return override
 
     try:
       from robosystems.config.graph_tier import GraphTierConfig
@@ -387,13 +394,16 @@ class DuckDBConnectionPool:
       conn.execute("SET preserve_insertion_order=false")
 
       # Configure spill-to-disk for larger-than-memory operations
-      # This allows DuckDB to use disk when memory limit is exceeded
-      # Uses /tmp which has space on EC2 instances (EBS-backed)
-      conn.execute("SET temp_directory='/tmp/duckdb_spill'")
+      # This allows DuckDB to use disk when memory limit is exceeded.
+      # Use EBS-backed staging directory (large volume) instead of /tmp (small root volume).
+      # DUCKDB_STAGING_PATH is set to /app/data/staging in container, which maps to
+      # /mnt/ladybug-data/staging on the host (EBS volume with 100GB+ for shared tier).
+      spill_dir = f"{env.DUCKDB_STAGING_PATH}/duckdb_spill"
+      conn.execute(f"SET temp_directory='{spill_dir}'")
 
       logger.debug(
         f"Configured DuckDB connection with S3 access, extensions, "
-        f"threads={max_threads}, memory_limit={memory_limit}, spill=/tmp/duckdb_spill"
+        f"threads={max_threads}, memory_limit={memory_limit}, spill={spill_dir}"
       )
 
     except Exception as e:
@@ -673,6 +683,38 @@ class DuckDBConnectionPool:
     """Close all connections in the pool."""
     self._cleanup_all_connections()
 
+  def reconfigure_memory_limit(self, graph_id: str, memory_limit: str) -> int:
+    """
+    Reconfigure memory limit on all existing connections for a database.
+
+    DuckDB allows changing memory_limit at runtime via SET statement.
+    This is useful for temporarily boosting memory during heavy operations.
+
+    Args:
+        graph_id: Graph database identifier
+        memory_limit: New memory limit (e.g., "58GB", "10GB")
+
+    Returns:
+        Number of connections reconfigured
+    """
+    reconfigured = 0
+    with self._get_database_lock(graph_id):
+      if graph_id in self._pools:
+        for conn_id, conn_info in self._pools[graph_id].items():
+          try:
+            conn_info.connection.execute(f"SET memory_limit='{memory_limit}'")
+            reconfigured += 1
+            logger.debug(f"Reconfigured memory limit to {memory_limit} on {conn_id}")
+          except Exception as e:
+            logger.warning(f"Failed to reconfigure memory on {conn_id}: {e}")
+
+    if reconfigured > 0:
+      logger.info(
+        f"Reconfigured {reconfigured} DuckDB connection(s) for {graph_id} "
+        f"to memory_limit={memory_limit}"
+      )
+    return reconfigured
+
   def force_database_cleanup(self, graph_id: str) -> None:
     """
     Force cleanup of a specific database file and all its connections.
@@ -738,3 +780,43 @@ def get_duckdb_pool() -> DuckDBConnectionPool:
       "DuckDB connection pool not initialized. Call initialize_duckdb_pool() first."
     )
   return _duckdb_pool
+
+
+# Memory limit override for temporary boosts during heavy operations
+_memory_limit_override: str | None = None
+
+
+def set_duckdb_memory_override(limit: str | None) -> str | None:
+  """
+  Set a temporary memory limit override for DuckDB connections.
+
+  This allows temporarily boosting DuckDB memory during staging operations,
+  then restoring the default lower limit afterward.
+
+  Args:
+      limit: Memory limit string (e.g., "58GB") or None to clear override
+
+  Returns:
+      Previous override value (for restore purposes)
+
+  Example:
+      # Boost memory for staging
+      old_limit = set_duckdb_memory_override("58GB")
+      try:
+          # ... perform staging ...
+      finally:
+          set_duckdb_memory_override(old_limit)  # Restore
+  """
+  global _memory_limit_override
+  old_value = _memory_limit_override
+  _memory_limit_override = limit
+  if limit:
+    logger.info(f"DuckDB memory override set to: {limit}")
+  else:
+    logger.info("DuckDB memory override cleared (using tier default)")
+  return old_value
+
+
+def get_duckdb_memory_override() -> str | None:
+  """Get current DuckDB memory override, if any."""
+  return _memory_limit_override

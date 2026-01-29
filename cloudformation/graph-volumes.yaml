@@ -53,20 +53,6 @@ Parameters:
     Default: LadybugVolumeManager
     Description: Component tag for resource identification
 
-Mappings:
-  # Environment-specific volume defaults
-  VolumeDefaults:
-    prod:
-      Size: "100" # Production: 100GB for larger datasets
-      Type: "gp3"
-      IOPS: "3000"
-      Throughput: "125"
-    staging:
-      Size: "50" # Staging: 50GB smaller datasets for testing
-      Type: "gp3"
-      IOPS: "3000"
-      Throughput: "125"
-
 Conditions:
   UseProvidedVolumeRegistry: !Not [!Equals [!Ref VolumeRegistryTable, ""]]
   HasGraphApiSecret: !Not [!Equals [!Ref GraphApiSecretArn, ""]]
@@ -225,14 +211,6 @@ Resources:
             - !Sub "robosystems-graph-${Environment}-volume-registry"
           GRAPH_REGISTRY_TABLE: !Sub "robosystems-graph-${Environment}-graph-registry"
           ALERT_TOPIC_ARN: !Ref VolumeAlertTopic
-          DEFAULT_VOLUME_SIZE:
-            !FindInMap [VolumeDefaults, !Ref Environment, Size]
-          DEFAULT_VOLUME_TYPE:
-            !FindInMap [VolumeDefaults, !Ref Environment, Type]
-          DEFAULT_VOLUME_IOPS:
-            !FindInMap [VolumeDefaults, !Ref Environment, IOPS]
-          DEFAULT_VOLUME_THROUGHPUT:
-            !FindInMap [VolumeDefaults, !Ref Environment, Throughput]
           SNAPSHOT_RETENTION_DAYS: "7"
       Code:
         ImageUri: !Ref LambdaImageUri

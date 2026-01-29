@@ -28,9 +28,10 @@ Flow:
 1. stage_to_duckdb(): Get tables from schema → Create DuckDB tables via glob → Persist
 2. materialize_from_duckdb(): Get tables from schema → Ingest to LadybugDB
 
-Backward Compatibility:
-- process_files() still works as before (runs staging then materialization)
-- New Dagster assets can call staging and materialization independently
+Full Rebuild Paradigm (2026-01-29):
+- Pipeline always rebuilds from all S3 parquet files (no incremental mode)
+- DuckDB staging and LadybugDB materialization are separate, retry-safe stages
+- Memory management handled via explicit API endpoints (boost/restore)
 
 Status: Production - enables independent retry of failed materialization.
 """
@@ -60,24 +61,64 @@ ProgressCallback = Callable[[str], None]
 
 # Table-specific timeouts for DuckDB staging (seconds)
 # Large tables with millions of rows need extended timeouts
-# Default: 1800s (30 min), Large: 7200s (2 hours)
-DEFAULT_STAGING_TIMEOUT = 1800  # 30 minutes
-LARGE_TABLE_STAGING_TIMEOUT = 7200  # 2 hours
+# Default: 300s (5 min), Large: 1800s (30 min)
+DEFAULT_STAGING_TIMEOUT = 300  # 5 minutes
+LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes
 
 # Tables known to have millions of rows requiring extended timeouts
 LARGE_STAGING_TABLES = frozenset(
   {
-    "Fact",  # 10-20M+ rows (hundreds of facts per filing)
-    "Label",  # 2M+ rows (multiple labels per element)
-    "Element",  # 1M+ rows (all XBRL elements across taxonomies)
+    # Large node tables
+    "Fact",  # 100M+ rows (hundreds of facts per filing)
+    "Label",  # 6M+ rows (multiple labels per element)
+    "Element",  # 10M+ rows (all XBRL elements across taxonomies)
     "FactDimension",  # Dimensional breakdowns of facts
     "Association",  # XBRL associations (millions of rows)
-    "FACT_HAS_DIMENSION",  # Relationship linking facts to dimensions
-    "FACT_REPORTS_ELEMENT",  # High-cardinality relationship
-    "ELEMENT_HAS_LABEL",  # Links Element to Label (2M+ labels)
-    "TAXONOMY_HAS_LABEL",  # Links Taxonomy to Label (2M+ labels)
+    # Large relationship tables (fact-related)
+    "REPORT_HAS_FACT",  # Report -> Fact (1:many)
+    "FACT_HAS_ELEMENT",  # Fact -> Element (high cardinality)
+    "FACT_HAS_ENTITY",  # Fact -> Entity
+    "FACT_HAS_PERIOD",  # Fact -> Period
+    "FACT_HAS_UNIT",  # Fact -> Unit
+    "FACT_HAS_DIMENSION",  # Fact -> FactDimension
+    "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
+    # Large relationship tables (shared reference)
+    "ELEMENT_HAS_LABEL",  # Links Element to Label (6M+ labels)
+    "TAXONOMY_HAS_LABEL",  # Links Taxonomy to Label
   }
 )
+
+# Tables safe to chunk by quarter (unique per filing, no cross-quarter duplicates)
+# These tables have data that is specific to individual filings, so loading
+# quarter-by-quarter won't create duplicates.
+QUARTER_CHUNKABLE_TABLES = frozenset(
+  {
+    # Fact nodes
+    "Fact",  # Facts are unique per filing
+    "FactDimension",  # Dimensional breakdowns are per-fact
+    "FactSet",  # Fact groupings are per-report
+    # Fact relationships (all per-fact, safe to chunk)
+    "REPORT_HAS_FACT",  # Report -> Fact
+    "FACT_HAS_ELEMENT",  # Fact -> Element
+    "FACT_HAS_ENTITY",  # Fact -> Entity
+    "FACT_HAS_PERIOD",  # Fact -> Period
+    "FACT_HAS_UNIT",  # Fact -> Unit
+    "FACT_HAS_DIMENSION",  # Fact -> FactDimension
+    "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
+    "FACT_DIMENSION_MEMBER_ELEMENT",  # FactDimension -> Element (member)
+    "FACT_SET_CONTAINS_FACT",  # FactSet -> Fact
+    "REPORT_HAS_FACT_SET",  # Report -> FactSet
+    "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
+  }
+)
+
+# Tables NOT safe to chunk (shared reference data across filings)
+# These tables have data shared across many filings. Chunking would create
+# duplicates because the same Element/Label appears in multiple quarters.
+# Must be loaded in a single pass with deduplication.
+# - Element, Label: Shared XBRL taxonomy elements
+# - Association: Shared taxonomy relationships
+# - ELEMENT_HAS_LABEL, TAXONOMY_HAS_LABEL: Shared element-label mappings
 
 
 def _get_staging_timeout(table_name: str) -> int:
@@ -85,6 +126,50 @@ def _get_staging_timeout(table_name: str) -> int:
   if table_name in LARGE_STAGING_TABLES:
     return LARGE_TABLE_STAGING_TIMEOUT
   return DEFAULT_STAGING_TIMEOUT
+
+
+def _group_dates_by_quarter(dates: list[str]) -> dict[str, list[str]]:
+  """Group filing dates by quarter.
+
+  Args:
+      dates: List of filing dates in YYYY-MM-DD format
+
+  Returns:
+      Dictionary mapping quarter keys (e.g., "2024-Q1") to list of dates in that quarter.
+      Sorted by quarter key.
+  """
+  quarters: dict[str, list[str]] = {}
+  for date_str in dates:
+    try:
+      year, month, _ = date_str.split("-")
+      quarter = (int(month) - 1) // 3 + 1
+      quarter_key = f"{year}-Q{quarter}"
+      if quarter_key not in quarters:
+        quarters[quarter_key] = []
+      quarters[quarter_key].append(date_str)
+    except (ValueError, IndexError):
+      logger.warning(f"Skipping invalid date format: {date_str}")
+      continue
+  # Sort by quarter key
+  return dict(sorted(quarters.items()))
+
+
+def _get_quarter_glob_pattern(quarter_key: str) -> list[str]:
+  """Convert quarter key to glob patterns for filed= partitions.
+
+  Args:
+      quarter_key: Quarter in format "YYYY-QN" (e.g., "2024-Q1")
+
+  Returns:
+      List of glob patterns like ["filed=2024-01-*", "filed=2024-02-*", "filed=2024-03-*"]
+  """
+  year, q = quarter_key.split("-Q")
+  quarter_num = int(q)
+  # Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
+  start_month = (quarter_num - 1) * 3 + 1
+  months = [start_month, start_month + 1, start_month + 2]
+  patterns = [f"filed={year}-{m:02d}-*" for m in months]
+  return patterns
 
 
 class XBRLDuckDBGraphProcessor:
@@ -119,43 +204,33 @@ class XBRLDuckDBGraphProcessor:
 
   async def stage_to_duckdb(
     self,
-    rebuild: bool = True,
     year: int | None = None,
-    filing_date: str | None = None,
     reset_staging: bool = False,
     use_glob: bool = True,
-    incremental: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
     """
     Stage processed Parquet files to persistent DuckDB.
 
-    This is Stage 1 of the decoupled pipeline. It uses the schema to determine
-    which tables to create, optionally rebuilds the LadybugDB database, and
-    creates DuckDB staging tables from S3 parquet files.
+    This is Stage 1 of the decoupled pipeline. It ONLY stages data to DuckDB.
+    LadybugDB operations are handled separately by materialize_from_duckdb().
 
     Schema-Driven Design:
     - Table names come from RoboLedgerContext.get_all_table_names_for_context()
     - No manifest file needed - schema is the source of truth
     - Works across services (Dagster/Graph API) without shared filesystem
 
-    Incremental Mode (incremental=True):
-    - Uses INSERT INTO (not CREATE TABLE) to append new data
-    - Skips LadybugDB rebuild to preserve existing data
-    - Filters to specific filing_date if provided
+    Full Rebuild Mode:
+    - Always recreates DuckDB tables from all S3 parquet files (CREATE TABLE)
+    - No incremental mode - pipeline always rebuilds from scratch
 
     Args:
-        rebuild: Whether to rebuild LadybugDB database from scratch (default: True).
         year: Optional year filter. If provided, only files from filings in that year
               will be included (filters to filed=YYYY-*).
-        filing_date: Optional exact date filter (YYYY-MM-DD). If provided, only files
-              from that specific filing date will be included. Takes precedence over year.
-        reset_staging: If True, delete DuckDB staging alongside LadybugDB for a
-            fresh start. If False (default), preserve DuckDB for incremental scenarios.
+        reset_staging: If True, delete DuckDB file for a fresh start.
+            If False (default), preserve DuckDB for retry scenarios.
         use_glob: If True (default), use glob patterns for efficient file discovery.
             If False, use explicit file lists (legacy behavior, slower for many files).
-        incremental: If True, append to existing tables instead of recreating them.
-            Default: False.
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
             Called with message strings during per-table staging operations.
 
@@ -171,17 +246,13 @@ class XBRLDuckDBGraphProcessor:
         progress_callback(msg)
 
     # Determine date filter for logging
-    date_filter = filing_date or (f"{year}-*" if year else "all")
-    mode_str = "incremental" if incremental else "full"
+    date_filter = f"{year}-*" if year else "all"
     logger.info(
       f"Starting DuckDB staging for graph {self.graph_id} "
-      f"(mode={mode_str}, filed={date_filter}, rebuild={rebuild}, reset_staging={reset_staging})"
+      f"(filed={date_filter}, reset_staging={reset_staging})"
     )
 
     duckdb_path = get_staging_duckdb_path(self.graph_id)
-
-    # Track dates for progress recording (discovered upfront for full mode)
-    staged_dates_for_progress: list[str] | None = None
 
     try:
       # Get graph client for API calls
@@ -198,34 +269,6 @@ class XBRLDuckDBGraphProcessor:
           error=f"Graph client initialization failed: {client_err!s}",
           duration_seconds=time.time() - start_time,
         )
-
-      # Step 0a: Discover dates upfront for full mode progress tracking
-      # This ensures we only record dates that exist at staging start time,
-      # avoiding race conditions with concurrent writes to S3.
-      if not incremental:
-        logger.info("Discovering filing dates from S3 for progress tracking...")
-        staged_dates_for_progress = await self._discover_filed_dates(year=year)
-        logger.info(f"Found {len(staged_dates_for_progress)} filing dates to stage")
-
-      # Step 0b: Check if already staged (incremental mode only)
-      # This prevents duplicate inserts if the same date is re-run
-      if incremental and filing_date:
-        try:
-          staged_dates = await client.get_staged_dates(self.graph_id)
-          if filing_date in staged_dates:
-            logger.info(
-              f"Filing date {filing_date} already staged - skipping to prevent duplicates"
-            )
-            return StagingResult(
-              status="already_staged",
-              table_names=[],
-              total_files=0,
-              total_rows=0,
-              duration_seconds=time.time() - start_time,
-            )
-        except Exception as e:
-          # If we can't check progress, continue anyway (table might not exist yet)
-          logger.warning(f"Could not check staging progress (continuing): {e}")
 
       # Step 1: Get table names from schema (no S3 discovery needed for glob mode)
       # Initialize variables for type checker
@@ -258,41 +301,19 @@ class XBRLDuckDBGraphProcessor:
         total_files = sum(len(files) for files in tables_info.values())
         logger.info(f"Total files: {total_files}")
 
-      # Step 2: Handle LadybugDB database rebuild BEFORE creating DuckDB tables
-      # Skip rebuild in incremental mode - we're appending to existing tables
-      if rebuild and not incremental:
-        logger.info("Step 2: Rebuilding LadybugDB database...")
-        await self._rebuild_ladybug_database(client, reset_staging=reset_staging)
-      elif incremental:
-        logger.info("Step 2: Skipped (incremental mode - preserving existing data)")
-
-      # Step 3: Create or append to DuckDB staging tables via Graph API
-      if incremental and use_glob:
-        # Incremental mode: INSERT INTO existing tables
-        log_progress("Step 3: Inserting into DuckDB staging tables (incremental)...")
-        (
-          successful_tables,
-          table_infos,
-        ) = await self._insert_into_duckdb_tables_with_glob(
-          tables_by_type,
-          client,
-          year=year,
-          filing_date=filing_date,
-          progress_callback=log_progress,
-        )
-      elif use_glob:
-        # Full mode: CREATE TABLE
-        log_progress(f"Step 3: Creating {len(tables_by_type)} DuckDB staging tables...")
+      # Step 2: Create DuckDB staging tables via Graph API
+      if use_glob:
+        # Full mode: CREATE TABLE from glob patterns
+        log_progress(f"Step 2: Creating {len(tables_by_type)} DuckDB staging tables...")
         successful_tables, table_infos = await self._create_duckdb_tables_with_glob(
           tables_by_type,
           client,
           year=year,
-          filing_date=filing_date,
           progress_callback=log_progress,
         )
       else:
         log_progress(
-          "Step 3: Creating DuckDB staging tables via file lists (legacy)..."
+          "Step 2: Creating DuckDB staging tables via file lists (legacy)..."
         )
         successful_tables, table_infos = await self._create_duckdb_tables_with_info(
           tables_info, client
@@ -308,19 +329,7 @@ class XBRLDuckDBGraphProcessor:
         f"Staging status: {status} ({len(successful_tables)}/{expected_table_count} tables)"
       )
 
-      # Step 4: Record staging progress
       total_rows = sum(info.row_count for info in table_infos.values())
-      if status == "success":
-        await self._record_staging_progress(
-          client=client,
-          filing_date=filing_date,
-          year=year,
-          incremental=incremental,
-          table_count=len(successful_tables),
-          total_rows=total_rows,
-          staged_dates=staged_dates_for_progress,
-        )
-
       duration = time.time() - start_time
 
       logger.info(
@@ -473,81 +482,6 @@ class XBRLDuckDBGraphProcessor:
         status="error",
         error=str(e),
       )
-
-  async def process_files(
-    self,
-    rebuild: bool = True,
-    year: int | None = None,
-  ) -> dict[str, Any]:
-    """
-    Process Parquet files into graph database using DuckDB-based pattern.
-
-    This is the backward-compatible method that runs both staging and
-    materialization in sequence. For independent control, use:
-    - stage_to_duckdb() for staging only
-    - materialize_from_duckdb() for materialization only
-
-    IMPORTANT: This approach always rebuilds the graph from scratch because
-    DuckDB staging tables contain ALL processed files from S3.
-
-    Args:
-        rebuild: Whether to rebuild graph from scratch (default: True).
-        year: Optional year filter for processing.
-
-    Returns:
-        Processing results with statistics
-    """
-    start_time = time.time()
-
-    logger.info(
-      f"Starting DuckDB-based SEC ingestion for graph {self.graph_id} "
-      f"(year={year or 'all'}, rebuild={rebuild})"
-    )
-
-    # Stage 1: DuckDB staging
-    staging_result = await self.stage_to_duckdb(rebuild=rebuild, year=year)
-
-    if staging_result.status == "error":
-      return {
-        "status": "error",
-        "error": staging_result.error,
-        "duration_seconds": time.time() - start_time,
-      }
-
-    if staging_result.status == "no_data":
-      return {
-        "status": "no_data",
-        "message": "No processed files found",
-        "duration_seconds": time.time() - start_time,
-      }
-
-    # Stage 2: LadybugDB materialization
-    materialize_result = await self.materialize_from_duckdb(
-      table_names=staging_result.table_names
-    )
-
-    duration = time.time() - start_time
-
-    if materialize_result.status == "error":
-      return {
-        "status": "error",
-        "error": materialize_result.error,
-        "staging_complete": True,  # Staging succeeded, materialization failed
-        "duration_seconds": duration,
-      }
-
-    logger.info(
-      f"SEC DuckDB-based ingestion complete in {duration:.2f}s: "
-      f"{materialize_result.total_rows_ingested} rows ingested from {staging_result.total_files} files"
-    )
-
-    return {
-      "status": "success",
-      "tables_processed": len(staging_result.table_names),
-      "total_files": staging_result.total_files,
-      "ingestion_results": materialize_result.to_dict(),
-      "duration_seconds": duration,
-    }
 
   async def _rebuild_ladybug_database(
     self, client, reset_staging: bool = False
@@ -708,92 +642,133 @@ class XBRLDuckDBGraphProcessor:
 
     return tables_info
 
-  async def _discover_table_names(
+  async def _stage_large_table_by_quarters(
     self,
-    year: int | None = None,
-    filing_date: str | None = None,
-  ) -> dict[str, str]:
+    table_name: str,
+    entity_type: str,
+    graph_client,
+    quarters: dict[str, list[str]],
+    log_progress: Callable[[str], None],
+    table_index: int,
+    total_tables: int,
+  ) -> tuple[bool, TableInfo | None, str | None]:
     """
-    Discover table names via S3 directory listing (lightweight, no file enumeration).
+    Stage a large table by loading one quarter at a time to reduce memory pressure.
 
-    This is a faster alternative to _discover_processed_files() when using glob patterns.
-    Instead of listing all files, it only lists directory prefixes to get table names.
-
-    Uses the new filed=YYYY-MM-DD partition structure:
-    sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
+    For tables like Fact (100M+ rows), loading all data at once can exceed memory.
+    This method chunks the load by quarter:
+    - First quarter: CREATE TABLE
+    - Subsequent quarters: INSERT INTO (append)
 
     Args:
-        year: Optional year filter. If provided, discovers from filed=YYYY-* partitions.
-        filing_date: Optional exact date filter (YYYY-MM-DD). Takes precedence over year.
+        table_name: Name of the table to stage
+        entity_type: "nodes" or "relationships"
+        graph_client: Graph API client instance
+        quarters: Dict mapping quarter keys ("2024-Q1") to filing dates
+        log_progress: Progress logging callback
+        table_index: Current table index for progress display
+        total_tables: Total number of tables for progress display
 
     Returns:
-        Dictionary mapping table names to entity type ("nodes" or "relationships")
+        Tuple of (success, TableInfo or None, error message or None)
     """
-    tables: dict[str, str] = {}
+    timeout = _get_staging_timeout(table_name)
+    total_rows = 0
+    total_duration = 0.0
+    quarter_list = list(quarters.keys())
 
-    # Find a sample filed= prefix to discover table names
-    # (S3 ListObjects doesn't support glob, so we need one concrete prefix)
-    filed_prefix = f"{self.source_prefix}/"
-    paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
-    pages = paginator.paginate(Bucket=self.bucket, Prefix=filed_prefix, Delimiter="/")
+    log_progress(
+      f"[{table_index}/{total_tables}] Staging {table_name} by quarter "
+      f"({len(quarter_list)} quarters)..."
+    )
 
-    sample_filed_path = None
-    for page in pages:
-      if "CommonPrefixes" in page:
-        for prefix_info in page["CommonPrefixes"]:
-          prefix_path = prefix_info["Prefix"]
-          if "filed=" in prefix_path:
-            # Extract the date from filed=YYYY-MM-DD
-            filed_date = prefix_path.split("filed=")[1].rstrip("/")
+    for q_idx, quarter_key in enumerate(quarter_list):
+      # Build glob patterns for this quarter's months
+      # e.g., Q1 = filed=2024-01-*, filed=2024-02-*, filed=2024-03-*
+      month_patterns = _get_quarter_glob_pattern(quarter_key)
 
-            # If filtering by exact date, only use that one
-            if filing_date and filed_date == filing_date:
-              sample_filed_path = prefix_path
-              break
+      # DuckDB read_parquet supports multiple glob patterns via list
+      # We'll build a pattern that matches all months in the quarter
+      s3_patterns = [
+        f"s3://{self.bucket}/{self.source_prefix}/{pattern}/{entity_type}/{table_name}/*.parquet"
+        for pattern in month_patterns
+      ]
 
-            # If filtering by year, check if date starts with that year
-            if year and not filed_date.startswith(str(year)):
-              continue
+      is_first = q_idx == 0
+      operation = "CREATE" if is_first else "INSERT"
 
-            # Use this prefix as sample (or first match)
-            sample_filed_path = prefix_path
-            break
-      if sample_filed_path:
-        break
-
-    if not sample_filed_path:
-      filter_desc = filing_date or (str(year) if year else "any")
-      logger.warning(
-        f"No filed= directories found under {filed_prefix} for filter {filter_desc}"
+      log_progress(
+        f"  [{quarter_key}] {operation} {table_name} "
+        f"(quarter {q_idx + 1}/{len(quarter_list)})..."
       )
-      return tables
 
-    # List table directories under nodes/ and relationships/
-    for entity_type in ["nodes", "relationships"]:
-      prefix = f"{sample_filed_path}{entity_type}/"
-      paginator = self.s3_client.s3_client.get_paginator("list_objects_v2")
-      pages = paginator.paginate(Bucket=self.bucket, Prefix=prefix, Delimiter="/")
+      try:
+        if is_first:
+          # First quarter: CREATE TABLE
+          response = await graph_client.create_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            s3_pattern=s3_patterns,  # List of patterns for the quarter
+            timeout=timeout,
+          )
+        else:
+          # Subsequent quarters: INSERT INTO (append)
+          response = await graph_client.insert_into_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            s3_pattern=s3_patterns,
+            timeout=timeout,
+          )
 
-      for page in pages:
-        if "CommonPrefixes" in page:
-          for prefix_info in page["CommonPrefixes"]:
-            # Extract table name from prefix like "sec/processed/filed=2025-01-15/nodes/Entity/"
-            table_path = prefix_info["Prefix"]
-            table_name = table_path.rstrip("/").split("/")[-1]
-            if table_name and table_name not in tables:
-              tables[table_name] = entity_type
-              logger.debug(f"Discovered table: {table_name} ({entity_type})")
+        if response.get("status") == "failed":
+          error = response.get("error", "Unknown error")
+          if "No files found" in error:
+            # No data for this quarter - that's OK, continue
+            log_progress(f"  [{quarter_key}] No files (skipped)")
+            continue
+          return False, None, f"Quarter {quarter_key}: {error}"
 
-    logger.info(f"Discovered {len(tables)} tables via directory listing")
-    return tables
+        result = response.get("result", {})
+        duration = response.get("duration_seconds", result.get("duration_seconds", 0))
+        row_count = result.get("row_count", 0)
+        total_rows += row_count
+        total_duration += duration
+
+        log_progress(
+          f"  [{quarter_key}] {row_count:,} rows in {duration:.1f}s "
+          f"(cumulative: {total_rows:,})"
+        )
+
+      except Exception as e:
+        error_str = str(e)
+        if "No files found" in error_str:
+          log_progress(f"  [{quarter_key}] No files (skipped)")
+          continue
+        return False, None, f"Quarter {quarter_key}: {error_str}"
+
+    log_progress(
+      f"[{table_index}/{total_tables}] Staged {table_name}: "
+      f"{total_rows:,} rows in {total_duration:.1f}s (chunked by quarter)"
+    )
+
+    return (
+      True,
+      TableInfo(
+        name=table_name,
+        row_count=total_rows,
+        file_count=0,
+        staged_at=datetime.now(UTC).isoformat(),
+      ),
+      None,
+    )
 
   async def _create_duckdb_tables_with_glob(
     self,
     tables: dict[str, str],
     graph_client,
     year: int | None = None,
-    filing_date: str | None = None,
     progress_callback: ProgressCallback | None = None,
+    chunk_large_tables: bool = True,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables using glob patterns (efficient for many files).
@@ -807,11 +782,17 @@ class XBRLDuckDBGraphProcessor:
       - Each flush during processing creates a new part file
       - DuckDB reads all part files as a single dataset
 
+    Large Table Chunking (chunk_large_tables=True):
+      For tables in LARGE_STAGING_TABLES (Fact, Label, Element, etc.), loads
+      data one quarter at a time to reduce memory pressure. Uses CREATE TABLE
+      for first quarter, INSERT INTO for subsequent quarters.
+
     Args:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
         graph_client: Graph API client instance
         year: Optional year filter. If provided, uses filed=YYYY-* pattern.
-        filing_date: Optional exact date filter (YYYY-MM-DD). Uses filed= pattern.
+        chunk_large_tables: If True (default), stage large tables quarter-by-quarter
+            to reduce memory pressure.
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
@@ -824,10 +805,7 @@ class XBRLDuckDBGraphProcessor:
     # Build partition patterns for glob
     # Uses filed=YYYY-MM-DD partition structure with part files
     # Pattern: sec/processed/filed=YYYY-MM-DD/nodes/Table/*.parquet
-    if filing_date:
-      # Exact date for incremental staging
-      filed_pattern = f"filed={filing_date}"
-    elif year:
+    if year:
       # Year filter for partial backfill (matches all dates in that year)
       filed_pattern = f"filed={year}-*"
     else:
@@ -840,11 +818,44 @@ class XBRLDuckDBGraphProcessor:
       if progress_callback:
         progress_callback(msg)
 
+    # Discover quarters for chunked staging (only if needed)
+    quarters_by_date: dict[str, list[str]] | None = None
+    if chunk_large_tables:
+      # Discover filing dates and group by quarter
+      filing_dates = await self._discover_filed_dates(year=year)
+      if filing_dates:
+        quarters_by_date = _group_dates_by_quarter(filing_dates)
+        logger.info(
+          f"Quarter chunking enabled: {len(quarters_by_date)} quarters discovered"
+        )
+
     total_tables = len(tables)
     for i, (table_name, entity_type) in enumerate(tables.items(), 1):
+      is_large = table_name in LARGE_STAGING_TABLES
+      is_chunkable = table_name in QUARTER_CHUNKABLE_TABLES
+
+      # Use quarter-based chunking for chunkable tables (if enabled and quarters discovered)
+      # Only tables with per-filing data (no cross-quarter duplicates) can be chunked.
+      if is_chunkable and quarters_by_date and chunk_large_tables:
+        success, table_info, error = await self._stage_large_table_by_quarters(
+          table_name=table_name,
+          entity_type=entity_type,
+          graph_client=graph_client,
+          quarters=quarters_by_date,
+          log_progress=log_progress,
+          table_index=i,
+          total_tables=total_tables,
+        )
+        if success and table_info:
+          successful_tables.append(table_name)
+          table_infos[table_name] = table_info
+        else:
+          failed_tables.append((table_name, error or "Unknown error"))
+        continue
+
+      # Standard staging for small tables (or when chunking is disabled)
       # Build glob pattern for part file output structure:
       # s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
-      # Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
       s3_pattern = (
         f"s3://{self.bucket}/{self.source_prefix}/"
         f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
@@ -852,7 +863,6 @@ class XBRLDuckDBGraphProcessor:
 
       # Get appropriate timeout for this table (large tables get extended timeout)
       timeout = _get_staging_timeout(table_name)
-      is_large = table_name in LARGE_STAGING_TABLES
       size_hint = " (large table)" if is_large else ""
       log_progress(
         f"[{i}/{total_tables}] Staging {table_name}{size_hint} (timeout={timeout}s)..."
@@ -947,170 +957,6 @@ class XBRLDuckDBGraphProcessor:
       # Raise after attempting all tables so we can see partial results
       raise RuntimeError(
         f"Failed to create {len(failed_tables)} DuckDB tables: "
-        f"{[t[0] for t in failed_tables]}"
-      )
-
-    return successful_tables, table_infos
-
-  async def _insert_into_duckdb_tables_with_glob(
-    self,
-    tables: dict[str, str],
-    graph_client,
-    year: int | None = None,
-    filing_date: str | None = None,
-    progress_callback: ProgressCallback | None = None,
-  ) -> tuple[list[str], dict[str, TableInfo]]:
-    """
-    Insert into existing DuckDB staging tables using glob patterns (incremental append).
-
-    This is the incremental version of _create_duckdb_tables_with_glob(). Instead of
-    CREATE TABLE, it uses INSERT INTO to append new data to existing tables.
-
-    Used for incremental daily staging after the initial full staging has been done.
-    Each filing date may have multiple part files per table.
-
-    Partition structure:
-      sec/processed/filed=YYYY-MM-DD/nodes/TABLE/*.parquet
-      Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
-
-    Args:
-        tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
-        graph_client: Graph API client instance
-        year: Optional year filter. If provided, uses filed=YYYY-* pattern.
-        filing_date: Optional exact date filter (YYYY-MM-DD). Uses filed= pattern.
-        progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info)
-
-    Returns:
-        Tuple of (successful_table_names, table_info_dict)
-    """
-    successful_tables: list[str] = []
-    table_infos: dict[str, TableInfo] = {}
-    failed_tables: list[tuple[str, str]] = []
-    skipped_tables: list[str] = []
-
-    # Helper for progress logging (both logger and optional callback)
-    def log_progress(msg: str) -> None:
-      logger.info(msg)
-      if progress_callback:
-        progress_callback(msg)
-
-    # Build partition patterns for glob
-    # Uses filed=YYYY-MM-DD partition structure with daily consolidated files
-    if filing_date:
-      # Exact date for incremental staging
-      filed_pattern = f"filed={filing_date}"
-    elif year:
-      # Year filter for partial backfill (matches all dates in that year)
-      filed_pattern = f"filed={year}-*"
-    else:
-      # All dates for full staging
-      filed_pattern = "filed=*"
-
-    total_tables = len(tables)
-    for i, (table_name, entity_type) in enumerate(tables.items(), 1):
-      # Build glob pattern for part file output structure:
-      # s3://bucket/sec/processed/filed=*/nodes/Entity/*.parquet
-      # Each flush creates a part file: part-001.parquet, part-002.parquet, etc.
-      s3_pattern = (
-        f"s3://{self.bucket}/{self.source_prefix}/"
-        f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
-      )
-
-      # Get appropriate timeout for this table (large tables get extended timeout)
-      timeout = _get_staging_timeout(table_name)
-      is_large = table_name in LARGE_STAGING_TABLES
-      size_hint = " (large table)" if is_large else ""
-      log_progress(
-        f"[{i}/{total_tables}] Inserting {table_name}{size_hint} (timeout={timeout}s)..."
-      )
-
-      try:
-        # Use graph client to call Graph API's insert_into_table endpoint
-        response = await graph_client.insert_into_table(
-          graph_id=self.graph_id,
-          table_name=table_name,
-          s3_pattern=s3_pattern,
-          timeout=timeout,
-        )
-
-        # Handle SSE-based response format
-        if response.get("status") == "failed":
-          error = response.get("error", "Unknown error")
-          # "No files found" is expected for optional tables
-          if "No files found" in error:
-            log_progress(
-              f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
-            )
-            skipped_tables.append(table_name)
-            successful_tables.append(table_name)
-            table_infos[table_name] = TableInfo(
-              name=table_name,
-              row_count=0,
-              file_count=0,
-              staged_at=datetime.now(UTC).isoformat(),
-            )
-            continue
-          logger.error(f"Failed to insert into DuckDB table {table_name}: {error}")
-          if progress_callback:
-            progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
-          failed_tables.append((table_name, error))
-          continue
-
-        # Extract result from SSE response
-        result = response.get("result", {})
-        duration = response.get("duration_seconds", result.get("duration_seconds", 0))
-        row_count = result.get("row_count", 0)
-
-        log_progress(
-          f"[{i}/{total_tables}] Appended {table_name}: {row_count:,} rows in {duration:.1f}s"
-        )
-
-        successful_tables.append(table_name)
-        table_infos[table_name] = TableInfo(
-          name=table_name,
-          row_count=row_count,
-          file_count=0,  # Unknown with glob pattern
-          staged_at=datetime.now(UTC).isoformat(),
-        )
-
-      except Exception as e:
-        error_str = str(e)
-        # Also handle "No files found" from exceptions
-        if "No files found" in error_str:
-          log_progress(
-            f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
-          )
-          skipped_tables.append(table_name)
-          successful_tables.append(table_name)
-          table_infos[table_name] = TableInfo(
-            name=table_name,
-            row_count=0,
-            file_count=0,
-            staged_at=datetime.now(UTC).isoformat(),
-          )
-          continue
-        logger.error(f"Failed to insert into DuckDB table {table_name}: {e}")
-        if progress_callback:
-          progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {e}")
-        failed_tables.append((table_name, error_str))
-        continue
-
-    # Report summary
-    if skipped_tables:
-      logger.info(
-        f"Skipped {len(skipped_tables)} tables with no files: {skipped_tables}"
-      )
-
-    if failed_tables:
-      logger.warning(
-        f"DuckDB table insert: {len(successful_tables)} succeeded, "
-        f"{len(failed_tables)} failed"
-      )
-      for table_name, error in failed_tables:
-        logger.error(f"  Failed: {table_name} - {error}")
-
-      raise RuntimeError(
-        f"Failed to insert into {len(failed_tables)} DuckDB tables: "
         f"{[t[0] for t in failed_tables]}"
       )
 
@@ -1366,104 +1212,11 @@ class XBRLDuckDBGraphProcessor:
       "tables": results,
     }
 
-  async def _record_staging_progress(
-    self,
-    client,
-    filing_date: str | None,
-    year: int | None,
-    incremental: bool,
-    table_count: int,
-    total_rows: int,
-    staged_dates: list[str] | None = None,
-  ) -> None:
-    """
-    Record staging progress to the DuckDB progress table.
-
-    For incremental staging (single filing_date): Records that specific date.
-    For full staging: Records the explicitly provided staged_dates, or
-    discovers dates from S3 if staged_dates not provided (legacy behavior).
-
-    Args:
-        client: Graph API client instance
-        filing_date: Specific filing date (for incremental) or None (for full)
-        year: Year filter (for full staging) or None
-        incremental: Whether this is incremental mode
-        table_count: Number of tables staged
-        total_rows: Total rows inserted
-        staged_dates: Explicit list of dates that were staged in this run.
-            If provided, only these dates will be recorded as complete.
-            If None (legacy), discovers dates from S3 (may include stale data).
-    """
-    try:
-      if incremental and filing_date:
-        # Incremental mode: record the specific filing_date
-        logger.info(f"Recording staging progress for {filing_date}")
-        await client.record_staging_progress(
-          graph_id=self.graph_id,
-          filing_date=filing_date,
-          table_count=table_count,
-          total_rows=total_rows,
-          status="complete",
-        )
-      elif staged_dates is not None:
-        # Explicit dates provided - only record these (safest approach)
-        if not staged_dates:
-          logger.info("No staged dates provided, skipping progress recording")
-          return
-
-        logger.info(
-          f"Recording progress for {len(staged_dates)} explicitly staged dates"
-        )
-        rows_per_date = total_rows // len(staged_dates) if staged_dates else 0
-
-        for staged_date in staged_dates:
-          await client.record_staging_progress(
-            graph_id=self.graph_id,
-            filing_date=staged_date,
-            table_count=table_count,
-            total_rows=rows_per_date,
-            status="complete",
-          )
-
-        logger.info(f"Recorded staging progress for {len(staged_dates)} dates")
-      else:
-        # Legacy behavior: discover all filed= dates from S3
-        # WARNING: This may include dates from previous failed runs
-        logger.warning(
-          "Discovering dates from S3 for progress tracking. "
-          "This may include stale data from previous runs."
-        )
-        filed_dates = await self._discover_filed_dates(year=year)
-
-        if not filed_dates:
-          logger.warning("No filed= dates discovered, skipping progress recording")
-          return
-
-        logger.info(
-          f"Recording progress for {len(filed_dates)} discovered filing dates"
-        )
-
-        # Record each date (rows are distributed across dates, so we estimate)
-        rows_per_date = total_rows // len(filed_dates) if filed_dates else 0
-
-        for filed_date in filed_dates:
-          await client.record_staging_progress(
-            graph_id=self.graph_id,
-            filing_date=filed_date,
-            table_count=table_count,
-            total_rows=rows_per_date,
-            status="complete",
-          )
-
-        logger.info(f"Recorded staging progress for {len(filed_dates)} dates")
-
-    except Exception as e:
-      # Don't fail staging if progress recording fails - it's just bookkeeping
-      logger.warning(f"Failed to record staging progress (non-fatal): {e}")
-
   async def _discover_filed_dates(self, year: int | None = None) -> list[str]:
     """
     Discover all filed= partition dates from S3.
+
+    Used for quarter-based chunking of large tables.
 
     Args:
         year: Optional year filter. If provided, only returns dates from that year.
