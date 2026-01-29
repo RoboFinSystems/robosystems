@@ -154,22 +154,38 @@ def _group_dates_by_quarter(dates: list[str]) -> dict[str, list[str]]:
   return dict(sorted(quarters.items()))
 
 
-def _get_quarter_glob_pattern(quarter_key: str) -> list[str]:
+def _get_quarter_glob_pattern(
+  quarter_key: str, use_quarter_end: bool = True
+) -> list[str]:
   """Convert quarter key to glob patterns for filed= partitions.
 
   Args:
       quarter_key: Quarter in format "YYYY-QN" (e.g., "2024-Q1")
+      use_quarter_end: If True (default), use quarter-end date pattern (filed=2024-03-31)
+                       which matches the default processing output.
+                       If False, use month patterns for daily-partitioned data.
 
   Returns:
-      List of glob patterns like ["filed=2024-01-*", "filed=2024-02-*", "filed=2024-03-*"]
+      If use_quarter_end=True: Single pattern like ["filed=2024-03-31"]
+      If use_quarter_end=False: Month patterns like ["filed=2024-01-*", ...]
   """
   year, q = quarter_key.split("-Q")
   quarter_num = int(q)
-  # Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
-  start_month = (quarter_num - 1) * 3 + 1
-  months = [start_month, start_month + 1, start_month + 2]
-  patterns = [f"filed={year}-{m:02d}-*" for m in months]
-  return patterns
+
+  if use_quarter_end:
+    # Default: files are stored at quarter-end date (e.g., filed=2024-03-31 for Q1)
+    quarter_end_dates = {
+      1: f"{year}-03-31",
+      2: f"{year}-06-30",
+      3: f"{year}-09-30",
+      4: f"{year}-12-31",
+    }
+    return [f"filed={quarter_end_dates[quarter_num]}"]
+  else:
+    # Daily mode: files distributed across the quarter by actual filing date
+    start_month = (quarter_num - 1) * 3 + 1
+    months = [start_month, start_month + 1, start_month + 2]
+    return [f"filed={year}-{m:02d}-*" for m in months]
 
 
 class XBRLDuckDBGraphProcessor:
@@ -721,15 +737,14 @@ class XBRLDuckDBGraphProcessor:
     )
 
     for q_idx, quarter_key in enumerate(quarter_list):
-      # Build glob patterns for this quarter's months
-      # e.g., Q1 = filed=2024-01-*, filed=2024-02-*, filed=2024-03-*
-      month_patterns = _get_quarter_glob_pattern(quarter_key)
+      # Use actual discovered dates for this quarter (not regenerated quarter-end dates)
+      # This handles both quarterly partitions (filed=2024-03-31) and daily (filed=2026-01-02)
+      actual_dates = quarters[quarter_key]
 
-      # DuckDB read_parquet supports multiple glob patterns via list
-      # We'll build a pattern that matches all months in the quarter
+      # Build S3 patterns for each actual date in this quarter
       s3_patterns = [
-        f"s3://{self.bucket}/{self.source_prefix}/{pattern}/{entity_type}/{table_name}/*.parquet"
-        for pattern in month_patterns
+        f"s3://{self.bucket}/{self.source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
+        for date in actual_dates
       ]
 
       is_first = q_idx == 0
