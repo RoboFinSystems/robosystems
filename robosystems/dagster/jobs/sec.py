@@ -84,10 +84,8 @@ sec_download_job = define_asset_job(
 # consolidated parquet files. Parallel execution across quarters is controlled
 # by DAGSTER_MAX_CONCURRENT_RUNS.
 #
-# Uses On-Demand Fargate for reliability:
-# - Long-running jobs (30+ min for large quarters) need stability
-# - SourceFile tracks individual filing failures
-# - Consolidated output scales better than per-filing approach
+# Uses Compute profile (4 vCPU, 16 GB) for CPU-intensive XBRL processing.
+# Uses On-Demand Fargate for reliability (long-running jobs need stability).
 sec_process_job = define_asset_job(
   name="sec_process",
   description="Process an entire quarter's SEC filings with consolidated output.",
@@ -98,7 +96,33 @@ sec_process_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "process",
-    # Long-running job - use on-demand for reliability
+    # Compute profile: 4 vCPU, 16 GB - for CPU-intensive XBRL processing
+    "ecs/task_definition": f"robosystems-dagster-run-compute-{env.ENVIRONMENT}",
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# Phase 2 (Heavy): Process with large batch for backfills
+# Uses Heavy profile (16 vCPU, 64 GB) for processing large batches (8000+ filings).
+# Useful for quarterly backfills where you want to process everything at once.
+sec_process_heavy_job = define_asset_job(
+  name="sec_process_heavy",
+  description="Process SEC filings with heavy resources (16 vCPU, 64 GB) for large batches.",
+  selection=AssetSelection.assets(
+    sec_processed_filings,
+  ),
+  partitions_def=sec_quarter_partitions,
+  tags={
+    "pipeline": "sec",
+    "phase": "process",
+    "profile": "heavy",
+    # Heavy profile: 16 vCPU, 64 GB - for large batch backfills (batch_limit=8000+)
+    "ecs/task_definition": f"robosystems-dagster-run-heavy-{env.ENVIRONMENT}",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
@@ -119,6 +143,7 @@ sec_process_job = define_asset_job(
 
 # Stage 1: DuckDB Staging
 # Discovers processed files from S3 and stages to persistent DuckDB.
+# Uses Standard profile (2 vCPU, 8 GB) - staging is I/O bound, not CPU intensive.
 sec_stage_job = define_asset_job(
   name="sec_stage",
   description="Stage SEC files to persistent DuckDB (no graph ingestion).",
@@ -126,6 +151,8 @@ sec_stage_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "stage",
+    # Standard profile: 2 vCPU, 8 GB - staging is mostly I/O bound
+    "ecs/task_definition": f"robosystems-dagster-run-standard-{env.ENVIRONMENT}",
     # Long-running job (2+ hours) - use on-demand to avoid Spot interruptions
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -138,6 +165,7 @@ sec_stage_job = define_asset_job(
 # Stage 2: LadybugDB Materialization
 # Materializes to LadybugDB from existing DuckDB staging.
 # Retry-safe: if this fails, just re-run it - DuckDB staging is preserved.
+# Uses Standard profile (2 vCPU, 8 GB) - materialization is network/API bound.
 sec_materialize_job = define_asset_job(
   name="sec_materialize",
   description="Materialize SEC graph from DuckDB staging (retry-safe).",
@@ -145,6 +173,8 @@ sec_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "materialize",
+    # Standard profile: 2 vCPU, 8 GB - materialization is network/API bound
+    "ecs/task_definition": f"robosystems-dagster-run-standard-{env.ENVIRONMENT}",
     # Long-running job - use on-demand to avoid Spot interruptions
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
@@ -156,6 +186,7 @@ sec_materialize_job = define_asset_job(
 
 # Combined: Run both stages in sequence
 # Useful for full rebuilds with checkpointing between stages.
+# Uses Standard profile (2 vCPU, 8 GB) - combined stage+materialize is I/O bound.
 sec_staged_materialize_job = define_asset_job(
   name="sec_staged_materialize",
   description="Full SEC pipeline: stage to DuckDB then materialize to LadybugDB.",
@@ -163,6 +194,8 @@ sec_staged_materialize_job = define_asset_job(
   tags={
     "pipeline": "sec",
     "phase": "full",
+    # Standard profile: 2 vCPU, 8 GB - stage+materialize is I/O/network bound
+    "ecs/task_definition": f"robosystems-dagster-run-standard-{env.ENVIRONMENT}",
     # Long-running job (2+ hours) - use on-demand to avoid Spot interruptions
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [

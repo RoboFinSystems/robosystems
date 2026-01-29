@@ -562,9 +562,7 @@ jobs:
       daemon_memory: ${{ vars.DAGSTER_DAEMON_MEMORY_STAGING || '2048' }}
       webserver_cpu: ${{ vars.DAGSTER_WEBSERVER_CPU_STAGING || '512' }}
       webserver_memory: ${{ vars.DAGSTER_WEBSERVER_MEMORY_STAGING || '1024' }}
-      # Run Job Configuration (for EcsRunLauncher)
-      run_job_cpu: ${{ vars.DAGSTER_RUN_JOB_CPU_STAGING || '1024' }}
-      run_job_memory: ${{ vars.DAGSTER_RUN_JOB_MEMORY_STAGING || '4096' }}
+      # Run Job Profiles: hardcoded in deploy-dagster.yml (Light/Standard/Compute/Heavy)
       max_concurrent_runs: ${{ vars.DAGSTER_MAX_CONCURRENT_RUNS_STAGING || '20' }}
       # Capacity Provider Configuration (Spot vs On-Demand)
       daemon_fargate_weight: ${{ vars.DAGSTER_DAEMON_FARGATE_WEIGHT_STAGING || '20' }}

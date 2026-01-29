@@ -1094,6 +1094,18 @@ def _consolidate_parquet_tables_by_date(
       table = reader.read()
       tables_by_date_and_key[filing_date][key].append(table)
 
+  # Shared node tables that should be deduplicated across filings
+  # These have deterministic IDs (UUID5) so same content = same identifier
+  SHARED_NODE_TABLES = frozenset(
+    {
+      "nodes/Element",
+      "nodes/Label",
+      "nodes/Reference",
+      "nodes/Unit",
+      "nodes/Period",
+    }
+  )
+
   # Consolidate each table type for each filing date
   consolidated: dict[str, dict[str, bytes]] = {}
 
@@ -1104,6 +1116,14 @@ def _consolidate_parquet_tables_by_date(
         continue
       # Concatenate all tables of this type for this date
       combined = pa.concat_tables(tables, promote_options="permissive")
+
+      # Deduplicate shared node tables on identifier column
+      # This reduces duplicates that DuckDB would otherwise have to handle
+      if key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
+        df = combined.to_pandas()
+        df = df.drop_duplicates(subset=["identifier"], keep="first")
+        combined = pa.Table.from_pandas(df, preserve_index=False)
+
       # Write to bytes
       buffer = BytesIO()
       pq.write_table(combined, buffer)
@@ -1140,6 +1160,11 @@ def _consolidate_parquet_from_disk(
 ) -> bytes:
   """Consolidate all parquet files for a table from disk into single bytes.
 
+  For shared node tables (Element, Label, Reference, Unit, Period), this also
+  deduplicates on the identifier column to reduce memory pressure during
+  DuckDB staging. These tables have deterministic UUIDs, so duplicates across
+  filings are guaranteed to have the same identifier.
+
   Args:
       work_dir: Directory containing parquet files
       table_key: Table key like "nodes/Entity"
@@ -1151,6 +1176,18 @@ def _consolidate_parquet_from_disk(
 
   import pyarrow as pa
   import pyarrow.parquet as pq
+
+  # Shared node tables that should be deduplicated across filings
+  # These have deterministic IDs (UUID5) so same content = same identifier
+  SHARED_NODE_TABLES = frozenset(
+    {
+      "nodes/Element",
+      "nodes/Label",
+      "nodes/Reference",
+      "nodes/Unit",
+      "nodes/Period",
+    }
+  )
 
   table_dir = work_dir / table_key
   if not table_dir.exists():
@@ -1175,6 +1212,21 @@ def _consolidate_parquet_from_disk(
 
   # Concatenate all tables
   combined = pa.concat_tables(tables, promote_options="permissive")
+
+  # Deduplicate shared node tables on identifier column
+  # This reduces duplicates that DuckDB would otherwise have to handle via
+  # memory-intensive ROW_NUMBER() window functions during staging
+  if table_key in SHARED_NODE_TABLES and "identifier" in combined.column_names:
+    original_rows = combined.num_rows
+    # Convert to pandas for deduplication, then back to Arrow
+    df = combined.to_pandas()
+    df = df.drop_duplicates(subset=["identifier"], keep="first")
+    combined = pa.Table.from_pandas(df, preserve_index=False)
+    deduped_rows = combined.num_rows
+    if original_rows != deduped_rows:
+      # Log would go here in production, but we're in a static function
+      # The reduction will be visible in the final row counts
+      pass
 
   # Write to bytes
   buffer = BytesIO()

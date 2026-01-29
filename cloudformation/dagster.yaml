@@ -51,17 +51,65 @@ Parameters:
     Default: "1024"
     Description: Memory in MiB for Dagster webserver
     AllowedValues: ["1024", "2048", "4096"]
-  # Run Job Configuration (Fargate)
-  RunJobCpu:
+  # Run Job Profiles (Fargate)
+  # Four tiers to match workload requirements:
+  #   Light   (0.5 vCPU / 2 GB)  - sensors, simple jobs, most runs
+  #   Standard (2 vCPU / 8 GB)   - normal ETL, moderate processing
+  #   Compute  (4 vCPU / 16 GB)  - daily SEC processing, staging
+  #   Heavy   (16 vCPU / 64 GB)  - SEC backfills, batch_limit=8000+
+  #
+  # Valid Fargate CPU/Memory combinations:
+  #   512:  1024-4096 MB   | 1024:  2048-8192 MB   | 2048:  4096-16384 MB
+  #   4096: 8192-30720 MB  | 8192: 16384-61440 MB  | 16384: 32768-122880 MB
+
+  # Light profile (default) - most Dagster jobs
+  LightRunJobCpu:
     Type: String
-    Default: "1024"
-    Description: CPU units for Dagster run jobs (1024 = 1 vCPU)
-    AllowedValues: ["512", "1024", "2048", "4096"]
-  RunJobMemory:
+    Default: "512"
+    Description: CPU units for light run jobs (512 = 0.5 vCPU)
+    AllowedValues: ["256", "512", "1024"]
+  LightRunJobMemory:
+    Type: String
+    Default: "2048"
+    Description: Memory in MiB for light run jobs
+    AllowedValues: ["1024", "2048", "4096"]
+
+  # Standard profile - moderate workloads
+  StandardRunJobCpu:
+    Type: String
+    Default: "2048"
+    Description: CPU units for standard run jobs (2048 = 2 vCPU)
+    AllowedValues: ["1024", "2048", "4096"]
+  StandardRunJobMemory:
+    Type: String
+    Default: "8192"
+    Description: Memory in MiB for standard run jobs
+    AllowedValues: ["4096", "8192", "16384"]
+
+  # Compute profile - daily SEC processing, staging
+  ComputeRunJobCpu:
     Type: String
     Default: "4096"
-    Description: Memory in MiB for Dagster run jobs
-    AllowedValues: ["1024", "2048", "4096", "8192", "16384"]
+    Description: CPU units for compute run jobs (4096 = 4 vCPU)
+    AllowedValues: ["2048", "4096", "8192"]
+  ComputeRunJobMemory:
+    Type: String
+    Default: "16384"
+    Description: Memory in MiB for compute run jobs
+    AllowedValues: ["8192", "16384", "30720"]
+
+  # Heavy profile - SEC backfills, large batches
+  HeavyRunJobCpu:
+    Type: String
+    Default: "16384"
+    Description: CPU units for heavy run jobs (16384 = 16 vCPU)
+    AllowedValues: ["8192", "16384"]
+  HeavyRunJobMemory:
+    Type: String
+    Default: "65536"
+    Description: Memory in MiB for heavy run jobs (64 GB)
+    AllowedValues: ["32768", "65536", "122880"]
+
   MaxConcurrentRuns:
     Type: Number
     Default: 20
@@ -596,12 +644,22 @@ Resources:
             - Name: RUN_MIGRATIONS
               Value: "true"
             # EcsRunLauncher configuration - Fargate only
+            # Default task definition is Light profile (most jobs)
             - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
-              Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
+              Value: !GetAtt LightRunJobTaskDefinition.TaskDefinitionArn
             - Name: DAGSTER_ECS_CLUSTER
               Value: !Ref DagsterCluster
             - Name: DAGSTER_ECS_LAUNCH_TYPE
               Value: FARGATE
+            # Run job profile task definitions (for ecs/task_definition tag selection)
+            - Name: DAGSTER_ECS_TASK_DEFINITION_LIGHT
+              Value: !GetAtt LightRunJobTaskDefinition.TaskDefinitionArn
+            - Name: DAGSTER_ECS_TASK_DEFINITION_STANDARD
+              Value: !GetAtt StandardRunJobTaskDefinition.TaskDefinitionArn
+            - Name: DAGSTER_ECS_TASK_DEFINITION_COMPUTE
+              Value: !GetAtt ComputeRunJobTaskDefinition.TaskDefinitionArn
+            - Name: DAGSTER_ECS_TASK_DEFINITION_HEAVY
+              Value: !GetAtt HeavyRunJobTaskDefinition.TaskDefinitionArn
             # S3 Bucket Configuration (derived from ARN parameters)
             - Name: SHARED_RAW_BUCKET
               Value: !Select [5, !Split [":", !Ref SharedRawBucketArn]]
@@ -685,11 +743,20 @@ Resources:
               Value: !Ref AWS::Region
             # EcsRunLauncher configuration - needed for webserver to understand run launcher
             - Name: DAGSTER_ECS_RUN_TASK_DEFINITION
-              Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
+              Value: !GetAtt LightRunJobTaskDefinition.TaskDefinitionArn
             - Name: DAGSTER_ECS_CLUSTER
               Value: !Ref DagsterCluster
             - Name: DAGSTER_ECS_LAUNCH_TYPE
               Value: FARGATE
+            # Run job profile task definitions (for ecs/task_definition tag selection)
+            - Name: DAGSTER_ECS_TASK_DEFINITION_LIGHT
+              Value: !GetAtt LightRunJobTaskDefinition.TaskDefinitionArn
+            - Name: DAGSTER_ECS_TASK_DEFINITION_STANDARD
+              Value: !GetAtt StandardRunJobTaskDefinition.TaskDefinitionArn
+            - Name: DAGSTER_ECS_TASK_DEFINITION_COMPUTE
+              Value: !GetAtt ComputeRunJobTaskDefinition.TaskDefinitionArn
+            - Name: DAGSTER_ECS_TASK_DEFINITION_HEAVY
+              Value: !GetAtt HeavyRunJobTaskDefinition.TaskDefinitionArn
             # S3 Bucket Configuration (derived from ARN parameters)
             - Name: SHARED_RAW_BUCKET
               Value: !Select [5, !Split [":", !Ref SharedRawBucketArn]]
@@ -721,13 +788,19 @@ Resources:
             Retries: 3
             StartPeriod: 60
 
-  # Task definition for Dagster run jobs (launched by EcsRunLauncher)
-  RunJobTaskDefinition:
+  # ========================================
+  # RUN JOB TASK DEFINITIONS (4 profiles)
+  # ========================================
+  # Jobs select profile via ecs/task_definition tag. Default: Light
+  # Light: sensors, simple jobs | Standard: moderate ETL | Compute: SEC daily | Heavy: SEC backfill
+
+  # Light profile - Default for most jobs (0.5 vCPU, 2 GB, 21 GB storage)
+  LightRunJobTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !Sub robosystems-dagster-run-${Environment}
-      Cpu: !Ref RunJobCpu
-      Memory: !Ref RunJobMemory
+      Family: !Sub robosystems-dagster-run-light-${Environment}
+      Cpu: !Ref LightRunJobCpu
+      Memory: !Ref LightRunJobMemory
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
@@ -736,9 +809,7 @@ Resources:
         OperatingSystemFamily: LINUX
       ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt DagsterTaskRole.Arn
-      # Fargate ephemeral storage (default 20GB, can increase to 200GB)
-      EphemeralStorage:
-        SizeInGiB: 100
+      # Default 21GB ephemeral storage (sufficient for light jobs)
       Tags:
         - Key: Environment
           Value: !Ref Environment
@@ -746,6 +817,8 @@ Resources:
           Value: !Ref ServiceTag
         - Key: Component
           Value: !Ref ComponentTag
+        - Key: Profile
+          Value: light
         - Key: CreatedBy
           Value: CloudFormation
       ContainerDefinitions:
@@ -757,7 +830,7 @@ Resources:
             Options:
               awslogs-group: !Ref DagsterLogGroup
               awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: run
+              awslogs-stream-prefix: run-light
           Environment:
             - Name: ENVIRONMENT
               Value: !Ref Environment
@@ -777,7 +850,6 @@ Resources:
               Value: !Ref ValkeyUrl
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            # S3 Bucket Configuration (derived from ARN parameters)
             - Name: SHARED_RAW_BUCKET
               Value: !Select [5, !Split [":", !Ref SharedRawBucketArn]]
             - Name: SHARED_PROCESSED_BUCKET
@@ -794,7 +866,234 @@ Resources:
               Value: !Select [5, !Split [":", !Ref LogsBucketArn]]
             - Name: PUBLIC_DATA_CDN_URL
               Value: !Ref PublicDataCDNURL
-            # Run coordinator configuration (shared config)
+            - Name: DAGSTER_MAX_CONCURRENT_RUNS
+              Value: !Ref MaxConcurrentRuns
+
+  # Standard profile - Moderate workloads (2 vCPU, 8 GB, 50 GB storage)
+  StandardRunJobTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub robosystems-dagster-run-standard-${Environment}
+      Cpu: !Ref StandardRunJobCpu
+      Memory: !Ref StandardRunJobMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      EphemeralStorage:
+        SizeInGiB: 50
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Profile
+          Value: standard
+        - Key: CreatedBy
+          Value: CloudFormation
+      ContainerDefinitions:
+        - Name: dagster-run
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DagsterLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: run-standard
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: "5432"
+            - Name: DAGSTER_POSTGRES_USER
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: SHARED_RAW_BUCKET
+              Value: !Select [5, !Split [":", !Ref SharedRawBucketArn]]
+            - Name: SHARED_PROCESSED_BUCKET
+              Value: !Select [5, !Split [":", !Ref SharedProcessedBucketArn]]
+            - Name: USER_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref UserDataBucketArn]]
+            - Name: PUBLIC_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
+            - Name: DEPLOYMENT_BUCKET
+              Value: !Select [5, !Split [":", !Ref DeploymentBucketArn]]
+            - Name: LOGS_BUCKET
+              Value: !Select [5, !Split [":", !Ref LogsBucketArn]]
+            - Name: DAGSTER_COMPUTE_LOGS_BUCKET
+              Value: !Select [5, !Split [":", !Ref LogsBucketArn]]
+            - Name: PUBLIC_DATA_CDN_URL
+              Value: !Ref PublicDataCDNURL
+            - Name: DAGSTER_MAX_CONCURRENT_RUNS
+              Value: !Ref MaxConcurrentRuns
+
+  # Compute profile - Daily SEC processing, staging (4 vCPU, 16 GB, 100 GB storage)
+  ComputeRunJobTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub robosystems-dagster-run-compute-${Environment}
+      Cpu: !Ref ComputeRunJobCpu
+      Memory: !Ref ComputeRunJobMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      EphemeralStorage:
+        SizeInGiB: 100
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Profile
+          Value: compute
+        - Key: CreatedBy
+          Value: CloudFormation
+      ContainerDefinitions:
+        - Name: dagster-run
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DagsterLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: run-compute
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: "5432"
+            - Name: DAGSTER_POSTGRES_USER
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: SHARED_RAW_BUCKET
+              Value: !Select [5, !Split [":", !Ref SharedRawBucketArn]]
+            - Name: SHARED_PROCESSED_BUCKET
+              Value: !Select [5, !Split [":", !Ref SharedProcessedBucketArn]]
+            - Name: USER_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref UserDataBucketArn]]
+            - Name: PUBLIC_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
+            - Name: DEPLOYMENT_BUCKET
+              Value: !Select [5, !Split [":", !Ref DeploymentBucketArn]]
+            - Name: LOGS_BUCKET
+              Value: !Select [5, !Split [":", !Ref LogsBucketArn]]
+            - Name: DAGSTER_COMPUTE_LOGS_BUCKET
+              Value: !Select [5, !Split [":", !Ref LogsBucketArn]]
+            - Name: PUBLIC_DATA_CDN_URL
+              Value: !Ref PublicDataCDNURL
+            - Name: DAGSTER_MAX_CONCURRENT_RUNS
+              Value: !Ref MaxConcurrentRuns
+
+  # Heavy profile - SEC backfills, large batches (16 vCPU, 64 GB, 200 GB storage)
+  HeavyRunJobTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub robosystems-dagster-run-heavy-${Environment}
+      Cpu: !Ref HeavyRunJobCpu
+      Memory: !Ref HeavyRunJobMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt DagsterTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt DagsterTaskRole.Arn
+      EphemeralStorage:
+        SizeInGiB: 200
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: Profile
+          Value: heavy
+        - Key: CreatedBy
+          Value: CloudFormation
+      ContainerDefinitions:
+        - Name: dagster-run
+          Image: !Sub ${ECRRepositoryUrl}:${ECRImageTag}
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DagsterLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: run-heavy
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: DAGSTER_HOME
+              Value: /app/dagster_home
+            - Name: DAGSTER_POSTGRES_HOST
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:host}}"
+            - Name: DAGSTER_POSTGRES_PORT
+              Value: "5432"
+            - Name: DAGSTER_POSTGRES_USER
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:username}}"
+            - Name: DAGSTER_POSTGRES_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:robosystems/${Environment}/postgres:SecretString:password}}"
+            - Name: DAGSTER_POSTGRES_DB
+              Value: dagster
+            - Name: VALKEY_URL
+              Value: !Ref ValkeyUrl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: SHARED_RAW_BUCKET
+              Value: !Select [5, !Split [":", !Ref SharedRawBucketArn]]
+            - Name: SHARED_PROCESSED_BUCKET
+              Value: !Select [5, !Split [":", !Ref SharedProcessedBucketArn]]
+            - Name: USER_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref UserDataBucketArn]]
+            - Name: PUBLIC_DATA_BUCKET
+              Value: !Select [5, !Split [":", !Ref PublicDataBucketArn]]
+            - Name: DEPLOYMENT_BUCKET
+              Value: !Select [5, !Split [":", !Ref DeploymentBucketArn]]
+            - Name: LOGS_BUCKET
+              Value: !Select [5, !Split [":", !Ref LogsBucketArn]]
+            - Name: DAGSTER_COMPUTE_LOGS_BUCKET
+              Value: !Select [5, !Split [":", !Ref LogsBucketArn]]
+            - Name: PUBLIC_DATA_CDN_URL
+              Value: !Ref PublicDataCDNURL
             - Name: DAGSTER_MAX_CONCURRENT_RUNS
               Value: !Ref MaxConcurrentRuns
 
@@ -905,11 +1204,30 @@ Outputs:
     Export:
       Name: !Sub ${AWS::StackName}-SecurityGroupId
 
-  RunJobTaskDefinitionArn:
-    Description: ARN of the run job task definition (for EcsRunLauncher)
-    Value: !GetAtt RunJobTaskDefinition.TaskDefinitionArn
+  # Run Job Profile Task Definitions
+  LightRunJobTaskDefinitionArn:
+    Description: ARN of the light run job task definition (default - 0.5 vCPU, 2 GB)
+    Value: !GetAtt LightRunJobTaskDefinition.TaskDefinitionArn
     Export:
-      Name: !Sub ${AWS::StackName}-RunJobTaskDefinition
+      Name: !Sub ${AWS::StackName}-LightRunJobTaskDefinition
+
+  StandardRunJobTaskDefinitionArn:
+    Description: ARN of the standard run job task definition (2 vCPU, 8 GB)
+    Value: !GetAtt StandardRunJobTaskDefinition.TaskDefinitionArn
+    Export:
+      Name: !Sub ${AWS::StackName}-StandardRunJobTaskDefinition
+
+  ComputeRunJobTaskDefinitionArn:
+    Description: ARN of the compute run job task definition (4 vCPU, 16 GB)
+    Value: !GetAtt ComputeRunJobTaskDefinition.TaskDefinitionArn
+    Export:
+      Name: !Sub ${AWS::StackName}-ComputeRunJobTaskDefinition
+
+  HeavyRunJobTaskDefinitionArn:
+    Description: ARN of the heavy run job task definition (16 vCPU, 64 GB)
+    Value: !GetAtt HeavyRunJobTaskDefinition.TaskDefinitionArn
+    Export:
+      Name: !Sub ${AWS::StackName}-HeavyRunJobTaskDefinition
 
   DaemonServiceArn:
     Description: ARN of the Dagster daemon ECS service

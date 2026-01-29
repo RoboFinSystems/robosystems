@@ -213,13 +213,13 @@ production:
 
       # Instance configuration
       instance:
-        type: r7g.xlarge # 32GB RAM for faster SEC data loading
+        type: r7g.2xlarge # 64GB RAM - required for large Fact table staging without dedup
         databases_per_instance: 1 # One repository per instance (SEC gets dedicated instance)
         # Note: Major repositories like SEC get dedicated instances for performance
 
         # Memory configuration
-        max_memory_mb: 30720 # 30GB available for repository
-        memory_per_db_mb: 30720 # Full instance memory for single repository
+        max_memory_mb: 61440 # 60GB available for repository
+        memory_per_db_mb: 61440 # Full instance memory for single repository
 
         # LadybugDB-specific performance settings (optimized for read-heavy analytical queries)
         chunk_size: 2500 # Large chunks for bulk operations
@@ -228,11 +228,11 @@ production:
         ingestion_batch_size: 10000 # Fast bulk loading for public data updates
         connection_pool_size: 100 # High concurrency - many users accessing public data
 
-        # DuckDB staging configuration (SEC needs large memory for Element/Label tables)
-        # NOTE: Element/Fact table staging requires ~20-25GB during peak operations
-        # Instance has 32GB total, staging uses ~40% at 20GB limit, so 26GB is safe
-        duckdb_memory_limit: "26GB" # Increased from 20GB for Element/Fact table OOM fix
-        duckdb_max_threads: 2 # Reduced from 4 to lower peak memory during window functions
+        # DuckDB staging configuration
+        # Fact table cannot be deduplicated and requires substantial memory
+        # Instance has 64GB total, allocate 50GB to DuckDB leaving 14GB for OS + LadybugDB
+        duckdb_memory_limit: "50GB"
+        duckdb_max_threads: 4 # r7g.2xlarge = 8 vCPU, use 4 for DuckDB
 
       # Deployment configuration
       deployment:
