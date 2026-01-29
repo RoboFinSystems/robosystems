@@ -97,12 +97,12 @@ LARGE_STAGING_TABLES = frozenset(
 # Tables safe to chunk by quarter (unique per filing, no cross-quarter duplicates)
 # These tables have data that is specific to individual filings, so loading
 # quarter-by-quarter won't create duplicates.
-# Note: FactSet excluded - only 1 per report, small table, no chunking needed.
+# Note: FactSet/REPORT_HAS_FACT_SET excluded - only 1 per report, small tables.
 QUARTER_CHUNKABLE_TABLES = frozenset(
   {
     # Fact nodes (high volume, benefit from chunking)
-    "Fact",  # Facts are unique per filing (100s per report)
-    "FactDimension",  # Dimensional breakdowns are per-fact
+    "Fact",  # ~1B rows - unique per filing
+    "FactDimension",  # ~76M rows - dimensional breakdowns per-fact
     # Fact relationships (all per-fact, safe to chunk)
     "REPORT_HAS_FACT",  # Report -> Fact
     "FACT_HAS_ELEMENT",  # Fact -> Element
@@ -111,9 +111,18 @@ QUARTER_CHUNKABLE_TABLES = frozenset(
     "FACT_HAS_UNIT",  # Fact -> Unit
     "FACT_HAS_DIMENSION",  # Fact -> FactDimension
     "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
-    "FACT_DIMENSION_MEMBER_ELEMENT",  # FactDimension -> Element (member)
-    "FACT_SET_CONTAINS_FACT",  # FactSet -> Fact
+    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - FactDimension -> Element (member)
+    "FACT_SET_CONTAINS_FACT",  # ~987M rows - FactSet -> Fact
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
+    # Structure and Association nodes (filing-specific, not shared across filings)
+    # Structure ID includes accession_number, Association ID is random UUID
+    "Structure",  # ~7M rows - per-filing presentation/calculation structures
+    "Association",  # ~206M rows - per-filing element relationships
+    # Structure/Association relationships
+    "STRUCTURE_HAS_TAXONOMY",  # Structure -> Taxonomy
+    "STRUCTURE_HAS_ASSOCIATION",  # ~200M rows - Structure -> Association
+    "ASSOCIATION_HAS_FROM_ELEMENT",  # ~206M rows - Association -> Element (parent)
+    "ASSOCIATION_HAS_TO_ELEMENT",  # ~206M rows - Association -> Element (child)
   }
 )
 
@@ -121,8 +130,7 @@ QUARTER_CHUNKABLE_TABLES = frozenset(
 # These tables have data shared across many filings. Chunking would create
 # duplicates because the same Element/Label appears in multiple quarters.
 # Must be loaded in a single pass with deduplication.
-# - Element, Label: Shared XBRL taxonomy elements
-# - Association: Shared taxonomy relationships
+# - Element, Label: Shared XBRL taxonomy elements (same us-gaap:Revenue across filings)
 # - ELEMENT_HAS_LABEL, TAXONOMY_HAS_LABEL: Shared element-label mappings
 
 # Taxonomy structure tables that can be skipped for instance-only mode
