@@ -534,6 +534,7 @@ class SECPipeline:
       # Clear S3 if requested
       if clear_s3:
         self._clear_s3_buckets()
+        self._clear_source_files()
 
       return True
 
@@ -573,6 +574,29 @@ class SECPipeline:
           logger.debug(f"    Bucket doesn't exist: {bucket}")
       except Exception as e:
         logger.warning(f"    Error clearing {bucket}/{prefix}/: {e}")
+
+  def _clear_source_files(self):
+    """Clear SourceFile records for SEC graph.
+
+    This keeps PostgreSQL tracking in sync with S3 when buckets are cleared.
+    Without this, stale SourceFile records would prevent reprocessing.
+    """
+    from robosystems.database import SessionFactory
+    from robosystems.models.iam import SourceFile
+
+    logger.info("  Clearing SEC SourceFile records...")
+    try:
+      session = SessionFactory()
+      try:
+        deleted = (
+          session.query(SourceFile).filter(SourceFile.graph_id == "sec").delete()
+        )
+        session.commit()
+        logger.info(f"    Cleared {deleted} SourceFile records")
+      finally:
+        session.close()
+    except Exception as e:
+      logger.warning(f"    Error clearing SourceFile records: {e}")
 
   def _run_quarterly_batch_processing(self) -> StageResult | None:
     """Trigger quarterly batch processing for all quarters with pending SourceFiles.

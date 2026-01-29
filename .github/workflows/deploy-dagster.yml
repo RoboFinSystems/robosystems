@@ -65,17 +65,11 @@ on:
         required: false
         type: string
         default: "1024"
-      # Run Job Configuration (for EcsRunLauncher)
-      run_job_cpu:
-        description: "CPU units for Dagster run jobs"
-        required: false
-        type: string
-        default: "1024"
-      run_job_memory:
-        description: "Memory in MiB for Dagster run jobs"
-        required: false
-        type: string
-        default: "4096"
+      # Run Job Profiles are hardcoded (profile name = fixed resources):
+      # - Light:    512 CPU,  2048 MB (0.5 vCPU, 2 GB)  - sensors, simple jobs
+      # - Standard: 2048 CPU, 8192 MB (2 vCPU, 8 GB)    - moderate ETL
+      # - Compute:  4096 CPU, 16384 MB (4 vCPU, 16 GB)  - SEC daily processing
+      # - Heavy:    16384 CPU, 65536 MB (16 vCPU, 64 GB) - SEC backfills
       max_concurrent_runs:
         description: "Maximum concurrent Dagster runs (QueuedRunCoordinator)"
         required: false
@@ -231,8 +225,14 @@ jobs:
                 ParameterKey=DaemonMemory,ParameterValue=${{ inputs.daemon_memory }} \
                 ParameterKey=WebserverCpu,ParameterValue=${{ inputs.webserver_cpu }} \
                 ParameterKey=WebserverMemory,ParameterValue=${{ inputs.webserver_memory }} \
-                ParameterKey=RunJobCpu,ParameterValue=${{ inputs.run_job_cpu }} \
-                ParameterKey=RunJobMemory,ParameterValue=${{ inputs.run_job_memory }} \
+                ParameterKey=LightRunJobCpu,ParameterValue=512 \
+                ParameterKey=LightRunJobMemory,ParameterValue=2048 \
+                ParameterKey=StandardRunJobCpu,ParameterValue=2048 \
+                ParameterKey=StandardRunJobMemory,ParameterValue=8192 \
+                ParameterKey=ComputeRunJobCpu,ParameterValue=4096 \
+                ParameterKey=ComputeRunJobMemory,ParameterValue=16384 \
+                ParameterKey=HeavyRunJobCpu,ParameterValue=16384 \
+                ParameterKey=HeavyRunJobMemory,ParameterValue=65536 \
                 ParameterKey=MaxConcurrentRuns,ParameterValue=${{ inputs.max_concurrent_runs }} \
                 ParameterKey=DaemonFargateWeight,ParameterValue=${{ inputs.daemon_fargate_weight }} \
                 ParameterKey=DaemonFargateSpotWeight,ParameterValue=${{ inputs.daemon_fargate_spot_weight }} \

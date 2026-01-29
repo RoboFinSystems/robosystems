@@ -384,15 +384,6 @@ class EnvConfig:
   # Format: http://internal-robosystems-shared-{env}.{region}.elb.amazonaws.com:8001
   SHARED_REPLICA_ALB_URL = get_str_env("SHARED_REPLICA_ALB_URL", "")
 
-  # SEC batch processing configuration
-  # Each job processes up to batch_limit filings then exits; sensor triggers next batch
-  # Lower = better memory isolation, more Dagster runs
-  # Higher = fewer runs, but more memory accumulation per container
-  SEC_PROCESS_BATCH_LIMIT = get_int_env(
-    "SEC_PROCESS_BATCH_LIMIT",
-    int(get_secret_value("SEC_PROCESS_BATCH_LIMIT", "500")),
-  )
-
   # SEC download schedule: daily fetch of new filings
   SEC_DOWNLOAD_SCHEDULE_ENABLED = get_bool_env(
     "SEC_DOWNLOAD_SCHEDULE_ENABLED",

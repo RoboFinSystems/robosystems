@@ -125,7 +125,6 @@ function create_production_secret() {
         "CONNECTION_PLAID_ENABLED": "false",
 
         "SHARED_MASTER_READS_ENABLED": "true",
-        "SEC_PROCESS_BATCH_LIMIT": "500",
         "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
         "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
         "SEC_PARALLEL_SENSOR_ENABLED": "false",
@@ -223,7 +222,6 @@ function create_staging_secret() {
         "CONNECTION_PLAID_ENABLED": "false",
 
         "SHARED_MASTER_READS_ENABLED": "true",
-        "SEC_PROCESS_BATCH_LIMIT": "500",
         "SEC_DOWNLOAD_SCHEDULE_ENABLED": "false",
         "SEC_MATERIALIZE_SCHEDULE_ENABLED": "false",
         "SEC_PARALLEL_SENSOR_ENABLED": "false",

@@ -165,10 +165,10 @@ all_jobs = [
   materialize_graph_job,
   # SEC pipeline jobs
   sec_download_job,  # Download raw filings to S3
-  sec_process_job,  # Per-filing processing (sensor-triggered)
-  sec_stage_job,  # Stage to persistent DuckDB (full or incremental mode)
-  sec_materialize_job,  # Materialize from DuckDB to LadybugDB (retry-safe)
-  sec_staged_materialize_job,  # Full pipeline: stage + materialize
+  sec_process_job,  # Process quarter's filings (heavy profile: 16 vCPU, 64 GB for 10k batch)
+  sec_stage_job,  # Stage to persistent DuckDB (standard profile: 2 vCPU, 8 GB)
+  sec_materialize_job,  # Materialize from DuckDB to LadybugDB (standard profile)
+  sec_staged_materialize_job,  # Full pipeline: stage + materialize (standard profile)
   # Shared repository jobs
   shared_repository_snapshot_job,  # Full: snapshot + update template + refresh replicas
   shared_repository_snapshot_only_job,  # Snapshot only (no replica refresh)
