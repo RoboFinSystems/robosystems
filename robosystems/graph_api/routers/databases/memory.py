@@ -108,8 +108,9 @@ async def boost_memory(
           duckdb_boost_mb = int(result[:-2]) * 1024
         elif result.endswith("MB"):
           duckdb_boost_mb = int(result[:-2])
-      except (ValueError, AttributeError):
-        pass
+      except (ValueError, AttributeError) as e:
+        # Non-fatal: boost succeeded but we couldn't parse the size for response
+        logger.warning(f"Could not parse DuckDB boost value '{result}': {e}")
       logger.info(f"DuckDB memory boosted to {result} for {graph_id}")
     else:
       # Already boosted or no boost configured
