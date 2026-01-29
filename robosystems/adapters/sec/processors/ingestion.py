@@ -75,11 +75,12 @@ LARGE_MATERIALIZATION_TIMEOUT = 1800  # 30 minutes
 LARGE_STAGING_TABLES = frozenset(
   {
     # Large node tables
-    "Fact",  # 100M+ rows (hundreds of facts per filing)
-    "Label",  # 6M+ rows (multiple labels per element)
-    "Element",  # 10M+ rows (all XBRL elements across taxonomies)
-    "FactDimension",  # Dimensional breakdowns of facts
-    "Association",  # XBRL associations (millions of rows)
+    "Fact",  # ~1B rows (hundreds of facts per filing)
+    "Label",  # ~6M rows (multiple labels per element)
+    "Element",  # ~10M rows (all XBRL elements across taxonomies)
+    "FactDimension",  # ~76M rows - Dimensional breakdowns of facts
+    "Association",  # ~206M rows - XBRL associations
+    "Structure",  # ~7M rows - Presentation/calculation structures
     # Large relationship tables (fact-related)
     "REPORT_HAS_FACT",  # Report -> Fact (1:many)
     "FACT_HAS_ELEMENT",  # Fact -> Element (high cardinality)
@@ -88,9 +89,16 @@ LARGE_STAGING_TABLES = frozenset(
     "FACT_HAS_UNIT",  # Fact -> Unit
     "FACT_HAS_DIMENSION",  # Fact -> FactDimension
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
+    "FACT_SET_CONTAINS_FACT",  # ~987M rows - FactSet -> Fact
+    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - FactDimension -> Element
+    "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
     # Large relationship tables (shared reference)
-    "ELEMENT_HAS_LABEL",  # Links Element to Label (6M+ labels)
-    "TAXONOMY_HAS_LABEL",  # Links Taxonomy to Label
+    "ELEMENT_HAS_LABEL",  # ~34M rows - Element to Label
+    "TAXONOMY_HAS_LABEL",  # ~106M rows - Taxonomy to Label
+    # Large relationship tables (structure/association)
+    "STRUCTURE_HAS_ASSOCIATION",  # ~200M rows - Structure -> Association
+    "ASSOCIATION_HAS_FROM_ELEMENT",  # ~206M rows - Association -> Element
+    "ASSOCIATION_HAS_TO_ELEMENT",  # ~206M rows - Association -> Element
   }
 )
 
