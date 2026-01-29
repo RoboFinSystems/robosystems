@@ -229,9 +229,10 @@ production:
         connection_pool_size: 100 # High concurrency - many users accessing public data
 
         # DuckDB staging configuration (SEC needs large memory for Element/Label tables)
-        # NOTE: Element table staging requires ~15-20GB during peak operations
-        duckdb_memory_limit: "20GB" # Increased from 12GB for Element table OOM fix
-        duckdb_max_threads: 4 # Match vCPU count (r7g.xlarge = 4 vCPU)
+        # NOTE: Element/Fact table staging requires ~20-25GB during peak operations
+        # Instance has 32GB total, staging uses ~40% at 20GB limit, so 26GB is safe
+        duckdb_memory_limit: "26GB" # Increased from 20GB for Element/Fact table OOM fix
+        duckdb_max_threads: 2 # Reduced from 4 to lower peak memory during window functions
 
       # Deployment configuration
       deployment:
