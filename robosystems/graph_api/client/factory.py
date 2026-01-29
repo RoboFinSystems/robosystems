@@ -1052,7 +1052,7 @@ async def boost_graph_memory(graph_id: str, target: str = "both") -> dict[str, A
   client = await get_graph_client(graph_id, operation_type="write")
 
   try:
-    response = await client._client.post(
+    response = await client.client.post(
       f"/databases/{graph_id}/memory/boost",
       json={"target": target},
       timeout=30.0,
@@ -1094,7 +1094,7 @@ async def restore_graph_memory(graph_id: str) -> dict[str, Any]:
   client = await get_graph_client(graph_id, operation_type="write")
 
   try:
-    response = await client._client.post(
+    response = await client.client.post(
       f"/databases/{graph_id}/memory/restore",
       timeout=30.0,
     )
