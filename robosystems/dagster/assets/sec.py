@@ -332,6 +332,7 @@ class SECStageConfig(Config):
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Optional year filter
   reset_staging: bool = False  # Clear all DuckDB tables first (use True if schema changed or DuckDB corrupted)
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables (Association, Structure, TAXONOMY_HAS_*, etc.) to reduce storage
 
 
 class SECMaterializeConfig(Config):
@@ -345,10 +346,13 @@ class SECMaterializeConfig(Config):
     rebuild_graph: If True, delete and recreate the LadybugDB database
                    with the roboledger SEC schema before materializing.
                    DuckDB staging is preserved for retry. (default: False)
+    skip_taxonomy_relationships: If True, skip materializing taxonomy structure
+                                 tables (Association, Structure, TAXONOMY_HAS_*, etc.)
   """
 
   graph_id: str = "sec"  # Target graph ID
   rebuild_graph: bool = False  # Rebuild LadybugDB before materialization
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables to reduce storage
 
 
 # ============================================================================
@@ -1740,6 +1744,7 @@ def sec_duckdb_staged(
     result = await processor.stage_to_duckdb(
       year=config.year,
       reset_staging=config.reset_staging,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       progress_callback=dagster_progress,
     )
     return result
@@ -1834,6 +1839,7 @@ def sec_graph_materialized(
   async def run_materialization():
     result = await processor.materialize_from_duckdb(
       rebuild=config.rebuild_graph,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
       progress_callback=dagster_progress,
     )
     return result

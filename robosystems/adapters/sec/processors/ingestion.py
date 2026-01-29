@@ -97,12 +97,12 @@ LARGE_STAGING_TABLES = frozenset(
 # Tables safe to chunk by quarter (unique per filing, no cross-quarter duplicates)
 # These tables have data that is specific to individual filings, so loading
 # quarter-by-quarter won't create duplicates.
+# Note: FactSet excluded - only 1 per report, small table, no chunking needed.
 QUARTER_CHUNKABLE_TABLES = frozenset(
   {
-    # Fact nodes
-    "Fact",  # Facts are unique per filing
+    # Fact nodes (high volume, benefit from chunking)
+    "Fact",  # Facts are unique per filing (100s per report)
     "FactDimension",  # Dimensional breakdowns are per-fact
-    "FactSet",  # Fact groupings are per-report
     # Fact relationships (all per-fact, safe to chunk)
     "REPORT_HAS_FACT",  # Report -> Fact
     "FACT_HAS_ELEMENT",  # Fact -> Element
@@ -113,7 +113,6 @@ QUARTER_CHUNKABLE_TABLES = frozenset(
     "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
     "FACT_DIMENSION_MEMBER_ELEMENT",  # FactDimension -> Element (member)
     "FACT_SET_CONTAINS_FACT",  # FactSet -> Fact
-    "REPORT_HAS_FACT_SET",  # Report -> FactSet
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
   }
 )
@@ -125,6 +124,34 @@ QUARTER_CHUNKABLE_TABLES = frozenset(
 # - Element, Label: Shared XBRL taxonomy elements
 # - Association: Shared taxonomy relationships
 # - ELEMENT_HAS_LABEL, TAXONOMY_HAS_LABEL: Shared element-label mappings
+
+# Taxonomy structure tables that can be skipped for instance-only mode
+# These encode XBRL taxonomy hierarchy (calculation/presentation/definition linkbases)
+# which are massive but not needed for basic fact analysis queries.
+# Skipping these allows more historical data to fit in the same storage budget.
+TAXONOMY_STRUCTURE_TABLES = frozenset(
+  {
+    # Structure nodes (XBRL presentation/calculation/definition trees)
+    "Structure",  # XBRL presentation/calculation structures
+    # Association nodes (element-to-element relationships - MASSIVE, larger than Facts)
+    "Association",
+    # Structure relationships
+    "STRUCTURE_HAS_TAXONOMY",  # Structure -> Taxonomy
+    "STRUCTURE_HAS_ASSOCIATION",  # Structure -> Association
+    "STRUCTURE_HAS_CHILD",  # Structure tree hierarchy
+    "STRUCTURE_HAS_PARENT",  # Structure tree hierarchy
+    # Association relationships (the real storage hogs)
+    "ASSOCIATION_HAS_FROM_ELEMENT",  # Association -> Element (source)
+    "ASSOCIATION_HAS_TO_ELEMENT",  # Association -> Element (target)
+  }
+)
+
+# Tables kept even in instance-only mode (critical for fact exploration):
+# - Taxonomy: Single node per report (small)
+# - TAXONOMY_HAS_ELEMENT: Links taxonomy to elements (needed for element context)
+# - Element: What each fact represents (us-gaap:Revenue, etc.)
+# - Label: Human-readable element names
+# - ELEMENT_HAS_LABEL: Links Element to Label
 
 
 def _get_staging_timeout(table_name: str) -> int:
@@ -235,6 +262,7 @@ class XBRLDuckDBGraphProcessor:
     self,
     year: int | None = None,
     reset_staging: bool = False,
+    skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
@@ -349,6 +377,22 @@ class XBRLDuckDBGraphProcessor:
           RoboLedgerContext.SEC_REPOSITORY
         )
         logger.info(f"Schema defines {len(tables_by_type)} tables to stage")
+
+        # Filter out taxonomy structure tables if requested (instance-only mode)
+        if skip_taxonomy_relationships:
+          original_count = len(tables_by_type)
+          tables_by_type = {
+            name: entity_type
+            for name, entity_type in tables_by_type.items()
+            if name not in TAXONOMY_STRUCTURE_TABLES
+          }
+          skipped_count = original_count - len(tables_by_type)
+          log_progress(
+            f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
+            f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
+          )
+          logger.info(f"After filtering: {len(tables_by_type)} tables to stage")
+
         # With glob, we don't know file count upfront - DuckDB will discover files
         total_files = 0
       else:
@@ -365,6 +409,21 @@ class XBRLDuckDBGraphProcessor:
           )
 
         logger.info(f"Found {len(tables_info)} tables to stage")
+
+        # Filter out taxonomy structure tables if requested (instance-only mode)
+        if skip_taxonomy_relationships:
+          original_count = len(tables_info)
+          tables_info = {
+            name: files
+            for name, files in tables_info.items()
+            if name not in TAXONOMY_STRUCTURE_TABLES
+          }
+          skipped_count = original_count - len(tables_info)
+          log_progress(
+            f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
+            f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
+          )
+          logger.info(f"After filtering: {len(tables_info)} tables to stage")
         total_files = sum(len(files) for files in tables_info.values())
         logger.info(f"Total files: {total_files}")
 
@@ -427,6 +486,7 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_names: list[str] | None = None,
     rebuild: bool = False,
+    skip_taxonomy_relationships: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> MaterializeResult:
     """
@@ -449,6 +509,8 @@ class XBRLDuckDBGraphProcessor:
         rebuild: If True, delete and recreate the LadybugDB database with
                  the roboledger SEC schema before materializing.
                  DuckDB staging is preserved for retry scenarios.
+        skip_taxonomy_relationships: If True, skip materializing taxonomy structure
+                     tables (Association, Structure, TAXONOMY_HAS_*, etc.) to reduce storage.
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
             Called with message strings during per-table materialization.
 
@@ -474,6 +536,17 @@ class XBRLDuckDBGraphProcessor:
         )
         table_names = list(tables_by_type.keys())
         logger.info(f"Schema defines {len(table_names)} tables to materialize")
+
+      # Filter out taxonomy structure tables if requested (instance-only mode)
+      if skip_taxonomy_relationships:
+        original_count = len(table_names)
+        table_names = [t for t in table_names if t not in TAXONOMY_STRUCTURE_TABLES]
+        skipped_count = original_count - len(table_names)
+        log_progress(
+          f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
+          f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
+        )
+        logger.info(f"After filtering: {len(table_names)} tables to materialize")
 
       if not table_names:
         logger.warning("No tables to materialize")
