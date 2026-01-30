@@ -324,6 +324,15 @@ class DuckDBTableManager:
         count_result = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         row_count = count_result[0] if count_result else 0
 
+        # Checkpoint to flush WAL and clear state after large table creation.
+        # This is important for chunked ingestion where CREATE is followed by INSERTs.
+        try:
+          conn.execute("CHECKPOINT")
+          logger.debug(f"Checkpointed DuckDB after CREATE {request.table_name}")
+        except Exception as cp_err:
+          # Non-fatal - log but continue
+          logger.warning(f"Could not checkpoint after CREATE: {cp_err}")
+
         execution_time_ms = (time.time() - start_time) * 1000
 
         logger.info(
@@ -487,6 +496,18 @@ class DuckDBTableManager:
         count_after = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
         rows_after = count_after[0] if count_after else 0
         rows_added = rows_after - rows_before
+
+        # CRITICAL: Checkpoint to flush WAL and clear accumulated state.
+        # Without this, chunked ingestion (multiple INSERTs in sequence) causes
+        # WAL growth and connection state accumulation that eventually stalls.
+        # This is especially important for large tables like Association (~200M rows)
+        # where 17 sequential INSERTs would otherwise accumulate significant state.
+        try:
+          conn.execute("CHECKPOINT")
+          logger.debug(f"Checkpointed DuckDB after INSERT into {request.table_name}")
+        except Exception as cp_err:
+          # Non-fatal - log but continue
+          logger.warning(f"Could not checkpoint after INSERT: {cp_err}")
 
         execution_time_ms = (time.time() - start_time) * 1000
 

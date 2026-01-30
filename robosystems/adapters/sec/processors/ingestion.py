@@ -1076,15 +1076,17 @@ class XBRLDuckDBGraphProcessor:
     total_tables: int,
   ) -> tuple[bool, TableInfo | None, str | None]:
     """
-    Stage a large table by loading one quarter at a time to reduce memory pressure.
+    Stage a large table using parallel chunk loading + final merge pattern.
 
-    For tables like Fact (100M+ rows), loading all data at once can exceed memory.
-    This method chunks the load by quarter:
-    - First quarter: CREATE TABLE (with deduplication)
-    - Subsequent quarters: INSERT INTO (merge + dedupe incrementally)
+    For tables like Fact (100M+ rows), this approach:
+    1. Loads each quarter into a separate chunk table (no cross-quarter dedupe needed)
+    2. Merges all chunks with deduplication into the final table
+    3. Cleans up chunk tables
 
-    Both operations use ROW_NUMBER() OVER (PARTITION BY identifier) for deduplication,
-    so the final table is always deduplicated regardless of how many quarters are loaded.
+    This is more efficient than incremental INSERT because:
+    - Each chunk load is O(chunk_size), not O(accumulated_size)
+    - Final merge is identical to full (non-chunked) ingest - one pass over all data
+    - No repeated DROP/RENAME cycles that can cause connection state issues
 
     Args:
         table_name: Name of the table to stage
@@ -1098,90 +1100,76 @@ class XBRLDuckDBGraphProcessor:
     Returns:
         Tuple of (success, TableInfo or None, error message or None)
     """
-    # Use chunked timeout since we're processing quarter-by-quarter, not the full table
     timeout = CHUNKED_STAGING_TIMEOUT
-    total_rows = 0
+    chunk_tables: list[str] = []
+    chunk_row_counts: dict[str, int] = {}
     total_duration = 0.0
     quarter_list = list(quarters.keys())
 
     log_progress(
       f"[{table_index}/{total_tables}] Staging {table_name} by quarter "
-      f"({len(quarter_list)} quarters)..."
+      f"({len(quarter_list)} quarters, chunk+merge)..."
     )
 
+    # Phase 1: Load each quarter into a separate chunk table
     for q_idx, quarter_key in enumerate(quarter_list):
-      # Use actual discovered dates for this quarter (not regenerated quarter-end dates)
-      # This handles both quarterly partitions (filed=2024-03-31) and daily (filed=2026-01-02)
       actual_dates = quarters[quarter_key]
+      # Chunk table name: Association_chunk_2024_Q1
+      chunk_name = f"{table_name}_chunk_{quarter_key.replace('-', '_')}"
 
-      # Build S3 patterns for each actual date in this quarter
       s3_patterns = [
         f"s3://{self.bucket}/{self.source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
         for date in actual_dates
       ]
 
-      is_first = q_idx == 0
-      operation = "CREATE" if is_first else "INSERT"
-
       log_progress(
-        f"  [{quarter_key}] {operation} {table_name} "
-        f"(quarter {q_idx + 1}/{len(quarter_list)})..."
+        f"  [{quarter_key}] Loading chunk {q_idx + 1}/{len(quarter_list)}..."
       )
 
-      # Retry logic per-quarter (not per-table) so failures resume from current quarter
-      quarter_success = False
-      last_quarter_error = None
+      # Retry logic for this chunk
+      chunk_success = False
+      last_error = None
 
       for attempt in range(STAGING_MAX_RETRIES):
         try:
-          if is_first:
-            # First quarter: CREATE TABLE
-            response = await graph_client.create_table(
-              graph_id=self.graph_id,
-              table_name=table_name,
-              s3_pattern=s3_patterns,  # List of patterns for the quarter
-              timeout=timeout,
-            )
-          else:
-            # Subsequent quarters: INSERT INTO (append)
-            response = await graph_client.insert_into_table(
-              graph_id=self.graph_id,
-              table_name=table_name,
-              s3_pattern=s3_patterns,
-              timeout=timeout,
-            )
+          response = await graph_client.create_table(
+            graph_id=self.graph_id,
+            table_name=chunk_name,
+            s3_pattern=s3_patterns,
+            timeout=timeout,
+          )
 
           if response.get("status") == "failed":
             error = response.get("error", "Unknown error")
             if "No files found" in error:
-              # No data for this quarter - that's OK, continue
               log_progress(f"  [{quarter_key}] No files (skipped)")
-              quarter_success = True
+              chunk_success = True
               break
-            last_quarter_error = error
+            last_error = error
             raise RuntimeError(error)
 
           result = response.get("result", {})
-          duration = response.get("duration_seconds", result.get("duration_seconds", 0))
           row_count = result.get("row_count", 0)
-          total_rows += row_count
+          duration = response.get("duration_seconds", result.get("duration_seconds", 0))
           total_duration += duration
 
           log_progress(
-            f"  [{quarter_key}] {row_count:,} rows in {duration:.1f}s "
-            f"(cumulative: {total_rows:,})"
+            f"  [{quarter_key}] Loaded {row_count:,} rows in {duration:.1f}s"
           )
-          quarter_success = True
-          break  # Success, move to next quarter
+
+          chunk_tables.append(chunk_name)
+          chunk_row_counts[chunk_name] = row_count
+          chunk_success = True
+          break
 
         except Exception as e:
           error_str = str(e)
           if "No files found" in error_str:
             log_progress(f"  [{quarter_key}] No files (skipped)")
-            quarter_success = True
+            chunk_success = True
             break
 
-          last_quarter_error = error_str
+          last_error = error_str
           if attempt < STAGING_MAX_RETRIES - 1:
             backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
             log_progress(
@@ -1194,24 +1182,142 @@ class XBRLDuckDBGraphProcessor:
               f"  [{quarter_key}] Failed after {STAGING_MAX_RETRIES} attempts: {error_str[:200]}"
             )
 
-      if not quarter_success:
-        return False, None, f"Quarter {quarter_key}: {last_quarter_error}"
+      if not chunk_success:
+        # Cleanup any created chunk tables before returning
+        await self._cleanup_chunk_tables(graph_client, chunk_tables, log_progress)
+        return False, None, f"Failed to load chunk {quarter_key}: {last_error}"
+
+    # Phase 2: Merge all chunks with deduplication
+    if not chunk_tables:
+      log_progress("  [MERGE] No chunks to merge (all quarters empty)")
+      return (
+        True,
+        TableInfo(
+          name=table_name,
+          row_count=0,
+          file_count=0,
+          staged_at=datetime.now(UTC).isoformat(),
+        ),
+        None,
+      )
+
+    total_chunk_rows = sum(chunk_row_counts.values())
+    log_progress(
+      f"  [MERGE] Merging {len(chunk_tables)} chunks ({total_chunk_rows:,} rows) with dedupe..."
+    )
+
+    # Build merge SQL - same pattern as full ingest uses
+    # Dedupe columns depend on table type: nodes use 'identifier', relationships use 'src, dst'
+    if entity_type == "nodes":
+      dedupe_columns = "identifier"
+    else:
+      # Relationships - columns are already renamed to src/dst by create_table
+      dedupe_columns = "src, dst"
+
+    union_parts = " UNION ALL ".join(f'SELECT * FROM "{t}"' for t in chunk_tables)
+    merge_sql = f"""
+      CREATE OR REPLACE TABLE "{table_name}" AS
+      SELECT * EXCLUDE (rn)
+      FROM (
+        SELECT *, ROW_NUMBER() OVER (PARTITION BY {dedupe_columns} ORDER BY {dedupe_columns}) AS rn
+        FROM ({union_parts})
+      )
+      WHERE rn = 1
+    """
+
+    # Retry logic for merge
+    merge_success = False
+    last_merge_error = None
+    final_row_count = 0
+
+    # Merge timeout: 30 minutes for 200M+ row UNION ALL + dedupe
+    # This is longer than chunk timeout since it processes all data at once
+    merge_timeout = 1800.0  # 30 minutes
+
+    for attempt in range(STAGING_MAX_RETRIES):
+      try:
+        # Use longer timeout for merge - it's processing all data at once
+        merge_start = asyncio.get_event_loop().time()
+        await graph_client.query_table(
+          graph_id=self.graph_id,
+          sql=merge_sql,
+          timeout=merge_timeout,
+        )
+        merge_duration = asyncio.get_event_loop().time() - merge_start
+        total_duration += merge_duration
+
+        # Get final row count (short timeout is fine for COUNT)
+        count_response = await graph_client.query_table(
+          graph_id=self.graph_id,
+          sql=f'SELECT COUNT(*) as cnt FROM "{table_name}"',
+          timeout=60.0,  # 1 minute is plenty for COUNT(*)
+        )
+        if count_response.get("rows") and count_response["rows"][0]:
+          final_row_count = count_response["rows"][0][0]
+
+        log_progress(
+          f"  [MERGE] Created {table_name}: {final_row_count:,} rows in {merge_duration:.1f}s"
+        )
+        merge_success = True
+        break
+
+      except Exception as e:
+        last_merge_error = str(e)
+        if attempt < STAGING_MAX_RETRIES - 1:
+          backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
+          log_progress(
+            f"  [MERGE] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {last_merge_error[:100]}. "
+            f"Retrying in {backoff}s..."
+          )
+          await asyncio.sleep(backoff)
+        else:
+          log_progress(
+            f"  [MERGE] Failed after {STAGING_MAX_RETRIES} attempts: {last_merge_error[:200]}"
+          )
+
+    # Phase 3: Cleanup chunk tables (regardless of merge success)
+    await self._cleanup_chunk_tables(graph_client, chunk_tables, log_progress)
+
+    if not merge_success:
+      return False, None, f"Failed to merge chunks: {last_merge_error}"
 
     log_progress(
       f"[{table_index}/{total_tables}] Staged {table_name}: "
-      f"{total_rows:,} rows in {total_duration:.1f}s (chunked by quarter)"
+      f"{final_row_count:,} rows in {total_duration:.1f}s (chunk+merge)"
     )
 
     return (
       True,
       TableInfo(
         name=table_name,
-        row_count=total_rows,
+        row_count=final_row_count,
         file_count=0,
         staged_at=datetime.now(UTC).isoformat(),
       ),
       None,
     )
+
+  async def _cleanup_chunk_tables(
+    self,
+    graph_client,
+    chunk_tables: list[str],
+    log_progress: Callable[[str], None],
+  ) -> None:
+    """Delete chunk tables after merge (best effort)."""
+    if not chunk_tables:
+      return
+
+    log_progress(f"  [CLEANUP] Deleting {len(chunk_tables)} chunk tables...")
+    deleted = 0
+    for chunk_name in chunk_tables:
+      try:
+        await graph_client.delete_table(self.graph_id, chunk_name)
+        deleted += 1
+      except Exception as e:
+        # Non-fatal - log and continue
+        logger.warning(f"Could not delete chunk table {chunk_name}: {e}")
+
+    log_progress(f"  [CLEANUP] Deleted {deleted}/{len(chunk_tables)} chunk tables")
 
   async def _create_duckdb_tables_with_glob(
     self,
