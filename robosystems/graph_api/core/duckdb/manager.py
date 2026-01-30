@@ -349,19 +349,19 @@ class DuckDBTableManager:
   @validate_table_name_decorator
   def insert_into_table(self, request: TableCreateRequest) -> TableCreateResponse:
     """
-    Insert data into an existing table from S3 files (incremental append).
+    Insert data into an existing table from S3 files with incremental deduplication.
 
-    This method appends new data to an existing DuckDB staging table using
-    INSERT INTO ... SELECT. Used for incremental ingestion where the table
-    already exists from a previous full staging.
+    This method merges new data with existing data and deduplicates using
+    ROW_NUMBER() OVER (PARTITION BY ...) - the same pattern as create_table().
 
-    Deduplication Note:
-    Unlike create_table(), this method does NOT deduplicate rows. This is
-    intentional because:
-    1. Filing-date partitions (filed=YYYY-MM-DD) ensure each filing is only
-       processed once per partition
-    2. The materialization step handles deduplication when ingesting to LadybugDB
-    3. For retry scenarios, the full staging (create_table) should be used
+    Deduplication Strategy:
+    1. UNION ALL existing table with new parquet data
+    2. Deduplicate on identifier (nodes) or from/to (relationships)
+    3. Replace original table with deduplicated result
+
+    This is more memory-efficient than post-staging deduplication because
+    each insert dedupes incrementally (e.g., 20M rows) rather than all at
+    once at the end (e.g., 900M rows).
 
     Prerequisites:
     - Table must already exist (created via create_table)
@@ -371,7 +371,7 @@ class DuckDBTableManager:
         request: TableCreateRequest with graph_id, table_name, and s3_pattern
 
     Returns:
-        TableCreateResponse with status and timing info
+        TableCreateResponse with status, timing info, and row_count (net rows added after dedupe)
 
     Raises:
         HTTPException: If table doesn't exist or insert fails
@@ -387,7 +387,7 @@ class DuckDBTableManager:
 
     logger.info(
       f"Inserting into table {request.table_name} for graph {request.graph_id} "
-      f"from {file_count} {'files' if is_list else ''}"
+      f"from {file_count} {'files' if is_list else ''} (with deduplication)"
     )
 
     pool = get_duckdb_pool()
@@ -395,40 +395,105 @@ class DuckDBTableManager:
     try:
       with pool.get_connection(request.graph_id) as conn:
         quoted_table = f'"{request.table_name}"'
+        temp_table = f'"{request.table_name}_insert_temp"'
 
-        # Build the INSERT INTO ... SELECT statement
-        # Using union_by_name=true to handle schema variations
+        # Count rows before merge
+        count_before = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
+        rows_before = count_before[0] if count_before else 0
+
+        # Detect table type from existing schema
+        probe_result = conn.execute(f"SELECT * FROM {quoted_table} LIMIT 0").description
+        column_names = [col[0] for col in probe_result]
+        has_identifier = "identifier" in column_names
+        has_from_to = "from" in column_names or (
+          "src" in column_names and "dst" in column_names
+        )
+
+        # Build parquet read expression
         if is_list:
           files_list = "[" + ", ".join(f"'{path}'" for path in request.s3_pattern) + "]"
-          sql = f"""
-            INSERT INTO {quoted_table}
-            SELECT * FROM read_parquet(
-              {files_list},
-              union_by_name=true,
-              hive_partitioning=false
-            )
-          """
-          conn.execute(sql)
+          parquet_read = (
+            f"read_parquet({files_list}, union_by_name=true, hive_partitioning=false)"
+          )
         else:
-          sql = f"""
-            INSERT INTO {quoted_table}
-            SELECT * FROM read_parquet(
-              ?,
-              union_by_name=true,
-              hive_partitioning=false
-            )
-          """
-          conn.execute(sql, [request.s3_pattern])
+          # For pattern, we need to use parameter binding differently
+          parquet_read = f"read_parquet('{request.s3_pattern}', union_by_name=true, hive_partitioning=false)"
 
-        # Count rows in the table after insert
-        count_result = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
-        row_count = count_result[0] if count_result else 0
+        # Build merge + dedupe SQL based on table type
+        if has_identifier:
+          # Node table: deduplicate on identifier
+          sql = f"""
+            CREATE OR REPLACE TABLE {temp_table} AS
+            SELECT * EXCLUDE (rn)
+            FROM (
+              SELECT *, ROW_NUMBER() OVER (PARTITION BY identifier ORDER BY identifier) AS rn
+              FROM (
+                SELECT * FROM {quoted_table}
+                UNION ALL
+                SELECT * FROM {parquet_read}
+              )
+            )
+            WHERE rn = 1
+          """
+        elif has_from_to:
+          # Relationship table: deduplicate on src/dst (or from/to)
+          # Check if already renamed to src/dst or still from/to
+          if "src" in column_names:
+            sql = f"""
+              CREATE OR REPLACE TABLE {temp_table} AS
+              SELECT * EXCLUDE (rn)
+              FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY src, dst ORDER BY src, dst) AS rn
+                FROM (
+                  SELECT * FROM {quoted_table}
+                  UNION ALL
+                  SELECT "from" as src, "to" as dst, * EXCLUDE ("from", "to")
+                  FROM {parquet_read}
+                )
+              )
+              WHERE rn = 1
+            """
+          else:
+            sql = f"""
+              CREATE OR REPLACE TABLE {temp_table} AS
+              SELECT * EXCLUDE (rn)
+              FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY "from", "to" ORDER BY "from", "to") AS rn
+                FROM (
+                  SELECT * FROM {quoted_table}
+                  UNION ALL
+                  SELECT * FROM {parquet_read}
+                )
+              )
+              WHERE rn = 1
+            """
+        else:
+          # Unknown table type: just append without deduplication
+          sql = f"""
+            CREATE OR REPLACE TABLE {temp_table} AS
+            SELECT * FROM {quoted_table}
+            UNION ALL
+            SELECT * FROM {parquet_read}
+          """
+
+        # Execute merge + dedupe
+        conn.execute(sql)
+
+        # Replace original with deduplicated result
+        conn.execute(f"DROP TABLE {quoted_table}")
+        conn.execute(f"ALTER TABLE {temp_table} RENAME TO {quoted_table}")
+
+        # Count rows after merge + dedupe
+        count_after = conn.execute(f"SELECT COUNT(*) FROM {quoted_table}").fetchone()
+        rows_after = count_after[0] if count_after else 0
+        rows_added = rows_after - rows_before
 
         execution_time_ms = (time.time() - start_time) * 1000
 
         logger.info(
           f"Inserted into table {request.table_name} for graph {request.graph_id} "
-          f"in {execution_time_ms:.2f}ms ({file_count} {'files' if is_list else ''}, {row_count:,} rows total)"
+          f"in {execution_time_ms:.2f}ms ({file_count} {'files' if is_list else ''}, "
+          f"{rows_added:,} net rows added, {rows_after:,} total after dedupe)"
         )
 
         return TableCreateResponse(
@@ -436,7 +501,7 @@ class DuckDBTableManager:
           graph_id=request.graph_id,
           table_name=request.table_name,
           execution_time_ms=execution_time_ms,
-          row_count=row_count,
+          row_count=rows_added,
         )
 
     except Exception as e:

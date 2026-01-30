@@ -22,6 +22,7 @@ class TableInfo:
   row_count: int
   file_count: int
   staged_at: str  # ISO timestamp
+  skipped: bool = False  # True if table was skipped (e.g., no files found)
 
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for JSON serialization."""
@@ -30,6 +31,7 @@ class TableInfo:
       "row_count": self.row_count,
       "file_count": self.file_count,
       "staged_at": self.staged_at,
+      "skipped": self.skipped,
     }
 
   @classmethod
@@ -40,6 +42,7 @@ class TableInfo:
       row_count=data["row_count"],
       file_count=data["file_count"],
       staged_at=data["staged_at"],
+      skipped=data.get("skipped", False),
     )
 
 

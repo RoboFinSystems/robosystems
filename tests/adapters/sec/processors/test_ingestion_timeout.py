@@ -6,6 +6,8 @@ from robosystems.adapters.sec.processors.ingestion import (
   DEFAULT_STAGING_TIMEOUT,
   LARGE_STAGING_TABLES,
   LARGE_TABLE_STAGING_TIMEOUT,
+  STAGING_MAX_RETRIES,
+  STAGING_RETRY_BACKOFF_BASE,
   _get_staging_timeout,
 )
 
@@ -17,6 +19,21 @@ class TestStagingTimeoutConfiguration:
     """Test that timeout constants have expected values."""
     assert DEFAULT_STAGING_TIMEOUT == 300  # 5 minutes
     assert LARGE_TABLE_STAGING_TIMEOUT == 1800  # 30 minutes
+
+  def test_retry_constants_values(self):
+    """Test that retry configuration constants have expected values."""
+    assert STAGING_MAX_RETRIES == 3  # 1 initial + 2 retries
+    assert STAGING_RETRY_BACKOFF_BASE == 30  # 30 seconds base backoff
+
+  def test_retry_backoff_sequence(self):
+    """Test that retry backoff sequence is reasonable."""
+    # Backoff sequence: 30s, 60s, 90s (base * attempt)
+    backoffs = [
+      STAGING_RETRY_BACKOFF_BASE * (i + 1) for i in range(STAGING_MAX_RETRIES - 1)
+    ]
+    assert backoffs == [30, 60]  # Two retries with increasing backoff
+    # Total max wait time before final failure: 90 seconds
+    assert sum(backoffs) == 90
 
   def test_large_staging_tables_contents(self):
     """Test that large staging tables set contains expected tables."""

@@ -343,15 +343,18 @@ class SECMaterializeConfig(Config):
 
   Options:
     graph_id: Target graph ID (default: "sec")
-    rebuild_graph: If True, delete and recreate the LadybugDB database
+    rebuild_graph: If True (default), delete and recreate the LadybugDB database
                    with the roboledger SEC schema before materializing.
-                   DuckDB staging is preserved for retry. (default: False)
+                   DuckDB staging is preserved. Set to False only for retry scenarios
+                   where you want to resume without losing existing graph data.
     skip_taxonomy_relationships: If True, skip materializing taxonomy structure
                                  tables (Association, Structure, TAXONOMY_HAS_*, etc.)
   """
 
   graph_id: str = "sec"  # Target graph ID
-  rebuild_graph: bool = False  # Rebuild LadybugDB before materialization
+  rebuild_graph: bool = (
+    True  # Rebuild LadybugDB before materialization (avoids duplicates)
+  )
   skip_taxonomy_relationships: bool = (
     False  # Skip taxonomy structure tables to reduce storage
   )

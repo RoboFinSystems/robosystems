@@ -28,6 +28,22 @@ class TestTableInfo:
     assert result["row_count"] == 1000
     assert result["file_count"] == 50
     assert result["staged_at"] == "2025-01-15T10:00:00Z"
+    assert result["skipped"] is False  # Default value
+
+  def test_to_dict_skipped(self):
+    """Test TableInfo serialization with skipped=True."""
+    info = TableInfo(
+      name="OptionalTable",
+      row_count=0,
+      file_count=0,
+      staged_at="2025-01-15T10:00:00Z",
+      skipped=True,
+    )
+    result = info.to_dict()
+
+    assert result["name"] == "OptionalTable"
+    assert result["row_count"] == 0
+    assert result["skipped"] is True
 
   def test_from_dict(self):
     """Test TableInfo deserialization from dict."""
@@ -43,6 +59,21 @@ class TestTableInfo:
     assert info.row_count == 50000
     assert info.file_count == 200
     assert info.staged_at == "2025-01-15T11:00:00Z"
+    assert info.skipped is False  # Default when not in dict
+
+  def test_from_dict_with_skipped(self):
+    """Test TableInfo deserialization with skipped field."""
+    data = {
+      "name": "OptionalTable",
+      "row_count": 0,
+      "file_count": 0,
+      "staged_at": "2025-01-15T11:00:00Z",
+      "skipped": True,
+    }
+    info = TableInfo.from_dict(data)
+
+    assert info.name == "OptionalTable"
+    assert info.skipped is True
 
   def test_roundtrip(self):
     """Test TableInfo serialization roundtrip."""
@@ -58,6 +89,20 @@ class TestTableInfo:
     assert restored.row_count == original.row_count
     assert restored.file_count == original.file_count
     assert restored.staged_at == original.staged_at
+    assert restored.skipped == original.skipped
+
+  def test_roundtrip_skipped(self):
+    """Test TableInfo serialization roundtrip with skipped=True."""
+    original = TableInfo(
+      name="OptionalTable",
+      row_count=0,
+      file_count=0,
+      staged_at="2025-01-15T12:00:00Z",
+      skipped=True,
+    )
+    restored = TableInfo.from_dict(original.to_dict())
+
+    assert restored.skipped is True
 
 
 class TestStagingResult:
