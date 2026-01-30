@@ -879,7 +879,7 @@ class XBRLDuckDBGraphProcessor:
       # Step 4: Trigger ingestion for each table
       log_progress(f"Step 4: Materializing {len(table_names)} tables to LadybugDB...")
       ingestion_results = await self._trigger_ingestion(
-        table_names, client, rebuild=False, progress_callback=log_progress
+        table_names, client, progress_callback=log_progress
       )
 
       duration = time.time() - start_time
@@ -1736,7 +1736,6 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_names: list[str],
     graph_client,
-    _rebuild: bool = False,  # Unused, kept for API compatibility
     progress_callback: ProgressCallback | None = None,
   ) -> dict[str, Any]:
     """
@@ -1747,7 +1746,6 @@ class XBRLDuckDBGraphProcessor:
     Args:
         table_names: List of table names to ingest
         graph_client: Graph API client instance
-        _rebuild: Unused - rebuild is now handled in process_files before table creation
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info)
 
     Returns:
