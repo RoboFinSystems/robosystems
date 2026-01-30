@@ -1131,7 +1131,7 @@ def materialize_graph_tables(
         "was_stale": False,
         "tables_materialized": [],
         "total_rows": 0,
-        "execution_time_ms": (time.time() - start_time) * 1000,
+        "duration_ms": (time.time() - start_time) * 1000,
         "message": "Graph is fresh - no materialization needed",
       }
       if config.operation_id:
@@ -1217,7 +1217,7 @@ def materialize_graph_tables(
           "stale_reason": stale_reason,
           "tables_materialized": [],
           "total_rows": 0,
-          "execution_time_ms": (time.time() - start_time) * 1000,
+          "duration_ms": (time.time() - start_time) * 1000,
           "message": "No tables with staged data to materialize",
         }
         if config.operation_id:
@@ -1296,11 +1296,11 @@ def materialize_graph_tables(
         graph_record.graph_metadata = graph_metadata
         session.commit()
 
-      execution_time_ms = (time.time() - start_time) * 1000
+      duration_ms = (time.time() - start_time) * 1000
 
       context.log.info(
         f"[100%] Graph materialization complete: {len(tables_materialized)} tables, "
-        f"{total_rows:,} rows in {execution_time_ms:.2f}ms"
+        f"{total_rows:,} rows in {duration_ms / 1000:.2f}s"
       )
 
       result = {
@@ -1310,7 +1310,7 @@ def materialize_graph_tables(
         "stale_reason": stale_reason,
         "tables_materialized": tables_materialized,
         "total_rows": total_rows,
-        "execution_time_ms": execution_time_ms,
+        "duration_ms": duration_ms,
         "rebuild": config.rebuild,
         "message": f"Graph materialized successfully from {len(tables_materialized)} tables",
       }
@@ -1324,7 +1324,7 @@ def materialize_graph_tables(
             "graph_id": MetadataValue.text(graph_id),
             "tables_materialized": MetadataValue.int(len(tables_materialized)),
             "total_rows": MetadataValue.int(total_rows),
-            "duration_ms": MetadataValue.float(execution_time_ms),
+            "duration_ms": MetadataValue.float(duration_ms),
             "rebuild": MetadataValue.bool(config.rebuild),
             "materialization_method": MetadataValue.text("dagster_job"),
           },

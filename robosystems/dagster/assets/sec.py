@@ -1764,13 +1764,13 @@ def sec_duckdb_staged(
         "graph_id": config.graph_id,
         "status": "error",
         "error": result.error,
-        "duration_seconds": result.duration_seconds,
+        "duration_ms": result.duration_ms,
       }
     )
 
   context.log.info(
     f"Staging complete: {len(result.table_names)} tables, "
-    f"{result.total_files} files, {result.duration_seconds:.2f}s"
+    f"{result.total_files} files, {result.duration_ms / 1000:.2f}s"
   )
 
   return MaterializeResult(
@@ -1782,7 +1782,7 @@ def sec_duckdb_staged(
       "total_files": result.total_files,
       "total_rows": result.total_rows,
       "duckdb_path": result.duckdb_path,
-      "duration_seconds": result.duration_seconds,
+      "duration_ms": result.duration_ms,
     }
   )
 
@@ -1837,7 +1837,7 @@ def sec_duckdb_incremental_stage(
       "quarter": config.quarter,
       "tables_staged": len(result.table_names),
       "total_rows": result.total_rows,  # Net new rows
-      "duration_seconds": result.duration_seconds,
+      "duration_ms": result.duration_ms,
     }
   )
 
@@ -1919,7 +1919,7 @@ def sec_graph_materialized(
 
   context.log.info(
     f"Materialization complete: {result.total_rows_ingested} rows, "
-    f"{result.total_time_ms:.2f}ms"
+    f"{result.duration_ms / 1000:.2f}s"
   )
 
   # Restore memory to defaults after materialization
@@ -1938,8 +1938,8 @@ def sec_graph_materialized(
       "graph_id": config.graph_id,
       "rebuild_graph": config.rebuild_graph,
       "status": result.status,
-      "rows_ingested": result.total_rows_ingested,
-      "execution_time_ms": result.total_time_ms,
+      "total_rows_ingested": result.total_rows_ingested,
+      "duration_ms": result.duration_ms,
       "tables": result.tables,
     }
   )
