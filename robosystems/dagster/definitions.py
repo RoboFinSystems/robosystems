@@ -114,8 +114,9 @@ from robosystems.dagster.sensors import (
   # Incremental pipeline (automated chain, disabled by default)
   sec_download_to_process_sensor,
   sec_incremental_download_schedule,
+  sec_incremental_post_ingest_snapshot_sensor,
+  sec_incremental_staging_sensor,
   sec_post_materialize_snapshot_sensor,
-  sec_process_to_stage_materialize_sensor,
   sec_processing_sensor,
 )
 
@@ -212,7 +213,8 @@ all_sensors = [
   sec_post_materialize_snapshot_sensor,
   # SEC incremental pipeline chain sensors (disabled by default)
   sec_download_to_process_sensor,
-  sec_process_to_stage_materialize_sensor,
+  sec_incremental_staging_sensor,
+  sec_incremental_post_ingest_snapshot_sensor,
 ]
 
 # ============================================================================

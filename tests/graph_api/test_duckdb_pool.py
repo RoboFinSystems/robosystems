@@ -429,7 +429,7 @@ class TestDuckDBConnectionPool:
 
   @patch("duckdb.connect")
   def test_interrupt_connections(self, mock_connect):
-    """Test interrupting connections for a graph."""
+    """Test interrupting and closing connections for a graph."""
     mock_conn = MagicMock()
     mock_connect.return_value = mock_conn
 
@@ -444,17 +444,18 @@ class TestDuckDBConnectionPool:
     with pool.get_connection("test_graph"):
       pass
 
-    # Verify connection is healthy before interrupt
-    conn_info = next(iter(pool._pools["test_graph"].values()))
-    assert conn_info.is_healthy is True
+    # Verify connection exists before interrupt
+    assert len(pool._pools.get("test_graph", {})) == 1
 
     # Interrupt connections
     interrupted_count = pool.interrupt_connections("test_graph")
 
-    # Verify interrupt was called and connection marked unhealthy
+    # Verify interrupt AND close were called, and connection was REMOVED from pool
+    # (to release file locks and prevent deadlocks)
     assert interrupted_count == 1
     mock_conn.interrupt.assert_called_once()
-    assert conn_info.is_healthy is False
+    mock_conn.close.assert_called_once()
+    assert len(pool._pools.get("test_graph", {})) == 0
 
   @patch("duckdb.connect")
   def test_interrupt_connections_nonexistent_graph(self, mock_connect):
@@ -467,7 +468,7 @@ class TestDuckDBConnectionPool:
 
   @patch("duckdb.connect")
   def test_interrupt_connections_handles_interrupt_failure(self, mock_connect):
-    """Test that interrupt failures are handled gracefully."""
+    """Test that interrupt failures are handled gracefully and connection is still closed."""
     mock_conn = MagicMock()
     mock_conn.interrupt.side_effect = Exception("Interrupt failed")
     mock_connect.return_value = mock_conn
@@ -483,9 +484,12 @@ class TestDuckDBConnectionPool:
     with pool.get_connection("test_graph"):
       pass
 
-    # Interrupt should not raise, but return 0 (no successful interrupts)
+    # Even if interrupt fails, we still close and remove the connection
+    # to release file locks (critical for preventing deadlocks)
     interrupted_count = pool.interrupt_connections("test_graph")
-    assert interrupted_count == 0
+    assert interrupted_count == 1  # Connection was processed
+    mock_conn.close.assert_called_once()  # Close was still attempted
+    assert len(pool._pools.get("test_graph", {})) == 0  # Removed from pool
 
 
 class TestConnectionPoolGlobals:

@@ -360,6 +360,21 @@ class SECMaterializeConfig(Config):
   )
 
 
+class SECIncrementalStageConfig(Config):
+  """Configuration for incremental SEC staging.
+
+  Stages current quarter's files incrementally using INSERT INTO with
+  deduplication. Safe to run daily - only net new rows are added.
+
+  Precondition: Initial full staging must have been done (tables exist).
+  """
+
+  graph_id: str = "sec"  # Target graph ID
+  year: int | None = None  # Year to stage (default: current year)
+  quarter: int | None = None  # Quarter to stage 1-4 (default: current quarter)
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
+
+
 # ============================================================================
 # Year-Partitioned Assets (download phase)
 # ============================================================================
@@ -1781,6 +1796,61 @@ def sec_duckdb_staged(
       "total_files": result.total_files,
       "total_rows": result.total_rows,
       "duckdb_path": result.duckdb_path,
+      "duration_seconds": result.duration_seconds,
+    }
+  )
+
+
+@asset(
+  group_name="sec_incremental",
+  description="Incrementally stage current quarter's filings to DuckDB",
+  kinds={"duckdb"},
+  metadata={"pipeline": "sec", "stage": "incremental_staging"},
+)
+def sec_duckdb_incremental_stage(
+  context: AssetExecutionContext,
+  config: SECIncrementalStageConfig,
+) -> MaterializeResult:
+  """INSERT current quarter's files into existing DuckDB tables.
+
+  Points at entire quarter's parquet files and uses INSERT INTO with
+  UNION ALL + ROW_NUMBER deduplication. Safe to run daily - only net
+  new rows are added, duplicates are automatically filtered out.
+
+  Precondition: Initial full staging must have been done (tables exist).
+
+  Run with:
+      just dagster-materialize sec_duckdb_incremental_stage
+  """
+  import asyncio
+
+  from robosystems.adapters.sec import XBRLDuckDBGraphProcessor
+
+  processor = XBRLDuckDBGraphProcessor(graph_id=config.graph_id)
+
+  async def run_incremental():
+    return await processor.stage_incremental_to_duckdb(
+      year=config.year,
+      quarter=config.quarter,
+      skip_taxonomy_relationships=config.skip_taxonomy_relationships,
+      progress_callback=context.log.info,
+    )
+
+  result = asyncio.run(run_incremental())
+
+  if result.status == "error":
+    context.log.error(f"Incremental staging failed: {result.error}")
+    return MaterializeResult(
+      metadata={"status": "error", "error": result.error or "Unknown error"}
+    )
+
+  return MaterializeResult(
+    metadata={
+      "status": result.status,
+      "year": config.year,
+      "quarter": config.quarter,
+      "tables_staged": len(result.table_names),
+      "total_rows": result.total_rows,  # Net new rows
       "duration_seconds": result.duration_seconds,
     }
   )

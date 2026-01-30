@@ -208,7 +208,7 @@ class DuckDBConnectionPool:
       conn = duckdb.connect(str(db_path))
 
       # Configure DuckDB connection
-      self._configure_connection(conn)
+      self._configure_connection(conn, graph_id)
 
       # Test connection health
       is_healthy = self._test_new_connection(conn)
@@ -253,7 +253,7 @@ class DuckDBConnectionPool:
       logger.error(f"Path validation failed for DuckDB graph_id {graph_id}: {e}")
       raise ValueError(f"Invalid graph_id: {e!s}") from e
 
-  def _get_duckdb_memory_limit(self) -> str:
+  def _get_duckdb_memory_limit(self, graph_id: str = "sec") -> str:
     """
     Get DuckDB memory limit based on tier configuration.
 
@@ -263,13 +263,16 @@ class DuckDBConnectionPool:
     3. DUCKDB_MEMORY_LIMIT environment variable
     4. Default: "2GB"
 
+    Args:
+        graph_id: Graph ID to check for memory overrides
+
     Returns:
         Memory limit string (e.g., "2GB", "8GB", "12GB")
     """
     from robosystems.config import env
 
     # Check for temporary override first (used during staging)
-    override = get_duckdb_memory_override()
+    override = get_duckdb_memory_override(graph_id)
     if override:
       logger.info(f"Using DuckDB memory override: {override}")
       return override
@@ -331,7 +334,9 @@ class DuckDBConnectionPool:
     logger.info(f"Using default DuckDB max threads: {max_threads}")
     return max_threads
 
-  def _configure_connection(self, conn: duckdb.DuckDBPyConnection):
+  def _configure_connection(
+    self, conn: duckdb.DuckDBPyConnection, graph_id: str = "sec"
+  ):
     """Configure a DuckDB connection with extensions and settings."""
     from robosystems.config import env
 
@@ -385,7 +390,7 @@ class DuckDBConnectionPool:
       conn.execute(f"SET threads TO {max_threads}")
 
       # Get tier-based DuckDB memory limit
-      memory_limit = self._get_duckdb_memory_limit()
+      memory_limit = self._get_duckdb_memory_limit(graph_id)
       conn.execute(f"SET memory_limit='{memory_limit}'")
 
       # Disable insertion order preservation for staging operations
@@ -636,19 +641,22 @@ class DuckDBConnectionPool:
 
   def interrupt_connections(self, graph_id: str) -> int:
     """
-    Interrupt all running queries on connections for a specific database.
+    Interrupt and close all connections for a specific database.
 
     This is used to cancel long-running queries when a timeout occurs.
     DuckDB's interrupt() method cancels any in-progress query on the connection.
 
-    After interruption, connections are marked as unhealthy to prevent reuse
-    of potentially corrupted connections.
+    CRITICAL: After interruption, connections must be CLOSED to release file locks.
+    Simply marking as unhealthy is not enough - the interrupted connection still
+    holds the DuckDB file lock, which blocks new operations from acquiring it.
+    This can cause deadlocks where new CREATE/INSERT operations hang forever
+    waiting for the lock held by the zombie connection.
 
     Args:
         graph_id: Graph database identifier
 
     Returns:
-        Number of connections interrupted
+        Number of connections interrupted and closed
     """
     interrupted_count = 0
     with self._get_database_lock(graph_id):
@@ -657,18 +665,34 @@ class DuckDBConnectionPool:
         pool_items = list(self._pools[graph_id].items())
         for conn_id, conn_info in pool_items:
           try:
+            # Step 1: Interrupt any running query
             conn_info.connection.interrupt()
-            # Mark as unhealthy to prevent reuse - interrupted connections
-            # may be in an undefined state
-            conn_info.is_healthy = False
-            interrupted_count += 1
-            logger.info(f"Interrupted DuckDB connection {conn_id} for {graph_id}")
+            logger.debug(f"Interrupted DuckDB query on {conn_id} for {graph_id}")
           except Exception as e:
             logger.warning(f"Failed to interrupt connection {conn_id}: {e}")
 
+          try:
+            # Step 2: Close the connection to release file locks
+            # Skip CHECKPOINT - interrupted connections may be in undefined state
+            # and CHECKPOINT could hang or fail
+            conn_info.connection.close()
+            logger.debug(f"Closed interrupted DuckDB connection {conn_id}")
+          except Exception as e:
+            logger.warning(f"Failed to close interrupted connection {conn_id}: {e}")
+
+          # Step 3: Remove from pool
+          if conn_id in self._pools[graph_id]:
+            del self._pools[graph_id][conn_id]
+            self._stats["connections_closed"] += 1
+
+          interrupted_count += 1
+          logger.info(
+            f"Interrupted and closed DuckDB connection {conn_id} for {graph_id}"
+          )
+
     if interrupted_count > 0:
       logger.info(
-        f"Interrupted {interrupted_count} DuckDB connection(s) for {graph_id}"
+        f"Interrupted and closed {interrupted_count} DuckDB connection(s) for {graph_id}"
       )
     return interrupted_count
 
@@ -782,11 +806,12 @@ def get_duckdb_pool() -> DuckDBConnectionPool:
   return _duckdb_pool
 
 
-# Memory limit override for temporary boosts during heavy operations
-_memory_limit_override: str | None = None
+# Memory limit overrides per graph_id for temporary boosts during heavy operations
+# Using per-graph tracking prevents race conditions when multiple graphs stage concurrently
+_memory_limit_overrides: dict[str, str] = {}
 
 
-def set_duckdb_memory_override(limit: str | None) -> str | None:
+def set_duckdb_memory_override(limit: str | None, graph_id: str = "sec") -> str | None:
   """
   Set a temporary memory limit override for DuckDB connections.
 
@@ -795,28 +820,30 @@ def set_duckdb_memory_override(limit: str | None) -> str | None:
 
   Args:
       limit: Memory limit string (e.g., "58GB") or None to clear override
+      graph_id: Graph ID to set override for (default: "sec")
 
   Returns:
       Previous override value (for restore purposes)
 
   Example:
       # Boost memory for staging
-      old_limit = set_duckdb_memory_override("58GB")
+      old_limit = set_duckdb_memory_override("58GB", graph_id="sec")
       try:
           # ... perform staging ...
       finally:
-          set_duckdb_memory_override(old_limit)  # Restore
+          set_duckdb_memory_override(old_limit, graph_id="sec")  # Restore
   """
-  global _memory_limit_override
-  old_value = _memory_limit_override
-  _memory_limit_override = limit
+  global _memory_limit_overrides
+  old_value = _memory_limit_overrides.get(graph_id)
   if limit:
-    logger.info(f"DuckDB memory override set to: {limit}")
+    _memory_limit_overrides[graph_id] = limit
+    logger.info(f"DuckDB memory override for {graph_id} set to: {limit}")
   else:
-    logger.info("DuckDB memory override cleared (using tier default)")
+    _memory_limit_overrides.pop(graph_id, None)
+    logger.info(f"DuckDB memory override for {graph_id} cleared (using tier default)")
   return old_value
 
 
-def get_duckdb_memory_override() -> str | None:
-  """Get current DuckDB memory override, if any."""
-  return _memory_limit_override
+def get_duckdb_memory_override(graph_id: str = "sec") -> str | None:
+  """Get current DuckDB memory override for a graph, if any."""
+  return _memory_limit_overrides.get(graph_id)
