@@ -105,7 +105,7 @@ class StagingResult:
   tables: dict[str, TableInfo] = field(default_factory=dict)
   total_files: int = 0
   total_rows: int = 0
-  duration_seconds: float = 0.0
+  duration_ms: float = 0.0
   duckdb_path: str | None = None
   error: str | None = None
 
@@ -117,7 +117,7 @@ class StagingResult:
       "tables": {name: info.to_dict() for name, info in self.tables.items()},
       "total_files": self.total_files,
       "total_rows": self.total_rows,
-      "duration_seconds": self.duration_seconds,
+      "duration_ms": self.duration_ms,
       "duckdb_path": self.duckdb_path,
       "error": self.error,
     }
@@ -132,7 +132,7 @@ class MaterializeResult:
 
   status: str  # "success", "error", "no_data"
   total_rows_ingested: int = 0
-  total_time_ms: float = 0.0
+  duration_ms: float = 0.0
   tables: list[dict[str, Any]] = field(default_factory=list)
   error: str | None = None
 
@@ -141,7 +141,7 @@ class MaterializeResult:
     return {
       "status": self.status,
       "total_rows_ingested": self.total_rows_ingested,
-      "total_time_ms": self.total_time_ms,
+      "duration_ms": self.duration_ms,
       "tables": self.tables,
       "error": self.error,
     }
@@ -159,16 +159,18 @@ LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
 CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
 
 # Table-specific timeouts for LadybugDB materialization (seconds)
-# For batched operations (50M rows), each batch is smaller so use shorter timeout
-# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 600s (10 min)
+# For batched operations, each batch is smaller so use shorter timeout
+# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 300s (5 min)
 DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
 LARGE_MATERIALIZATION_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
-CHUNKED_MATERIALIZATION_TIMEOUT = 600  # 10 minutes per 50M row batch
+CHUNKED_MATERIALIZATION_TIMEOUT = 300  # 5 minutes per 10M row batch
 
 # Chunked materialization settings for large tables
 # Tables exceeding this row count will be materialized in batches to avoid OOM
-MATERIALIZATION_BATCH_SIZE = 50_000_000  # 50M rows per batch
-MATERIALIZATION_CHUNK_THRESHOLD = 100_000_000  # 100M rows triggers chunked mode
+# Smaller batches (10M) are safer for memory and provide better failure resilience
+# At ~100k rows/sec, 10M rows takes ~100 seconds - well under the 5 min timeout
+MATERIALIZATION_BATCH_SIZE = 10_000_000  # 10M rows per batch
+MATERIALIZATION_CHUNK_THRESHOLD = 50_000_000  # 50M rows triggers chunked mode
 
 # Retry configuration for staging operations
 # On timeout or failure, retry the entire table from scratch
@@ -415,7 +417,7 @@ class XBRLDuckDBGraphProcessor:
           status="error",
           table_names=[],
           error=f"Graph client initialization failed: {client_err!s}",
-          duration_seconds=time.time() - start_time,
+          duration_ms=(time.time() - start_time) * 1000,
         )
 
       # Reset staging if requested - delete all DuckDB tables before staging new ones
@@ -453,7 +455,7 @@ class XBRLDuckDBGraphProcessor:
           status="error",
           table_names=[],
           error=f"Graph client initialization failed: {client_err!s}",
-          duration_seconds=time.time() - start_time,
+          duration_ms=(time.time() - start_time) * 1000,
         )
 
       # Step 1: Get table names from schema (no S3 discovery needed for glob mode)
@@ -496,7 +498,7 @@ class XBRLDuckDBGraphProcessor:
             status="no_data",
             table_names=[],
             error="No processed files found",
-            duration_seconds=time.time() - start_time,
+            duration_ms=(time.time() - start_time) * 1000,
           )
 
         logger.info(f"Found {len(tables_info)} tables to stage")
@@ -560,7 +562,7 @@ class XBRLDuckDBGraphProcessor:
         tables=table_infos,
         total_files=total_files,
         total_rows=total_rows,
-        duration_seconds=duration,
+        duration_ms=duration * 1000,
         duckdb_path=duckdb_path,
       )
 
@@ -570,7 +572,7 @@ class XBRLDuckDBGraphProcessor:
         status="error",
         table_names=[],
         error=str(e),
-        duration_seconds=time.time() - start_time,
+        duration_ms=(time.time() - start_time) * 1000,
       )
 
   async def stage_incremental_to_duckdb(
@@ -633,7 +635,7 @@ class XBRLDuckDBGraphProcessor:
             "No existing DuckDB tables found for incremental staging. "
             "Run full staging first via the sec_duckdb_staged asset."
           ),
-          duration_seconds=time.time() - start_time,
+          duration_ms=(time.time() - start_time) * 1000,
         )
 
       log_progress(f"Found {len(existing_tables)} existing tables in DuckDB")
@@ -748,7 +750,7 @@ class XBRLDuckDBGraphProcessor:
         table_names=successful_tables,
         tables=table_infos,
         total_rows=total_rows,
-        duration_seconds=duration,
+        duration_ms=duration * 1000,
         duckdb_path=get_staging_duckdb_path(self.graph_id),
       )
 
@@ -758,7 +760,7 @@ class XBRLDuckDBGraphProcessor:
         status="error",
         table_names=[],
         error=str(e),
-        duration_seconds=time.time() - start_time,
+        duration_ms=(time.time() - start_time) * 1000,
       )
 
   async def materialize_from_duckdb(
@@ -891,7 +893,7 @@ class XBRLDuckDBGraphProcessor:
       return MaterializeResult(
         status="success",
         total_rows_ingested=ingestion_results.get("total_rows_ingested", 0),
-        total_time_ms=ingestion_results.get("total_time_ms", 0),
+        duration_ms=ingestion_results.get("duration_ms", 0),
         tables=ingestion_results.get("tables", []),
       )
 
@@ -1885,7 +1887,7 @@ class XBRLDuckDBGraphProcessor:
 
     return {
       "total_rows_ingested": total_rows,
-      "total_time_ms": total_time_ms,
+      "duration_ms": total_time_ms,
       "tables": results,
     }
 

@@ -597,7 +597,7 @@ def sec_incremental_staging_sensor(context: SensorEvaluationContext):
     run_key=run_key,
     run_config={
       "ops": {
-        "sec_duckdb_incremental_stage": {
+        "sec_duckdb_incremental_staged": {
           "config": {
             "graph_id": "sec",
             # year/quarter default to current if not specified

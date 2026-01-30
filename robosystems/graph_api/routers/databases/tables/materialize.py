@@ -105,10 +105,23 @@ async def materialize_table(
         column_names = [col[0] for col in columns_result]
         has_file_id = "file_id" in column_names
 
-        # Build LIMIT/OFFSET clause for chunked materialization
+        # Build ORDER BY + LIMIT/OFFSET clause for chunked materialization
+        # ORDER BY is critical for deterministic pagination - without it, LIMIT/OFFSET
+        # can return overlapping rows between batches, causing duplicate key errors
         limit_clause = ""
         if request.batch_size is not None:
-          limit_clause = f" LIMIT {request.batch_size} OFFSET {request.offset}"
+          # Determine order column based on table type
+          # Node tables use 'identifier', relationship tables use 'src, dst'
+          if "identifier" in column_names:
+            order_col = "identifier"
+          elif "src" in column_names and "dst" in column_names:
+            order_col = "src, dst"
+          else:
+            # Fallback to first column if neither standard column exists
+            order_col = column_names[0] if column_names else "rowid"
+          limit_clause = (
+            f" ORDER BY {order_col} LIMIT {request.batch_size} OFFSET {request.offset}"
+          )
 
         # Create physical copy of table without file_id column (if it exists)
         if request.file_ids:

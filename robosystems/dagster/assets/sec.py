@@ -1764,13 +1764,13 @@ def sec_duckdb_staged(
         "graph_id": config.graph_id,
         "status": "error",
         "error": result.error,
-        "duration_seconds": result.duration_seconds,
+        "duration_ms": result.duration_ms,
       }
     )
 
   context.log.info(
     f"Staging complete: {len(result.table_names)} tables, "
-    f"{result.total_files} files, {result.duration_seconds:.2f}s"
+    f"{result.total_files} files, {result.duration_ms / 1000:.2f}s"
   )
 
   return MaterializeResult(
@@ -1782,18 +1782,22 @@ def sec_duckdb_staged(
       "total_files": result.total_files,
       "total_rows": result.total_rows,
       "duckdb_path": result.duckdb_path,
-      "duration_seconds": result.duration_seconds,
+      "duration_ms": result.duration_ms,
     }
   )
 
 
 @asset(
-  group_name="sec_incremental",
+  group_name="sec_pipeline",
   description="Incrementally stage current quarter's filings to DuckDB",
   kinds={"duckdb"},
-  metadata={"pipeline": "sec", "stage": "incremental_staging"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "incremental_staging",
+    "decoupled": True,
+  },
 )
-def sec_duckdb_incremental_stage(
+def sec_duckdb_incremental_staged(
   context: AssetExecutionContext,
   config: SECIncrementalStageConfig,
 ) -> MaterializeResult:
@@ -1806,7 +1810,7 @@ def sec_duckdb_incremental_stage(
   Precondition: Initial full staging must have been done (tables exist).
 
   Run with:
-      just dagster-materialize sec_duckdb_incremental_stage
+      just dagster-materialize sec_duckdb_incremental_staged
   """
   import asyncio
 
@@ -1827,17 +1831,28 @@ def sec_duckdb_incremental_stage(
   if result.status == "error":
     context.log.error(f"Incremental staging failed: {result.error}")
     return MaterializeResult(
-      metadata={"status": "error", "error": result.error or "Unknown error"}
+      metadata={
+        "graph_id": config.graph_id,
+        "status": "error",
+        "error": result.error or "Unknown error",
+        "duration_ms": result.duration_ms,
+      }
     )
+
+  context.log.info(
+    f"Incremental staging complete: {len(result.table_names)} tables, "
+    f"{result.total_rows} rows, {result.duration_ms / 1000:.2f}s"
+  )
 
   return MaterializeResult(
     metadata={
+      "graph_id": config.graph_id,
       "status": result.status,
       "year": config.year,
       "quarter": config.quarter,
       "tables_staged": len(result.table_names),
       "total_rows": result.total_rows,  # Net new rows
-      "duration_seconds": result.duration_seconds,
+      "duration_ms": result.duration_ms,
     }
   )
 
@@ -1850,6 +1865,7 @@ def sec_duckdb_incremental_stage(
   metadata={
     "pipeline": "sec",
     "stage": "materialization",
+    "decoupled": True,
   },
 )
 def sec_graph_materialized(
@@ -1919,7 +1935,7 @@ def sec_graph_materialized(
 
   context.log.info(
     f"Materialization complete: {result.total_rows_ingested} rows, "
-    f"{result.total_time_ms:.2f}ms"
+    f"{result.duration_ms / 1000:.2f}s"
   )
 
   # Restore memory to defaults after materialization
@@ -1938,8 +1954,8 @@ def sec_graph_materialized(
       "graph_id": config.graph_id,
       "rebuild_graph": config.rebuild_graph,
       "status": result.status,
-      "rows_ingested": result.total_rows_ingested,
-      "execution_time_ms": result.total_time_ms,
+      "total_rows_ingested": result.total_rows_ingested,
+      "duration_ms": result.duration_ms,
       "tables": result.tables,
     }
   )
