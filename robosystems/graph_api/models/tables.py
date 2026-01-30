@@ -106,6 +106,14 @@ class TableMaterializationRequest(BaseModel):
     default=None,
     description="Optional list of file IDs to materialize. If None, materializes all files (full materialization).",
   )
+  batch_size: int | None = Field(
+    default=None,
+    description="Number of rows per batch for chunked materialization. If None, materializes all at once.",
+  )
+  offset: int = Field(
+    default=0,
+    description="Row offset for chunked materialization. Use with batch_size to paginate.",
+  )
 
   class Config:
     extra = "forbid"

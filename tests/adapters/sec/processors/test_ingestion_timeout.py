@@ -27,6 +27,7 @@ class TestStagingTimeoutConfiguration:
       "Element",
       "FactDimension",
       "Association",
+      "Structure",
       # Large relationship tables (fact-related)
       "REPORT_HAS_FACT",
       "FACT_HAS_ELEMENT",
@@ -35,9 +36,16 @@ class TestStagingTimeoutConfiguration:
       "FACT_HAS_UNIT",
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
+      "FACT_SET_CONTAINS_FACT",
+      "FACT_DIMENSION_MEMBER_ELEMENT",
+      "FACT_DIMENSION_AXIS_ELEMENT",
       # Large relationship tables (shared reference)
       "ELEMENT_HAS_LABEL",
       "TAXONOMY_HAS_LABEL",
+      # Large relationship tables (structure/association)
+      "STRUCTURE_HAS_ASSOCIATION",
+      "ASSOCIATION_HAS_FROM_ELEMENT",
+      "ASSOCIATION_HAS_TO_ELEMENT",
     }
     assert expected_tables == LARGE_STAGING_TABLES
 
@@ -58,6 +66,7 @@ class TestGetStagingTimeout:
       "Element",
       "FactDimension",
       "Association",
+      "Structure",
       # Large relationship tables (fact-related)
       "REPORT_HAS_FACT",
       "FACT_HAS_ELEMENT",
@@ -66,9 +75,16 @@ class TestGetStagingTimeout:
       "FACT_HAS_UNIT",
       "FACT_HAS_DIMENSION",
       "FACT_REPORTS_ELEMENT",
+      "FACT_SET_CONTAINS_FACT",
+      "FACT_DIMENSION_MEMBER_ELEMENT",
+      "FACT_DIMENSION_AXIS_ELEMENT",
       # Large relationship tables (shared reference)
       "ELEMENT_HAS_LABEL",
       "TAXONOMY_HAS_LABEL",
+      # Large relationship tables (structure/association)
+      "STRUCTURE_HAS_ASSOCIATION",
+      "ASSOCIATION_HAS_FROM_ELEMENT",
+      "ASSOCIATION_HAS_TO_ELEMENT",
     ],
   )
   def test_large_tables_get_extended_timeout(self, table_name: str):
@@ -84,7 +100,7 @@ class TestGetStagingTimeout:
       "Report",
       "Taxonomy",
       "Reference",
-      "Structure",
+      "FactSet",
       "ENTITY_HAS_REPORT",
     ],
   )

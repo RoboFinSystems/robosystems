@@ -60,16 +60,23 @@ from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 ProgressCallback = Callable[[str], None]
 
 # Table-specific timeouts for DuckDB staging (seconds)
-# Large tables with millions of rows need extended timeouts
-# Default: 300s (5 min), Large: 1800s (30 min)
+# For chunked operations (quarter-by-quarter), each chunk is smaller so use shorter timeout
+# Default: 300s (5 min), Large non-chunked: 1800s (30 min), Large chunked: 600s (10 min)
 DEFAULT_STAGING_TIMEOUT = 300  # 5 minutes
-LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes
+LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
+CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
 
 # Table-specific timeouts for LadybugDB materialization (seconds)
-# Materialization is typically faster than staging, but billion-row tables need more time
-# Default: 600s (10 min), Large: 1800s (30 min)
+# For batched operations (50M rows), each batch is smaller so use shorter timeout
+# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 600s (10 min)
 DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
-LARGE_MATERIALIZATION_TIMEOUT = 1800  # 30 minutes
+LARGE_MATERIALIZATION_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
+CHUNKED_MATERIALIZATION_TIMEOUT = 600  # 10 minutes per 50M row batch
+
+# Chunked materialization settings for large tables
+# Tables exceeding this row count will be materialized in batches to avoid OOM
+MATERIALIZATION_BATCH_SIZE = 50_000_000  # 50M rows per batch
+MATERIALIZATION_CHUNK_THRESHOLD = 100_000_000  # 100M rows triggers chunked mode
 
 # Tables known to have millions of rows requiring extended timeouts
 LARGE_STAGING_TABLES = frozenset(
@@ -828,7 +835,8 @@ class XBRLDuckDBGraphProcessor:
     Returns:
         Tuple of (success, TableInfo or None, error message or None)
     """
-    timeout = _get_staging_timeout(table_name)
+    # Use chunked timeout since we're processing quarter-by-quarter, not the full table
+    timeout = CHUNKED_STAGING_TIMEOUT
     total_rows = 0
     total_duration = 0.0
     quarter_list = list(quarters.keys())
@@ -923,7 +931,7 @@ class XBRLDuckDBGraphProcessor:
     graph_client,
     year: int | None = None,
     progress_callback: ProgressCallback | None = None,
-    chunk_large_tables: bool = True,
+    chunk_large_tables: bool | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables using glob patterns (efficient for many files).
@@ -946,12 +954,18 @@ class XBRLDuckDBGraphProcessor:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
         graph_client: Graph API client instance
         year: Optional year filter. If provided, uses filed=YYYY-* pattern.
-        chunk_large_tables: If True (default), stage large tables quarter-by-quarter
-            to reduce memory pressure.
+        chunk_large_tables: If True, stage large tables quarter-by-quarter
+            to reduce memory pressure. Defaults to SEC_LARGE_SCALE_MODE_ENABLED env var
+            (False in dev, True in prod).
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
     """
+    # Default to env var if not explicitly specified
+    # SEC_LARGE_SCALE_MODE_ENABLED is False in dev (small data), True in prod
+    if chunk_large_tables is None:
+      chunk_large_tables = env.SEC_LARGE_SCALE_MODE_ENABLED
+
     successful_tables: list[str] = []
     table_infos: dict[str, TableInfo] = {}
     failed_tables: list[tuple[str, str]] = []
@@ -1298,6 +1312,8 @@ class XBRLDuckDBGraphProcessor:
     """
     Trigger ingestion for all tables into LadybugDB graph via Graph API.
 
+    For large tables (>100M rows), uses chunked materialization to avoid OOM.
+
     Args:
         table_names: List of table names to ingest
         graph_client: Graph API client instance
@@ -1322,34 +1338,111 @@ class XBRLDuckDBGraphProcessor:
     for i, table_name in enumerate(table_names, 1):
       is_large = table_name in LARGE_STAGING_TABLES
       timeout = _get_materialization_timeout(table_name)
-      size_hint = f" (large table, timeout={timeout:.0f}s)" if is_large else ""
-      log_progress(f"[{i}/{total_tables}] Materializing {table_name}{size_hint}...")
 
       try:
-        response = await graph_client.materialize_table(
-          graph_id=self.graph_id,
-          table_name=table_name,
-          ignore_errors=True,
-          timeout=timeout,
-        )
+        # Get row count to determine if chunking is needed
+        row_count = 0
+        if is_large:
+          try:
+            count_response = await graph_client.query_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              sql=f"SELECT COUNT(*) as cnt FROM {table_name}",
+            )
+            if count_response.get("rows"):
+              row_count = count_response["rows"][0].get("cnt", 0)
+          except Exception as count_err:
+            logger.warning(f"Could not get row count for {table_name}: {count_err}")
+            row_count = 0
 
-        rows_ingested = response.get("rows_ingested", 0)
-        exec_time_ms = response.get("execution_time_ms", 0)
-        total_rows += rows_ingested
-        total_time_ms += exec_time_ms
+        # Use chunked materialization for very large tables (only in large-scale mode)
+        if (
+          env.SEC_LARGE_SCALE_MODE_ENABLED
+          and row_count > MATERIALIZATION_CHUNK_THRESHOLD
+        ):
+          num_batches = (
+            row_count + MATERIALIZATION_BATCH_SIZE - 1
+          ) // MATERIALIZATION_BATCH_SIZE
+          log_progress(
+            f"[{i}/{total_tables}] Materializing {table_name} in {num_batches} batches "
+            f"({row_count:,} rows, {MATERIALIZATION_BATCH_SIZE:,} per batch)..."
+          )
 
-        results.append(
-          {
-            "table_name": table_name,
-            "rows_ingested": rows_ingested,
-            "status": response.get("status", "success"),
-          }
-        )
+          table_rows = 0
+          table_time_ms = 0.0
 
-        log_progress(
-          f"[{i}/{total_tables}] Materialized {table_name}: "
-          f"{rows_ingested:,} rows in {exec_time_ms:.0f}ms"
-        )
+          for batch_num in range(num_batches):
+            offset = batch_num * MATERIALIZATION_BATCH_SIZE
+            log_progress(
+              f"  [{table_name}] Batch {batch_num + 1}/{num_batches} "
+              f"(offset={offset:,})..."
+            )
+
+            response = await graph_client.materialize_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              ignore_errors=True,
+              batch_size=MATERIALIZATION_BATCH_SIZE,
+              offset=offset,
+              timeout=CHUNKED_MATERIALIZATION_TIMEOUT,
+            )
+
+            batch_rows = response.get("rows_ingested", 0)
+            batch_time = response.get("execution_time_ms", 0)
+            table_rows += batch_rows
+            table_time_ms += batch_time
+
+            log_progress(
+              f"  [{table_name}] Batch {batch_num + 1}/{num_batches}: "
+              f"{batch_rows:,} rows in {batch_time:.0f}ms"
+            )
+
+          total_rows += table_rows
+          total_time_ms += table_time_ms
+
+          results.append(
+            {
+              "table_name": table_name,
+              "rows_ingested": table_rows,
+              "status": "success",
+              "batches": num_batches,
+            }
+          )
+
+          log_progress(
+            f"[{i}/{total_tables}] Materialized {table_name}: "
+            f"{table_rows:,} rows in {table_time_ms:.0f}ms ({num_batches} batches)"
+          )
+
+        else:
+          # Standard single-pass materialization for smaller tables
+          size_hint = f" (large table, timeout={timeout:.0f}s)" if is_large else ""
+          log_progress(f"[{i}/{total_tables}] Materializing {table_name}{size_hint}...")
+
+          response = await graph_client.materialize_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            ignore_errors=True,
+            timeout=timeout,
+          )
+
+          rows_ingested = response.get("rows_ingested", 0)
+          exec_time_ms = response.get("execution_time_ms", 0)
+          total_rows += rows_ingested
+          total_time_ms += exec_time_ms
+
+          results.append(
+            {
+              "table_name": table_name,
+              "rows_ingested": rows_ingested,
+              "status": response.get("status", "success"),
+            }
+          )
+
+          log_progress(
+            f"[{i}/{total_tables}] Materialized {table_name}: "
+            f"{rows_ingested:,} rows in {exec_time_ms:.0f}ms"
+          )
 
       except Exception as e:
         logger.error(f"Failed to materialize table {table_name}: {e}")

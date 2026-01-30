@@ -400,18 +400,11 @@ class EnvConfig:
     bool(get_secret_value("SEC_PARALLEL_SENSOR_ENABLED", "false").lower() == "true"),
   )
 
-  # Shared repository schedule: weekly snapshot + replica refresh
-  SHARED_REPO_SCHEDULE_ENABLED = get_bool_env(
-    "SHARED_REPO_SCHEDULE_ENABLED",
-    bool(get_secret_value("SHARED_REPO_SCHEDULE_ENABLED", "false").lower() == "true"),
-  )
-
-  # Shared repository snapshot sensor: trigger snapshot after SEC materialization
-  SHARED_REPO_SNAPSHOT_SENSOR_ENABLED = get_bool_env(
-    "SHARED_REPO_SNAPSHOT_SENSOR_ENABLED",
-    bool(
-      get_secret_value("SHARED_REPO_SNAPSHOT_SENSOR_ENABLED", "false").lower() == "true"
-    ),
+  # SEC large-scale mode: enables chunked staging and batched materialization
+  # Disabled in dev (small data), enabled in prod (billions of rows)
+  SEC_LARGE_SCALE_MODE_ENABLED = get_bool_env(
+    "SEC_LARGE_SCALE_MODE_ENABLED",
+    bool(get_secret_value("SEC_LARGE_SCALE_MODE_ENABLED", "false").lower() == "true"),
   )
 
   # Shared repositories list for infrastructure/deployment (used by userdata scripts)

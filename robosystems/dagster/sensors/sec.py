@@ -207,11 +207,11 @@ def sec_processing_sensor(context: SensorEvaluationContext):
 # SEC Post-Materialization Snapshot Sensor
 # ============================================================================
 
-# Sensor status controlled by environment variable
-# Enable via SHARED_REPO_SNAPSHOT_SENSOR_ENABLED=true after verifying manual runs work
+# Controlled by SEC_INCREMENTAL_PIPELINE_ENABLED - part of the full pipeline chain
+# download → process → stage → materialize → snapshot
 SEC_SNAPSHOT_SENSOR_STATUS = (
   DefaultSensorStatus.RUNNING
-  if env.SHARED_REPO_SNAPSHOT_SENSOR_ENABLED
+  if env.SEC_INCREMENTAL_PIPELINE_ENABLED
   else DefaultSensorStatus.STOPPED
 )
 
@@ -236,7 +236,7 @@ def sec_post_materialize_snapshot_sensor(context: RunStatusSensorContext):
   This ensures replicas are updated with the latest SEC data after each
   nightly materialization run.
 
-  Enable via: SHARED_REPO_SNAPSHOT_SENSOR_ENABLED=true
+  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true (part of full pipeline)
 
   Note: Only triggers for jobs on the "sec" graph_id (shared repository).
   """
