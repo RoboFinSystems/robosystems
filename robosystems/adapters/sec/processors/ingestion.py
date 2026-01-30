@@ -820,8 +820,11 @@ class XBRLDuckDBGraphProcessor:
 
     For tables like Fact (100M+ rows), loading all data at once can exceed memory.
     This method chunks the load by quarter:
-    - First quarter: CREATE TABLE
-    - Subsequent quarters: INSERT INTO (append)
+    - First quarter: CREATE TABLE (with deduplication)
+    - Subsequent quarters: INSERT INTO (merge + dedupe incrementally)
+
+    Both operations use ROW_NUMBER() OVER (PARTITION BY identifier) for deduplication,
+    so the final table is always deduplicated regardless of how many quarters are loaded.
 
     Args:
         table_name: Name of the table to stage
