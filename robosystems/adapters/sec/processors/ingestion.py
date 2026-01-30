@@ -1128,49 +1128,74 @@ class XBRLDuckDBGraphProcessor:
         f"(quarter {q_idx + 1}/{len(quarter_list)})..."
       )
 
-      try:
-        if is_first:
-          # First quarter: CREATE TABLE
-          response = await graph_client.create_table(
-            graph_id=self.graph_id,
-            table_name=table_name,
-            s3_pattern=s3_patterns,  # List of patterns for the quarter
-            timeout=timeout,
-          )
-        else:
-          # Subsequent quarters: INSERT INTO (append)
-          response = await graph_client.insert_into_table(
-            graph_id=self.graph_id,
-            table_name=table_name,
-            s3_pattern=s3_patterns,
-            timeout=timeout,
-          )
+      # Retry logic per-quarter (not per-table) so failures resume from current quarter
+      quarter_success = False
+      last_quarter_error = None
 
-        if response.get("status") == "failed":
-          error = response.get("error", "Unknown error")
-          if "No files found" in error:
-            # No data for this quarter - that's OK, continue
+      for attempt in range(STAGING_MAX_RETRIES):
+        try:
+          if is_first:
+            # First quarter: CREATE TABLE
+            response = await graph_client.create_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              s3_pattern=s3_patterns,  # List of patterns for the quarter
+              timeout=timeout,
+            )
+          else:
+            # Subsequent quarters: INSERT INTO (append)
+            response = await graph_client.insert_into_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              s3_pattern=s3_patterns,
+              timeout=timeout,
+            )
+
+          if response.get("status") == "failed":
+            error = response.get("error", "Unknown error")
+            if "No files found" in error:
+              # No data for this quarter - that's OK, continue
+              log_progress(f"  [{quarter_key}] No files (skipped)")
+              quarter_success = True
+              break
+            last_quarter_error = error
+            raise RuntimeError(error)
+
+          result = response.get("result", {})
+          duration = response.get("duration_seconds", result.get("duration_seconds", 0))
+          row_count = result.get("row_count", 0)
+          total_rows += row_count
+          total_duration += duration
+
+          log_progress(
+            f"  [{quarter_key}] {row_count:,} rows in {duration:.1f}s "
+            f"(cumulative: {total_rows:,})"
+          )
+          quarter_success = True
+          break  # Success, move to next quarter
+
+        except Exception as e:
+          error_str = str(e)
+          if "No files found" in error_str:
             log_progress(f"  [{quarter_key}] No files (skipped)")
-            continue
-          return False, None, f"Quarter {quarter_key}: {error}"
+            quarter_success = True
+            break
 
-        result = response.get("result", {})
-        duration = response.get("duration_seconds", result.get("duration_seconds", 0))
-        row_count = result.get("row_count", 0)
-        total_rows += row_count
-        total_duration += duration
+          last_quarter_error = error_str
+          if attempt < STAGING_MAX_RETRIES - 1:
+            backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
+            log_progress(
+              f"  [{quarter_key}] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {error_str[:100]}. "
+              f"Retrying in {backoff}s..."
+            )
+            await asyncio.sleep(backoff)
+          else:
+            log_progress(
+              f"  [{quarter_key}] Failed after {STAGING_MAX_RETRIES} attempts: {error_str[:200]}"
+            )
 
-        log_progress(
-          f"  [{quarter_key}] {row_count:,} rows in {duration:.1f}s "
-          f"(cumulative: {total_rows:,})"
-        )
-
-      except Exception as e:
-        error_str = str(e)
-        if "No files found" in error_str:
-          log_progress(f"  [{quarter_key}] No files (skipped)")
-          continue
-        return False, None, f"Quarter {quarter_key}: {error_str}"
+      if not quarter_success:
+        return False, None, f"Quarter {quarter_key}: {last_quarter_error}"
 
     log_progress(
       f"[{table_index}/{total_tables}] Staged {table_name}: "
@@ -1269,22 +1294,13 @@ class XBRLDuckDBGraphProcessor:
       # Use quarter-based chunking for chunkable tables (if enabled and quarters discovered)
       # Only tables with per-filing data (no cross-quarter duplicates) can be chunked.
       if is_chunkable and quarters_by_date and chunk_large_tables:
-        # Wrap chunked staging with retry logic - on failure, retry entire table
-        async def chunked_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
-          return await self._stage_large_table_by_quarters(
-            table_name=table_name,
-            entity_type=entity_type,
-            graph_client=graph_client,
-            quarters=quarters_by_date,
-            log_progress=log_progress,
-            table_index=i,
-            total_tables=total_tables,
-          )
-
-        success, table_info, error = await self._stage_table_with_retry(
+        # Per-quarter retry logic is inside _stage_large_table_by_quarters
+        # No outer retry needed - that would restart from Q1 and waste completed work
+        success, table_info, error = await self._stage_large_table_by_quarters(
           table_name=table_name,
-          stage_fn=chunked_stage_fn,
+          entity_type=entity_type,
           graph_client=graph_client,
+          quarters=quarters_by_date,
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
