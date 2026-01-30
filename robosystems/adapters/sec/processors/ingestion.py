@@ -1220,7 +1220,14 @@ class XBRLDuckDBGraphProcessor:
           break
 
         except Exception as e:
-          error_str = str(e)
+          # Capture error details - include type if message is empty/unhelpful
+          error_str = str(e).strip() if str(e).strip() and str(e).strip() != "." else ""
+          if not error_str:
+            error_str = f"{type(e).__name__} (no message)"
+          else:
+            # Prepend exception type for clarity in logs
+            error_str = f"{type(e).__name__}: {error_str}"
+
           if "No files found" in error_str:
             log_progress(f"  [{quarter_key}] No files (skipped)")
             chunk_success = True
@@ -1233,6 +1240,21 @@ class XBRLDuckDBGraphProcessor:
               f"  [{quarter_key}] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {error_str[:100]}. "
               f"Retrying in {backoff}s..."
             )
+
+            # CRITICAL: Get fresh client before retry to avoid corrupted httpx state
+            # After timeout/SSE failures, the existing client's connection pool may be
+            # in a bad state, causing subsequent requests to fail silently
+            try:
+              graph_client = await get_graph_client(
+                graph_id=self.graph_id, operation_type="write"
+              )
+              logger.debug(
+                f"Obtained fresh graph client for retry attempt {attempt + 2}"
+              )
+            except Exception as client_err:
+              logger.warning(f"Could not refresh graph client: {client_err}")
+              # Continue with existing client - better than nothing
+
             await asyncio.sleep(backoff)
           else:
             log_progress(
@@ -1319,13 +1341,31 @@ class XBRLDuckDBGraphProcessor:
           break
 
         except Exception as e:
-          last_merge_error = str(e)
+          # Capture error details - include type if message is empty/unhelpful
+          error_str = str(e).strip() if str(e).strip() and str(e).strip() != "." else ""
+          if not error_str:
+            last_merge_error = f"{type(e).__name__} (no message)"
+          else:
+            last_merge_error = f"{type(e).__name__}: {error_str}"
+
           if attempt < STAGING_MAX_RETRIES - 1:
             backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
             log_progress(
               f"  [MERGE] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {last_merge_error[:100]}. "
               f"Retrying in {backoff}s..."
             )
+
+            # CRITICAL: Get fresh client before retry to avoid corrupted httpx state
+            try:
+              graph_client = await get_graph_client(
+                graph_id=self.graph_id, operation_type="write"
+              )
+              logger.debug(
+                f"Obtained fresh graph client for merge retry attempt {attempt + 2}"
+              )
+            except Exception as client_err:
+              logger.warning(f"Could not refresh graph client for merge: {client_err}")
+
             await asyncio.sleep(backoff)
           else:
             log_progress(
