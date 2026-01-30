@@ -1346,11 +1346,10 @@ class XBRLDuckDBGraphProcessor:
           try:
             count_response = await graph_client.query_table(
               graph_id=self.graph_id,
-              table_name=table_name,
-              sql=f"SELECT COUNT(*) as cnt FROM {table_name}",
+              sql=f"SELECT COUNT(*) FROM {table_name}",
             )
-            if count_response.get("rows"):
-              row_count = count_response["rows"][0].get("cnt", 0)
+            if count_response.get("rows") and count_response["rows"][0]:
+              row_count = count_response["rows"][0][0]  # First row, first column
           except Exception as count_err:
             logger.warning(f"Could not get row count for {table_name}: {count_err}")
             row_count = 0

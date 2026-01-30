@@ -70,7 +70,7 @@ class StorageCalculator:
         Total bytes of file storage
     """
     result = (
-      self.session.query(func.sum(GraphFile.size_bytes))
+      self.session.query(func.sum(GraphFile.file_size_bytes))
       .filter(GraphFile.graph_id == graph_id, GraphFile.deleted_at.is_(None))
       .scalar()
     )
