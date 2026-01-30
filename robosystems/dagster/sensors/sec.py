@@ -395,7 +395,7 @@ def sec_incremental_download_schedule(context):
         "ops": {
           "sec_raw_filings": SECDownloadConfig(
             skip_existing=True,
-            form_types=["10-K", "10-Q"],
+            form_types=["10-K", "10-Q", "20-F", "40-F"],
           ),
         }
       },

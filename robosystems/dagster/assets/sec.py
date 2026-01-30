@@ -270,7 +270,7 @@ class SECDownloadConfig(Config):
   """
 
   skip_existing: bool = True  # Skip already downloaded filings
-  form_types: list[str] = ["10-K", "10-Q"]  # Form types to download
+  form_types: list[str] = ["10-K", "10-Q", "20-F", "40-F"]  # Form types to download
   tickers: list[str] = []  # Optional ticker filter (empty = all companies)
   ciks: list[str] = []  # Optional CIK filter
   max_filings: int = 0  # Max filings to download (0 = unlimited)
