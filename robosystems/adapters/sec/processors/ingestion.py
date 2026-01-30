@@ -511,6 +511,193 @@ class XBRLDuckDBGraphProcessor:
         duration_seconds=time.time() - start_time,
       )
 
+  async def stage_incremental_to_duckdb(
+    self,
+    year: int | None = None,
+    quarter: int | None = None,
+    skip_taxonomy_relationships: bool = False,
+    progress_callback: ProgressCallback | None = None,
+  ) -> StagingResult:
+    """
+    Stage current quarter's files incrementally to existing DuckDB tables.
+
+    Unlike stage_to_duckdb() which rebuilds all tables from scratch,
+    this method INSERTs data into existing tables with deduplication.
+
+    Since INSERT uses UNION ALL + ROW_NUMBER dedup, we can point at the
+    entire quarter's files every time - only truly new rows are added.
+    No need to track which specific dates have been staged.
+
+    Safe to re-run daily - deduplication prevents data multiplication.
+
+    Precondition: DuckDB tables must already exist from initial full staging.
+
+    Args:
+        year: Year to stage (default: current year)
+        quarter: Quarter to stage 1-4 (default: current quarter)
+        skip_taxonomy_relationships: If True, skip taxonomy structure tables
+        progress_callback: Optional callback for Dagster logging
+
+    Returns:
+        StagingResult with tables staged and row counts (net new rows)
+    """
+    start_time = time.time()
+
+    # Default to current year/quarter
+    now = datetime.now(UTC)
+    year = year or now.year
+    quarter = quarter or ((now.month - 1) // 3 + 1)
+
+    def log_progress(msg: str) -> None:
+      logger.info(msg)
+      if progress_callback:
+        progress_callback(msg)
+
+    logger.info(
+      f"Starting incremental DuckDB staging for graph {self.graph_id} "
+      f"(year={year}, Q{quarter})"
+    )
+
+    try:
+      client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
+
+      # Verify tables exist (must have done initial full staging)
+      existing_tables = await client.list_tables(self.graph_id)
+      if not existing_tables:
+        return StagingResult(
+          status="error",
+          table_names=[],
+          error="No existing DuckDB tables. Run full staging first.",
+          duration_seconds=time.time() - start_time,
+        )
+
+      log_progress(f"Found {len(existing_tables)} existing tables in DuckDB")
+
+      # Get schema-defined tables
+      tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
+        RoboLedgerContext.SEC_REPOSITORY
+      )
+
+      if skip_taxonomy_relationships:
+        tables_by_type = {
+          name: entity_type
+          for name, entity_type in tables_by_type.items()
+          if name not in TAXONOMY_STRUCTURE_TABLES
+        }
+
+      # Build quarter date pattern for glob
+      # Q1: 01-*, 02-*, 03-*  Q2: 04-*, 05-*, 06-*  etc.
+      quarter_months = {
+        1: ["01", "02", "03"],
+        2: ["04", "05", "06"],
+        3: ["07", "08", "09"],
+        4: ["10", "11", "12"],
+      }
+      months = quarter_months[quarter]
+
+      # Stage each table incrementally
+      successful_tables: list[str] = []
+      table_infos: dict[str, TableInfo] = {}
+      failed_tables: list[tuple[str, str]] = []
+
+      total_tables = len(tables_by_type)
+      for i, (table_name, entity_type) in enumerate(tables_by_type.items(), 1):
+        # Build S3 patterns for all months in the quarter
+        s3_patterns = [
+          f"s3://{self.bucket}/{self.source_prefix}/filed={year}-{month}-*/{entity_type}/{table_name}/*.parquet"
+          for month in months
+        ]
+
+        timeout = _get_staging_timeout(table_name)
+        log_progress(
+          f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})..."
+        )
+
+        try:
+          # INSERT INTO existing table (with dedup)
+          response = await client.insert_into_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            s3_pattern=s3_patterns,
+            timeout=timeout,
+          )
+
+          if response.get("status") == "failed":
+            error = response.get("error", "Unknown error")
+            if "No files found" in error:
+              log_progress(
+                f"[{i}/{total_tables}] Skipped {table_name}: no files for Q{quarter}"
+              )
+              successful_tables.append(table_name)
+              table_infos[table_name] = TableInfo(
+                name=table_name,
+                row_count=0,
+                file_count=0,
+                staged_at=datetime.now(UTC).isoformat(),
+                skipped=True,
+              )
+              continue
+            failed_tables.append((table_name, error))
+            continue
+
+          result = response.get("result", {})
+          row_count = result.get("row_count", 0)  # Net new rows after dedup
+          duration = response.get("duration_seconds", 0)
+
+          log_progress(
+            f"[{i}/{total_tables}] Inserted {table_name}: "
+            f"{row_count:,} net new rows in {duration:.1f}s"
+          )
+
+          successful_tables.append(table_name)
+          table_infos[table_name] = TableInfo(
+            name=table_name,
+            row_count=row_count,
+            file_count=0,
+            staged_at=datetime.now(UTC).isoformat(),
+          )
+
+        except Exception as e:
+          error_str = str(e)
+          if "No files found" in error_str:
+            successful_tables.append(table_name)
+            table_infos[table_name] = TableInfo(
+              name=table_name,
+              row_count=0,
+              file_count=0,
+              staged_at=datetime.now(UTC).isoformat(),
+              skipped=True,
+            )
+          else:
+            failed_tables.append((table_name, error_str))
+
+      status = "success" if len(successful_tables) == total_tables else "partial"
+      total_rows = sum(info.row_count for info in table_infos.values())
+      duration = time.time() - start_time
+
+      logger.info(
+        f"Incremental staging complete in {duration:.2f}s: "
+        f"{len(successful_tables)}/{total_tables} tables, {total_rows:,} net new rows"
+      )
+
+      return StagingResult(
+        status=status,
+        table_names=successful_tables,
+        tables=table_infos,
+        total_rows=total_rows,
+        duration_seconds=duration,
+        duckdb_path=get_staging_duckdb_path(self.graph_id),
+      )
+
+    except Exception as e:
+      logger.error(f"Incremental staging failed: {e}", exc_info=True)
+      return StagingResult(
+        status="error",
+        table_names=[],
+        error=str(e),
+        duration_seconds=time.time() - start_time,
+      )
+
   async def materialize_from_duckdb(
     self,
     table_names: list[str] | None = None,

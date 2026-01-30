@@ -1,16 +1,18 @@
-"""SEC pipeline sensors for parallel processing.
+"""SEC pipeline sensors for automated incremental updates.
 
-Sensors trigger per-filing processing jobs based on SourceFile queue state.
+Sensors trigger jobs based on SourceFile queue state and job completion.
 
-Architecture:
-- Phase 1 (Downloads): sec_raw_filings downloads ZIPs to S3, creates SourceFile records
-- Phase 2 (Processing): This sensor discovers pending files, triggers per-file runs
-- Phase 3 (Materialization): sec_materialize_job ingests to graph (sequential)
-- Phase 4 (Snapshot): After materialization, trigger shared replica snapshot
+Architecture (SEC_INCREMENTAL_PIPELINE_ENABLED=true):
+- Phase 1 (Download): sec_incremental_download_schedule triggers every 3 hours
+- Phase 2 (Process): sec_download_to_process_sensor chains download → process
+- Phase 3 (Stage): sec_incremental_staging_sensor chains process → incremental stage + materialize
+- Phase 4 (Snapshot): sec_incremental_post_ingest_snapshot_sensor chains ingest → snapshot
 
-The sensor yields one RunRequest per pending SourceFile. Each run processes
-one filing in its own ECS container, enabling parallel execution.
-Dagster's run coordinator (DAGSTER_MAX_CONCURRENT_RUNS) controls concurrency.
+Manual Processing (SEC_PARALLEL_SENSOR_ENABLED=true):
+- sec_processing_sensor: Discovers pending SourceFiles, triggers batch processing per quarter
+
+Incremental staging uses INSERT INTO with dedup (only net new rows added).
+LadybugDB is fully rebuilt since it doesn't support incremental updates.
 """
 
 from datetime import UTC, datetime
@@ -32,9 +34,9 @@ from dagster import (
 from robosystems.config import env
 from robosystems.dagster.jobs.sec import (
   sec_download_job,
+  sec_incremental_ingest_job,
   sec_materialize_job,
   sec_process_job,
-  sec_staged_materialize_job,
 )
 from robosystems.dagster.jobs.shared_repository import shared_repository_snapshot_job
 
@@ -487,141 +489,199 @@ def sec_download_to_process_sensor(context: RunStatusSensorContext):
   )
 
 
-@run_status_sensor(
-  run_status=DagsterRunStatus.SUCCESS,
-  monitored_jobs=[sec_process_job],
-  request_job=sec_staged_materialize_job,
+# ============================================================================
+# SEC Incremental Staging Sensors
+# ============================================================================
+# These sensors complete the incremental pipeline chain:
+#   download → process → incremental stage → materialize → snapshot
+#
+# Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+#
+# Unlike full rebuild (CREATE TABLE from scratch), incremental staging uses
+# INSERT INTO with dedup to add only net new rows to existing DuckDB tables.
+# LadybugDB is still fully rebuilt since it doesn't support incremental updates.
+
+
+@sensor(
+  job=sec_incremental_ingest_job,
+  minimum_interval_seconds=300,  # Check every 5 minutes
   default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
-  minimum_interval_seconds=60,
-  description="Chain: process success → trigger stage + materialize (waits for batch)",
+  description="Trigger incremental staging when all pending SourceFiles are processed",
 )
-def sec_process_to_stage_materialize_sensor(context: RunStatusSensorContext):
-  """Trigger full staging and materialization after ALL processing in batch completes.
+def sec_incremental_staging_sensor(context: SensorEvaluationContext):
+  """Trigger incremental staging when all pending SourceFiles are processed.
 
-  Part of the automated incremental pipeline. At quarter boundaries, multiple
-  quarters may be downloaded and processed. This sensor waits for ALL process
-  jobs in the same batch to complete before triggering stage+materialize.
+  Part of the automated incremental pipeline. Detects when pending count
+  reaches 0 (all files processed), then triggers incremental staging for
+  current quarter. Deduplication handles any duplicates - no date tracking needed.
 
-  Batch tracking:
-  - Jobs from the same schedule tick share a batch_id tag
-  - Sensor queries all process jobs with same batch_id
-  - Only triggers when all are complete (SUCCESS or FAILURE)
-  - Uses batch_id in run_key for deduplication (Dagster prevents duplicate runs)
-
-  Note: Uses sec_staged_materialize_job which does both staging and
-  materialization in sequence, ensuring atomicity.
-
-  Enable via: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
   """
+  from datetime import timedelta
+
+  from robosystems.database import session as SessionLocal
+  from robosystems.models.iam import SourceFile
+
+  # Skip in dev - use manual job triggers for testing
   if env.ENVIRONMENT == "dev":
-    context.log.info("Skipping chain sensor in dev environment")
+    yield SkipReason("Skipped in dev - use Dagster UI to trigger manually")
     return
 
-  dagster_run = context.dagster_run
+  session = None
+  try:
+    session = SessionLocal()
 
-  # Only chain incremental pipeline runs
-  run_tags = dagster_run.tags or {}
-  if run_tags.get("mode") != "incremental":
-    context.log.info("Skipping - not an incremental pipeline run")
-    return
-
-  # Get batch_id for batch tracking
-  batch_id = run_tags.get("batch_id")
-  if not batch_id:
-    context.log.warning("No batch_id found on process run, skipping batch tracking")
-    return
-
-  # Query all process jobs in this batch
-  batch_runs = context.instance.get_runs(
-    filters=RunsFilter(
-      job_name="sec_process",
-      tags={"batch_id": batch_id, "mode": "incremental"},
-    ),
-  )
-
-  if not batch_runs:
-    context.log.warning(f"No process jobs found for batch {batch_id}")
-    return
-
-  # Check if all jobs in batch are complete (SUCCESS or FAILURE)
-  terminal_statuses = {DagsterRunStatus.SUCCESS, DagsterRunStatus.FAILURE}
-  incomplete = [r for r in batch_runs if r.status not in terminal_statuses]
-
-  if incomplete:
-    incomplete_quarters = [r.tags.get("quarter", "?") for r in incomplete]
-    context.log.info(
-      f"Waiting for {len(incomplete)} more process job(s) in batch {batch_id}: "
-      f"{incomplete_quarters}"
+    # Check for pending files
+    pending_count = (
+      session.query(SourceFile)
+      .filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "pending",
+      )
+      .count()
     )
-    return
 
-  # All jobs complete - check if any succeeded
-  succeeded = [r for r in batch_runs if r.status == DagsterRunStatus.SUCCESS]
-  if not succeeded:
-    context.log.warning(
-      f"All {len(batch_runs)} process jobs in batch {batch_id} failed, "
-      "skipping stage+materialize"
+    if pending_count > 0:
+      yield SkipReason(f"{pending_count} files still pending processing")
+      return
+
+    # Check if there are recently processed files (last 24 hours)
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
+
+    recent_count = (
+      session.query(SourceFile)
+      .filter(
+        SourceFile.graph_id == "sec",
+        SourceFile.status == "success",
+        SourceFile.processed_at >= cutoff,
+      )
+      .count()
     )
+
+    if recent_count == 0:
+      yield SkipReason("No recently processed files to stage")
+      return
+
+  except Exception as e:
+    context.log.error(f"Database query failed: {e}")
+    yield SkipReason(f"Database error: {e}")
     return
+  finally:
+    if session:
+      session.close()
 
-  succeeded_quarters = [r.tags.get("quarter", "?") for r in succeeded]
-  context.log.info(
-    f"All process jobs in batch {batch_id} complete. "
-    f"Succeeded: {succeeded_quarters}. Triggering stage+materialize."
-  )
-
-  # Check for already running stage/materialize job
+  # Check if incremental job is already running
   active_runs = context.instance.get_runs(
     filters=RunsFilter(
-      job_name="sec_staged_materialize",
+      job_name="sec_incremental_ingest",
       statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
     ),
     limit=1,
   )
   if active_runs:
     context.log.info(
-      f"Stage/materialize job already running (run_id={active_runs[0].run_id}), skipping"
+      f"Incremental ingest already running (run_id={active_runs[0].run_id}), skipping"
     )
     return
 
-  # Also check for separate stage or materialize jobs
-  for job_name in ["sec_stage", "sec_materialize"]:
-    active = context.instance.get_runs(
-      filters=RunsFilter(
-        job_name=job_name,
-        statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
-      ),
-      limit=1,
-    )
-    if active:
-      context.log.info(f"{job_name} job already running, skipping")
-      return
+  # Create run key based on current date to prevent duplicate daily runs
+  today = datetime.now(UTC).strftime("%Y-%m-%d")
+  run_key = f"sec-incremental-{today}"
 
-  # Use batch_id in run_key for deduplication
-  # If sensor fires multiple times (once per completed job in batch),
-  # Dagster's run_key deduplication ensures only one stage+materialize runs
+  context.log.info(
+    f"All processing complete ({recent_count} files in last 24h), "
+    f"triggering incremental staging"
+  )
+
   yield RunRequest(
-    run_key=f"sec-stage-materialize-batch-{batch_id}",
+    run_key=run_key,
     run_config={
       "ops": {
-        "sec_duckdb_staged": {
+        "sec_duckdb_incremental_stage": {
           "config": {
             "graph_id": "sec",
-            "reset_staging": True,  # Fresh DuckDB file each run
+            # year/quarter default to current if not specified
           }
         },
         "sec_graph_materialized": {
           "config": {
             "graph_id": "sec",
-            "rebuild_graph": True,  # Delete and rebuild LadybugDB from fresh DuckDB staging
+            "rebuild_graph": True,  # Full LadybugDB rebuild from updated DuckDB
           }
         },
       }
     },
     tags={
       "pipeline": "sec",
-      "phase": "stage_materialize",
+      "phase": "incremental_ingest",
       "mode": "incremental",
-      "batch_id": batch_id,
+    },
+  )
+
+
+@run_status_sensor(
+  run_status=DagsterRunStatus.SUCCESS,
+  monitored_jobs=[sec_incremental_ingest_job],
+  request_job=shared_repository_snapshot_job,
+  default_status=SEC_INCREMENTAL_PIPELINE_STATUS,
+  minimum_interval_seconds=60,
+  description="Trigger shared repository snapshot after incremental ingest completes",
+)
+def sec_incremental_post_ingest_snapshot_sensor(context: RunStatusSensorContext):
+  """Trigger shared repository snapshot after incremental ingest completes.
+
+  Part of the automated incremental pipeline. After incremental staging +
+  materialization succeeds, this triggers:
+  1. Create EBS snapshot of shared master's data volume
+  2. Update replica launch template with new snapshot
+  3. Trigger rolling refresh of replica fleet
+
+  This ensures replicas serve the latest SEC data after daily updates.
+
+  Controlled by: SEC_INCREMENTAL_PIPELINE_ENABLED=true
+  """
+  if env.ENVIRONMENT == "dev":
+    context.log.info("Skipping snapshot sensor in dev environment")
+    return
+
+  dagster_run = context.dagster_run
+
+  # Check if a snapshot job is already running
+  active_runs = context.instance.get_runs(
+    filters=RunsFilter(
+      job_name="shared_repository_snapshot_job",
+      statuses=[DagsterRunStatus.STARTED, DagsterRunStatus.QUEUED],
+    ),
+    limit=1,
+  )
+  if active_runs:
+    context.log.info(
+      f"Snapshot job already running (run_id={active_runs[0].run_id}), skipping"
+    )
+    return
+
+  context.log.info(
+    f"Incremental ingest completed (run_id={dagster_run.run_id}), "
+    "triggering snapshot + replica refresh"
+  )
+
+  yield RunRequest(
+    run_key=f"snapshot-after-{dagster_run.run_id[:8]}",
+    run_config={
+      "ops": {
+        "get_shared_master_volume": {
+          "config": {
+            "graph_id": "sec",
+            "wait_for_completion": True,
+            "description_prefix": "SEC incremental ingest",
+          }
+        },
+        "refresh_replica_instances": {
+          "config": {
+            "min_healthy_percentage": 50,
+            "instance_warmup_seconds": 300,
+          }
+        },
+      }
     },
   )

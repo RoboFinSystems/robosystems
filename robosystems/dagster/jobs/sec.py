@@ -44,6 +44,7 @@ from dagster import (
 
 from robosystems.config import env
 from robosystems.dagster.assets import (
+  sec_duckdb_incremental_stage,
   sec_duckdb_staged,
   sec_graph_materialized,
   sec_processed_filings,
@@ -165,6 +166,38 @@ sec_staged_materialize_job = define_asset_job(
     # Standard profile: 2 vCPU, 8 GB - stage+materialize is I/O/network bound
     "ecs/task_definition": f"robosystems-dagster-run-standard-{env.ENVIRONMENT}",
     # Long-running job (2+ hours) - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 3b: Incremental Ingest (Daily Updates)
+# ============================================================================
+# Incremental pipeline for daily SEC updates:
+# 1. sec_duckdb_incremental_stage: INSERT new quarter files with dedup
+# 2. sec_graph_materialized: Full rebuild from updated DuckDB tables
+#
+# Unlike full rebuild, incremental staging only adds net new rows.
+# Materialization still does full rebuild since LadybugDB doesn't support
+# incremental updates efficiently.
+
+sec_incremental_ingest_job = define_asset_job(
+  name="sec_incremental_ingest",
+  description="Incremental SEC ingest: stage new dates → materialize → snapshot.",
+  selection=AssetSelection.assets(
+    sec_duckdb_incremental_stage,
+    sec_graph_materialized,
+  ),
+  tags={
+    "pipeline": "sec",
+    "mode": "incremental",
+    # Standard profile: 2 vCPU, 8 GB - incremental staging is I/O bound
+    "ecs/task_definition": f"robosystems-dagster-run-standard-{env.ENVIRONMENT}",
     "ecs/run_task_kwargs": {
       "capacityProviderStrategy": [
         {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
