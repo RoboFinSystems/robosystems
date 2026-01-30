@@ -40,7 +40,10 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+  from robosystems.graph_api.client.client import GraphClient
 
 from robosystems.adapters.sec.models.staging import (
   MaterializeResult,
@@ -1069,7 +1072,7 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_name: str,
     entity_type: str,
-    graph_client,
+    graph_client: "GraphClient",
     quarters: dict[str, list[str]],
     log_progress: Callable[[str], None],
     table_index: int,
@@ -1230,53 +1233,53 @@ class XBRLDuckDBGraphProcessor:
     last_merge_error = None
     final_row_count = 0
 
-    # Merge timeout: 30 minutes for 200M+ row UNION ALL + dedupe
-    # This is longer than chunk timeout since it processes all data at once
-    merge_timeout = 1800.0  # 30 minutes
+    # Merge timeout: Use same timeout as chunk operations (10 min)
+    # The merge is O(n) like full ingest, so shouldn't need longer than chunk loading
+    merge_timeout = float(CHUNKED_STAGING_TIMEOUT)  # 10 minutes
 
-    for attempt in range(STAGING_MAX_RETRIES):
-      try:
-        # Use longer timeout for merge - it's processing all data at once
-        merge_start = asyncio.get_event_loop().time()
-        await graph_client.query_table(
-          graph_id=self.graph_id,
-          sql=merge_sql,
-          timeout=merge_timeout,
-        )
-        merge_duration = asyncio.get_event_loop().time() - merge_start
-        total_duration += merge_duration
-
-        # Get final row count (short timeout is fine for COUNT)
-        count_response = await graph_client.query_table(
-          graph_id=self.graph_id,
-          sql=f'SELECT COUNT(*) as cnt FROM "{table_name}"',
-          timeout=60.0,  # 1 minute is plenty for COUNT(*)
-        )
-        if count_response.get("rows") and count_response["rows"][0]:
-          final_row_count = count_response["rows"][0][0]
-
-        log_progress(
-          f"  [MERGE] Created {table_name}: {final_row_count:,} rows in {merge_duration:.1f}s"
-        )
-        merge_success = True
-        break
-
-      except Exception as e:
-        last_merge_error = str(e)
-        if attempt < STAGING_MAX_RETRIES - 1:
-          backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
-          log_progress(
-            f"  [MERGE] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {last_merge_error[:100]}. "
-            f"Retrying in {backoff}s..."
+    try:
+      for attempt in range(STAGING_MAX_RETRIES):
+        try:
+          merge_start = asyncio.get_event_loop().time()
+          await graph_client.query_table(
+            graph_id=self.graph_id,
+            sql=merge_sql,
+            timeout=merge_timeout,
           )
-          await asyncio.sleep(backoff)
-        else:
-          log_progress(
-            f"  [MERGE] Failed after {STAGING_MAX_RETRIES} attempts: {last_merge_error[:200]}"
-          )
+          merge_duration = asyncio.get_event_loop().time() - merge_start
+          total_duration += merge_duration
 
-    # Phase 3: Cleanup chunk tables (regardless of merge success)
-    await self._cleanup_chunk_tables(graph_client, chunk_tables, log_progress)
+          # Get final row count (short timeout is fine for COUNT)
+          count_response = await graph_client.query_table(
+            graph_id=self.graph_id,
+            sql=f'SELECT COUNT(*) as cnt FROM "{table_name}"',
+            timeout=60.0,  # 1 minute is plenty for COUNT(*)
+          )
+          if count_response.get("rows") and count_response["rows"][0]:
+            final_row_count = count_response["rows"][0][0]
+
+          log_progress(
+            f"  [MERGE] Created {table_name}: {final_row_count:,} rows in {merge_duration:.1f}s"
+          )
+          merge_success = True
+          break
+
+        except Exception as e:
+          last_merge_error = str(e)
+          if attempt < STAGING_MAX_RETRIES - 1:
+            backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
+            log_progress(
+              f"  [MERGE] Attempt {attempt + 1}/{STAGING_MAX_RETRIES} failed: {last_merge_error[:100]}. "
+              f"Retrying in {backoff}s..."
+            )
+            await asyncio.sleep(backoff)
+          else:
+            log_progress(
+              f"  [MERGE] Failed after {STAGING_MAX_RETRIES} attempts: {last_merge_error[:200]}"
+            )
+    finally:
+      # Phase 3: Cleanup chunk tables (always runs, even on crash/exception)
+      await self._cleanup_chunk_tables(graph_client, chunk_tables, log_progress)
 
     if not merge_success:
       return False, None, f"Failed to merge chunks: {last_merge_error}"
@@ -1299,7 +1302,7 @@ class XBRLDuckDBGraphProcessor:
 
   async def _cleanup_chunk_tables(
     self,
-    graph_client,
+    graph_client: "GraphClient",
     chunk_tables: list[str],
     log_progress: Callable[[str], None],
   ) -> None:
