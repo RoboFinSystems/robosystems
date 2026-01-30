@@ -249,7 +249,7 @@ class SECDownloader:
 
     Args:
         year: Year to download
-        form_types: Form types to download (default: ["10-K", "10-Q"])
+        form_types: Form types to download (default: ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"])
         ciks: Optional list of CIKs to filter
         bucket: S3 bucket (default: SHARED_RAW_BUCKET)
 
@@ -262,7 +262,7 @@ class SECDownloader:
     """
     from .efts import EFTSClient
 
-    form_types = form_types or ["10-K", "10-Q", "20-F", "40-F"]
+    form_types = form_types or ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"]
 
     # Discover filings via EFTS
     async with EFTSClient(requests_per_second=self.requests_per_second) as efts:

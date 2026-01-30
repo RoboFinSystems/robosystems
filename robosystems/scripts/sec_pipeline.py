@@ -245,7 +245,7 @@ class SECPipeline:
           "sec_raw_filings": {
             "config": {
               "skip_existing": skip_existing,
-              "form_types": ["10-K", "10-Q", "20-F", "40-F"],
+              "form_types": ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
               "tickers": tickers,
             }
           },

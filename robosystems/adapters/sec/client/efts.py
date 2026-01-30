@@ -114,6 +114,7 @@ class EFTSClient:
     """Fetch a single page of results from EFTS."""
     MAX_RETRIES = 3
     MAX_RETRY_AFTER = 300  # Cap at 5 minutes to prevent DoS
+    SERVER_ERROR_RETRY_DELAY = 30  # Wait 30s before retrying server errors
 
     if not self._session:
       raise RuntimeError("Client not initialized. Use 'async with EFTSClient():'")
@@ -136,6 +137,19 @@ class EFTSClient:
             f"(retry {retry_count + 1}/{MAX_RETRIES})"
           )
           await asyncio.sleep(retry_after)
+          return await self._fetch_page(params, offset, size, retry_count + 1)
+
+        # Retry on server errors (500, 502, 503, 504) - these are often transient
+        if response.status >= 500:
+          if retry_count >= MAX_RETRIES:
+            raise RuntimeError(
+              f"EFTS server error {response.status} after {MAX_RETRIES} retries"
+            )
+          logger.warning(
+            f"EFTS server error {response.status}, waiting {SERVER_ERROR_RETRY_DELAY}s "
+            f"(retry {retry_count + 1}/{MAX_RETRIES})"
+          )
+          await asyncio.sleep(SERVER_ERROR_RETRY_DELAY)
           return await self._fetch_page(params, offset, size, retry_count + 1)
 
         response.raise_for_status()
@@ -289,14 +303,14 @@ class EFTSClient:
 
     Args:
         year: The fiscal year to query
-        form_types: List of form types (default: ["10-K", "10-Q"])
+        form_types: List of form types (default: ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"])
         ciks: Optional list of CIKs to filter by
 
     Returns:
         List of EFTSHit objects for the year.
     """
     return await self.query(
-      form_types=form_types or ["10-K", "10-Q", "20-F", "40-F"],
+      form_types=form_types or ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date=f"{year}-01-01",
       end_date=f"{year}-12-31",
       ciks=ciks,
@@ -318,7 +332,7 @@ class EFTSClient:
     Args:
         year: The fiscal year
         quarter: Quarter (1-4)
-        form_types: List of form types (default: ["10-K", "10-Q"])
+        form_types: List of form types (default: ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"])
         ciks: Optional list of CIKs to filter by
 
     Returns:
@@ -337,7 +351,7 @@ class EFTSClient:
     start_mmdd, end_mmdd = quarter_dates[quarter]
 
     return await self.query(
-      form_types=form_types or ["10-K", "10-Q", "20-F", "40-F"],
+      form_types=form_types or ["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date=f"{year}-{start_mmdd}",
       end_date=f"{year}-{end_mmdd}",
       ciks=ciks,
