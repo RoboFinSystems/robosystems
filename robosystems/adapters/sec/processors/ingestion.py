@@ -572,7 +572,10 @@ class XBRLDuckDBGraphProcessor:
         return StagingResult(
           status="error",
           table_names=[],
-          error="No existing DuckDB tables. Run full staging first.",
+          error=(
+            "No existing DuckDB tables found for incremental staging. "
+            "Run full staging first via the sec_duckdb_staged asset."
+          ),
           duration_seconds=time.time() - start_time,
         )
 

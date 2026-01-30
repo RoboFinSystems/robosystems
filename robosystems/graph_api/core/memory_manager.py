@@ -67,7 +67,7 @@ def boost_duckdb_memory(graph_id: str) -> Generator[str | None]:
 
   if boost_limit:
     logger.info(f"Boosting DuckDB memory to {boost_limit} for staging {graph_id}")
-    old_override = set_duckdb_memory_override(boost_limit)
+    old_override = set_duckdb_memory_override(boost_limit, graph_id)
 
     # Reconfigure existing connections to use new limit
     try:
@@ -80,7 +80,7 @@ def boost_duckdb_memory(graph_id: str) -> Generator[str | None]:
       yield boost_limit
     finally:
       logger.info(f"Restoring DuckDB memory to default after staging {graph_id}")
-      set_duckdb_memory_override(old_override)
+      set_duckdb_memory_override(old_override, graph_id)
 
       # Reconfigure connections back to default
       try:
@@ -205,16 +205,18 @@ def ensure_duckdb_memory_boosted(graph_id: str) -> str | None:
   if not boost_limit:
     return None
 
-  # Check if override is already set
-  current_override = get_duckdb_memory_override()
+  # Check if override is already set for this graph
+  current_override = get_duckdb_memory_override(graph_id)
   if current_override:
-    logger.debug(f"DuckDB memory override already active: {current_override}")
+    logger.debug(
+      f"DuckDB memory override already active for {graph_id}: {current_override}"
+    )
     _active_duckdb_boosts.add(graph_id)
     return None
 
   # Apply boost
   logger.info(f"Boosting DuckDB memory to {boost_limit} for staging {graph_id}")
-  set_duckdb_memory_override(boost_limit)
+  set_duckdb_memory_override(boost_limit, graph_id)
   _active_duckdb_boosts.add(graph_id)
 
   # Reconfigure existing connections
@@ -248,25 +250,19 @@ def restore_duckdb_memory(graph_id: str) -> bool:
 
   _active_duckdb_boosts.discard(graph_id)
 
-  # Only clear override if no other graphs are using boost
-  if not _active_duckdb_boosts:
-    logger.info(f"Restoring DuckDB memory to default after {graph_id}")
-    set_duckdb_memory_override(None)
+  # Clear override for this graph
+  logger.info(f"Restoring DuckDB memory to default after {graph_id}")
+  set_duckdb_memory_override(None, graph_id)
 
-    # Reconfigure connections back to default
-    tier = env.CLUSTER_TIER
-    try:
-      default_limit = GraphTierConfig.get_duckdb_memory_limit(tier) if tier else "2GB"
-      pool = get_duckdb_pool()
-      pool.reconfigure_memory_limit(graph_id, default_limit)
-      return True
-    except Exception as e:
-      logger.warning(f"Could not restore DuckDB memory config: {e}")
-      return False
-  else:
-    logger.debug(
-      f"Other graphs still using boost: {_active_duckdb_boosts}, not restoring"
-    )
+  # Reconfigure connections back to default
+  tier = env.CLUSTER_TIER
+  try:
+    default_limit = GraphTierConfig.get_duckdb_memory_limit(tier) if tier else "2GB"
+    pool = get_duckdb_pool()
+    pool.reconfigure_memory_limit(graph_id, default_limit)
+    return True
+  except Exception as e:
+    logger.warning(f"Could not restore DuckDB memory config: {e}")
     return False
 
 
