@@ -636,19 +636,22 @@ class DuckDBConnectionPool:
 
   def interrupt_connections(self, graph_id: str) -> int:
     """
-    Interrupt all running queries on connections for a specific database.
+    Interrupt and close all connections for a specific database.
 
     This is used to cancel long-running queries when a timeout occurs.
     DuckDB's interrupt() method cancels any in-progress query on the connection.
 
-    After interruption, connections are marked as unhealthy to prevent reuse
-    of potentially corrupted connections.
+    CRITICAL: After interruption, connections must be CLOSED to release file locks.
+    Simply marking as unhealthy is not enough - the interrupted connection still
+    holds the DuckDB file lock, which blocks new operations from acquiring it.
+    This can cause deadlocks where new CREATE/INSERT operations hang forever
+    waiting for the lock held by the zombie connection.
 
     Args:
         graph_id: Graph database identifier
 
     Returns:
-        Number of connections interrupted
+        Number of connections interrupted and closed
     """
     interrupted_count = 0
     with self._get_database_lock(graph_id):
@@ -657,18 +660,34 @@ class DuckDBConnectionPool:
         pool_items = list(self._pools[graph_id].items())
         for conn_id, conn_info in pool_items:
           try:
+            # Step 1: Interrupt any running query
             conn_info.connection.interrupt()
-            # Mark as unhealthy to prevent reuse - interrupted connections
-            # may be in an undefined state
-            conn_info.is_healthy = False
-            interrupted_count += 1
-            logger.info(f"Interrupted DuckDB connection {conn_id} for {graph_id}")
+            logger.debug(f"Interrupted DuckDB query on {conn_id} for {graph_id}")
           except Exception as e:
             logger.warning(f"Failed to interrupt connection {conn_id}: {e}")
 
+          try:
+            # Step 2: Close the connection to release file locks
+            # Skip CHECKPOINT - interrupted connections may be in undefined state
+            # and CHECKPOINT could hang or fail
+            conn_info.connection.close()
+            logger.debug(f"Closed interrupted DuckDB connection {conn_id}")
+          except Exception as e:
+            logger.warning(f"Failed to close interrupted connection {conn_id}: {e}")
+
+          # Step 3: Remove from pool
+          if conn_id in self._pools[graph_id]:
+            del self._pools[graph_id][conn_id]
+            self._stats["connections_closed"] += 1
+
+          interrupted_count += 1
+          logger.info(
+            f"Interrupted and closed DuckDB connection {conn_id} for {graph_id}"
+          )
+
     if interrupted_count > 0:
       logger.info(
-        f"Interrupted {interrupted_count} DuckDB connection(s) for {graph_id}"
+        f"Interrupted and closed {interrupted_count} DuckDB connection(s) for {graph_id}"
       )
     return interrupted_count
 

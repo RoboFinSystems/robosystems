@@ -432,11 +432,55 @@ class GraphClient(BaseGraphClient):
         Dict with results or error
     """
     start_time = time.time()
-    last_heartbeat = start_time
-    last_progress_log = start_time
 
     # Build full SSE URL
     sse_url = f"{self.config.base_url}{sse_path}"
+
+    try:
+      # Wrap entire SSE monitoring with asyncio.wait_for for hard timeout
+      # This ensures we timeout even if the server stops sending events entirely
+      # (the previous timeout checks only ran after receiving an event)
+      return await asyncio.wait_for(
+        self._sse_event_loop(
+          sse_url=sse_url,
+          task_id=task_id,
+          table_name=table_name,
+          timeout=timeout,
+          start_time=start_time,
+        ),
+        timeout=timeout + 30,  # Add 30s buffer for connection setup
+      )
+
+    except TimeoutError:
+      elapsed = time.time() - start_time
+      logger.error(
+        f"SSE monitoring hard timeout after {elapsed:.0f}s for {table_name} "
+        f"(task {task_id}) - server may be stuck"
+      )
+      return {
+        "status": "failed",
+        "task_id": task_id,
+        "error": f"Hard timeout after {elapsed:.0f} seconds - server not responding",
+      }
+    except Exception as e:
+      logger.error(f"SSE monitoring error: {e}")
+      return {"status": "failed", "task_id": task_id, "error": str(e)}
+
+  async def _sse_event_loop(
+    self,
+    sse_url: str,
+    task_id: str,
+    table_name: str,
+    timeout: int,
+    start_time: float,
+  ) -> dict[str, Any]:
+    """
+    Internal SSE event processing loop.
+
+    Separated from _monitor_ingestion_sse to allow wrapping with asyncio.wait_for.
+    """
+    last_heartbeat = start_time
+    last_progress_log = start_time
 
     try:
       # Use a separate client for SSE to avoid interfering with main client
@@ -522,7 +566,7 @@ class GraphClient(BaseGraphClient):
                 "error": f"SSE stream error: {error}",
               }
 
-            # Check for timeout
+            # Check for timeout (soft timeout - checked after each event)
             if current_time - start_time > timeout:
               logger.error(f"Ingestion timeout after {timeout}s for {table_name}")
               return {
@@ -552,9 +596,6 @@ class GraphClient(BaseGraphClient):
     except TimeoutError:
       logger.error(f"SSE connection timeout for task {task_id}")
       return {"status": "failed", "task_id": task_id, "error": "SSE connection timeout"}
-    except Exception as e:
-      logger.error(f"SSE monitoring error: {e}")
-      return {"status": "failed", "task_id": task_id, "error": str(e)}
 
   async def list_databases(self) -> dict[str, Any]:
     """List all databases."""

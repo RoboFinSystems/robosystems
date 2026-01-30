@@ -102,7 +102,7 @@ LARGE_STAGING_TABLES = frozenset(
     "FACT_HAS_UNIT",  # Fact -> Unit
     "FACT_HAS_DIMENSION",  # Fact -> FactDimension
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
-    "FACT_SET_CONTAINS_FACT",  # ~987M rows - FactSet -> Fact
+    "FACT_SET_CONTAINS_FACT",  # ~105M rows - FactSet -> Fact (1:1 with Fact)
     "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - FactDimension -> Element
     "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
     # Large relationship tables (shared reference)
@@ -118,34 +118,39 @@ LARGE_STAGING_TABLES = frozenset(
 # Tables safe to chunk by quarter (unique per filing, no cross-quarter duplicates)
 # These tables have data that is specific to individual filings, so loading
 # quarter-by-quarter won't create duplicates.
+#
+# Chunking threshold: Only chunk tables >100M rows. Full staging works reliably
+# up to ~106M rows (TAXONOMY_HAS_LABEL completes in 90s). Smaller tables have
+# unnecessary overhead from 17 sequential CREATE/INSERT operations.
+#
 # Note: FactSet/REPORT_HAS_FACT_SET excluded - only 1 per report, small tables.
 QUARTER_CHUNKABLE_TABLES = frozenset(
   {
-    # Fact nodes (high volume, benefit from chunking)
-    "Fact",  # ~1B rows - unique per filing
-    "FactDimension",  # ~76M rows - dimensional breakdowns per-fact
-    # Fact relationships (all per-fact, safe to chunk)
-    "REPORT_HAS_FACT",  # Report -> Fact
-    "FACT_HAS_ELEMENT",  # Fact -> Element
-    "FACT_HAS_ENTITY",  # Fact -> Entity
-    "FACT_HAS_PERIOD",  # Fact -> Period
-    "FACT_HAS_UNIT",  # Fact -> Unit
-    "FACT_HAS_DIMENSION",  # Fact -> FactDimension
-    "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
-    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - FactDimension -> Element (member)
-    "FACT_SET_CONTAINS_FACT",  # ~987M rows - FactSet -> Fact
+    # Fact node (~105M rows) - the core high-volume table
+    "Fact",
+    # Fact relationships (~94-105M rows each, 1:1 with Fact)
+    "REPORT_HAS_FACT",
+    "FACT_HAS_ELEMENT",
+    "FACT_HAS_ENTITY",
+    "FACT_HAS_PERIOD",
+    "FACT_HAS_UNIT",
+    "FACT_HAS_DIMENSION",
+    "FACT_SET_CONTAINS_FACT",
+    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - borderline but safer to chunk
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
-    # Structure and Association nodes (filing-specific, not shared across filings)
-    # Structure ID includes accession_number, Association ID is random UUID
-    "Structure",  # ~7M rows - per-filing presentation/calculation structures
-    "Association",  # ~206M rows - per-filing element relationships
-    # Structure/Association relationships
-    "STRUCTURE_HAS_TAXONOMY",  # Structure -> Taxonomy
-    "STRUCTURE_HAS_ASSOCIATION",  # ~200M rows - Structure -> Association
-    "ASSOCIATION_HAS_FROM_ELEMENT",  # ~206M rows - Association -> Element (parent)
-    "ASSOCIATION_HAS_TO_ELEMENT",  # ~206M rows - Association -> Element (child)
+    # Association tables (~200-206M rows) - largest tables, benefit most from chunking
+    "Association",
+    "STRUCTURE_HAS_ASSOCIATION",
+    "ASSOCIATION_HAS_FROM_ELEMENT",
+    "ASSOCIATION_HAS_TO_ELEMENT",
   }
 )
+
+# Tables removed from chunking (full staging is faster for these sizes):
+# - Structure (7M) - well under 100M threshold
+# - FactDimension (8M) - well under 100M threshold
+# - STRUCTURE_HAS_TAXONOMY (7M) - well under 100M threshold
+# - FACT_DIMENSION_AXIS_ELEMENT (8M) - well under 100M threshold
 
 # Tables NOT safe to chunk (shared reference data across filings)
 # These tables have data shared across many filings. Chunking would create
@@ -609,9 +614,7 @@ class XBRLDuckDBGraphProcessor:
         ]
 
         timeout = _get_staging_timeout(table_name)
-        log_progress(
-          f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})..."
-        )
+        log_progress(f"[{i}/{total_tables}] INSERT {table_name} (Q{quarter} {year})...")
 
         try:
           # INSERT INTO existing table (with dedup)
