@@ -323,7 +323,7 @@ class TestEFTSClientQueryByYear:
     await client.query_by_year(2024)
 
     client.query.assert_called_once_with(
-      form_types=["10-K", "10-Q"],
+      form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date="2024-01-01",
       end_date="2024-12-31",
       ciks=None,
@@ -338,7 +338,7 @@ class TestEFTSClientQueryByYear:
     await client.query_by_year(2024, ciks=["320193"])
 
     client.query.assert_called_once_with(
-      form_types=["10-K", "10-Q"],
+      form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date="2024-01-01",
       end_date="2024-12-31",
       ciks=["320193"],
@@ -372,7 +372,7 @@ class TestEFTSClientQueryByQuarter:
     await client.query_by_quarter(2024, quarter=1)
 
     client.query.assert_called_once_with(
-      form_types=["10-K", "10-Q"],
+      form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date="2024-01-01",
       end_date="2024-03-31",
       ciks=None,
@@ -387,7 +387,7 @@ class TestEFTSClientQueryByQuarter:
     await client.query_by_quarter(2024, quarter=2)
 
     client.query.assert_called_once_with(
-      form_types=["10-K", "10-Q"],
+      form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date="2024-04-01",
       end_date="2024-06-30",
       ciks=None,
@@ -402,7 +402,7 @@ class TestEFTSClientQueryByQuarter:
     await client.query_by_quarter(2024, quarter=3)
 
     client.query.assert_called_once_with(
-      form_types=["10-K", "10-Q"],
+      form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date="2024-07-01",
       end_date="2024-09-30",
       ciks=None,
@@ -417,7 +417,7 @@ class TestEFTSClientQueryByQuarter:
     await client.query_by_quarter(2024, quarter=4)
 
     client.query.assert_called_once_with(
-      form_types=["10-K", "10-Q"],
+      form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date="2024-10-01",
       end_date="2024-12-31",
       ciks=None,
@@ -432,7 +432,7 @@ class TestEFTSClientQueryByQuarter:
     await client.query_by_quarter(2024, quarter=1, ciks=["320193"])
 
     client.query.assert_called_once_with(
-      form_types=["10-K", "10-Q"],
+      form_types=["10-K", "10-Q", "20-F", "40-F", "DEF 14A", "S-1"],
       start_date="2024-01-01",
       end_date="2024-03-31",
       ciks=["320193"],

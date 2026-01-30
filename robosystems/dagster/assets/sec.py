@@ -241,6 +241,15 @@ def _get_sec_metadata(
 # Start year for SEC data loading (XBRL filings began 2009)
 SEC_START_YEAR = 2009
 
+# Form type batches for EFTS queries to avoid 10k result limit
+# Q2 (proxy season) can exceed 10k when all forms are included
+# Batch 1: Core financial statements
+# Batch 2: Supplementary filings (proxies, registrations)
+SEC_FORM_TYPE_BATCHES = [
+  ["10-K", "10-Q", "20-F", "40-F"],  # Core financials (~7k in Q2)
+  ["DEF 14A", "S-1"],  # Supplementary (~3k in Q2)
+]
+
 # Quarter partitions for SEC data (SEC_START_YEAR-Q1 through current year Q4)
 # EFTS has a 10k result limit per query; quarterly partitions typically return 5-7k filings
 # Dynamically includes current year so no manual updates needed on Jan 1
@@ -270,7 +279,14 @@ class SECDownloadConfig(Config):
   """
 
   skip_existing: bool = True  # Skip already downloaded filings
-  form_types: list[str] = ["10-K", "10-Q"]  # Form types to download
+  form_types: list[str] = [
+    "10-K",
+    "10-Q",
+    "20-F",
+    "40-F",
+    "DEF 14A",
+    "S-1",
+  ]  # Form types to download
   tickers: list[str] = []  # Optional ticker filter (empty = all companies)
   ciks: list[str] = []  # Optional CIK filter
   max_filings: int = 0  # Max filings to download (0 = unlimited)
@@ -294,17 +310,18 @@ class SECProcessConfig(Config):
   but the job continues processing remaining filings in the batch.
 
   Memory Management:
-  - Each job processes at most batch_limit filings (hardcoded at 10,000)
+  - Each job processes at most batch_limit filings (default 15,000)
   - Job exits gracefully after batch, releasing all memory
   - Sensor re-triggers if more pending files exist
   - This prevents memory accumulation across thousands of filings
 
-  Note: batch_limit is fixed at 10,000 - the maximum EFTS returns per
-  quarterly partition. The heavy job profile (16 vCPU, 64 GB) handles this.
+  Note: batch_limit set to 15,000 to handle Q2 (proxy season) which can
+  exceed 10k filings when all form types are included. The heavy job
+  profile (16 vCPU, 64 GB) handles this comfortably.
   """
 
   # Max filings to process per job run before exiting gracefully.
-  # Fixed at 10,000 - the max EFTS can return per quarterly partition.
+  # Set to 15,000 to handle Q2 proxy season (can exceed 10k with all forms).
   # The heavy job profile (16 vCPU, 64 GB) is sized to handle full quarters.
   batch_limit: int = SEC_PROCESS_BATCH_LIMIT
 
@@ -474,12 +491,35 @@ def sec_raw_filings(
             cik = str(company.get("cik_str", company.get("cik", "")))
             cik_filter.append(cik)
 
-      hits = await efts.query_by_quarter(
-        year=year,
-        quarter=quarter,
-        form_types=config.form_types,
-        ciks=cik_filter,
-      )
+      # Split form types into batches to avoid EFTS 10k limit (especially Q2 proxy season)
+      # Each batch is queried separately and results are combined
+      requested_forms = set(config.form_types)
+      form_batches = []
+      for batch in SEC_FORM_TYPE_BATCHES:
+        batch_forms = [f for f in batch if f in requested_forms]
+        if batch_forms:
+          form_batches.append(batch_forms)
+
+      # Also include any forms not in predefined batches (custom forms)
+      known_forms = {f for batch in SEC_FORM_TYPE_BATCHES for f in batch}
+      custom_forms = [f for f in config.form_types if f not in known_forms]
+      if custom_forms:
+        form_batches.append(custom_forms)
+
+      # Query each batch and combine results
+      hits = []
+      for batch_idx, batch_forms in enumerate(form_batches):
+        context.log.info(
+          f"EFTS batch {batch_idx + 1}/{len(form_batches)}: {batch_forms}"
+        )
+        batch_hits = await efts.query_by_quarter(
+          year=year,
+          quarter=quarter,
+          form_types=batch_forms,
+          ciks=cik_filter,
+        )
+        context.log.info(f"  Batch {batch_idx + 1} found {len(batch_hits)} filings")
+        hits.extend(batch_hits)
 
     context.log.info(f"EFTS discovered {len(hits)} filings for {year}-Q{quarter}")
 
