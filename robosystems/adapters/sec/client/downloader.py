@@ -262,7 +262,7 @@ class SECDownloader:
     """
     from .efts import EFTSClient
 
-    form_types = form_types or ["10-K", "10-Q"]
+    form_types = form_types or ["10-K", "10-Q", "20-F", "40-F"]
 
     # Discover filings via EFTS
     async with EFTSClient(requests_per_second=self.requests_per_second) as efts:

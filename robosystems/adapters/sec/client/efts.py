@@ -296,7 +296,7 @@ class EFTSClient:
         List of EFTSHit objects for the year.
     """
     return await self.query(
-      form_types=form_types or ["10-K", "10-Q"],
+      form_types=form_types or ["10-K", "10-Q", "20-F", "40-F"],
       start_date=f"{year}-01-01",
       end_date=f"{year}-12-31",
       ciks=ciks,
@@ -337,7 +337,7 @@ class EFTSClient:
     start_mmdd, end_mmdd = quarter_dates[quarter]
 
     return await self.query(
-      form_types=form_types or ["10-K", "10-Q"],
+      form_types=form_types or ["10-K", "10-Q", "20-F", "40-F"],
       start_date=f"{year}-{start_mmdd}",
       end_date=f"{year}-{end_mmdd}",
       ciks=ciks,
