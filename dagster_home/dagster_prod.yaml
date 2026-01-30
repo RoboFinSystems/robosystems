@@ -59,8 +59,11 @@ schedule_storage:
 # ECS cluster configuration. The EcsRunLauncher will use the same network
 # settings as the daemon/webserver services.
 #
-# Default: Spot Fargate for cost savings (~70% cheaper)
-# Falls back to On-Demand automatically if Spot capacity unavailable
+# Capacity provider strategy is NOT set here - controlled by job tags instead.
+# Jobs specify ecs/run_task_kwargs with their preferred strategy:
+# - Long-running jobs (SEC staging): On-demand only to avoid Spot interruptions
+# - Short jobs: Spot-preferred for cost savings
+# If no job tag is specified, ECS uses the cluster's default capacity provider.
 run_launcher:
   module: dagster_aws.ecs
   class: EcsRunLauncher
@@ -70,18 +73,9 @@ run_launcher:
       env: DAGSTER_ECS_RUN_TASK_DEFINITION
     # Container name in the task definition
     container_name: dagster-run
-    # Spot-first capacity strategy with On-Demand fallback
-    # Weight 4:1 means prefer Spot, but use On-Demand if unavailable
     run_task_kwargs:
       cluster:
         env: DAGSTER_ECS_CLUSTER
-      capacityProviderStrategy:
-        - capacityProvider: FARGATE_SPOT
-          weight: 4
-          base: 0
-        - capacityProvider: FARGATE
-          weight: 1
-          base: 0
       # Propagate tags from task definition to tasks for cost allocation
       propagateTags: TASK_DEFINITION
     # Resource overrides removed - uses task definition defaults from CloudFormation
