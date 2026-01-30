@@ -36,8 +36,9 @@ Full Rebuild Paradigm (2026-01-29):
 Status: Production - enables independent retry of failed materialization.
 """
 
+import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -77,6 +78,11 @@ CHUNKED_MATERIALIZATION_TIMEOUT = 600  # 10 minutes per 50M row batch
 # Tables exceeding this row count will be materialized in batches to avoid OOM
 MATERIALIZATION_BATCH_SIZE = 50_000_000  # 50M rows per batch
 MATERIALIZATION_CHUNK_THRESHOLD = 100_000_000  # 100M rows triggers chunked mode
+
+# Retry configuration for staging operations
+# On timeout or failure, retry the entire table from scratch
+STAGING_MAX_RETRIES = 3  # Total attempts (1 initial + 2 retries)
+STAGING_RETRY_BACKOFF_BASE = 30  # Base backoff in seconds (30s, 60s, 90s)
 
 # Tables known to have millions of rows requiring extended timeouts
 LARGE_STAGING_TABLES = frozenset(
@@ -805,6 +811,67 @@ class XBRLDuckDBGraphProcessor:
 
     return tables_info
 
+  async def _stage_table_with_retry(
+    self,
+    table_name: str,
+    stage_fn: Callable[[], Awaitable[tuple[bool, TableInfo | None, str | None]]],
+    graph_client,
+    log_progress: Callable[[str], None],
+    table_index: int,
+    total_tables: int,
+  ) -> tuple[bool, TableInfo | None, str | None]:
+    """
+    Retry wrapper for table staging with exponential backoff.
+
+    On failure (including timeout), drops the partial table and retries from scratch.
+    This ensures we don't end up with partially staged tables missing quarters/data.
+
+    Args:
+        table_name: Name of the table being staged
+        stage_fn: Async callable that performs the staging, returns (success, info, error)
+        graph_client: Graph API client for dropping tables on retry
+        log_progress: Progress logging callback
+        table_index: Current table index for progress display
+        total_tables: Total tables for progress display
+
+    Returns:
+        Tuple of (success, TableInfo or None, error message or None)
+    """
+    last_error: str | None = None
+
+    for attempt in range(STAGING_MAX_RETRIES):
+      success, table_info, error = await stage_fn()
+
+      if success:
+        return success, table_info, error
+
+      last_error = error
+
+      # Check if we have retries left
+      if attempt < STAGING_MAX_RETRIES - 1:
+        backoff = STAGING_RETRY_BACKOFF_BASE * (attempt + 1)
+        log_progress(
+          f"[{table_index}/{total_tables}] {table_name} failed: {error}. "
+          f"Retry {attempt + 2}/{STAGING_MAX_RETRIES} in {backoff}s..."
+        )
+
+        # Drop partial table before retry to ensure clean slate
+        try:
+          await graph_client.delete_table(self.graph_id, table_name)
+          logger.debug(f"Dropped partial table {table_name} before retry")
+        except Exception as drop_err:
+          # Table might not exist or already be gone - that's fine
+          logger.debug(f"Could not drop table {table_name} before retry: {drop_err}")
+
+        await asyncio.sleep(backoff)
+      else:
+        log_progress(
+          f"[{table_index}/{total_tables}] {table_name} failed after "
+          f"{STAGING_MAX_RETRIES} attempts: {error}"
+        )
+
+    return False, None, f"Failed after {STAGING_MAX_RETRIES} attempts: {last_error}"
+
   async def _stage_large_table_by_quarters(
     self,
     table_name: str,
@@ -1009,11 +1076,22 @@ class XBRLDuckDBGraphProcessor:
       # Use quarter-based chunking for chunkable tables (if enabled and quarters discovered)
       # Only tables with per-filing data (no cross-quarter duplicates) can be chunked.
       if is_chunkable and quarters_by_date and chunk_large_tables:
-        success, table_info, error = await self._stage_large_table_by_quarters(
+        # Wrap chunked staging with retry logic - on failure, retry entire table
+        async def chunked_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
+          return await self._stage_large_table_by_quarters(
+            table_name=table_name,
+            entity_type=entity_type,
+            graph_client=graph_client,
+            quarters=quarters_by_date,
+            log_progress=log_progress,
+            table_index=i,
+            total_tables=total_tables,
+          )
+
+        success, table_info, error = await self._stage_table_with_retry(
           table_name=table_name,
-          entity_type=entity_type,
+          stage_fn=chunked_stage_fn,
           graph_client=graph_client,
-          quarters=quarters_by_date,
           log_progress=log_progress,
           table_index=i,
           total_tables=total_tables,
@@ -1040,77 +1118,98 @@ class XBRLDuckDBGraphProcessor:
         f"[{i}/{total_tables}] Staging {table_name}{size_hint} (timeout={timeout}s)..."
       )
 
-      try:
-        # Use graph client to call Graph API's table creation endpoint
-        # Pass glob pattern (string) instead of file list
-        response = await graph_client.create_table(
-          graph_id=self.graph_id,
-          table_name=table_name,
-          s3_pattern=s3_pattern,  # Glob pattern, not a file list
-          timeout=timeout,
-        )
+      # Inner function for retry wrapper - returns (success, table_info, error)
+      # Special case: "No files found" is treated as success (optional table)
+      async def standard_stage_fn() -> tuple[bool, TableInfo | None, str | None]:
+        try:
+          # Use graph client to call Graph API's table creation endpoint
+          # Pass glob pattern (string) instead of file list
+          response = await graph_client.create_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            s3_pattern=s3_pattern,  # Glob pattern, not a file list
+            timeout=timeout,
+          )
 
-        # Handle SSE-based response format
-        if response.get("status") == "failed":
-          error = response.get("error", "Unknown error")
-          # "No files found" is expected for optional tables (e.g., ENTITY_EVOLVED_FROM)
-          if "No files found" in error:
-            log_progress(
-              f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
-            )
-            skipped_tables.append(table_name)
-            successful_tables.append(table_name)
-            table_infos[table_name] = TableInfo(
+          # Handle SSE-based response format
+          if response.get("status") == "failed":
+            error = response.get("error", "Unknown error")
+            # "No files found" is expected for optional tables - return success with 0 rows
+            if "No files found" in error:
+              return (
+                True,
+                TableInfo(
+                  name=table_name,
+                  row_count=0,
+                  file_count=0,
+                  staged_at=datetime.now(UTC).isoformat(),
+                  skipped=True,  # Mark as skipped for tracking
+                ),
+                None,
+              )
+            return False, None, error
+
+          # Extract result from SSE response
+          result = response.get("result", {})
+          duration = response.get("duration_seconds", result.get("duration_seconds", 0))
+          row_count = result.get("row_count", 0)
+
+          log_progress(
+            f"[{i}/{total_tables}] Staged {table_name}: {row_count:,} rows in {duration:.1f}s"
+          )
+
+          return (
+            True,
+            TableInfo(
               name=table_name,
-              row_count=0,
-              file_count=0,
+              row_count=row_count,
+              file_count=0,  # Unknown with glob pattern
               staged_at=datetime.now(UTC).isoformat(),
+            ),
+            None,
+          )
+
+        except Exception as e:
+          error_str = str(e)
+          # "No files found" from exceptions - return success with 0 rows
+          if "No files found" in error_str:
+            return (
+              True,
+              TableInfo(
+                name=table_name,
+                row_count=0,
+                file_count=0,
+                staged_at=datetime.now(UTC).isoformat(),
+                skipped=True,
+              ),
+              None,
             )
-            continue
-          logger.error(f"Failed to create DuckDB table {table_name}: {error}")
-          if progress_callback:
-            progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
-          failed_tables.append((table_name, error))
-          continue
+          return False, None, error_str
 
-        # Extract result from SSE response
-        result = response.get("result", {})
-        duration = response.get("duration_seconds", result.get("duration_seconds", 0))
-        row_count = result.get("row_count", 0)
+      # Wrap standard staging with retry logic
+      success, table_info, error = await self._stage_table_with_retry(
+        table_name=table_name,
+        stage_fn=standard_stage_fn,
+        graph_client=graph_client,
+        log_progress=log_progress,
+        table_index=i,
+        total_tables=total_tables,
+      )
 
-        log_progress(
-          f"[{i}/{total_tables}] Staged {table_name}: {row_count:,} rows in {duration:.1f}s"
-        )
-
-        successful_tables.append(table_name)
-        table_infos[table_name] = TableInfo(
-          name=table_name,
-          row_count=row_count,
-          file_count=0,  # Unknown with glob pattern
-          staged_at=datetime.now(UTC).isoformat(),
-        )
-
-      except Exception as e:
-        error_str = str(e)
-        # Also handle "No files found" from exceptions
-        if "No files found" in error_str:
+      if success and table_info:
+        # Check if this was a skipped table (no files found)
+        if table_info.skipped:
           log_progress(
             f"[{i}/{total_tables}] Skipped {table_name}: no files (optional)"
           )
           skipped_tables.append(table_name)
-          successful_tables.append(table_name)
-          table_infos[table_name] = TableInfo(
-            name=table_name,
-            row_count=0,
-            file_count=0,
-            staged_at=datetime.now(UTC).isoformat(),
-          )
-          continue
-        logger.error(f"Failed to create DuckDB table {table_name}: {e}")
+        successful_tables.append(table_name)
+        table_infos[table_name] = table_info
+      else:
+        logger.error(f"Failed to create DuckDB table {table_name}: {error}")
         if progress_callback:
-          progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {e}")
-        failed_tables.append((table_name, error_str))
-        continue
+          progress_callback(f"[{i}/{total_tables}] FAILED {table_name}: {error}")
+        failed_tables.append((table_name, error or "Unknown error"))
 
     # Report summary
     if skipped_tables:
