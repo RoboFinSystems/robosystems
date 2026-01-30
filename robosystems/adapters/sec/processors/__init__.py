@@ -35,7 +35,12 @@ from .ids import (
   make_plural,
   safe_concat,
 )
-from .ingestion import XBRLDuckDBGraphProcessor
+from .ingestion import (
+  MaterializeResult,
+  StagingResult,
+  TableInfo,
+  XBRLDuckDBGraphProcessor,
+)
 from .parquet import ParquetWriter
 from .schema import (
   IngestTableInfo,
@@ -53,9 +58,13 @@ __all__ = [
   # DataFrame management
   "DataFrameManager",
   "IngestTableInfo",
+  # Staging result models
+  "MaterializeResult",
   # Parquet file output
   "ParquetWriter",
   "SchemaIngestConfig",
+  "StagingResult",
+  "TableInfo",
   # S3 externalization
   "TextBlockExternalizer",
   # DuckDB ingestion

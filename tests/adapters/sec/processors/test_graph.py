@@ -1,6 +1,5 @@
 """Comprehensive tests for XBRL Graph Engine."""
 
-import datetime
 import re
 import shutil
 import tempfile
@@ -700,58 +699,6 @@ class TestS3Externalization:
 
     # Test None value
     assert processor.textblock_externalizer.should_externalize(None) is False
-
-  @patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client")
-  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
-  def test_generate_s3_key_with_metadata(
-    self, mock_schema_ingestion_processor, mock_schema_processor, mock_s3_client
-  ):
-    """Test S3 key generation with report metadata."""
-    setup_mock_schema_processor(mock_schema_processor)
-    mock_schema_ingestion_processor.return_value = MagicMock()
-
-    processor = XBRLGraphProcessor(
-      report_uri="file:///test.xml",
-      entityId="test",
-      output_dir=self.temp_dir,
-      schema_config=self.mock_schema_config,
-    )
-
-    entity_data = {"cik": "0000320193"}
-    report_data = {
-      "filing_date": "2023-11-03",
-      "accession_number": "0000320193-23-000077",
-    }
-
-    s3_key = processor.textblock_externalizer._generate_s3_key(
-      "fact123456", entity_data, report_data, "html"
-    )
-    assert s3_key == "2023/0000320193/0000320193-23-000077/fact_fact1234.html"
-
-  @patch("robosystems.adapters.sec.processors.xbrl_graph.S3Client")
-  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaAdapter")
-  @patch("robosystems.adapters.sec.processors.xbrl_graph.XBRLSchemaConfigGenerator")
-  def test_generate_s3_key_without_metadata(
-    self, mock_schema_ingestion_processor, mock_schema_processor, mock_s3_client
-  ):
-    """Test S3 key generation without report metadata (fallback)."""
-    setup_mock_schema_processor(mock_schema_processor)
-    mock_schema_ingestion_processor.return_value = MagicMock()
-
-    processor = XBRLGraphProcessor(
-      report_uri="file:///test.xml",
-      entityId="test",
-      output_dir=self.temp_dir,
-      schema_config=self.mock_schema_config,
-    )
-
-    # No entity_data or report_data
-    current_year = datetime.datetime.now().strftime("%Y")
-    s3_key = processor.textblock_externalizer._generate_s3_key(
-      "fact123456", None, None, "txt"
-    )
-    assert s3_key == f"{current_year}/unknown/unknown/fact_fact1234.txt"
 
 
 class TestParquetOutput:

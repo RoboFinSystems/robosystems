@@ -59,60 +59,6 @@ from robosystems.models.iam import Graph, SourceFile
 _sec_submissions_cache: dict[str, dict] = {}
 
 
-def _store_entity_submissions_snapshot(
-  s3_client, bucket: str, cik: str, submissions_data: dict
-) -> str | None:
-  """Store entity submissions snapshot to S3.
-
-  Submissions are stored at the CIK level (not year-partitioned) since they
-  contain cumulative data spanning all years.
-
-  Args:
-      s3_client: boto3 S3 client
-      bucket: S3 bucket name
-      cik: Company CIK
-      submissions_data: Complete submissions data from SEC API
-
-  Returns:
-      S3 key where data was stored, or None on failure
-  """
-  import json
-  from datetime import datetime
-
-  try:
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    submissions_json = json.dumps(submissions_data, default=str)
-
-    # Store as latest (primary location for quick retrieval)
-    latest_s3_key = f"submissions/{cik}/latest.json"
-    s3_client.put_object(
-      Bucket=bucket,
-      Key=latest_s3_key,
-      Body=submissions_json.encode("utf-8"),
-      ContentType="application/json",
-    )
-
-    # Store versioned copy for history/audit
-    version_s3_key = f"submissions/{cik}/versions/v{timestamp}.json"
-    s3_client.put_object(
-      Bucket=bucket,
-      Key=version_s3_key,
-      Body=submissions_json.encode("utf-8"),
-      ContentType="application/json",
-    )
-
-    return latest_s3_key
-
-  except Exception as e:
-    # Don't fail the pipeline if snapshot storage fails
-    import logging
-
-    logging.getLogger(__name__).warning(
-      f"Failed to store submissions snapshot for {cik}: {e}"
-    )
-    return None
-
-
 def _load_entity_submissions_snapshot(s3_client, bucket: str, cik: str) -> dict | None:
   """Load entity submissions snapshot from S3.
 

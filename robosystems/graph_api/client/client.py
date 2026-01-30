@@ -1327,7 +1327,11 @@ class GraphClient(BaseGraphClient):
     return response.json()
 
   async def query_table(
-    self, graph_id: str, sql: str, parameters: list[Any] | None = None
+    self,
+    graph_id: str,
+    sql: str,
+    parameters: list[Any] | None = None,
+    timeout: float | None = None,
   ) -> dict[str, Any]:
     """
     Execute SQL query on DuckDB staging tables.
@@ -1336,6 +1340,8 @@ class GraphClient(BaseGraphClient):
         graph_id: Graph database identifier
         sql: SQL query to execute
         parameters: Optional query parameters for safe value substitution
+        timeout: Optional request timeout in seconds. Defaults to client config timeout.
+                 Use longer timeout for DDL operations like CREATE TABLE AS SELECT.
 
     Returns:
         Query results with columns and rows
@@ -1348,6 +1354,7 @@ class GraphClient(BaseGraphClient):
       "POST",
       f"/databases/{graph_id}/tables/query",
       json_data=json_data,
+      timeout=timeout,
     )
     return response.json()
 

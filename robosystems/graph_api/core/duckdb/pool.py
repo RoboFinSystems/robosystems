@@ -536,23 +536,6 @@ class DuckDBConnectionPool:
       logger.debug(f"DuckDB connection health check failed: {e}")
       return False
 
-  def _cleanup_old_databases_DISABLED(self):
-    """
-    [INTENTIONALLY DISABLED]
-
-    This method was originally designed to auto-delete old staging databases,
-    but that's too aggressive. Staging tables are part of the user's workflow
-    and should persist as long as the graph exists.
-
-    Instead:
-    - Databases are cleaned up when the parent graph is deleted (via force_database_cleanup)
-    - Connection pooling prevents resource leaks from abandoned connections
-    - External tables use ~1KB per table (views only, no materialized data)
-
-    This method is kept for documentation purposes but is never called.
-    """
-    pass  # Intentionally disabled
-
   def _cleanup_all_connections(self):
     """Clean up all connections (called on shutdown)."""
     with self._global_lock:

@@ -4,7 +4,7 @@ Tests the staging result models used for decoupled
 DuckDB staging and LadybugDB materialization.
 """
 
-from robosystems.adapters.sec.models.staging import (
+from robosystems.adapters.sec.processors.ingestion import (
   MaterializeResult,
   StagingResult,
   TableInfo,
