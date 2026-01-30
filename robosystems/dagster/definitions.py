@@ -28,6 +28,7 @@ from robosystems.dagster.assets import (
   qb_graph_data,
   qb_transactions,
   # SEC pipeline - two-stage materialization
+  sec_duckdb_incremental_stage,
   sec_duckdb_staged,
   sec_graph_materialized,
   # SEC pipeline - quarterly batch processing with consolidated output
@@ -89,6 +90,7 @@ from robosystems.dagster.jobs.provisioning import (
 )
 from robosystems.dagster.jobs.sec import (
   sec_download_job,
+  sec_incremental_ingest_job,
   sec_materialize_job,
   sec_process_job,
   sec_stage_job,
@@ -170,6 +172,7 @@ all_jobs = [
   sec_stage_job,  # Stage to persistent DuckDB (standard profile: 2 vCPU, 8 GB)
   sec_materialize_job,  # Materialize from DuckDB to LadybugDB (standard profile)
   sec_staged_materialize_job,  # Full pipeline: stage + materialize (standard profile)
+  sec_incremental_ingest_job,  # Incremental: INSERT new files + materialize
   # Shared repository jobs
   shared_repository_snapshot_job,  # Full: snapshot + update template + refresh replicas
   shared_repository_snapshot_only_job,  # Snapshot only (no replica refresh)
@@ -235,6 +238,7 @@ all_assets = [
   sec_processed_filings,
   # SEC pipeline - two-stage materialization
   sec_duckdb_staged,  # DuckDB staging (full rebuild)
+  sec_duckdb_incremental_stage,  # DuckDB incremental staging (INSERT with dedup)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
   # QuickBooks pipeline assets
   qb_accounts,
