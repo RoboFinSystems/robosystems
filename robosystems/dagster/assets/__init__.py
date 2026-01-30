@@ -32,7 +32,7 @@ from robosystems.dagster.assets.sec import (
   SECProcessConfig,
   SECStageConfig,
   # Assets - two-stage materialization
-  sec_duckdb_incremental_stage,
+  sec_duckdb_incremental_staged,
   sec_duckdb_staged,
   sec_graph_materialized,
   # Assets - quarterly batch processing with consolidated output
@@ -54,7 +54,7 @@ __all__ = [
   "qb_accounts",
   "qb_graph_data",
   "qb_transactions",
-  "sec_duckdb_incremental_stage",
+  "sec_duckdb_incremental_staged",
   "sec_duckdb_staged",
   "sec_graph_materialized",
   "sec_processed_filings",

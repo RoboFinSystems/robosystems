@@ -43,7 +43,7 @@ from dagster import (
 )
 
 from robosystems.dagster.assets import (
-  sec_duckdb_incremental_stage,
+  sec_duckdb_incremental_staged,
   sec_duckdb_staged,
   sec_graph_materialized,
   sec_processed_filings,
@@ -187,7 +187,7 @@ sec_staged_materialize_job = define_asset_job(
 # Phase 3b: Incremental Ingest (Daily Updates)
 # ============================================================================
 # Incremental pipeline for daily SEC updates:
-# 1. sec_duckdb_incremental_stage: INSERT new quarter files with dedup
+# 1. sec_duckdb_incremental_staged: INSERT new quarter files with dedup
 # 2. sec_graph_materialized: Full rebuild from updated DuckDB tables
 #
 # Unlike full rebuild, incremental staging only adds net new rows.
@@ -198,7 +198,7 @@ sec_incremental_ingest_job = define_asset_job(
   name="sec_incremental_ingest",
   description="Incremental SEC ingest: stage new dates → materialize → snapshot.",
   selection=AssetSelection.assets(
-    sec_duckdb_incremental_stage,
+    sec_duckdb_incremental_staged,
     sec_graph_materialized,
   ),
   tags={

@@ -28,7 +28,7 @@ from robosystems.dagster.assets import (
   qb_graph_data,
   qb_transactions,
   # SEC pipeline - two-stage materialization
-  sec_duckdb_incremental_stage,
+  sec_duckdb_incremental_staged,
   sec_duckdb_staged,
   sec_graph_materialized,
   # SEC pipeline - quarterly batch processing with consolidated output
@@ -238,7 +238,7 @@ all_assets = [
   sec_processed_filings,
   # SEC pipeline - two-stage materialization
   sec_duckdb_staged,  # DuckDB staging (full rebuild)
-  sec_duckdb_incremental_stage,  # DuckDB incremental staging (INSERT with dedup)
+  sec_duckdb_incremental_staged,  # DuckDB incremental staging (INSERT with dedup)
   sec_graph_materialized,  # LadybugDB materialization (retry-safe)
   # QuickBooks pipeline assets
   qb_accounts,
