@@ -60,20 +60,34 @@ from robosystems.schemas.extensions.roboledger import RoboLedgerContext
 ProgressCallback = Callable[[str], None]
 
 # Table-specific timeouts for DuckDB staging (seconds)
-# Large tables with millions of rows need extended timeouts
-# Default: 300s (5 min), Large: 1800s (30 min)
+# For chunked operations (quarter-by-quarter), each chunk is smaller so use shorter timeout
+# Default: 300s (5 min), Large non-chunked: 1800s (30 min), Large chunked: 600s (10 min)
 DEFAULT_STAGING_TIMEOUT = 300  # 5 minutes
-LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes
+LARGE_TABLE_STAGING_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
+CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
+
+# Table-specific timeouts for LadybugDB materialization (seconds)
+# For batched operations (50M rows), each batch is smaller so use shorter timeout
+# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 600s (10 min)
+DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
+LARGE_MATERIALIZATION_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
+CHUNKED_MATERIALIZATION_TIMEOUT = 600  # 10 minutes per 50M row batch
+
+# Chunked materialization settings for large tables
+# Tables exceeding this row count will be materialized in batches to avoid OOM
+MATERIALIZATION_BATCH_SIZE = 50_000_000  # 50M rows per batch
+MATERIALIZATION_CHUNK_THRESHOLD = 100_000_000  # 100M rows triggers chunked mode
 
 # Tables known to have millions of rows requiring extended timeouts
 LARGE_STAGING_TABLES = frozenset(
   {
     # Large node tables
-    "Fact",  # 100M+ rows (hundreds of facts per filing)
-    "Label",  # 6M+ rows (multiple labels per element)
-    "Element",  # 10M+ rows (all XBRL elements across taxonomies)
-    "FactDimension",  # Dimensional breakdowns of facts
-    "Association",  # XBRL associations (millions of rows)
+    "Fact",  # ~1B rows (hundreds of facts per filing)
+    "Label",  # ~6M rows (multiple labels per element)
+    "Element",  # ~10M rows (all XBRL elements across taxonomies)
+    "FactDimension",  # ~76M rows - Dimensional breakdowns of facts
+    "Association",  # ~206M rows - XBRL associations
+    "Structure",  # ~7M rows - Presentation/calculation structures
     # Large relationship tables (fact-related)
     "REPORT_HAS_FACT",  # Report -> Fact (1:many)
     "FACT_HAS_ELEMENT",  # Fact -> Element (high cardinality)
@@ -82,21 +96,28 @@ LARGE_STAGING_TABLES = frozenset(
     "FACT_HAS_UNIT",  # Fact -> Unit
     "FACT_HAS_DIMENSION",  # Fact -> FactDimension
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
+    "FACT_SET_CONTAINS_FACT",  # ~987M rows - FactSet -> Fact
+    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - FactDimension -> Element
+    "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
     # Large relationship tables (shared reference)
-    "ELEMENT_HAS_LABEL",  # Links Element to Label (6M+ labels)
-    "TAXONOMY_HAS_LABEL",  # Links Taxonomy to Label
+    "ELEMENT_HAS_LABEL",  # ~34M rows - Element to Label
+    "TAXONOMY_HAS_LABEL",  # ~106M rows - Taxonomy to Label
+    # Large relationship tables (structure/association)
+    "STRUCTURE_HAS_ASSOCIATION",  # ~200M rows - Structure -> Association
+    "ASSOCIATION_HAS_FROM_ELEMENT",  # ~206M rows - Association -> Element
+    "ASSOCIATION_HAS_TO_ELEMENT",  # ~206M rows - Association -> Element
   }
 )
 
 # Tables safe to chunk by quarter (unique per filing, no cross-quarter duplicates)
 # These tables have data that is specific to individual filings, so loading
 # quarter-by-quarter won't create duplicates.
+# Note: FactSet/REPORT_HAS_FACT_SET excluded - only 1 per report, small tables.
 QUARTER_CHUNKABLE_TABLES = frozenset(
   {
-    # Fact nodes
-    "Fact",  # Facts are unique per filing
-    "FactDimension",  # Dimensional breakdowns are per-fact
-    "FactSet",  # Fact groupings are per-report
+    # Fact nodes (high volume, benefit from chunking)
+    "Fact",  # ~1B rows - unique per filing
+    "FactDimension",  # ~76M rows - dimensional breakdowns per-fact
     # Fact relationships (all per-fact, safe to chunk)
     "REPORT_HAS_FACT",  # Report -> Fact
     "FACT_HAS_ELEMENT",  # Fact -> Element
@@ -105,10 +126,18 @@ QUARTER_CHUNKABLE_TABLES = frozenset(
     "FACT_HAS_UNIT",  # Fact -> Unit
     "FACT_HAS_DIMENSION",  # Fact -> FactDimension
     "FACT_DIMENSION_AXIS_ELEMENT",  # FactDimension -> Element (axis)
-    "FACT_DIMENSION_MEMBER_ELEMENT",  # FactDimension -> Element (member)
-    "FACT_SET_CONTAINS_FACT",  # FactSet -> Fact
-    "REPORT_HAS_FACT_SET",  # Report -> FactSet
+    "FACT_DIMENSION_MEMBER_ELEMENT",  # ~70M rows - FactDimension -> Element (member)
+    "FACT_SET_CONTAINS_FACT",  # ~987M rows - FactSet -> Fact
     "FACT_REPORTS_ELEMENT",  # Legacy name for FACT_HAS_ELEMENT
+    # Structure and Association nodes (filing-specific, not shared across filings)
+    # Structure ID includes accession_number, Association ID is random UUID
+    "Structure",  # ~7M rows - per-filing presentation/calculation structures
+    "Association",  # ~206M rows - per-filing element relationships
+    # Structure/Association relationships
+    "STRUCTURE_HAS_TAXONOMY",  # Structure -> Taxonomy
+    "STRUCTURE_HAS_ASSOCIATION",  # ~200M rows - Structure -> Association
+    "ASSOCIATION_HAS_FROM_ELEMENT",  # ~206M rows - Association -> Element (parent)
+    "ASSOCIATION_HAS_TO_ELEMENT",  # ~206M rows - Association -> Element (child)
   }
 )
 
@@ -116,9 +145,36 @@ QUARTER_CHUNKABLE_TABLES = frozenset(
 # These tables have data shared across many filings. Chunking would create
 # duplicates because the same Element/Label appears in multiple quarters.
 # Must be loaded in a single pass with deduplication.
-# - Element, Label: Shared XBRL taxonomy elements
-# - Association: Shared taxonomy relationships
+# - Element, Label: Shared XBRL taxonomy elements (same us-gaap:Revenue across filings)
 # - ELEMENT_HAS_LABEL, TAXONOMY_HAS_LABEL: Shared element-label mappings
+
+# Taxonomy structure tables that can be skipped for instance-only mode
+# These encode XBRL taxonomy hierarchy (calculation/presentation/definition linkbases)
+# which are massive but not needed for basic fact analysis queries.
+# Skipping these allows more historical data to fit in the same storage budget.
+TAXONOMY_STRUCTURE_TABLES = frozenset(
+  {
+    # Structure nodes (XBRL presentation/calculation/definition trees)
+    "Structure",  # XBRL presentation/calculation structures
+    # Association nodes (element-to-element relationships - MASSIVE, larger than Facts)
+    "Association",
+    # Structure relationships
+    "STRUCTURE_HAS_TAXONOMY",  # Structure -> Taxonomy
+    "STRUCTURE_HAS_ASSOCIATION",  # Structure -> Association
+    "STRUCTURE_HAS_CHILD",  # Structure tree hierarchy
+    "STRUCTURE_HAS_PARENT",  # Structure tree hierarchy
+    # Association relationships (the real storage hogs)
+    "ASSOCIATION_HAS_FROM_ELEMENT",  # Association -> Element (source)
+    "ASSOCIATION_HAS_TO_ELEMENT",  # Association -> Element (target)
+  }
+)
+
+# Tables kept even in instance-only mode (critical for fact exploration):
+# - Taxonomy: Single node per report (small)
+# - TAXONOMY_HAS_ELEMENT: Links taxonomy to elements (needed for element context)
+# - Element: What each fact represents (us-gaap:Revenue, etc.)
+# - Label: Human-readable element names
+# - ELEMENT_HAS_LABEL: Links Element to Label
 
 
 def _get_staging_timeout(table_name: str) -> int:
@@ -126,6 +182,13 @@ def _get_staging_timeout(table_name: str) -> int:
   if table_name in LARGE_STAGING_TABLES:
     return LARGE_TABLE_STAGING_TIMEOUT
   return DEFAULT_STAGING_TIMEOUT
+
+
+def _get_materialization_timeout(table_name: str) -> float:
+  """Get appropriate materialization timeout for a table based on expected size."""
+  if table_name in LARGE_STAGING_TABLES:
+    return float(LARGE_MATERIALIZATION_TIMEOUT)
+  return float(DEFAULT_MATERIALIZATION_TIMEOUT)
 
 
 def _group_dates_by_quarter(dates: list[str]) -> dict[str, list[str]]:
@@ -154,22 +217,38 @@ def _group_dates_by_quarter(dates: list[str]) -> dict[str, list[str]]:
   return dict(sorted(quarters.items()))
 
 
-def _get_quarter_glob_pattern(quarter_key: str) -> list[str]:
+def _get_quarter_glob_pattern(
+  quarter_key: str, use_quarter_end: bool = True
+) -> list[str]:
   """Convert quarter key to glob patterns for filed= partitions.
 
   Args:
       quarter_key: Quarter in format "YYYY-QN" (e.g., "2024-Q1")
+      use_quarter_end: If True (default), use quarter-end date pattern (filed=2024-03-31)
+                       which matches the default processing output.
+                       If False, use month patterns for daily-partitioned data.
 
   Returns:
-      List of glob patterns like ["filed=2024-01-*", "filed=2024-02-*", "filed=2024-03-*"]
+      If use_quarter_end=True: Single pattern like ["filed=2024-03-31"]
+      If use_quarter_end=False: Month patterns like ["filed=2024-01-*", ...]
   """
   year, q = quarter_key.split("-Q")
   quarter_num = int(q)
-  # Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
-  start_month = (quarter_num - 1) * 3 + 1
-  months = [start_month, start_month + 1, start_month + 2]
-  patterns = [f"filed={year}-{m:02d}-*" for m in months]
-  return patterns
+
+  if use_quarter_end:
+    # Default: files are stored at quarter-end date (e.g., filed=2024-03-31 for Q1)
+    quarter_end_dates = {
+      1: f"{year}-03-31",
+      2: f"{year}-06-30",
+      3: f"{year}-09-30",
+      4: f"{year}-12-31",
+    }
+    return [f"filed={quarter_end_dates[quarter_num]}"]
+  else:
+    # Daily mode: files distributed across the quarter by actual filing date
+    start_month = (quarter_num - 1) * 3 + 1
+    months = [start_month, start_month + 1, start_month + 2]
+    return [f"filed={year}-{m:02d}-*" for m in months]
 
 
 class XBRLDuckDBGraphProcessor:
@@ -206,6 +285,7 @@ class XBRLDuckDBGraphProcessor:
     self,
     year: int | None = None,
     reset_staging: bool = False,
+    skip_taxonomy_relationships: bool = False,
     use_glob: bool = True,
     progress_callback: ProgressCallback | None = None,
   ) -> StagingResult:
@@ -270,6 +350,44 @@ class XBRLDuckDBGraphProcessor:
           duration_seconds=time.time() - start_time,
         )
 
+      # Reset staging if requested - delete all DuckDB tables before staging new ones
+      if reset_staging:
+        log_progress("Resetting DuckDB staging - clearing existing tables...")
+        try:
+          existing_tables = await client.list_tables(self.graph_id)
+          if existing_tables:
+            for table_info in existing_tables:
+              table_name = (
+                table_info.get("name")
+                if isinstance(table_info, dict)
+                else getattr(table_info, "name", None)
+              )
+              if table_name:
+                await client.delete_table(self.graph_id, table_name)
+                logger.debug(f"Deleted staging table: {table_name}")
+            log_progress(f"Cleared {len(existing_tables)} existing staging tables")
+          else:
+            log_progress("No existing staging tables to clear")
+        except Exception as reset_err:
+          # Non-fatal - tables might not exist yet
+          logger.warning(f"Could not reset staging tables: {reset_err}")
+          log_progress(f"Reset skipped (tables may not exist): {reset_err}")
+
+      # Refresh client connection after reset
+      try:
+        client = await get_graph_client(graph_id=self.graph_id, operation_type="write")
+      except Exception as client_err:
+        logger.error(
+          f"Failed to initialize graph client for {self.graph_id}: {client_err}",
+          exc_info=True,
+        )
+        return StagingResult(
+          status="error",
+          table_names=[],
+          error=f"Graph client initialization failed: {client_err!s}",
+          duration_seconds=time.time() - start_time,
+        )
+
       # Step 1: Get table names from schema (no S3 discovery needed for glob mode)
       # Initialize variables for type checker
       tables_by_type: dict[str, str] = {}
@@ -282,6 +400,22 @@ class XBRLDuckDBGraphProcessor:
           RoboLedgerContext.SEC_REPOSITORY
         )
         logger.info(f"Schema defines {len(tables_by_type)} tables to stage")
+
+        # Filter out taxonomy structure tables if requested (instance-only mode)
+        if skip_taxonomy_relationships:
+          original_count = len(tables_by_type)
+          tables_by_type = {
+            name: entity_type
+            for name, entity_type in tables_by_type.items()
+            if name not in TAXONOMY_STRUCTURE_TABLES
+          }
+          skipped_count = original_count - len(tables_by_type)
+          log_progress(
+            f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
+            f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
+          )
+          logger.info(f"After filtering: {len(tables_by_type)} tables to stage")
+
         # With glob, we don't know file count upfront - DuckDB will discover files
         total_files = 0
       else:
@@ -298,6 +432,21 @@ class XBRLDuckDBGraphProcessor:
           )
 
         logger.info(f"Found {len(tables_info)} tables to stage")
+
+        # Filter out taxonomy structure tables if requested (instance-only mode)
+        if skip_taxonomy_relationships:
+          original_count = len(tables_info)
+          tables_info = {
+            name: files
+            for name, files in tables_info.items()
+            if name not in TAXONOMY_STRUCTURE_TABLES
+          }
+          skipped_count = original_count - len(tables_info)
+          log_progress(
+            f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
+            f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
+          )
+          logger.info(f"After filtering: {len(tables_info)} tables to stage")
         total_files = sum(len(files) for files in tables_info.values())
         logger.info(f"Total files: {total_files}")
 
@@ -360,6 +509,7 @@ class XBRLDuckDBGraphProcessor:
     self,
     table_names: list[str] | None = None,
     rebuild: bool = False,
+    skip_taxonomy_relationships: bool = False,
     progress_callback: ProgressCallback | None = None,
   ) -> MaterializeResult:
     """
@@ -382,6 +532,8 @@ class XBRLDuckDBGraphProcessor:
         rebuild: If True, delete and recreate the LadybugDB database with
                  the roboledger SEC schema before materializing.
                  DuckDB staging is preserved for retry scenarios.
+        skip_taxonomy_relationships: If True, skip materializing taxonomy structure
+                     tables (Association, Structure, TAXONOMY_HAS_*, etc.) to reduce storage.
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
             Called with message strings during per-table materialization.
 
@@ -407,6 +559,17 @@ class XBRLDuckDBGraphProcessor:
         )
         table_names = list(tables_by_type.keys())
         logger.info(f"Schema defines {len(table_names)} tables to materialize")
+
+      # Filter out taxonomy structure tables if requested (instance-only mode)
+      if skip_taxonomy_relationships:
+        original_count = len(table_names)
+        table_names = [t for t in table_names if t not in TAXONOMY_STRUCTURE_TABLES]
+        skipped_count = original_count - len(table_names)
+        log_progress(
+          f"Instance-only mode: skipping {skipped_count} taxonomy structure tables "
+          f"(Association, Structure, TAXONOMY_HAS_*, etc.)"
+        )
+        logger.info(f"After filtering: {len(table_names)} tables to materialize")
 
       if not table_names:
         logger.warning("No tables to materialize")
@@ -672,7 +835,8 @@ class XBRLDuckDBGraphProcessor:
     Returns:
         Tuple of (success, TableInfo or None, error message or None)
     """
-    timeout = _get_staging_timeout(table_name)
+    # Use chunked timeout since we're processing quarter-by-quarter, not the full table
+    timeout = CHUNKED_STAGING_TIMEOUT
     total_rows = 0
     total_duration = 0.0
     quarter_list = list(quarters.keys())
@@ -683,15 +847,14 @@ class XBRLDuckDBGraphProcessor:
     )
 
     for q_idx, quarter_key in enumerate(quarter_list):
-      # Build glob patterns for this quarter's months
-      # e.g., Q1 = filed=2024-01-*, filed=2024-02-*, filed=2024-03-*
-      month_patterns = _get_quarter_glob_pattern(quarter_key)
+      # Use actual discovered dates for this quarter (not regenerated quarter-end dates)
+      # This handles both quarterly partitions (filed=2024-03-31) and daily (filed=2026-01-02)
+      actual_dates = quarters[quarter_key]
 
-      # DuckDB read_parquet supports multiple glob patterns via list
-      # We'll build a pattern that matches all months in the quarter
+      # Build S3 patterns for each actual date in this quarter
       s3_patterns = [
-        f"s3://{self.bucket}/{self.source_prefix}/{pattern}/{entity_type}/{table_name}/*.parquet"
-        for pattern in month_patterns
+        f"s3://{self.bucket}/{self.source_prefix}/filed={date}/{entity_type}/{table_name}/*.parquet"
+        for date in actual_dates
       ]
 
       is_first = q_idx == 0
@@ -768,7 +931,7 @@ class XBRLDuckDBGraphProcessor:
     graph_client,
     year: int | None = None,
     progress_callback: ProgressCallback | None = None,
-    chunk_large_tables: bool = True,
+    chunk_large_tables: bool | None = None,
   ) -> tuple[list[str], dict[str, TableInfo]]:
     """
     Create DuckDB staging tables using glob patterns (efficient for many files).
@@ -791,12 +954,18 @@ class XBRLDuckDBGraphProcessor:
         tables: Dictionary mapping table names to entity type ("nodes" or "relationships")
         graph_client: Graph API client instance
         year: Optional year filter. If provided, uses filed=YYYY-* pattern.
-        chunk_large_tables: If True (default), stage large tables quarter-by-quarter
-            to reduce memory pressure.
+        chunk_large_tables: If True, stage large tables quarter-by-quarter
+            to reduce memory pressure. Defaults to SEC_LARGE_SCALE_MODE_ENABLED env var
+            (False in dev, True in prod).
 
     Returns:
         Tuple of (successful_table_names, table_info_dict)
     """
+    # Default to env var if not explicitly specified
+    # SEC_LARGE_SCALE_MODE_ENABLED is False in dev (small data), True in prod
+    if chunk_large_tables is None:
+      chunk_large_tables = env.SEC_LARGE_SCALE_MODE_ENABLED
+
     successful_tables: list[str] = []
     table_infos: dict[str, TableInfo] = {}
     failed_tables: list[tuple[str, str]] = []
@@ -1143,6 +1312,8 @@ class XBRLDuckDBGraphProcessor:
     """
     Trigger ingestion for all tables into LadybugDB graph via Graph API.
 
+    For large tables (>100M rows), uses chunked materialization to avoid OOM.
+
     Args:
         table_names: List of table names to ingest
         graph_client: Graph API client instance
@@ -1166,33 +1337,112 @@ class XBRLDuckDBGraphProcessor:
 
     for i, table_name in enumerate(table_names, 1):
       is_large = table_name in LARGE_STAGING_TABLES
-      size_hint = " (large table)" if is_large else ""
-      log_progress(f"[{i}/{total_tables}] Materializing {table_name}{size_hint}...")
+      timeout = _get_materialization_timeout(table_name)
 
       try:
-        response = await graph_client.materialize_table(
-          graph_id=self.graph_id,
-          table_name=table_name,
-          ignore_errors=True,
-        )
+        # Get row count to determine if chunking is needed
+        row_count = 0
+        if is_large:
+          try:
+            count_response = await graph_client.query_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              sql=f"SELECT COUNT(*) as cnt FROM {table_name}",
+            )
+            if count_response.get("rows"):
+              row_count = count_response["rows"][0].get("cnt", 0)
+          except Exception as count_err:
+            logger.warning(f"Could not get row count for {table_name}: {count_err}")
+            row_count = 0
 
-        rows_ingested = response.get("rows_ingested", 0)
-        exec_time_ms = response.get("execution_time_ms", 0)
-        total_rows += rows_ingested
-        total_time_ms += exec_time_ms
+        # Use chunked materialization for very large tables (only in large-scale mode)
+        if (
+          env.SEC_LARGE_SCALE_MODE_ENABLED
+          and row_count > MATERIALIZATION_CHUNK_THRESHOLD
+        ):
+          num_batches = (
+            row_count + MATERIALIZATION_BATCH_SIZE - 1
+          ) // MATERIALIZATION_BATCH_SIZE
+          log_progress(
+            f"[{i}/{total_tables}] Materializing {table_name} in {num_batches} batches "
+            f"({row_count:,} rows, {MATERIALIZATION_BATCH_SIZE:,} per batch)..."
+          )
 
-        results.append(
-          {
-            "table_name": table_name,
-            "rows_ingested": rows_ingested,
-            "status": response.get("status", "success"),
-          }
-        )
+          table_rows = 0
+          table_time_ms = 0.0
 
-        log_progress(
-          f"[{i}/{total_tables}] Materialized {table_name}: "
-          f"{rows_ingested:,} rows in {exec_time_ms:.0f}ms"
-        )
+          for batch_num in range(num_batches):
+            offset = batch_num * MATERIALIZATION_BATCH_SIZE
+            log_progress(
+              f"  [{table_name}] Batch {batch_num + 1}/{num_batches} "
+              f"(offset={offset:,})..."
+            )
+
+            response = await graph_client.materialize_table(
+              graph_id=self.graph_id,
+              table_name=table_name,
+              ignore_errors=True,
+              batch_size=MATERIALIZATION_BATCH_SIZE,
+              offset=offset,
+              timeout=CHUNKED_MATERIALIZATION_TIMEOUT,
+            )
+
+            batch_rows = response.get("rows_ingested", 0)
+            batch_time = response.get("execution_time_ms", 0)
+            table_rows += batch_rows
+            table_time_ms += batch_time
+
+            log_progress(
+              f"  [{table_name}] Batch {batch_num + 1}/{num_batches}: "
+              f"{batch_rows:,} rows in {batch_time:.0f}ms"
+            )
+
+          total_rows += table_rows
+          total_time_ms += table_time_ms
+
+          results.append(
+            {
+              "table_name": table_name,
+              "rows_ingested": table_rows,
+              "status": "success",
+              "batches": num_batches,
+            }
+          )
+
+          log_progress(
+            f"[{i}/{total_tables}] Materialized {table_name}: "
+            f"{table_rows:,} rows in {table_time_ms:.0f}ms ({num_batches} batches)"
+          )
+
+        else:
+          # Standard single-pass materialization for smaller tables
+          size_hint = f" (large table, timeout={timeout:.0f}s)" if is_large else ""
+          log_progress(f"[{i}/{total_tables}] Materializing {table_name}{size_hint}...")
+
+          response = await graph_client.materialize_table(
+            graph_id=self.graph_id,
+            table_name=table_name,
+            ignore_errors=True,
+            timeout=timeout,
+          )
+
+          rows_ingested = response.get("rows_ingested", 0)
+          exec_time_ms = response.get("execution_time_ms", 0)
+          total_rows += rows_ingested
+          total_time_ms += exec_time_ms
+
+          results.append(
+            {
+              "table_name": table_name,
+              "rows_ingested": rows_ingested,
+              "status": response.get("status", "success"),
+            }
+          )
+
+          log_progress(
+            f"[{i}/{total_tables}] Materialized {table_name}: "
+            f"{rows_ingested:,} rows in {exec_time_ms:.0f}ms"
+          )
 
       except Exception as e:
         logger.error(f"Failed to materialize table {table_name}: {e}")

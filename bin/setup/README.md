@@ -215,7 +215,7 @@ just setup-aws
   "INSTANCE_SCHEDULES_ENABLED": "true",
   "SEC_PARALLEL_SENSOR_ENABLED": "false",
   "SEC_INCREMENTAL_PIPELINE_ENABLED": "false",
-  "SHARED_REPO_SCHEDULE_ENABLED": "false",
+  "SEC_LARGE_SCALE_MODE_ENABLED": "false",
 
   // Integration Placeholders (update with real values)
   "INTUIT_CLIENT_ID": "Intuit.ipp.application.your_client_id",

@@ -100,7 +100,6 @@ from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
   shared_repository_snapshot_job,
   shared_repository_snapshot_only_job,
-  weekly_shared_repository_snapshot_schedule,
 )
 from robosystems.dagster.resources import (
   DatabaseResource,
@@ -199,8 +198,6 @@ all_schedules = [
   full_instance_maintenance_schedule,
   # SEC incremental pipeline (automated chain, disabled by default)
   sec_incremental_download_schedule,
-  # Shared repository schedules
-  weekly_shared_repository_snapshot_schedule,
 ]
 
 # ============================================================================

@@ -105,6 +105,11 @@ async def materialize_table(
         column_names = [col[0] for col in columns_result]
         has_file_id = "file_id" in column_names
 
+        # Build LIMIT/OFFSET clause for chunked materialization
+        limit_clause = ""
+        if request.batch_size is not None:
+          limit_clause = f" LIMIT {request.batch_size} OFFSET {request.offset}"
+
         # Create physical copy of table without file_id column (if it exists)
         if request.file_ids:
           file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
@@ -112,11 +117,11 @@ async def materialize_table(
             duck_conn.execute(
               f"CREATE TABLE {temp_table_name} AS "
               f"SELECT * EXCLUDE (file_id) FROM {table_name} "
-              f"WHERE file_id IN ({file_ids_str})"
+              f"WHERE file_id IN ({file_ids_str}){limit_clause}"
             )
           else:
             duck_conn.execute(
-              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}"
+              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
             )
           logger.info(
             f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
@@ -125,15 +130,21 @@ async def materialize_table(
           if has_file_id:
             duck_conn.execute(
               f"CREATE TABLE {temp_table_name} AS "
-              f"SELECT * EXCLUDE (file_id) FROM {table_name}"
+              f"SELECT * EXCLUDE (file_id) FROM {table_name}{limit_clause}"
             )
           else:
             duck_conn.execute(
-              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}"
+              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
             )
-          logger.info(
-            f"Created temp DuckDB table {temp_table_name} for full materialization"
-          )
+          if request.batch_size:
+            logger.info(
+              f"Created temp DuckDB table {temp_table_name} for chunked materialization "
+              f"(batch={request.batch_size}, offset={request.offset})"
+            )
+          else:
+            logger.info(
+              f"Created temp DuckDB table {temp_table_name} for full materialization"
+            )
 
     except Exception as err:
       logger.error(f"Could not prepare DuckDB table for materialization: {err}")

@@ -1351,21 +1351,25 @@ class GraphClient(BaseGraphClient):
     table_name: str,
     ignore_errors: bool = True,
     file_ids: list[str] | None = None,
+    batch_size: int | None = None,
+    offset: int = 0,
     timeout: float = 600.0,
   ) -> dict[str, Any]:
     """
     Materialize a DuckDB staging table into the graph database.
 
     Supports both selective materialization (filtering by file_ids) and full
-    materialization (copying entire table).
+    materialization (copying entire table). For large tables, use batch_size
+    and offset for chunked materialization.
 
     Args:
         graph_id: Graph database identifier
         table_name: Table name to materialize
         ignore_errors: Continue on row errors
-        file_ids: Optional list of file IDs to materialize. If None, materializes all rows (full materialization).
+        file_ids: Optional list of file IDs to materialize. If None, materializes all rows.
+        batch_size: Number of rows per batch for chunked materialization. If None, all at once.
+        offset: Row offset for chunked materialization. Use with batch_size to paginate.
         timeout: Request timeout in seconds. Default 600s (10 min) for large bulk operations.
-                 The default 30s timeout is insufficient for tables with millions of rows.
 
     Returns:
         Materialization response with rows materialized and timing
@@ -1374,6 +1378,10 @@ class GraphClient(BaseGraphClient):
 
     if file_ids is not None:
       json_data["file_ids"] = file_ids
+
+    if batch_size is not None:
+      json_data["batch_size"] = batch_size
+      json_data["offset"] = offset
 
     response = await self._request(
       "POST",

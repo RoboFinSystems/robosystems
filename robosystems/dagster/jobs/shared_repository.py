@@ -15,9 +15,7 @@ from typing import Any
 import boto3
 from dagster import (
   Config,
-  DefaultScheduleStatus,
   OpExecutionContext,
-  ScheduleDefinition,
   job,
   op,
 )
@@ -42,19 +40,6 @@ class ReplicaConfig(Config):
 
   min_healthy_percentage: int = 50
   instance_warmup_seconds: int = 300
-
-
-# ============================================================================
-# Environment-based Schedule Status
-# ============================================================================
-
-# Shared repository schedules are STOPPED by default everywhere.
-# Enable via SHARED_REPO_SCHEDULE_ENABLED=true after verifying jobs work manually.
-SHARED_REPO_SCHEDULE_STATUS = (
-  DefaultScheduleStatus.RUNNING
-  if env.SHARED_REPO_SCHEDULE_ENABLED
-  else DefaultScheduleStatus.STOPPED
-)
 
 
 # ============================================================================
@@ -410,17 +395,3 @@ def shared_repository_refresh_replicas_job():
   """
   lt_info = get_current_launch_template_info()
   refresh_replica_instances(lt_info)
-
-
-# ============================================================================
-# Schedules
-# ============================================================================
-
-# Weekly snapshot schedule - Sundays at 6 AM UTC (after SEC materialization)
-# This gives time for any weekend SEC processing to complete
-# Auto-enabled in prod/staging only
-weekly_shared_repository_snapshot_schedule = ScheduleDefinition(
-  job=shared_repository_snapshot_job,
-  cron_schedule="0 6 * * 0",  # Sundays at 6 AM UTC
-  default_status=SHARED_REPO_SCHEDULE_STATUS,
-)

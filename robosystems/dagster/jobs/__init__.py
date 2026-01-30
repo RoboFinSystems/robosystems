@@ -39,7 +39,6 @@ from robosystems.dagster.jobs.shared_repository import (
   shared_repository_refresh_replicas_job,
   shared_repository_snapshot_job,
   shared_repository_snapshot_only_job,
-  weekly_shared_repository_snapshot_schedule,
 )
 
 __all__ = [
@@ -63,5 +62,4 @@ __all__ = [
   "shared_repository_snapshot_job",
   "shared_repository_snapshot_only_job",
   "weekly_health_check_job",
-  "weekly_shared_repository_snapshot_schedule",
 ]

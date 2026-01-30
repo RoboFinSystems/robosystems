@@ -127,8 +127,7 @@ function create_production_secret() {
         "SHARED_MASTER_READS_ENABLED": "true",
         "SEC_PARALLEL_SENSOR_ENABLED": "false",
         "SEC_INCREMENTAL_PIPELINE_ENABLED": "false",
-        "SHARED_REPO_SCHEDULE_ENABLED": "false",
-        "SHARED_REPO_SNAPSHOT_SENSOR_ENABLED": "false",
+        "SEC_LARGE_SCALE_MODE_ENABLED": "false",
 
         "ORG_GRAPHS_DEFAULT_LIMIT": "10",
         "ORG_MEMBER_INVITATIONS_ENABLED": "false",
@@ -222,8 +221,7 @@ function create_staging_secret() {
         "SHARED_MASTER_READS_ENABLED": "true",
         "SEC_PARALLEL_SENSOR_ENABLED": "false",
         "SEC_INCREMENTAL_PIPELINE_ENABLED": "false",
-        "SHARED_REPO_SCHEDULE_ENABLED": "false",
-        "SHARED_REPO_SNAPSHOT_SENSOR_ENABLED": "false",
+        "SEC_LARGE_SCALE_MODE_ENABLED": "false",
 
         "ORG_GRAPHS_DEFAULT_LIMIT": "10",
         "ORG_MEMBER_INVITATIONS_ENABLED": "false",

@@ -30,6 +30,7 @@ from robosystems.adapters.sec.processors.schema import (
   XBRLSchemaAdapter,
   XBRLSchemaConfigGenerator,
 )
+from robosystems.config import env
 from robosystems.logger import logger
 from robosystems.operations.aws.s3 import S3Client
 from robosystems.utils import (
@@ -68,8 +69,6 @@ class XBRLGraphProcessor:
     self.processed_elements = set()
 
     # Initialize TextBlockExternalizer for S3 externalization
-    from robosystems.config import env
-
     s3_client = None
     if env.XBRL_EXTERNALIZE_LARGE_VALUES and env.PUBLIC_DATA_BUCKET:
       try:
@@ -647,6 +646,14 @@ class XBRLGraphProcessor:
     # Skip facts with missing context (malformed XBRL)
     if xfact.context is None:
       logger.warning(f"Skipping fact with missing context: {fact_uri}")
+      return
+
+    # Skip textblock facts entirely if configured (saves storage for historical data)
+    # This takes precedence over externalization - fact is not created at all
+    if env.XBRL_SKIP_TEXTBLOCK_FACTS and xfact.concept and xfact.concept.isTextBlock:
+      logger.debug(
+        f"Skipping textblock fact (XBRL_SKIP_TEXTBLOCK_FACTS=true): {fact_uri}"
+      )
       return
 
     # Check if fact already exists to prevent duplicates
