@@ -115,7 +115,7 @@ class TestStagingResult:
       table_names=["Entity", "Fact", "Element"],
       total_files=500,
       total_rows=100000,
-      duration_seconds=120.5,
+      duration_ms=120500.0,
       duckdb_path="/data/staging/sec.duckdb",
     )
 
@@ -131,7 +131,7 @@ class TestStagingResult:
       status="error",
       table_names=[],
       error="Graph client initialization failed",
-      duration_seconds=0.5,
+      duration_ms=500.0,
     )
 
     assert result.status == "error"
@@ -145,7 +145,7 @@ class TestStagingResult:
       table_names=["Entity"],
       total_files=10,
       total_rows=1000,
-      duration_seconds=5.0,
+      duration_ms=5000.0,
     )
     data = result.to_dict()
 
@@ -163,7 +163,7 @@ class TestMaterializeResult:
     result = MaterializeResult(
       status="success",
       total_rows_ingested=50000,
-      total_time_ms=30000.0,
+      duration_ms=30000.0,
       tables=[
         {"table_name": "Entity", "rows_ingested": 1000, "status": "success"},
         {"table_name": "Fact", "rows_ingested": 49000, "status": "success"},
@@ -189,10 +189,10 @@ class TestMaterializeResult:
     result = MaterializeResult(
       status="success",
       total_rows_ingested=1000,
-      total_time_ms=5000.0,
+      duration_ms=5000.0,
     )
     data = result.to_dict()
 
     assert data["status"] == "success"
     assert data["total_rows_ingested"] == 1000
-    assert data["total_time_ms"] == 5000.0
+    assert data["duration_ms"] == 5000.0

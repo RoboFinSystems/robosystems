@@ -119,7 +119,9 @@ async def materialize_table(
           else:
             # Fallback to first column if neither standard column exists
             order_col = column_names[0] if column_names else "rowid"
-          limit_clause = f" ORDER BY {order_col} LIMIT {request.batch_size} OFFSET {request.offset}"
+          limit_clause = (
+            f" ORDER BY {order_col} LIMIT {request.batch_size} OFFSET {request.offset}"
+          )
 
         # Create physical copy of table without file_id column (if it exists)
         if request.file_ids:
