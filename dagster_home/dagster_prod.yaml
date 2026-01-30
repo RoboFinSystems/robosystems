@@ -82,6 +82,8 @@ run_launcher:
         - capacityProvider: FARGATE
           weight: 1
           base: 0
+      # Propagate tags from task definition to tasks for cost allocation
+      propagateTags: TASK_DEFINITION
     # Resource overrides removed - uses task definition defaults from CloudFormation
     # (RunJobCpu and RunJobMemory parameters)
 
@@ -113,8 +115,8 @@ run_monitoring:
   enabled: true
   poll_interval_seconds: 30
   max_resume_run_attempts: 0
-  start_timeout_seconds: 600   # 10 minutes - accounts for deployment gap + Fargate provisioning
-  cancel_timeout_seconds: 300  # 5 minutes
+  start_timeout_seconds: 600 # 10 minutes - accounts for deployment gap + Fargate provisioning
+  cancel_timeout_seconds: 300 # 5 minutes
 
 # Compute log storage - capture stdout/stderr from ECS run tasks
 # Logs are stored in S3 and viewable in the Dagster webserver UI

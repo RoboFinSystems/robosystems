@@ -225,14 +225,8 @@ jobs:
                 ParameterKey=DaemonMemory,ParameterValue=${{ inputs.daemon_memory }} \
                 ParameterKey=WebserverCpu,ParameterValue=${{ inputs.webserver_cpu }} \
                 ParameterKey=WebserverMemory,ParameterValue=${{ inputs.webserver_memory }} \
-                ParameterKey=LightRunJobCpu,ParameterValue=512 \
-                ParameterKey=LightRunJobMemory,ParameterValue=2048 \
-                ParameterKey=StandardRunJobCpu,ParameterValue=2048 \
-                ParameterKey=StandardRunJobMemory,ParameterValue=8192 \
-                ParameterKey=ComputeRunJobCpu,ParameterValue=4096 \
-                ParameterKey=ComputeRunJobMemory,ParameterValue=16384 \
-                ParameterKey=HeavyRunJobCpu,ParameterValue=16384 \
-                ParameterKey=HeavyRunJobMemory,ParameterValue=65536 \
+                ParameterKey=RunJobCpu,ParameterValue=512 \
+                ParameterKey=RunJobMemory,ParameterValue=2048 \
                 ParameterKey=MaxConcurrentRuns,ParameterValue=${{ inputs.max_concurrent_runs }} \
                 ParameterKey=DaemonFargateWeight,ParameterValue=${{ inputs.daemon_fargate_weight }} \
                 ParameterKey=DaemonFargateSpotWeight,ParameterValue=${{ inputs.daemon_fargate_spot_weight }} \
