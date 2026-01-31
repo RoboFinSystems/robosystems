@@ -142,6 +142,34 @@ class TestJobDefinitionsValid:
         assert len(job.all_node_defs) >= 1, f"Job {job.name} has no nodes"
 
   @pytest.mark.unit
+  def test_asset_jobs_resolve_successfully(self):
+    """Test that all asset jobs can resolve their asset selections.
+
+    This catches the common error where an asset job references an asset
+    that isn't registered in the Definitions. Dagster lazily resolves
+    asset jobs, so this error only surfaces at runtime unless we force
+    resolution during testing.
+
+    The test uses repo.load_all_definitions() which is the same method
+    that fails at Dagster startup when assets are missing.
+    """
+    from robosystems.dagster.definitions import defs
+
+    # Get the repository definitions - this forces resolution of all jobs
+    repo = defs.get_repository_def()
+
+    # Load all definitions - this will raise DagsterInvalidDefinitionError
+    # if any asset job references assets not in all_assets
+    try:
+      repo.load_all_definitions()
+    except Exception as e:
+      pytest.fail(f"Failed to load definitions: {e}")
+
+    # Verify jobs were resolved
+    jobs = list(repo.get_all_jobs())
+    assert len(jobs) > 0, "No jobs resolved"
+
+  @pytest.mark.unit
   def test_all_schedules_have_valid_cron(self):
     """Test that all schedules have valid cron expressions."""
     from robosystems.dagster.definitions import all_schedules
