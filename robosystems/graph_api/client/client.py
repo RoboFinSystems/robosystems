@@ -529,13 +529,13 @@ class GraphClient(BaseGraphClient):
 
               if records_loaded > 0:
                 logger.info(
-                  f"✅ Ingestion completed for {table_name}: "
+                  f"[OK] Ingestion completed for {table_name}: "
                   f"{records_loaded:,} records in {duration:.1f}s"
                 )
               else:
                 # With IGNORE_ERRORS, record count is not available
                 logger.info(
-                  f"✅ Ingestion completed for {table_name} in {duration:.1f}s"
+                  f"[OK] Ingestion completed for {table_name} in {duration:.1f}s"
                 )
 
               return {
@@ -552,7 +552,7 @@ class GraphClient(BaseGraphClient):
               if "No files found" in error:
                 logger.info(f"No files found for {table_name} (optional table)")
               else:
-                logger.error(f"❌ Ingestion failed for {table_name}: {error}")
+                logger.error(f"[FAILED] Ingestion failed for {table_name}: {error}")
 
               return {"status": "failed", "task_id": task_id, "error": error}
 
@@ -1399,24 +1399,24 @@ class GraphClient(BaseGraphClient):
     table_name: str,
     ignore_errors: bool = True,
     file_ids: list[str] | None = None,
-    batch_size: int | None = None,
-    offset: int = 0,
+    batch_num: int | None = None,
+    num_batches: int | None = None,
     timeout: float = 600.0,
   ) -> dict[str, Any]:
     """
     Materialize a DuckDB staging table into the graph database.
 
     Supports both selective materialization (filtering by file_ids) and full
-    materialization (copying entire table). For large tables, use batch_size
-    and offset for chunked materialization.
+    materialization (copying entire table). For large tables, use hash-based
+    batching (batch_num/num_batches) for deterministic partitioning.
 
     Args:
         graph_id: Graph database identifier
         table_name: Table name to materialize
         ignore_errors: Continue on row errors
         file_ids: Optional list of file IDs to materialize. If None, materializes all rows.
-        batch_size: Number of rows per batch for chunked materialization. If None, all at once.
-        offset: Row offset for chunked materialization. Use with batch_size to paginate.
+        batch_num: Current batch number (0-indexed) for hash-based batching.
+        num_batches: Total number of batches. Each row goes to one batch based on hash(key) % num_batches.
         timeout: Request timeout in seconds. Default 600s (10 min) for large bulk operations.
 
     Returns:
@@ -1427,9 +1427,9 @@ class GraphClient(BaseGraphClient):
     if file_ids is not None:
       json_data["file_ids"] = file_ids
 
-    if batch_size is not None:
-      json_data["batch_size"] = batch_size
-      json_data["offset"] = offset
+    if batch_num is not None and num_batches is not None:
+      json_data["batch_num"] = batch_num
+      json_data["num_batches"] = num_batches
 
     response = await self._request(
       "POST",
@@ -1473,3 +1473,66 @@ class GraphClient(BaseGraphClient):
       },
     )
     return response.json()
+
+  async def copy_from_s3(
+    self,
+    graph_id: str,
+    table_name: str,
+    s3_pattern: str,
+    ignore_errors: bool = True,
+    timeout: int = 14400,  # 4 hours default
+    wait_for_completion: bool = True,
+  ) -> dict[str, Any]:
+    """
+    Copy data directly from S3 parquet files into LadybugDB.
+
+    This bypasses DuckDB staging entirely and uses LadybugDB's native
+    S3 reading capabilities with spill_to_disk for memory efficiency.
+    Duplicates are handled via ignore_errors=true (constraint violations
+    are silently skipped).
+
+    This is the preferred method for large-scale data loading where
+    DuckDB staging would exceed memory limits.
+
+    Args:
+        graph_id: Graph database identifier
+        table_name: Target table name in LadybugDB
+        s3_pattern: S3 glob pattern (e.g., "s3://bucket/path/*.parquet")
+        ignore_errors: Use IGNORE_ERRORS for duplicate/constraint handling
+        timeout: Maximum time to wait for completion (seconds). Default 4 hours.
+        wait_for_completion: If True, monitor via SSE until complete. If False, return immediately with task_id.
+
+    Returns:
+        If wait_for_completion=True:
+          - status: "completed" or "failed"
+          - records_loaded: Number of records ingested (if successful)
+          - duration_seconds: Total time taken
+          - error: Error message (if failed)
+        If wait_for_completion=False:
+          - task_id: Background task ID
+          - sse_url: SSE monitoring endpoint
+    """
+    if wait_for_completion:
+      # Use the existing SSE-based monitoring method
+      return await self.ingest_with_sse(
+        graph_id=graph_id,
+        table_name=table_name,
+        s3_pattern=s3_pattern,
+        s3_credentials=None,  # Use IAM role credentials
+        ignore_errors=ignore_errors,
+        timeout=timeout,
+      )
+    else:
+      # Return immediately with task_id for manual monitoring
+      response = await self._request(
+        "POST",
+        f"/databases/{graph_id}/copy",
+        json_data={
+          "table_name": table_name,
+          "s3_pattern": s3_pattern,
+          "ignore_errors": ignore_errors,
+        },
+        timeout=30.0,  # Short timeout for starting the task
+        retries=0,
+      )
+      return response.json()

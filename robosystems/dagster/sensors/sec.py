@@ -3,7 +3,7 @@
 Sensors trigger jobs based on SourceFile queue state and job completion.
 
 Architecture (SEC_INCREMENTAL_PIPELINE_ENABLED=true):
-- Phase 1 (Download): sec_incremental_download_schedule triggers every 3 hours
+- Phase 1 (Download): sec_incremental_download_schedule triggers at 9pm EST weekdays
 - Phase 2 (Process): sec_download_to_process_sensor chains download → process
 - Phase 3 (Stage): sec_incremental_staging_sensor chains process → incremental stage + materialize
 - Phase 4 (Snapshot): sec_incremental_post_ingest_snapshot_sensor chains ingest → snapshot
@@ -364,12 +364,12 @@ def _get_quarters_to_scan() -> list[str]:
 
 @schedule(
   job=sec_download_job,
-  cron_schedule="0 */3 * * *",  # Every 3 hours
+  cron_schedule="0 21 * * 1-5",  # 9pm EST, Monday-Friday
   default_status=SEC_INCREMENTAL_SCHEDULE_STATUS,
-  execution_timezone="UTC",
+  execution_timezone="America/New_York",
 )
 def sec_incremental_download_schedule(context):
-  """Incremental SEC download every 3 hours.
+  """Incremental SEC download at 9pm EST on weekdays.
 
   Part of the automated incremental pipeline. Downloads new filings for
   current quarter (and previous quarter at quarter boundaries).

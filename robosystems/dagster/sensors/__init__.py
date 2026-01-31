@@ -6,7 +6,7 @@ Sensors monitor for conditions and trigger jobs when criteria are met:
 - SEC post-materialize snapshot: Trigger replica snapshot after SEC materialization
 
 Incremental Pipeline (SEC_INCREMENTAL_PIPELINE_ENABLED=true):
-- sec_incremental_download_schedule: Download every 3 hours
+- sec_incremental_download_schedule: Download at 9pm EST weekdays
 - sec_download_to_process_sensor: Chain download → process
 - sec_incremental_staging_sensor: Chain process → incremental stage + materialize
 - sec_incremental_post_ingest_snapshot_sensor: Chain incremental ingest → snapshot

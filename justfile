@@ -371,6 +371,7 @@ duckdb-query-i graph_id env=_local_env:
 #   just sec-process all=1                    # Process all pending files
 #   just sec-process reset_errors=1           # Retry failed files
 #   just sec-pipeline 50 2024
+#   just sec-direct-copy 2024                  # Direct S3 → LadybugDB (bypasses DuckDB)
 
 # --- Full Pipeline (convenience) ---
 
@@ -406,22 +407,35 @@ sec-process reset_errors="" env=_local_env:
 # --- Phase 3: Materialize ---
 
 # Materialize processed parquet files to graph (combined: staging + ingestion)
-sec-materialize graph_id="sec" env=_local_env:
-    @just sec-stage {{graph_id}} "" {{env}}
-    @just sec-materialize-graph {{graph_id}} {{env}}
+sec-materialize env=_local_env:
+    @just sec-stage "" {{env}}
+    @just sec-materialize-graph {{env}}
 
 # Stage to persistent DuckDB only (decoupled Stage 1)
 # Use this to save 2+ hours of work that persists if materialization fails
-sec-stage graph_id="sec" year="" env=_local_env:
+sec-stage year="" env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline stage \
-        --graph-id {{graph_id}} \
+        --graph-id sec \
         {{ if year != "" { "--year " + year } else { "" } }}
 
 # Materialize graph from existing DuckDB staging (decoupled Stage 2)
 # Use this to retry materialization without re-staging
-sec-materialize-graph graph_id="sec" env=_local_env:
+sec-materialize-graph env=_local_env:
     UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline materialize-graph \
-        --graph-id {{graph_id}}
+        --graph-id sec
+
+# Direct S3 → LadybugDB copy (bypasses DuckDB staging)
+# Alternative when DuckDB staging hits memory limits on large tables
+# Rebuild is ON by default - use no_rebuild=1 to append instead
+# Usage: just sec-direct-copy [year]
+#   just sec-direct-copy           # Copy all years, rebuild graph (default)
+#   just sec-direct-copy 2024      # Copy 2024 only, rebuild graph
+sec-direct-copy year="" no_rebuild="" skip_taxonomy="" env=_local_env:
+    UV_ENV_FILE={{env}} uv run python -m robosystems.scripts.sec_pipeline direct-copy \
+        --graph-id sec \
+        {{ if year != "" { "--year " + year } else { "" } }} \
+        {{ if no_rebuild != "" { "--no-rebuild" } else { "" } }} \
+        {{ if skip_taxonomy != "" { "--skip-taxonomy" } else { "" } }}
 
 # --- Utilities ---
 
