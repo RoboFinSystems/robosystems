@@ -97,6 +97,7 @@ from robosystems.dagster.jobs.sec import (
   sec_stage_job,
   sec_staged_materialize_job,
 )
+from robosystems.dagster.jobs.sec_backup import sec_backup_job
 
 # Import shared repository jobs
 from robosystems.dagster.jobs.shared_repository import (
@@ -175,6 +176,7 @@ all_jobs = [
   sec_staged_materialize_job,  # Full pipeline: stage + materialize (standard profile)
   sec_incremental_ingest_job,  # Incremental: INSERT new files + materialize
   sec_direct_copy_job,  # Direct S3 → LadybugDB (bypasses DuckDB staging)
+  sec_backup_job,  # Create downloadable backup of SEC database
   # Shared repository jobs
   shared_repository_snapshot_job,  # Full: snapshot + update template + refresh replicas
   shared_repository_snapshot_only_job,  # Snapshot only (no replica refresh)

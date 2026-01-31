@@ -121,6 +121,8 @@ class RepositoryBillingConfig:
         "agent_calls_per_minute": 2,
         "agent_calls_per_hour": 20,
         "agent_calls_per_day": 200,
+        # Backup download limits
+        "downloads_per_day": 3,
       },
       RepositoryPlan.ADVANCED: {
         # Query limits (5x Starter)
@@ -135,6 +137,8 @@ class RepositoryBillingConfig:
         "agent_calls_per_minute": 10,
         "agent_calls_per_hour": 100,
         "agent_calls_per_day": 1000,
+        # Backup download limits (data only updates daily, so 5 is sufficient)
+        "downloads_per_day": 5,
       },
     },
     # Future repositories can be added here
@@ -155,6 +159,7 @@ class RepositoryBillingConfig:
     "status",  # Repository status
     "info",  # Repository information
     "describe",  # Repository description
+    "download",  # Backup downloads (rate-limited)
   ]
 
   # Blocked endpoints for shared repositories

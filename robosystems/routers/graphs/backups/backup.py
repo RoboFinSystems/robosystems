@@ -17,6 +17,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from robosystems.config import env
+from robosystems.config.billing.repositories import RepositoryPlan
 from robosystems.database import get_async_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
@@ -26,14 +27,18 @@ from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.middleware.rate_limits import (
+  DownloadRateLimiter,
+  subscription_aware_rate_limit_dependency,
+)
 from robosystems.models.api.common import ErrorResponse
 from robosystems.models.api.graphs.backups import (
   BackupCreateRequest,
   BackupListResponse,
   BackupResponse,
+  DownloadQuota,
 )
-from robosystems.models.iam import User
+from robosystems.models.iam import User, UserRepository
 from robosystems.security import SecurityAuditLogger, SecurityEventType
 
 from .utils import verify_admin_access
@@ -155,6 +160,29 @@ async def list_backups(
         )
       )
 
+    # Check if this is a shared repository and get download quota
+    is_shared_repo = MultiTenantUtils.is_shared_repository(graph_id)
+    download_quota = None
+
+    if is_shared_repo:
+      # Get user's repository subscription for quota info
+      user_repo = UserRepository.get_by_user_and_repository(
+        str(current_user.id), graph_id, db
+      )
+      if user_repo:
+        plan = RepositoryPlan(user_repo.repository_plan)
+        quota_info = await DownloadRateLimiter.get_download_quota(
+          user_id=str(current_user.id),
+          repository=graph_id,
+          plan=plan,
+        )
+        download_quota = DownloadQuota(
+          limit_per_day=quota_info["limit_per_day"],
+          used_today=quota_info["used_today"],
+          remaining=quota_info["remaining"],
+          resets_at=quota_info["resets_at"],
+        )
+
     # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -167,6 +195,7 @@ async def list_backups(
         "backups_returned": len(backups),
         "limit": limit,
         "offset": offset,
+        "is_shared_repository": is_shared_repo,
       },
       user_id=current_user.id,
     )
@@ -175,6 +204,8 @@ async def list_backups(
       backups=backups,
       total_count=total_count,
       graph_id=graph_id,
+      is_shared_repository=is_shared_repo,
+      download_quota=download_quota,
     )
 
   except HTTPException:
@@ -284,6 +315,17 @@ async def create_backup(
   """
   try:
     verify_admin_access(current_user, graph_id, db)
+
+    # Block backup creation for shared repositories
+    if MultiTenantUtils.is_shared_repository(graph_id):
+      logger.warning(
+        f"User {current_user.id} attempted backup creation on shared repository {graph_id}"
+      )
+      raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"Creating backups is not allowed on shared repository '{graph_id}'. "
+        f"System-generated backups are available for download.",
+      )
 
     # Check if backup creation is enabled
     if not env.BACKUP_CREATION_ENABLED:
