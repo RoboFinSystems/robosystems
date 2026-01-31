@@ -13,6 +13,42 @@ from robosystems.graph_api.models.tables import (
 )
 from robosystems.logger import logger
 
+# Constants for checkpoint retry logic
+CHECKPOINT_MAX_RETRIES = 3
+CHECKPOINT_RETRY_DELAY_SECONDS = 1
+
+
+def checkpoint_with_retry(conn, graph_id: str, context: str = "DuckDB") -> None:
+  """Checkpoint DuckDB database with retry logic.
+
+  Args:
+      conn: DuckDB connection
+      graph_id: Graph ID for logging
+      context: Context string for log messages (e.g., "DuckDB", "parent DuckDB")
+
+  Raises:
+      HTTPException: If checkpoint fails after all retries
+  """
+  import time
+
+  for attempt in range(CHECKPOINT_MAX_RETRIES):
+    try:
+      conn.execute("CHECKPOINT")
+      logger.info(f"✅ {context} checkpointed successfully for {graph_id}")
+      return
+    except Exception as e:
+      if attempt == CHECKPOINT_MAX_RETRIES - 1:
+        logger.error(
+          f"Failed to checkpoint {context} after {CHECKPOINT_MAX_RETRIES} attempts: {e}"
+        )
+        raise HTTPException(
+          status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+          detail=f"Failed to checkpoint {context} after {CHECKPOINT_MAX_RETRIES} attempts: {e!s}",
+        )
+      logger.warning(f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}")
+      time.sleep(CHECKPOINT_RETRY_DELAY_SECONDS)
+
+
 router = APIRouter(prefix="/databases/{graph_id}/tables")
 
 
@@ -53,27 +89,7 @@ async def materialize_table(
     # Check if table exists, create temp copy without file_id
     try:
       with duckdb_pool.get_connection(graph_id) as duck_conn:
-        max_retries = 3
-        for attempt in range(max_retries):
-          try:
-            duck_conn.execute("CHECKPOINT")
-            logger.info(f"✅ DuckDB checkpointed successfully for {graph_id}")
-            break
-          except Exception as e:
-            if attempt == max_retries - 1:
-              logger.error(
-                f"Failed to checkpoint DuckDB after {max_retries} attempts: {e}"
-              )
-              raise HTTPException(
-                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to checkpoint DuckDB after {max_retries} attempts: {e!s}",
-              )
-            logger.warning(
-              f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
-            )
-            import time
-
-            time.sleep(1)
+        checkpoint_with_retry(duck_conn, graph_id, context="DuckDB")
 
         # Check if table exists
         result = duck_conn.execute(
@@ -364,27 +380,7 @@ async def fork_from_parent_duckdb(
 
     # Get list of tables and create views (excluding file_id column)
     with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
-      max_retries = 3
-      for attempt in range(max_retries):
-        try:
-          duck_conn.execute("CHECKPOINT")
-          logger.info(f"✅ Parent DuckDB checkpointed for {parent_graph_id}")
-          break
-        except Exception as e:
-          if attempt == max_retries - 1:
-            logger.error(
-              f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {e}"
-            )
-            raise HTTPException(
-              status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-              detail=f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {e!s}",
-            )
-          logger.warning(
-            f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
-          )
-          import time
-
-          time.sleep(1)
+      checkpoint_with_retry(duck_conn, parent_graph_id, context="parent DuckDB")
 
       result = duck_conn.execute("SHOW TABLES").fetchall()
       available_tables = [row[0] for row in result]
