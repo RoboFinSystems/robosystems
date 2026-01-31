@@ -112,6 +112,8 @@ class DuckDBTableManager:
     if has_identifier:
       # Node table: deduplicate on identifier using window function
       # union_by_name=true handles schema variations between files (different filings may have different columns)
+      # ORDER BY identifier at the end ensures physical storage is sorted, making
+      # LIMIT/OFFSET queries fast during batched materialization (avoids re-sorting 50M+ rows)
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
         SELECT * EXCLUDE (rn)
@@ -120,11 +122,13 @@ class DuckDBTableManager:
           FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
         )
         WHERE rn = 1
+        ORDER BY identifier
       """
     elif has_from_to:
       # Relationship table: deduplicate on (from, to) and rename to src/dst
       # IMPORTANT: LadybugDB expects columns in order: src, dst, then properties
       # union_by_name=true handles schema variations between files
+      # ORDER BY at the end ensures physical storage is sorted for fast batched materialization
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
         SELECT
@@ -136,6 +140,7 @@ class DuckDBTableManager:
           FROM read_parquet({read_pattern}, union_by_name=true, hive_partitioning=false)
         )
         WHERE rn = 1
+        ORDER BY src, dst
       """
     else:
       # Unknown table type: just read without deduplication
@@ -208,6 +213,7 @@ class DuckDBTableManager:
     union_query = "\n UNION ALL\n".join(selects)
 
     # Wrap in deduplication if needed
+    # ORDER BY at the end ensures physical storage is sorted for fast batched materialization
     if has_identifier:
       return f"""
         CREATE OR REPLACE TABLE {quoted_table} AS
@@ -217,6 +223,7 @@ class DuckDBTableManager:
           FROM ({union_query})
         )
         WHERE rn = 1
+        ORDER BY identifier
       """
     elif has_from_to:
       return f"""
@@ -227,6 +234,7 @@ class DuckDBTableManager:
           FROM ({union_query})
         )
         WHERE rn = 1
+        ORDER BY src, dst
       """
     else:
       # No deduplication for unknown tables
