@@ -160,18 +160,19 @@ CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
 
 # Table-specific timeouts for LadybugDB materialization (seconds)
 # For batched operations, each batch is smaller so use shorter timeout
-# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 600s (10 min)
+# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 1800s (30 min)
 DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
 LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 minutes (for direct COPY of 200M+ row tables)
 CHUNKED_MATERIALIZATION_TIMEOUT = (
-  600  # 10 minutes per 10M row batch (DuckDB temp table creation + COPY)
+  1800  # 30 minutes per 10M row batch - increased from 600s after timeout failures
 )
 
 # Chunked materialization settings for large tables
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
 # with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory
 # exhaustion by materializing in chunks with cleanup between batches.
-# Updated to 10M after observing <50% memory usage with 5M batches.
+# 10M batches with 30min timeout balances memory (~85% peak) vs timeout risk.
+# 5M batches peaked at 80% memory but timed out at 10min; 15M risks OOM.
 # Tables larger than this are batched; smaller tables use single COPY.
 MATERIALIZATION_BATCH_SIZE = 10_000_000  # 10M rows per batch
 
@@ -380,8 +381,9 @@ class XBRLDuckDBGraphProcessor:
     Args:
         year: Optional year filter. If provided, only files from filings in that year
               will be included (filters to filed=YYYY-*).
-        reset_staging: If True, delete DuckDB file for a fresh start.
-            If False (default), preserve DuckDB for retry scenarios.
+        reset_staging: If True, delete entire DuckDB staging database for a fresh start.
+            Use this when changing settings like skip_taxonomy_relationships.
+            If False (default), preserve DuckDB for retry scenarios (tables are overwritten).
         use_glob: If True (default), use glob patterns for efficient file discovery.
             If False, use explicit file lists (legacy behavior, slower for many files).
         progress_callback: Optional callback for progress logging (e.g., Dagster context.log.info).
@@ -423,28 +425,17 @@ class XBRLDuckDBGraphProcessor:
           duration_ms=(time.time() - start_time) * 1000,
         )
 
-      # Reset staging if requested - delete all DuckDB tables before staging new ones
+      # Reset staging if requested - delete entire DuckDB staging database
       if reset_staging:
-        log_progress("Resetting DuckDB staging - clearing existing tables...")
+        log_progress("Resetting DuckDB staging - deleting staging database...")
         try:
-          existing_tables = await client.list_tables(self.graph_id)
-          if existing_tables:
-            for table_info in existing_tables:
-              table_name = (
-                table_info.get("name")
-                if isinstance(table_info, dict)
-                else getattr(table_info, "name", None)
-              )
-              if table_name:
-                await client.delete_table(self.graph_id, table_name)
-                logger.debug(f"Deleted staging table: {table_name}")
-            log_progress(f"Cleared {len(existing_tables)} existing staging tables")
-          else:
-            log_progress("No existing staging tables to clear")
+          # Use staging_only=True to delete only DuckDB, preserve LadybugDB graph
+          await client.delete_database(self.graph_id, staging_only=True)
+          log_progress("DuckDB staging database deleted successfully")
         except Exception as reset_err:
-          # Non-fatal - tables might not exist yet
-          logger.warning(f"Could not reset staging tables: {reset_err}")
-          log_progress(f"Reset skipped (tables may not exist): {reset_err}")
+          # Non-fatal - database might not exist yet
+          logger.warning(f"Could not reset staging database: {reset_err}")
+          log_progress(f"Reset skipped (staging may not exist): {reset_err}")
 
       # Refresh client connection after reset
       try:

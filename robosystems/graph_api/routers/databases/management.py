@@ -86,6 +86,10 @@ async def delete_database(
     False,
     description="If true, preserve DuckDB staging database (for retry scenarios)",
   ),
+  staging_only: bool = Query(
+    False,
+    description="If true, delete only DuckDB staging database, preserve LadybugDB graph",
+  ),
   ladybug_service=Depends(get_ladybug_service),
 ) -> dict:
   """
@@ -94,15 +98,44 @@ async def delete_database(
   Permanently removes a database and all associated data.
   This operation cannot be undone.
 
-  Use preserve_duckdb=true when you want to delete only the LadybugDB
-  graph database while keeping DuckDB staging data for retry scenarios
-  (e.g., SEC pipeline materialization retry).
+  Delete modes:
+  - Default (both false): Delete both LadybugDB and DuckDB staging
+  - preserve_duckdb=true: Delete LadybugDB only, keep DuckDB staging (for materialization retry)
+  - staging_only=true: Delete DuckDB staging only, keep LadybugDB graph (for re-staging with different settings)
+
+  Cannot use both preserve_duckdb and staging_only at the same time.
   """
+  # Validate mutually exclusive options
+  if preserve_duckdb and staging_only:
+    raise HTTPException(
+      status_code=http_status.HTTP_400_BAD_REQUEST,
+      detail="Cannot use both preserve_duckdb and staging_only - these options are mutually exclusive",
+    )
+
   if ladybug_service.read_only:
     raise HTTPException(
       status_code=http_status.HTTP_403_FORBIDDEN,
       detail="Database deletion not allowed on read-only nodes",
     )
+
+  # Handle staging_only mode - delete only DuckDB, preserve LadybugDB
+  if staging_only:
+    from robosystems.graph_api.core.duckdb import get_duckdb_pool
+
+    try:
+      duckdb_pool = get_duckdb_pool()
+      duckdb_pool.force_database_cleanup(graph_id)
+      logger.info(f"Deleted DuckDB staging database for {graph_id} (staging_only mode)")
+      return {
+        "status": "success",
+        "message": f"DuckDB staging for {graph_id} deleted successfully (LadybugDB preserved)",
+      }
+    except Exception as e:
+      logger.error(f"Failed to delete DuckDB staging for {graph_id}: {e}")
+      raise HTTPException(
+        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=f"Failed to delete DuckDB staging: {e!s}",
+      )
 
   # Additional validation for shared writer nodes
   if ladybug_service.node_type == NodeType.SHARED_MASTER:
