@@ -290,12 +290,18 @@ class SECStageConfig(Config):
 
   Note: This step only stages data to DuckDB. LadybugDB rebuild is handled
   by the materialize step (sec_graph_materialized) via SECMaterializeConfig.rebuild_graph.
+
+  Common scenarios:
+    - Normal re-run: Use defaults (reset_staging=False). Tables are overwritten.
+    - Enable skip_taxonomy_relationships: Set reset_staging=True AND skip_taxonomy_relationships=True.
+      Without reset_staging, old taxonomy tables would remain in DuckDB.
+    - Fresh start after corruption: Set reset_staging=True to delete all staging.
   """
 
   graph_id: str = "sec"  # Target graph ID
   year: int | None = None  # Optional year filter
-  reset_staging: bool = False  # Clear all DuckDB tables first (use True if schema changed or DuckDB corrupted)
-  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables (Association, Structure, TAXONOMY_HAS_*, etc.) to reduce storage
+  reset_staging: bool = False  # Delete entire DuckDB staging database first (required when changing skip_taxonomy_relationships)
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables (Association, Structure, ~600M rows) to reduce storage
 
 
 class SECMaterializeConfig(Config):
