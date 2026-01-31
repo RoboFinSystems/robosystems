@@ -332,6 +332,13 @@ Resources:
                   - events:*
                 Resource: "*"
 
+              # Data Lifecycle Manager (EBS snapshots)
+              - Sid: DLM
+                Effect: Allow
+                Action:
+                  - dlm:*
+                Resource: "*"
+
               # Service Discovery (Cloud Map) - for ECS service discovery
               - Sid: ServiceDiscovery
                 Effect: Allow
