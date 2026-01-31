@@ -29,6 +29,7 @@ from robosystems.dagster.jobs.provisioning import (
   provision_repository_job,
 )
 from robosystems.dagster.jobs.sec import (
+  sec_direct_copy_job,
   sec_download_job,
   sec_incremental_ingest_job,
   sec_materialize_job,
@@ -53,6 +54,7 @@ __all__ = [
   "process_stripe_webhook_job",
   "provision_graph_job",
   "provision_repository_job",
+  "sec_direct_copy_job",
   "sec_download_job",
   "sec_incremental_ingest_job",
   "sec_materialize_job",

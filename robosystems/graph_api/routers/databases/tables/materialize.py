@@ -34,7 +34,7 @@ def checkpoint_with_retry(conn, graph_id: str, context: str = "DuckDB") -> None:
   for attempt in range(CHECKPOINT_MAX_RETRIES):
     try:
       conn.execute("CHECKPOINT")
-      logger.info(f"✅ {context} checkpointed successfully for {graph_id}")
+      logger.info(f"[OK] {context} checkpointed successfully for {graph_id}")
       return
     except Exception as e:
       if attempt == CHECKPOINT_MAX_RETRIES - 1:
@@ -267,7 +267,7 @@ async def materialize_table(
       execution_time_ms = (time.time() - start_time) * 1000
 
       logger.info(
-        f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms:.2f}ms"
+        f"Materialized {rows_ingested} rows from {table_name} in {execution_time_ms / 1000:.1f}s"
       )
 
       # Checkpoint and release LadybugDB memory after each table
@@ -509,7 +509,7 @@ async def fork_from_parent_duckdb(
 
             total_rows += rows_ingested
             tables_copied.append(table_name)
-            logger.info(f"✅ Copied {table_name}: {rows_ingested} rows")
+            logger.info(f"[OK] Copied {table_name}: {rows_ingested} rows")
 
           except Exception as table_err:
             logger.error(f"Failed to copy {table_name}: {table_err}")
@@ -525,7 +525,7 @@ async def fork_from_parent_duckdb(
       execution_time_ms = (time.time() - start_time) * 1000
 
       logger.info(
-        f"Fork completed: {len(tables_copied)} tables, {total_rows:,} rows in {execution_time_ms:.2f}ms"
+        f"Fork completed: {len(tables_copied)} tables, {total_rows:,} rows in {execution_time_ms / 1000:.1f}s"
       )
 
       return ForkFromParentResponse(

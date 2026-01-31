@@ -45,6 +45,7 @@ from dagster import (
 from robosystems.dagster.assets import (
   sec_duckdb_incremental_staged,
   sec_duckdb_staged,
+  sec_graph_direct_copy,
   sec_graph_materialized,
   sec_processed_filings,
   sec_quarter_partitions,
@@ -205,6 +206,43 @@ sec_incremental_ingest_job = define_asset_job(
     "pipeline": "sec",
     "mode": "incremental",
     # Standard profile: 2 vCPU, 8 GB, 50 GB storage - incremental staging is I/O bound
+    "ecs/cpu": "2048",
+    "ecs/memory": "8192",
+    "ecs/ephemeral_storage": "50",
+    # Long-running job - use on-demand to avoid Spot interruptions
+    "ecs/run_task_kwargs": {
+      "capacityProviderStrategy": [
+        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
+      ],
+    },
+  },
+)
+
+
+# ============================================================================
+# Phase 3c: Direct S3 → LadybugDB Copy (Bypasses DuckDB Staging)
+# ============================================================================
+# Alternative to DuckDB staging for large-scale loads where DuckDB
+# merge operations would exceed memory limits.
+#
+# Benefits:
+# - No memory pressure from DuckDB merge/dedupe operations
+# - Proven to work at scale (200M+ rows)
+# - Uses LadybugDB's httpfs extension with spill_to_disk=true
+# - Simpler pipeline with fewer moving parts
+#
+# Trade-offs:
+# - Relies on LadybugDB constraints for deduplication (not pre-deduped)
+# - Must rebuild graph to avoid duplicates (rebuild_graph=true recommended)
+
+sec_direct_copy_job = define_asset_job(
+  name="sec_direct_copy",
+  description="Direct S3 → LadybugDB copy (bypasses DuckDB staging).",
+  selection=AssetSelection.assets(sec_graph_direct_copy),
+  tags={
+    "pipeline": "sec",
+    "phase": "direct_copy",
+    # Standard profile: 2 vCPU, 8 GB - LadybugDB does heavy lifting
     "ecs/cpu": "2048",
     "ecs/memory": "8192",
     "ecs/ephemeral_storage": "50",

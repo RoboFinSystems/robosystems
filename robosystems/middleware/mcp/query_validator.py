@@ -589,9 +589,9 @@ class GraphQueryValidator:
   def format_validation_errors(self, validation: ValidationResult) -> str:
     """Format validation errors for display to AI agents."""
     if validation.is_valid:
-      return "✅ Query validation passed"
+      return "[OK] Query validation passed"
 
-    error_msg = "❌ **Query Validation Failed**\n\n"
+    error_msg = "[FAILED] **Query Validation Failed**\n\n"
 
     # Add errors
     if validation.errors:

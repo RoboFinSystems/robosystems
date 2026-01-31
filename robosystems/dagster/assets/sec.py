@@ -338,6 +338,30 @@ class SECIncrementalStageConfig(Config):
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
 
 
+class SECDirectCopyConfig(Config):
+  """Configuration for direct S3 → LadybugDB copy (bypasses DuckDB staging).
+
+  This approach:
+  1. Reads parquet files directly from S3 using LadybugDB's httpfs extension
+  2. Uses spill_to_disk=true for memory-efficient loading of large tables
+  3. Handles duplicates via ignore_errors=true (constraint violations skipped)
+
+  Benefits over DuckDB staging:
+  - No memory pressure from DuckDB merge/dedupe operations
+  - Proven to work at scale (200M+ rows)
+  - Simpler pipeline with fewer moving parts
+
+  Trade-offs:
+  - Relies on LadybugDB constraints for deduplication (not pre-deduped)
+  - May load some duplicate rows that get rejected at insert time
+  """
+
+  graph_id: str = "sec"  # Target graph ID
+  rebuild_graph: bool = True  # Rebuild LadybugDB before copy (avoids duplicates)
+  skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
+  year: int | None = None  # Optional year filter (None = all years)
+
+
 # ============================================================================
 # Year-Partitioned Assets (download phase)
 # ============================================================================
@@ -1703,7 +1727,7 @@ def sec_duckdb_staged(
   - year: Optional year filter for partial staging
 
   Run with:
-    just dagster-materialize sec_duckdb_staged
+    uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_staged
 
   Returns:
       MaterializeResult with staging statistics
@@ -1810,7 +1834,7 @@ def sec_duckdb_incremental_staged(
   Precondition: Initial full staging must have been done (tables exist).
 
   Run with:
-      just dagster-materialize sec_duckdb_incremental_staged
+    uv run dagster asset materialize -m robosystems.dagster --select sec_duckdb_incremental_staged
   """
   import asyncio
 
@@ -1885,7 +1909,8 @@ def sec_graph_materialized(
   - Can be retried independently if materialization fails
   - Uses manifest to verify staging completeness
 
-  Run with: just dagster-materialize sec_graph_materialized
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_graph_materialized
 
   Returns:
       MaterializeResult with materialization statistics
@@ -1957,5 +1982,236 @@ def sec_graph_materialized(
       "total_rows_ingested": result.total_rows_ingested,
       "duration_ms": result.duration_ms,
       "tables": result.tables,
+    }
+  )
+
+
+# ============================================================================
+# Direct S3 → LadybugDB Copy Asset (Alternative to DuckDB Staging)
+# ============================================================================
+# This asset bypasses DuckDB staging entirely and copies directly from S3.
+# Uses LadybugDB's native parquet reading with spill_to_disk for memory efficiency.
+# Duplicates are handled via ignore_errors=true (constraint violations skipped).
+
+
+@asset(
+  group_name="sec_pipeline",
+  description="Direct S3 → LadybugDB copy (bypasses DuckDB staging)",
+  kinds={"ladybug"},
+  metadata={
+    "pipeline": "sec",
+    "stage": "direct_copy",
+    "decoupled": True,
+  },
+)
+def sec_graph_direct_copy(
+  context: AssetExecutionContext,
+  config: SECDirectCopyConfig,
+) -> MaterializeResult:
+  """Copy SEC data directly from S3 to LadybugDB (bypasses DuckDB staging).
+
+  This asset provides an alternative materialization path that:
+  1. Reads parquet files directly from S3 using LadybugDB's httpfs extension
+  2. Uses spill_to_disk=true for memory-efficient loading of large tables
+  3. Handles duplicates via ignore_errors=true (constraint violations skipped)
+
+  When to use this vs sec_graph_materialized:
+  - Use this when DuckDB staging hits memory limits on large tables
+  - Use sec_graph_materialized when you need DuckDB's merge/dedupe capabilities
+
+  The flow is:
+  1. (Optional) Rebuild LadybugDB database with SEC schema
+  2. Get table names from schema (same as DuckDB staging)
+  3. For each table, build S3 glob pattern and call copy endpoint
+  4. LadybugDB loads directly from S3 with spill_to_disk=true
+
+  Run with:
+    uv run dagster asset materialize -m robosystems.dagster --select sec_graph_direct_copy
+
+  Returns:
+      MaterializeResult with copy statistics
+  """
+  import asyncio
+  import time
+
+  from robosystems.graph_api.client.factory import (
+    boost_graph_memory,
+    get_graph_client,
+    restore_graph_memory,
+  )
+  from robosystems.operations.graph.shared_repository_service import (
+    ensure_shared_repository_exists,
+  )
+  from robosystems.schemas.extensions.roboledger import RoboLedgerContext
+
+  context.log.info(f"Direct S3 → LadybugDB copy for graph: {config.graph_id}")
+  if config.year:
+    context.log.info(f"Year filter: {config.year}")
+  if config.rebuild_graph:
+    context.log.info("Rebuild enabled - will delete and recreate database")
+
+  start_time = time.time()
+
+  # Boost LadybugDB memory before copy
+  try:
+    boost_result = asyncio.run(boost_graph_memory(config.graph_id, target="ladybug"))
+    context.log.info(f"Memory boost: {boost_result.get('message', 'done')}")
+  except Exception as boost_err:
+    context.log.warning(f"Could not boost memory (non-fatal): {boost_err}")
+
+  async def run_direct_copy():
+    # Ensure repository exists
+    context.log.info("Ensuring SEC repository metadata exists...")
+    repo_result = await ensure_shared_repository_exists(
+      repository_name=config.graph_id,
+      created_by="system",
+      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+    )
+    context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
+
+    # Rebuild LadybugDB if requested
+    if config.rebuild_graph:
+      context.log.info("Rebuilding LadybugDB database with SEC schema...")
+      async with get_graph_client() as client:
+        # Delete and recreate database
+        try:
+          await client.delete_database(config.graph_id)
+          context.log.info(f"Deleted existing database: {config.graph_id}")
+        except Exception:
+          pass  # Database may not exist
+
+        await client.create_database(
+          config.graph_id,
+          schema="sec",
+        )
+        context.log.info(f"Created database with SEC schema: {config.graph_id}")
+
+    # Get table names from schema
+    context.log.info("Getting table names from schema...")
+    tables_by_type = RoboLedgerContext.get_all_table_names_for_context(
+      RoboLedgerContext.SEC_REPOSITORY
+    )
+
+    # Filter taxonomy tables if requested
+    if config.skip_taxonomy_relationships:
+      taxonomy_tables = {
+        "Association",
+        "Structure",
+        "TAXONOMY_HAS_ELEMENT",
+        "ELEMENT_HAS_LABEL",
+        "ELEMENT_HAS_REFERENCE",
+        "TAXONOMY_HAS_STRUCTURE",
+        "STRUCTURE_HAS_ELEMENT",
+        "TAXONOMY_HAS_ASSOCIATION",
+      }
+      tables_by_type = {
+        name: entity_type
+        for name, entity_type in tables_by_type.items()
+        if name not in taxonomy_tables
+      }
+
+    context.log.info(f"Schema defines {len(tables_by_type)} tables to copy")
+
+    # Sort tables: nodes before relationships (relationships have uppercase names)
+    node_tables = [
+      (name, etype) for name, etype in tables_by_type.items() if not name.isupper()
+    ]
+    rel_tables = [
+      (name, etype) for name, etype in tables_by_type.items() if name.isupper()
+    ]
+    ordered_tables = node_tables + rel_tables
+
+    context.log.info(
+      f"  Node tables ({len(node_tables)}): {[t[0] for t in node_tables]}"
+    )
+    context.log.info(
+      f"  Relationship tables ({len(rel_tables)}): {[t[0] for t in rel_tables]}"
+    )
+
+    # Build S3 patterns and copy each table
+    bucket = env.SHARED_PROCESSED_BUCKET
+    source_prefix = "sec/processed"
+
+    # Build filed pattern based on year filter
+    if config.year:
+      filed_pattern = f"filed={config.year}-*"
+    else:
+      filed_pattern = "filed=*"
+
+    tables_copied = []
+    total_rows = 0
+    failed_tables = []
+
+    async with get_graph_client() as client:
+      for i, (table_name, entity_type) in enumerate(ordered_tables, 1):
+        # Build S3 glob pattern
+        s3_pattern = (
+          f"s3://{bucket}/{source_prefix}/"
+          f"{filed_pattern}/{entity_type}/{table_name}/*.parquet"
+        )
+
+        context.log.info(f"[{i}/{len(ordered_tables)}] Copying {table_name} from S3...")
+        context.log.debug(f"  Pattern: {s3_pattern}")
+
+        try:
+          # Call copy endpoint with SSE monitoring (waits for completion)
+          copy_result = await client.copy_from_s3(
+            graph_id=config.graph_id,
+            table_name=table_name,
+            s3_pattern=s3_pattern,
+            ignore_errors=True,
+            timeout=14400,  # 4 hours per table (large tables like Fact/Association)
+            wait_for_completion=True,  # Wait for SSE completion
+          )
+
+          if copy_result.get("status") == "completed":
+            records = copy_result.get("records_loaded", 0)
+            duration = copy_result.get("duration_seconds", 0)
+            total_rows += records
+            tables_copied.append(table_name)
+            context.log.info(
+              f"  [OK] {table_name}: {records:,} records in {duration:.1f}s"
+            )
+          else:
+            error = copy_result.get("error", "Unknown error")
+            context.log.error(f"  [FAILED] {table_name}: {error}")
+            failed_tables.append({"table": table_name, "error": error})
+
+        except Exception as e:
+          context.log.error(f"  [FAILED] {table_name}: {e}")
+          failed_tables.append({"table": table_name, "error": str(e)})
+
+    return {
+      "status": "success" if not failed_tables else "partial",
+      "tables_copied": tables_copied,
+      "total_rows": total_rows,
+      "failed_tables": failed_tables,
+    }
+
+  result = asyncio.run(run_direct_copy())
+
+  duration_ms = (time.time() - start_time) * 1000
+
+  # Restore memory to defaults
+  try:
+    restore_result = asyncio.run(restore_graph_memory(config.graph_id))
+    context.log.info(f"Memory restored: {restore_result.get('message', 'done')}")
+  except Exception as restore_err:
+    context.log.warning(f"Could not restore memory (non-fatal): {restore_err}")
+
+  context.log.info(
+    f"Direct copy complete: {len(result['tables_copied'])} tables, "
+    f"{duration_ms / 1000:.2f}s"
+  )
+
+  return MaterializeResult(
+    metadata={
+      "graph_id": config.graph_id,
+      "rebuild_graph": config.rebuild_graph,
+      "status": result["status"],
+      "total_rows": result["total_rows"],
+      "tables_copied": result["tables_copied"],
+      "failed_tables": result["failed_tables"],
+      "duration_ms": duration_ms,
     }
   )

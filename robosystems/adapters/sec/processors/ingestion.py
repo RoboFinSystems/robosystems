@@ -171,10 +171,9 @@ CHUNKED_MATERIALIZATION_TIMEOUT = (
 # RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
 # with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory
 # exhaustion by materializing in chunks with cleanup between batches.
-MATERIALIZATION_BATCH_SIZE = 5_000_000  # 5M rows per batch
-MATERIALIZATION_CHUNK_THRESHOLD = (
-  10_000_000  # 10M rows - trigger batching for large tables
-)
+# Updated to 10M after observing <50% memory usage with 5M batches.
+# Tables larger than this are batched; smaller tables use single COPY.
+MATERIALIZATION_BATCH_SIZE = 10_000_000  # 10M rows per batch
 
 # Retry configuration for staging operations
 # On timeout or failure, retry the entire table from scratch
@@ -1790,17 +1789,14 @@ class XBRLDuckDBGraphProcessor:
 
         # Use hash-based batched materialization for very large tables to prevent OOM
         # Hash batching doesn't require sorted source tables (unlike LIMIT/OFFSET)
-        if (
-          env.SEC_LARGE_SCALE_MODE_ENABLED
-          and row_count > MATERIALIZATION_CHUNK_THRESHOLD
-        ):
+        if env.SEC_LARGE_SCALE_MODE_ENABLED and row_count > MATERIALIZATION_BATCH_SIZE:
           # Calculate number of batches needed (round up)
           num_batches = (
             row_count + MATERIALIZATION_BATCH_SIZE - 1
           ) // MATERIALIZATION_BATCH_SIZE
           log_progress(
             f"[{i}/{total_tables}] Materializing {table_name} in {num_batches} batches "
-            f"({row_count:,} rows, ~{MATERIALIZATION_BATCH_SIZE:,} per batch, hash-based)..."
+            f"({row_count:,} rows, hash-based)..."
           )
 
           table_rows = 0
@@ -1827,7 +1823,7 @@ class XBRLDuckDBGraphProcessor:
 
             log_progress(
               f"  [{table_name}] Batch {batch_num + 1}/{num_batches}: "
-              f"{batch_rows:,} rows in {batch_time:.0f}ms"
+              f"{batch_rows:,} rows in {batch_time / 1000:.1f}s"
             )
 
           total_rows += table_rows
@@ -1844,7 +1840,7 @@ class XBRLDuckDBGraphProcessor:
 
           log_progress(
             f"[{i}/{total_tables}] Materialized {table_name}: "
-            f"{table_rows:,} rows in {table_time_ms:.0f}ms ({num_batches} batches)"
+            f"{table_rows:,} rows in {table_time_ms / 1000:.1f}s ({num_batches} batches)"
           )
 
         else:
@@ -1874,7 +1870,7 @@ class XBRLDuckDBGraphProcessor:
 
           log_progress(
             f"[{i}/{total_tables}] Materialized {table_name}: "
-            f"{rows_ingested:,} rows in {exec_time_ms:.0f}ms"
+            f"{rows_ingested:,} rows in {exec_time_ms / 1000:.1f}s"
           )
 
       except Exception as e:
