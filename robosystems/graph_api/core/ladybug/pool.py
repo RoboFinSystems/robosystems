@@ -300,15 +300,10 @@ class LadybugConnectionPool:
         # Apply connection-level configuration AFTER verifying connection is healthy
         # These are non-critical settings that enhance performance but aren't required
         try:
-          # Set home directory to a shared location on the same volume as databases
+          # Set home directory to the base path (LadybugDB creates .lbug subdirectory)
           # This keeps temporary files on the same fast EBS volume
-          # All databases can share this directory for scratch space
-          home_dir = str(self.base_path / ".lbug")
-
-          # Ensure the home directory exists
-          import os
-
-          os.makedirs(home_dir, exist_ok=True)
+          # Note: Don't add ".lbug" suffix - LadybugDB creates that internally
+          home_dir = str(self.base_path)
 
           conn.execute(f"CALL home_directory='{home_dir}';")
 
@@ -333,7 +328,7 @@ class LadybugConnectionPool:
           conn.execute("CALL spill_to_disk=true;")
 
           logger.info(
-            f"Applied connection configuration for {database_name} (home_dir=.lbug, progress_bar=false, timeout=120000ms, semi_mask=true, warning_limit=1024, spill_to_disk=true)"
+            f"Applied connection configuration for {database_name} (home_dir={home_dir}, progress_bar=false, timeout=120000ms, semi_mask=true, warning_limit=1024, spill_to_disk=true)"
           )
         except Exception as config_error:
           # These settings are nice-to-have but not critical

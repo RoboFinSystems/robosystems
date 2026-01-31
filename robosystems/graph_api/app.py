@@ -54,6 +54,27 @@ def create_app() -> FastAPI:
     # Startup
     logger.info("Graph API starting up")
 
+    # Clear stale extension cache from persistent volume
+    # LadybugDB caches extensions in {home_directory}/.lbug/extension/
+    # When container images are updated, stale cached extensions can cause
+    # ABI mismatch errors (undefined symbols). Clear the cache on startup
+    # to force LadybugDB to use fresh extensions from the container image.
+    import shutil
+
+    cache_paths_to_clear = [
+      # Current path (after fix): home_dir=base_path, cache at base_path/.lbug/extension
+      Path(env.LBUG_DATABASE_PATH) / ".lbug" / "extension",
+      # Legacy double-nested path: home_dir=base_path/.lbug, cache at base_path/.lbug/.lbug/extension
+      Path(env.LBUG_DATABASE_PATH) / ".lbug" / ".lbug" / "extension",
+    ]
+    for cache_path in cache_paths_to_clear:
+      if cache_path.exists():
+        try:
+          shutil.rmtree(cache_path)
+          logger.info(f"Cleared stale LadybugDB extension cache: {cache_path}")
+        except Exception as e:
+          logger.warning(f"Failed to clear extension cache at {cache_path}: {e}")
+
     # Initialize DuckDB connection pool for staging tables
     from robosystems.graph_api.core.duckdb import initialize_duckdb_pool
 

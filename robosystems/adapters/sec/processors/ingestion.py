@@ -168,15 +168,12 @@ CHUNKED_MATERIALIZATION_TIMEOUT = (
 )
 
 # Chunked materialization settings for large tables
-# DISABLED (2026-01-31): With pre-sorted staging and direct COPY optimization,
-# batching is no longer needed. Memory pressure is low (17% peak on r7g.2xlarge)
-# and direct COPY is faster than batched temp table creation.
-# Threshold set high to effectively disable batching for all SEC tables.
-MATERIALIZATION_BATCH_SIZE = (
-  10_000_000  # 10M rows per batch (unused when threshold high)
-)
+# RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
+# with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory
+# exhaustion by materializing in chunks with cleanup between batches.
+MATERIALIZATION_BATCH_SIZE = 5_000_000  # 5M rows per batch
 MATERIALIZATION_CHUNK_THRESHOLD = (
-  1_000_000_000  # 1B rows - effectively disables batching
+  10_000_000  # 10M rows - trigger batching for large tables
 )
 
 # Retry configuration for staging operations
@@ -1791,7 +1788,7 @@ class XBRLDuckDBGraphProcessor:
             logger.warning(f"Could not get row count for {table_name}: {count_err}")
             row_count = 0
 
-        # Use chunked materialization for very large tables (only in large-scale mode)
+        # Use chunked materialization for very large tables to prevent OOM
         if (
           env.SEC_LARGE_SCALE_MODE_ENABLED
           and row_count > MATERIALIZATION_CHUNK_THRESHOLD
