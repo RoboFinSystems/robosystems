@@ -36,6 +36,8 @@ GRAPH_REGISTRY_TABLE = os.environ.get(
   "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
 )
 ALERT_TOPIC = os.environ["ALERT_TOPIC_ARN"]
+# Retention for fallback cleanup of orphaned volume snapshots (tagged AutoDelete: true)
+# Note: DLM handles primary snapshot lifecycle with 3-day retention
 RETENTION_DAYS = int(os.environ.get("SNAPSHOT_RETENTION_DAYS", "7"))
 
 # Volume defaults (used as fallback when tier not found in tier_config)
@@ -67,10 +69,6 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
       return expand_volume(event)
     elif action == "cleanup_orphaned":
       return cleanup_orphaned_volumes()
-    elif action == "snapshot_volume":
-      return snapshot_volume(event)
-    elif action == "scheduled_snapshots":
-      return create_scheduled_snapshots(event)
     elif action == "cleanup_snapshots":
       return cleanup_old_snapshots(event)
     elif action == "restore_from_snapshot":
@@ -667,122 +665,6 @@ def cleanup_orphaned_volumes() -> dict[str, Any]:
   )
 
   return {"statusCode": 200, "orphaned_volumes": orphaned}
-
-
-def snapshot_volume(event: dict[str, Any]) -> dict[str, Any]:
-  """Create a snapshot of a volume"""
-  volume_id = event["volume_id"]
-  description = event.get("description", f"Manual snapshot of {volume_id}")
-
-  # First verify the volume exists
-  try:
-    volume_check = ec2.describe_volumes(VolumeIds=[volume_id])
-    if not volume_check["Volumes"]:
-      logger.error(f"Volume {volume_id} does not exist")
-      raise ValueError(f"Volume {volume_id} not found")
-  except Exception as e:
-    if "InvalidVolume.NotFound" in str(e):
-      logger.error(f"Volume {volume_id} not found in EC2")
-      # Clean up registry entry
-      try:
-        table.delete_item(Key={"volume_id": volume_id})
-        logger.info(f"Removed stale registry entry for non-existent volume {volume_id}")
-      except Exception:
-        pass
-      raise ValueError(f"Volume {volume_id} does not exist")
-    else:
-      raise
-
-  # Get volume info from registry
-  response = table.get_item(Key={"volume_id": volume_id})
-  volume_info = response.get("Item", {})
-  databases = volume_info.get("databases", [])
-
-  # Create snapshot with database info in tags
-  snapshot_response = ec2.create_snapshot(
-    VolumeId=volume_id,
-    Description=description,
-    TagSpecifications=[
-      {
-        "ResourceType": "snapshot",
-        "Tags": [
-          {"Key": "Name", "Value": f"snapshot-{volume_id}"},
-          {"Key": "Environment", "Value": ENVIRONMENT},
-          {"Key": "VolumeId", "Value": volume_id},
-          {"Key": "Databases", "Value": json.dumps(databases)},
-          {"Key": "CreatedAt", "Value": datetime.now(UTC).isoformat()},
-        ],
-      }
-    ],
-  )
-
-  return {"statusCode": 200, "snapshot_id": snapshot_response["SnapshotId"]}
-
-
-def create_scheduled_snapshots(event: dict[str, Any]) -> dict[str, Any]:
-  """Create scheduled snapshots for all attached volumes"""
-  # Find all attached volumes
-  response = table.scan(
-    FilterExpression="#status = :status",
-    ExpressionAttributeNames={"#status": "status"},
-    ExpressionAttributeValues={":status": "attached"},
-  )
-
-  snapshots = []
-  volumes_to_remove = []  # Track stale registry entries
-
-  for item in response["Items"]:
-    volume_id = item["volume_id"]
-    try:
-      # First verify the volume actually exists
-      try:
-        volume_check = ec2.describe_volumes(VolumeIds=[volume_id])
-        if not volume_check["Volumes"]:
-          logger.warning(f"Volume {volume_id} no longer exists, removing from registry")
-          volumes_to_remove.append(volume_id)
-          continue
-      except Exception as e:
-        if "InvalidVolume.NotFound" in str(e):
-          logger.warning(f"Volume {volume_id} not found in EC2, removing from registry")
-          volumes_to_remove.append(volume_id)
-          continue
-        else:
-          # Some other error - log but continue
-          logger.error(f"Error checking volume {volume_id}: {e}")
-          continue
-
-      # Volume exists, proceed with snapshot
-      result = snapshot_volume(
-        {"volume_id": volume_id, "description": "Scheduled snapshot"}
-      )
-      snapshots.append(result["snapshot_id"])
-      logger.info(f"Created snapshot {result['snapshot_id']} for volume {volume_id}")
-    except Exception as e:
-      logger.error(f"Failed to snapshot {volume_id}: {e}")
-
-  # Clean up stale registry entries
-  for volume_id in volumes_to_remove:
-    try:
-      table.delete_item(Key={"volume_id": volume_id})
-      logger.info(f"Removed stale registry entry for volume {volume_id}")
-    except Exception as e:
-      logger.error(f"Failed to remove registry entry for {volume_id}: {e}")
-
-  # Log summary
-  if volumes_to_remove:
-    logger.warning(
-      f"Removed {len(volumes_to_remove)} stale volume entries from registry"
-    )
-    send_alert(
-      "Stale Volume Registry Entries",
-      f"Removed {len(volumes_to_remove)} non-existent volumes from registry: {volumes_to_remove}",
-    )
-
-  return {
-    "statusCode": 200,
-    "snapshots": snapshots,
-    "cleaned_volumes": volumes_to_remove,
-  }
 
 
 def cleanup_old_snapshots(event: dict[str, Any]) -> dict[str, Any]:

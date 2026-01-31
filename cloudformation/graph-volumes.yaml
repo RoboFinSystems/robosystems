@@ -64,6 +64,72 @@ Resources:
   # ========================================
 
   # ========================================
+  # EBS SNAPSHOT LIFECYCLE (DLM)
+  # ========================================
+  # AWS Data Lifecycle Manager for automated EBS snapshots
+  # Short retention (3 days) for quick disaster recovery
+  # Longer-term backups use S3 (tier-based retention)
+
+  DLMLifecycleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-dlm-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dlm.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  EBSSnapshotLifecyclePolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: !Sub "EBS snapshot lifecycle for LadybugDB volumes (${Environment})"
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt DLMLifecycleRole.Arn
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes:
+          - VOLUME
+        TargetTags:
+          - Key: ManagedBy
+            Value: GraphVolumeManager
+          - Key: Environment
+            Value: !Ref Environment
+        Schedules:
+          - Name: DailySnapshots
+            CopyTags: true
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times:
+                - "03:00" # 3 AM UTC - after nightly jobs complete
+            RetainRule:
+              Count: 3 # Keep 3 daily snapshots for quick recovery
+            TagsToAdd:
+              - Key: DLMManaged
+                Value: "true"
+              - Key: AutoDelete
+                Value: "true"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+
+  # ========================================
   # SNS TOPICS
   # ========================================
 
@@ -211,7 +277,6 @@ Resources:
             - !Sub "robosystems-graph-${Environment}-volume-registry"
           GRAPH_REGISTRY_TABLE: !Sub "robosystems-graph-${Environment}-graph-registry"
           ALERT_TOPIC_ARN: !Ref VolumeAlertTopic
-          SNAPSHOT_RETENTION_DAYS: "7"
       Code:
         ImageUri: !Ref LambdaImageUri
       ImageConfig:
@@ -723,27 +788,6 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt VolumeDetachmentEventRule.Arn
-
-  # Daily Snapshot Creation for Shared Volumes
-  SharedVolumeSnapshotRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub "${AWS::StackName}-shared-snapshots"
-      Description: Daily snapshots of shared repository volumes
-      ScheduleExpression: "cron(0 1 * * ? *)" # 1 AM UTC daily
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt VolumeManagerFunction.Arn
-          Id: "1"
-          Input: '{"action": "scheduled_snapshots", "filter": "shared"}'
-
-  SharedSnapshotRulePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref VolumeManagerFunction
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt SharedVolumeSnapshotRule.Arn
 
   # Daily Snapshot Cleanup
   SnapshotCleanupRule:
