@@ -160,7 +160,7 @@ CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
 
 # Table-specific timeouts for LadybugDB materialization (seconds)
 # For batched operations, each batch is smaller so use shorter timeout
-# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 1800s (30 min)
+# Default: 600s (10 min), Large non-chunked: 3600s (60 min), Batched: 1800s (30 min)
 DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
 LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 minutes (for direct COPY of 200M+ row tables)
 CHUNKED_MATERIALIZATION_TIMEOUT = (
