@@ -324,7 +324,7 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     table_name: str,
-    s3_pattern: str,
+    s3_pattern: str | list[str],
     s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
     timeout: int = 14400,  # 4 hours default
@@ -339,7 +339,8 @@ class GraphClient(BaseGraphClient):
     Args:
         graph_id: Target database identifier
         table_name: Table to ingest into
-        s3_pattern: S3 glob pattern for files
+        s3_pattern: S3 glob pattern(s) for files. Can be a single pattern
+            or a list of patterns for quarter-by-quarter loading.
         s3_credentials: Optional S3 credentials for LocalStack/MinIO
         ignore_errors: Whether to use IGNORE_ERRORS for duplicate handling
         timeout: Maximum time to wait for completion (seconds)
@@ -364,7 +365,10 @@ class GraphClient(BaseGraphClient):
     """
     try:
       # Step 1: Start the background ingestion task
-      logger.info(f"Starting background ingestion for {table_name} from {s3_pattern}")
+      pattern_desc = (
+        f"{len(s3_pattern)} patterns" if isinstance(s3_pattern, list) else s3_pattern
+      )
+      logger.info(f"Starting background ingestion for {table_name} from {pattern_desc}")
 
       start_response = await self._request(
         "POST",
@@ -1484,7 +1488,7 @@ class GraphClient(BaseGraphClient):
     self,
     graph_id: str,
     table_name: str,
-    s3_pattern: str,
+    s3_pattern: str | list[str],
     ignore_errors: bool = True,
     timeout: int = 14400,  # 4 hours default
     wait_for_completion: bool = True,
@@ -1503,7 +1507,9 @@ class GraphClient(BaseGraphClient):
     Args:
         graph_id: Graph database identifier
         table_name: Target table name in LadybugDB
-        s3_pattern: S3 glob pattern (e.g., "s3://bucket/path/*.parquet")
+        s3_pattern: S3 glob pattern(s). Can be a single pattern
+            (e.g., "s3://bucket/path/*.parquet") or a list of patterns
+            for quarter-by-quarter loading.
         ignore_errors: Use IGNORE_ERRORS for duplicate/constraint handling
         timeout: Maximum time to wait for completion (seconds). Default 4 hours.
         wait_for_completion: If True, monitor via SSE until complete. If False, return immediately with task_id.

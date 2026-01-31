@@ -165,7 +165,7 @@ class LadybugBackend(GraphBackend):
     self,
     graph_id: str,
     table_name: str,
-    s3_pattern: str,
+    s3_pattern: str | list[str],
     s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
     database: str | None = None,
@@ -213,14 +213,28 @@ class LadybugBackend(GraphBackend):
         )
 
       # Build and execute COPY query
-      query = f'COPY {table_name} FROM "{s3_pattern}"'
+      # Handle both single pattern (string) and multiple patterns (list)
+      if isinstance(s3_pattern, list):
+        # Multiple patterns: use read_parquet with list syntax
+        patterns_list = ", ".join(f"'{p}'" for p in s3_pattern)
+        source = f"(SELECT * FROM read_parquet([{patterns_list}], union_by_name=true))"
+        query = f"COPY {table_name} FROM {source}"
+      else:
+        # Single pattern: use direct COPY FROM
+        query = f'COPY {table_name} FROM "{s3_pattern}"'
+
       if ignore_errors:
         if "(" in query:
           query = query[:-1] + ", IGNORE_ERRORS=TRUE)"
         else:
           query += " (IGNORE_ERRORS=TRUE)"
 
-      logger.info(f"Executing LadybugDB COPY: {query}")
+      pattern_count = len(s3_pattern) if isinstance(s3_pattern, list) else 1
+      logger.info(
+        f"Executing LadybugDB COPY ({pattern_count} patterns): {query[:200]}..."
+        if len(query) > 200
+        else f"Executing LadybugDB COPY: {query}"
+      )
 
       start_time = time.time()
       result = conn.execute(query)
