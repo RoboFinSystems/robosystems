@@ -94,7 +94,7 @@ Resources:
   EBSSnapshotLifecyclePolicy:
     Type: AWS::DLM::LifecyclePolicy
     Properties:
-      Description: !Sub "EBS snapshot lifecycle for LadybugDB volumes (${Environment})"
+      Description: !Sub "EBS snapshot lifecycle for LadybugDB volumes - ${Environment}"
       State: ENABLED
       ExecutionRoleArn: !GetAtt DLMLifecycleRole.Arn
       PolicyDetails:
