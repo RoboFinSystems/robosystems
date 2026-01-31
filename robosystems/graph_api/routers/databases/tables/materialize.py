@@ -13,6 +13,42 @@ from robosystems.graph_api.models.tables import (
 )
 from robosystems.logger import logger
 
+# Constants for checkpoint retry logic
+CHECKPOINT_MAX_RETRIES = 3
+CHECKPOINT_RETRY_DELAY_SECONDS = 1
+
+
+def checkpoint_with_retry(conn, graph_id: str, context: str = "DuckDB") -> None:
+  """Checkpoint DuckDB database with retry logic.
+
+  Args:
+      conn: DuckDB connection
+      graph_id: Graph ID for logging
+      context: Context string for log messages (e.g., "DuckDB", "parent DuckDB")
+
+  Raises:
+      HTTPException: If checkpoint fails after all retries
+  """
+  import time
+
+  for attempt in range(CHECKPOINT_MAX_RETRIES):
+    try:
+      conn.execute("CHECKPOINT")
+      logger.info(f"✅ {context} checkpointed successfully for {graph_id}")
+      return
+    except Exception as e:
+      if attempt == CHECKPOINT_MAX_RETRIES - 1:
+        logger.error(
+          f"Failed to checkpoint {context} after {CHECKPOINT_MAX_RETRIES} attempts: {e}"
+        )
+        raise HTTPException(
+          status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+          detail=f"Failed to checkpoint {context} after {CHECKPOINT_MAX_RETRIES} attempts: {e!s}",
+        )
+      logger.warning(f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}")
+      time.sleep(CHECKPOINT_RETRY_DELAY_SECONDS)
+
+
 router = APIRouter(prefix="/databases/{graph_id}/tables")
 
 
@@ -53,27 +89,7 @@ async def materialize_table(
     # Check if table exists, create temp copy without file_id
     try:
       with duckdb_pool.get_connection(graph_id) as duck_conn:
-        max_retries = 3
-        for attempt in range(max_retries):
-          try:
-            duck_conn.execute("CHECKPOINT")
-            logger.info(f"✅ DuckDB checkpointed successfully for {graph_id}")
-            break
-          except Exception as e:
-            if attempt == max_retries - 1:
-              logger.error(
-                f"Failed to checkpoint DuckDB after {max_retries} attempts: {e}"
-              )
-              raise HTTPException(
-                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to checkpoint DuckDB after {max_retries} attempts: {e!s}",
-              )
-            logger.warning(
-              f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
-            )
-            import time
-
-            time.sleep(1)
+        checkpoint_with_retry(duck_conn, graph_id, context="DuckDB")
 
         # Check if table exists
         result = duck_conn.execute(
@@ -105,65 +121,73 @@ async def materialize_table(
         column_names = [col[0] for col in columns_result]
         has_file_id = "file_id" in column_names
 
-        # Build ORDER BY + LIMIT/OFFSET clause for chunked materialization
-        # ORDER BY is critical for deterministic pagination - without it, LIMIT/OFFSET
-        # can return overlapping rows between batches, causing duplicate key errors
-        limit_clause = ""
-        if request.batch_size is not None:
-          # Determine order column based on table type
-          # Node tables use 'identifier', relationship tables use 'src, dst'
-          if "identifier" in column_names:
-            order_col = "identifier"
-          elif "src" in column_names and "dst" in column_names:
-            order_col = "src, dst"
-          else:
-            # Fallback to first column if neither standard column exists
-            order_col = column_names[0] if column_names else "rowid"
-          limit_clause = (
-            f" ORDER BY {order_col} LIMIT {request.batch_size} OFFSET {request.offset}"
-          )
+        # Optimization: Skip temp table when not needed (no file_id, no batching, no file filter)
+        # This enables direct COPY from source table, avoiding expensive temp table creation
+        can_skip_temp_table = (
+          not has_file_id and request.batch_size is None and not request.file_ids
+        )
 
-        # Create physical copy of table without file_id column (if it exists)
-        if request.file_ids:
-          file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
-          if has_file_id:
-            duck_conn.execute(
-              f"CREATE TABLE {temp_table_name} AS "
-              f"SELECT * EXCLUDE (file_id) FROM {table_name} "
-              f"WHERE file_id IN ({file_ids_str}){limit_clause}"
-            )
-          else:
-            duck_conn.execute(
-              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
-            )
-          logger.info(
-            f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
-          )
+        if can_skip_temp_table:
+          # Fast path: COPY directly from source table
+          logger.info(f"Using direct COPY for {table_name} (no temp table needed)")
+          temp_table_created = False
         else:
-          if has_file_id:
-            duck_conn.execute(
-              f"CREATE TABLE {temp_table_name} AS "
-              f"SELECT * EXCLUDE (file_id) FROM {table_name}{limit_clause}"
+          # Build ORDER BY + LIMIT/OFFSET clause for chunked materialization
+          # ORDER BY is critical for deterministic pagination - without it, LIMIT/OFFSET
+          # can return overlapping rows between batches, causing duplicate key errors
+          limit_clause = ""
+          if request.batch_size is not None:
+            # Determine order column based on table type
+            # Node tables use 'identifier', relationship tables use 'src, dst'
+            if "identifier" in column_names:
+              order_col = "identifier"
+            elif "src" in column_names and "dst" in column_names:
+              order_col = "src, dst"
+            else:
+              # Fallback to first column if neither standard column exists
+              order_col = column_names[0] if column_names else "rowid"
+            limit_clause = f" ORDER BY {order_col} LIMIT {request.batch_size} OFFSET {request.offset}"
+
+          # Create physical copy of table without file_id column (if it exists)
+          if request.file_ids:
+            file_ids_str = ", ".join([f"'{fid}'" for fid in request.file_ids])
+            if has_file_id:
+              duck_conn.execute(
+                f"CREATE TABLE {temp_table_name} AS "
+                f"SELECT * EXCLUDE (file_id) FROM {table_name} "
+                f"WHERE file_id IN ({file_ids_str}){limit_clause}"
+              )
+            else:
+              duck_conn.execute(
+                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
+              )
+            logger.info(
+              f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
             )
           else:
-            duck_conn.execute(
-              f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
-            )
-          if request.batch_size:
-            logger.info(
-              f"Created temp DuckDB table {temp_table_name} for chunked materialization "
-              f"(batch={request.batch_size}, offset={request.offset})"
-            )
-          else:
-            logger.info(
-              f"Created temp DuckDB table {temp_table_name} for full materialization"
-            )
+            if has_file_id:
+              duck_conn.execute(
+                f"CREATE TABLE {temp_table_name} AS "
+                f"SELECT * EXCLUDE (file_id) FROM {table_name}{limit_clause}"
+              )
+            else:
+              duck_conn.execute(
+                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
+              )
+            if request.batch_size:
+              logger.info(
+                f"Created temp DuckDB table {temp_table_name} for chunked materialization "
+                f"(batch={request.batch_size}, offset={request.offset})"
+              )
+            else:
+              logger.info(
+                f"Created temp DuckDB table {temp_table_name} for full materialization"
+              )
+          temp_table_created = True
 
     except Exception as err:
       logger.error(f"Could not prepare DuckDB table for materialization: {err}")
       raise
-
-    temp_table_created = True
 
     try:
       with ladybug_service.db_manager.connection_pool.get_connection(graph_id) as conn:
@@ -188,7 +212,9 @@ async def materialize_table(
         conn.execute(f"ATTACH '{duck_path}' AS duck (DBTYPE duckdb)")
         logger.info(f"Attached DuckDB database: {duck_path}")
 
-        # Copy from the temp table (which already has file_id excluded)
+        # Determine source table for COPY (temp table or direct source)
+        source_table = table_name if not temp_table_created else temp_table_name
+
         if request.file_ids:
           logger.info(
             f"Executing selective materialization from DuckDB to graph: {table_name} "
@@ -201,16 +227,16 @@ async def materialize_table(
 
         if request.ignore_errors:
           copy_query = (
-            f"COPY {table_name} FROM duck.{temp_table_name} (ignore_errors=true)"
+            f"COPY {table_name} FROM duck.{source_table} (ignore_errors=true)"
           )
         else:
-          copy_query = f"COPY {table_name} FROM duck.{temp_table_name}"
+          copy_query = f"COPY {table_name} FROM duck.{source_table}"
 
         # Set extended timeout for COPY operations (30 minutes)
         # Default connection timeout is 120s, but large tables like Fact
         # can take 2-3 minutes with millions of rows
         try:
-          conn.execute("CALL timeout=1800000")  # 30 minutes
+          conn.execute("CALL timeout=3600000")  # 60 minutes
           logger.info(f"Executing: {copy_query}")
           result = conn.execute(copy_query)
         finally:
@@ -354,27 +380,7 @@ async def fork_from_parent_duckdb(
 
     # Get list of tables and create views (excluding file_id column)
     with duckdb_pool.get_connection(parent_graph_id) as duck_conn:
-      max_retries = 3
-      for attempt in range(max_retries):
-        try:
-          duck_conn.execute("CHECKPOINT")
-          logger.info(f"✅ Parent DuckDB checkpointed for {parent_graph_id}")
-          break
-        except Exception as e:
-          if attempt == max_retries - 1:
-            logger.error(
-              f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {e}"
-            )
-            raise HTTPException(
-              status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-              detail=f"Failed to checkpoint parent DuckDB after {max_retries} attempts: {e!s}",
-            )
-          logger.warning(
-            f"Checkpoint attempt {attempt + 1} failed, retrying... Error: {e}"
-          )
-          import time
-
-          time.sleep(1)
+      checkpoint_with_retry(duck_conn, parent_graph_id, context="parent DuckDB")
 
       result = duck_conn.execute("SHOW TABLES").fetchall()
       available_tables = [row[0] for row in result]
@@ -474,7 +480,7 @@ async def fork_from_parent_duckdb(
             logger.info(f"Copying {table_name} from parent to subgraph")
             # Set extended timeout for COPY operations (30 minutes)
             try:
-              conn.execute("CALL timeout=1800000")  # 30 minutes
+              conn.execute("CALL timeout=3600000")  # 60 minutes
               result = conn.execute(copy_query)
             finally:
               # Always reset timeout to default after COPY

@@ -160,17 +160,21 @@ CHUNKED_STAGING_TIMEOUT = 600  # 10 minutes per quarter chunk
 
 # Table-specific timeouts for LadybugDB materialization (seconds)
 # For batched operations, each batch is smaller so use shorter timeout
-# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 300s (5 min)
+# Default: 600s (10 min), Large non-chunked: 1800s (30 min), Batched: 600s (10 min)
 DEFAULT_MATERIALIZATION_TIMEOUT = 600  # 10 minutes
-LARGE_MATERIALIZATION_TIMEOUT = 1800  # 30 minutes (for non-chunked large tables)
-CHUNKED_MATERIALIZATION_TIMEOUT = 300  # 5 minutes per 10M row batch
+LARGE_MATERIALIZATION_TIMEOUT = 3600  # 60 minutes (for direct COPY of 200M+ row tables)
+CHUNKED_MATERIALIZATION_TIMEOUT = (
+  600  # 10 minutes per 10M row batch (DuckDB temp table creation + COPY)
+)
 
 # Chunked materialization settings for large tables
-# Tables exceeding this row count will be materialized in batches to avoid OOM
-# Smaller batches (10M) are safer for memory and provide better failure resilience
-# At ~100k rows/sec, 10M rows takes ~100 seconds - well under the 5 min timeout
-MATERIALIZATION_BATCH_SIZE = 10_000_000  # 10M rows per batch
-MATERIALIZATION_CHUNK_THRESHOLD = 50_000_000  # 50M rows triggers chunked mode
+# RE-ENABLED (2026-01-31): Direct COPY of 200M+ row tables causes OOM on r7g.2xlarge
+# with 64GB RAM when LadybugDB buffer pool is boosted. Batching prevents memory
+# exhaustion by materializing in chunks with cleanup between batches.
+MATERIALIZATION_BATCH_SIZE = 5_000_000  # 5M rows per batch
+MATERIALIZATION_CHUNK_THRESHOLD = (
+  10_000_000  # 10M rows - trigger batching for large tables
+)
 
 # Retry configuration for staging operations
 # On timeout or failure, retry the entire table from scratch
@@ -1784,7 +1788,7 @@ class XBRLDuckDBGraphProcessor:
             logger.warning(f"Could not get row count for {table_name}: {count_err}")
             row_count = 0
 
-        # Use chunked materialization for very large tables (only in large-scale mode)
+        # Use chunked materialization for very large tables to prevent OOM
         if (
           env.SEC_LARGE_SCALE_MODE_ENABLED
           and row_count > MATERIALIZATION_CHUNK_THRESHOLD
