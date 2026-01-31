@@ -123,7 +123,9 @@ async def materialize_table(
 
         # Optimization: Skip temp table when not needed (no file_id, no batching, no file filter)
         # This enables direct COPY from source table, avoiding expensive temp table creation
-        has_hash_batching = request.num_batches is not None and request.batch_num is not None
+        has_hash_batching = (
+          request.num_batches is not None and request.batch_num is not None
+        )
         can_skip_temp_table = (
           not has_file_id and not has_hash_batching and not request.file_ids
         )
@@ -140,6 +142,8 @@ async def materialize_table(
             # Hash-based batching: deterministic partitioning without sorting
             # Each row goes to exactly one batch based on hash(key) % num_batches
             # This is O(n) per batch vs O(n log n) for ORDER BY + LIMIT/OFFSET
+            assert request.batch_num is not None and request.num_batches is not None
+
             if "identifier" in column_names:
               hash_col = "identifier"
             elif "src" in column_names and "dst" in column_names:
@@ -180,6 +184,7 @@ async def materialize_table(
                 f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{batch_clause}"
               )
             if has_hash_batching:
+              assert request.batch_num is not None and request.num_batches is not None
               logger.info(
                 f"Created temp DuckDB table {temp_table_name} for hash-based materialization "
                 f"(batch {request.batch_num + 1}/{request.num_batches})"
