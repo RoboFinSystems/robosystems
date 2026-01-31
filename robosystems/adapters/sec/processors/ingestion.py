@@ -1788,35 +1788,35 @@ class XBRLDuckDBGraphProcessor:
             logger.warning(f"Could not get row count for {table_name}: {count_err}")
             row_count = 0
 
-        # Use chunked materialization for very large tables to prevent OOM
+        # Use hash-based batched materialization for very large tables to prevent OOM
+        # Hash batching doesn't require sorted source tables (unlike LIMIT/OFFSET)
         if (
           env.SEC_LARGE_SCALE_MODE_ENABLED
           and row_count > MATERIALIZATION_CHUNK_THRESHOLD
         ):
+          # Calculate number of batches needed (round up)
           num_batches = (
             row_count + MATERIALIZATION_BATCH_SIZE - 1
           ) // MATERIALIZATION_BATCH_SIZE
           log_progress(
             f"[{i}/{total_tables}] Materializing {table_name} in {num_batches} batches "
-            f"({row_count:,} rows, {MATERIALIZATION_BATCH_SIZE:,} per batch)..."
+            f"({row_count:,} rows, ~{MATERIALIZATION_BATCH_SIZE:,} per batch, hash-based)..."
           )
 
           table_rows = 0
           table_time_ms = 0.0
 
           for batch_num in range(num_batches):
-            offset = batch_num * MATERIALIZATION_BATCH_SIZE
             log_progress(
-              f"  [{table_name}] Batch {batch_num + 1}/{num_batches} "
-              f"(offset={offset:,})..."
+              f"  [{table_name}] Batch {batch_num + 1}/{num_batches} (hash-based)..."
             )
 
             response = await graph_client.materialize_table(
               graph_id=self.graph_id,
               table_name=table_name,
               ignore_errors=True,
-              batch_size=MATERIALIZATION_BATCH_SIZE,
-              offset=offset,
+              batch_num=batch_num,
+              num_batches=num_batches,
               timeout=CHUNKED_MATERIALIZATION_TIMEOUT,
             )
 

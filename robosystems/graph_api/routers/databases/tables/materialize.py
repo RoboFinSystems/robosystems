@@ -123,8 +123,9 @@ async def materialize_table(
 
         # Optimization: Skip temp table when not needed (no file_id, no batching, no file filter)
         # This enables direct COPY from source table, avoiding expensive temp table creation
+        has_hash_batching = request.num_batches is not None and request.batch_num is not None
         can_skip_temp_table = (
-          not has_file_id and request.batch_size is None and not request.file_ids
+          not has_file_id and not has_hash_batching and not request.file_ids
         )
 
         if can_skip_temp_table:
@@ -132,21 +133,25 @@ async def materialize_table(
           logger.info(f"Using direct COPY for {table_name} (no temp table needed)")
           temp_table_created = False
         else:
-          # Build ORDER BY + LIMIT/OFFSET clause for chunked materialization
-          # ORDER BY is critical for deterministic pagination - without it, LIMIT/OFFSET
-          # can return overlapping rows between batches, causing duplicate key errors
-          limit_clause = ""
-          if request.batch_size is not None:
-            # Determine order column based on table type
-            # Node tables use 'identifier', relationship tables use 'src, dst'
+          # Build WHERE/LIMIT clause for batched materialization
+          batch_clause = ""
+
+          if has_hash_batching:
+            # Hash-based batching: deterministic partitioning without sorting
+            # Each row goes to exactly one batch based on hash(key) % num_batches
+            # This is O(n) per batch vs O(n log n) for ORDER BY + LIMIT/OFFSET
             if "identifier" in column_names:
-              order_col = "identifier"
+              hash_col = "identifier"
             elif "src" in column_names and "dst" in column_names:
-              order_col = "src, dst"
+              # For relationships, hash on concatenated src+dst
+              hash_col = "src || '|' || dst"
             else:
-              # Fallback to first column if neither standard column exists
-              order_col = column_names[0] if column_names else "rowid"
-            limit_clause = f" ORDER BY {order_col} LIMIT {request.batch_size} OFFSET {request.offset}"
+              hash_col = column_names[0] if column_names else "rowid"
+
+            batch_clause = f" WHERE abs(hash({hash_col}::VARCHAR)) % {request.num_batches} = {request.batch_num}"
+            logger.info(
+              f"Using hash-based batching for {table_name}: batch {request.batch_num + 1}/{request.num_batches}"
+            )
 
           # Create physical copy of table without file_id column (if it exists)
           if request.file_ids:
@@ -155,11 +160,11 @@ async def materialize_table(
               duck_conn.execute(
                 f"CREATE TABLE {temp_table_name} AS "
                 f"SELECT * EXCLUDE (file_id) FROM {table_name} "
-                f"WHERE file_id IN ({file_ids_str}){limit_clause}"
+                f"WHERE file_id IN ({file_ids_str}){batch_clause}"
               )
             else:
               duck_conn.execute(
-                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
+                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{batch_clause}"
               )
             logger.info(
               f"Created temp DuckDB table {temp_table_name} with {len(request.file_ids)} file(s)"
@@ -168,16 +173,16 @@ async def materialize_table(
             if has_file_id:
               duck_conn.execute(
                 f"CREATE TABLE {temp_table_name} AS "
-                f"SELECT * EXCLUDE (file_id) FROM {table_name}{limit_clause}"
+                f"SELECT * EXCLUDE (file_id) FROM {table_name}{batch_clause}"
               )
             else:
               duck_conn.execute(
-                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{limit_clause}"
+                f"CREATE TABLE {temp_table_name} AS SELECT * FROM {table_name}{batch_clause}"
               )
-            if request.batch_size:
+            if has_hash_batching:
               logger.info(
-                f"Created temp DuckDB table {temp_table_name} for chunked materialization "
-                f"(batch={request.batch_size}, offset={request.offset})"
+                f"Created temp DuckDB table {temp_table_name} for hash-based materialization "
+                f"(batch {request.batch_num + 1}/{request.num_batches})"
               )
             else:
               logger.info(
