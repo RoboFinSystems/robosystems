@@ -318,8 +318,10 @@ class TestFixColumnTypesByFilename:
 
     result = writer._fix_column_types_by_filename(df, "Entity.parquet")
 
-    assert result["name"].dtype == "object"
-    assert result["tax_id"].dtype == "object"
+    # String columns now use pyarrow-backed string dtype for proper Parquet type handling
+    expected_dtype = pd.ArrowDtype(pa.string())
+    assert result["name"].dtype == expected_dtype
+    assert result["tax_id"].dtype == expected_dtype
     assert result["tax_id"].iloc[0] == "000123456"
 
   def test_unit_filename(self, mock_dependencies):

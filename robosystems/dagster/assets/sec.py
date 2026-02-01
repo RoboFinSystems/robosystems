@@ -225,6 +225,7 @@ class SECDownloadConfig(Config):
   """
 
   skip_existing: bool = True  # Skip already downloaded filings
+  skip_submissions: bool = False  # Skip fetching/updating submissions.json files
   form_types: list[str] = [
     "10-K",
     "10-Q",
@@ -365,6 +366,9 @@ class SECDirectCopyConfig(Config):
   graph_id: str = "sec"  # Target graph ID
   rebuild_graph: bool = True  # Rebuild LadybugDB before copy (avoids duplicates)
   skip_taxonomy_relationships: bool = False  # Skip taxonomy structure tables
+  skip_tables: list[
+    str
+  ] = []  # Tables to skip (e.g., ["Entity"] for type mismatch issues)
   year: int | None = None  # Optional year filter (None = all years)
 
 
@@ -512,145 +516,151 @@ def sec_raw_filings(
 
     # Phase 2: Fetch submissions data for unique CIKs (parallel with rate limiting)
     # This provides company metadata (name, SIC, fiscal year end, etc.)
-    unique_ciks = list({hit.cik for hit in hits})
-    context.log.info(
-      f"Phase 2: Fetching submissions for {len(unique_ciks)} unique companies..."
-    )
-
-    # Always refresh submissions for CIKs with discovered filings.
-    # The skip_existing flag controls ZIP downloads, not submissions metadata.
-    # New filings discovered via EFTS may not be in stale submissions snapshots,
-    # so we always do an incremental update (or full build if no existing file).
-    ciks_to_fetch = unique_ciks
-
-    context.log.info(f"Submissions: {len(ciks_to_fetch)} to refresh")
-
+    # Can be skipped with skip_submissions=True to avoid rate limiting issues
     submissions_fetched = 0
     submissions_failed = 0
 
-    if ciks_to_fetch:
-      import json
-      from datetime import UTC, datetime
+    if config.skip_submissions:
+      context.log.info("Phase 2: Skipping submissions fetch (skip_submissions=True)")
+    else:
+      unique_ciks = list({hit.cik for hit in hits})
+      context.log.info(
+        f"Phase 2: Fetching submissions for {len(unique_ciks)} unique companies..."
+      )
 
-      from robosystems.adapters.sec import SECClient
+      # Always refresh submissions for CIKs with discovered filings.
+      # The skip_existing flag controls ZIP downloads, not submissions metadata.
+      # New filings discovered via EFTS may not be in stale submissions snapshots,
+      # so we always do an incremental update (or full build if no existing file).
+      ciks_to_fetch = unique_ciks
 
-      # Rate limiter and semaphore for parallel fetching (configurable)
-      submissions_limiter = AsyncRateLimiter(rate=config.submissions_rate)
-      submissions_semaphore = asyncio.Semaphore(config.submissions_concurrency)
+      context.log.info(f"Submissions: {len(ciks_to_fetch)} to refresh")
 
-      def build_complete_submissions_sync(cik: str) -> dict:
-        """Build complete master submissions file (all pagination files)."""
-        client = SECClient(cik=cik)
-        return client.get_complete_submissions()
+      if ciks_to_fetch:
+        import json
+        from datetime import UTC, datetime
 
-      def incremental_update_submissions(
-        existing: dict, cik: str, new_recent: dict
-      ) -> dict:
-        """Incrementally update existing submissions with new filings from recent page."""
-        # Get new filings from recent page
-        new_accessions = set(
-          new_recent.get("filings", {}).get("recent", {}).get("accessionNumber", [])
-        )
-        existing_accessions = set(
-          existing.get("filings", {}).get("accessionNumber", [])
-        )
+        from robosystems.adapters.sec import SECClient
 
-        # Find truly new accession numbers
-        new_only = new_accessions - existing_accessions
-        if not new_only:
-          return existing  # No new filings
+        # Rate limiter and semaphore for parallel fetching (configurable)
+        submissions_limiter = AsyncRateLimiter(rate=config.submissions_rate)
+        submissions_semaphore = asyncio.Semaphore(config.submissions_concurrency)
 
-        # Find indices of new filings in the recent data
-        recent_data = new_recent.get("filings", {}).get("recent", {})
-        recent_accessions = recent_data.get("accessionNumber", [])
+        def build_complete_submissions_sync(cik: str) -> dict:
+          """Build complete master submissions file (all pagination files)."""
+          client = SECClient(cik=cik)
+          return client.get_complete_submissions()
 
-        # Prepend new filings to existing (new filings go at the front)
-        for field in existing["filings"]:
-          if field in recent_data:
-            new_values = [
-              recent_data[field][i]
-              for i, acc in enumerate(recent_accessions)
-              if acc in new_only
-            ]
-            existing["filings"][field] = new_values + existing["filings"][field]
+        def incremental_update_submissions(
+          existing: dict, cik: str, new_recent: dict
+        ) -> dict:
+          """Incrementally update existing submissions with new filings from recent page."""
+          # Get new filings from recent page
+          new_accessions = set(
+            new_recent.get("filings", {}).get("recent", {}).get("accessionNumber", [])
+          )
+          existing_accessions = set(
+            existing.get("filings", {}).get("accessionNumber", [])
+          )
 
-        # Update metadata
-        existing["_metadata"] = existing.get("_metadata", {})
-        existing["_metadata"]["totalFilings"] = len(
-          existing["filings"].get("accessionNumber", [])
-        )
-        existing["_metadata"]["lastUpdated"] = datetime.now(UTC).isoformat()
+          # Find truly new accession numbers
+          new_only = new_accessions - existing_accessions
+          if not new_only:
+            return existing  # No new filings
 
-        return existing
+          # Find indices of new filings in the recent data
+          recent_data = new_recent.get("filings", {}).get("recent", {})
+          recent_accessions = recent_data.get("accessionNumber", [])
 
-      async def fetch_submission(cik: str) -> bool:
-        nonlocal submissions_fetched, submissions_failed
-        submissions_key = get_raw_key(DataSourceType.SEC, "submissions", f"{cik}.json")
+          # Prepend new filings to existing (new filings go at the front)
+          for field in existing["filings"]:
+            if field in recent_data:
+              new_values = [
+                recent_data[field][i]
+                for i, acc in enumerate(recent_accessions)
+                if acc in new_only
+              ]
+              existing["filings"][field] = new_values + existing["filings"][field]
 
-        async with submissions_semaphore:
-          async with submissions_limiter:
-            try:
-              # Check if master file already exists
-              existing_data = None
+          # Update metadata
+          existing["_metadata"] = existing.get("_metadata", {})
+          existing["_metadata"]["totalFilings"] = len(
+            existing["filings"].get("accessionNumber", [])
+          )
+          existing["_metadata"]["lastUpdated"] = datetime.now(UTC).isoformat()
+
+          return existing
+
+        async def fetch_submission(cik: str) -> bool:
+          nonlocal submissions_fetched, submissions_failed
+          submissions_key = get_raw_key(
+            DataSourceType.SEC, "submissions", f"{cik}.json"
+          )
+
+          async with submissions_semaphore:
+            async with submissions_limiter:
               try:
-                response = s3.client.get_object(Bucket=bucket, Key=submissions_key)
-                existing_data = json.loads(response["Body"].read().decode("utf-8"))
-              except Exception:
-                pass  # File doesn't exist
+                # Check if master file already exists
+                existing_data = None
+                try:
+                  response = s3.client.get_object(Bucket=bucket, Key=submissions_key)
+                  existing_data = json.loads(response["Body"].read().decode("utf-8"))
+                except Exception:
+                  pass  # File doesn't exist
 
-              if existing_data is None:
-                # No existing file - build complete master (sync, fetches all pages)
-                context.log.info(
-                  f"Building complete submissions master for CIK {cik}..."
+                if existing_data is None:
+                  # No existing file - build complete master (sync, fetches all pages)
+                  context.log.info(
+                    f"Building complete submissions master for CIK {cik}..."
+                  )
+                  # Run sync function in thread pool to not block event loop
+                  loop = asyncio.get_event_loop()
+                  submissions_data = await loop.run_in_executor(
+                    None, build_complete_submissions_sync, cik
+                  )
+                else:
+                  # Existing file - do incremental update from recent page only
+                  url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+                  async with aiohttp.ClientSession(headers=SEC_HEADERS) as session:
+                    async with session.get(url) as response:
+                      if response.status == 429:
+                        retry_after = int(response.headers.get("Retry-After", 60))
+                        context.log.warning(
+                          f"Rate limited on submissions, waiting {retry_after}s"
+                        )
+                        await asyncio.sleep(retry_after)
+                        return await fetch_submission(cik)
+
+                      response.raise_for_status()
+                      new_recent = await response.json()
+
+                  submissions_data = incremental_update_submissions(
+                    existing_data, cik, new_recent
+                  )
+
+                # Store to S3
+                s3.client.put_object(
+                  Bucket=bucket,
+                  Key=submissions_key,
+                  Body=json.dumps(submissions_data),
+                  ContentType="application/json",
                 )
-                # Run sync function in thread pool to not block event loop
-                loop = asyncio.get_event_loop()
-                submissions_data = await loop.run_in_executor(
-                  None, build_complete_submissions_sync, cik
-                )
-              else:
-                # Existing file - do incremental update from recent page only
-                url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-                async with aiohttp.ClientSession(headers=SEC_HEADERS) as session:
-                  async with session.get(url) as response:
-                    if response.status == 429:
-                      retry_after = int(response.headers.get("Retry-After", 60))
-                      context.log.warning(
-                        f"Rate limited on submissions, waiting {retry_after}s"
-                      )
-                      await asyncio.sleep(retry_after)
-                      return await fetch_submission(cik)
+                submissions_fetched += 1
+                return True
 
-                    response.raise_for_status()
-                    new_recent = await response.json()
+              except Exception as e:
+                context.log.debug(f"Failed to fetch submissions for CIK {cik}: {e}")
+                submissions_failed += 1
+                return False
 
-                submissions_data = incremental_update_submissions(
-                  existing_data, cik, new_recent
-                )
-
-              # Store to S3
-              s3.client.put_object(
-                Bucket=bucket,
-                Key=submissions_key,
-                Body=json.dumps(submissions_data),
-                ContentType="application/json",
-              )
-              submissions_fetched += 1
-              return True
-
-            except Exception as e:
-              context.log.debug(f"Failed to fetch submissions for CIK {cik}: {e}")
-              submissions_failed += 1
-              return False
-
-      # Run all fetches in parallel
-      tasks = [fetch_submission(cik) for cik in ciks_to_fetch]
-      completed = 0
-      for coro in asyncio.as_completed(tasks):
-        await coro
-        completed += 1
-        if completed % 50 == 0:
-          context.log.info(f"Submissions progress: {completed}/{len(ciks_to_fetch)}")
+        # Run all fetches in parallel
+        tasks = [fetch_submission(cik) for cik in ciks_to_fetch]
+        completed = 0
+        for coro in asyncio.as_completed(tasks):
+          _ = await coro
+          completed += 1
+          if completed % 50 == 0:
+            context.log.info(f"Submissions progress: {completed}/{len(ciks_to_fetch)}")
 
     context.log.info(
       f"Submissions complete: {submissions_fetched} fetched, {submissions_failed} failed"
@@ -2152,6 +2162,19 @@ def sec_graph_direct_copy(
       skipped_count = original_count - len(tables_by_type)
       context.log.info(
         f"Skipping {skipped_count} taxonomy tables (skip_taxonomy_relationships=True)"
+      )
+
+    # Filter explicitly skipped tables (e.g., Entity with type mismatch issues)
+    if config.skip_tables:
+      original_count = len(tables_by_type)
+      tables_by_type = {
+        name: entity_type
+        for name, entity_type in tables_by_type.items()
+        if name not in config.skip_tables
+      }
+      skipped_count = original_count - len(tables_by_type)
+      context.log.info(
+        f"Skipping {skipped_count} tables from skip_tables config: {config.skip_tables}"
       )
 
     context.log.info(f"Schema defines {len(tables_by_type)} tables to copy")
