@@ -182,6 +182,7 @@ class LadybugBackend(GraphBackend):
 
       # Configure S3 credentials
       if s3_credentials:
+        # Explicit credentials provided (LocalStack/MinIO or manual override)
         if s3_credentials.get("aws_access_key_id"):
           escaped_key = s3_credentials["aws_access_key_id"].replace("'", "''")
           conn.execute(f"CALL s3_access_key_id = '{escaped_key}'")
@@ -201,16 +202,97 @@ class LadybugBackend(GraphBackend):
           conn.execute(f"CALL s3_endpoint = '{escaped_endpoint}'")
           conn.execute("CALL s3_url_style = 'path'")
           logger.debug(f"Set S3 endpoint to: {endpoint} (path style URLs)")
+        logger.debug("Configured S3 with explicit credentials")
+      else:
+        # Production: Kuzu/LadybugDB httpfs does NOT support credential chains.
+        # We must fetch credentials from EC2 Instance Metadata Service (IMDS)
+        # and pass them explicitly.
+        from robosystems.config import env
 
-        conn.execute("CALL s3_uploader_threads_limit = 8")
-        conn.execute("CALL s3_uploader_max_num_parts_per_file = 10000")
-        conn.execute("CALL s3_uploader_max_filesize = 10737418240")
-        conn.execute("CALL spill_to_disk = true")
-        conn.execute("CALL timeout=1800000")
+        region = env.AWS_DEFAULT_REGION or env.AWS_REGION or "us-east-1"
+        credentials_loaded = False
 
-        logger.debug(
-          "Configured S3 performance settings, memory management, and 30-minute timeout for bulk ingestion"
-        )
+        # Method 1: Try environment variables (Kuzu checks S3_ACCESS_KEY_ID, etc.)
+        if env.AWS_ACCESS_KEY_ID and env.AWS_SECRET_ACCESS_KEY:
+          escaped_key = env.AWS_ACCESS_KEY_ID.replace("'", "''")
+          escaped_secret = env.AWS_SECRET_ACCESS_KEY.replace("'", "''")
+          conn.execute(f"CALL s3_access_key_id = '{escaped_key}'")
+          conn.execute(f"CALL s3_secret_access_key = '{escaped_secret}'")
+          credentials_loaded = True
+          logger.debug("Configured S3 credentials from environment variables")
+
+        # Method 2: Fetch from EC2 Instance Metadata Service (IMDS) for IAM roles
+        if not credentials_loaded:
+          try:
+            import requests
+
+            # IMDSv2: Get token first
+            token_response = requests.put(
+              "http://169.254.169.254/latest/api/token",
+              headers={"X-aws-ec2-metadata-token-ttl-seconds": "21600"},
+              timeout=2,
+            )
+            token = token_response.text
+
+            # Get IAM role name
+            role_response = requests.get(
+              "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+              headers={"X-aws-ec2-metadata-token": token},
+              timeout=2,
+            )
+            role_name = role_response.text.strip()
+
+            # Get credentials for the role
+            creds_response = requests.get(
+              f"http://169.254.169.254/latest/meta-data/iam/security-credentials/{role_name}",
+              headers={"X-aws-ec2-metadata-token": token},
+              timeout=2,
+            )
+            creds = creds_response.json()
+
+            access_key = creds["AccessKeyId"].replace("'", "''")
+            secret_key = creds["SecretAccessKey"].replace("'", "''")
+            session_token = creds.get("Token", "").replace("'", "''")
+
+            conn.execute(f"CALL s3_access_key_id = '{access_key}'")
+            conn.execute(f"CALL s3_secret_access_key = '{secret_key}'")
+            # IAM role credentials include a session token - try to set it
+            # (may not be supported in all Kuzu/LadybugDB versions)
+            if session_token:
+              try:
+                conn.execute(f"CALL s3_session_token = '{session_token}'")
+              except Exception as token_err:
+                logger.warning(
+                  f"Could not set s3_session_token (may not be supported): {token_err}. "
+                  "IAM role credentials may not work without session token support."
+                )
+
+            credentials_loaded = True
+            logger.info(f"Loaded S3 credentials from EC2 IMDS (role: {role_name})")
+
+          except Exception as imds_err:
+            logger.warning(f"Could not fetch credentials from EC2 IMDS: {imds_err}")
+
+        if not credentials_loaded:
+          logger.error(
+            "No S3 credentials available. Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY "
+            "environment variables or ensure EC2 instance has an IAM role."
+          )
+
+        # Always set region for S3 access
+        conn.execute(f"CALL s3_region = '{region}'")
+        logger.debug(f"Set S3 region to: {region}")
+
+      # S3 performance settings (apply to all credential modes)
+      conn.execute("CALL s3_uploader_threads_limit = 8")
+      conn.execute("CALL s3_uploader_max_num_parts_per_file = 10000")
+      conn.execute("CALL s3_uploader_max_filesize = 10737418240")
+      conn.execute("CALL spill_to_disk = true")
+      conn.execute("CALL timeout=1800000")
+
+      logger.debug(
+        "Configured S3 performance settings, memory management, and 30-minute timeout for bulk ingestion"
+      )
 
       # Build and execute COPY query
       # Handle both single pattern (string) and multiple patterns (list)
