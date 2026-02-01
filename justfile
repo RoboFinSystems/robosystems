@@ -485,6 +485,11 @@ clean-data:
     rm -rf ./data/valkey
     rm -f ./examples/credentials/config.json
 
+reset-local:
+    @just stop
+    @just clean-data
+    @just rebuild
+
 # Show help
 help:
     @just --list

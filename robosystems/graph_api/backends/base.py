@@ -73,7 +73,7 @@ class GraphBackend(ABC):
     self,
     graph_id: str,
     table_name: str,
-    s3_pattern: str,
+    s3_pattern: str | list[str],
     s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
     database: str | None = None,

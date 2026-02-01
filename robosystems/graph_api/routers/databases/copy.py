@@ -152,7 +152,7 @@ async def perform_ingestion(
   task_id: str,
   graph_id: str,
   table_name: str,
-  s3_pattern: str,
+  s3_pattern: str | list[str],
   s3_credentials: dict | None,
   ignore_errors: bool,
   backend,

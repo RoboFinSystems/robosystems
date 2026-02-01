@@ -165,7 +165,7 @@ class LadybugBackend(GraphBackend):
     self,
     graph_id: str,
     table_name: str,
-    s3_pattern: str,
+    s3_pattern: str | list[str],
     s3_credentials: dict[str, Any] | None = None,
     ignore_errors: bool = True,
     database: str | None = None,
@@ -213,31 +213,58 @@ class LadybugBackend(GraphBackend):
         )
 
       # Build and execute COPY query
-      query = f'COPY {table_name} FROM "{s3_pattern}"'
-      if ignore_errors:
-        if "(" in query:
-          query = query[:-1] + ", IGNORE_ERRORS=TRUE)"
-        else:
-          query += " (IGNORE_ERRORS=TRUE)"
+      # Handle both single pattern (string) and multiple patterns (list)
+      # LadybugDB supports: COPY table FROM ["file1.parquet", "file2.parquet"]
+      if isinstance(s3_pattern, list):
+        # Multiple patterns: use LadybugDB's array syntax
+        patterns_str = ", ".join(f'"{p}"' for p in s3_pattern)
+        query = f"COPY {table_name} FROM [{patterns_str}]"
+      else:
+        # Single pattern: use direct COPY FROM
+        query = f'COPY {table_name} FROM "{s3_pattern}"'
 
-      logger.info(f"Executing LadybugDB COPY: {query}")
+      if ignore_errors:
+        query += " (IGNORE_ERRORS=TRUE)"
+
+      pattern_count = len(s3_pattern) if isinstance(s3_pattern, list) else 1
+      logger.info(
+        f"Executing LadybugDB COPY ({pattern_count} patterns): {query[:200]}..."
+        if len(query) > 200
+        else f"Executing LadybugDB COPY: {query}"
+      )
 
       start_time = time.time()
       result = conn.execute(query)
       duration = time.time() - start_time
 
       records_loaded = 0
-      if result and hasattr(result, "get_as_list"):
-        result_list = result.get_as_list()
-        if result_list and len(result_list) > 0:
-          result_str = str(result_list[0])
-          if "Records loaded:" in result_str:
-            try:
-              records_loaded = int(
-                result_str.split("Records loaded:")[-1].strip().split()[0]
-              )
-            except (ValueError, IndexError):
-              pass
+      if result:
+        # Try multiple methods to get row count from COPY result
+        # LadybugDB COPY returns different formats depending on version
+        try:
+          # Method 1: get_as_list() returns tuples like [(count,)]
+          if hasattr(result, "get_as_list"):
+            result_list = result.get_as_list()
+            if result_list and len(result_list) > 0:
+              first_row = result_list[0]
+              # Check if it's a tuple with a number
+              if isinstance(first_row, (list, tuple)) and len(first_row) > 0:
+                if isinstance(first_row[0], int):
+                  records_loaded = first_row[0]
+              # Check if it's a string with "Records loaded:"
+              result_str = str(first_row)
+              if "Records loaded:" in result_str:
+                records_loaded = int(
+                  result_str.split("Records loaded:")[-1].strip().split()[0]
+                )
+          # Method 2: Check for get_next pattern
+          if records_loaded == 0 and hasattr(result, "has_next") and result.has_next():
+            row = result.get_next()
+            if isinstance(row, (list, tuple)) and len(row) > 0:
+              if isinstance(row[0], int):
+                records_loaded = row[0]
+        except Exception as parse_err:
+          logger.debug(f"Could not parse COPY result: {parse_err}")
 
       # CRITICAL: Execute CHECKPOINT while still in the connection context
       # This flushes WAL to disk before connection is returned to pool
