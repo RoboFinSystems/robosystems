@@ -657,7 +657,7 @@ def sec_raw_filings(
         tasks = [fetch_submission(cik) for cik in ciks_to_fetch]
         completed = 0
         for coro in asyncio.as_completed(tasks):
-          await coro
+          _ = await coro
           completed += 1
           if completed % 50 == 0:
             context.log.info(f"Submissions progress: {completed}/{len(ciks_to_fetch)}")
