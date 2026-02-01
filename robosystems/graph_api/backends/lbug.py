@@ -205,24 +205,16 @@ class LadybugBackend(GraphBackend):
         logger.debug("Configured S3 with explicit credentials")
       else:
         # Production: Kuzu/LadybugDB httpfs does NOT support credential chains.
-        # We must fetch credentials from EC2 Instance Metadata Service (IMDS)
-        # and pass them explicitly.
+        # We must fetch credentials explicitly based on environment.
         from robosystems.config import env
 
         region = env.AWS_DEFAULT_REGION or env.AWS_REGION or "us-east-1"
         credentials_loaded = False
+        is_production = env.ENVIRONMENT in ("prod", "staging")
 
-        # Method 1: Try environment variables (Kuzu checks S3_ACCESS_KEY_ID, etc.)
-        if env.AWS_ACCESS_KEY_ID and env.AWS_SECRET_ACCESS_KEY:
-          escaped_key = env.AWS_ACCESS_KEY_ID.replace("'", "''")
-          escaped_secret = env.AWS_SECRET_ACCESS_KEY.replace("'", "''")
-          conn.execute(f"CALL s3_access_key_id = '{escaped_key}'")
-          conn.execute(f"CALL s3_secret_access_key = '{escaped_secret}'")
-          credentials_loaded = True
-          logger.debug("Configured S3 credentials from environment variables")
-
-        # Method 2: Fetch from EC2 Instance Metadata Service (IMDS) for IAM roles
-        if not credentials_loaded:
+        if is_production:
+          # Production/Staging: Fetch from EC2 Instance Metadata Service (IMDS)
+          # EC2 instances have IAM roles attached
           try:
             import requests
 
@@ -256,8 +248,6 @@ class LadybugBackend(GraphBackend):
 
             conn.execute(f"CALL s3_access_key_id = '{access_key}'")
             conn.execute(f"CALL s3_secret_access_key = '{secret_key}'")
-            # IAM role credentials include a session token - try to set it
-            # (may not be supported in all Kuzu/LadybugDB versions)
             if session_token:
               try:
                 conn.execute(f"CALL s3_session_token = '{session_token}'")
@@ -271,12 +261,22 @@ class LadybugBackend(GraphBackend):
             logger.info(f"Loaded S3 credentials from EC2 IMDS (role: {role_name})")
 
           except Exception as imds_err:
-            logger.warning(f"Could not fetch credentials from EC2 IMDS: {imds_err}")
+            logger.warning(f"Failed to fetch credentials from EC2 IMDS: {imds_err}")
+
+        # Dev environment OR fallback if IMDS failed: use explicit credentials
+        if not credentials_loaded:
+          if env.AWS_S3_ACCESS_KEY_ID and env.AWS_S3_SECRET_ACCESS_KEY:
+            escaped_key = env.AWS_S3_ACCESS_KEY_ID.replace("'", "''")
+            escaped_secret = env.AWS_S3_SECRET_ACCESS_KEY.replace("'", "''")
+            conn.execute(f"CALL s3_access_key_id = '{escaped_key}'")
+            conn.execute(f"CALL s3_secret_access_key = '{escaped_secret}'")
+            credentials_loaded = True
+            logger.info("Configured S3 credentials from environment variables")
 
         if not credentials_loaded:
           logger.error(
-            "No S3 credentials available. Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY "
-            "environment variables or ensure EC2 instance has an IAM role."
+            "No S3 credentials available. In prod/staging, ensure EC2 has IAM role. "
+            "In dev, set AWS_S3_ACCESS_KEY_ID/AWS_S3_SECRET_ACCESS_KEY."
           )
 
         # Always set region for S3 access
