@@ -366,10 +366,13 @@ class GraphMCPClient:
 
   async def get_schema(self) -> list[dict[str, Any]]:
     """
-    Get database schema information (simplified for performance).
+    Get database schema information (optimized for large databases).
+
+    Returns schema structure without counts to ensure fast response times
+    even on databases with 100M+ nodes.
 
     Returns:
-        List of schema information dictionaries with basic details
+        List of schema information dictionaries with structure details
     """
     try:
       # Get table information with explicit column names
@@ -379,7 +382,6 @@ class GraphMCPClient:
       schema_info = []
 
       for table in tables_result:
-        # Now we have named columns from our explicit query
         table_name = table.get("name", "")
         table_type = table.get("type", "")
         table_comment = table.get("comment", "")
@@ -387,64 +389,22 @@ class GraphMCPClient:
         if not table_name:
           continue
 
-        # Create basic schema entry without detailed property inspection
         if table_type.upper() == "NODE":
-          # Always try to get count for all nodes - it's a fast operation
-          count = 0
-          try:
-            count_query = f"MATCH (n:{table_name}) RETURN count(n) as count"
-            count_result = await self.execute_query(count_query)
-            if count_result and len(count_result) > 0:
-              count = count_result[0].get("count", 0)
-          except Exception as e:
-            logger.debug(f"Could not count {table_name}: {e}")
-            pass  # Skip count if query fails
-
-          # Try to get sample properties for important node types
-          sample_properties = []
-          if table_name in [
-            "Entity",
-            "Fact",
-            "Report",
-            "Transaction",
-            "User",
-            "Period",
-            "Element",
-          ]:
-            try:
-              prop_query = f"MATCH (n:{table_name}) RETURN keys(n) as props LIMIT 1"
-              prop_result = await self.execute_query(prop_query)
-              if prop_result and prop_result[0].get("props"):
-                sample_properties = prop_result[0]["props"][
-                  :15
-                ]  # Limit to first 15 properties
-            except Exception:
-              pass
+          # Use static common properties instead of querying each table
+          sample_properties = self._get_common_properties(table_name)
 
           schema_info.append(
             {
               "label": table_name,
               "type": "node",
               "comment": table_comment,
-              "count": count,
               "description": self._get_node_description(table_name),
               "sample_properties": sample_properties,
-              "common_properties": self._get_common_properties(table_name),
+              "common_properties": sample_properties,
             }
           )
 
         elif table_type.upper() == "REL":
-          # Get count for relationships
-          count = 0
-          try:
-            count_query = f"MATCH ()-[r:{table_name}]->() RETURN count(r) as count"
-            count_result = await self.execute_query(count_query)
-            if count_result and len(count_result) > 0:
-              count = count_result[0].get("count", 0)
-          except Exception as e:
-            logger.debug(f"Could not count {table_name}: {e}")
-            pass
-
           # Infer relationship details without querying table structure
           from_node, to_node = self._infer_relationship_nodes(table_name)
 
@@ -453,14 +413,13 @@ class GraphMCPClient:
               "label": table_name,
               "type": "relationship",
               "comment": table_comment,
-              "count": count,
               "from_node": from_node,
               "to_node": to_node,
               "description": self._get_relationship_description(table_name),
             }
           )
 
-      logger.info(f"Retrieved simplified schema for {len(schema_info)} tables")
+      logger.info(f"Retrieved schema for {len(schema_info)} tables")
       return schema_info
 
     except Exception as e:
@@ -643,7 +602,10 @@ class GraphMCPClient:
 
   async def get_graph_info(self) -> dict[str, Any]:
     """
-    Get basic graph information and statistics.
+    Get basic graph information and statistics (optimized for large databases).
+
+    Uses efficient aggregation query for node counts. Skips relationship counts
+    to ensure fast response times on 100M+ node databases.
 
     Returns:
         Dictionary with graph statistics
@@ -655,67 +617,41 @@ class GraphMCPClient:
       api_info = response.json()
 
       # Get table information from database
+      node_labels = []
+      rel_labels = []
+      total_nodes = 0
+
       try:
         tables_query = "CALL SHOW_TABLES() RETURN id, name, type, comment"
         tables = await self.execute_query(tables_query)
 
-        # Now we have named columns from our explicit query
-        node_tables = []
+        # Extract node and relationship labels from tables
         for t in tables:
           table_type = t.get("type", "")
-          if table_type.upper() == "NODE":
-            node_tables.append(t)
-
-        # Try to get actual node and relationship counts
-        total_nodes = 0
-        total_relationships = 0
-
-        # Count all nodes (more efficient than counting per table)
-        try:
-          node_count_query = "MATCH (n) RETURN count(n) as count"
-          node_count_result = await self.execute_query(node_count_query)
-          if node_count_result:
-            total_nodes = node_count_result[0].get("count", 0)
-        except Exception:
-          # Fallback to per-table counting
-          for table in node_tables[:5]:  # Limit to first 5 node tables
-            try:
-              table_name = table.get("name", "")
-              if table_name:
-                count_query = f"MATCH (n:{table_name}) RETURN count(n) as count"
-                count_result = await self.execute_query(count_query)
-                if count_result:
-                  total_nodes += count_result[0].get("count", 0)
-            except Exception:
-              pass
-
-        # Count all relationships
-        try:
-          rel_count_query = "MATCH ()-[r]->() RETURN count(r) as count"
-          rel_count_result = await self.execute_query(rel_count_query)
-          if rel_count_result:
-            total_relationships = rel_count_result[0].get("count", 0)
-        except Exception:
-          pass
-
-        # Extract node labels from tables
-        node_labels = []
-        for t in node_tables:
           label = t.get("name", "")
           if label:
-            node_labels.append(label)
+            if table_type.upper() == "NODE":
+              node_labels.append(label)
+            elif table_type.upper() == "REL":
+              rel_labels.append(label)
+
+        # Use efficient aggregation query to get node counts in ONE query
+        try:
+          node_count_query = "MATCH (n) RETURN labels(n) as label, count(*) as cnt"
+          node_count_result = await self.execute_query(node_count_query)
+          for row in node_count_result:
+            total_nodes += row.get("cnt", 0)
+        except Exception as e:
+          logger.warning(f"Could not get node counts: {e}")
+
       except Exception as e:
-        logger.warning(f"Failed to get table counts: {e}")
-        # Fallback to basic info
-        node_labels = []
-        total_nodes = 0
-        total_relationships = 0
+        logger.warning(f"Failed to get table info: {e}")
 
       return {
         "graph_id": self.graph_id,
         "total_nodes": total_nodes,
-        "total_relationships": total_relationships,
         "node_labels": node_labels,
+        "relationship_types": rel_labels,
         "database_path": api_info.get("database_path", ""),
         "read_only": api_info.get("read_only", True),
         "uptime_seconds": api_info.get("uptime_seconds", 0),
