@@ -1,27 +1,24 @@
-"""Dagster job for SEC repository backup generation.
+"""SEC repository backup asset.
 
-This job creates downloadable .lbug backups of the SEC database for users
+This asset creates downloadable .lbug backups of the SEC database for users
 with repository subscriptions. It runs after SEC materialization and creates
 unencrypted, compressed backups that can be downloaded.
 
-Usage:
-  just dagster-run sec_backup_job
-
-The job:
+The asset:
 1. Creates a BackupJob with encryption=False, allow_export=True
 2. Uses BackupManager to create the backup
 3. Stores in S3 with 14-day retention
 4. Creates GraphBackup record with graph_id="sec"
 """
 
+import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from dagster import (
+  AssetExecutionContext,
   Config,
-  OpExecutionContext,
-  job,
-  op,
+  MaterializeResult,
+  asset,
 )
 
 from robosystems.dagster.resources import DatabaseResource, S3Resource
@@ -38,22 +35,36 @@ class SECBackupConfig(Config):
   backup_format: str = "full_dump"
 
 
-@op
-def create_sec_backup(
-  context: OpExecutionContext,
+@asset(
+  group_name="sec_pipeline",
+  description="Create downloadable backup of SEC database for user downloads",
+  kinds={"backup"},
+  deps=["sec_graph_materialized"],
+  metadata={
+    "pipeline": "sec",
+    "stage": "backup",
+  },
+)
+def sec_backup(
+  context: AssetExecutionContext,
+  config: SECBackupConfig,
   db: DatabaseResource,
   s3: S3Resource,
-  config: SECBackupConfig,
-) -> dict[str, Any]:
+) -> MaterializeResult:
   """Create a downloadable backup of the SEC database.
 
-  This creates an unencrypted, compressed .lbug backup file that users
-  with SEC repository subscriptions can download.
+  This asset generates a .lbug backup file that users with SEC repository
+  subscriptions can download. The backup is:
+  - Unencrypted (allow_export=True)
+  - Compressed
+  - Stored with 14-day retention
 
-  The backup is stored in S3 and tracked in the GraphBackup table.
+  This asset depends on sec_graph_materialized, so it will run after
+  materialization completes. It can also be triggered manually.
+
+  Returns:
+      MaterializeResult with backup statistics
   """
-  import asyncio
-
   from robosystems.middleware.graph.utils import MultiTenantUtils
   from robosystems.models.iam import GraphBackup
   from robosystems.operations.aws.s3 import S3BackupAdapter
@@ -64,7 +75,9 @@ def create_sec_backup(
     create_backup_manager,
   )
 
-  context.log.info("Creating downloadable backup for SEC repository")
+  context.log.info(
+    f"Creating downloadable backup for SEC repository: {config.graph_id}"
+  )
 
   # Validate graph_id is a shared repository
   if not MultiTenantUtils.is_shared_repository(config.graph_id):
@@ -119,6 +132,7 @@ def create_sec_backup(
     allow_export=True,  # Enable downloads
   )
 
+  # Run async backup in sync context
   loop = asyncio.new_event_loop()
   try:
     backup_info = loop.run_until_complete(backup_manager.create_backup(backup_job))
@@ -144,7 +158,7 @@ def create_sec_backup(
           "compression_ratio": backup_info.compression_ratio,
           "is_encrypted": backup_info.is_encrypted,
           "encryption_method": backup_info.encryption_method,
-          "created_by": "sec_backup_job",
+          "created_by": "sec_backup_asset",
           "dagster_run_id": context.run_id,
         },
       )
@@ -154,49 +168,16 @@ def create_sec_backup(
     f"ratio: {backup_info.compression_ratio:.2f}"
   )
 
-  return {
-    "backup_id": backup_id,
-    "graph_id": config.graph_id,
-    "s3_key": backup_info.s3_key,
-    "size_bytes": backup_info.compressed_size,
-    "compression_ratio": backup_info.compression_ratio,
-    "node_count": backup_info.node_count,
-    "relationship_count": backup_info.relationship_count,
-    "created_at": timestamp.isoformat(),
-    "expires_at": (timestamp + timedelta(days=config.retention_days)).isoformat(),
-  }
-
-
-@job(
-  name="sec_backup",
-  description="Create downloadable backup of SEC database for user downloads.",
-  tags={
-    "pipeline": "sec",
-    "phase": "backup",
-    "dagster/priority": "-1",
-    "dagster/max_retries": 3,
-    # Standard profile - backup is I/O bound
-    "ecs/cpu": "2048",
-    "ecs/memory": "8192",
-    "ecs/ephemeral_storage": "50",
-    # Use on-demand to avoid Spot interruptions
-    "ecs/run_task_kwargs": {
-      "capacityProviderStrategy": [
-        {"capacityProvider": "FARGATE", "weight": 1, "base": 1},
-      ],
-    },
-  },
-)
-def sec_backup_job():
-  """Create downloadable backup of SEC database.
-
-  This job generates a .lbug backup file that users with SEC repository
-  subscriptions can download. The backup is:
-  - Unencrypted (allow_export=True)
-  - Compressed
-  - Stored with 14-day retention
-
-  Run this job after sec_materialize_job to provide updated backups
-  to users.
-  """
-  create_sec_backup()
+  return MaterializeResult(
+    metadata={
+      "backup_id": backup_id,
+      "graph_id": config.graph_id,
+      "s3_key": backup_info.s3_key,
+      "size_bytes": backup_info.compressed_size,
+      "compression_ratio": backup_info.compression_ratio,
+      "node_count": backup_info.node_count,
+      "relationship_count": backup_info.relationship_count,
+      "created_at": timestamp.isoformat(),
+      "expires_at": (timestamp + timedelta(days=config.retention_days)).isoformat(),
+    }
+  )

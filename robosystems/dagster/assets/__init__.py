@@ -44,8 +44,13 @@ from robosystems.dagster.assets.sec import (
   sec_quarter_partitions,
   sec_raw_filings,
 )
+from robosystems.dagster.assets.sec_backup import (
+  SECBackupConfig,
+  sec_backup,
+)
 
 __all__ = [
+  "SECBackupConfig",
   "SECDirectCopyConfig",
   "SECDownloadConfig",
   "SECIncrementalStageConfig",
@@ -58,6 +63,7 @@ __all__ = [
   "qb_accounts",
   "qb_graph_data",
   "qb_transactions",
+  "sec_backup",
   "sec_duckdb_incremental_staged",
   "sec_duckdb_staged",
   "sec_graph_direct_copy",
