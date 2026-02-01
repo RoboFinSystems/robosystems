@@ -1,5 +1,7 @@
 """Graph query API models."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -59,12 +61,27 @@ class BackupResponse(BaseModel):
   expires_at: str | None
 
 
+class DownloadQuota(BaseModel):
+  """Download quota information for shared repository backups."""
+
+  limit_per_day: int = Field(..., description="Maximum downloads allowed per day")
+  used_today: int = Field(..., description="Number of downloads used today")
+  remaining: int = Field(..., description="Downloads remaining today")
+  resets_at: datetime = Field(..., description="When the daily limit resets (UTC)")
+
+
 class BackupListResponse(BaseModel):
   """Response model for backup list."""
 
   backups: list[BackupResponse]
   total_count: int
   graph_id: str
+  is_shared_repository: bool = Field(
+    False, description="Whether this is a shared repository (limits apply)"
+  )
+  download_quota: DownloadQuota | None = Field(
+    None, description="Download quota for shared repositories"
+  )
 
 
 class BackupStatsResponse(BaseModel):

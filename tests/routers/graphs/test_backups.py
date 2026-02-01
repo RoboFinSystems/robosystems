@@ -269,3 +269,76 @@ class TestBackupEndpoints:
           f"Missing operationId for {method.upper()} {path}"
         )
         assert "summary" in details, f"Missing summary for {method.upper()} {path}"
+
+  @patch("robosystems.middleware.graph.utils.MultiTenantUtils.is_shared_repository")
+  @patch("robosystems.models.iam.GraphUser.get_by_user_id")
+  def test_create_backup_blocked_for_shared_repository(
+    self, mock_get_by_user_id, mock_is_shared, client, mock_auth_user
+  ):
+    """Test that backup creation is blocked for shared repositories with 403."""
+    from robosystems.database import session
+    from robosystems.middleware.auth.dependencies import get_current_user_with_graph
+
+    # Create mock session
+    mock_session = MagicMock()
+
+    # Override the dependencies
+    app.dependency_overrides[get_current_user_with_graph] = lambda: mock_auth_user
+    app.dependency_overrides[session] = lambda: mock_session
+
+    try:
+      # Mock authorization - this IS a shared repository
+      mock_is_shared.return_value = True
+
+      # Mock user graph access with admin role
+      mock_user_graph = MagicMock()
+      mock_user_graph.graph_id = "sec"
+      mock_user_graph.role = "admin"
+      mock_get_by_user_id.return_value = [mock_user_graph]
+
+      # Set mock user ID
+      mock_auth_user.id = "test-user-123"
+
+      # Attempt to create backup on shared repository
+      response = client.post(
+        "/v1/graphs/sec/backups",
+        json={
+          "backup_format": "full_dump",
+          "backup_type": "full",
+          "retention_days": 90,
+          "compression": True,
+          "encryption": False,
+        },
+      )
+
+      # Should be forbidden for shared repositories
+      assert response.status_code == 403
+      data = response.json()
+      assert "shared repository" in data["detail"].lower()
+      assert "sec" in data["detail"]
+    finally:
+      if get_current_user_with_graph in app.dependency_overrides:
+        del app.dependency_overrides[get_current_user_with_graph]
+      if session in app.dependency_overrides:
+        del app.dependency_overrides[session]
+
+  def test_list_backups_response_includes_shared_repo_fields(self, client):
+    """Test that BackupListResponse model includes shared repository fields."""
+    from robosystems.models.api.graphs.backups import BackupListResponse, DownloadQuota
+
+    # Verify the response model has the expected fields for shared repositories
+    assert hasattr(BackupListResponse, "model_fields")
+    fields = BackupListResponse.model_fields
+
+    # Check is_shared_repository field exists
+    assert "is_shared_repository" in fields
+
+    # Check download_quota field exists
+    assert "download_quota" in fields
+
+    # Verify DownloadQuota model structure
+    quota_fields = DownloadQuota.model_fields
+    assert "limit_per_day" in quota_fields
+    assert "used_today" in quota_fields
+    assert "remaining" in quota_fields
+    assert "resets_at" in quota_fields

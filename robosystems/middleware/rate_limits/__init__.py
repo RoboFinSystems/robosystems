@@ -10,6 +10,7 @@ This module provides comprehensive rate limiting functionality including:
 
 from ...config.rate_limits import EndpointCategory
 from .cache import rate_limit_cache
+from .download_limits import DownloadRateLimiter
 from .headers import RateLimitHeaderMiddleware
 from .rate_limiting import (
   analytics_rate_limit_dependency,
@@ -48,6 +49,8 @@ __all__ = [
   "BLOCKED_SHARED_ENDPOINTS",
   "SUBSCRIPTION_RATE_LIMITS",
   "AllowedSharedEndpoints",
+  # Download rate limits
+  "DownloadRateLimiter",
   # Repository rate limits
   "DualLayerRateLimiter",
   "EndpointCategory",

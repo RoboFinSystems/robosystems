@@ -14,17 +14,22 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from robosystems.config.billing.repositories import RepositoryPlan
 from robosystems.database import get_db_session
 from robosystems.logger import logger
 from robosystems.middleware.auth.dependencies import get_current_user_with_graph
 from robosystems.middleware.graph.types import GRAPH_OR_SUBGRAPH_ID_PATTERN
+from robosystems.middleware.graph.utils import MultiTenantUtils
 from robosystems.middleware.otel.metrics import (
   endpoint_metrics_decorator,
   get_endpoint_metrics,
 )
-from robosystems.middleware.rate_limits import subscription_aware_rate_limit_dependency
+from robosystems.middleware.rate_limits import (
+  DownloadRateLimiter,
+  subscription_aware_rate_limit_dependency,
+)
 from robosystems.models.api.graphs.backups import BackupDownloadUrlResponse
-from robosystems.models.iam import User
+from robosystems.models.iam import User, UserRepository
 
 from .utils import get_backup_manager
 
@@ -86,6 +91,39 @@ async def get_backup_download_url(
   try:
     # Access validated by get_current_user_with_graph dependency
 
+    # Check if this is a shared repository - apply download rate limiting
+    if MultiTenantUtils.is_shared_repository(graph_id):
+      # Get user's repository subscription
+      user_repo = UserRepository.get_by_user_and_repository(
+        str(current_user.id), graph_id, session
+      )
+      if not user_repo:
+        raise HTTPException(
+          status_code=status.HTTP_403_FORBIDDEN,
+          detail="Repository subscription required for backup downloads",
+        )
+
+      # Check daily download limit
+      plan = RepositoryPlan(user_repo.repository_plan)
+      allowed, remaining, resets_at = await DownloadRateLimiter.check_download_limit(
+        user_id=str(current_user.id),
+        repository=graph_id,
+        plan=plan,
+      )
+
+      if not allowed:
+        raise HTTPException(
+          status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+          detail=f"Daily download limit exceeded. Limit resets at {resets_at.isoformat()}.",
+          headers={
+            "X-RateLimit-Limit": str(
+              DownloadRateLimiter._get_daily_limit(graph_id, plan)
+            ),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": resets_at.isoformat(),
+          },
+        )
+
     # Get backup manager and generate download URL
     backup_manager = get_backup_manager()
 
@@ -99,6 +137,13 @@ async def get_backup_download_url(
         detail="Backup not found or cannot be downloaded",
       )
 
+    # Increment download count for shared repositories
+    if MultiTenantUtils.is_shared_repository(graph_id):
+      await DownloadRateLimiter.increment_download_count(
+        user_id=str(current_user.id),
+        repository=graph_id,
+      )
+
     # Record business event
     metrics_instance = get_endpoint_metrics()
     metrics_instance.record_business_event(
@@ -110,6 +155,7 @@ async def get_backup_download_url(
         "graph_id": graph_id,
         "backup_id": backup_id,
         "expires_in": expires_in,
+        "is_shared_repository": MultiTenantUtils.is_shared_repository(graph_id),
       },
       user_id=current_user.id,
     )
