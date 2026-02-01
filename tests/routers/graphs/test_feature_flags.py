@@ -668,6 +668,8 @@ class TestGraphOperationFeatureFlags:
             "/tmp/test/path"
           )
           mock_utils.return_value = mock_utils_instance
+          # Mock is_shared_repository to return False (not a shared repository)
+          mock_utils.is_shared_repository.return_value = False
 
           # Mock os.path.exists and os.walk for database size calculation
           with (
